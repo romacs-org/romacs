@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "9a84b09aa9d67d0c2093d2f330cec6644cb4eec4d1f129e57be38bc8f9a99480",
+  "input_hash": "537109045ebc33a5407100a6e32b59a42f1e003038a85d5ad3c899b57395e1a1",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 265,
-  "symbols": 581,
+  "rows": 267,
+  "symbols": 583,
   "rows_without_symbols": 15
  },
  "by_symbol": {
@@ -21,7 +21,7 @@
    84
   ],
   "(max-char)": [
-   193
+   195
   ],
   "+": [
    67
@@ -30,7 +30,7 @@
    10
   ],
   "1+": [
-   208
+   210
   ],
   ":20": [
    84
@@ -42,38 +42,38 @@
    67
   ],
   "[:class:]": [
-   264
+   266
   ],
   "abort-minibuffers": [
    61
   ],
   "accept-process-output": [
-   165,
-   166
+   167,
+   168
   ],
   "add-name-to-file": [
    8
   ],
   "add-text-properties": [
-   207,
-   253
+   209,
+   255
   ],
   "add-variable-watcher": [
-   224,
-   225
+   226,
+   227
   ],
   "after-change-functions": [
    161
   ],
   "after-insert-file-set-coding": [
-   254
+   256
   ],
   "after-load-alist": [
-   239
+   241
   ],
   "all-completions": [
-   249,
-   250
+   251,
+   252
   ],
   "append": [
    103
@@ -81,7 +81,7 @@
   "apply": [
    104,
    126,
-   220
+   222
   ],
   "aref": [
    75,
@@ -96,17 +96,17 @@
    90
   ],
   "autoload": [
-   228
+   230
   ],
   "autoload-do-load": [
-   228,
-   240
+   230,
+   242
   ],
   "b->last_window_start": [
-   172
+   174
   ],
   "backtrace--locals": [
-   252
+   254
   ],
   "backward-char": [
    137
@@ -117,6 +117,9 @@
   "bare-symbol-p": [
    50
   ],
+  "base64-decode-region": [
+   165
+  ],
   "before-change-functions": [
    161
   ],
@@ -125,20 +128,20 @@
   ],
   "bool-vector": [
    82,
-   205
+   207
   ],
   "bool-vector-p": [
    82
   ],
   "boundp": [
-   235
+   237
   ],
   "buffer-chars-modified-tick": [
    96
   ],
   "buffer-file-coding-system": [
    95,
-   254
+   256
   ],
   "buffer-file-name": [
    95
@@ -171,7 +174,7 @@
   ],
   "byte-code-function-p": [
    38,
-   232
+   234
   ],
   "byte-compile": [
    48
@@ -181,11 +184,11 @@
    140
   ],
   "call-process": [
-   165,
-   166
+   167,
+   168
   ],
   "call-process-region": [
-   165
+   167
   ],
   "capitalize": [
    53
@@ -194,13 +197,13 @@
    54
   ],
   "car": [
-   222
+   224
   ],
   "ceiling": [
-   189
+   191
   ],
   "char-category-set": [
-   219
+   221
   ],
   "char-code-property-description": [
    39
@@ -218,10 +221,10 @@
    84
   ],
   "cl-print-object": [
-   252
+   254
   ],
   "cl-type-of": [
-   251
+   253
   ],
   "clear-composition-cache": [
    159
@@ -236,10 +239,10 @@
    95
   ],
   "color-defined-p": [
-   167
+   169
   ],
   "color-values": [
-   167
+   169
   ],
   "combine-after-change-calls": [
    161
@@ -260,24 +263,24 @@
    100
   ],
   "compare-strings": [
-   250
+   252
   ],
   "compiled-function-p": [
-   232
+   234
   ],
   "composition-function-table": [
    159
   ],
   "concat": [
    19,
-   194,
-   195,
    196,
-   238
+   197,
+   198,
+   240
   ],
   "condition-case": [
-   233,
-   240
+   235,
+   242
   ],
   "copy-case-table": [
    53
@@ -288,7 +291,7 @@
   "copy-sequence": [
    75,
    101,
-   238
+   240
   ],
   "copy-syntax-table": [
    149
@@ -312,7 +315,7 @@
    3
   ],
   "current-load-list": [
-   239
+   241
   ],
   "current-prefix-arg": [
    71
@@ -330,7 +333,7 @@
    83
   ],
   "current-window-configuration": [
-   173
+   175
   ],
   "custom-set": [
    131
@@ -345,10 +348,10 @@
    131
   ],
   "daemon-initialized": [
-   170
+   172
   ],
   "daemonp": [
-   170
+   172
   ],
   "debug-on-error": [
    20
@@ -362,21 +365,21 @@
   "defalias": [
    98,
    99,
-   228,
-   230
+   230,
+   232
   ],
   "default-boundp": [
-   234
+   236
   ],
   "default-directory": [
    94
   ],
   "default-file-name-coding-system": [
-   254
+   256
   ],
   "default-value": [
-   234,
-   235
+   236,
+   237
   ],
   "defcustom": [
    131
@@ -388,37 +391,37 @@
    120,
    121,
    145,
-   256,
-   260
+   258,
+   262
   ],
   "define-category": [
-   219
+   221
   ],
   "define-charset-internal": [
    157,
-   216
+   218
   ],
   "define-coding-system": [
-   254
+   256
   ],
   "define-coding-system-alias": [
-   217
+   219
   ],
   "define-error": [
-   229
+   231
   ],
   "define-hash-table-test": [
    127
   ],
   "defined-colors": [
-   167
+   169
   ],
   "defmacro": [
    104
   ],
   "defun": [
    133,
-   230
+   232
   ],
   "defvar": [
    15,
@@ -427,11 +430,11 @@
    134
   ],
   "defvaralias": [
-   224,
-   227
+   226,
+   229
   ],
   "delete": [
-   238
+   240
   ],
   "delete-backward-char": [
    137
@@ -440,8 +443,8 @@
    137
   ],
   "delete-other-windows-internal": [
-   175,
-   177
+   177,
+   179
   ],
   "ding": [
    138
@@ -456,51 +459,51 @@
    62
   ],
   "display-color-cells": [
-   167
+   169
   ],
   "display-color-p": [
    121,
-   167
+   169
   ],
   "display-graphic-p": [
    121,
-   167
+   169
   ],
   "display-grayscale-p": [
-   167
+   169
   ],
   "display-mm-height": [
-   167
+   169
   ],
   "display-mm-width": [
-   167
+   169
   ],
   "display-monitor-attributes-list": [
-   167
+   169
   ],
   "display-pixel-height": [
-   167
+   169
   ],
   "display-pixel-width": [
-   167
+   169
   ],
   "display-planes": [
-   167
+   169
   ],
   "display-visual-class": [
-   167
+   169
   ],
   "display-warning": [
-   227
+   229
   ],
   "do-after-load-evaluation": [
-   239
+   241
   ],
   "documentation-property": [
    99
   ],
   "downcase_char_code_emacs_compat": [
-   263
+   265
   ],
   "elt": [
    22,
@@ -511,10 +514,10 @@
    153
   ],
   "emacs_downcase_compat": [
-   263
+   265
   ],
   "enable-recursive-minibuffers": [
-   236
+   238
   ],
   "encode-coding-string": [
    12
@@ -527,11 +530,11 @@
    101
   ],
   "eql": [
-   246
+   248
   ],
   "equal": [
    128,
-   168
+   170
   ],
   "erase-buffer": [
    1
@@ -542,21 +545,21 @@
   "error-message-string": [
    139,
    140,
-   221
+   223
   ],
   "ert--run-test-internal": [
-   252
+   254
   ],
   "esc-map": [
    135
   ],
   "eval": [
-   222,
-   223,
-   231
+   224,
+   225,
+   233
   ],
   "eval-after-load": [
-   239
+   241
   ],
   "eval-buffer": [
    107
@@ -565,7 +568,7 @@
    139
   ],
   "eval-when-compile": [
-   223
+   225
   ],
   "excessive-lisp-nesting": [
    89
@@ -594,31 +597,31 @@
    118,
    119,
    120,
-   256,
-   257,
-   260
+   258,
+   259,
+   262
   ],
   "face-family": [
    116,
-   259
+   261
   ],
   "face-font": [
    115,
-   258
+   260
   ],
   "face-remapping-alist": [
    110,
    119,
    120,
-   262
+   264
   ],
   "featurep": [
    87
   ],
   "features": [
    87,
-   228,
-   241
+   230,
+   243
   ],
   "file-accessible-directory-p": [
    31
@@ -636,13 +639,13 @@
    95
   ],
   "find-auto-coding": [
-   254
+   256
   ],
   "find-composition": [
-   187
+   189
   ],
   "find-composition-internal": [
-   187
+   189
   ],
   "find-file": [
    0,
@@ -650,7 +653,7 @@
   ],
   "find-file-name-handler": [
    47,
-   248
+   250
   ],
   "find-file-noselect": [
    0
@@ -665,7 +668,7 @@
    50
   ],
   "floor": [
-   189
+   191
   ],
   "force-mode-line-update": [
    153
@@ -677,12 +680,12 @@
    93,
    102,
    106,
-   247
+   249
   ],
   "format-message": [
    73,
    102,
-   247
+   249
   ],
   "format-time-string": [
    83
@@ -694,22 +697,22 @@
    150
   ],
   "frame-char-height": [
-   178
+   180
   ],
   "frame-char-width": [
-   178
+   180
   ],
   "frame-list": [
-   179
+   181
   ],
   "frame-live-p": [
-   178
+   180
   ],
   "frame-parameter": [
-   226
+   228
   ],
   "frame-parameters": [
-   226
+   228
   ],
   "frame-pixel-height": [
    145
@@ -718,17 +721,17 @@
    145
   ],
   "frame-set-background-mode": [
-   167
+   169
   ],
   "frame-terminal": [
-   179,
-   188
+   181,
+   190
   ],
   "frame-visible-p": [
-   183
+   185
   ],
   "framep": [
-   179
+   181
   ],
   "fset": [
    98
@@ -738,8 +741,8 @@
    104,
    126,
    133,
-   220,
-   222
+   222,
+   224
   ],
   "funcall-interactively": [
    71
@@ -748,7 +751,7 @@
    99
   ],
   "function-history": [
-   228
+   230
   ],
   "function-key-map": [
    135
@@ -759,17 +762,17 @@
    34
   ],
   "generate-new-buffer": [
-   171
+   173
   ],
   "get": [
    84,
-   229
+   231
   ],
   "get-buffer": [
-   171
+   173
   ],
   "get-buffer-window": [
-   179
+   181
   ],
   "get-char-code-property": [
    39
@@ -779,15 +782,15 @@
   ],
   "get-load-suffixes": [
    74,
-   235,
-   237
+   237,
+   239
   ],
   "get-text-property": [
-   195,
-   196
+   197,
+   198
   ],
   "get-variable-watchers": [
-   225
+   227
   ],
   "global-map": [
    135
@@ -805,10 +808,10 @@
    129
   ],
   "header-line-format": [
-   176
+   178
   ],
   "iconify-frame": [
-   183
+   185
   ],
   "identity": [
    51
@@ -820,13 +823,13 @@
    98
   ],
   "indirect-variable": [
-   224
+   226
   ],
   "inhibit-file-name-handlers": [
-   248
+   250
   ],
   "inhibit-file-name-operation": [
-   248
+   250
   ],
   "inhibit-mouse-event-check": [
    71
@@ -850,25 +853,25 @@
    71
   ],
   "intern": [
-   197,
-   242,
-   243,
+   199,
    244,
-   245
+   245,
+   246,
+   247
   ],
   "intern-soft": [
-   243,
-   244
+   245,
+   246
   ],
   "internal-delete-indirect-variable": [
-   224
+   226
   ],
   "internal-interpreter-environment": [
    134
   ],
   "internal-macroexpand-for-load": [
-   230,
-   231
+   232,
+   233
   ],
   "internal-set-alternative-font-family-alist": [
    16,
@@ -881,10 +884,10 @@
    16
   ],
   "internal-show-cursor": [
-   226
+   228
   ],
   "interpreted-function-p": [
-   232
+   234
   ],
   "invalid-function": [
    104
@@ -919,13 +922,13 @@
   "lambda": [
    132,
    133,
-   220,
-   230,
-   233
+   222,
+   232,
+   235
   ],
   "last-coding-system-used": [
    95,
-   254
+   256
   ],
   "last-command": [
    71
@@ -935,10 +938,10 @@
    141
   ],
   "last-nonminibuffer-frame": [
-   179
+   181
   ],
   "latin-extra-code-table": [
-   254
+   256
   ],
   "length": [
    103
@@ -946,7 +949,7 @@
   "let": [
    132,
    134,
-   235
+   237
   ],
   "lexical-binding": [
    86
@@ -964,14 +967,14 @@
    89
   ],
   "list-system-processes": [
-   165
+   167
   ],
   "load": [
    107,
    134,
-   231,
-   240,
-   241
+   233,
+   242,
+   243
   ],
   "load eval-buffer eval-region": [
    26
@@ -980,31 +983,31 @@
    25
   ],
   "load-file-rep-suffixes": [
-   235,
-   237
+   237,
+   239
   ],
   "load-history": [
-   224,
-   228,
-   239
+   226,
+   230,
+   241
   ],
   "load-path": [
    87,
    88
   ],
   "load-suffixes": [
-   235
+   237
   ],
   "local-variable-p": [
    40
   ],
   "locate-file-internal": [
    94,
-   248
+   250
   ],
   "locate-library": [
    88,
-   169
+   171
   ],
   "looking-at": [
    149,
@@ -1014,14 +1017,14 @@
    151
   ],
   "lower-frame": [
-   183
+   185
   ],
   "macroexp--pending-eager-loads": [
-   231
+   233
   ],
   "macroexpand": [
-   223,
-   230
+   225,
+   232
   ],
   "major-mode": [
    153
@@ -1032,71 +1035,71 @@
    55,
    81,
    82,
-   205
+   207
   ],
   "make-char-table": [
    75,
-   205
+   207
   ],
   "make-frame-invisible": [
-   183
+   185
   ],
   "make-frame-visible": [
-   183
+   185
   ],
   "make-hash-table": [
    127
   ],
   "make-interpreted-closure": [
-   251
+   253
   ],
   "make-local-variable": [
    152,
-   236
+   238
   ],
   "make-marker": [
    77,
    125
   ],
   "make-network-process": [
-   165
+   167
   ],
   "make-overlay": [
    125
   ],
   "make-pipe-process": [
-   165
+   167
   ],
   "make-process": [
-   165,
-   166
+   167,
+   168
   ],
   "make-serial-process": [
-   165
+   167
   ],
   "make-string": [
    101,
-   238
+   240
   ],
   "make-symbol": [
    85,
-   242
+   244
   ],
   "make-symbolic-link": [
    8
   ],
   "make-variable-buffer-local": [
    152,
-   234,
-   236
+   236,
+   238
   ],
   "make-vector": [
-   205,
-   206,
-   208
+   207,
+   208,
+   210
   ],
   "makunbound": [
-   235
+   237
   ],
   "map-char-table": [
    75
@@ -1105,10 +1108,10 @@
    75
   ],
   "mapatoms": [
-   243
+   245
   ],
   "mapbacktrace": [
-   252
+   254
   ],
   "mapc": [
    51,
@@ -1151,7 +1154,7 @@
    89
   ],
   "memory-signal-data": [
-   206
+   208
   ],
   "menu-bar-lines": [
    153
@@ -1173,7 +1176,7 @@
    61
   ],
   "minibuffer-local-map": [
-   235
+   237
   ],
   "minibuffer-prompt-properties": [
    61
@@ -1182,13 +1185,13 @@
    61
   ],
   "minibuffer-selected-window": [
-   180
+   182
   ],
   "mode-line-format": [
    130,
    142,
    144,
-   176
+   178
   ],
   "mode-line-in-non-selected-windows": [
    142
@@ -1197,10 +1200,10 @@
    142
   ],
   "modify-category-entry": [
-   219
+   221
   ],
   "modify-frame-parameters": [
-   226
+   228
   ],
   "modify-syntax-entry": [
    149
@@ -1209,7 +1212,7 @@
    3
   ],
   "multibyte-string-p": [
-   194
+   196
   ],
   "native-comp-function-p": [
    48
@@ -1221,19 +1224,19 @@
    122
   ],
   "next-property-change": [
-   253
+   255
   ],
   "next-single-char-property-change": [
-   253
+   255
   ],
   "normal-top-level-add-to-load-path": [
    88
   ],
   "not-unicode-string": [
-   197,
-   198,
    199,
-   200
+   200,
+   201,
+   202
   ],
   "nreverse": [
    15
@@ -1242,13 +1245,13 @@
    50
   ],
   "obarray-make": [
-   245
+   247
   ],
   "obarrayp": [
-   243
+   245
   ],
   "oclosure-type": [
-   251
+   253
   ],
   "optimize-char-table": [
    158
@@ -1262,7 +1265,7 @@
    124
   ],
   "overriding-plist-environment": [
-   229
+   231
   ],
   "overwrite-mode": [
    161
@@ -1286,7 +1289,7 @@
    124
   ],
   "pos-visible-in-window-p": [
-   185
+   187
   ],
   "position-symbol": [
    49
@@ -1301,8 +1304,8 @@
    154,
    155,
    156,
-   188,
-   242
+   190,
+   244
   ],
   "prin1-to-string": [
    52,
@@ -1310,15 +1313,15 @@
    106,
    154,
    156,
-   188,
-   204,
-   242
+   190,
+   206,
+   244
   ],
   "princ": [
    154,
    155,
    156,
-   204
+   206
   ],
   "print": [
    154,
@@ -1359,34 +1362,34 @@
    156
   ],
   "process-attributes": [
-   165
+   167
   ],
   "propertize": [
-   196,
-   207
+   198,
+   209
   ],
   "provide": [
-   228,
-   239,
-   241
+   230,
+   241,
+   243
   ],
   "purify-flag": [
-   251
+   253
   ],
   "push macroexp-let2 gv-letplace": [
    27
   ],
   "put": [
-   229
+   231
   ],
   "put-text-property": [
-   196
+   198
   ],
   "quit-flag": [
    63
   ],
   "raise-frame": [
-   183
+   185
   ],
   "re-search-backward": [
    149,
@@ -1403,7 +1406,7 @@
    79,
    80,
    107,
-   195
+   197
   ],
   "read-char": [
    62
@@ -1430,8 +1433,8 @@
    79,
    80,
    107,
-   195,
-   245
+   197,
+   247
   ],
   "read-key-sequence": [
    62
@@ -1453,10 +1456,10 @@
    62
   ],
   "recenter": [
-   182
+   184
   ],
   "record": [
-   205
+   207
   ],
   "recordp": [
    29
@@ -1466,58 +1469,61 @@
   ],
   "redisplay": [
    138,
-   184
+   186
   ],
   "remove-variable-watcher": [
-   225
+   227
   ],
   "replace-match": [
    42,
    43,
    44,
    45,
-   210,
-   211,
    212,
    213,
    214,
-   215
+   215,
+   216,
+   217
+  ],
+  "replace-region-contents": [
+   166
   ],
   "require": [
    87,
-   228,
-   239,
-   240,
-   241
+   230,
+   241,
+   242,
+   243
   ],
   "reset": [
    118,
-   255
+   257
   ],
   "reverse": [
    55,
-   205
+   207
   ],
   "romacs--host-input": [
    63
   ],
   "romacs--oclosure-type": [
-   251
+   253
   ],
   "romacs--read-host-event": [
    63
   ],
   "romacs-display": [
-   167
+   169
   ],
   "romacs-gui-install-command": [
    97
   ],
   "romacs-unsafe-coding": [
-   254
+   256
   ],
   "round": [
-   189
+   191
   ],
   "run-hook-with-args": [
    72
@@ -1529,7 +1535,7 @@
    96
   ],
   "save-window-excursion": [
-   173
+   175
   ],
   "scan-lists": [
    150
@@ -1553,24 +1559,24 @@
    160
   ],
   "secure-hash": [
-   209
+   211
   ],
   "secure-hash-algorithms": [
-   209
+   211
   ],
   "select-safe-coding-system": [
-   254
+   256
   ],
   "select-safe-coding-system-function": [
    95
   ],
   "select-safe-coding-system-interactively": [
-   254
+   256
   ],
   "selected-frame": [
    145,
-   179,
-   188
+   181,
+   190
   ],
   "selected-window": [
    145
@@ -1585,14 +1591,14 @@
   ],
   "set": [
    84,
-   235
+   237
   ],
   "set-auto-coding": [
    11,
-   254
+   256
   ],
   "set-buffer-redisplay": [
-   225
+   227
   ],
   "set-case-table": [
    53
@@ -1601,23 +1607,23 @@
    75
   ],
   "set-charset-priority": [
-   216
+   218
   ],
   "set-coding-system-priority": [
-   217,
-   254
+   219,
+   256
   ],
   "set-default": [
-   235
+   237
   ],
   "set-face-attribute": [
    114,
    115,
    116,
-   257,
-   258,
    259,
-   261
+   260,
+   261,
+   263
   ],
   "set-file-times": [
    8
@@ -1626,7 +1632,7 @@
    69
   ],
   "set-process-thread": [
-   165
+   167
   ],
   "set-standard-case-table current-case-table": [
    36
@@ -1640,27 +1646,27 @@
   ],
   "set-window-buffer": [
    145,
-   172
-  ],
-  "set-window-configuration": [
-   173
-  ],
-  "set-window-hscroll": [
-   181,
-   186
-  ],
-  "set-window-new-total": [
    174
   ],
+  "set-window-configuration": [
+   175
+  ],
+  "set-window-hscroll": [
+   183,
+   188
+  ],
+  "set-window-new-total": [
+   176
+  ],
   "set-window-next-buffers": [
-   173
+   175
   ],
   "set-window-prev-buffers": [
-   173
+   175
   ],
   "set-window-start": [
    143,
-   190
+   192
   ],
   "set-window-vscroll": [
    130,
@@ -1673,45 +1679,45 @@
    15
   ],
   "setf": [
-   233
-  ],
-  "setplist": [
-   229
-  ],
-  "setq": [
    235
   ],
+  "setplist": [
+   231
+  ],
+  "setq": [
+   237
+  ],
   "signal": [
-   240
+   242
   ],
   "signal-hook-function": [
    89
   ],
   "skip-chars-backward": [
-   264
+   266
   ],
   "skip-chars-forward": [
-   264
+   266
   ],
   "sleep-for": [
-   165
+   167
   ],
   "sort": [
    18
   ],
   "source_string": [
-   198,
-   199
+   200,
+   201
   ],
   "special-event-map": [
    135
   ],
   "special-variable-p": [
    86,
-   235
+   237
   ],
   "split-window-internal": [
-   192
+   194
   ],
   "standard-case-table": [
    37
@@ -1732,7 +1738,7 @@
    90
   ],
   "string-glyph-split": [
-   187
+   189
   ],
   "string-match": [
    149,
@@ -1747,7 +1753,7 @@
   "string-to-number": [
    70,
    73,
-   246
+   248
   ],
   "string-trim": [
    102
@@ -1764,7 +1770,7 @@
   ],
   "substring": [
    101,
-   238
+   240
   ],
   "supports": [
    113
@@ -1777,15 +1783,15 @@
    105
   ],
   "symbol-name": [
-   244
+   246
   ],
   "symbol-plist": [
    15,
-   229
+   231
   ],
   "symbol-value": [
    21,
-   235
+   237
   ],
   "symbol-with-pos-p": [
    49
@@ -1803,29 +1809,29 @@
    3
   ],
   "terminal-list": [
-   179
+   181
   ],
   "terminal-live-p": [
-   179,
-   218
+   181,
+   220
   ],
   "terminal-parameter": [
-   218
+   220
   ],
   "terpri": [
    155
   ],
   "test-completion": [
-   249,
-   250
+   251,
+   252
   ],
   "text-properties-at": [
    79,
-   196,
-   207
+   198,
+   209
   ],
   "text-quoting-style": [
-   247
+   249
   ],
   "theme-face": [
    112
@@ -1855,40 +1861,40 @@
    163
   ],
   "truncate": [
-   189
+   191
   ],
   "truncate-lines": [
    153
   ],
   "try-completion": [
-   249,
-   250
+   251,
+   252
   ],
   "tty-color-alist": [
-   167
+   169
   ],
   "tty-top-frame": [
-   179
+   181
   ],
   "undefined": [
    62,
    138
   ],
   "undo-limit": [
-   236
+   238
   ],
   "unibyte-string": [
-   194
+   196
   ],
   "unicode-property-table-internal": [
    39
   ],
   "unify-charset": [
-   216
+   218
   ],
   "unintern": [
-   243,
-   244
+   245,
+   246
   ],
   "unread-command-events": [
    61,
@@ -1904,7 +1910,7 @@
    18
   ],
   "vconcat": [
-   205
+   207
   ],
   "vector": [
    101
@@ -1916,92 +1922,92 @@
    95
   ],
   "visible-frame-list": [
-   183
+   185
   ],
   "visited-file-modtime": [
    92,
    95
   ],
   "window-bottom-divider-width": [
-   176
+   178
   ],
   "window-buffer": [
    145
   ],
   "window-combination-limit": [
-   179
+   181
   ],
   "window-configuration-frame": [
-   173
+   175
   ],
   "window-configuration-p": [
-   173
+   175
   ],
   "window-end": [
-   191
+   193
   ],
   "window-header-line-height": [
-   176
+   178
   ],
   "window-hscroll": [
-   181,
-   186
+   183,
+   188
   ],
   "window-list": [
-   179
+   181
   ],
   "window-mode-line-height": [
-   176
+   178
   ],
   "window-next-buffers": [
-   173
+   175
   ],
   "window-persistent-parameters": [
-   235
+   237
   ],
   "window-point": [
    145,
-   172
-  ],
-  "window-prev-buffers": [
-   173
-  ],
-  "window-resize-apply-total": [
    174
   ],
-  "window-right-divider-width": [
+  "window-prev-buffers": [
+   175
+  ],
+  "window-resize-apply-total": [
    176
+  ],
+  "window-right-divider-width": [
+   178
   ],
   "window-scroll-bar-height": [
-   176
+   178
   ],
   "window-scroll-bar-width": [
-   176
+   178
   ],
   "window-start": [
    143,
    145,
-   172,
-   177
+   174,
+   179
   ],
   "window-tab-line-height": [
-   176
+   178
   ],
   "window-total-height": [
-   174
+   176
   ],
   "window-vscroll": [
    130,
    142
   ],
   "with-eval-after-load": [
-   239
+   241
   ],
   "with-output-to-string": [
-   204
+   206
   ],
   "with-temp-buffer": [
-   171
+   173
   ],
   "write-char": [
    155
@@ -2013,7 +2019,7 @@
    105
   ],
   "wrong-type-argument": [
-   221
+   223
   ]
  },
  "rows": [
@@ -4810,6 +4816,36 @@
    "symbols": [
     "translate-region-internal",
     "translate-region"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-BASE64-REGION1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`base64-decode-region` into a multibyte buffer",
+   "gnu": "`fns.c:4334` inserts each decoded octet above 127 into a multibyte buffer as a raw-byte character",
+   "romacs": "VM2 decodes into unibyte buffers, and into multibyte buffers when every decoded octet is ASCII, as GNU does; other octets for a multibyte buffer signal an explicit VM2 error before the buffer changes",
+   "why": "A VM2 multibyte buffer holds Unicode text (VM2-TRANSLATE1, VM2-FILEIO1); decoding binary data is done in a unibyte buffer, as svg.el and image callers do",
+   "symbols": [
+    "base64-decode-region"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-REPLACE-REGION1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`replace-region-contents` past MAX-SECS with a vector SOURCE",
+   "gnu": "`editfns.c:2155` falls back to replacing the region with SBUF's whole accessible text, not the SBEG..SEND the vector names",
+   "romacs": "VM2 falls back to SBEG..SEND; everything else (GNU's comparison and edit script, markers, point, undo, hooks, MODIFF, and INHERIT reaching replace_range as its adjust-match-data flag) follows the pinned source and is compared with it",
+   "why": "The fallback only runs when the comparison times out or lacks memory, and replacing with text the caller did not name would corrupt the region",
+   "symbols": [
+    "replace-region-contents"
    ],
    "symbols_derived": false
   },
