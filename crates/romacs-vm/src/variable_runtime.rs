@@ -134,11 +134,9 @@ impl Vm {
     /// explicit LET_DEFAULT flag. Saved values are already traced by `dynamic`.
     pub(super) fn default_toplevel_binding(&mut self, slot: usize) -> Option<usize> {
         let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
-        let at = self.dynamic.iter().position(|(bound, _, _, let_default)| {
+        self.dynamic.iter().position(|(bound, _, _, let_default)| {
             *bound == slot && (!buffer_forwarded || *let_default)
-        })?;
-        self.fence_saved(slot, at);
-        Some(at)
+        })
     }
 
     /// GNU eval.c:766: the oldest SPECPDL_LET_LOCAL of exactly this symbol
@@ -149,12 +147,10 @@ impl Vm {
     pub(super) fn local_toplevel_binding(&mut self, slot: usize, buffer: Value) -> Option<usize> {
         let symbol = Value::reference(slot + 1, 7);
         let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
-        let at = self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
+        self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
             let (bound, _, owner, let_default) = self.dynamic[at];
             owner == buffer && if buffer_forwarded { bound == slot && !let_default } else { bound != slot }
-        })?;
-        self.fence_saved(slot, at);
-        Some(at)
+        })
     }
 
     fn allocate_local_binding_slot(&mut self) -> usize {
@@ -217,6 +213,9 @@ impl Vm {
         if self.variable_redirects[slot].is_none() {
             let localized = self.slots[slot].local != Value::NIL;
             self.variable_redirects[slot] = Some(if localized { VariableRedirect::Localized } else { VariableRedirect::Plain });
+        }
+        if self.fence.is_some() {
+            self.observe_new_variable(slot);
         }
     }
     /// Publish SLOT's local TABLE, retaining native Boolean forwarding.
@@ -419,7 +418,9 @@ impl Vm {
             MakeLocalVariable => { self.make_local_variable(slot)?; Ok(symbol) }
             // These read or write the toplevel or saved value, never a let's.
             MakeVariableBufferLocal | DefvarBoundp | DefvarSetDefault if self.fenced_variable(slot) => {
-                self.fenced(slot, crate::world::Access::Saved, |vm| vm.variable_primitive(p, start, n))
+                use crate::world::Access::*;
+                let access = match p { DefvarBoundp => SavedRead, _ => SavedWrite };
+                self.fenced(slot, access, |vm| vm.variable_primitive(p, start, n))
             }
             SymbolValue => {
                 let value = self.variable_value(slot)?;

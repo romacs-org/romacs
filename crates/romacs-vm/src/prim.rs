@@ -868,6 +868,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
+            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -876,6 +877,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
+            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
             self.vm.dynamic[binding].1 = value;
             Ok(true)
@@ -888,6 +890,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
+            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -896,6 +899,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
+            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }

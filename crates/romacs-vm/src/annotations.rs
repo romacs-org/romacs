@@ -727,6 +727,9 @@ impl Vm {
     /// GNU `Fsetplist` (data.c:1029) after CHECK_SYMBOL: install NEWPLIST
     /// unchecked, exactly as given.
     pub(super) fn set_symbol_plist(&mut self, symbol: Value, plist: Value) -> Result<Value> {
+        if self.fence.is_some() {
+            self.fence_property(symbol, None, crate::world::Access::Write);
+        }
         let slot = self.plist_owner_mut(symbol)?;
         self.slots[slot].plist = plist;
         Ok(plist)
@@ -775,6 +778,9 @@ impl Vm {
         key: Value,
         value: Value,
     ) -> std::result::Result<Value, PlistFault> {
+        if self.fence.is_some() {
+            self.fence_property(symbol, Some(key), crate::world::Access::Write);
+        }
         let owner = self.plist_owner_mut(symbol).map_err(|_| PlistFault::Symbol(symbol))?;
         loop {
             let plist = self.slots[owner].plist;

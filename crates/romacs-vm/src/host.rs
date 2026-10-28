@@ -250,6 +250,11 @@ fn record(kind: &str, fields: Json) {
     });
 }
 
+/// Record a startup input (root 6) with its content digest, FIELDS.
+pub(crate) fn record_input(fields: Json) {
+    record("input", fields);
+}
+
 /// List a refusal: KIND with FIELDS and the current site.
 pub(crate) fn refuse(kind: &str, fields: Json) {
     with_build(|b| {

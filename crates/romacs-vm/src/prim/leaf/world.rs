@@ -6,6 +6,15 @@ impl Leaf<'_> {
         self.vm.startup_phase(on);
     }
 
+    /// `symbol-plist`: a read of every property of SYMBOL, which startup
+    /// makes an input.
+    pub(crate) fn observed_symbol_plist(&mut self, symbol: Value) -> crate::prim::Out {
+        if self.vm.fence.is_some() {
+            self.vm.fence_property(symbol, None, crate::world::Access::Read);
+        }
+        self.symbol_plist(symbol)
+    }
+
     /// The environment list NAME as its Rust owners read it: one named
     /// entry, which the host records, not a read of the fenced list.
     pub(crate) fn environment_list(&mut self, name: &str) -> crate::prim::Out {

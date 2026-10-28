@@ -1442,6 +1442,9 @@ impl Vm {
     /// Slot stamps retain precise source-macro dependencies; the world epoch
     /// guards speculative dispatch, including intervening writes to other slots.
     fn define_function(&mut self, slot: usize, value: Value, is_macro: bool) -> Result<()> {
+        if self.fence.is_some() {
+            self.fence_function(slot);
+        }
         let world = self
             .world_version
             .checked_add(1)

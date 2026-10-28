@@ -10,14 +10,19 @@ use std::time::UNIX_EPOCH;
 
 const PINNED: Pinned = Pinned { clock: UNIX_EPOCH, pid: 4242, seed: [1, 2, 3, 4] };
 
-/// A fake loadup whose startup sets two delayed variables.
+/// A fake loadup whose startup sets two delayed variables from its inputs:
+/// a variable, a property, a plist and a function.
 const BOOTSTRAP: &str = "\
 (defvar custom-delayed-init-variables '(fence-a fence-b))
 (defvar fence-a nil)
 (defvar fence-b nil)
+(defvar fence-input \"/in/\")
+(defun fence-locate () fence-input)
+(put 'fence-a 'standard-value (list \"std\"))
+(put 'fence-plist 'p 1)
 (unwind-protect
     (progn (romacs--startup-phase t)
-           (setq fence-a \"/a/\" fence-b 1)
+           (setq fence-a (concat (fence-locate) (car (get 'fence-a 'standard-value))) fence-b (symbol-plist 'fence-plist))
            (setq startup-saw (list (length process-environment) default-directory (random 3)))
            (setq custom-delayed-init-variables t))
   (romacs--startup-phase nil))
@@ -138,6 +143,57 @@ fn lets_buffers_and_startup_pass() {
     assert!(trace["refusals"].as_array().unwrap().is_empty(), "{trace}");
     let shown = vm.eval_source("(list p1 p2 p3 p4 p5 (stringp p6) (length startup-saw))").and_then(|v| v.display()).unwrap();
     assert_eq!(shown, "((\"/l/\" \"/l/\") 2 \"/x\" \"/y\" \"fence-new\" t 3)");
+}
+
+#[test]
+fn writes_to_startup_inputs_refuse_whatever_they_store() {
+    let preload = "\
+(setq fence-input \"/x/\")
+(setq fence-input \"/in/\")
+(put 'fence-a 'standard-value (list \"/y\"))
+(fset 'fence-locate (lambda () nil))
+(defalias 'fence-locate (lambda () nil))
+(setplist 'fence-plist nil)
+(setq ok1 fence-input)
+(setq ok2 (let ((fence-input \"/x/\")) fence-input))
+(put 'fence-a 'other 1)
+(setq ok3 (get 'fence-a 'standard-value))
+(makunbound 'fence-input)
+";
+    let (_, trace) = run("inputs", preload, true);
+    let trace = trace.unwrap();
+    let refused: Vec<_> = trace["refusals"].as_array().unwrap().iter()
+        .map(|r| (r["site"]["line"].as_u64().unwrap(), r["root"].as_u64().unwrap(), r["access"].as_str().unwrap().to_owned(), r["symbol"].as_str().unwrap().to_owned()))
+        .collect();
+    let expected: Vec<(u64, u64, String, String)> = [(1, "fence-input"), (2, "fence-input"), (3, "fence-a"), (4, "fence-locate"), (5, "fence-locate"), (6, "fence-plist"), (11, "fence-input")]
+        .into_iter().map(|(line, symbol)| (line, 6, "write".to_owned(), symbol.to_owned())).collect();
+    assert_eq!(refused, expected, "{trace}");
+    let inputs: Vec<_> = trace["records"].as_array().unwrap().iter().filter(|r| r["kind"] == "input")
+        .map(|r| format!("{} {} {}", r["input"].as_str().unwrap(), r["symbol"].as_str().unwrap(), r["property"].as_str().unwrap_or(""))).collect();
+    for input in ["variable fence-input ", "property fence-a standard-value", "plist fence-plist ", "function fence-locate "] {
+        assert!(inputs.iter().any(|i| i == input), "{input}: {inputs:?}");
+    }
+}
+
+#[test]
+fn an_input_changed_in_place_refuses_at_the_content_check() {
+    let dir = scratch("in-place");
+    let bootstrap = write(&dir.join("rlisp/romacs-loadup-bootstrap.el"), BOOTSTRAP);
+    let preload = write(&dir.join("preload.el"), "(setcar (get 'fence-a 'standard-value) \"/y\")\n");
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    for file in [bootstrap, preload] {
+        vm.load_file(&file).unwrap();
+    }
+    assert!(host::leave_build().unwrap()["refusals"].as_array().unwrap().is_empty());
+    host::enter_build(PINNED);
+    vm.world_check_inputs();
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<_> = trace["refusals"].as_array().unwrap().iter()
+        .map(|r| (r["access"].as_str().unwrap(), r["input"].as_str().unwrap(), r["symbol"].as_str().unwrap(), r["property"].as_str().unwrap())).collect();
+    assert_eq!(refused, [("changed", "property", "fence-a", "standard-value")], "{trace}");
 }
 
 #[test]

@@ -16,11 +16,11 @@ crates/romacs-regex-engine/src/engine.rs:8605 std::env::var romacs-vm depends on
 crates/romacs-vm/src/autoload.rs:137 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/autoload.rs:164 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/autoload.rs:168 dynamic:saved specbind: pushes a new binding, saving the value it shadows
-crates/romacs-vm/src/backtrace.rs:127 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/backtrace.rs:133 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/backtrace.rs:155 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/backtrace.rs:158 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
-crates/romacs-vm/src/backtrace.rs:164 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:161 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/backtrace.rs:183 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/backtrace.rs:186 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:192 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
 crates/romacs-vm/src/bin/romacs-vm-census.rs:63 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs bin adapter that builds no worlds
@@ -45,24 +45,24 @@ crates/romacs-vm/src/image.rs:397 std::fs the code-image store, reached only thr
 crates/romacs-vm/src/lib.rs:1346 slot:exec-path declares the environment specials by name; reads no slot
 crates/romacs-vm/src/lib.rs:1346 slot:initial-environment declares the environment specials by name; reads no slot
 crates/romacs-vm/src/lib.rs:1346 slot:process-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:2486 dynamic:saved unbind: restores the saved value as the binding ends
+crates/romacs-vm/src/lib.rs:2489 dynamic:saved unbind: restores the saved value as the binding ends
 crates/romacs-vm/src/loader.rs:353 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/loader.rs:355 dynamic:saved specbind: pushes a new binding, saving the value it shadows
-crates/romacs-vm/src/prim.rs:871 dynamic:saved saved-binding accessor: default_toplevel_binding checked the fence (F2)
-crates/romacs-vm/src/prim.rs:880 dynamic:saved saved-binding accessor: default_toplevel_binding checked the fence (F2)
-crates/romacs-vm/src/prim.rs:891 dynamic:saved saved-binding accessor: local_toplevel_binding checked the fence (F2)
-crates/romacs-vm/src/prim.rs:899 dynamic:saved saved-binding accessor: local_toplevel_binding checked the fence (F2)
-crates/romacs-vm/src/prim.rs:990 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/prim.rs:872 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:882 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:894 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:903 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:994 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/threaded.rs:723 dynamic:saved unbind: checks a saved integer before restoring it
 crates/romacs-vm/src/threaded.rs:727 dynamic:saved unbind: drops a saved integer it refused to restore
 crates/romacs-vm/src/variable_runtime.rs:137 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/variable_runtime.rs:153 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/variable_runtime.rs:268 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/variable_runtime.rs:331 dynamic:saved reads saved values of a localized Boolean, which the fence never holds
-crates/romacs-vm/src/variable_runtime.rs:356 dynamic:saved specbind: pushes a new binding, saving the value it shadows
-crates/romacs-vm/src/variable_runtime.rs:468 dynamic:saved saved-binding accessor: defvar's boundp; variable_primitive checks a fenced variable first (F2)
-crates/romacs-vm/src/variable_runtime.rs:473 dynamic:saved saved-binding accessor: defvar's set-default; variable_primitive checks a fenced variable first (F2)
-crates/romacs-vm/src/world/mod.rs:64 slot:exec-path fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:64 slot:initial-environment fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:64 slot:process-environment fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:174 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/variable_runtime.rs:151 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/variable_runtime.rs:267 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/variable_runtime.rs:330 dynamic:saved reads saved values of a localized Boolean, which the fence never holds
+crates/romacs-vm/src/variable_runtime.rs:355 dynamic:saved specbind: pushes a new binding, saving the value it shadows
+crates/romacs-vm/src/variable_runtime.rs:469 dynamic:saved saved-binding accessor: defvar's boundp; variable_primitive checks a fenced variable first (F2)
+crates/romacs-vm/src/variable_runtime.rs:474 dynamic:saved saved-binding accessor: defvar's set-default; variable_primitive checks a fenced variable first (F2)
+crates/romacs-vm/src/world/mod.rs:95 slot:exec-path fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:95 slot:initial-environment fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:95 slot:process-environment fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:271 dynamic:saved reads the bound variable, owner or flag, not the saved value
