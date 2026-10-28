@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "887ab002fd852d1b1a97713a4e84cf5b47292bec405036ccb5f600d744d64d3b",
+  "input_hash": "eb9970a7c7cd4dae6ea2dac759a86285f1ad8751b0077d1dc2a6aef90e79d1ba",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4389,7 +4389,7 @@
    "planned": false,
    "mechanism": "GUI command-loop errors in the echo area",
    "gnu": "`keyboard.c` `command-error-default-function` prints the error with `print_error_message` into the echo area and rings the bell; `command_loop_1` clears the echo area when the next command starts. `call-interactively` of a key bound to a symbol with no function signals `(wrong-type-argument commandp SYMBOL)` (GNU 32.0.50: `Wrong type argument: commandp, romacs-nonexistent-cmd`)",
-   "romacs": "The GUI host echoes `error-message-string` of the error rebuilt from VM2's printed condition and data, clears it when the next non-prefix command starts, and rings the bell. Data that cannot be re-read (`#<buffer x>`) falls back to `CONDITION: DATA`. VM2's `call-interactively` of a void command signals `(wrong-type-argument)` with no data, so `M-x` under `--gnu-lisp` shows `Wrong type argument` where GNU shows `Wrong type argument: commandp, execute-extended-command`. Unbound keys only ring the bell: GNU's `KEYS is undefined` needs C `key-description`, which VM2 lacks",
+   "romacs": "The GUI host echoes `error-message-string` of the error rebuilt from VM2's printed condition and data, clears it when the next non-prefix command starts, and rings the bell. A command that returns normally leaves its last message (`message`, or printing to `t`) in the echo area, without its text properties. Data that cannot be re-read (`#<buffer x>`) falls back to `CONDITION: DATA`. VM2's `call-interactively` of a void command signals `(wrong-type-argument)` with no data, so `M-x` under `--gnu-lisp` shows `Wrong type argument` where GNU shows `Wrong type argument: commandp, execute-extended-command`. Unbound keys only ring the bell: GNU's `KEYS is undefined` needs C `key-description`, which VM2 lacks",
    "why": "**User-observable** echo text; the void-command signal data is Lisp-visible through `condition-case` (a VM2 divergence, surfaced here, not introduced)",
    "symbols": [
     "command-error-default-function",
@@ -4678,7 +4678,7 @@
    "planned": false,
    "mechanism": "Output destinations and callback timing",
    "gnu": "GNU `print.c:print_prepare`, `Fterpri` and `printchar` accept buffer/marker streams, preserve point, run modification hooks and output objects incrementally.",
-   "romacs": "Romacs emits to buffer streams, markers in multibyte buffers, rooted T2 callback functions/symbols and batch stdout. Buffer/marker output follows GNU point motion and restores the current buffer on errors; unibyte-buffer markers explicitly refuse. Output that runs no Lisp is inserted natively and recorded in `buffer-undo-list`; when change hooks or `undo-auto--undoable-change` can run it goes through `insert`'s bracket (`romacs--print-insert`), as print_finish's insert_1_both and signal_after_change do, including the after-change of empty output. `terpri` with non-nil ENSURE refuses, including non-function streams (only the function refusal matches GNU). Rendering is snapshotted before callbacks, so callback mutation of remaining graph/print controls is not reflected. Quoted non-ASCII unibyte strings to callback/stdout streams refuse; `princ` raw strings retain their actual character codes. `write-char` matches GNU uint32 callback conversion, but unsupported stdout character codes refuse.",
+   "romacs": "Romacs emits to buffer streams, markers in multibyte buffers, rooted T2 callback functions/symbols and batch stdout. `t` is the echo area, as on GNU's terminal, only where `noninteractive` is nil and the embedder declares it renders one (`Vm::set_echo_area_host`: the live GUI); a print there extends the message printing made, and any other message starts a new one (`message_buf_print`). Every other host, `noninteractive` or not, prints `t` toBuffer/marker output follows GNU point motion and restores the current buffer on errors; unibyte-buffer markers explicitly refuse. Output that runs no Lisp is inserted natively and recorded in `buffer-undo-list`; when change hooks or `undo-auto--undoable-change` can run it goes through `insert`'s bracket (`romacs--print-insert`), as print_finish's insert_1_both and signal_after_change do, including the after-change of empty output. `terpri` with non-nil ENSURE refuses, including non-function streams (only the function refusal matches GNU). Rendering is snapshotted before callbacks, so callback mutation of remaining graph/print controls is not reflected. Quoted non-ASCII unibyte strings to callback/stdout streams refuse; `princ` raw strings retain their actual character codes. `write-char` matches GNU uint32 callback conversion, but unsupported stdout character codes refuse.",
    "why": "Buffer/marker comparisons are in `tests/printing_streams.rs` and `tests/print_change_hooks.rs`; ENSURE and incremental callback mutation parity remain outside the supported boundary.",
    "symbols": [
     "prin1",

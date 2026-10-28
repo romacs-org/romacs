@@ -234,6 +234,21 @@ fn set_file_modes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) 
     Ok(Step::Done(Value::NIL))
 }
 
+// Fdefault_file_modes and Fset_default_file_modes: the permission bits of
+// newly created files, the complement of the process umask.  GNU keeps the
+// mask in realmask; VM2 reads the process's own ([`umask`]).
+defsubr! { name = "default-file-modes", gnu = "fileio.c:3730", effect = Reads,
+fn default_file_modes(cx) {
+    let _ = cx;
+    Ok(Value::integer(i64::from(!umask()? & 0o777)).map_err(Fault::Error)?)
+}}
+defsubr! { name = "set-default-file-modes", gnu = "fileio.c:3700", effect = Global,
+fn set_default_file_modes(cx, mode: Value) {
+    let mode = mode.integer_value().ok_or(Fault::Wrong("fixnump", mode))?;
+    cx.filesave_set_umask(!(mode as u32) & 0o777);
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "rename-file", gnu = "fileio.c:2724", effect = Global,
 fn rename_file(cx, file: Value, newname: Value; optional overwrite: Value) -> Step {
     let (source, source_value) = name(cx, file)?;

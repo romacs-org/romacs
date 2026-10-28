@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "90a260a5fee197ba8141e8379140582440c8eee2dc56813488d0c4f51a3d8d71",
+    "input_hash": "73bbf15bf63edcfb1abfd9a53e61e5de0e66adbb4e845801c888beae5f3142ab",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4314
+    "vm2_universe": 4322
   },
   "schema": 2,
   "vm2": {
-    "count": 992,
+    "count": 994,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -221,6 +221,7 @@
       "decode-time",
       "defalias",
       "default-boundp",
+      "default-file-modes",
       "default-toplevel-value",
       "default-value",
       "defconst",
@@ -781,6 +782,7 @@
       "set-charset-priority",
       "set-coding-system-priority",
       "set-default",
+      "set-default-file-modes",
       "set-default-toplevel-value",
       "set-file-modes",
       "set-file-times",

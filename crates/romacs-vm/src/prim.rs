@@ -88,6 +88,10 @@ pub(crate) type Out = std::result::Result<Value, Fault>;
 pub(crate) const INTERACTIVE_TABLE: &str = "#:vm2-interactive-specs";
 /// The echo area's current message (xdisp.c echo_area_buffer contents).
 pub(crate) const ECHO_AREA_MESSAGE: &str = "#:vm2-echo-area-message";
+/// Non-nil once an embedder renders the echo area (`Vm::set_echo_area_host`).
+pub(crate) const ECHO_AREA_HOST: &str = "#:vm2-echo-area-host";
+/// The echo-area message printing last made, which later prints extend.
+pub(crate) const ECHO_AREA_PRINTED: &str = "#:vm2-echo-area-printed";
 /// Lazy native root, traced and forwarded like INTERACTIVE_TABLE.
 pub(crate) const FONT_ALTERNATIVE_FAMILIES: &str = "#:vm2-font-alternative-families";
 /// xfaces.c Vface_alternative_font_registry_alist: staticpro'd, not a Lisp variable.

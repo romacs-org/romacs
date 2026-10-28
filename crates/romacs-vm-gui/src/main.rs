@@ -205,13 +205,13 @@ fn run() -> Result<(), String> {
         Err(std::sync::mpsc::TryRecvError::Empty) => Ok(()),
     }
 }
-/// `--loadup-report [EXPR...]`: run GNU's loadup.el exactly as the GUI's
-/// startup does, on the same 64 MiB evaluator, with no window; print the
-/// per-site table, then each EXPR evaluated in that VM and its printed value.
+/// `--loadup-report [EXPR...]`: run `--loadup`'s GNU Lisp chain exactly as
+/// the GUI's startup does, on the same 64 MiB evaluator, with no window; print
+/// the per-site table, then each EXPR evaluated in that VM and its printed value.
 fn loadup_report(exprs: Vec<String>) -> Result<(), String> {
     spawn_evaluator(move || -> Result<(), String> {
         let mut vm = Vm::new();
-        let report = loadup::drive(&mut vm, &startup::lisp_dir())?;
+        let report = startup::drive_loadup(&mut vm, &startup::lisp_dir())?;
         print!("{}", report.table());
         eprintln!("romacs: {} ({:.1}s); GNU's dump would stop at {}", report.status(), report.seconds,
                   report.gnu_would_stop().unwrap_or_else(|| "nothing".into()));
@@ -417,6 +417,8 @@ fn evaluate(
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     if live { vm.set_terminal_host(Some(Box::new(terminal_service)))?; }
+    // The window shows an echo area: printing to `t' goes there, as on GNU's terminal.
+    if live { vm.set_echo_area_host(true); }
     if let Some(floor) = floor {
         vm.set_collection_floor(floor);
     }
@@ -426,8 +428,8 @@ fn evaluate(
         if launch != startup::Launch::GnuOnly {
             vm.eval_source("(defvar interprogram-cut-function 'romacs-clipboard-select-text) (defvar interprogram-paste-function 'romacs-clipboard-selection-value)")?;
         }
-        // The launch font's face, as source: evaluated BEFORE GNU's loadup
-        // (whose custom.el makes `defface' a macro VM2 cannot run yet), and
+        // The launch font's face, as source: declared BEFORE GNU's Lisp, so
+        // GNU's own `defface' (custom.el) leaves the declared face alone, and
         // after the workspace's own faces otherwise, exactly as before.
         let font = match std::env::var("ROMACS_GUI_FONT") {
             Ok(family) => {
