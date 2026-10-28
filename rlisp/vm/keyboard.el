@@ -67,6 +67,18 @@ commands and autoloads)."
   "keyboard.c add_command_key."
   (setq romacs--command-keys (vconcat romacs--command-keys (list key))))
 
+(defvar romacs--reading-command-keys nil
+  "Non-nil while the command loop reads a command's key sequence, between
+commands: completed background commands may run their callbacks then.")
+
+(defun romacs--dispatch-background ()
+  "Run completed background commands' callbacks while the command loop
+waits for a command's keys outside any minibuffer read (rlisp/vm/process.el
+runs them between commands, never inside a recursive minibuffer read)."
+  (when (and romacs--reading-command-keys (= (minibuffer-depth) 0)
+             (fboundp 'romacs-process-dispatch-ready) (romacs--process-pending-p))
+    (romacs-process-dispatch-ready)))
+
 (defun romacs--read-host-char (seconds)
   "keyboard.c kbd_buffer_get_event's wait for the host keyboard: the next
 host event, running timers as they fall due, or nil once SECONDS pass or a
@@ -90,7 +102,8 @@ runs no timers."
                 (setq waiting nil)
               (setq c (romacs--read-host-event
                        (if (and delay left) (min delay left) (or delay left)))
-                    waiting (null c)))))
+                    waiting (null c))
+              (unless c (romacs--dispatch-background)))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 
@@ -455,7 +468,8 @@ Return the keys read, nil at the end of an executing keyboard macro."
   (set-buffer (window-buffer (selected-window)))
   (setq deactivate-mark nil this-command nil real-this-command nil
         this-original-command nil this-command-keys-shift-translated nil)
-  (let ((keys (romacs--read-key-sequence nil)) cmd previous-buffer previous-tick)
+  (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil)))
+        cmd previous-buffer previous-tick)
     (set-buffer (window-buffer (selected-window)))
     (setq num-input-keys (1+ num-input-keys))
     (when keys

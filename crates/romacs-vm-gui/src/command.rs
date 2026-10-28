@@ -74,6 +74,21 @@ mod tests {
         }
     }
 
+    /// A host keyboard giving these keys, None standing for a pause in
+    /// which a background command can finish, then a wake as a completion
+    /// gives.
+    struct Scripted(std::collections::VecDeque<Option<CommandEvent>>);
+    impl romacs_vm::HostInput for Scripted {
+        fn input_pending(&mut self) -> bool { false }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
+            match self.0.pop_front().ok_or("keys exhausted")? {
+                Some(key) => Ok(romacs_vm::HostEvent::Key(key)),
+                None => { std::thread::sleep(std::time::Duration::from_millis(500)); Ok(romacs_vm::HostEvent::Background) }
+            }
+        }
+    }
+
     /// The workspace in a fundamental-mode buffer that logs, from
     /// `pre-command-hook' and `post-command-hook', each command with its
     /// event, keys and `recent-keys'.
@@ -130,6 +145,25 @@ mod tests {
         vm.set_host_input(Some(Box::new(Keys([CommandEvent::Named("f9".into())].into()))));
         assert!(run(&mut vm).unwrap().signal.is_none());
         assert_eq!(printed(&mut vm, "(let ((l (delq nil (copy-sequence buffer-undo-list)))) (list (point) (car l) (car (cdr l))))"), "(6 (1 . 2) 5)");
+    }
+
+    /// A background command that completes while a prefix key waits for
+    /// the next one has its callback run then, before that key; one that
+    /// completes during a minibuffer read waits for the commands to end.
+    #[test]
+    fn a_background_completion_runs_while_a_prefix_waits() {
+        let mut vm = logged();
+        let start = "(romacs-process-start (list \"true\") \"\" default-directory 10
+            (lambda (result) (setq log (cons (list 'callback (car result)) log)) nil))";
+        vm.eval_source(start).unwrap();
+        vm.set_host_input(Some(Box::new(Scripted([Some(CommandEvent::Character(24)), None, Some(CommandEvent::Character(104))].into()))));
+        let out = run(&mut vm).unwrap();
+        assert_eq!(out.command.as_deref(), Some("mark-whole-buffer"), "{out:?}");
+        assert_eq!(printed(&mut vm, "(mapcar #'car (reverse log))"), "(callback pre post)");
+        vm.eval_source(&format!("(setq log nil) (global-set-key [f9] (lambda () (interactive) (setq got (read-string \"x: \")))) {start}")).unwrap();
+        vm.set_host_input(Some(Box::new(Scripted([Some(CommandEvent::Named("f9".into())), None, Some(CommandEvent::Character(97)), Some(CommandEvent::Character(13))].into()))));
+        assert!(run(&mut vm).unwrap().signal.is_none());
+        assert_eq!(printed(&mut vm, "(list got (mapcar #'car (reverse log)) (romacs--process-pending-p))"), "(\"a\" (pre post pre post pre post) t)", "the minibuffer's own commands run too, no callback");
     }
 
     /// pre-command-hook runs before each command and post-command-hook

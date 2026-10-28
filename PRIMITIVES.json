@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c9d11218daa5cda3f677724a3013c3bae62e147d8d1fe2d8a0c5cb8825b9dd1a",
+  "source_fingerprint": "bead3a9ec8eb27faff941ccc2fb8ce5af648f2b2bf3b5dffafe44c57311e1f01",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 997,
-  "parsed_vm2_only": 997
+  "parsed_total": 998,
+  "parsed_vm2_only": 998
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3700,6 +3700,11 @@
   "romacs--process-forget": {
    "name": "romacs--process-forget",
    "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/process_jobs.rs:17"
+  },
+  "romacs--process-pending-p": {
+   "name": "romacs--process-pending-p",
+   "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process_jobs.rs:14"
   },
   "romacs--process-ready": {
@@ -3836,7 +3841,7 @@
   "romacs-json-read": {
    "name": "romacs-json-read",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process_jobs.rs:17"
+   "registered_at": "crates/romacs-vm/src/prims/process_jobs.rs:20"
   },
   "round": {
    "name": "round",
