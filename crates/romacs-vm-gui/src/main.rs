@@ -533,6 +533,11 @@ fn evaluate(
                 }
             }
         }
+        if launch == startup::Launch::Loadup {
+            if let Err(error) = vm.eval_source("(romacs-gui-loadup-after-init)") {
+                eprintln!("romacs: after-init failed: {error}");
+            }
+        }
         eprintln!("romacs: {}", started.status());
         if let Some(loadup) = &started.loadup {
             for line in loadup.table().lines() { eprintln!("romacs-loadup: {line}"); }

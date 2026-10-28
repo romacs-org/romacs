@@ -53,5 +53,47 @@
 ;; (the Rum palette, the launch font) keeps its own spec.
 (frame-set-background-mode (selected-frame))
 
+(defun romacs-gui-loadup-after-init ()
+  "What GNU's `command-line' does once the init file has loaded.
+The GUI calls this after the user's init, in GNU's order: startup.el
+`command-line' (startup.el:1717), the no-arguments path of
+`command-line-1' (startup.el:2736, 3013), then `normal-top-level'
+\(startup.el:808, 849).  The Romacs workspace stands where GNU shows its
+startup screen, so `inhibit-startup-screen' or `initial-buffer-choice'
+retract it, leaving *scratch* as GNU does without a startup screen."
+  (setq after-init-time (current-time))
+  (run-hooks 'after-init-hook 'delayed-warnings-hook)
+  (when (or inhibit-startup-screen initial-buffer-choice)
+    (romacs-gui-loadup--retract-workspace))
+  (when (get-buffer "*scratch*")
+    (with-current-buffer "*scratch*"
+      (when (eq major-mode 'fundamental-mode)
+        (funcall initial-major-mode))))
+  (display-startup-echo-area-message)
+  (and initial-scratch-message
+       (get-buffer "*scratch*")
+       (with-current-buffer "*scratch*"
+         (when (zerop (buffer-size))
+           (insert (substitute-command-keys initial-scratch-message))
+           (set-buffer-modified-p nil))))
+  (unless inhibit-startup-hooks
+    (run-hooks 'emacs-startup-hook 'term-setup-hook 'window-setup-hook)))
+
+(defun romacs-gui-loadup--retract-workspace ()
+  "Remove the workspace's evaluations window and its text in *scratch*."
+  (let ((results (get-buffer "*VM evaluations*")))
+    (when results
+      (dolist (window (get-buffer-window-list results nil t))
+        (when (window-parent window) (delete-window window)))
+      (kill-buffer results)))
+  (let ((scratch (get-buffer "*scratch*")))
+    (when (and scratch (boundp 'romacs-gui-scratch-start))
+      (with-current-buffer scratch
+        (delete-region (point-min) (min romacs-gui-scratch-start (point-max)))
+        (set-buffer-modified-p nil)
+        (dolist (window (get-buffer-window-list scratch nil t))
+          (set-window-start window (point-min))
+          (set-window-point window (point-max)))))))
+
 (provide 'romacs-gui-loadup)
 ;;; romacs-gui-loadup.el ends here
