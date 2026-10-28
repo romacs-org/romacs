@@ -119,11 +119,18 @@ impl Vm {
     /// keyboard.c timer_stop_idle: the host read a key for a command.
     pub fn timer_stop_idle(&mut self) { self.idle_since = None; }
 
+    fn redisplay_inhibited(&mut self) -> Result<bool> {
+        let slot = self.slot("inhibit-redisplay");
+        Ok(self.variable_value(slot)? != Value::NIL)
+    }
+
     fn read_host_event_with(&mut self, host: &mut dyn HostInput, deadline: Option<std::time::Instant>) -> Result<HostEvent> {
         let mut redraw = true;
         loop {
             redraw |= self.poll_terminal_output()?;
-            if redraw && !host.input_pending() {
+            // GNU redisplay_internal does nothing while `inhibit-redisplay'
+            // is non-nil, as it is around Lisp that redisplay itself calls.
+            if redraw && !host.input_pending() && !self.redisplay_inhibited()? {
                 let (width, height) = (self.window_state.width, self.window_state.height);
                 let frame = self.frame_snapshot(width, height)?;
                 let selected = self.selected_window_value()?;

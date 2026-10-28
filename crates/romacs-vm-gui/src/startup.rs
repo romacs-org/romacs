@@ -1956,4 +1956,48 @@ mod tests {
         assert!(session.pixel_size >= 10.0, "{session:?}");
         assert_eq!(settings, "(t t t t)", "{values}");
     }
+
+    /// `--loadup` visiting a Lisp file: its first redisplay runs jit-lock
+    /// through `fontification-functions` over the rows the window shows, so
+    /// the snapshot carries font-lock's faces with no `font-lock-ensure`;
+    /// text beyond the window stays unfontified, and an unchanged redisplay
+    /// calls nothing.
+    #[test]
+    fn loadup_redisplay_fontifies_a_visited_lisp_file_through_jit_lock() {
+        let (before, first, second, state, keyword) = on_evaluator(|| {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            private_home(&mut vm, "jit-lock");
+            initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let lines: Vec<&str> = include_str!("../../../gnu-lisp/subr.el").lines().take(2000).collect();
+            let dir = scratch_lisp("jit-lock-visit", &[("sample.el", &(lines.join("\n") + "\n"))]);
+            visit_files(&mut vm, &[dir.join("sample.el")]).unwrap();
+            vm.eval_source("(progn (setq romacs-jit-log nil)
+                (advice-add 'jit-lock-function :before (lambda (pos) (setq romacs-jit-log (cons pos romacs-jit-log)))))").unwrap();
+            let shown = "(with-current-buffer \"sample.el\" (list major-mode font-lock-mode (and (memq 'jit-lock-function fontification-functions) t) (next-single-property-change 1 'face)))";
+            let before = printed(&mut vm, shown);
+            let frame = vm.frame_snapshot(1200, 800).unwrap();
+            let first = printed(&mut vm, "(reverse romacs-jit-log)");
+            vm.frame_snapshot(1200, 800).unwrap();
+            let second = printed(&mut vm, "(reverse romacs-jit-log)");
+            let state = printed(&mut vm, "(with-current-buffer \"sample.el\"
+                (let* ((window (get-buffer-window)) (start (window-start window))
+                       (shown (save-excursion (goto-char start) (forward-line 40) (point))))
+                  (list (= start 1) (get-text-property 1 'fontified)
+                        (< (next-single-property-change 1 'fontified nil (point-max)) (+ shown jit-lock-chunk-size))
+                        (get-text-property (1- (point-max)) 'fontified)
+                        (seq-every-p (lambda (pos) (< pos shown)) romacs-jit-log)
+                        (save-excursion (goto-char 1) (search-forward \"(defmacro\") (get-text-property (- (point) 8) 'face)))))");
+            let window = frame.windows.iter().map(|w| &w.snapshot).find(|w| w.text.utf8.starts_with(";;; subr.el")).unwrap();
+            let at = window.text.utf8.find("(defmacro").unwrap() + 1;
+            let run = window.text.face_runs.iter().find(|run| run.bytes.contains(&at)).unwrap();
+            let keyword = window.faces[run.face.0 as usize].foreground != window.faces[0].foreground;
+            (before, first, second, state, keyword)
+        });
+        assert_eq!(before, "(emacs-lisp-mode t t nil)");
+        assert_ne!(first, "nil", "redisplay ran no fontification");
+        assert_eq!(second, first, "an unchanged redisplay fontified again");
+        assert_eq!(state, "(t t t nil t font-lock-keyword-face)");
+        assert!(keyword, "the snapshot shows `(defmacro' in the default face");
+    }
 }
