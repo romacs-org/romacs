@@ -94,6 +94,16 @@ runs no timers."
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 
+(defun romacs--keyboard-translate (c)
+  "keyboard.c read_char: host character C through `keyboard-translate-table'.
+A nil entry, or a C beyond a string or vector table, is no translation."
+  (let ((table keyboard-translate-table))
+    (or (and (natnump c)
+             (if (char-table-p table) (characterp c)
+               (and (or (stringp table) (vectorp table)) (< c (length table))))
+             (aref table c))
+        c)))
+
 (defun romacs--read-char (&optional seconds)
   "keyboard.c read_char: the next event, recorded as input.
 It comes from `unread-command-events', else from the executing keyboard
@@ -124,7 +134,7 @@ reports it, raised from the innermost recursive edit when there is one."
         (setq c (logior #x8000000 (logand c #x7f))))
       (setq executing-kbd-macro-index (1+ executing-kbd-macro-index)))
      ((romacs--host-input-p)
-      (setq c (romacs--read-host-char seconds))
+      (setq c (romacs--keyboard-translate (romacs--read-host-char seconds)))
       (cond (c (unless executing-kbd-macro
                  (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))))
             ;; A timer queued input while the host waited: read it as GNU's

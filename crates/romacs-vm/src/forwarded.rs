@@ -84,6 +84,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // DEFVAR_KBOARD; VM2's single keyboard is the initial terminal's (VM2-WIN5).
     CVariable { name: "window-system", gnu: "dispnew.c:7522", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "initial-window-system", gnu: "dispnew.c:7507", kind: Kind::Lisp(Init::Nil) },
+    // DEFVAR_KBOARD; read_char applies it (rlisp/vm/keyboard.el).
+    CVariable { name: "keyboard-translate-table", gnu: "keyboard.c:13980", kind: Kind::Lisp(Init::Nil) },
     // command-line sets it once initialization is done; package.el reads it.
     CVariable { name: "after-init-time", gnu: "emacs.c:3591", kind: Kind::Lisp(Init::Nil) },
     // C variables that GNU's preloaded Lisp and the Gnosis/emacs-hermes load
