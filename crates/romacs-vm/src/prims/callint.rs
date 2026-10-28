@@ -604,8 +604,34 @@ fn arg_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
                 push(cx, &mut saved, Value::NIL, Value::NIL);
                 saved[FLAGS] = fixnum(index(saved[FLAGS]) as i64 | ARG_FROM_TTY);
             }
-            b'a' | b'b' | b'B' | b'c' | b'C' | b'D' | b'f' | b'F' | b'G' | b'k' | b'K' | b'M' | b'n' | b'N'
-            | b's' | b'S' | b'v' | b'x' | b'X' | b'z' | b'Z' => {
+            // read_file_name (callint.c:229): `read-file-name' through its
+            // symbol with DEFAULT, MUSTMATCH, INITIAL and PREDICATE; and
+            // Fread_string, called directly, not through its symbol.
+            b'D' | b'f' | b'F' | b'G' | b's' => {
+                let template = cx.string(&String::from_utf8_lossy(prompt));
+                let message = cx.format_message(template, &[])?;
+                let (f, args) = if spec[pos] == b's' {
+                    let f = crate::prim::subr_named("read-string").expect("read-string subr");
+                    (f, vec![message, Value::NIL, Value::NIL, Value::NIL, Value::NIL])
+                } else {
+                    let lambda = cx.intern("lambda");
+                    let [default, mustmatch, initial, predicate] = match spec[pos] {
+                        b'D' => {
+                            let directory = cx.intern("default-directory");
+                            let directory = cx.variable_value(directory)?.unwrap_or(Value::NIL);
+                            [directory, lambda, Value::NIL, cx.intern("file-directory-p")]
+                        }
+                        b'f' => [Value::NIL, lambda, Value::NIL, Value::NIL],
+                        b'F' => [Value::NIL; 4],
+                        _ => [Value::NIL, Value::NIL, cx.make_string(vec![], false), Value::NIL],
+                    };
+                    (cx.intern("read-file-name"), vec![message, Value::NIL, default, mustmatch, initial, predicate])
+                };
+                saved[POS] = fixnum(line_end.min(spec.len()) as i64);
+                return Ok(Step::Call { f, args, then: read_argument, saved });
+            }
+            b'a' | b'b' | b'B' | b'c' | b'C' | b'k' | b'K' | b'M' | b'n' | b'N'
+            | b'S' | b'v' | b'x' | b'X' | b'z' | b'Z' => {
                 let code = spec[pos] as char;
                 return Err(unsupported(&format!("the input-reading code `{code}'")));
             }
@@ -622,6 +648,19 @@ fn arg_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
     }
     saved[POS] = fixnum(pos as i64);
     finish(cx, saved)
+}
+
+/// An argument read from the user: it varies == 0, so the call is
+/// arg_from_tty and the history quotes the value. Continue after its line.
+fn read_argument(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
+    let mut saved = saved.to_vec();
+    let history = quotify(cx, value);
+    push(cx, &mut saved, value, history);
+    saved[FLAGS] = fixnum(index(saved[FLAGS]) as i64 | ARG_FROM_TTY);
+    let spec = spec_bytes(cx, &saved)?;
+    let pos = index(saved[POS]);
+    saved[POS] = fixnum((pos + 1).min(spec.len()) as i64);
+    arg_codes(cx, saved)
 }
 
 fn push_region(cx: &mut Leaf<'_>, saved: &mut Vec<Value>, optional: bool) -> std::result::Result<(), Fault> {
