@@ -46,6 +46,45 @@ where
 }
 
 #[cfg(test)]
+mod native_wake_tests {
+    use std::sync::mpsc::{Receiver, channel};
+    use std::time::Duration;
+
+    /// A terminal host whose drain lasts until a background command completes:
+    /// the completion lands between the drain and the readiness check of an
+    /// order that checks readiness first.
+    struct SlowDrain(Receiver<()>);
+
+    impl romacs_vm::TerminalHost for SlowDrain {
+        fn create(&mut self, _: &str, _: &str, _: u16, _: u16) -> Result<u64, String> { Err("no terminals".into()) }
+        fn send(&mut self, _: u64, _: &[u8]) -> Result<(), String> { Err("no terminals".into()) }
+        fn resize(&mut self, _: u64, _: u16, _: u16) -> Result<(), String> { Err("no terminals".into()) }
+        fn input_state(&mut self, _: u64) -> Result<romacs_vm::TerminalInputState, String> { Err("no terminals".into()) }
+        fn changed_sessions(&mut self) -> Vec<u64> {
+            self.0.recv_timeout(Duration::from_secs(10)).expect("background command completed");
+            vec![]
+        }
+        fn snapshot(&mut self, _: u64) -> Result<romacs_vm::TerminalSnapshot, String> { Err("no terminals".into()) }
+        fn close(&mut self, _: u64) -> Result<(), String> { Err("no terminals".into()) }
+    }
+
+    /// A completion whose wake the terminal drain consumes is still dispatched.
+    #[test]
+    fn a_completion_during_the_terminal_drain_is_dispatched() {
+        let mut vm = romacs_vm::Vm::new();
+        let (completed, drain) = channel();
+        let completed = std::sync::Mutex::new(completed);
+        vm.set_background_wake(std::sync::Arc::new(move || { let _ = completed.lock().unwrap().send(()); }));
+        vm.set_terminal_host(Some(Box::new(SlowDrain(drain)))).unwrap();
+        vm.eval_source("(defun romacs-process-dispatch-ready () (setq dispatched (romacs--process-ready)))
+                        (romacs--process-start '(\"sleep\" \"0.2\") \"\" \"/\" 5)").unwrap();
+        assert!(super::service_native(&mut vm).unwrap());
+        assert_eq!(vm.eval_source("dispatched").unwrap().display().unwrap(), "(1)");
+        assert!(!vm.background_processes_ready());
+    }
+}
+
+#[cfg(test)]
 mod evaluator_stack_tests {
     use std::os::unix::process::ExitStatusExt;
 
@@ -505,15 +544,7 @@ fn evaluate(
         }
     }); }
     loop {
-        if live && vm.background_processes_ready() {
-            let changed = vm.eval_source("(if (fboundp 'romacs-process-dispatch-ready) (romacs-process-dispatch-ready) (progn (romacs--process-ready) nil))");
-            match changed {
-                Ok(value) if !value.is_nil() => live_presentation.changed(),
-                Err(error) => { echo::show(&mut vm, &format!("Background command: {error}"))?; live_presentation.changed(); },
-                _ => {},
-            }
-        }
-        if live && vm.poll_terminal_output()? { live_presentation.changed(); }
+        if live && service_native(&mut vm)? { live_presentation.changed(); }
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
         while let Some(event) = batch.pop_front() {
@@ -727,6 +758,21 @@ fn evaluate(
         }
     }
     shutdown_editor(&mut vm, sender)
+}
+
+/// Native work that woke the wait: terminal output, then completed background
+/// commands. Draining the shared wake first means a completion that lands
+/// after the drain signals the next wait, and one before it is dispatched
+/// here. Whether a displayed buffer changed.
+fn service_native(vm: &mut Vm) -> Result<bool, String> {
+    let mut changed = vm.poll_terminal_output()?;
+    if vm.background_processes_ready() {
+        match vm.eval_source("(if (fboundp 'romacs-process-dispatch-ready) (romacs-process-dispatch-ready) (progn (romacs--process-ready) nil))") {
+            Ok(value) => changed |= !value.is_nil(),
+            Err(error) => { echo::show(vm, &format!("Background command: {error}"))?; changed = true; },
+        }
+    }
+    Ok(changed)
 }
 
 fn shutdown_editor(vm: &mut Vm, sender: &PaintSender) -> Result<(), String> {
