@@ -490,6 +490,23 @@ mod leaf {
                 class == SyntaxClass::Word || (symbols && class == SyntaxClass::Symbol)
             }).collect())
         }
+        /// syntax_prefix_flag_p of each of CODES in the current buffer's
+        /// syntax table, as casing a buffer region reads it.
+        pub(crate) fn casing_prefix_flags(&mut self, codes: &[u32]) -> std::result::Result<Vec<bool>, Fault> {
+            let i = self.vm.buffer_index().map_err(Fault::Error)?;
+            let table = match &self.vm.objects[i] {
+                data::Object::Buffer(b) => b.syntax_table,
+                data::Object::ByteBuffer(b) => b.syntax_table,
+                _ => unreachable!("buffer_index validates"),
+            };
+            let standard = self.vm.names.get("#:vm2-standard-syntax").map(|&s| self.vm.slots[s].value);
+            let code_of = |table: Value, code: u32| self.vm.char_table_get(table, code as usize).ok()
+                .and_then(|entry| self.vm.cons_pair(entry).ok()).and_then(|(n, _)| n.integer_value());
+            Ok(codes.iter().map(|&code| {
+                let entry = code_of(table, code).or_else(|| standard.and_then(|t| code_of(t, code)));
+                entry.is_some_and(|n| (n >> 20) & 1 != 0)
+            }).collect())
+        }
         pub fn make_string(&mut self, bytes: Vec<u8>, multibyte: bool) -> Value {
             self.vm.make_lisp_string(bytes, multibyte)
         }
@@ -814,6 +831,10 @@ mod leaf {
                 let data=self.vm.list_value(&[stream]);
                 Fault::Signal(condition,data)
             }else{Fault::EndOfFile}
+        }
+        /// The registers of match group N, if it matched.
+        pub(crate) fn match_group(&self, n: usize) -> Option<(usize, usize)> {
+            self.vm.regexp.groups.get(n).copied().flatten()
         }
         pub fn translate_match_data(&mut self, delta: i64) {
             self.vm.regexp_translate_match_data(delta);
@@ -1580,6 +1601,7 @@ mod leaf {
     mod buffer_locals;
     mod casetab;
     mod casing;
+    pub(crate) use casing::RegionCase;
     mod modification;
     mod buffer_lifecycle;
     mod editor_mark;

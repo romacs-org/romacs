@@ -37,7 +37,7 @@ fn substitute(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
     let noundo = saved[4] != Value::NIL;
     cx.change_deactivates_mark(saved[7] != Value::NIL)?;
     let (pos, stop) = (saved[5].integer_value().expect("pos"), saved[6].integer_value().expect("stop"));
-    cx.subst_char_modify(pos, stop, noundo)?;
+    cx.modify_text_tail(pos, stop, noundo)?;
     let (hits, _) = cx.subst_char_hits(saved[0], saved[1], saved[2], saved[3])?;
     let (Some(&changed), Some(&last)) = (hits.first(), hits.last()) else { return Ok(Step::Done(Value::NIL)) };
     cx.subst_char_write(&hits, saved[3], noundo)?;

@@ -193,6 +193,18 @@ call for an undo boundary, 1 when it might not have been simple."
       (run-hooks 'post-self-insert-hook)
       hairy)))
 
+(defun romacs--casify-noncontiguous (function)
+  "casefiddle.c casify_pnc_region: FUNCTION, a region casing command, on
+each (BEG . END) of the bounds `region-extract-function' gives."
+  (let ((bounds (funcall region-extract-function 'bounds)))
+    (while (consp bounds)
+      (let ((bound (car bounds)))
+        (or (consp bound) (signal 'wrong-type-argument (list 'consp bound)))
+        (funcall function (car bound) (cdr bound)))
+      (setq bounds (cdr bounds)))
+    (if bounds (signal 'wrong-type-argument (list 'listp bounds))))
+  nil)
+
 (defun romacs--replace-source (source)
   "SOURCE of `replace-region-contents' as editfns.c reads it: a string as
 it is, else [BUFFER BEG END] for the accessible text of a buffer or the

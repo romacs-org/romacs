@@ -128,64 +128,6 @@ impl Vm {
         })
     }
 
-    /// Bounded string-only Freplace_match. Unsupported domains refuse before
-    /// allocation or mutation; string replacement leaves the registers intact.
-    pub(crate) fn regexp_replace_match(&mut self, newtext: Value, fixedcase: Value, literal: Value, string: Value, subexp: Value) -> prim::Out {
-        use prim::Fault;
-        let replacement = self.str_view(newtext).ok_or(Fault::Wrong("stringp", newtext))?.to_owned();
-        if string != Value::NIL && self.str_view(string).is_none() {
-            return Err(Fault::Wrong("stringp", string));
-        }
-        if self.regexp.groups.is_empty() {
-            return Err(Fault::Error("`replace-match' called before any match found".into()));
-        }
-        let sub = if subexp == Value::NIL { 0 } else {
-            if matches!(self.object_if(subexp), Some(Object::Bignum(_))) {
-                return Err(Fault::Error("VM2 replace-match unsupported: unrepresented subexpression register".into()));
-            }
-            let n = subexp.integer_value().ok_or(Fault::Wrong("integerp", subexp))?;
-            if n < 0 || n as usize >= self.regexp.groups.len() {
-                return Err(Fault::Error("VM2 replace-match unsupported: unrepresented subexpression register".into()));
-            }
-            n as usize
-        };
-        let refuse = |domain: &str| Fault::Error(format!("VM2 replace-match unsupported: {domain}"));
-        if string == Value::NIL { return Err(refuse("buffer replacement")); }
-        let input = self.str_view(string).unwrap().to_owned();
-        let Some((a, b)) = self.regexp.groups[sub] else {
-            let message = self.make_lisp_string(b"replace-match subexpression does not exist".to_vec(), false);
-            let data = self.list_value(&[message, subexp]);
-            let error = self.intern("error");
-            return Err(Fault::Signal(error, data));
-        };
-        if (a as i64) < 0 || (b as i64) < 0 || b < a {
-            return Err(refuse("signed or inverted match registers"));
-        }
-        if b > input.len() {
-            return Err(Fault::Range(Value::integer(a as i64).map_err(Fault::Error)?, Value::integer(b as i64).map_err(Fault::Error)?));
-        }
-        if fixedcase == Value::NIL && !replacement.bytes().is_empty() {
-            return Err(refuse("case inference with nonempty replacement"));
-        }
-        if literal == Value::NIL && replacement.bytes().contains(&b'\\') {
-            return Err(refuse("replacement backslash directives"));
-        }
-        for value in [newtext, string] {
-            if matches!(self.object_if(value), Some(Object::String(s) | Object::RawString(s)) if !s.properties.is_empty()) {
-                return Err(refuse("text properties"));
-            }
-        }
-        if input.is_multibyte() != replacement.is_multibyte() &&
-            !(if input.is_multibyte() { replacement.bytes() } else { input.bytes() }).is_ascii() {
-            return Err(refuse("mixed non-ASCII string encodings"));
-        }
-        let source = Input { bytes: input.bytes().to_vec(), multibyte: input.is_multibyte() };
-        let mut bytes = source.bytes[..source.byte(a)].to_vec();
-        bytes.extend_from_slice(replacement.bytes());
-        bytes.extend_from_slice(&source.bytes[source.byte(b)..]);
-        Ok(self.make_lisp_string(bytes, input.is_multibyte() || replacement.is_multibyte()))
-    }
-
     /// search.c update_search_regs: OLDSTART..OLDEND became OLDSTART..NEWEND.
     /// Registers inside the old text go to OLDSTART, those after it shift
     /// with it, whatever the last match searched. A start at OLDSTART stays

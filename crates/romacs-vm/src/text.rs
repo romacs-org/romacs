@@ -623,6 +623,27 @@ impl Text {
         self.is_ascii = self.bytes_len == self.chars_len;
         Ok(())
     }
+    /// Rewrite the one character of R as REPLACEMENT, of another byte
+    /// length, its properties stretched over the new text and point and
+    /// the restriction kept at their characters. The caller records the
+    /// change and moves the anchors (`AnnotatedBuffer::rewrite_character').
+    pub(crate) fn rewrite_unanchored(&mut self, r: Range<ByteOffset>, replacement: &str) -> Result<()> {
+        self.validate_range(&r)?;
+        self.flush_tail();
+        let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
+        let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
+        let shift = |p: ByteOffset| if p < r.end { p } else { ByteOffset(p.0 - (r.end.0 - r.start.0) + replacement.len()) };
+        self.point = shift(self.point);
+        self.restriction = shift(self.restriction.start)..shift(self.restriction.end);
+        self.properties.resize_character(r, replacement.len());
+        self.invalidate_reads();
+        self.rope.remove(start..end);
+        self.rope.insert(start, replacement);
+        self.bytes_len = self.rope.len_bytes();
+        self.chars_len = self.rope.len_chars();
+        self.is_ascii = self.bytes_len == self.chars_len;
+        Ok(())
+    }
     /// Cursor movement is grapheme based, independently of Lisp scalar indexing.
     pub fn next_grapheme(&self, at: ByteOffset) -> Result<ByteOffset> {
         self.boundary(at)?;

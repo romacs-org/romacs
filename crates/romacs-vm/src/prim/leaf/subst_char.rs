@@ -57,7 +57,7 @@ impl Leaf<'_> {
     /// modify_text's tail for a change of POS..END once its hooks ran: the
     /// first-change entry (none with NOUNDO, which turns undo off) and the
     /// modification count, which NOUNDO keeps from marking the buffer.
-    pub fn subst_char_modify(&mut self, pos: i64, end: i64, noundo: bool) -> std::result::Result<(), Fault> {
+    pub fn modify_text_tail(&mut self, pos: i64, end: i64, noundo: bool) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let buffer = self.current_buffer()?;
         if !noundo && !self.vm.buffer_state(buffer).map_err(Fault::Error)?.modified() {

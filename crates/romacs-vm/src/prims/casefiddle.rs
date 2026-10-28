@@ -1,10 +1,76 @@
 use super::*;
+use crate::prim::leaf::RegionCase;
 
 defsubr! { name = "upcase", gnu = "casefiddle.c:368", effect = Reads,
 fn upcase(cx, value: Value) { cx.case_convert(value, false) }}
 
 defsubr! { name = "downcase", gnu = "casefiddle.c:383", effect = Reads,
 fn downcase(cx, value: Value) { cx.case_convert(value, true) }}
+
+fn flag(b: bool) -> Value { if b { Value::TRUE } else { Value::NIL } }
+fn fixnum(n: i64) -> Value { Value::integer(n).expect("buffer position") }
+
+fn region_case(code: Value) -> RegionCase {
+    if code == Value::NIL { RegionCase::Up } else { RegionCase::InitialsUp }
+}
+
+// casify_pnc_region and casify_region (casefiddle.c:529): validate_region,
+// modify_text's bracket over the region, each character cased in place,
+// and one after-change over what changed. Registers between the steps:
+//   [START, END, CASE, INHIBITED]
+// CASE is nil for upcase and t for upcase-initials.
+fn casify_region(cx: &mut Leaf<'_>, case: Value, beg: Value, end: Value, noncontiguous: Value) -> Next {
+    if noncontiguous != Value::NIL {
+        let function = cx.intern(if case == Value::NIL { "upcase-region" } else { "upcase-initials-region" });
+        if super::insdel::half_missing(cx)? {
+            return super::insdel::install_half(cx, casify_restart, vec![case, beg, end, noncontiguous]);
+        }
+        return Ok(Step::Call { f: cx.intern("romacs--casify-noncontiguous"), args: vec![function], then: casified, saved: vec![] });
+    }
+    let (start, end) = cx.validate_region(beg, end)?;
+    if start == end { return Ok(Step::Done(Value::NIL)); }
+    let prepared = cx.prepare_change(start, end)?;
+    if (prepared.before || cx.after_change_runs(false, false)?) && super::insdel::half_missing(cx)? {
+        return super::insdel::install_half(cx, casify_restart, vec![case, fixnum(start), fixnum(end), Value::NIL]);
+    }
+    let saved = vec![fixnum(start), fixnum(end), case, flag(prepared.inhibited)];
+    if !prepared.before { return casify_edit(cx, Value::NIL, &saved); }
+    let buffer = cx.current_buffer()?;
+    let hooks = prepared.modification_hooks.iter().rev().fold(Value::NIL, |tail, &h| cx.cons(h, tail));
+    let args = vec![buffer, fixnum(start), fixnum(end), hooks, flag(prepared.undoable)];
+    Ok(Step::Call { f: cx.intern("romacs--before-change"), args, then: casify_edit, saved })
+}
+
+fn casify_restart(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    casify_region(cx, saved[0], saved[1], saved[2], saved[3])
+}
+
+fn casify_edit(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
+    let overlays = super::insdel::found_overlays(cx, before);
+    cx.change_deactivates_mark(saved[3] != Value::NIL)?;
+    let (start, end) = (saved[0].integer_value().expect("start"), saved[1].integer_value().expect("end"));
+    let Some((first, last, added)) = cx.casify_region_edit(start, end, region_case(saved[2]))? else {
+        return Ok(Step::Done(Value::NIL));
+    };
+    if !cx.after_change_runs(overlays != Value::NIL, false)? { return Ok(Step::Done(Value::NIL)); }
+    let buffer = cx.current_buffer()?;
+    let args = vec![buffer, fixnum(first), fixnum(last), fixnum(last - first - added), Value::NIL, Value::NIL, overlays];
+    Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: casified, saved: vec![] })
+}
+
+fn casified(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(Value::NIL))
+}
+
+defsubr! { name = "upcase-region", gnu = "casefiddle.c:609", effect = Global,
+fn upcase_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
+    casify_region(cx, Value::NIL, beg, end, region_noncontiguous_p)
+}}
+
+defsubr! { name = "upcase-initials-region", gnu = "casefiddle.c:646", effect = Global,
+fn upcase_initials_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
+    casify_region(cx, Value::TRUE, beg, end, region_noncontiguous_p)
+}}
 
 #[cfg(test)]
 mod tests {
@@ -32,7 +98,7 @@ mod tests {
     fn native_case_context_and_no_normalization() {
         check(
             "(list (downcase \"AΣ́ AΣ́A AΣ' AΣ'A\") (upcase \"é é\") (downcase \"ẞ\"))",
-            "(\"aς́ aσ́a aς' aσ'a\" \"É É\" \"ß\")",
+            "(\"aσ́ aσ́a aς' aς'a\" \"É É\" \"ß\")",
         );
     }
 
@@ -50,13 +116,16 @@ mod tests {
 
     #[test]
     fn native_case_buffer_overrides_and_identity() {
+        // Special casing precedes the case table, as in GNU. `A', which the
+        // table has no entry for, takes the Unicode default; GNU leaves it
+        // as it is and gives "Aς".
         check(
             "(let ((d (make-char-table 'case-table)) (u (make-char-table 'case-table))) (aset d 931 120) (aset u 223 223) (aset u 233 81) (set-char-table-extra-slot d 0 u) (set-char-table-extra-slot d 1 (make-char-table 'case-table)) (set-case-table d) (list (upcase 223) (upcase \"ßéﬃ\") (downcase \"AΣ\") (with-temp-buffer (upcase \"ßé\"))))",
-            "(223 \"ßQFFI\" \"ax\" \"SSÉ\")",
+            "(223 \"SSQFFI\" \"aς\" \"SSÉ\")",
         );
         check(
             "(let ((d (copy-sequence (standard-case-table)))) (aset d 304 304) (set-case-table d) (list (downcase 304) (downcase \"İA\")))",
-            "(304 \"İa\")",
+            "(304 \"i̇a\")",
         );
     }
 
@@ -107,7 +176,7 @@ mod tests {
             "the collection must actually move the case roots"
         );
         let got = vm.eval_source_raw("(list (upcase \"ßé\") (append (upcase saved-case-string) nil) (eq saved-prop (get-text-property 0 'p saved-case-result)) (eq saved-prop (get-text-property 1 'p (upcase saved-case-string))))").unwrap();
-        assert_eq!(vm.display(got).unwrap(), "(\"ßÉ\" (65 233) t t)");
+        assert_eq!(vm.display(got).unwrap(), "(\"SSÉ\" (65 233) t t)");
     }
 
     #[test]

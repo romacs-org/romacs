@@ -1163,6 +1163,19 @@ impl AnnotatedBuffer {
     pub fn replace(&mut self, range: Range<ByteOffset>, bytes: &[u8]) -> Result<()> {
         self.replace_with_bias(range, bytes, false)
     }
+    /// `Text::rewrite_unanchored' with the anchors: those at its start
+    /// stay and those after it follow the new text.
+    pub(crate) fn rewrite_character(&mut self, range: Range<ByteOffset>, replacement: &str) -> Result<()> {
+        let a = u32::try_from(range.start.0).map_err(|_| "buffer too large")?;
+        let b = u32::try_from(range.end.0).map_err(|_| "buffer too large")?;
+        let len = u32::try_from(replacement.len()).map_err(|_| "buffer too large")?;
+        self.anchors.extent().checked_sub(b.checked_sub(a).ok_or("invalid range")?)
+            .and_then(|n| n.checked_add(len)).ok_or("buffer too large")?;
+        self.text.rewrite_unanchored(range, replacement)?;
+        self.insert_anchors(b, len, true);
+        assert!(self.anchors.delete(a, b));
+        Ok(())
+    }
     pub fn replace_with_bias(
         &mut self,
         range: Range<ByteOffset>,

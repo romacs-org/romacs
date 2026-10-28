@@ -9,7 +9,7 @@
   "search.c"
  ],
  "gnu_def": "search.c:2344",
- "rust": "src/prims/search.rs:11",
+ "rust": "src/prims/search.rs:18",
  "args": [
   "float",
   "float",

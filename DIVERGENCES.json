@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "10894f98fc8f4816e8c904cf1c72e073e1539eaf50f368f2327184755ea44e26",
+  "input_hash": "aa882b3436fdf1a87720cb8ae88bee8187bf9efeecb75968a1f4c8964c458458",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 268,
-  "symbols": 590,
+  "rows": 261,
+  "symbols": 593,
   "rows_without_symbols": 15
  },
  "by_symbol": {
@@ -24,7 +24,7 @@
    196
   ],
   "+": [
-   67
+   68
   ],
   "/proc/stat": [
    10
@@ -36,16 +36,16 @@
    84
   ],
   "<=": [
-   67
+   68
   ],
   "=": [
-   67
+   68
   ],
   "[:class:]": [
-   267
+   260
   ],
   "abort-minibuffers": [
-   61
+   62
   ],
   "accept-process-output": [
    167,
@@ -56,24 +56,24 @@
   ],
   "add-text-properties": [
    210,
-   256
+   249
   ],
   "add-variable-watcher": [
-   227,
-   228
+   221,
+   222
   ],
   "after-change-functions": [
    161
   ],
   "after-insert-file-set-coding": [
-   257
+   250
   ],
   "after-load-alist": [
-   242
+   236
   ],
   "all-completions": [
-   252,
-   253
+   245,
+   246
   ],
   "append": [
    103
@@ -81,7 +81,7 @@
   "apply": [
    104,
    126,
-   223
+   217
   ],
   "aref": [
    75,
@@ -96,17 +96,17 @@
    90
   ],
   "autoload": [
-   231
+   225
   ],
   "autoload-do-load": [
-   231,
-   243
+   225,
+   237
   ],
   "b->last_window_start": [
    174
   ],
   "backtrace--locals": [
-   255
+   248
   ],
   "backward-char": [
    137
@@ -134,14 +134,14 @@
    82
   ],
   "boundp": [
-   238
+   232
   ],
   "buffer-chars-modified-tick": [
    96
   ],
   "buffer-file-coding-system": [
    95,
-   257
+   250
   ],
   "buffer-file-name": [
    95
@@ -153,18 +153,18 @@
    40
   ],
   "buffer-modified-p": [
-   59,
+   60,
    96
   ],
   "buffer-modified-tick": [
    96
   ],
   "buffer-name": [
-   56,
-   57
+   57,
+   58
   ],
   "buffer-name buffer-modified-p": [
-   58
+   59
   ],
   "buffer-read-only": [
    1
@@ -177,7 +177,7 @@
   ],
   "byte-code-function-p": [
    38,
-   235
+   229
   ],
   "byte-compile": [
    48
@@ -200,13 +200,13 @@
    54
   ],
   "car": [
-   225
+   219
   ],
   "ceiling": [
    192
   ],
   "char-category-set": [
-   222
+   216
   ],
   "char-code-property-description": [
    39
@@ -224,10 +224,10 @@
    84
   ],
   "cl-print-object": [
-   255
+   248
   ],
   "cl-type-of": [
-   254
+   247
   ],
   "clear-composition-cache": [
    159
@@ -254,7 +254,7 @@
    140
   ],
   "command-execute": [
-   62
+   63
   ],
   "command-history": [
    71
@@ -266,10 +266,10 @@
    100
   ],
   "compare-strings": [
-   253
+   246
   ],
   "compiled-function-p": [
-   235
+   229
   ],
   "composition-function-table": [
    159
@@ -279,11 +279,11 @@
    197,
    198,
    199,
-   241
+   235
   ],
   "condition-case": [
-   236,
-   243
+   230,
+   237
   ],
   "copy-case-table": [
    53
@@ -294,7 +294,7 @@
   "copy-sequence": [
    75,
    101,
-   241
+   235
   ],
   "copy-syntax-table": [
    149
@@ -321,7 +321,7 @@
    3
   ],
   "current-load-list": [
-   242
+   236
   ],
   "current-prefix-arg": [
    71
@@ -371,21 +371,21 @@
   "defalias": [
    98,
    99,
-   231,
-   233
+   225,
+   227
   ],
   "default-boundp": [
-   237
+   231
   ],
   "default-directory": [
    94
   ],
   "default-file-name-coding-system": [
-   257
+   250
   ],
   "default-value": [
-   237,
-   238
+   231,
+   232
   ],
   "defcustom": [
    131
@@ -397,24 +397,24 @@
    120,
    121,
    145,
-   259,
-   263
+   252,
+   256
   ],
   "define-category": [
-   222
+   216
   ],
   "define-charset-internal": [
    157,
-   219
+   213
   ],
   "define-coding-system": [
-   257
+   250
   ],
   "define-coding-system-alias": [
-   220
+   214
   ],
   "define-error": [
-   232
+   226
   ],
   "define-hash-table-test": [
    127
@@ -427,7 +427,7 @@
   ],
   "defun": [
    133,
-   233
+   227
   ],
   "defvar": [
    15,
@@ -436,11 +436,11 @@
    134
   ],
   "defvaralias": [
-   227,
-   230
+   221,
+   224
   ],
   "delete": [
-   241
+   235
   ],
   "delete-backward-char": [
    137
@@ -462,7 +462,7 @@
    0
   ],
   "discard-input": [
-   62
+   63
   ],
   "display-color-cells": [
    169
@@ -500,16 +500,16 @@
    169
   ],
   "display-warning": [
-   230
+   224
   ],
   "do-after-load-evaluation": [
-   242
+   236
   ],
   "documentation-property": [
    99
   ],
   "downcase_char_code_emacs_compat": [
-   266
+   259
   ],
   "elt": [
    22,
@@ -520,10 +520,10 @@
    153
   ],
   "emacs_downcase_compat": [
-   266
+   259
   ],
   "enable-recursive-minibuffers": [
-   239
+   233
   ],
   "encode-coding-string": [
    12
@@ -532,11 +532,8 @@
    137
   ],
   "eq": [
-   55,
+   56,
    101
-  ],
-  "eql": [
-   249
   ],
   "equal": [
    128,
@@ -551,21 +548,21 @@
   "error-message-string": [
    139,
    140,
-   224
+   218
   ],
   "ert--run-test-internal": [
-   255
+   248
   ],
   "esc-map": [
    135
   ],
   "eval": [
-   225,
-   226,
-   234
+   219,
+   220,
+   228
   ],
   "eval-after-load": [
-   242
+   236
   ],
   "eval-buffer": [
    107
@@ -574,7 +571,7 @@
    139
   ],
   "eval-when-compile": [
-   226
+   220
   ],
   "excessive-lisp-nesting": [
    89
@@ -583,14 +580,14 @@
    0
   ],
   "execute-kbd-macro": [
-   62
-  ],
-  "executing-kbd-macro": [
-   61,
    63
   ],
+  "executing-kbd-macro": [
+   62,
+   64
+  ],
   "exit-minibuffer": [
-   61
+   62
   ],
   "expand-file-name": [
    94
@@ -603,31 +600,31 @@
    118,
    119,
    120,
-   259,
-   260,
-   263
+   252,
+   253,
+   256
   ],
   "face-family": [
    116,
-   262
+   255
   ],
   "face-font": [
    115,
-   261
+   254
   ],
   "face-remapping-alist": [
    110,
    119,
    120,
-   265
+   258
   ],
   "featurep": [
    87
   ],
   "features": [
    87,
-   231,
-   244
+   225,
+   238
   ],
   "file-accessible-directory-p": [
    31
@@ -645,7 +642,7 @@
    95
   ],
   "find-auto-coding": [
-   257
+   250
   ],
   "find-composition": [
    190
@@ -659,7 +656,7 @@
   ],
   "find-file-name-handler": [
    47,
-   251
+   244
   ],
   "find-file-noselect": [
    0
@@ -683,18 +680,18 @@
    153
   ],
   "format": [
-   67,
+   68,
    73,
    91,
    93,
    102,
    106,
-   250
+   243
   ],
   "format-message": [
    73,
    102,
-   250
+   243
   ],
   "format-time-string": [
    83
@@ -724,10 +721,10 @@
    180
   ],
   "frame-parameter": [
-   229
+   223
   ],
   "frame-parameters": [
-   229
+   223
   ],
   "frame-pixel-height": [
    145
@@ -756,8 +753,8 @@
    104,
    126,
    133,
-   223,
-   225
+   217,
+   219
   ],
   "funcall-interactively": [
    71
@@ -766,7 +763,7 @@
    99
   ],
   "function-history": [
-   231
+   225
   ],
   "function-key-map": [
    135
@@ -781,7 +778,7 @@
   ],
   "get": [
    84,
-   232
+   226
   ],
   "get-buffer": [
    173
@@ -797,15 +794,15 @@
   ],
   "get-load-suffixes": [
    74,
-   238,
-   240
+   232,
+   234
   ],
   "get-text-property": [
    198,
    199
   ],
   "get-variable-watchers": [
-   228
+   222
   ],
   "global-map": [
    135
@@ -838,13 +835,13 @@
    98
   ],
   "indirect-variable": [
-   227
+   221
   ],
   "inhibit-file-name-handlers": [
-   251
+   244
   ],
   "inhibit-file-name-operation": [
-   251
+   244
   ],
   "inhibit-mouse-event-check": [
    71
@@ -853,7 +850,7 @@
    1
   ],
   "input-pending-p": [
-   62
+   63
   ],
   "insert-file-contents": [
    95
@@ -869,24 +866,24 @@
   ],
   "intern": [
    200,
-   245,
-   246,
-   247,
-   248
+   239,
+   240,
+   241,
+   242
   ],
   "intern-soft": [
-   246,
-   247
+   240,
+   241
   ],
   "internal-delete-indirect-variable": [
-   227
+   221
   ],
   "internal-interpreter-environment": [
    134
   ],
   "internal-macroexpand-for-load": [
-   233,
-   234
+   227,
+   228
   ],
   "internal-set-alternative-font-family-alist": [
    16,
@@ -899,10 +896,10 @@
    16
   ],
   "internal-show-cursor": [
-   229
+   223
   ],
   "interpreted-function-p": [
-   235
+   229
   ],
   "invalid-function": [
    104
@@ -937,13 +934,13 @@
   "lambda": [
    132,
    133,
-   223,
-   233,
-   236
+   217,
+   227,
+   230
   ],
   "last-coding-system-used": [
    95,
-   257
+   250
   ],
   "last-command": [
    71
@@ -956,7 +953,7 @@
    181
   ],
   "latin-extra-code-table": [
-   257
+   250
   ],
   "length": [
    103
@@ -964,7 +961,7 @@
   "let": [
    132,
    134,
-   238
+   232
   ],
   "lexical-binding": [
    86
@@ -987,9 +984,9 @@
   "load": [
    107,
    134,
-   234,
-   243,
-   244
+   228,
+   237,
+   238
   ],
   "load eval-buffer eval-region": [
    26
@@ -998,27 +995,27 @@
    25
   ],
   "load-file-rep-suffixes": [
-   238,
-   240
+   232,
+   234
   ],
   "load-history": [
-   227,
-   231,
-   242
+   221,
+   225,
+   236
   ],
   "load-path": [
    87,
    88
   ],
   "load-suffixes": [
-   238
+   232
   ],
   "local-variable-p": [
    40
   ],
   "locate-file-internal": [
    94,
-   251
+   244
   ],
   "locate-library": [
    88,
@@ -1035,11 +1032,11 @@
    185
   ],
   "macroexp--pending-eager-loads": [
-   234
+   228
   ],
   "macroexpand": [
-   226,
-   233
+   220,
+   227
   ],
   "major-mode": [
    153
@@ -1047,7 +1044,7 @@
   "make-bool-vector": [
    19,
    51,
-   55,
+   56,
    81,
    82,
    208
@@ -1066,11 +1063,11 @@
    127
   ],
   "make-interpreted-closure": [
-   254
+   247
   ],
   "make-local-variable": [
    152,
-   239
+   233
   ],
   "make-marker": [
    77,
@@ -1094,19 +1091,19 @@
   ],
   "make-string": [
    101,
-   241
+   235
   ],
   "make-symbol": [
    85,
-   245
+   239
   ],
   "make-symbolic-link": [
    8
   ],
   "make-variable-buffer-local": [
    152,
-   237,
-   239
+   231,
+   233
   ],
   "make-vector": [
    208,
@@ -1114,7 +1111,7 @@
    211
   ],
   "makunbound": [
-   238
+   232
   ],
   "map-char-table": [
    75
@@ -1123,10 +1120,10 @@
    75
   ],
   "mapatoms": [
-   246
+   240
   ],
   "mapbacktrace": [
-   255
+   248
   ],
   "mapc": [
    51,
@@ -1160,7 +1157,7 @@
    146
   ],
   "match-string": [
-   69
+   70
   ],
   "matching-paren": [
    150
@@ -1185,19 +1182,19 @@
    138
   ],
   "min": [
-   67
+   68
   ],
   "minibuffer-history": [
-   61
+   62
   ],
   "minibuffer-local-map": [
-   238
+   232
   ],
   "minibuffer-prompt-properties": [
-   61
+   62
   ],
   "minibuffer-quit-recursive-edit": [
-   61
+   62
   ],
   "minibuffer-selected-window": [
    182
@@ -1215,10 +1212,10 @@
    142
   ],
   "modify-category-entry": [
-   222
+   216
   ],
   "modify-frame-parameters": [
-   229
+   223
   ],
   "modify-syntax-entry": [
    149
@@ -1239,10 +1236,10 @@
    122
   ],
   "next-property-change": [
-   256
+   249
   ],
   "next-single-char-property-change": [
-   256
+   249
   ],
   "normal-top-level-add-to-load-path": [
    88
@@ -1260,13 +1257,13 @@
    50
   ],
   "obarray-make": [
-   248
+   242
   ],
   "obarrayp": [
-   246
+   240
   ],
   "oclosure-type": [
-   254
+   247
   ],
   "optimize-char-table": [
    158
@@ -1280,7 +1277,7 @@
    124
   ],
   "overriding-plist-environment": [
-   232
+   226
   ],
   "overwrite-mode": [
    161
@@ -1323,17 +1320,17 @@
    155,
    156,
    191,
-   245
+   239
   ],
   "prin1-to-string": [
    52,
-   67,
+   68,
    106,
    154,
    156,
    191,
    207,
-   245
+   239
   ],
   "princ": [
    154,
@@ -1387,24 +1384,24 @@
    210
   ],
   "provide": [
-   231,
-   242,
-   244
+   225,
+   236,
+   238
   ],
   "purify-flag": [
-   254
+   247
   ],
   "push macroexp-let2 gv-letplace": [
    27
   ],
   "put": [
-   232
+   226
   ],
   "put-text-property": [
    199
   ],
   "quit-flag": [
-   63
+   64
   ],
   "raise-frame": [
    185
@@ -1427,51 +1424,51 @@
    198
   ],
   "read-char": [
-   62
-  ],
-  "read-char-exclusive": [
-   62
-  ],
-  "read-event": [
-   62
-  ],
-  "read-from-minibuffer": [
-   61,
    63
   ],
+  "read-char-exclusive": [
+   63
+  ],
+  "read-event": [
+   63
+  ],
+  "read-from-minibuffer": [
+   62,
+   64
+  ],
   "read-from-string": [
-   60,
-   64,
+   61,
    65,
    66,
    67,
    68,
+   69,
    76,
    78,
    79,
    80,
    107,
    198,
-   248
+   242
   ],
   "read-key-sequence": [
-   62
+   63
   ],
   "read-key-sequence-vector": [
-   62
+   63
   ],
   "read-positioning-symbols": [
    49
   ],
   "read-string": [
-   61,
-   63
+   62,
+   64
   ],
   "real-this-command": [
    71
   ],
   "recent-keys": [
-   62
+   63
   ],
   "recenter": [
    184
@@ -1483,53 +1480,53 @@
    29
   ],
   "recursive-edit": [
-   62
+   63
   ],
   "redisplay": [
    138,
    186
   ],
   "remove-variable-watcher": [
-   228
+   222
   ],
   "replace-match": [
    42,
    43,
    44,
-   45,
-   213,
-   214,
-   215,
-   216,
-   217,
-   218
+   45
   ],
   "replace-region-contents": [
    166
   ],
+  "replace_range": [
+   42
+  ],
   "require": [
    87,
-   231,
-   242,
-   243,
-   244
+   225,
+   236,
+   237,
+   238
   ],
   "reset": [
    118,
-   258
+   251
   ],
   "reverse": [
-   55,
+   56,
    208
   ],
   "romacs--host-input": [
-   63
+   64
   ],
   "romacs--oclosure-type": [
-   254
+   247
   ],
   "romacs--read-host-event": [
-   63
+   64
+  ],
+  "romacs--replace-range": [
+   42
   ],
   "romacs-display": [
    169
@@ -1538,7 +1535,7 @@
    97
   ],
   "romacs-unsafe-coding": [
-   257
+   250
   ],
   "round": [
    192
@@ -1583,13 +1580,13 @@
    212
   ],
   "select-safe-coding-system": [
-   257
+   250
   ],
   "select-safe-coding-system-function": [
    95
   ],
   "select-safe-coding-system-interactively": [
-   257
+   250
   ],
   "selected-frame": [
    145,
@@ -1609,14 +1606,14 @@
   ],
   "set": [
    84,
-   238
+   232
   ],
   "set-auto-coding": [
    11,
-   257
+   250
   ],
   "set-buffer-redisplay": [
-   228
+   222
   ],
   "set-case-table": [
    53
@@ -1625,29 +1622,29 @@
    75
   ],
   "set-charset-priority": [
-   219
+   213
   ],
   "set-coding-system-priority": [
-   220,
-   257
+   214,
+   250
   ],
   "set-default": [
-   238
+   232
   ],
   "set-face-attribute": [
    114,
    115,
    116,
-   260,
-   261,
-   262,
-   264
+   253,
+   254,
+   255,
+   257
   ],
   "set-file-times": [
    8
   ],
   "set-match-data": [
-   69
+   70
   ],
   "set-process-thread": [
    167
@@ -1697,25 +1694,25 @@
    15
   ],
   "setf": [
-   236
+   230
   ],
   "setplist": [
-   232
+   226
   ],
   "setq": [
-   238
+   232
   ],
   "signal": [
-   243
+   237
   ],
   "signal-hook-function": [
    89
   ],
   "skip-chars-backward": [
-   267
+   260
   ],
   "skip-chars-forward": [
-   267
+   260
   ],
   "sleep-for": [
    167
@@ -1732,7 +1729,7 @@
   ],
   "special-variable-p": [
    86,
-   238
+   232
   ],
   "split-window-internal": [
    195
@@ -1769,9 +1766,7 @@
    102
   ],
   "string-to-number": [
-   70,
-   73,
-   249
+   73
   ],
   "string-trim": [
    102
@@ -1788,7 +1783,7 @@
   ],
   "substring": [
    101,
-   241
+   235
   ],
   "supports": [
    113
@@ -1801,15 +1796,15 @@
    105
   ],
   "symbol-name": [
-   247
+   241
   ],
   "symbol-plist": [
    15,
-   232
+   226
   ],
   "symbol-value": [
    21,
-   238
+   232
   ],
   "symbol-with-pos-p": [
    49
@@ -1831,17 +1826,17 @@
   ],
   "terminal-live-p": [
    181,
-   221
+   215
   ],
   "terminal-parameter": [
-   221
+   215
   ],
   "terpri": [
    155
   ],
   "test-completion": [
-   252,
-   253
+   245,
+   246
   ],
   "text-properties-at": [
    79,
@@ -1849,7 +1844,7 @@
    210
   ],
   "text-quoting-style": [
-   250
+   243
   ],
   "theme-face": [
    112
@@ -1858,7 +1853,7 @@
    71
   ],
   "this-command-keys": [
-   62,
+   63,
    136,
    141
   ],
@@ -1885,8 +1880,8 @@
    153
   ],
   "try-completion": [
-   252,
-   253
+   245,
+   246
   ],
   "tty-color-alist": [
    169
@@ -1895,11 +1890,11 @@
    181
   ],
   "undefined": [
-   62,
+   63,
    138
   ],
   "undo-limit": [
-   239
+   233
   ],
   "unibyte-string": [
    197
@@ -1908,18 +1903,26 @@
    39
   ],
   "unify-charset": [
-   219
+   213
   ],
   "unintern": [
-   246,
-   247
+   240,
+   241
   ],
   "unread-command-events": [
-   61,
-   63
+   62,
+   64
   ],
   "upcase-initials": [
    53
+  ],
+  "upcase-initials-region": [
+   42,
+   55
+  ],
+  "upcase-region": [
+   42,
+   55
   ],
   "usize": [
    84
@@ -1981,7 +1984,7 @@
    175
   ],
   "window-persistent-parameters": [
-   238
+   232
   ],
   "window-point": [
    145,
@@ -2022,7 +2025,7 @@
    142
   ],
   "with-eval-after-load": [
-   242
+   236
   ],
   "with-output-to-string": [
    207
@@ -2040,7 +2043,7 @@
    105
   ],
   "wrong-type-argument": [
-   224
+   218
   ]
  },
  "rows": [
@@ -2685,22 +2688,26 @@
   {
    "id": "VM2-REPLACE1",
    "source": "DIVERGENCES.md",
-   "section": "VM2 replace-match string subset",
+   "section": "VM2 replace-match",
    "observable": false,
    "planned": false,
    "mechanism": "`replace-match` buffer/case operations",
-   "gnu": "`search.c:2344` replaces buffer matches and applies current-buffer case/syntax tables when FIXEDCASE is nil.",
-   "romacs": "String replacement now infers all-caps/initial casing from the match using supported current case/syntax tables, including tested explicit nil overrides. Conversion of initial letters shares VM2-CASE1 pinned titlecase limitations. Buffer replacement still explicitly signals before mutation.",
-   "why": "Buffer mutation and unrestricted custom titlecase conversion remain unsupported; string casing comparisons are in `tests/replace_match.rs`.",
+   "gnu": "`search.c:2344` replaces buffer matches through `replace_range` and applies current-buffer case/syntax tables when FIXEDCASE is nil.",
+   "romacs": "String and buffer replacement both infer all-caps/initial casing from the match. A buffer replacement is `romacs--replace-range` (change hooks, undo, markers, match-data adjustment), then `upcase-region` or `upcase-initials-region` over the new text, then point after it. Conversion of initial letters shares VM2-CASE1 pinned titlecase limitations; a casing that expands a character follows VM2-CASE3. VM2 has no intangible text, so point always ends after the replacement.",
+   "why": "Buffer and string cases are compared with pinned GNU in `tests/replace_match.rs`.",
    "symbols": [
-    "replace-match"
+    "replace-match",
+    "replace_range",
+    "romacs--replace-range",
+    "upcase-region",
+    "upcase-initials-region"
    ],
    "symbols_derived": true
   },
   {
    "id": "VM2-REPLACE2",
    "source": "DIVERGENCES.md",
-   "section": "VM2 replace-match string subset",
+   "section": "VM2 replace-match",
    "observable": false,
    "planned": false,
    "mechanism": "`replace-match` mixed encodings",
@@ -2715,7 +2722,7 @@
   {
    "id": "VM2-REPLACE3",
    "source": "DIVERGENCES.md",
-   "section": "VM2 replace-match string subset",
+   "section": "VM2 replace-match",
    "observable": false,
    "planned": false,
    "mechanism": "`replace-match` arity payload",
@@ -2730,12 +2737,12 @@
   {
    "id": "VM2-REPLACE4",
    "source": "DIVERGENCES.md",
-   "section": "VM2 replace-match string subset",
+   "section": "VM2 replace-match",
    "observable": false,
    "planned": false,
    "mechanism": "`replace-match` register capacity",
-   "gnu": "GNU retains allocated unused match registers, including startup search history, and reports nonexistent subexpressions inside that capacity.",
-   "romacs": "VM2 uses its retained match-group vector length, so an unused SUBEXP can signal args-out-of-range earlier and its maximum differs.",
+   "gnu": "GNU retains allocated unused match registers, including startup search history, and reports nonexistent subexpressions inside that capacity; a buffer replacement's `\\N` past that capacity signals invalid replacement text and one inside it inserts nothing.",
+   "romacs": "VM2 uses its retained match-group vector length, so an unused SUBEXP can signal args-out-of-range earlier and its maximum differs, and a buffer replacement's `\\N` past the match's groups signals where GNU's capacity may insert nothing.",
    "why": "Match-register allocation history is not modeled; successful groups and explicit nil groups retain their normal semantics.",
    "symbols": [
     "replace-match"
@@ -2814,7 +2821,7 @@
    "planned": false,
    "mechanism": "Data predicates and missing object producers",
    "gnu": "GNU `data.c:352,463,472` distinguishes positioned symbols from bare symbols and includes bool-vectors in arrays and sequences (`lisp.h:3322`). Live the positioned-symbol witness and the array/sequence bool-vector witnesses are recorded in `tools/primh/evidence/`.",
-   "romacs": "The ten predicates in this lane classify every represented public object kind without numeric conversion; `bare-symbol-p` cannot receive a positioned symbol. That producer witness remains missing; `arrayp`/`sequencep` now classify real bool-vectors and their two missing pins were removed after GNU replay. `string-to-number` bignum results are separately refused (VM2-NUMPARSE1); radix and decimal bignum literals are accepted and classified.",
+   "romacs": "The ten predicates in this lane classify every represented public object kind without numeric conversion; `bare-symbol-p` cannot receive a positioned symbol. That producer witness remains missing; `arrayp`/`sequencep` now classify real bool-vectors and their two missing pins were removed after GNU replay. `string-to-number` bignum results and radix and decimal bignum literals are accepted and classified.",
    "why": "Inherited representation gaps, not invented false answers or rounded integers. Existing VM2-SYMPOS1 and VM2-READ1 describe the missing objects; this row attributes the new consumer evidence. Syntax tables satisfy these GNU predicates, but their older `char-table-p`/`aref` consumer mismatch remains VM2-SY1. See `notes/data-predicates.md` for the finite domain and evidence IDs.",
    "symbols": [
     "bare-symbol-p",
@@ -2872,7 +2879,7 @@
    "mechanism": "Custom casing and pinned titlecase mappings",
    "gnu": "GNU `casefiddle.c:prepare_casing_context` and `casify_object` consult current-buffer case/syntax tables and Unicode special/titlecase properties.",
    "romacs": "`capitalize` retains pinned GNU default mappings and current syntax-table word boundaries. `upcase-initials` is available; its fallback uses supported current-case mappings, but known pinned mapping rows take precedence. `current-case-table` and `set-case-table` exist; `copy-case-table` remains unavailable.",
-   "why": "General custom capitalization and region/word mutation siblings remain outside this slice. `tests/capitalize.rs` keeps the explicit custom-case divergence and tests the supported titlecase/initials domain.",
+   "why": "General custom capitalization remains outside this slice. `upcase-region` and `upcase-initials-region` case buffer regions (casify_region, VM2-CASE3); `downcase-region`, `capitalize-region` and the word commands remain absent. `tests/capitalize.rs` keeps the explicit custom-case divergence and tests the supported titlecase/initials domain.",
    "symbols": [
     "capitalize",
     "upcase-initials",
@@ -2894,6 +2901,22 @@
    "why": "**Package-observable variable representation gap**, while the resulting capitalization matches. The inherited circular printer gap VM2-EV2 also pins `capitalize/0018`, `/0039`, `/0068` as `PRINTER`; these are not claimed as primitive parity.",
    "symbols": [
     "capitalize case-symbols-as-words"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-CASE3",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "Region casing that expands a character",
+   "gnu": "`casefiddle.c:do_casify_multibyte_region` replaces a character whose case is several characters (`ß` to `SS`) through `replace_range_2` without moving markers: markers keep their character positions, the extra characters take the stickiness-inherited properties at the character's start and the last keeps the old character's.",
+   "romacs": "`upcase-region` and `upcase-initials-region` replace such a character as one run: its properties cover all the new characters and markers after it follow the text, as for any other replacement. One-for-one casing, of any byte width, keeps properties and character positions as GNU does.",
+   "why": "A marker past an expanded character still points at the same text, which GNU's comment on replace_range_2 calls not yet right. Checked in `tests/replace_match.rs` `region_case_expansion_keeps_properties_and_follows_markers`.",
+   "symbols": [
+    "upcase-region",
+    "upcase-initials-region"
    ],
    "symbols_derived": false
   },
@@ -3154,21 +3177,6 @@
    "symbols": [
     "set-match-data",
     "match-string"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-NUMPARSE1",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`string-to-number` integer overflow",
-   "gnu": "GNU `data.c:3092`, `lread.c:4500` returns arbitrary-precision integers, e.g. `2305843009213693952` for that decimal string.",
-   "romacs": "VM2 parses supported radices, signs, numeric prefixes and binary64 floats, but an integer outside its fixnum range signals `(error \"string-to-number: bignum results are not supported\")`; no float is substituted.",
-   "why": "**Package-observable missing integer promotion in string-to-number:** radix-reader bignum storage exists, but this conversion still refuses rather than silently rounds larger integers.",
-   "symbols": [
-    "string-to-number"
    ],
    "symbols_derived": false
   },
@@ -5667,96 +5675,6 @@
    "symbols_derived": false
   },
   {
-   "id": "VM2-RM1",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`replace-match` buffer operation",
-   "gnu": "Pinned GNU `search.c:2616-2765` replaces buffer text, updates match registers through `replace_range`, adjusts markers and moves point; live `replace-match/0022` returns `(nil \"xbc\" 2)`.",
-   "romacs": "Every buffer request with available match registers signals `(error \"VM2 replace-match unsupported: buffer replacement\")` before touching text, point, markers or registers.",
-   "why": "**Explicit string-only subset**; no buffer hooks, narrowing, read-only handling, marker/point adjustment or buffer match-data update is implemented. Value test checks unchanged buffer, point and endpoints.",
-   "symbols": [
-    "replace-match"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-RM2",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`replace-match` nonliteral directives",
-   "gnu": "GNU `search.c:2521-2605` expands backslash ampersand, numbered captures and escaped backslashes (and retains backslash question mark in the string path); live `replace-match/0024` returns `\"abc\"`.",
-   "romacs": "With nil LITERAL, any backslash in NEWTEXT signals `(error \"VM2 replace-match unsupported: replacement backslash directives\")`. Non-nil LITERAL copies all bytes; nil LITERAL without backslashes uses GNU's literal fast path.",
-   "why": "**Explicit refusal**, not an approximate expansion. No backreferences, unmatched-reference substitution or invalid-escape semantics are claimed.",
-   "symbols": [
-    "replace-match"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-RM3",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`replace-match` inferred casing",
-   "gnu": "GNU `search.c:2430-2509,2607-2613` derives all-caps/initials conversion from matched text and current syntax/case tables.",
-   "romacs": "String replacement now applies that inference to assembled replacement text. All-caps conversion uses supported current case tables; initial conversion shares VM2-CASE1 pinned titlecase precedence and current-table fallback. Tested explicit nil mappings suppress inference, and unibyte inputs preserve byte-valued output. Non-nil FIXEDCASE preserves replacement case.",
-   "why": "Buffer replacement remains refused (VM2-RM1), and general custom titlecase conversion remains limited. Supported string and custom-table cases are checked against pinned GNU in `tests/replace_match.rs`.",
-   "symbols": [
-    "replace-match"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-RM4",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`replace-match` string properties",
-   "gnu": "GNU's substring/concat path preserves surviving source/replacement properties; live `replace-match/0025` succeeds.",
-   "romacs": "Any properties on STRING or NEWTEXT signal `(error \"VM2 replace-match unsupported: text properties\")`, including properties wholly inside the replaced range.",
-   "why": "**Explicit conservative refusal**, never silent property loss. Existing compiled-constant property loss (VM2-STR10) remains a prior substrate limit.",
-   "symbols": [
-    "replace-match"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-RM5",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`replace-match` mixed non-ASCII encodings",
-   "gnu": "GNU widens unibyte high bytes when concatenating with multibyte text; live `replace-match/0026` succeeds.",
-   "romacs": "Different multibyte flags are refused when the unibyte operand contains non-ASCII bytes: `(error \"VM2 replace-match unsupported: mixed non-ASCII string encodings\")`. Same-kind strings and ASCII unibyte widening are accepted.",
-   "why": "**Explicit encoding boundary** matching the unresolved VM2-STR2 substrate, without Latin-1 substitution. VM2-STR1's multibyte ASCII literals additionally make `/0021` refuse where GNU returns unibyte `\"axc\"`.",
-   "symbols": [
-    "replace-match"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-RM6",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`replace-match` retained register capacity and signed offsets",
-   "gnu": "GNU retains allocated register capacity across matches: in the pinned primh world, negative SUBEXP signals `(args-out-of-range -1 0 6)` (`/0012`) and absent register 3 signals `(error \"replace-match subexpression does not exist\" 3)` (`/0013`). GNU also normalizes a negative end via substring, returning `\"axc\"` for `(set-match-data '(1 -1))` (`/0027`).",
-   "romacs": "SUBEXP outside VM2's stored register vector (including negative values and bignums, live `/0029`) signals `(error \"VM2 replace-match unsupported: unrepresented subexpression register\")`; signed/inverted represented endpoints signal `(error \"VM2 replace-match unsupported: signed or inverted match registers\")`. Represented unmatched groups retain GNU's exact subexpression-does-not-exist condition/data.",
-   "why": "**Explicit representation refusal**, no fabricated GNU capacity. VM2-MD2/MD3/MD4 remain unchanged; string replacement does not mutate match data. Decimal bignum reader and out-of-fixnum materialization limits remain inherited, not claimed as supported arguments.",
-   "symbols": [
-    "replace-match"
-   ],
-   "symbols_derived": false
-  },
-  {
    "id": "charset **definition**",
    "source": "DIVERGENCES.md",
    "section": "Planned, not yet in effect",
@@ -6299,22 +6217,6 @@
     "read-from-string",
     "intern",
     "obarray-make"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-EQL-READER",
-   "source": "DIVERGENCES.md",
-   "section": "Detail",
-   "observable": false,
-   "planned": false,
-   "mechanism": "Bignum construction blocks source-level `eql` cases",
-   "gnu": "GNU accepts `(eql (string-to-number \"2305843009213693952\") (string-to-number \"2305843009213693952\"))` and returns t; live pin corpus `tools/primh/evidence/eql.json` records the complete outcomes",
-   "romacs": "VM2 refuses at `string-to-number` with `(error \"string-to-number: bignum results are not supported\")`; 129 SIGNAL-VS-VALUE rows cover the construction and printer/alias probes. Direct bignum literal reading likewise refuses with `fixnum overflow (bignums not implemented)`. Neither path rounds or truncates. The native `eql` body handles existing bignum objects exactly (native unit test), but these source-level inputs never reach it",
-   "why": "Source construction limitation, not numeric equality parity; no pins have been marked PASS",
-   "symbols": [
-    "eql",
-    "string-to-number"
    ],
    "symbols_derived": false
   },

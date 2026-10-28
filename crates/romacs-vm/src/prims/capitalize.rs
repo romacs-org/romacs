@@ -31,13 +31,31 @@ pub(crate) fn capitalized(cx: &mut Leaf<'_>, object: Value, initials: bool) -> O
     if view.chars == 0 { return Ok(object); }
     let multibyte = view.is_multibyte();
     let chars: Vec<u32> = view.chars().map(|c| if !multibyte && c >= 128 { c + BYTE8_OFFSET } else { c }).collect();
-    let defaults: Vec<u8> = chars.iter().map(|&code| {
-        let i = WORD_RANGES.partition_point(|row| row.1 < code);
-        WORD_RANGES[i].2
-    }).collect();
-    let words = cx.casing_word_flags(&chars, &defaults)?;
     let mut bytes = Vec::new();
+    for (&code, out) in chars.iter().zip(capitalized_chars(cx, &chars, None, initials)?) {
+        for c in out {
+            if multibyte {
+                let mut encoded = [0; 5];
+                let n = char_string(c, &mut encoded);
+                bytes.extend_from_slice(&encoded[..n]);
+            } else {
+                bytes.push(Leaf::byte_case_result(c, if code >= BYTE8_OFFSET { code - BYTE8_OFFSET } else { code }, false));
+            }
+        }
+    }
+    // GNU's multibyte path allocates a property-free string; its unibyte
+    // path uses copy-sequence and retains properties.
+    Ok(if multibyte { cx.make_string(bytes, true) }
+       else { cx.buffer_name_string(object, bytes, false) })
+}
+
+/// case_character over CHARS for `capitalize', or `upcase-initials' when
+/// INITIALS: what each character becomes. In a buffer, a character with
+/// the syntax prefix flag (PREFIXES) starts no word.
+pub(crate) fn capitalized_chars(cx: &mut Leaf<'_>, chars: &[u32], prefixes: Option<&[bool]>, initials: bool) -> std::result::Result<Vec<Vec<u32>>, Fault> {
+    let words = word_flags(cx, chars)?;
     let mut inword = false;
+    let mut cased = Vec::with_capacity(chars.len());
     for (i, &code) in chars.iter().enumerate() {
         let row = mapping(code);
         let fallback = [if initials && !inword && row.is_none() { cx.case_mapping_character(code, false)? } else { code }];
@@ -48,21 +66,20 @@ pub(crate) fn capitalized(cx: &mut Leaf<'_>, object: Value, initials: bool) -> O
         if !initials && inword && code == 0x3a3 && !words.get(i + 1).copied().unwrap_or(false) {
             out = &sigma;
         }
-        for &c in out {
-            if multibyte {
-                let mut encoded = [0; 5];
-                let n = char_string(c, &mut encoded);
-                bytes.extend_from_slice(&encoded[..n]);
-            } else {
-                bytes.push(Leaf::byte_case_result(c, if code >= BYTE8_OFFSET { code - BYTE8_OFFSET } else { code }, false));
-            }
-        }
-        inword = words[i];
+        cased.push(out.to_vec());
+        inword = words[i] && (inword || !prefixes.is_some_and(|p| p[i]));
     }
-    // GNU's multibyte path allocates a property-free string; its unibyte
-    // path uses copy-sequence and retains properties.
-    Ok(if multibyte { cx.make_string(bytes, true) }
-       else { cx.buffer_name_string(object, bytes, false) })
+    Ok(cased)
+}
+
+/// Whether each of CHARS is a word character to casefiddle.c: the
+/// current syntax table, else GNU's standard syntax.
+pub(crate) fn word_flags(cx: &mut Leaf<'_>, chars: &[u32]) -> std::result::Result<Vec<bool>, Fault> {
+    let defaults: Vec<u8> = chars.iter().map(|&code| {
+        let i = WORD_RANGES.partition_point(|row| row.1 < code);
+        WORD_RANGES[i].2
+    }).collect();
+    cx.casing_word_flags(chars, &defaults)
 }
 
 defsubr! { name = "capitalize", gnu = "casefiddle.c:400", effect = Reads,
