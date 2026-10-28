@@ -148,6 +148,8 @@ pub(super) struct WindowState {
     pub height: u32,
     pub line: u32,
     pub column: u32,
+    /// The mini-window's height in lines (xdisp.c resize_mini_window).
+    pub mini_lines: u32,
 }
 impl Default for WindowState {
     fn default() -> Self {
@@ -158,6 +160,7 @@ impl Default for WindowState {
             height: 480,
             line: 20,
             column: 10,
+            mini_lines: 1,
         }
     }
 }
@@ -789,6 +792,10 @@ impl Vm {
         self.window_leaf_ids(root, &mut ids)?;
         let mini = self.window_root(MINI);
         ids.push(self.window(mini)?.id);
+        // Redisplay sizes the mini-window to its display before laying out.
+        if self.resize_mini_window(mini)? {
+            self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column)?;
+        }
         let outcome = (|| {
             let mut snapshots = vec![];
             for id in ids {
@@ -848,19 +855,22 @@ impl Vm {
         }
         self.ensure_windows()?;
         let root = self.window_root(ROOT);
+        // A mini-window the root windows cannot make room for keeps one
+        // line (window.c grow_mini_window, bug#69140).
+        let mini_height = self.window_state.mini_lines.saturating_mul(line_height).min(height - line_height);
         let mut geometry = vec![];
-        self.plan_window_geometry(
-            root,
-            0,
-            0,
-            width,
-            height - line_height,
-            line_height,
-            column_width,
-            &mut geometry,
-        )?;
+        let planned = self.plan_window_geometry(root, 0, 0, width, height - mini_height, line_height, column_width, &mut geometry);
+        let mini_height = if planned.is_err() && mini_height > line_height {
+            self.window_state.mini_lines = 1;
+            geometry.clear();
+            self.plan_window_geometry(root, 0, 0, width, height - line_height, line_height, column_width, &mut geometry)?;
+            line_height
+        } else {
+            planned?;
+            mini_height
+        };
         let mini = self.window_root(MINI);
-        geometry.push((mini, 0, height - line_height, width, line_height));
+        geometry.push((mini, 0, height - mini_height, width, mini_height));
         for (v, x, y, w, h) in geometry {
             let window = self.window_mut(v)?;
             if (window.x, window.y, window.width, window.height) != (x, y, w, h) {
@@ -934,6 +944,9 @@ impl Vm {
             let Object::Buffer(b) = self.object(w.buffer)? else {
                 return Err("buffer required".into());
             };
+            // A display with overlay strings ends at a display byte.
+            let end = self.display_state.segments(id)
+                .map_or(end, |segments| crate::display::buffer_of(segments, end, b.len_bytes()));
             let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
             changes.push((index, b.len_chars() - end_char));
         }

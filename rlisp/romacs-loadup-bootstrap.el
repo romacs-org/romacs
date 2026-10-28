@@ -35,6 +35,9 @@
 (load "format.el" nil t t)
 (load "bindings.el" nil t t)
 (load "window.el" nil t t)
+;; loadup.el: mini-windows can resize now, so the variable takes its
+;; advertised default (xdisp.c starts it as nil).
+(setq resize-mini-windows 'grow-only)
 ;; cus-start.el's Linux standard value for this C variable, applied before
 ;; files.el reads it.  GNU reaches it through custom-initialize-delay at
 ;; startup, after cus-start preloads.

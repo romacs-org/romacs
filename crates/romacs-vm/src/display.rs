@@ -5,6 +5,9 @@ use crate::{coordinates::ByteOffset, data::Object, *};
 mod tests;
 #[path = "mode_line.rs"]
 mod mode_line;
+#[path = "mini_window.rs"]
+mod mini_window;
+pub(crate) use mini_window::buffer_of;
 use romacs_face::{
     Attribute, AttrsBuilder, Background, Base, BoundedDatum, Deffaces, LispGraph, NodeView,
     Slot as FaceSlot, Theme, Value as FaceValue,
@@ -24,6 +27,9 @@ pub(super) struct DisplayState {
     /// an unpruned map would grow for the life of the VM once windows start
     /// churning.
     previous: std::collections::BTreeMap<u64, WindowSnapshot>,
+    /// Per window id, how its last publication's display text maps to
+    /// buffer text, when overlay strings were spliced in.
+    segments: std::collections::BTreeMap<u64, Vec<mini_window::Segment>>,
     pub version: u64,
     /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
     pub(super) hosted: bool,
@@ -53,6 +59,11 @@ impl DisplayState {
     /// reused, so without this the map grows for the life of the VM.
     pub(super) fn forget_window(&mut self, id: u64) {
         self.previous.remove(&id);
+        self.segments.remove(&id);
+    }
+    /// How window ID's last publication maps display bytes to buffer bytes.
+    pub(super) fn segments(&self, id: u64) -> Option<&[mini_window::Segment]> {
+        self.segments.get(&id).map(Vec::as_slice)
     }
     pub fn new() -> Self {
         let mut attrs = AttrsBuilder::default();
@@ -87,6 +98,7 @@ impl DisplayState {
             font_selection_order: romacs_layout_input::FontSelectionState::default(),
             font_alternatives: romacs_layout_input::FontAlternativeState::default(),
             previous: std::collections::BTreeMap::new(),
+            segments: std::collections::BTreeMap::new(),
             theme: Theme::build(
                 Arc::new(defs),
                 None,
@@ -442,7 +454,7 @@ impl Vm {
         if !w.live() {
             return Err("window deleted during snapshot".into());
         }
-        let (id, buffer, start) = (w.id, w.buffer, w.start);
+        let (id, buffer, start, mini) = (w.id, w.buffer, w.start, w.mini);
         self.slots[slot].value = buffer;
         let start = self
             .marker_position_value(start)?
@@ -479,6 +491,7 @@ impl Vm {
             if let Some(color) = binding.default_colors[1] { faces[0].background = color; }
         }
         let default = faces[0].clone();
+        let mut merged = std::collections::HashMap::new();
         let styles = terminal.map_or(&[][..], |binding| binding.styles.as_ref());
         let mut style_index = 0;
         let mut terminal_faces = std::collections::HashMap::new();
@@ -490,17 +503,7 @@ impl Vm {
                 .properties
                 .get_property(ByteOffset(at), "face")
                 .unwrap_or(Value::NIL);
-            let graph = Graph(self);
-            let resolved = if value.tag() == 3 {
-                self.cons_pair(value)?.0
-            } else {
-                value
-            };
-            let name = match graph.view(resolved.0) {
-                NodeView::Symbol(s) => s,
-                _ => "default",
-            };
-            let mut face = FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32);
+            let mut face = self.face_handle(&names, &mut faces, &mut merged, value);
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
@@ -542,6 +545,25 @@ impl Vm {
         // the snapshot and so are compared per window below.
         self.display_state.width = width;
         self.display_state.height = height;
+        // The mini-window shows its overlay strings (icomplete's candidates).
+        let (utf8, face_runs, start_byte, point_byte) = if mini {
+            let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
+            if spliced.has_strings() {
+                let mut strings = vec![];
+                for (bytes, value) in &spliced.string_faces {
+                    strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&names, &mut faces, &mut merged, *value) });
+                }
+                let runs = mini_window::display_face_runs(&face_runs, &spliced.segments, strings);
+                let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
+                self.display_state.segments.insert(id, spliced.segments);
+                (spliced.text, runs, start, point)
+            } else {
+                self.display_state.segments.remove(&id);
+                (utf8, face_runs, start_byte, point_byte)
+            }
+        } else {
+            (utf8, face_runs, start_byte, point_byte)
+        };
         let mut snapshot = WindowSnapshot {
             id,
             width,
@@ -586,6 +608,32 @@ impl Vm {
         snapshot.buffer_version = self.display_state.version;
         self.display_state.previous.insert(id, snapshot.clone());
         Ok(snapshot)
+    }
+    /// The row of FACES for a `face' property VALUE: a face symbol's own
+    /// row, and for a list of faces or an attribute list a row merged as
+    /// GNU's C merges them (xfaces.c merge_face_ref), added once per value
+    /// to FACES and MERGED. What the display cannot realize shows as default.
+    fn face_handle(&self, names: &[String], faces: &mut Vec<Face>,
+                   merged: &mut std::collections::HashMap<u64, FaceHandle>, value: Value) -> FaceHandle {
+        let graph = Graph(self);
+        match graph.view(value.0) {
+            NodeView::Symbol(name) => return FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32),
+            NodeView::Cons(..) => {}
+            _ => return FaceHandle(0),
+        }
+        if let Some(&handle) = merged.get(&value.0) { return handle; }
+        let face = BoundedDatum::from_graph(&graph, value.0).ok()
+            .and_then(|datum| romacs_face::remap::parse_face_ref(&datum).ok())
+            .and_then(|face_ref| {
+                let view = romacs_face::View::bind(&self.display_state.theme, &romacs_face::Remap::empty()).ok()?;
+                face_of_attrs(&view.realize_ref(&face_ref), "merged face").ok()
+            });
+        let handle = match face {
+            Some(face) => { faces.push(face); FaceHandle(faces.len() as u32 - 1) }
+            None => FaceHandle(0),
+        };
+        merged.insert(value.0, handle);
+        handle
     }
     /// GNU `redisplay_window` order for one window: make its buffer current,
     /// keep point visible, then `display_mode_line` (`src/xdisp.c:28200`)
@@ -758,27 +806,32 @@ impl Vm {
             .theme
             .realize(name)
             .ok_or("unknown face")?;
-        let string = |a| match attrs.get(a) {
-            FaceSlot::Set(FaceValue::Str(s)) => Ok(s.to_string()),
-            _ => Err("face string required".to_owned()),
-        };
-        let color = |a| -> Result<[u8; 3]> {
-            let s = string(a)?;
-            let (red, green, blue) = romacs_display_protocol::x11_color_value(&s)
-                .ok_or_else(|| format!("invalid face colour {s:?} for {name}"))?;
-            Ok([red, green, blue])
-        };
-        let size = match attrs.get(Attribute::Height) {
-            FaceSlot::Set(FaceValue::Height(romacs_face::Height::Absolute(h))) => {
-                *h as f32 * 96.0 / 720.0
-            }
-            _ => return Err("absolute face height required".into()),
-        };
-        Ok(Face {
-            foreground: color(Attribute::Foreground)?,
-            background: color(Attribute::Background)?,
-            family: string(Attribute::Family)?,
-            pixel_size: size,
-        })
+        face_of_attrs(&attrs, name)
     }
+}
+
+/// The display's face for realized ATTRS of the face NAME.
+fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
+    let string = |a| match attrs.get(a) {
+        FaceSlot::Set(FaceValue::Str(s)) => Ok(s.to_string()),
+        _ => Err("face string required".to_owned()),
+    };
+    let color = |a| -> Result<[u8; 3]> {
+        let s = string(a)?;
+        let (red, green, blue) = romacs_display_protocol::x11_color_value(&s)
+            .ok_or_else(|| format!("invalid face colour {s:?} for {name}"))?;
+        Ok([red, green, blue])
+    };
+    let size = match attrs.get(Attribute::Height) {
+        FaceSlot::Set(FaceValue::Height(romacs_face::Height::Absolute(h))) => {
+            *h as f32 * 96.0 / 720.0
+        }
+        _ => return Err("absolute face height required".into()),
+    };
+    Ok(Face {
+        foreground: color(Attribute::Foreground)?,
+        background: color(Attribute::Background)?,
+        family: string(Attribute::Family)?,
+        pixel_size: size,
+    })
 }
