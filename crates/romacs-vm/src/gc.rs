@@ -415,6 +415,11 @@ impl Vm {
             vec![false; self.cells.len()],
             vec![false; self.objects.len()],
         ];
+        // Finished nested runs' programs are caches: relowering what is used
+        // again costs less than tracing, retiring and forwarding every copy.
+        for program in &mut self.spare_programs {
+            program.forget_code();
+        }
         let pads = self.gc_stress.take_pads();
         let mut pending = roots.to_vec();
         pending.extend_from_slice(&self.stack);

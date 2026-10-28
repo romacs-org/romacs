@@ -580,6 +580,17 @@ impl Program {
     pub(super) fn code_is_empty(&self) -> bool {
         self.code.iter().all(Vec::is_empty) && self.entries.is_empty()
     }
+    /// Drop the lowered code an idle program caches; it is lowered again on
+    /// first use. Nothing points into it: no engine runs this program.
+    pub(super) fn forget_code(&mut self) {
+        self.code.clear();
+        self.entries.clear();
+        self.inline_bodies.clear();
+        self.free_entries.clear();
+    }
+    pub(super) fn code_len(&self) -> usize {
+        self.code.iter().map(Vec::len).sum()
+    }
     pub(super) fn trace_function(
         &self,
         id: usize,

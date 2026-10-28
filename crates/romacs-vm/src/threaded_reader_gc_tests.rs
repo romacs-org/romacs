@@ -108,3 +108,17 @@ fn callback_preserves_an_open_builders_collection_hold() {
     assert_eq!(vm.heap_stats().collections, before);
     assert_eq!(vm.gc_holds, 1);
 }
+
+#[test]
+fn a_collection_drops_idle_programs_code_and_nested_runs_relower_it() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(defun spare-callee (x) (list x (cons x 'tail)))").unwrap();
+    let callee = vm.intern("spare-callee");
+    let first = vm.reader_call(callee, &[Value::integer(1).unwrap()]).unwrap();
+    assert_eq!(vm.display(first).unwrap(), "(1 (1 . tail))");
+    assert!(vm.spare_programs.iter().any(|p| p.code_len() > 0), "a nested run leaves its program idle");
+    vm.collect(&mut []);
+    assert!(vm.spare_programs.iter().all(|p| p.code_len() == 0), "a collection drops idle lowered code");
+    let again = vm.reader_call(callee, &[Value::integer(2).unwrap()]).unwrap();
+    assert_eq!(vm.display(again).unwrap(), "(2 (2 . tail))");
+}
