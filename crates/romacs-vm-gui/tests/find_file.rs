@@ -573,6 +573,31 @@ fn extended_command_cancel_history_rejection_and_prefix() {
     assert_eq!(printed(&mut vm, "mx-forbidden"), "nil");
 }
 
+/// An installed package's command is an interactive autoload: M-x offers
+/// and accepts it by name without loading its file, and running it loads the
+/// file. A non-interactive autoload stays refused, still unloaded.
+#[test]
+fn extended_command_runs_interactive_autoloads() {
+    let fixture = Fixture::new("extended-command-autoload");
+    let library = fixture.root.join("mx-package.el");
+    std::fs::write(&library, "(setq mx-package-loads (1+ mx-package-loads))\n\
+        (defun mx-autoloaded () (interactive) (setq mx-autoloaded-ran t))\n\
+        (defun mx-auto-plain () (setq mx-forbidden t))\n").unwrap();
+    let mut vm = fixture.vm();
+    vm.eval_source(&format!("(setq mx-package-loads 0 mx-autoloaded-ran nil mx-forbidden nil)
+        (autoload 'mx-autoloaded {0} nil t) (autoload 'mx-auto-plain {0})", quoted(&library.to_string_lossy()))).unwrap();
+    assert_eq!(printed(&mut vm,
+        "(list (and (member \"mx-autoloaded\" (romacs-command-names)) t) (member \"mx-auto-plain\" (romacs-command-names)) mx-package-loads)"),
+        "(t nil 0)", "EXTENDED_COMMAND_OFFERS_AUTOLOAD_UNLOADED");
+    assert_eq!(printed(&mut vm,
+        "(condition-case e (execute-extended-command nil \"mx-auto-plain\") (error 'refused))"),
+        "refused", "EXTENDED_COMMAND_REJECTS_NONINTERACTIVE_AUTOLOAD");
+    attach(&mut vm, "mx-autol\t\r");
+    assert_eq!(printed(&mut vm,
+        "(progn (call-interactively 'execute-extended-command) (list mx-autoloaded-ran mx-package-loads mx-forbidden))"),
+        "(t 1 nil)", "EXTENDED_COMMAND_LOADS_AUTOLOAD_ON_CALL");
+}
+
 #[test]
 fn extended_command_escape_entry_and_errors_keep_editor_usable() {
     let fixture = Fixture::new("extended-command-errors");

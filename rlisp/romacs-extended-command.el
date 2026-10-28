@@ -10,9 +10,10 @@
 (defvar extended-command-history nil)
 
 (defun romacs-command-p (command)
-  "Return non-nil for an invocable named interactive COMMAND."
-  (and (symbolp command) (fboundp command)
-       (condition-case nil (interactive-form command) (error nil))))
+  "Return non-nil for an invocable named interactive COMMAND.
+An interactive autoload qualifies without loading its file, as with
+GNU's `commandp'; calling it loads the file."
+  (and (symbolp command) (fboundp command) (commandp command)))
 
 (defun romacs-command-names ()
   "Return currently defined interactive command names, sorted for completion."
