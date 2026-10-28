@@ -155,6 +155,79 @@ mod evaluator_stack_tests {
     }
 }
 
+#[cfg(test)]
+mod frame_tests {
+    /// The live loop skips a repaint whose frame equals the last one painted,
+    /// so equality must change exactly when the paint would.
+    #[test]
+    fn frames_differ_exactly_when_the_paint_would() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        vm.eval_source("(insert \"(a b)\") (goto-char 1)").unwrap();
+        let frame = |vm: &mut romacs_vm::Vm| super::frame(vm, false, 1200, 800).unwrap();
+        let first = frame(&mut vm);
+        assert!(first.selected.is_some());
+        assert!(frame(&mut vm) == first, "an unchanged frame repaints");
+        // A timer that changes nothing on screen, though restoring point
+        // moves the VM's conservative display revision.
+        let version = vm.display_version();
+        vm.eval_source("(save-excursion (forward-char 1)) (setq romacs-test-probe (buffer-substring 1 3))").unwrap();
+        assert!(vm.display_version() > version);
+        assert!(frame(&mut vm) == first, "a timer that changes nothing repaints");
+        vm.eval_source("(forward-char 1)").unwrap();
+        let moved = frame(&mut vm);
+        assert!(moved != first, "point motion must repaint");
+        vm.eval_source("(select-window (next-window))").unwrap();
+        let selected = frame(&mut vm);
+        assert!(selected.selected != moved.selected && selected != moved, "selecting another window must repaint");
+    }
+}
+
+/// What one paint shows: the windows and which of them has the cursor.
+struct Frame {
+    snapshot: romacs_layout_input::FrameSnapshot,
+    selected: Option<u64>,
+}
+
+/// Equal frames paint identically, so an equal one needs no repaint.
+/// `buffer_version` is left out: it is the VM's conservative redraw signal,
+/// which also moves when nothing shown changed (a `save-excursion` restoring
+/// point), and layout never reads it.
+impl PartialEq for Frame {
+    fn eq(&self, other: &Self) -> bool {
+        let (a, b) = (&self.snapshot, &other.snapshot);
+        self.selected == other.selected && a.font_selection == b.font_selection
+            && a.font_alternatives == b.font_alternatives && (a.width, a.height) == (b.width, b.height)
+            && a.windows.len() == b.windows.len()
+            && a.windows.iter().zip(&b.windows).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot))
+    }
+}
+
+fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
+    // Exhaustive, so a new field must be placed on one side or the other.
+    let romacs_layout_input::WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
+        text, mode_line, mode_line_face, vscroll_px, faces } = a;
+    (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px)
+        == (b.id, b.width, b.height, b.start_byte, b.point_byte, b.mode_line_face, b.vscroll_px)
+        && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
+}
+
+fn frame(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<Frame, String> {
+    let snapshot = snapshot(vm, g1, width, height)?;
+    let selected = selected_window(vm, &snapshot)?;
+    Ok(Frame { snapshot, selected })
+}
+
+/// The selected window's id, once the GUI's own Lisp lays out windows.
+fn selected_window(vm: &mut Vm, snapshot: &romacs_layout_input::FrameSnapshot) -> Result<Option<u64>, String> {
+    if vm.eval_source("(boundp 'romacs-gui-quit-requested)")? == romacs_vm::Fixed::NIL { return Ok(None); }
+    let remaining = vm.eval_source(startup::SELECTED_TAIL)?;
+    let remaining = remaining.display()?.parse::<usize>().map_err(|e| e.to_string())?;
+    let index = snapshot.windows.len().checked_sub(1 + remaining).ok_or("selected window not in frame")?;
+    Ok(Some(snapshot.windows[index].snapshot.id))
+}
+
 fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
     if g1 {
         // Preserve G1's explicitly full-height legacy selected-window fixture.
@@ -293,11 +366,11 @@ fn paint(
     presentation: u64,
     force_gc: bool,
     floor: Option<usize>,
-    snapshot: romacs_layout_input::FrameSnapshot,
+    shown: Frame,
     pending: &mut std::collections::VecDeque<InputEvent>,
     synchronous: bool,
     timings: &mut Option<latency::Paint>,
-) -> Result<romacs_layout_input::FrameSnapshot, String> {
+) -> Result<Frame, String> {
     if force_gc {
         // Only this explicit root is retained. The snapshot has no heap handles.
         vm.set_collection_floor(1_000_000);
@@ -321,15 +394,10 @@ fn paint(
         );
     }
     let layout_start = Instant::now();
-    let selected = if vm.eval_source("(boundp 'romacs-gui-quit-requested)")? != romacs_vm::Fixed::NIL {
-        let remaining = vm.eval_source(startup::SELECTED_TAIL)?;
-        let remaining = remaining.display()?.parse::<usize>().map_err(|e| e.to_string())?;
-        let index = snapshot.windows.len().checked_sub(1 + remaining).ok_or("selected window not in frame")?;
-        Some(snapshot.windows[index].snapshot.id)
-    } else { None };
+    let (snapshot, selected) = (&shown.snapshot, shown.selected);
     let (mut frame, ends) = if let Some(selected) = selected {
-        engine.layout_frame(&snapshot, presentation, Some((selected, romacs_display_protocol::Color::from_pixel(0x9099d9))))?
-    } else { engine.layout_frame(&snapshot, presentation, None)? };
+        engine.layout_frame(snapshot, presentation, Some((selected, romacs_display_protocol::Color::from_pixel(0x9099d9))))?
+    } else { engine.layout_frame(snapshot, presentation, None)? };
     if selected.is_some() {
         let mut effects = romacs_display_protocol::EffectsConfig::default();
         effects.cursor_color_cycle.enabled = false;
@@ -408,7 +476,7 @@ fn paint(
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
-    Ok(snapshot)
+    Ok(shown)
 }
 /// Lay out and submit a frame for a prompt waiting inside a command
 /// (prompt.rs). The same cursor policy as `paint`; no VM access, because the
@@ -529,7 +597,7 @@ fn evaluate(
     if live {
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone() })));
     }
-    let initial = snapshot(&mut vm, g1, width, height)?;
+    let initial = frame(&mut vm, g1, width, height)?;
     let mut pending = std::collections::VecDeque::new();
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
@@ -629,7 +697,7 @@ fn evaluate(
                 let command_ns = command_start.elapsed().as_nanos();
                 let snapshot_ns = if !live {
                     let snapshot_start = Instant::now();
-                    let next = snapshot(&mut vm, g1, width, height)?;
+                    let next = frame(&mut vm, g1, width, height)?;
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     presentation = presentation.checked_add(1).ok_or("presentation exhausted")?;
                     previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
@@ -679,7 +747,7 @@ fn evaluate(
                         for sample in trace.completed(in_flight, observed) { eprintln!("{sample}"); }
                     }
                     eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
-                        "buffer_versions":previous.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
+                        "buffer_versions":previous.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
                         "unresolved_face_text_total":diagnostic.unresolved_face_text_total}));
                     if tracing() {
                         eprintln!("{}", json!({"diagnostic":"latency-render","presentation":in_flight,
@@ -693,21 +761,25 @@ fn evaluate(
             }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 let snapshot_start = Instant::now();
-                let next = snapshot(&mut vm, g1, width, height)?;
+                let next = frame(&mut vm, g1, width, height)?;
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
+                // GNU's redisplay draws nothing when nothing changed: a timer
+                // such as show-paren's runs after every key.
+                if next == previous { return Ok(None); }
                 presentation = presentation.checked_add(1).ok_or("presentation exhausted")?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, false, &mut paint_timings)?;
-                Ok((snapshot_start, snapshot_ns))
+                Ok(Some((snapshot_start, snapshot_ns)))
             }) {
-                let (snapshot_start, snapshot_ns) = result?;
-                live_presentation.submitted(presentation, Instant::now());
-                if let Some(trace) = &mut key_trace {
-                    trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
-                }
-                if tracing() {
-                    eprintln!("{}", json!({"diagnostic":"latency-snapshot","presentation":presentation,
-                        "units":"ns","snapshot_ns":snapshot_ns}));
-                }
+                if let Some((snapshot_start, snapshot_ns)) = result? {
+                    live_presentation.submitted(presentation, Instant::now());
+                    if let Some(trace) = &mut key_trace {
+                        trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
+                    }
+                    if tracing() {
+                        eprintln!("{}", json!({"diagnostic":"latency-snapshot","presentation":presentation,
+                            "units":"ns","snapshot_ns":snapshot_ns}));
+                    }
+                } else { live_presentation.unchanged(); }
             }
             if pending.is_empty() && sender.input().is_empty() {
                 // read_char: with no key to read, idle and run ripe timers;
@@ -744,7 +816,7 @@ fn evaluate(
                 }
             });
         // An evaluation may mutate before signalling; its error must not hide that paint.
-        let next = snapshot(&mut vm, g1, width, height)?;
+        let next = frame(&mut vm, g1, width, height)?;
         if next != previous {
             presentation = presentation
                 .checked_add(1)
