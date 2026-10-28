@@ -573,7 +573,8 @@ WORKFLOWS = {
         key('nodes-menu', [T('n')], POPUP_HAS('"View all nodes"')),
         key('all-nodes', [T('a')], f'(and {MODE_IS("gnosis-dashboard-nodes-mode")} {DASHBOARD_RENDERED})'),
         key('nodes-back', [T('q')], DASHBOARD_READY),
-        key('history', [T('H')], f'(and {MODE_IS("gnosis-dashboard-history-mode")} {DASHBOARD_RENDERED})'),
+        # History shows in its own buffer, *Gnosis History*.
+        key('history', [T('H')], MODE_IS("gnosis-dashboard-history-mode")),
         key('history-back', [T('q')], DASHBOARD_READY),
         # Line motion last: GNU's next-line needs vertical-motion and
         # current-bidi-paragraph-direction, which t3/daily-use-gui-fixes adds.
