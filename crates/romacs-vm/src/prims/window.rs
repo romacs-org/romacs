@@ -382,3 +382,11 @@ defsubr! { name = "frame-native-height", gnu = "frame.c:4401", effect = Reads,
 fn frame_native_height(cx; optional frame: Value) {
     cx.windows().frame_native_size(frame, false)
 }}
+
+// xdisp.c sets a buffer's long_line_optimizations_p when redisplay meets a
+// line past `long-line-threshold'; Romacs's redisplay has no long-line
+// optimizations, so none is ever in effect (DIVERGENCES.md VM2-LONGLINE1).
+defsubr! { name = "long-line-optimizations-p", gnu = "xdisp.c:20409", effect = Reads,
+fn long_line_optimizations_p(_cx) {
+    Ok(Value::NIL)
+}}
