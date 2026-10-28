@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "2098c1b51a6cd8cb66357eebd3843f94583867a82e448cb654ed4d2526a4cca7",
+  "source_fingerprint": "03babb78ae40b323c9be9782b1d15eac3d682f3aa8acb6d53debf0f66ac74456",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1008,
-  "parsed_vm2_only": 1008
+  "parsed_total": 1011,
+  "parsed_vm2_only": 1011
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -893,6 +893,16 @@
    "name": "completion--flex-cost-gotoh",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/completion.rs:463"
+  },
+  "compose-region-internal": {
+   "name": "compose-region-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/composite.rs:28"
+  },
+  "compose-string-internal": {
+   "name": "compose-string-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/composite.rs:39"
   },
   "concat": {
    "name": "concat",
@@ -3457,6 +3467,11 @@
    "name": "region-end",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/editor_mark.rs:9"
+  },
+  "register-ccl-program": {
+   "name": "register-ccl-program",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/ccl.rs:52"
   },
   "remhash": {
    "name": "remhash",

@@ -247,6 +247,16 @@ mod leaf {
                 _ => Fault::Error(text),
             }
         }
+        /// A VM-owned Lisp value kept in the internal symbol NAME's value
+        /// cell ("#:vm2-..."), rooted like every symbol value; None unset.
+        pub(crate) fn internal_value(&mut self, name: &str) -> Option<Value> {
+            let slot = self.vm.slot(name);
+            Some(self.vm.slots[slot].value).filter(|&v| v != Value::UNBOUND)
+        }
+        pub(crate) fn set_internal_value(&mut self, name: &str, value: Value) {
+            let slot = self.vm.slot(name);
+            self.vm.slots[slot].value = value;
+        }
         pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
             self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
         }
