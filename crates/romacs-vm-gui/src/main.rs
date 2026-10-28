@@ -779,7 +779,12 @@ fn evaluate(
                         eprintln!("{}", json!({"diagnostic":"latency-snapshot","presentation":presentation,
                             "units":"ns","snapshot_ns":snapshot_ns}));
                     }
-                } else { live_presentation.unchanged(); }
+                } else {
+                    live_presentation.unchanged();
+                    if let Some(trace) = &mut key_trace {
+                        for sample in trace.unchanged() { eprintln!("{sample}"); }
+                    }
+                }
             }
             if pending.is_empty() && sender.input().is_empty() {
                 // read_char: with no key to read, idle and run ripe timers;
