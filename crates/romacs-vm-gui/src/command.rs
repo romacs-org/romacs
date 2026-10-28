@@ -25,6 +25,10 @@ impl Commands {
             }
         };
         self.pending.push(form);
+        let event = match Self::function_key(vm, &format!("[{}]", self.pending.join(" ")))? {
+            Some((form, translated)) => { *self.pending.last_mut().unwrap() = form; translated }
+            None => event,
+        };
         let sequence = format!("[{}]", self.pending.join(" "));
         let prefix = vm.eval_source(&format!("(keymapp (key-binding {sequence}))"))? != Fixed::NIL;
         if prefix {
@@ -41,11 +45,47 @@ impl Commands {
         vm.eval_source(&format!("(define-key (current-global-map) [romacs-gui-sequence] (key-binding {sequence} nil t))"))?;
         vm.command_event(CommandEvent::Named("romacs-gui-sequence".into())).map(Some)
     }
+
+    /// read_key_sequence's `local-function-key-map' step: SEQUENCE, which
+    /// no keymap binds, ends in an event that map translates to one event
+    /// (simple.el makes `return' RET): that event and its spelling.
+    fn function_key(vm: &mut Vm, sequence: &str) -> Result<Option<(String, CommandEvent)>, String> {
+        let translated = vm.eval_source(&format!(
+            "(and (boundp 'local-function-key-map) (null (key-binding {sequence}))
+                  (let ((to (lookup-key local-function-key-map (vector (aref {sequence} (1- (length {sequence})))))))
+                    (and (vectorp to) (= (length to) 1) (or (natnump (aref to 0)) (symbolp (aref to 0))) (aref to 0))))"))?;
+        if translated == Fixed::NIL { return Ok(None); }
+        let form = translated.display()?;
+        Ok(Some(match form.parse::<i64>() {
+            Ok(code) => (form, CommandEvent::Character(code)),
+            Err(_) if form.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c)) => (form.clone(), CommandEvent::Named(form)),
+            Err(_) => return Ok(None),
+        }))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The host's `return' is RET through `local-function-key-map' unless
+    /// bound itself; C-j stays C-j.
+    #[test]
+    fn return_reads_as_ret_unless_bound_and_c_j_stays() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1600, 1000, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        vm.eval_source("(erase-buffer)").unwrap();
+        let mut keys = Commands::default();
+        let mut run = |vm: &mut Vm, event| {
+            let out = keys.dispatch(vm, event).unwrap().unwrap();
+            assert!(out.signal.is_none(), "{out:?}");
+            (out.command.unwrap(), vm.eval_source("(list last-command-event (buffer-string))").unwrap().display().unwrap())
+        };
+        assert_eq!(run(&mut vm, CommandEvent::Named("return".into())), ("romacs-newline".into(), "(13 \"\\n\")".into()));
+        assert_eq!(run(&mut vm, CommandEvent::Character(10)), ("self-insert-command".into(), "(10 \"\\n\\n\")".into()));
+        vm.eval_source("(global-set-key [return] 'beginning-of-line)").unwrap();
+        assert_eq!(run(&mut vm, CommandEvent::Named("return".into())).0, "beginning-of-line");
+    }
     #[test]
     fn vertical_goal_column_and_boundaries() {
         let mut vm = Vm::new();

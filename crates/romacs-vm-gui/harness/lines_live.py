@@ -14,6 +14,10 @@ text).  The point after each command must equal pinned GNU's on a
 terminal frame (`emacs -Q -nw' over a pty, private HOME) whose window
 continues lines after as many columns as the native window does.
 
+keys: Return in *scratch* runs what RET is bound to there (GNU's
+`newline'), as the function key `return' that `local-function-key-map'
+translates to RET; C-j runs its own binding.  Both insert a newline.
+
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY; DISPLAY is never set and no ROMACS_GUI_FONT is passed.
 labwc, wlr-randr, wtype and grim come from --tools or PATH.
@@ -307,6 +311,46 @@ def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion')
           [{'command': i + 1, 'gnu': g, 'romacs': r} for i, (g, r) in enumerate(zip(gnu[1:], shown + [None] * len(keys))) if g != r][:6])
 
 
+RETURN_INIT = INIT + '''(run-with-timer 1 nil (lambda () (lines-live-record
+  (list 'bindings (with-current-buffer (window-buffer) (list (key-binding [13]) (key-binding [10])))
+        (lookup-key local-function-key-map [return])))))
+'''
+
+
+def check_return(args, report, check):
+    output = args.output / 'keys'
+    output.mkdir(parents=True, exist_ok=True)
+    log = output / 'binary.stderr'
+    with session(args.binary, [], output, args.tools, RETURN_INIT, files=[]) as (process, env, work, state, display):
+        report['keys_display'] = display
+        fio.wait(lambda: any(r.startswith('(bindings') for r in records(state)), args.timeout, 'bindings record', process)
+        bindings = next(r for r in records(state) if r.startswith('(bindings'))
+        ret, cj = bindings.split('(', 2)[2].split(')')[0].split()
+        time.sleep(.5)
+        replies = lambda: [json.loads(line) for line in log.read_text(errors='replace').split('\n') if line.startswith('{') and '"native_command"' in line]
+        for count, key in enumerate([['-k', 'Return'], ['-M', 'ctrl', 'j', '-m', 'ctrl']], 1):
+            subprocess.run(['wtype', *key], env=env, check=True, timeout=20)
+            fio.wait(lambda: len(replies()) >= count, 10, f'command {count}', process)
+        time.sleep(.5)
+        fio.shot(args.output / 'keys.png', env, report)
+        shown = replies()
+        # The selected window's point before the keys and after each.
+        points, selected = [], None
+        for line in log.read_text(errors='replace').split('\n'):
+            if line.startswith('{') and '"cursor-publication"' in line:
+                record = json.loads(line)
+                selected = next((c['window'] for c in record['cursors'] if c['active']), selected)
+                points.append((record['presentation'], next(p['point_byte'] for p in record['points'] if p['id'] == selected)))
+        before = [b for presentation, b in points if presentation < shown[0]['presentation']][-1]
+        after = [next(b for presentation, b in points if presentation > r['presentation']) for r in shown]
+    report['keys'] = {'bindings': bindings, 'replies': shown, 'point_bytes': [before, *after]}
+    check('each inserted one newline at point', [after[0] - before, after[1] - after[0]] == [1, 1], [before, *after])
+    check(f'RET is bound to newline and C-j elsewhere in *scratch* ({bindings})', ret == 'newline' and cj not in ('newline', 'nil')
+          and bindings.endswith('[13])'), bindings)
+    check('Return runs RET\'s binding, C-j its own, neither signalling',
+          [(r['native_command'], r['signal']) for r in shown] == [(ret, None), (cj, None)], shown)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=Path)
@@ -314,7 +358,7 @@ def main():
     parser.add_argument('--tools', help='directory with labwc, wlr-randr, wtype and grim')
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--gnu', default=os.environ.get('ROMACS_GNU_ORACLE'), help='pinned GNU emacs')
-    parser.add_argument('--only', choices=['tabs', 'motion'])
+    parser.add_argument('--only', choices=['tabs', 'motion', 'keys'])
     args = parser.parse_args()
     args.binary = args.binary.resolve()
     args.output = args.output.resolve()
@@ -327,9 +371,11 @@ def main():
         if not ok:
             report['failures'].append(name)
     try:
-        if args.only != 'motion':
+        if args.only in (None, 'keys'):
+            check_return(args, report, check)
+        if args.only in (None, 'tabs'):
             check_tabs(args, report, check)
-        if args.only != 'tabs':
+        if args.only in (None, 'motion'):
             check_motion(args, report, check)
             check_motion(args, report, check, TALL_FILE, TALL_KEYS, 'scroll')
         report['status'] = 'PASS' if not report['failures'] else 'FAIL'
