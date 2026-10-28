@@ -16,7 +16,9 @@ A phase counts only if
     (the binary's `romacs-binding:` lines name C-n's) with no signal;
   * point after the phase is where the commands put it (simulated on the text);
   * a paint completed for a presentation submitted after the last command
-    (counting stops only then); fewer than N paints marks it coalesced;
+    (counting stops only then; a frame nothing changed is not repainted, so
+    a phase whose commands signalled only settles); fewer than N paints
+    marks it coalesced;
   * the counter is numeric and ran 100% of the time.
 A refused phase is reported apart, with its reason, never as a result.
 Paints per key are reported too: each paint is a full layout.  The session
@@ -259,7 +261,10 @@ class Session:
         subprocess.run(['wtype', *parts], env=self.environ, check=True, timeout=30)
 
     def run_keys(self, parts, count):
-        """Type COUNT keys; return their replies once a later presentation has painted."""
+        """Type COUNT keys; return their replies once a later presentation has
+        painted.  A command that signalled may change nothing on screen, and
+        an unchanged frame is not repainted: its phase is refused anyway, so it
+        only settles."""
         before = len(records(self.stdout))
         for _ in range(count):
             self.type(parts)
@@ -267,6 +272,9 @@ class Session:
         self.wait(lambda: len([r for r in records(self.stdout)[before:] if 'native_command' in r
                                or 'native_error' in r]) >= count, self.args.timeout, 'command replies')
         replies = [r for r in records(self.stdout)[before:] if 'native_command' in r or 'native_error' in r]
+        if any(r.get('signal') or r.get('native_error') for r in replies):
+            time.sleep(1)
+            return replies
         last = replies[-1]['presentation'] if replies else 0
         self.wait(lambda: any(r.get('diagnostic') == 'paint' and r['presentation'] > last
                               for r in records(self.stderr)), self.args.timeout, 'paint after the last command')
