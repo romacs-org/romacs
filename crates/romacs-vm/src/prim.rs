@@ -332,8 +332,19 @@ mod leaf {
         /// CLOSURE_INTERACTIVE slot), as `(SPEC . THUNK)`: THUNK evaluates a
         /// non-string SPEC in the closure's own lexical environment, or is nil.
         /// VM2 closures have no such slot, so the compiler registers it in a
-        /// key-weak `eq` table held by an ordinary traced variable slot.
+        /// key-weak `eq` table held by an ordinary traced variable slot. The
+        /// entry holds the slot's value as GNU makes it: SPEC, or
+        /// `[SPEC MODES]' for a command with modes.
         pub(crate) fn interactive_spec(&mut self, closure: Value) -> Option<(Value, Value)> {
+            let (form, thunk) = self.interactive_entry(closure)?;
+            Some((self.vector_get(form, Value::integer(0).unwrap()).unwrap_or(form), thunk))
+        }
+        /// The MODES of a closure's `(interactive SPEC . MODES)', or nil.
+        pub(crate) fn interactive_modes(&mut self, closure: Value) -> Value {
+            let Some((form, _)) = self.interactive_entry(closure) else { return Value::NIL };
+            self.vector_get(form, Value::integer(1).unwrap()).unwrap_or(Value::NIL)
+        }
+        fn interactive_entry(&mut self, closure: Value) -> Option<(Value, Value)> {
             let slot = *self.vm.names.get(super::INTERACTIVE_TABLE)?;
             let table = self.vm.slots[slot].value;
             if table == Value::UNBOUND {

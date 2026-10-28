@@ -3,7 +3,8 @@
 //! exists), frame-first-window, timer-idle-list, and the subrs in the
 //! special forms' function cells, print-gensym as gnosis's serializer
 //! binds it, `random' seeded as GNU seeds glibc's generator,
-//! overlay-properties, byte-to-string and the base64 region coders.
+//! overlay-properties, byte-to-string, the base64 region coders and
+//! command-modes.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -38,11 +39,21 @@ const CASES: &str = r###"
 (with-temp-buffer (insert "_-8") (list (condition-case e (base64-decode-region 1 4) (error e)) (buffer-string) (progn (erase-buffer) (insert "YWI") (base64-decode-region 1 4 t)) (buffer-string) (progn (erase-buffer) (insert "YWI") (condition-case e (base64-decode-region 1 4) (error e))) (buffer-string)))
 (with-temp-buffer (set-buffer-multibyte nil) (insert "/w==") (list (base64-decode-region 1 5) (append (buffer-string) nil) (multibyte-string-p (buffer-string))))
 (list (commandp 'base64-encode-region) (commandp 'base64url-encode-region) (commandp 'base64-decode-region) (interactive-form 'base64-decode-region))
+(list (command-modes (lambda () (interactive nil foo-mode) 1)) (command-modes (lambda () (interactive "p" a-mode b-mode) 1)) (command-modes (lambda () (interactive "p") 1)) (command-modes (lambda () 1)) (command-modes 'car) (command-modes 'cm-undefined) (command-modes nil) (command-modes 1) (command-modes "x") (command-modes (lambda () (interactive "p" . m-mode) 1)))
+(progn (defalias 'cm-a (lambda () (interactive nil x-mode) 1)) (defalias 'cm-b 'cm-a) (put 'cm-b 'command-modes '(y-mode)) (list (command-modes 'cm-a) (command-modes 'cm-b) (progn (put 'cm-a 'command-modes '(z-mode)) (command-modes 'cm-a)) (interactive-form 'cm-a) (commandp 'cm-a)))
+(let ((f (lambda (x) (interactive (list 7) q-mode) x)) (g (lambda (x) (interactive "p") x))) (list (interactive-form f) (command-modes f) (call-interactively f) (command-modes g)))
+(progn (autoload 'cm-auto "cm-file" nil '(w-mode v-mode)) (autoload 'cm-auto2 "cm-file" nil t) (list (command-modes 'cm-auto) (command-modes 'cm-auto2) (command-modes '(lambda () (interactive "p" l-mode) 1)) (command-modes '(lambda () (interactive "p") 1)) (command-modes '(lambda () 1)) (command-modes '(macro . car))))
+(let ((f (make-interpreted-closure nil '(1) '(t) nil '(interactive nil r-mode s-mode)))) (command-modes f))
+(let ((f (make-interpreted-closure nil '(1) '(t) nil '(interactive nil r-mode s-mode)))) (interactive-form f))
+(let ((f (make-interpreted-closure nil '(1) '(t) nil '(interactive nil r-mode s-mode)))) (aref f 5))
+(let ((f (make-interpreted-closure nil '(1) '(t) nil '(interactive nil r-mode s-mode)))) (funcall f))
+(let ((g (make-interpreted-closure nil '(1) '(t) nil '(interactive "p")))) (list (command-modes g) (aref g 5)))
 "###;
 
 /// Cases whose change hooks run Lisp, which needs the Lisp prelude.
 const PRELUDE_CASES: &str = r###"
 (with-temp-buffer (buffer-enable-undo) (insert "abc") (undo-boundary) (let ((log nil)) (set (make-local-variable 'before-change-functions) (list (lambda (b e) (setq log (cons (list 'before b e) log))))) (set (make-local-variable 'after-change-functions) (list (lambda (b e l) (setq log (cons (list 'after b e l) log))))) (list (base64-encode-region 1 4) (buffer-string) (reverse log) buffer-undo-list (progn (setq log nil) (base64-decode-region 1 5)) (reverse log) (buffer-string))))
+(progn (defun cm-d () "doc" (interactive nil d-mode e-mode) 1) (defun cm-e (x) (interactive "p") x) (list (command-modes 'cm-d) (interactive-form 'cm-d) (commandp 'cm-d) (command-modes 'cm-e)))
 "###;
 
 #[test]
