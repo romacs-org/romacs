@@ -34,6 +34,9 @@ pub struct Shared {
     pub closed: bool,
     /// Under --trace-latency, when the prompt last read a key.
     pub key_read: Option<std::time::Instant>,
+    /// The prompt's last painted frame, its selected window, presentation
+    /// and row ends: an unchanged redisplay answers these again.
+    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<(u64, usize)>)>,
 }
 
 pub struct GuiHost {
@@ -119,6 +122,16 @@ impl HostInput for GuiHost {
     }
 
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
+        // GNU's redisplay draws nothing when nothing changed: a timer run
+        // in a prompt that left the frame as this prompt last painted it,
+        // with nothing presented since, submits no frame.
+        if let Some((painted, selected, presentation, ends)) = &self.shared.borrow().painted {
+            let shared = self.shared.borrow();
+            if *presentation == shared.presentation && shared.in_flight.is_none()
+                && *selected == frame.selected && *painted == frame.frame {
+                return Ok(ends.clone());
+            }
+        }
         let started = std::time::Instant::now();
         let wait = Duration::from_secs(30);
         let presentation = {
@@ -134,6 +147,7 @@ impl HostInput for GuiHost {
         // Synchronous, like the oracle path: the prompt is on screen before
         // the evaluator blocks for its key.
         self.sender.wait_for_render(presentation, wait)?;
+        self.shared.borrow_mut().painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone()));
         eprintln!(
             "{}",
             serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
