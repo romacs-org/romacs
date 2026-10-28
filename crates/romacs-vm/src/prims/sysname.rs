@@ -4,8 +4,7 @@ use super::*;
 pub(crate) fn initial_value(vm: &mut Vm) -> Value {
     // Linux exposes the same kernel nodename as GNU's gethostname, without an
     // unsafe syscall at the primitive boundary. Do not consult HOSTNAME or DNS.
-    let host = std::fs::read_to_string("/proc/sys/kernel/hostname")
-        .unwrap_or_else(|_| "unknown".into());
+    let host = crate::host::system_name().unwrap_or_else(|_| "unknown".into());
     let host = host.strip_suffix('\n').unwrap_or(&host).replace([' ', '\t'], "-");
     vm.allocate_object(data::Object::String(Box::new(
         data::LispString::from_bytes(host.into_bytes(), false))))
@@ -21,7 +20,7 @@ fn system_name(cx) {
 
 defsubr! { name = "emacs-pid", gnu = "editfns.c:1292", effect = Reads,
 fn emacs_pid(_cx) {
-    Ok(Value::integer(i64::from(std::process::id())).expect("pid is a fixnum"))
+    Ok(Value::integer(i64::from(crate::host::pid())).expect("pid is a fixnum"))
 }}
 
 // Fsleep_for: GNU waits in wait_reading_process_output, which also runs
@@ -69,5 +68,5 @@ fn slept(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 
 /// current_timespec, as `float-time' reads it.
 fn now() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+    crate::host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }

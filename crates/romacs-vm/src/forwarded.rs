@@ -851,7 +851,7 @@ impl Vm {
             Init::Str(text) => self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii()),
             Init::Float(x) => self.allocate_object(data::Object::Float(x)),
             Init::Getenv(name, fallback) => {
-                let text = std::env::var(name).unwrap_or_else(|_| fallback.to_owned());
+                let text = crate::host::getenv(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::SystemName => prim::prims::sysname::initial_value(self),
@@ -869,13 +869,13 @@ impl Vm {
                 self.list_value(&values)
             }
             Init::EtcDirectory => {
-                let root = std::env::var_os("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
+                let root = crate::host::getenv("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
                     .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
                 let text = format!("{}/", root.join("etc").display());
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::Invocation(name) => {
-                let exe = std::env::current_exe().unwrap_or_default();
+                let exe = crate::host::current_exe().unwrap_or_default();
                 let text = if name {
                     exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
                 } else {

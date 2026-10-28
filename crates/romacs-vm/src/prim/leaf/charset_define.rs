@@ -27,7 +27,7 @@ impl Leaf<'_> {
             let default = self.variable_value(default_symbol)?.unwrap_or(Value::NIL);
             let base = if matches!(self.kind(default), Kind::String | Kind::Bytes) {
                 std::path::PathBuf::from(std::ffi::OsString::from_vec(self.string_view(default)?.bytes().to_vec()))
-            } else { std::env::current_dir().map_err(|e| Fault::Error(e.to_string()))? };
+            } else { crate::host::current_dir().map_err(|e| Fault::Error(e.to_string()))? };
             for directory in directories {
                 let directory = if directory.is_absolute() { directory } else { base.join(directory) };
                 for suffix in [".map", ".txt"] {

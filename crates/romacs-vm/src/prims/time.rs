@@ -432,7 +432,7 @@ fn zone_rule(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<ZoneRule, F
     let wall = cx.symbol_name(value).ok().as_deref() == Some("wall");
     let rule = if value == Value::NIL {
         match cx.local_zone() {
-            crate::LocalZone::Process => std::env::var("TZ").ok(),
+            crate::LocalZone::Process => crate::host::getenv("TZ").and_then(|v| v.into_string().ok()),
             crate::LocalZone::Rule(rule) => Some(rule),
             crate::LocalZone::Wall | crate::LocalZone::Utc => None,
         }

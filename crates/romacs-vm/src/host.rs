@@ -184,7 +184,7 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
     let mut entry = std::mem::MaybeUninit::<libc::group>::uninit();
     let mut found = std::ptr::null_mut();
     let status = unsafe { libc::getgrgid_r(gid, entry.as_mut_ptr(), buffer.as_mut_ptr(), buffer.len(), &mut found) };
-    if status != 0 || found.is_null() {
+    if status != 0 || found.is_null() || unsafe { (*found).gr_name }.is_null() {
         return Err(status);
     }
     Ok(unsafe { CStr::from_ptr((*found).gr_name) }.to_bytes().to_vec())
