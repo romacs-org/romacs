@@ -61,13 +61,6 @@ fn char_to_string(cx, char: Value) {
     Ok(cx.make_string(bytes, multibyte))
 }}
 
-defsubr! { name = "byte-to-string", gnu = "editfns.c:164", effect = Pure,
-fn byte_to_string(cx, byte: Value) {
-    let b = byte.integer_value().ok_or(Fault::Wrong("fixnump", byte))?;
-    let b = u8::try_from(b).map_err(|_| Fault::Error("Invalid byte".into()))?;
-    Ok(cx.make_string(vec![b], false))
-}}
-
 defsubr! { name = "string-to-multibyte", gnu = "fns.c:string-to-multibyte", effect = Pure,
 fn string_to_multibyte(cx, string: Value) {
     widen_string(cx, string)
@@ -371,3 +364,10 @@ fn fillarray(cx, array: Value, item: Value) {
 
 defsubr! { name = "clear-string", gnu = "fns.c:3364", effect = MutatesArgs,
 fn clear_string(cx, string: Value) { cx.clear_string(string) }}
+
+defsubr! { name = "byte-to-string", gnu = "editfns.c:164", effect = Pure,
+fn byte_to_string(cx, byte: Value) {
+    let b = byte.integer_value().ok_or(Fault::Wrong("fixnump", byte))?;
+    let b = u8::try_from(b).map_err(|_| Fault::Error("Invalid byte".into()))?;
+    Ok(cx.make_string(vec![b], false))
+}}
