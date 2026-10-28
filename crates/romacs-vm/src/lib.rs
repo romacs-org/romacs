@@ -2573,22 +2573,26 @@ impl Vm {
         // may have been killed and made again inside the let.
         // The popped value and owner are no longer traced as a binding: a
         // watcher sees them from a root frame, and the restore reads them back.
+        // GNU do_one_unbind (SPECPDL_LET_LOCAL, eval.c:3871-3882) restores
+        // only if OWNER still has its local binding.
         if let Some(base) = base && self.local_binding_slots.contains(&slot) {
-            if self.live_buffer_value(owner) {
-                let table = self.slots[base].local;
-                if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
-                    let mut value = value;
-                    if self.variable_trapped(base) {
-                        let frame = self.root_frame(&[value, owner]);
-                        let notified = self.notify_watchers_at(base, value, "unlet", Some(owner));
-                        [value, _] = self.release_frame(frame);
-                        notified?;
-                    }
-                    // set-buffer-local-toplevel-value may have saved any object.
-                    let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
-                    self.slots[local.index(7).expect("private binding") - 1].value = value;
-                }
+            if self.owner_local_binding(base, owner).is_none() {
+                return Ok(());
             }
+            let (mut value, mut owner) = (value, owner);
+            if self.variable_trapped(base) {
+                let frame = self.root_frame(&[value, owner]);
+                let notified = self.notify_watchers_at(base, value, "unlet", Some(owner));
+                [value, owner] = self.release_frame(frame);
+                notified?;
+            }
+            // set_internal finds OWNER's binding after the watchers (data.c:
+            // 1730-1760): one may have killed it, made another or let its
+            // private slot be reused. With none left the default takes it.
+            let target = self.owner_local_binding(base, owner).unwrap_or(base);
+            // set-buffer-local-toplevel-value may have saved any object.
+            let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
+            self.slots[target].value = value;
             return Ok(());
         }
         if let Some(fwd) = self.native_forwarding(slot) {
@@ -2606,6 +2610,17 @@ impl Vm {
             self.slots[slot].value = value;
         }
         Ok(())
+    }
+    /// The private slot of OWNER's local binding of BASE, if OWNER is live
+    /// and still has one.
+    fn owner_local_binding(&mut self, base: usize, owner: Value) -> Option<usize> {
+        if !self.live_buffer_value(owner) {
+            return None;
+        }
+        // A watcher may have dropped the whole table: no local binding then.
+        let table = self.slots[base].local;
+        let local = self.declaration_hash_get(table, owner).ok()??;
+        Some(local.index(7).expect("private binding") - 1)
     }
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
