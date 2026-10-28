@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "5f3b8d9715c899efb9c5f62585646ac688cdcf5246d30da297c2115b102148ac",
+  "input_hash": "9a84b09aa9d67d0c2093d2f330cec6644cb4eec4d1f129e57be38bc8f9a99480",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -3418,10 +3418,10 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`lexical-binding` is a constant in VM2",
-   "gnu": "GNU declares `lexical-binding` a special variable (`src/lread.c` `DEFVAR_LISP (\"lexical-binding\", ...)` + `Fmake_variable_buffer_local`): live GNU 32.0.50 `(list (let ((lexical-binding t)) lexical-binding) (progn (setq lexical-binding nil) lexical-binding) (special-variable-p 'lexical-binding))` => `(t nil t)`",
-   "romacs": "VM2's compiler treats the symbol like `nil`/`t` (`crates/romacs-vm/src/lib.rs:890,1344,1649,1833,1890,1972`): a redundant literal `(let ((lexical-binding t)) ...)` or `let*` binding is accepted without changing the VM's lexical mode, while other bindings fail `vm2: cannot bind a constant`; `setq` fails `vm2: cannot set a constant`, both uncatchable (not Lisp signals), and `special-variable-p` answers nil (probes `reference/lisp-oracle/probes/g06-*.el`, receipts in `reference/lisp-oracle/VM-GAPS.md` G6)",
-   "why": "**Package-observable, accidental, not designed:** exposed when `lisp/` became GNU's own (Phase 0, R221); an in-place sweep of GNU's files had hidden it. Still breaks GNU sites that change its value; the literal-true assertion used by `cl-generic` now works. There are about 20 in the pinned `lisp/` including `simple.el:2176` (loadup) and the ERT runner `ert.el:844`. Open as gap G6 / worklist W20; owner decision pending (the dropped sweep is `git show 63495afe:lisp-overlay/proposed/lexical-binding-sweep.patch`). Recorded here so the gap has a row; no fix in this lane",
+   "mechanism": "`lexical-binding` reads t in every buffer",
+   "gnu": "GNU declares `lexical-binding` a special variable (`src/lread.c:5761` `DEFVAR_LISP` + `Fmake_variable_buffer_local`) whose default is nil; a file's cookie selects its mode. Live GNU 32.0.50 batch `(list lexical-binding (default-value 'lexical-binding) (with-temp-buffer lexical-binding) (let ((lexical-binding nil)) lexical-binding) (special-variable-p 'lexical-binding))` => `(t nil nil nil t)`",
+   "romacs": "VM2 declares it as GNU does, a special, automatically buffer-local variable (`crates/romacs-vm/src/forwarded.rs` `C_SPECIALS`), so `let`, `setq`, `set` and `special-variable-p` behave as in GNU, but its value starts t in every buffer and as the default, because VM2 compiles every form lexically: binding it nil does not select dynamic binding for `eval`, `load` or `eval-buffer`, and a file's cookie is not bound into it",
+   "why": "**Package-observable:** `(default-value 'lexical-binding)` and a fresh buffer's value are t, not nil; code that binds it nil to get dynamic evaluation still evaluates lexically. GNU's sites that bind or set it (`bytecomp.el`, `simple.el:2176`, `ert.el:844`) run",
    "symbols": [
     "lexical-binding",
     "special-variable-p"

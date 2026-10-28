@@ -34,8 +34,10 @@ impl Vm {
         // and a bare VM must stay bare: the collector's tests assert exact heap
         // contents and arena indices, so a skeleton allocated in the constructor
         // silently rewrites what "empty heap" means for every one of them.
-        // Installing on first keymap use keeps both properties true.
-        if self.names.contains_key("global-map") {
+        // Installing on first keymap use keeps both properties true. The
+        // internal map marks installation: reading a form interns
+        // `global-map' before any keymap primitive runs.
+        if self.names.contains_key("#:vm2-global-keymap") {
             return;
         }
         self.initialize_keymaps();

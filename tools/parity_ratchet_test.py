@@ -966,7 +966,7 @@ class CensusPopulation(unittest.TestCase):
             self.executed.append(path.relative_to(self.root).as_posix())
             return row_edit(dict(file=path.relative_to(self.root).as_posix(), forms_evaluated=1,
                                  total_forms=1, loaded=True, mode='cold'))
-        lc = SimpleNamespace(ROOT=self.root, run_file=run_file)
+        lc = SimpleNamespace(ROOT=self.root, run_file=run_file, load_path=lambda root: [root / 'gnu-lisp'])
         load = pr.load_module
         def module(path, name):
             return lc if name == 'lisp_census' else load(path, name)

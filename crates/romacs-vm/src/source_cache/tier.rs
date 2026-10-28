@@ -40,7 +40,7 @@ impl Vm {
             let mut args = vec![];
             for f in &a[1..] {
                 args.push(match f {
-                    Form::Sym(s) if !matches!(s.as_str(), "nil" | "t" | "lexical-binding") => {
+                    Form::Sym(s) if !matches!(s.as_str(), "nil" | "t") => {
                         let slot = self.slot(s);
                         let value = self.variable_value(slot)?;
                         if value == Value::UNBOUND {
@@ -48,7 +48,6 @@ impl Vm {
                         }
                         value
                     }
-                    Form::Sym(s) if s == "lexical-binding" => Value::TRUE,
                     _ => self.literal(f)?,
                 });
             }

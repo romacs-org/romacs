@@ -135,9 +135,11 @@ fn maphash_carries_its_observable_divergence_with_gnu_beside_ours() {
 
 #[test]
 fn special_form_if_is_not_falsely_reported_as_a_registered_core_subr() {
-    // VM2 compiles `if` as syntax, not a funcall-able registry entry.
-    let a = not_found(Index::embedded(), "if");
-    assert_eq!(a.coverage.core_registered, 0);
+    // GNU's `if` is an UNEVALLED subr in its function cell (eval.c), and
+    // VM2 registers one (prims/special_forms.rs); no core implements it.
+    let d = found("if");
+    assert_eq!(d.implementation, Implementation::Vm2Only);
+    assert!(d.core.is_empty());
     assert!(matches!(
         Index::embedded().implements("eval_if"),
         Reverse::NotFound { .. }

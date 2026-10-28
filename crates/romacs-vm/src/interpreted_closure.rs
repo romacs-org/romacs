@@ -125,7 +125,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("romacs-load-constant-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join("constant.el");
-        std::fs::write(&path, "(defun loaded-constant () (let ((lexical-binding nil)) 7))\n(setq loaded-after-constant t)\n").unwrap();
+        std::fs::write(&path, "(defun loaded-constant () (let ((t nil)) 7))\n(setq loaded-after-constant t)\n").unwrap();
         let mut vm = Vm::new();
         vm.eval_source_raw("(defun internal-macroexpand-for-load (form &rest ignored) form)").unwrap();
         vm.load_file_raw(&path).unwrap();
@@ -138,7 +138,7 @@ mod tests {
     fn explicit_interpreted_body_is_compiled_only_when_called() {
         let mut vm = Vm::new();
         vm.lazy_regime = true;
-        check(&mut vm, "(progn (setq deferred-constant (make-interpreted-closure nil '((let ((lexical-binding nil)) 7)) '(t) nil nil)) t)", "t");
+        check(&mut vm, "(progn (setq deferred-constant (make-interpreted-closure nil '((let ((t nil)) 7)) '(t) nil nil)) t)", "t");
         let error = vm.eval_source_raw("(condition-case e (funcall deferred-constant) (error e))").unwrap();
         assert!(vm.display(error).unwrap().contains("constant"));
     }

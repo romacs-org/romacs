@@ -73,6 +73,9 @@ const HOST_CONFIGURATION: &str = if cfg!(target_arch = "x86_64") {
 /// variable (forwarded objects and integers cannot yet: VM2-CVAR1).
 pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "inhibit-x-resources", gnu: "emacs.c:3596", kind: Kind::Bool(false) },
+    // VM2 compiles every form lexically, so the variable reads t, as in a
+    // lexical-binding file; GNU's default is nil (VM2-LEXBIND1).
+    CVariable { name: "lexical-binding", gnu: "lread.c:5761", kind: Kind::Lisp(Init::True) },
     // run-window-scroll-functions (window.c:3862) runs it through ordinary
     // lookup; modes make it buffer-local, as hooks are. xdisp.c:38881 nil.
     CVariable { name: "window-scroll-functions", gnu: "xdisp.c:38865", kind: Kind::Lisp(Init::Nil) },
@@ -373,7 +376,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
 
 /// C variables GNU makes automatically buffer-local at startup
 /// (`Fmake_variable_buffer_local` in buffer.c, syntax.c, xdisp.c, ...).
-const AUTOMATICALLY_LOCAL: &[&str] = &["syntax-propertize--done", "case-symbols-as-words",
+const AUTOMATICALLY_LOCAL: &[&str] = &["syntax-propertize--done", "case-symbols-as-words", "lexical-binding",
     "comment-end-can-be-escaped", "display-fill-column-indicator", "display-fill-column-indicator-character",
     "display-fill-column-indicator-column", "display-line-numbers", "display-line-numbers-offset",
     "display-line-numbers-widen", "display-line-numbers-width", "expose-hidden-buffer", "fontification-functions",

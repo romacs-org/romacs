@@ -949,7 +949,7 @@ fn lambda_arity(args: &[Form]) -> Result<(usize, usize, bool)> {
         if name.source().is_some_and(|n| n.starts_with('&')) {
             return Err("invalid lambda argument list".into());
         }
-        if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
+        if matches!(name.source(), Some("nil" | "t")) {
             return Err("cannot bind a constant".into());
         }
         if !optional && !rest {
@@ -1595,7 +1595,7 @@ impl Vm {
         }
         for arg in &parameters {
             let name = arg.name()?;
-            if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
+            if matches!(name.source(), Some("nil" | "t")) {
                 return Err("cannot bind a constant".into());
             }
             let reg = b.reg();
@@ -1921,7 +1921,7 @@ impl Vm {
                 b.emit(Op::Const(r, object.value(self)?));
                 Ok(r)
             }
-            Form::Sym(s) if s == "nil" || s == "t" || s == "lexical-binding" => {
+            Form::Sym(s) if s == "nil" || s == "t" => {
                 let r = b.reg();
                 b.emit(Op::Const(
                     r,
@@ -2113,7 +2113,7 @@ impl Vm {
                         b.emit(Op::Const(r, Value::NIL));
                         for pair in rest.chunks_exact(2) {
                             let name = pair[0].name()?;
-                            if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
+                            if matches!(name.source(), Some("nil" | "t")) {
                                 return Err("cannot set a constant".into());
                             }
                             r = self.expr(b, &pair[1])?;
@@ -2170,12 +2170,7 @@ impl Vm {
                                 }
                                 _ => return Err("bad let binding".into()),
                             };
-                            if name.source() == Some("lexical-binding")
-                                && matches!(init, Some(Form::Sym(value)) if value == "t")
-                            {
-                                continue;
-                            }
-                            if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
+                            if matches!(name.source(), Some("nil" | "t")) {
                                 return Err("cannot bind a constant".into());
                             }
                             let value = if let Some(f) = init {
@@ -2287,7 +2282,7 @@ impl Vm {
     fn condition_case(&mut self, b: &mut Builder, rest: &[Form]) -> Result<usize> {
         // Macro-generated handler variables carry identity, not an interned name.
         let variable = rest[0].name()?;
-        if matches!(variable.source(), Some("t" | "lexical-binding")) {
+        if variable.source() == Some("t") {
             return Err("cannot bind a constant".into());
         }
         let mut clauses = Vec::new();

@@ -32,18 +32,16 @@ fn replay_gnu_32_known_answers_and_dump_every_form() {
     assert_eq!(categories.len(), 20);
 }
 
+/// GNU's `lexical-binding' is a special, automatically buffer-local
+/// variable (lread.c DEFVAR_LISP + Fmake_variable_buffer_local), so `let',
+/// `setq' and a parameter bind it; VM2 reads t, being always lexical
+/// (DIVERGENCES.md VM2-LEXBIND1).
 #[test]
-fn lexical_binding_is_constant_by_a10_a11_and_the_owner_ruling() {
-    for json in [
-        serde_json::json!(["setq", "lexical-binding", "nil"]),
-        serde_json::json!(["let", [["lexical-binding", "nil"]], "lexical-binding"]),
-        serde_json::json!(["lambda", ["lexical-binding"], "lexical-binding"]),
-    ] {
-        let error = Vm::new()
-            .compile(&Form::from_json(json).unwrap())
-            .unwrap_err();
-        assert!(error.contains("constant"));
-    }
+fn lexical_binding_is_a_special_variable_as_in_gnu() {
+    let mut vm = Vm::new();
+    let source = "(list lexical-binding (special-variable-p 'lexical-binding) (local-variable-if-set-p 'lexical-binding) (let ((lexical-binding nil)) lexical-binding) (funcall (lambda (lexical-binding) lexical-binding) 5) lexical-binding (progn (setq lexical-binding nil) lexical-binding))";
+    let got = vm.eval_source(source).unwrap().display().unwrap();
+    assert_eq!(got, "(t t t nil 5 t nil)");
 }
 
 #[test]

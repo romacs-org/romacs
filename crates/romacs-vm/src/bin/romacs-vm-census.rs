@@ -62,6 +62,8 @@ fn main() {
     let warm = !preload.is_empty();
     let file = std::fs::canonicalize(&args[0]).unwrap();
     let mut vm = Vm::new();
+    // GNU's census oracle runs `--batch`, as the ERT runner's regime does.
+    vm.eval_source("(setq noninteractive t)").unwrap();
     let paths = args[1..].iter().map(std::path::PathBuf::from).collect::<Vec<_>>();
     vm.set_load_path(&paths).unwrap();
     let mut chain = Vec::new();

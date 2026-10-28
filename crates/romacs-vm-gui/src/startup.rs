@@ -257,11 +257,6 @@ fn gnu_defined(vm: &mut Vm, command: &str) -> Result<bool, String> {
 
 /// Bind every stand-in key: GNU's command where loadup defined it, else romacs's.
 fn bind_journey_keys(vm: &mut Vm, after_loadup: bool) -> Result<Vec<Binding>, String> {
-    // Install VM2's keymaps through a keymap primitive BEFORE any form names
-    // `global-map`: VM2's lazy keymap setup treats an interned `global-map`
-    // symbol as "already installed", and `global-set-key` then panics on the
-    // missing internal map (crates/romacs-vm/src/keymap.rs ensure_keymaps).
-    vm.eval_source("(keymapp nil)")?;
     let mut bindings = vec![];
     for (key, gnu, romacs) in STAND_INS {
         let gnu_defined = after_loadup && gnu_defined(vm, gnu)?;
