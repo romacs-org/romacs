@@ -9,7 +9,7 @@
     "fns.c"
   ],
   "gnu_def": "fns.c:6576",
-  "rust": "src/prims/search.rs:18",
+  "rust": "src/prims/search.rs:54",
   "args": [
     "string",
     "string",

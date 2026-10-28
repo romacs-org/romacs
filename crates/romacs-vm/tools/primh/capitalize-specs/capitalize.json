@@ -1,7 +1,7 @@
 {
  "name": "capitalize", "arity": [1, 1], "effect": "reads",
  "gnu_files": ["casefiddle.c"], "gnu_def": "casefiddle.c:400",
- "rust": "src/prims/capitalize.rs:68", "args": ["any"],
+ "rust": "src/prims/capitalize.rs:79", "args": ["any"],
  "extra": {"0": ["97", "453", "454", "64257", "134217825", "536871009", "9999999999", "(unibyte-string 255 97 66)", "(string-to-multibyte \"aBC\")", "\"hELLO-world 123ABC foo_BAR don't\"", "\"ßABC ﬃXYZ ǆABC ΟΣ ΟΣΑ İX\""]},
  "probes": [
   "(list (fboundp 'capitalize) (functionp #'capitalize) (funcall #'capitalize \"aBC\"))",
