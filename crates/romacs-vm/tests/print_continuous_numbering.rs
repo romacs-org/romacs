@@ -29,6 +29,7 @@ const CASES: &str = r##"
 (let ((print-circle t) (print-continuous-numbering t) print-number-table (a (list 1))) (prin1-to-string (list a a)) (list (prin1-to-string (list a a) nil '((continuous-numbering))) (gethash a print-number-table)))
 (let ((print-circle t) (print-continuous-numbering t) print-number-table (tb (make-hash-table :test 'eq)) (a (list 1))) (list (prin1-to-string (list a a) nil `((number-table . ,tb))) (prin1-to-string a nil `((number-table . ,tb))) (gethash a tb) print-number-table (prin1-to-string a)))
 (let ((print-circle t) (print-continuous-numbering t) (tb (make-hash-table :test 'eq)) (a (list 1))) (puthash a 3 tb) (let ((print-number-table tb)) (prin1-to-string (list a a) nil '((number-table)))))
+(let ((print-circle t) (print-continuous-numbering t) print-number-table (a (list 1))) (list (prin1-to-string (list a a)) (with-temp-buffer (let ((print-continuous-numbering nil)) (princ "\377" (current-buffer))) (buffer-string)) (prin1-to-string (list a a)) (gethash a print-number-table)))
 (list (prin1-to-string "\377" t) (prin1-to-string (list "\377" (string-to-multibyte "\377")) t) (with-temp-buffer (princ "\377" (current-buffer)) (princ (vector "\377" "é") (current-buffer)) (buffer-string)) (let (acc) (princ "\377" (lambda (c) (push c acc))) acc))
 "##;
 

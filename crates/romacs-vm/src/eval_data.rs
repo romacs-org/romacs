@@ -175,6 +175,13 @@ impl Vm {
         printed
     }
 
+    /// print_string for princ of a plain string into a multibyte buffer:
+    /// the printer's own escaping, without print's numbering state.
+    pub(super) fn print_plain_string(&self, value: Value) -> Result<String> {
+        let options = PrintOptions { nonascii: true, buffer: true, ..PrintOptions::default() };
+        self.print_body(value, false, &options, 0)
+    }
+
     /// GNU print_preprocess: mark each circle candidate in OBJECT's
     /// traversal order, numbering one when it is reached a second time.
     fn print_preprocess(&mut self, value: Value, quoted: bool, options: &mut PrintOptions, continuous: bool, table: Value) -> Result<()> {

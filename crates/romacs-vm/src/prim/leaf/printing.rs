@@ -95,9 +95,12 @@ impl Leaf<'_> {
     pub(crate) fn princ_text(&mut self, object: Value, stream: Value) -> std::result::Result<Value, Fault> {
         let continuous = self.intern("print-continuous-numbering");
         let continuous = self.variable_value(continuous)?.is_some_and(|v| v != Value::NIL);
-        if continuous || !matches!(self.kind(object), Kind::String | Kind::Bytes)
-            || !self.string_view(object)?.is_multibyte() && self.print_buffer(stream)?.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer) {
+        if continuous || !matches!(self.kind(object), Kind::String | Kind::Bytes) {
             return self.print_text(object, false, Value::NIL, stream);
+        }
+        if !self.string_view(object)?.is_multibyte() && self.print_buffer(stream)?.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer) {
+            let text = self.vm.print_plain_string(object).map_err(Fault::Error)?;
+            return Ok(self.string(&text));
         }
         Ok(object)
     }
