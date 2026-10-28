@@ -76,6 +76,7 @@ const CASES: &str = r###"
 (progn (setq truncate-lines t) (insert "a" (propertize " " 'display '(space :align-to 200)) "b\n" (propertize " " 'display '(space :width 100)) "c") (list (window-text-pixel-size) (window-text-pixel-size nil nil nil 500)))
 (progn (insert "x" (propertize " " 'display '(space :width 100)) "y\nz") (list (window-text-pixel-size) (window-text-pixel-size nil 2 3) (window-text-pixel-size nil 3)))
 (progn (insert "a" (propertize "X" 'display '((margin nil) "LONG")) "b") (list (window-text-pixel-size) (progn (put-text-property 2 3 'display '((margin nil) (space :width 5))) (window-text-pixel-size)) (progn (put-text-property 2 3 'display '((margin) "LONG")) (window-text-pixel-size)) (progn (put-text-property 2 3 'display '((margin left-margin) "LONG")) (window-text-pixel-size)) (progn (put-text-property 2 3 'display '((margin right-margin) (space :width 5))) (window-text-pixel-size)) (progn (put-text-property 2 3 'display '((margin foo) "LONG")) (window-text-pixel-size)) (progn (put-text-property 2 3 'display '[((margin nil) . "LONG")]) (window-text-pixel-size)) (progn (put-text-property 2 3 'display '(((margin nil) "LONG") ((margin left-margin) "Q"))) (window-text-pixel-size)) (progn (put-text-property 2 3 'display (propertize "ab" 'display '((margin nil) "LONG"))) (window-text-pixel-size))))
+(progn (insert "a" (propertize "X" 'display (propertize "ab" 'display '(when (> 2 1) . "Q"))) "b") (window-text-pixel-size))
 (progn (insert "abc") (let ((o (make-overlay 2 2)) (p (make-overlay 3 4))) (overlay-put o 'before-string (propertize "x" 'display '((margin nil) "WIDE"))) (overlay-put p 'display '((margin nil) (space :width 6)))) (window-text-pixel-size))
 (progn (insert "ab") (let ((o (make-overlay 1 1))) (overlay-put o 'priority 1) (overlay-put o 'before-string "\t") (overlay-put o 'after-string "X") (list (window-text-pixel-size) (progn (overlay-put o 'priority -1) (window-text-pixel-size)) (progn (overlay-put o 'priority nil) (window-text-pixel-size)) (progn (move-overlay o 2 2) (overlay-put o 'priority 1) (window-text-pixel-size)))))
 (progn (insert "abcd") (let ((a (make-overlay 2 2)) (b (make-overlay 2 2)) (c (make-overlay 2 2))) (overlay-put a 'before-string "A") (overlay-put a 'after-string "\t") (overlay-put a 'priority 3) (overlay-put b 'before-string "\t") (overlay-put b 'priority 1) (overlay-put c 'after-string "CC") (overlay-put c 'priority 2)) (window-text-pixel-size))
@@ -84,6 +85,7 @@ const CASES: &str = r###"
 (progn (insert "abc") (let ((a (make-overlay 1 2)) (b (make-overlay 2 2))) (overlay-put a 'after-string "A") (overlay-put b 'after-string "\t")) (list (window-text-pixel-size) (progn (dolist (o (overlays-in 1 4)) (delete-overlay o)) (let ((a (make-overlay 2 2)) (b (make-overlay 1 2))) (overlay-put a 'after-string "A") (overlay-put b 'after-string "\t")) (window-text-pixel-size))))
 (progn (insert "ab") (dolist (s '("A" "\t" "BB" "\t" "C")) (overlay-put (make-overlay 2 2) 'before-string s) (overlay-put (make-overlay 1 1) 'after-string s)) (window-text-pixel-size))
 (progn (insert "ab") (let ((x (make-overlay 2 2))) (overlay-put x 'before-string "\t") (dolist (s '("A" "BB")) (overlay-put (make-overlay 2 2) 'before-string s)) (delete-overlay x) (dolist (s '("\t" "C")) (overlay-put (make-overlay 2 2) 'before-string s))) (window-text-pixel-size))
+(progn (insert "a" (propertize "X" 'display (string-to-unibyte "\351\200z")) "b") (let ((o (make-overlay 1 1))) (overlay-put o 'before-string (string-to-unibyte "\351z")) (overlay-put o 'after-string (string-to-unibyte "\200"))) (setq line-prefix (string-to-unibyte "\377")) (list (window-text-pixel-size) (window-text-pixel-size nil 2 3)))
 (progn (insert "abc\n") (setq mode-line-format nil) (list (window-text-pixel-size nil nil nil nil nil t) (progn (setq mode-line-format "x") (window-text-pixel-size nil nil nil nil nil t)) (progn (set-window-parameter nil 'mode-line-format 'none) (prog1 (window-text-pixel-size nil nil nil nil nil t) (set-window-parameter nil 'mode-line-format nil)))))
 "###;
 
@@ -185,4 +187,27 @@ fn displayed_window_refuses_after_a_host_layout() {
         assert_eq!(refused, format!("\"VM2 {name} in a displayed window is unsupported\""));
     }
     assert_eq!(vm.eval_source("(condition-case e (window-text-pixel-size 'w) (error e))").unwrap().display().unwrap(), "(wrong-type-argument window-live-p w)");
+}
+
+/// Strings refuse what buffer text refuses. GNU's answer for each refused
+/// form differs from its twin without the feature, which matches.
+#[test]
+fn strings_refuse_as_buffer_text_does() {
+    let mut vm = booted();
+    let composed = "(propertize \"abc\" 'composition '((3)))";
+    for (refused, plain, what) in [
+        (format!("(insert \"a\" (propertize \"X\" 'display {composed}) \"b\")"), "(insert \"a\" (propertize \"X\" 'display \"abc\") \"b\")".to_owned(), "of composed text (the `composition' property)"),
+        (format!("(insert \"ab\") (overlay-put (make-overlay 2 2) 'before-string {composed})"), "(insert \"ab\") (overlay-put (make-overlay 2 2) 'before-string \"abc\")".to_owned(), "of composed text (the `composition' property)"),
+        (format!("(insert \"ab\") (overlay-put (make-overlay 2 2) 'before-string (propertize \"Q\" 'display {composed}))"), "(insert \"ab\") (overlay-put (make-overlay 2 2) 'before-string (propertize \"Q\" 'display \"abc\"))".to_owned(), "of composed text (the `composition' property)"),
+        (format!("(insert \"ab\") (setq line-prefix {composed})"), "(insert \"ab\") (setq line-prefix \"abc\")".to_owned(), "of composed text (the `composition' property)"),
+        ("(insert \"a\" (propertize \"X\" 'display (propertize \"ab\" 'display '(min-width (5)))) \"b\")".to_owned(), "(insert \"a\" (propertize \"X\" 'display \"ab\") \"b\")".to_owned(), "of a `(min-width ...)' display specification"),
+        ("(setq unibyte-display-via-language-environment t) (insert \"a\" (propertize \"X\" 'display (string-to-unibyte \"\\351\")) \"b\")".to_owned(), "(insert \"a\" (propertize \"X\" 'display (string-to-unibyte \"\\351\")) \"b\")".to_owned(), "of a unibyte string with `unibyte-display-via-language-environment'"),
+    ] {
+        let measure = |body: &str| format!("(unwind-protect (progn {body} (window-text-pixel-size)) (setq unibyte-display-via-language-environment nil))");
+        let refusal = romacs(&mut vm, &format!("(condition-case e {} (error (cadr e)))", measure(&refused)));
+        assert_eq!(refusal, format!("\"VM2 window-text-pixel-size {what} is unsupported\""), "{refused}");
+        let twin = oracle(&measure(&plain));
+        assert_eq!(romacs(&mut vm, &measure(&plain)), twin, "{plain}");
+        assert_ne!(oracle(&measure(&refused)), twin, "{refused}");
+    }
 }

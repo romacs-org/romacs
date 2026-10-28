@@ -32,6 +32,7 @@ struct Look {
     nobreak_ascii: bool,
     raw_hex: bool,
     glyphless: Value,
+    unibyte_via_language: bool,
 }
 
 pub(super) struct Source<'l, 'a> {
@@ -122,7 +123,7 @@ impl<'l, 'a> Source<'l, 'a> {
             let invisible = self.property(p - 1, self.syms.invisible)?.0;
             if self.leaf.invisible_kind(invisible)? != 0 { continue; }
             let (spec, overlay) = self.property(p - 1, self.syms.display)?;
-            if spec != Value::NIL && self.display_spec(spec, false)?.is_some() {
+            if spec != Value::NIL && self.display_spec(spec, false, false)?.is_some() {
                 let start = match self.overlay_span(overlay)? {
                     Some((start, _)) => start,
                     None => {
@@ -203,11 +204,9 @@ impl<'l, 'a> Source<'l, 'a> {
         self.stop_due = false;
         if self.pre.is_none() { self.pre = Some(p); }
         if p < self.view.zv {
-            if self.property(p, self.syms.composition)?.0 != Value::NIL {
-                return Err(unsupported("of composed text (the `composition' property)"));
-            }
+            composition_refusal(self.property(p, self.syms.composition)?.0)?;
             let (spec, overlay) = self.property(p, self.syms.display)?;
-            if spec != Value::NIL && let Some(replacement) = self.display_spec(spec, false)? {
+            if spec != Value::NIL && let Some(replacement) = self.display_spec(spec, false, false)? {
                 let end = match self.overlay_span(overlay)? {
                     Some((_, end)) => end.clamp(self.view.begv, self.view.zv),
                     None => self.display_end(p)?,
@@ -337,7 +336,7 @@ impl<'l, 'a> Source<'l, 'a> {
     fn string(&mut self, string: Value, origin: Origin) -> R<()> {
         let chars: Vec<(usize, u32)> = {
             let view = self.leaf.vm.str_view(string).ok_or_else(|| fault("display string required"))?;
-            if !view.is_multibyte() { view.bytes().iter().enumerate().map(|(i, &b)| (i, u32::from(b))).collect() }
+            if !view.is_multibyte() { view.bytes().iter().enumerate().map(|(i, &b)| (i, unibyte_char(b))).collect() }
             else {
                 let (bytes, mut at, mut out) = (view.bytes(), 0, vec![]);
                 while at < bytes.len() {
@@ -348,21 +347,23 @@ impl<'l, 'a> Source<'l, 'a> {
                 out
             }
         };
+        if self.look.unibyte_via_language && chars.iter().any(|&(_, c)| c > 0x7f) {
+            return Err(unsupported("of a unibyte string with `unibyte-display-via-language-environment'"));
+        }
         let end_byte = self.leaf.vm.str_view(string).map_or(0, |v| v.bytes().len());
         let mut i = 0;
         while i < chars.len() {
             let here = Origin { strpos: Some(i), ..origin };
-            if !origin.from_display {
-                let spec = self.leaf.vm.property_textget(string, i as i64, self.syms.display)?;
-                if spec != Value::NIL && let Some(replacement) = self.display_spec(spec, true)? {
-                    let (at, display) = (Value::integer(i as i64).map_err(Fault::Error)?, self.syms.display);
-                    let end = self.leaf.vm.next_single_property_change_values(at, display, string, Value::NIL)?
-                        .integer_value().map_or(chars.len(), |n| n as usize);
-                    let under = here.whitespace_under || matches!(chars[i].1, 0x20 | 0x09);
-                    self.replacement(replacement, Origin { from_display: true, whitespace_under: under, ..here })?;
-                    i = end.max(i + 1);
-                    continue;
-                }
+            composition_refusal(self.leaf.vm.property_textget(string, i as i64, self.syms.composition)?)?;
+            let spec = self.leaf.vm.property_textget(string, i as i64, self.syms.display)?;
+            if spec != Value::NIL && let Some(replacement) = self.display_spec(spec, true, origin.from_display)? {
+                let (at, display) = (Value::integer(i as i64).map_err(Fault::Error)?, self.syms.display);
+                let end = self.leaf.vm.next_single_property_change_values(at, display, string, Value::NIL)?
+                    .integer_value().map_or(chars.len(), |n| n as usize);
+                let under = here.whitespace_under || matches!(chars[i].1, 0x20 | 0x09);
+                self.replacement(replacement, Origin { from_display: true, whitespace_under: under, ..here })?;
+                i = end.max(i + 1);
+                continue;
             }
             let property = self.leaf.vm.property_textget(string, i as i64, self.syms.invisible)?;
             let invisible = self.leaf.invisible_kind(property)?;
@@ -528,7 +529,8 @@ impl<'l, 'a> Source<'l, 'a> {
 
     /// handle_display_spec: the replacing specification in SPEC, if any.
     /// IN_STRING stops at the first one, as for a string's own property.
-    fn display_spec(&mut self, spec: Value, in_string: bool) -> R<Option<Replacement>> {
+    /// In a string from a display property (NESTED) nothing replaces.
+    fn display_spec(&mut self, spec: Value, in_string: bool, nested: bool) -> R<Option<Replacement>> {
         let s = self.syms;
         let mut spec = spec;
         let mut eval = true;
@@ -546,7 +548,7 @@ impl<'l, 'a> Source<'l, 'a> {
         };
         let mut found = None;
         for item in items {
-            if let Some(r) = self.single_display_spec(item, eval)? {
+            if let Some(r) = self.single_display_spec(item, eval, nested)? {
                 if found.is_none() { found = Some(r); }
                 if in_string { break; }
             }
@@ -554,23 +556,30 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(found)
     }
 
-    fn single_display_spec(&mut self, spec: Value, eval: bool) -> R<Option<Replacement>> {
+    /// handle_single_display_spec. A nested string's spec matters only
+    /// for `min-width', which GNU applies before it stops there; FORM in
+    /// `(when FORM ...)' cannot change what a nested string shows.
+    fn single_display_spec(&mut self, spec: Value, eval: bool, nested: bool) -> R<Option<Replacement>> {
         let s = self.syms;
         let mut spec = spec;
         if let Some((head, rest)) = self.leaf.pair(spec) && head == s.when {
             let Some((form, value)) = self.leaf.pair(rest) else { return Ok(None) };
             let form = if eval { form } else { Value::NIL };
             if form == Value::NIL { return Ok(None); }
-            if form != Value::TRUE { return Err(unsupported("of a `(when FORM ...)' display specification")); }
+            if form != Value::TRUE && !nested {
+                return Err(unsupported("of a `(when FORM ...)' display specification"));
+            }
             spec = value;
         }
+        if let Some((head, rest)) = self.leaf.pair(spec) && head == s.min_width
+            && self.leaf.pair(rest).is_some_and(|(w, _)| self.leaf.pair(w).is_some()) {
+            return Err(unsupported("of a `(min-width ...)' display specification"));
+        }
+        if nested { return Ok(None); }
         if let Some((head, rest)) = self.leaf.pair(spec) {
             let has_arg = self.leaf.pair(rest).is_some();
             if has_arg && [s.height, s.space_width, s.raise].contains(&head) { return Ok(None); }
             if head == s.slice { return Ok(None); }
-            if head == s.min_width && self.leaf.pair(rest).is_some_and(|(w, _)| self.leaf.pair(w).is_some()) {
-                return Err(unsupported("of a `(min-width ...)' display specification"));
-            }
             if has_arg && (head == s.left_fringe || head == s.right_fringe) { return Ok(Some(Replacement::Nothing)); }
         }
         // `(margin LOCATION)': a nil or absent LOCATION is the text area.
@@ -711,6 +720,17 @@ impl<'l, 'a> Source<'l, 'a> {
     }
 }
 
+/// A unibyte string's byte as get_next_display_element shows it: a
+/// non-ASCII byte is a raw-byte character (BYTE8_TO_CHAR).
+fn unibyte_char(b: u8) -> u32 {
+    if b.is_ascii() { u32::from(b) } else { 0x3fff00 + u32::from(b) }
+}
+
+/// Composed text, in a buffer or a string, has no terminal model here.
+fn composition_refusal(property: Value) -> R<()> {
+    if property == Value::NIL { Ok(()) } else { Err(unsupported("of composed text (the `composition' property)")) }
+}
+
 /// compare_overlay_entries: after-strings before before-strings, except
 /// within one overlay; after-strings by decreasing and before-strings by
 /// increasing priority. Not a total order across overlays.
@@ -793,6 +813,7 @@ impl Look {
             nobreak_ascii: var(leaf, "nobreak-char-ascii-display")? != Value::NIL,
             raw_hex: var(leaf, "display-raw-bytes-as-hex")? != Value::NIL,
             glyphless: var(leaf, "glyphless-char-display")?,
+            unibyte_via_language: var(leaf, "unibyte-display-via-language-environment")? != Value::NIL,
         })
     }
 }
