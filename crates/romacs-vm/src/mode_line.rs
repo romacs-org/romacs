@@ -229,6 +229,25 @@ impl Vm {
         self.expansion_form(value, 0).unwrap_or(Form::Vector(vec![]))
     }
 
+    /// A string element's text. A string with text properties reaches the
+    /// expander as an object (`expansion_form`), as GNU's `propertize`d
+    /// mode-line strings do; VM2 does not project its properties (VM2-G1B),
+    /// so it expands as its text.
+    fn ml_string(&self, elt: &Form) -> Result<Option<String>> {
+        Ok(match elt {
+            Form::String(s) => Some(s.clone()),
+            Form::Bytes(b) => Some(String::from_utf8_lossy(b).into_owned()),
+            Form::Object(object) => {
+                let value = object.value(self)?;
+                match self.object_if(value) {
+                    Some(data::Object::String(_)) => Some(String::from_utf8_lossy(&self.string_bytes(value)?).into_owned()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+    }
+
     fn ml_risky_marked(&mut self, symbol: &Form) -> bool {
         let quote = |form| Form::List(vec![Form::Sym("quote".into()), form]);
         let form = Form::List(vec![Form::Sym("get".into()), quote(symbol.clone()), quote(Form::Sym("risky-local-variable".into()))]);
@@ -264,12 +283,7 @@ impl Vm {
                 elt = Form::String("*too-deep*".into());
             }
             depth += 1;
-            let string = match &elt {
-                Form::String(s) => Some(s.clone()),
-                Form::Bytes(b) => Some(String::from_utf8_lossy(b).into_owned()),
-                _ => None,
-            };
-            if let Some(s) = string {
+            if let Some(s) = self.ml_string(&elt)? {
                 let tab = self.ml_tab_width()?;
                 // GNU replaces a risky string's properties with PROPS and
                 // otherwise merges PROPS onto the string's own; VM2 does not
@@ -333,7 +347,7 @@ impl Vm {
                         risky = true;
                     }
                     let Some(value) = self.ml_form_symbol_value(&symbol)? else { break };
-                    if matches!(value, Form::String(_) | Form::Bytes(_)) {
+                    if self.ml_string(&value)?.is_some() {
                         literal = true;
                     }
                     if value.name().ok().is_some_and(|name| symbol.name().ok() == Some(name)) {
@@ -343,6 +357,7 @@ impl Vm {
                 }
                 form @ (Form::List(_) | Form::Dotted(..)) if is_cons(&form) => {
                     let (car, cdr) = split(&form).expect("cons");
+                    let string_car = self.ml_string(&car)?.is_some();
                     match car {
                         Form::Sym(s) if s == ":eval" => {
                             if risky {
@@ -400,7 +415,8 @@ impl Vm {
                                 field_width = field_width.max(lim);
                             }
                         }
-                        Form::String(_) | Form::Bytes(_) | Form::List(_) | Form::Dotted(..) => {
+                        Form::String(_) | Form::Bytes(_) | Form::List(_) | Form::Dotted(..) | Form::Object(_)
+                            if string_car || !matches!(car, Form::Object(_)) => {
                             let items = match &form {
                                 Form::List(items) | Form::Dotted(items, _) => items.clone(),
                                 _ => unreachable!(),

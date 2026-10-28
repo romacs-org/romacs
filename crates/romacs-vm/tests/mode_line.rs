@@ -133,3 +133,21 @@ fn error_construct_is_empty_and_siblings_survive_collection() {
     let alive = vm.eval_source("(+ 2 3)").unwrap();
     assert_eq!(alive.display().unwrap(), "5");
 }
+
+/// GNU's own mode-line variables hold `propertize`d strings (bindings.el
+/// `mode-line-modified`, `propertized-buffer-identification`): each
+/// expands as its text, a %-construct when it is an element or heads a
+/// list, literally when it is a symbol's value (`display_mode_element`).
+#[test]
+fn propertized_strings_expand_as_their_text() {
+    let mut vm = Vm::new();
+    vm.eval_source(SCENE).unwrap();
+    vm.eval_source(r#"(setq ml-literal (propertize "%b" 'face 'bold)
+                            mode-line-format
+                            (list (propertize "[%b]" 'help-echo "name")
+                                  (list (propertize "%1*" 'local-map (make-sparse-keymap)) (propertize "%1+" 'help-echo "m"))
+                                  '(:eval (propertize "E" 'face 'bold))
+                                  'ml-literal))"#).unwrap();
+    let s = vm.display_snapshot(400, 300).unwrap();
+    assert_eq!(s.mode_line.as_ref().map(|b| b.utf8.as_str()), Some("[g1]**E%b"));
+}
