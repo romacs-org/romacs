@@ -47,7 +47,7 @@ impl HostInput for Script {
         seen.widths.push(frame.frame.width);
         Ok(self.first_end.map(|end| vec![(frame.frame.windows[0].snapshot.id, end)]).unwrap_or_default())
     }
-    fn next_event(&mut self) -> Result<HostEvent, String> {
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
         self.seen.borrow_mut().reads += 1;
         // An exhausted script fails the request instead of hanging the test.
         self.events.pop_front().ok_or_else(|| "host script exhausted".to_string())
@@ -218,7 +218,7 @@ fn every_call_path_reads_through_the_reentrant_primitive() {
     );
     assert_eq!(seen.borrow().reads, 3);
     assert_eq!(
-        eval(&mut vm, "(condition-case e (romacs--read-host-event 1) (error (car e)))"),
+        eval(&mut vm, "(condition-case e (romacs--read-host-event 1 2) (error (car e)))"),
         "wrong-number-of-arguments"
     );
 }

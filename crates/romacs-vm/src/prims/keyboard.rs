@@ -299,10 +299,21 @@ fn discard_input(cx) {
     Ok(Value::NIL)
 }}
 
-defsubr! { name = "current-idle-time", gnu = "keyboard.c:4949", effect = Pure,
-fn current_idle_time(_cx) {
-    // timer_idleness_start_time is valid only while Emacs waits idle and
-    // runs idle timers; VM2 never does (VM2-PROC1), so Lisp always sees nil.
+defsubr! { name = "current-idle-time", gnu = "keyboard.c:4949", effect = Reads,
+fn current_idle_time(cx) {
+    // timer_idleness_start_time is valid only while the command loop waits
+    // idle for a key (`romacs--timer-start-idle'); a running command sees nil.
+    match cx.idle_since() {
+        Some(since) => super::time::lisp_time(cx, since.elapsed().as_nanos() as i128),
+        None => Ok(Value::NIL),
+    }
+}}
+
+defsubr! { name = "romacs--set-idle", gnu = "keyboard.c:4695", effect = Global,
+fn set_idle(cx, idle: Value) {
+    // The state timer_start_idle (IDLE non-nil) and timer_stop_idle set;
+    // rlisp/vm/subprocess.el `romacs--timer-start-idle' is the rest.
+    cx.set_idle_since((idle != Value::NIL).then(std::time::Instant::now));
     Ok(Value::NIL)
 }}
 

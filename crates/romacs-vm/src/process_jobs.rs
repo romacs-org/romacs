@@ -30,15 +30,22 @@ struct Job {
     notified: bool,
 }
 
+/// Called from a worker thread once a job completes.
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
+
 #[derive(Default)]
 pub struct Jobs {
     jobs: BTreeMap<u64, Job>,
     next_id: u64,
     completions: Arc<AtomicUsize>,
     workers: Vec<std::thread::JoinHandle<()>>,
+    wake: Option<Wake>,
 }
 
 impl Jobs {
+    /// Wake the embedder's wait when a job completes, so it need not poll.
+    pub fn set_wake(&mut self, wake: Wake) { self.wake = Some(wake); }
+
     pub fn start(&mut self, request: Request) -> Result<u64, String> {
         if !cfg!(target_os = "linux") {
             return Err("asynchronous CLI jobs require Linux process-group supervision".into());
@@ -62,6 +69,7 @@ impl Jobs {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
         let completions = self.completions.clone();
+        let wake = self.wake.clone();
         let (sender, receiver) = mpsc::channel();
         self.workers.retain(|worker| !worker.is_finished());
         let worker = std::thread::Builder::new()
@@ -70,6 +78,7 @@ impl Jobs {
                 let output = run(request, worker_cancel);
                 if sender.send(Arc::new(output)).is_ok() {
                     completions.fetch_add(1, Ordering::Release);
+                    if let Some(wake) = wake { wake(); }
                 }
             })
             .map_err(|error| error.to_string())?;

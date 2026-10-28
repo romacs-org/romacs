@@ -1102,6 +1102,9 @@ pub struct Vm {
     host_input: Option<Box<dyn host_input::HostInput>>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
+    /// keyboard.c timer_idleness_start_time: when the command loop began
+    /// waiting idle for a key, while it does.
+    idle_since: Option<std::time::Instant>,
     process_jobs: process_jobs::Jobs,
     /// GNU process.c chan_process and friends: subprocess descriptors.
     subprocesses: subprocess::Table,
@@ -1255,6 +1258,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             layout_host: None,
+            idle_since: None,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
@@ -2621,7 +2625,22 @@ impl Vm {
             }
             let value = self.format_string(start, n)?;
             self.slots[echo].value = value;
-            eprintln!("{}", self.source_string(value)?);
+            // GNU writes the bytes it formatted: a unibyte string's as they
+            // are, a raw-byte character as its byte.
+            let view = self.str_view(value).ok_or("message: format made no string")?;
+            let mut line = Vec::with_capacity(view.bytes().len() + 1);
+            if view.is_multibyte() {
+                for code in view.chars() {
+                    match char::from_u32(code) {
+                        Some(c) => line.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+                        None => line.push(code as u8),
+                    }
+                }
+            } else {
+                line.extend_from_slice(view.bytes());
+            }
+            line.push(b'\n');
+            let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), &line);
             return Ok(value);
         }
         if p == Fset || (List as usize..=Memq as usize).contains(&(p as usize)) {

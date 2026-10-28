@@ -83,7 +83,7 @@ impl HostInput for Keys {
         );
         Ok(vec![])
     }
-    fn next_event(&mut self) -> Result<HostEvent, String> {
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
         self.keys
             .pop_front()
             .ok_or_else(|| "find-file host script exhausted".into())

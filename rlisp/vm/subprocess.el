@@ -11,10 +11,10 @@
 ;; and status conversion are native; every Lisp call happens here, so the
 ;; values a loop keeps across a callback live in traced Lisp frames.
 ;;
-;; Limits (DIVERGENCES.md VM2-PROC1, VM2-PROC2): idle timers do not run;
-;; waits never read the keyboard; `undecided' output decoding detects only
-;; ASCII and UTF-8; network processes are TCP streams without :nowait,
-;; :local/:remote addresses, datagrams, local sockets or TLS.
+;; Limits (DIVERGENCES.md VM2-PROC1, VM2-PROC2): these waits never read
+;; the keyboard; `undecided' output decoding detects only ASCII and UTF-8;
+;; network processes are TCP streams without :nowait, :local/:remote
+;; addresses, datagrams, local sockets or TLS.
 
 ;;; Code:
 
@@ -858,6 +858,20 @@ first reading what remains of its output.  GNU's got_some_output."
 
 ;;;; Timers
 
+(defvar romacs--timers-run 0 "keyboard.c timers_run: how many timers have run.")
+
+(defun romacs--timer-start-idle ()
+  "keyboard.c timer_start_idle: unless already idle, Emacs is idle from now
+on, and every idle timer may run once more."
+  (unless (current-idle-time)
+    (romacs--set-idle t)
+    ;; timer.el is GNU's preloaded Lisp; a bare VM has no idle timers.
+    (if (fboundp 'internal-timer-start-idle) (internal-timer-start-idle))))
+
+(defun romacs--timer-stop-idle ()
+  "keyboard.c timer_stop_idle."
+  (romacs--set-idle nil))
+
 (defun romacs--timer-time (timer)
   "keyboard.c decode_timer: when TIMER fires, as a float, or nil."
   (and (vectorp timer) (= (length timer) 10)
@@ -865,35 +879,70 @@ first reading what remains of its output.  GNU's got_some_output."
        (integerp (aref timer 2))
        (float-time (list (aref timer 1) (aref timer 2) (aref timer 3) (aref timer 8)))))
 
-(defun romacs--timer-check-2 (timers)
-  "keyboard.c timer_check_2 over ordinary TIMERS: run the first valid timer
-if ripe and return 0, else the seconds until it is, or nil if none."
-  (let ((now (float-time)) (result nil) (looking t))
-    (while (and looking timers)
-      (let ((timer (car timers)))
-        (setq timers (cdr timers))
-        (let ((time (romacs--timer-time timer)))
-          (if time
-              (progn
-                (setq looking nil)
-                (if (<= time now)
-                    (let ((old-deactivate-mark deactivate-mark))
-                      (aset timer 0 t)
-                      (let ((inhibit-quit t))
-                        (funcall 'timer-event-handler timer))
-                      (setq deactivate-mark old-deactivate-mark)
-                      (setq result 0))
-                  (setq result (- time now))))))))
+(defun romacs--timer-check-2 (timers idle-timers)
+  "keyboard.c timer_check_2: of ordinary TIMERS and IDLE-TIMERS, run the
+next valid timer if ripe and return 0, else the seconds until it is, or nil
+if there is none.  An idle timer's time counts from the start of idleness."
+  (let* ((now (float-time))
+         (idle (current-idle-time))
+         (idleness (if idle (float-time idle) 0.0))
+         (result nil) (looking t))
+    (while (and looking (or timers idle-timers))
+      (let ((time (and timers (romacs--timer-time (car timers))))
+            (idle-time (and idle-timers (romacs--timer-time (car idle-timers)))))
+        (cond
+         ;; Skip invalid timers and timers already run.
+         ((and timers (null time)) (setq timers (cdr timers)))
+         ((and idle-timers (null idle-time)) (setq idle-timers (cdr idle-timers)))
+         (t
+          (setq looking nil)
+          (let* ((timer-ripe (and time (<= time now)))
+                 (idle-ripe (and idle-time (<= idle-time idleness)))
+                 (timer-difference (and time (abs (- now time))))
+                 (idle-difference (and idle-time (abs (- idleness idle-time))))
+                 ;; The ripe one, else the one ripe longest or soonest.
+                 (ordinary (and time
+                                (or (null idle-time)
+                                    (and timer-ripe (not idle-ripe))
+                                    (and (eq timer-ripe idle-ripe)
+                                         (if timer-ripe
+                                             (< idle-difference timer-difference)
+                                           (< timer-difference idle-difference))))))
+                 (chosen (if ordinary (car timers) (car idle-timers))))
+            (if (if ordinary timer-ripe idle-ripe)
+                (progn
+                  (if (null (aref chosen 0))
+                      (let ((old-deactivate-mark deactivate-mark))
+                        ;; Triggered, in case its Lisp fails to reschedule it.
+                        (aset chosen 0 t)
+                        (let ((inhibit-quit t))
+                          (funcall 'timer-event-handler chosen))
+                        (setq deactivate-mark old-deactivate-mark)
+                        (setq romacs--timers-run (1+ romacs--timers-run))))
+                  (setq result 0))
+              (setq result (if ordinary timer-difference idle-difference))))))))
     result))
 
 (defun romacs--timer-check ()
-  "keyboard.c timer_check: run every ripe timer; the seconds until the next
-one, or nil.  Idle timers never run: VM2's waits are never idle (VM2-PROC1)."
+  "keyboard.c timer_check: run every ripe timer, idle timers only while
+Emacs is idle; the seconds until the next one, or nil.  Copies of the lists
+let a timer add itself again without running twice."
   (let ((timers (copy-sequence timer-list))
+        (idle-timers (and (current-idle-time) (copy-sequence timer-idle-list)))
         (next 0))
     (while (eql next 0)
-      (setq next (romacs--timer-check-2 timers)))
+      (setq next (romacs--timer-check-2 timers idle-timers)))
     next))
+
+(defun romacs--timer-check-idle ()
+  "What keyboard.c read_char does before it blocks for a command key with
+no time limit: start idling, then run ripe timers as its wait does.  Return
+\=(RAN . DELAY): whether a timer ran, so the caller redisplays, and the
+seconds until the next timer, or nil."
+  (romacs--timer-start-idle)
+  (let* ((run romacs--timers-run)
+         (delay (romacs--timer-check)))
+    (cons (/= run romacs--timers-run) delay)))
 
 ;;;; Waiting
 

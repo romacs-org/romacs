@@ -24,6 +24,7 @@ mod terminal_wait;
 mod batch;
 mod user_init;
 mod measure;
+mod timers;
 
 const SCENE: &str = include_str!("../scene.el");
 
@@ -43,6 +44,45 @@ where
         .stack_size(EVALUATOR_STACK_SIZE)
         .spawn(evaluate)
         .map_err(|error| format!("spawn evaluator: {error}"))
+}
+
+#[cfg(test)]
+mod native_wake_tests {
+    use std::sync::mpsc::{Receiver, channel};
+    use std::time::Duration;
+
+    /// A terminal host whose drain lasts until a background command completes:
+    /// the completion lands between the drain and the readiness check of an
+    /// order that checks readiness first.
+    struct SlowDrain(Receiver<()>);
+
+    impl romacs_vm::TerminalHost for SlowDrain {
+        fn create(&mut self, _: &str, _: &str, _: u16, _: u16) -> Result<u64, String> { Err("no terminals".into()) }
+        fn send(&mut self, _: u64, _: &[u8]) -> Result<(), String> { Err("no terminals".into()) }
+        fn resize(&mut self, _: u64, _: u16, _: u16) -> Result<(), String> { Err("no terminals".into()) }
+        fn input_state(&mut self, _: u64) -> Result<romacs_vm::TerminalInputState, String> { Err("no terminals".into()) }
+        fn changed_sessions(&mut self) -> Vec<u64> {
+            self.0.recv_timeout(Duration::from_secs(10)).expect("background command completed");
+            vec![]
+        }
+        fn snapshot(&mut self, _: u64) -> Result<romacs_vm::TerminalSnapshot, String> { Err("no terminals".into()) }
+        fn close(&mut self, _: u64) -> Result<(), String> { Err("no terminals".into()) }
+    }
+
+    /// A completion whose wake the terminal drain consumes is still dispatched.
+    #[test]
+    fn a_completion_during_the_terminal_drain_is_dispatched() {
+        let mut vm = romacs_vm::Vm::new();
+        let (completed, drain) = channel();
+        let completed = std::sync::Mutex::new(completed);
+        vm.set_background_wake(std::sync::Arc::new(move || { let _ = completed.lock().unwrap().send(()); }));
+        vm.set_terminal_host(Some(Box::new(SlowDrain(drain)))).unwrap();
+        vm.eval_source("(defun romacs-process-dispatch-ready () (setq dispatched (romacs--process-ready)))
+                        (romacs--process-start '(\"sleep\" \"0.2\") \"\" \"/\" 5)").unwrap();
+        assert!(super::service_native(&mut vm).unwrap());
+        assert_eq!(vm.eval_source("dispatched").unwrap().display().unwrap(), "(1)");
+        assert!(!vm.background_processes_ready());
+    }
 }
 
 #[cfg(test)]
@@ -419,6 +459,8 @@ fn evaluate(
     vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
+    // A completed background command wakes the same wait as a terminal.
+    if live { vm.set_background_wake(terminal_service.waker()); }
     if live { vm.set_terminal_host(Some(Box::new(terminal_service)))?; }
     // The window shows an echo area: printing to `t' goes there, as on GNU's terminal.
     if live { vm.set_echo_area_host(true); }
@@ -505,15 +547,7 @@ fn evaluate(
         }
     }); }
     loop {
-        if live && vm.background_processes_ready() {
-            let changed = vm.eval_source("(if (fboundp 'romacs-process-dispatch-ready) (romacs-process-dispatch-ready) (progn (romacs--process-ready) nil))");
-            match changed {
-                Ok(value) if !value.is_nil() => live_presentation.changed(),
-                Err(error) => { echo::show(&mut vm, &format!("Background command: {error}"))?; live_presentation.changed(); },
-                _ => {},
-            }
-        }
-        if live && vm.poll_terminal_output()? { live_presentation.changed(); }
+        if live && service_native(&mut vm)? { live_presentation.changed(); }
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
         while let Some(event) = batch.pop_front() {
@@ -527,6 +561,8 @@ fn evaluate(
             let received = if tracing() {
                 romacs_display_runtime::paint_host::take_key_enqueue_time(&event)
             } else { None };
+            // read_char's timer_stop_idle: Emacs is idle until a key arrives.
+            if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
             let event = command::unwrap_event(event);
             let command_start = Instant::now();
             let gc_before = vm.heap_stats().collections;
@@ -677,8 +713,19 @@ fn evaluate(
                         "units":"ns","snapshot_ns":snapshot_ns}));
                 }
             }
-            if pending.is_empty() {
-                match terminal_wait::wait(sender.input(), &terminal_ready, Some(live_presentation.wait())) {
+            if pending.is_empty() && sender.input().is_empty() {
+                // read_char: with no key to read, idle and run ripe timers;
+                // after any ran, redisplay and check again before blocking.
+                let idle = timers::idle(&mut vm).unwrap_or_else(|error| {
+                    let _ = echo::show(&mut vm, &format!("Timer: {error}"));
+                    timers::Idle { ran: true, message: false, delay: None }
+                });
+                if idle.ran {
+                    if idle.message { echo::sync_current_message(&mut vm)?; }
+                    live_presentation.changed();
+                    continue;
+                }
+                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay)) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(()),
                     terminal_wait::Wake::Terminal | terminal_wait::Wake::Timeout => {},
@@ -714,6 +761,21 @@ fn evaluate(
         }
     }
     shutdown_editor(&mut vm, sender)
+}
+
+/// Native work that woke the wait: terminal output, then completed background
+/// commands. Draining the shared wake first means a completion that lands
+/// after the drain signals the next wait, and one before it is dispatched
+/// here. Whether a displayed buffer changed.
+fn service_native(vm: &mut Vm) -> Result<bool, String> {
+    let mut changed = vm.poll_terminal_output()?;
+    if vm.background_processes_ready() {
+        match vm.eval_source("(if (fboundp 'romacs-process-dispatch-ready) (romacs-process-dispatch-ready) (progn (romacs--process-ready) nil))") {
+            Ok(value) => changed |= !value.is_nil(),
+            Err(error) => { echo::show(vm, &format!("Background command: {error}"))?; changed = true; },
+        }
+    }
+    Ok(changed)
 }
 
 fn shutdown_editor(vm: &mut Vm, sender: &PaintSender) -> Result<(), String> {

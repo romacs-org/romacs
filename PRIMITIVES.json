@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c5101b3e84fc4eab97dcc38e936a0024f2d1b72ea992878cdb38d6f1b981fdab",
+  "source_fingerprint": "1aa3faa8e0a8e6eb958cd506e99eb5b069649681419219b3ab3aa94af4a87562",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 986,
-  "parsed_vm2_only": 986
+  "parsed_total": 987,
+  "parsed_vm2_only": 987
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1026,12 +1026,12 @@
   "current-time-string": {
    "name": "current-time-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:599"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:604"
   },
   "current-time-zone": {
    "name": "current-time-zone",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:607"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:612"
   },
   "current-window-configuration": {
    "name": "current-window-configuration",
@@ -1084,7 +1084,7 @@
   "decode-time": {
    "name": "decode-time",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:639"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:644"
   },
   "defalias": {
    "name": "defalias",
@@ -1321,7 +1321,7 @@
   "encode-time": {
    "name": "encode-time",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:750"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:755"
   },
   "end-of-line": {
    "name": "end-of-line",
@@ -1578,7 +1578,7 @@
   "float-time": {
    "name": "float-time",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:691"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:696"
   },
   "floatp": {
    "name": "floatp",
@@ -1625,7 +1625,7 @@
   "format-time-string": {
    "name": "format-time-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:587"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:592"
   },
   "forward-char": {
    "name": "forward-char",
@@ -2013,7 +2013,7 @@
   "input-pending-p": {
    "name": "input-pending-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:309"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:320"
   },
   "insert": {
    "name": "insert",
@@ -3737,6 +3737,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/digest.rs:8"
   },
+  "romacs--set-idle": {
+   "name": "romacs--set-idle",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:312"
+  },
   "romacs--set-local-toplevel-cell": {
    "name": "romacs--set-local-toplevel-cell",
    "implementation": "vm2",
@@ -4106,7 +4111,7 @@
   "set-time-zone-rule": {
    "name": "set-time-zone-rule",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:925"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:930"
   },
   "set-visited-file-modtime": {
    "name": "set-visited-file-modtime",
@@ -4664,27 +4669,27 @@
   "time-add": {
    "name": "time-add",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:341"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:346"
   },
   "time-convert": {
    "name": "time-convert",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:250"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:255"
   },
   "time-equal-p": {
    "name": "time-equal-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:379"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:384"
   },
   "time-less-p": {
    "name": "time-less-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:374"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:379"
   },
   "time-subtract": {
    "name": "time-subtract",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:344"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:349"
   },
   "top-level": {
    "name": "top-level",

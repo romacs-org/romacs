@@ -8,6 +8,10 @@ impl Vm {
     /// Whether an owned background command completed since the last drain.
     pub fn background_processes_ready(&self) -> bool { self.process_jobs.has_ready() }
 
+    /// Call WAKE, from another thread, whenever an owned background command
+    /// completes: the embedder's wait blocks instead of polling for them.
+    pub fn set_background_wake(&mut self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) { self.process_jobs.set_wake(wake) }
+
     /// Cancel and settle background children before the native window shuts down.
     pub fn shutdown_background_processes(&mut self) -> Result<()> { self.process_jobs.shutdown() }
 

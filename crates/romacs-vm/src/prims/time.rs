@@ -38,6 +38,11 @@ fn current_time(cx) {
         Ok(duration) => duration.as_nanos() as i128,
         Err(error) => -(error.duration().as_nanos() as i128),
     };
+    lisp_time(cx, nanos)
+}}
+
+/// GNU make_lisp_time of NANOS nanoseconds, in `current-time-list''s form.
+pub(super) fn lisp_time(cx: &mut Leaf<'_>, nanos: i128) -> Out {
     let format = cx.intern("current-time-list");
     if cx.variable_value(format)?.unwrap_or(Value::NIL) == Value::NIL {
         return Ok(cx.cons(ticks_value(nanos)?, Value::integer(1_000_000_000).unwrap()));
@@ -47,7 +52,7 @@ fn current_time(cx) {
         time = cx.cons(Value::integer(n).map_err(Fault::Error)?, time);
     }
     Ok(time)
-}}
+}
 
 // Retain numerator/denominator until the caller chooses seconds or nanoseconds.
 #[derive(Clone, Copy)]

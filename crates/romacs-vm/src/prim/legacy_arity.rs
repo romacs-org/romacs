@@ -128,7 +128,8 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | BufferString | EncodeBufferUtf8 | DecodeBufferUtf8 | CacheStats | CacheClear
         | CacheEntries | MakeMarker | SyntaxTable | StandardSyntaxTable | SelectedWindow
         | SelectedFrame | CurrentGlobalMap | EmacsLispMode | Daemonp
-        | DaemonInitialized | ReadHostEvent => (0, Some(0)),
+        | DaemonInitialized => (0, Some(0)),
+        ReadHostEvent => (0, Some(1)),
         CharAfter | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine | CopySyntaxTable
         | WindowBuffer | WindowStart | WindowPoint | FramePixelWidth | FramePixelHeight
         | FrameSelectedWindow | MinibufferWindow | WindowNewPixel | WindowParent

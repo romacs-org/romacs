@@ -895,6 +895,49 @@ fn process_waits_run_timers_like_gnu() {
     assert_eq!(actual, expected);
 }
 
+// keyboard.c timer_check and timer_check_2 through timer.el's
+// timer-event-handler: ripe timers run in due order within each wait, a timer
+// may wait in turn (its sit-for runs the timers due meanwhile), a timer that
+// reactivates itself is checked again, and a wait inside Lisp is not idle, so
+// idle timers wait and `current-idle-time' stays nil. Pinned GNU's answers.
+#[test]
+fn timer_order_in_waits_matches_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let source = r###"(prin1-to-string
+ (list (let ((log nil))
+         (run-at-time 0.03 nil (lambda () (push 'c log)))
+         (run-at-time 0.01 nil (lambda () (push 'a log)))
+         (run-at-time 0.02 nil (lambda () (push 'b log)))
+         (sleep-for 0.06)
+         (nreverse log))
+       (let ((log nil))
+         (run-at-time 0 nil (lambda () (push 'outer log) (sit-for 0.04) (push 'outer-done log)))
+         (run-at-time 0.01 nil (lambda () (push 'inner log)))
+         (accept-process-output nil 0.08)
+         (nreverse log))
+       (let ((n 0) (tm (timer-create)))
+         (timer-set-time tm nil)
+         (timer-set-function tm (lambda () (setq n (1+ n)) (if (< n 3) (timer-activate tm))))
+         (timer-activate tm)
+         (accept-process-output nil 0)
+         (prog1 n (cancel-timer tm)))
+       (let ((log nil))
+         (let ((idle (run-with-idle-timer 0 nil (lambda () (push 'idle log)))))
+           (run-at-time 0 nil (lambda () (push (list 'ordinary (current-idle-time)) log)))
+           (accept-process-output nil 0.03)
+           (sit-for 0.02)
+           (cancel-timer idle))
+         (list (nreverse log) (current-idle-time)))))"###;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let printed = vm.eval_source(source).unwrap().display().unwrap();
+    let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
+    assert_eq!(actual, expected);
+}
+
 // fileio.c Fcopy_file, Fadd_name_to_file, Fmake_symbolic_link and
 // Fset_file_times, dired.c Ffile_name_all_completions, and the files.el
 // callers that reach them, on the loadup chain. Each case runs in DIR, a

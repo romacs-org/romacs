@@ -38,7 +38,7 @@ impl HostInput for Keys {
     fn redisplay(&mut self, _: HostFrame) -> Result<Vec<(u64, usize)>, String> {
         Ok(vec![])
     }
-    fn next_event(&mut self) -> Result<HostEvent, String> {
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
         self.0.pop_front().ok_or_else(|| "editing input exhausted".into())
     }
 }
