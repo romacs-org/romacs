@@ -2,8 +2,8 @@
 //! line-number-at-pos, text-property-any, get-buffer-process (no process
 //! exists), frame-first-window, timer-idle-list, and the subrs in the
 //! special forms' function cells, print-gensym as gnosis's serializer
-//! binds it, `random' seeded as GNU seeds glibc's generator, and
-//! overlay-properties.
+//! binds it, `random' seeded as GNU seeds glibc's generator,
+//! overlay-properties and byte-to-string.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -28,6 +28,7 @@ const CASES: &str = r###"
 (progn (random "abc") (list (random) (random 10) (random 1000000) (random (expt 2 70)) (random (expt 2 64)) (random most-positive-fixnum) (progn (random "") (random 100)) (progn (random "a longer seed string") (list (random 7) (random 7))) (condition-case e (random 0) (error e)) (condition-case e (random -5) (error e)) (condition-case e (random (- (expt 2 70))) (error e)) (fixnump (random nil)) (fixnump (random 'x)) (progn (random t) (< -1 (random 5) 5))))
 (with-temp-buffer (insert "abcdef") (let ((o (make-overlay 1 3))) (list (overlay-properties o) (progn (overlay-put o 'face 'bold) (overlay-put o 'a 1) (overlay-put o 'face 'italic) (overlay-put o 'b nil) (overlay-properties o)) (let ((p (overlay-properties o))) (setcar (cdr p) 'zz) (overlay-get o 'b)) (eq (overlay-properties o) (overlay-properties o)) (progn (delete-overlay o) (overlay-properties o)))))
 (with-temp-buffer (insert "abc") (let ((o (make-overlay 1 2))) (overlay-put o 'evaporate t) (overlay-put o 'face 'bold) (list (overlay-properties o) (condition-case e (overlay-properties 1) (error e)) (condition-case e (overlay-properties nil) (error e)) (condition-case e (overlay-properties (current-buffer)) (error e)))))
+(list (byte-to-string 0) (byte-to-string 65) (byte-to-string 255) (multibyte-string-p (byte-to-string 200)) (string-bytes (byte-to-string 200)) (aref (byte-to-string 200) 0) (condition-case e (byte-to-string 256) (error e)) (condition-case e (byte-to-string -1) (error e)) (condition-case e (byte-to-string ?é) (error e)) (condition-case e (byte-to-string 1.0) (error e)) (condition-case e (byte-to-string (expt 2 70)) (error e)) (condition-case e (byte-to-string nil) (error e)) (concat "a" (byte-to-string 255)))
 "###;
 
 #[test]
