@@ -789,20 +789,17 @@ impl Vm {
         self.window_leaf_ids(root, &mut ids)?;
         let mini = self.window_root(MINI);
         ids.push(self.window(mini)?.id);
+        let live = |vm: &Self, id| {
+            vm.objects.iter().enumerate().find_map(|(i, o)| match o {
+                Object::Window(w) if w.id == id && w.live() => Some(Value::reference(i + 1, 0)),
+                _ => None,
+            })
+        };
         let outcome = (|| {
             let mut snapshots = vec![];
             for id in ids {
-                let v = self
-                    .objects
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, o)| match o {
-                        Object::Window(w) if w.id == id && w.live() => {
-                            Some(Value::reference(i + 1, 0))
-                        }
-                        _ => None,
-                    })
-                    .ok_or("window deleted during frame snapshot")?;
+                // Lisp run by an earlier window's redisplay may delete this one.
+                let Some(v) = live(self, id) else { continue };
                 let w = self.window(v)?;
                 let (x, y, width, height) = (
                     w.x + w.left_margin * self.window_state.column,
@@ -812,7 +809,12 @@ impl Vm {
                     ),
                     w.height,
                 );
-                snapshots.push((x, y, self.snapshot_window(v, width, height)?));
+                match self.snapshot_window(v, width, height) {
+                    Ok(snapshot) => snapshots.push((x, y, snapshot)),
+                    // ... or its own.
+                    Err(_) if live(self, id).is_none() => {}
+                    Err(error) => return Err(error),
+                }
             }
             Ok(snapshots)
         })();

@@ -611,7 +611,7 @@ impl Vm {
     }
     fn redisplay_window_inner(&mut self, root: usize, buffer_slot: usize, height: u32) -> Result<Option<mode_line::Band>> {
         if self.window(self.slots[root].value)?.mini {
-            return Ok(None);
+            return self.redisplay_window_fontify(root, buffer_slot, height).map(|_| None);
         }
         let format_slot = self.slot("mode-line-format");
         let value = self.variable_value(format_slot)?;
@@ -627,6 +627,9 @@ impl Vm {
         let band_height = if format.is_some() { self.window_state.line } else { 0 };
         let text_height = height.saturating_sub(band_height);
         self.redisplay_point_visibility(self.slots[root].value, text_height)?;
+        if !self.redisplay_window_fontify(root, buffer_slot, text_height)? {
+            return Ok(None);
+        }
         let Some(format) = format else { return Ok(None) };
         let state = self.mode_line_state(root, buffer_slot, text_height)?;
         // GNU redisplay_window installs a non-selected window's point before
@@ -676,6 +679,45 @@ impl Vm {
         // snapshot_window_inner chooses the band face after restoration,
         // using the real selection, not the temporary evaluation context.
         outcome
+    }
+    /// GNU `handle_fontified_prop` (`xdisp.c:4667`) over the rows `window`
+    /// shows in the current buffer, its own. The walk over unfontified
+    /// stretches and the calls are Lisp (`romacs--redisplay-fontify`,
+    /// rlisp/vm/prelude.el), so nothing is held across them; a signal is
+    /// logged there and never ends redisplay, and any other failure becomes
+    /// a display diagnostic.
+    fn fontify_displayed(&mut self, window: Value, text_height: u32) -> Result<()> {
+        let functions = self.slot("fontification-functions");
+        if self.variable_value(functions)? == Value::NIL {
+            return Ok(());
+        }
+        let Some((start, end)) = self.displayed_range(window, text_height)? else {
+            return Ok(());
+        };
+        let call = Form::List(vec![
+            Form::Sym("romacs--redisplay-fontify".into()),
+            Form::Int(start as i64),
+            Form::Int(end as i64),
+        ]);
+        if let Err(error) = self.eval_form_raw(&call) {
+            self.display_state.diagnostics.push(format!("fontification: {error}"));
+        }
+        Ok(())
+    }
+    /// Fontify the rows the window shows, then re-derive what that Lisp may
+    /// have changed: the window's buffer, which becomes current again as GNU
+    /// restores it after `fontification-functions`. False if Lisp deleted
+    /// the window.
+    fn redisplay_window_fontify(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<bool> {
+        self.fontify_displayed(self.slots[root].value, text_height)?;
+        let w = self.window(self.slots[root].value)?;
+        if !w.live() {
+            return Ok(false);
+        }
+        let buffer = w.buffer;
+        self.slots[buffer_slot].value = buffer;
+        self.slots[self.buffer_slot].value = buffer;
+        Ok(true)
     }
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
