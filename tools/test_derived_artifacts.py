@@ -21,7 +21,8 @@ from derived_artifacts import ARTIFACTS
 
 MERGED = 'merged artifacts must describe both source branches'
 OWNED = ('scripts/check-derived', 'scripts/derived', 'tools/derived_artifacts.py',
-         'tools/primitive_index.py', 'tools/divergence_index.py', '.gitattributes')
+         'tools/primitive_index.py', 'tools/divergence_index.py', '.gitattributes',
+         'LISP-BUNDLED.json')
 SNAPSHOT_FIXTURE = '''#!/usr/bin/env python3
 import json
 from pathlib import Path
@@ -31,6 +32,12 @@ values = sorted(p.stem for p in root.glob('snapshot-input-*.txt'))
 for name in ['crates/romacs-introspect-live/data/registry.json', 'crates/romacs-introspect/data/registry.json']:
     (root / name).parent.mkdir(parents=True, exist_ok=True)
     (root / name).write_text(json.dumps({'fixture_sources': values}) + '\\n')
+'''
+AUTOLOADS_FIXTURE = '''import json
+from pathlib import Path
+output = Path(json.loads(Path('LISP-BUNDLED.json').read_text())['autoloads'])
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(f';;; {output.name} --- fixture\\n;;; {output.name} ends here\\n')
 '''
 
 
@@ -67,6 +74,7 @@ def fixture(root, real=False):
         for name in ('tools/lisp_oracle.py', 'tools/parity_ratchet.py'):
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_text('raise SystemExit(0)\n')
+        (root / 'tools/bundled_autoloads.py').write_text(AUTOLOADS_FIXTURE)
     for name in OWNED:
         copy(root, name)
     git(root, 'config', '--local', 'user.name', 'Derived fixture')
@@ -75,7 +83,7 @@ def fixture(root, real=False):
     git(root, 'config', '--local', 'core.hooksPath', '/dev/null')
     env = os.environ.copy()
     if not real:
-        for name in ARTIFACTS[2:]:
+        for name in ARTIFACTS[2:4]:
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_text('{"fixture_sources": []}\n')
         bin_dir = root.parent / (root.name + '-bin')
@@ -120,7 +128,8 @@ class DerivedTests(unittest.TestCase):
             (self.root / name).write_text('<<<<<<< corrupt\n')
         regenerate(self.root, self.env)
         for name in ARTIFACTS:
-            self.assertIsInstance(json.loads((self.root / name).read_bytes()), dict)
+            if name.endswith('.json'):
+                self.assertIsInstance(json.loads((self.root / name).read_bytes()), dict)
         self.assertEqual((self.root / ARTIFACTS[2]).read_bytes(), (self.root / ARTIFACTS[3]).read_bytes())
 
     def test_snapshot_bootstrap_restores_exact_head_bytes(self):
@@ -249,7 +258,7 @@ def assert_merged(root):
     assert {'derived-left', 'derived-right'} <= set(divergences), MERGED
     assert not git(root, 'status', '--porcelain').stdout, 'merge result must be committed and clean'
     assert len(git(root, 'show', '-s', '--format=%P').stdout.split()) == 2, 'must create a genuine merge commit'
-    snapshots = [json.loads((root / name).read_bytes()) for name in ARTIFACTS[2:]]
+    snapshots = [json.loads((root / name).read_bytes()) for name in ARTIFACTS[2:4]]
     assert snapshots[0] == snapshots[1], 'both snapshots must be regenerated identically'
     for snapshot in snapshots:
         if 'vm2' in snapshot:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and explicitly regenerate the complete derived JSON artifact set."""
+"""Validate and explicitly regenerate the complete derived artifact set."""
 import json
 from pathlib import Path
 import re
@@ -11,11 +11,13 @@ ARTIFACTS = (
     'PRIMITIVES.json',
     'crates/romacs-introspect-live/data/registry.json',
     'crates/romacs-introspect/data/registry.json',
+    json.loads((Path(__file__).resolve().parents[1] / 'LISP-BUNDLED.json').read_text())['autoloads'],
 )
 GENERATORS = (
     (sys.executable, 'tools/divergence_index.py'),
     (sys.executable, 'tools/primitive_index.py'),
     ('cargo', 'run', '-q', '-p', 'romacs-introspect-live', '--', '--write'),
+    (sys.executable, 'tools/bundled_autoloads.py'),
 )
 MARKER = re.compile(rb'(?m)^[ \t]*(?:<{7}|={7}|>{7}|\|{7})')
 
@@ -25,6 +27,11 @@ def validate(root):
         data = (root / name).read_bytes()
         if MARKER.search(data):
             raise ValueError(f'{name}: unresolved conflict marker')
+        if name.endswith('.el'):
+            stem = Path(name).name.encode()
+            if not (data.startswith(b';;; ' + stem + b' --- ') and data.endswith(b'\n;;; ' + stem + b' ends here\n')):
+                raise ValueError(f'{name}: not a complete generated Lisp file')
+            continue
         try:
             json.loads(data)
         except (ValueError, UnicodeError) as exc:

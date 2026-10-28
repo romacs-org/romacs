@@ -192,6 +192,18 @@ fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: Option<std:
         .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp"))
 }
 
+/// Where the bundled Lisp lives beside gnu-lisp/, declared once for
+/// [`runtime_load_path`] and the autoload generator (tools/bundled_autoloads.py).
+fn bundled_layout() -> Result<serde_json::Value, String> {
+    serde_json::from_str(include_str!("../../../LISP-BUNDLED.json")).map_err(|e| format!("LISP-BUNDLED.json: {e}"))
+}
+
+/// The bundled packages' autoloads beside the GNU Lisp directory `dir`, when present.
+pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
+    let file = bundled_layout()?["autoloads"].as_str().ok_or("LISP-BUNDLED.json: no autoloads path")?.to_owned();
+    Ok(dir.parent().map(|runtime| runtime.join(file)).filter(|path| path.is_file()))
+}
+
 /// GNU libraries precede Romacs libraries and their temporary dependencies.
 /// VM helper sources are compile-time inputs and stay off the public path.
 pub fn runtime_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
@@ -210,11 +222,14 @@ pub fn runtime_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf
     }
     let mut path = Vec::new();
     root_and_children(dir, &mut path, &[])?;
-    if let Some(owned) = dir.parent().map(|p| p.join("rlisp")).filter(|p| p.is_dir()) {
-        root_and_children(&owned, &mut path, &["vm", "deps"])?;
-        let deps = owned.join("deps");
-        if deps.is_dir() {
-            root_and_children(&deps, &mut path, &[])?;
+    let layout = bundled_layout()?;
+    for root in layout["roots"].as_array().ok_or("LISP-BUNDLED.json: no roots")? {
+        let bad = || format!("LISP-BUNDLED.json: malformed root {root}");
+        let relative = root["path"].as_str().ok_or_else(bad)?;
+        let excluded: Vec<&str> = root["exclude"].as_array().ok_or_else(bad)?.iter()
+            .map(|name| name.as_str().ok_or_else(bad)).collect::<Result<_, _>>()?;
+        if let Some(owned) = dir.parent().map(|p| p.join(relative)).filter(|p| p.is_dir()) {
+            root_and_children(&owned, &mut path, &excluded)?;
         }
     }
     Ok(path)
@@ -357,6 +372,14 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
         .map(|p| lisp_string(&p.to_string_lossy())).collect();
     if !bundled.is_empty() {
         vm.eval_source(&format!("(setq load-path (append load-path (list {})))", bundled.join(" ")))?;
+    }
+    // The bundled packages are installed, not preloaded: their autoloads
+    // come next, as `package-activate-all' runs before site and user init.
+    // --gnu-lisp, like `emacs -Q', activates no packages.
+    if launch == Launch::Loadup {
+        if let Some(autoloads) = bundled_autoloads(dir)? {
+            vm.load_file(&autoloads).map_err(|e| format!("{}: {e}", autoloads.display()))?;
+        }
     }
     let gnu_mode_line = vm.eval_source("(default-boundp 'mode-line-format)")? != romacs_vm::Fixed::NIL;
     if launch == Launch::GnuOnly {
@@ -1579,6 +1602,38 @@ mod tests {
         });
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(found, "t", "bundled Lisp beside the symlink target is not on load-path");
+    }
+
+    /// `--loadup` installs the bundled packages as GNU installs a package:
+    /// after loadup their commands are interactive autoloads whose library
+    /// is the bundled file, and nothing has loaded it. `--gnu-lisp`, like
+    /// `emacs -Q`, activates none. (tests/bundled_autoloads.rs in romacs-vm
+    /// shows a call loading each package.)
+    #[test]
+    fn loadup_autoloads_bundled_package_commands_without_loading_them() {
+        let dir = lisp_dir().canonicalize().unwrap();
+        let owned = dir.parent().unwrap().to_path_buf();
+        let in_vm = dir.clone();
+        let (gnu_only, loadup) = on_evaluator(move || {
+            let query = |vm: &mut Vm, form: &str| vm.eval_source(form).and_then(|v| v.display()).unwrap_or_else(|e| format!("ERR {e}"));
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            initialize_loadup_from(&mut vm, Launch::GnuOnly, None, &in_vm).unwrap();
+            let gnu_only = query(&mut vm, "(list (fboundp 'hermes) (featurep 'romacs-bundled-autoloads))");
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            initialize_loadup_from(&mut vm, Launch::Loadup, None, &in_vm).unwrap();
+            let loadup = [("gnosis-dashboard", "gnosis/gnosis-dashboard.el"), ("hermes", "hermes/hermes.el")].map(|(name, file)| {
+                let file = lisp_string(&owned.join("rlisp").join(file).to_string_lossy());
+                query(&mut vm, &format!("(list (nth 1 (symbol-function '{name})) (commandp '{name}) (featurep '{name})
+                                               (equal (locate-file-internal \"{name}\" load-path '(\".el\")) {file})
+                                               (and (assoc {file} load-history) t))"))
+            });
+            (gnu_only, loadup)
+        });
+        assert_eq!(gnu_only, "(nil nil)", "--gnu-lisp activates no bundled package");
+        assert_eq!(loadup, [r#"("gnosis-dashboard" t nil t nil)"#, r#"("hermes" t nil t nil)"#],
+            "interactive autoloads of the bundled files, not yet loaded");
     }
 
     /// `--gnu-lisp`/`--loadup`: GNU's directories come before every bundled

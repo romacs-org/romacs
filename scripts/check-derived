@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject corrupt or stale derived JSON before the expensive gate.
+"""Reject corrupt or stale derived artifacts before the expensive gate.
 
 Corruption is rejected without healing. Freshness checks run checked generators
 and leave valid regenerated output for review. Explicit recovery is available
@@ -8,14 +8,6 @@ through scripts/derived regenerate.
 import pathlib
 import subprocess
 import sys
-
-DERIVED = [
-    dict(artifact='DIVERGENCES.json'),
-    dict(artifact='PRIMITIVES.json'),
-    dict(artifact='crates/romacs-introspect-live/data/registry.json'),
-    dict(artifact='crates/romacs-introspect/data/registry.json'),
-]
-
 
 def main():
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else '.').resolve()
@@ -33,7 +25,7 @@ def main():
     ratchet = subprocess.run([sys.executable, 'tools/parity_ratchet.py', 'verify', '--candidate', '--root', str(root)], cwd=root)
     if layout.returncode or oracle.returncode or ratchet.returncode:
         return 1
-    print(f'check-derived: ok, {len(DERIVED)} derived artifacts match their sources; '
+    print(f'check-derived: ok, {len(derived_artifacts.ARTIFACTS)} derived artifacts match their sources; '
           'lisp/ is the GNU pin; parity floors verified')
     return 0
 
