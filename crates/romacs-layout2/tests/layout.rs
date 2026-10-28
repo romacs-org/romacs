@@ -110,3 +110,18 @@ fn rows_continue_and_truncate_as_gnu_without_fringes() {
     let truncated = shown(&s);
     assert_eq!(&truncated[8..], &[('i', 96.0, 0.0), ('$', 108.0, 0.0), ('x', 0.0, 23.0), ('y', 12.0, 23.0)]);
 }
+/// A window starting on a continuation row lays it out as from the line's
+/// start: the rows above count toward a TAB's stop.
+#[test]
+fn a_window_start_on_a_continuation_row_keeps_the_rows_above() {
+    let mut s = scene();
+    s.width = 120; // ten 12px columns: a row holds nine before its `\'
+    s.text = TextSlice { utf8: "abcdefghijkl\tz".into(), face_runs: vec![] };
+    let z = |s: &WindowSnapshot| romacs_layout2::layout(s, 1).unwrap().glyphs.iter().find_map(|g| match g {
+        FrameGlyph::Char { char: 'z', x, y, .. } => Some((*x, *y)),
+        _ => None,
+    }).unwrap();
+    assert_eq!(z(&s), (84.0, 23.0), "from the line start");
+    s.start_byte = 9;
+    assert_eq!(z(&s), (84.0, 0.0), "from the continuation row");
+}

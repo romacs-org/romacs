@@ -191,6 +191,23 @@ mod tests {
         assert!(tall > line, "{tall} > {line}");
     }
 
+    /// A window that starts on a continuation row: the host's glyphs and
+    /// the VM's answers agree there, TABs stopping as from the line start.
+    #[test]
+    fn a_window_starting_on_a_continuation_row_agrees() {
+        let mut h = hosted();
+        // 29 columns before the `\'; the second row starts at 30.
+        h.eval("(progn (setq truncate-partial-width-windows nil) (erase-buffer) (insert (make-string 34 ?a) \"\\tz\\nnext\") (goto-char 36) (set-window-start nil 30))");
+        let paint = h.paint();
+        let z = paint.glyphs.iter().find(|g| g.0 == 'z').unwrap();
+        let first = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text && g.0 != '\\').map(|g| g.2).fold(f32::MAX, f32::min);
+        assert_eq!((h.eval("(window-start)").as_str(), first), ("30", 0.0), "starts on the continuation row");
+        assert_eq!(h.eval("(pos-visible-in-window-p 36 nil t)"), format!("({} {})", z.1 as i64, z.2 as i64));
+        assert_eq!(h.eval("(car (nth 2 (posn-at-point 36)))"), (z.1 as i64).to_string());
+        // From the line start z stands past a TAB stop counted over both rows.
+        assert_eq!(z.1 as i64, 110);
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]

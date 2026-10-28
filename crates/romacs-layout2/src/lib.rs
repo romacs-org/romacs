@@ -207,13 +207,18 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     let (mut continued, mut hpos, mut hidden) = (0.0f32, 0usize, false);
     let mut drawing = line_start == snapshot.start_byte;
     for (byte, ch) in text[line_start..].char_indices().map(|(at, ch)| (line_start + at, ch)) {
-        if !drawing && byte >= snapshot.start_byte {
-            drawing = true;
-            (x, y, row_height, hpos) = (0.0, -(snapshot.vscroll_px as f32), metrics[0].1, 0);
+        // The window start begins a row: at a line start, or where the row
+        // before it breaks, which the character there decides below, so
+        // that row's width counts toward `continued' first.
+        let mut starting = !drawing && byte >= snapshot.start_byte;
+        let top = -(snapshot.vscroll_px as f32);
+        if starting && (x == 0.0 || ch == '\n') {
+            (drawing, starting) = (true, false);
+            (x, y, row_height, hpos) = (0.0, top, metrics[0].1, 0);
         }
         if drawing && y >= body_height { break; }
-        if drawing { end_byte = byte + ch.len_utf8(); }
-        let at_point = drawing && byte == snapshot.point_byte;
+        if drawing || starting { end_byte = byte + ch.len_utf8(); }
+        let at_point = (drawing || starting) && byte == snapshot.point_byte;
         if at_point { point_rect = (!hidden).then_some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         if ch == '\n' {
             x = 0.0;
@@ -237,6 +242,15 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             // A TAB that does not fit continues from the text area's edge.
             continued += if matches!(shown, Shown::Tab) { last_x } else { x };
             (x, y, row_height, hpos) = (0.0, y + row_height, metrics[0].1, 0);
+            if starting { (drawing, starting, y) = (true, false, top); }
+            advance_px = width(frame, continued);
+            if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
+        }
+        if starting {
+            // A start inside a row (the motion refuses one): the row
+            // breaks there.
+            continued += x;
+            (drawing, x, y, row_height, hpos) = (true, 0.0, top, metrics[0].1, 0);
             advance_px = width(frame, continued);
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }
