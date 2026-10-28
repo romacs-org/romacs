@@ -165,32 +165,6 @@ fn reviewed_must_tolerate_malformed_property_aliases() {
 }
 
 #[test]
-fn reviewed_must_refuse_first_change_hook() {
-    let d = dir("reviewed-insertion-hooks");
-    let f = d.join("input");
-    std::fs::write(&f, b"X").unwrap();
-    let mut vm = Vm::new();
-    let source = format!("(with-temp-buffer (let ((first-change-hook '(ignore))) (list (condition-case e (insert-file-contents {}) (error (list (car e) (nth 1 e)))) (buffer-string) (point) buffer-file-name)))", lisp(&f));
-    assert_eq!(eval(&mut vm, &source), "((error \"VM2 insert-file-contents with change hooks is unsupported\") \"\" 1 nil)", "REVIEWED_FIRST_CHANGE_HOOK_FAILCLOSED");
-}
-
-#[test]
-fn reviewed_must_refuse_property_insertion_hooks() {
-    let d = dir("reviewed-property-hooks");
-    let f = d.join("input");
-    std::fs::write(&f, b"X").unwrap();
-    let mut vm = Vm::new();
-    for setup in [
-        "(put-text-property 1 3 'modification-hooks '(ignore))",
-        "(put-text-property 2 3 'insert-in-front-hooks '(ignore))",
-        "(put-text-property 1 2 'insert-behind-hooks '(ignore))",
-    ] {
-        let source = format!("(with-temp-buffer (insert \"ab\") {setup} (goto-char 2) (list (condition-case e (insert-file-contents {}) (error (list (car e) (nth 1 e)))) (buffer-string) (point) buffer-file-name))", lisp(&f));
-        assert_eq!(eval(&mut vm, &source), "((error \"VM2 insert-file-contents with change hooks is unsupported\") \"ab\" 2 nil)", "REVIEWED_INSERTION_HOOKS_FAILCLOSED: {setup}");
-    }
-}
-
-#[test]
 fn read_only_insertion_boundaries() {
     let d = dir("readonly-boundary");
     let f = d.join("input");
@@ -216,8 +190,9 @@ fn read_only_insertion_boundaries() {
         let source = format!("(with-temp-buffer (insert \"ab\") (let ((inhibit-read-only t)) {setup}) (goto-char {point}) (let ((inhibit-read-only {inhibition})) (let ((result (condition-case e (progn (insert-file-contents {}) 'ok) (error e)))) (list result (equal (buffer-string) {}) (point)))))", lisp(&f), if expected == "ok" { match point { 1 => "\"Xab\"", 2 => "\"aXb\"", _ => "\"abX\"" } } else { "\"ab\"" });
         assert_eq!(eval(&mut vm, &source), format!("({expected} t {point})"), "FILEIO4 boundary: {source}");
     }
+    // fileio.c:4881: an empty read prepares no change, so no hook runs.
     let source = format!("(with-temp-buffer (let ((before-change-functions '(ignore))) (condition-case e (insert-file-contents {}) (error e))))", lisp(&empty));
-    assert_eq!(eval(&mut vm, &source), "(error \"VM2 insert-file-contents with change hooks is unsupported\")", "FILEIO4 empty before-change");
+    assert_eq!(eval(&mut vm, &source), format!("({} 0)", lisp(&empty)), "FILEIO4 empty before-change");
 }
 
 #[test]
@@ -473,7 +448,6 @@ fn unsupported_reads_refuse_and_leave_the_buffer_alone() {
         (format!("(insert-file-contents {latin})"), raw),
         (format!("(insert-file-contents {bom})"), raw),
         (format!("(insert-file-contents {crlf} nil nil nil t)"), "insert-file-contents REPLACE"),
-        (format!("(let ((after-change-functions (list 'ignore))) (insert-file-contents {nul} nil 0 1))"), "insert-file-contents with change hooks"),
         // Anchor the nonmatching basename: random TMPDIR components may contain x.
         (format!("(let ((file-name-handler-alist '((\"/handler-only\\\\'\" . ignore)))) (insert-file-contents {latin}))"), raw),
         // The matching control must still refuse before touching the buffer or file.

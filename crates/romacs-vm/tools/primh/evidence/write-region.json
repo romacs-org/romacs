@@ -1,7 +1,7 @@
 {
  "protocol": "primh-v1",
  "primitive": "write-region",
- "spec_sha256": "32ec9c275eb475389228a81145ee0be77b248e105999127cb32bb476ada9528b",
+ "spec_sha256": "b4920db632d3f70cbcfffbc375f52ed6e914b526b38473181ff7905149b0a6af",
  "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
  "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
  "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",

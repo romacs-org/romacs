@@ -121,7 +121,7 @@ impl Vm {
     }
 
     pub(super) fn print_render(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool) -> Result<String> {
-        for name in ["float-output-format", "print-continuous-numbering", "print-number-table", "print-integers-as-characters", "print-unreadable-function", "print-charset-text-property", "print-symbols-bare"] {
+        for name in ["float-output-format", "print-integers-as-characters", "print-unreadable-function", "print-charset-text-property", "print-symbols-bare"] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;
             // Text properties print unpruned, which is GNU's `t'.
@@ -137,59 +137,167 @@ impl Vm {
             let v = self.variable_value(slot)?;
             if v != Value::UNBOUND { options.set(key, v); }
         }
-        if overrides == Value::TRUE { options = PrintOptions::default(); }
-        else if overrides != Value::NIL {
-            for setting in self.list_values(overrides)? {
-                if setting == Value::TRUE { options = PrintOptions::default(); continue; }
-                let (key, v) = self.cons_pair(setting)?;
-                let key = key.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).ok_or("symbol required")?.clone();
-                if !options.set(&key, v) { return Err("unsupported printing override".into()); }
+        let continuous = self.slot("print-continuous-numbering");
+        let mut continuous = !matches!(self.variable_value(continuous)?, Value::NIL | Value::UNBOUND);
+        // An overriding number table is bound for this call only, as
+        // print_bind_overrides binds it; `t' binds every default.
+        let mut bound_table = None;
+        let settings = if overrides == Value::TRUE { vec![overrides] } else { self.list_values(overrides)? };
+        for setting in settings {
+            if setting == Value::TRUE {
+                (options, continuous, bound_table) = (PrintOptions::default(), false, Some(Value::NIL));
+                continue;
+            }
+            let (key, v) = self.cons_pair(setting)?;
+            let key = key.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).ok_or("symbol required")?.clone();
+            match key.as_str() {
+                "continuous-numbering" => continuous = v != Value::NIL,
+                "number-table" => bound_table = Some(v),
+                _ if options.set(&key, v) => {}
+                _ => return Err("unsupported printing override".into()),
             }
         }
-        if buffer_output { options.nonascii = true; }
-        if options.circle {
-            use char_table::CharTableSlot;
-            let mut pending = vec![CharTableSlot::Value(value)];
-            while let Some(slot) = pending.pop() {
-                let v = match slot {
-                    CharTableSlot::Node(node) => {
-                        let key = (1, char_table::char_table_node_id(&node) as u64);
-                        let count = options.graph.get_mut().counts.entry(key).or_default();
-                        *count += 1;
-                        if *count == 1 { pending.extend(node.lock().unwrap().slots.iter().cloned()); }
-                        continue;
+        if buffer_output { (options.nonascii, options.buffer) = (true, true); }
+        // print.c print: the number table and its index survive between
+        // calls only while print-continuous-numbering and the table are set.
+        let table_slot = self.slot("print-number-table");
+        let mut table = match bound_table { Some(table) => table, None => self.variable_value(table_slot)? };
+        if !continuous || matches!(table, Value::NIL | Value::UNBOUND) {
+            self.print_number_index = 0;
+            table = Value::NIL;
+            if bound_table.is_none() { self.set_print_number_table(table_slot, table)?; }
+        }
+        if !options.circle { return self.print_object(value, quoted, &options, 0); }
+        self.print_preprocess(value, quoted, &mut options, continuous, table)?;
+        let printed = self.print_object(value, quoted, &options, 0);
+        let slot = if bound_table.is_none() { Some(table_slot) } else { None };
+        self.publish_print_number_table(slot, table, options.graph.get_mut())?;
+        printed
+    }
+
+    /// print_string for princ of a plain string into a multibyte buffer:
+    /// the printer's own escaping, without print's numbering state.
+    pub(super) fn print_plain_string(&self, value: Value) -> Result<String> {
+        let options = PrintOptions { nonascii: true, buffer: true, ..PrintOptions::default() };
+        self.print_body(value, false, &options, 0)
+    }
+
+    /// GNU print_preprocess: mark each circle candidate in OBJECT's
+    /// traversal order, numbering one when it is reached a second time.
+    fn print_preprocess(&mut self, value: Value, quoted: bool, options: &mut PrintOptions, continuous: bool, table: Value) -> Result<()> {
+        use char_table::CharTableSlot;
+        let gensym = options.gensym;
+        let graph = options.graph.get_mut();
+        if let Some(data::Object::HashTable(t)) = self.object_if(table) {
+            for (_, key, mark) in t.entries() {
+                let mark = if mark == Value::TRUE { CircleMark::Once }
+                    else if let Some(n) = mark.integer_value() { if n < 0 { CircleMark::Pending(-n) } else { CircleMark::Printed(n) } }
+                    else if mark == Value::NIL { continue }
+                    else { CircleMark::Other(mark) };
+                // print_object consults the table only for candidates.
+                if self.circle_candidate(key, gensym) { graph.marks.insert((0, key.0), mark); }
+            }
+        }
+        let mut pending = vec![CharTableSlot::Value(value)];
+        while let Some(slot) = pending.pop() {
+            let v = match slot {
+                CharTableSlot::Node(node) => {
+                    let key = (1, char_table::char_table_node_id(&node) as u64);
+                    match graph.marks.get(&key) {
+                        None => {
+                            graph.marks.insert(key, CircleMark::Once);
+                            pending.extend(node.lock().unwrap().slots.iter().rev().cloned());
+                        }
+                        Some(CircleMark::Once) => {
+                            self.print_number_index += 1;
+                            graph.marks.insert(key, CircleMark::Pending(self.print_number_index as i64));
+                        }
+                        Some(_) => {}
                     }
-                    CharTableSlot::Value(v) => v,
-                };
-                if let Some(data::Object::SubCharTable(node)) = self.object_if(v) {
-                    pending.push(CharTableSlot::Node(std::sync::Arc::clone(node)));
                     continue;
                 }
-                // print_circle_candidate_p: uninterned symbols too under print-gensym.
-                let gensym = options.gensym && self.printed_as_gensym(v)
-                    && !self.obarray_symbol_names.contains_key(&(v.payload() as usize - 1));
-                if !gensym && v.tag() != 3 && !matches!(self.object_if(v), Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::CharTable(_) | data::Object::HashTable(_))) && !self.str_view(v).is_some_and(|s| !s.bytes().is_empty()) { continue; }
-                let count = options.graph.get_mut().counts.entry((0, v.0)).or_default();
-                *count += 1;
-                if *count > 1 { continue; }
-                if v.tag() == 3 { let (a, d) = self.cons_pair(v)?; pending.extend([CharTableSlot::Value(d), CharTableSlot::Value(a)]); }
-                else if let Some(data::Object::Vector(v) | data::Object::Record(v)) = self.object_if(v) { pending.extend(v.iter().copied().map(CharTableSlot::Value)); }
-                else if let Some(data::Object::CharTable(t)) = self.object_if(v) {
-                    pending.extend(t.print_slots());
+                CharTableSlot::Value(v) => v,
+            };
+            if let Some(data::Object::SubCharTable(node)) = self.object_if(v) {
+                pending.push(CharTableSlot::Node(std::sync::Arc::clone(node)));
+                continue;
+            }
+            if !self.circle_candidate(v, gensym) { continue; }
+            let key = (0, v.0);
+            let mark = graph.marks.get(&key).copied();
+            // A gensym under continuous numbering is always numbered, for
+            // bytecomp's byte-compile-output-docform.
+            if mark.is_some() || (continuous && v.tag() == 7) {
+                if matches!(mark, None | Some(CircleMark::Once)) || matches!(mark, Some(CircleMark::Other(m)) if m.tag() == 7) {
+                    if mark.is_none() { graph.inserted.push(v); }
+                    self.print_number_index += 1;
+                    graph.marks.insert(key, CircleMark::Pending(self.print_number_index as i64));
                 }
-                else if let Some(data::Object::HashTable(t)) = self.object_if(v) {
-                    // Entries print in order; push them reversed onto the stack.
-                    let entries: Vec<Value> = t.entries().flat_map(|(_, k, v)| [k, v]).collect();
-                    pending.extend(entries.into_iter().rev().map(CharTableSlot::Value));
-                }
-                else if quoted {
-                    for (_, _, properties) in self.print_string_properties(v) {
-                        pending.extend(properties.into_iter().map(|(_, value)| CharTableSlot::Value(value)));
-                    }
+                continue;
+            }
+            graph.marks.insert(key, CircleMark::Once);
+            graph.inserted.push(v);
+            // The stack pops children left to right, as print.c's does.
+            if v.tag() == 3 { let (a, d) = self.cons_pair(v)?; pending.extend([CharTableSlot::Value(d), CharTableSlot::Value(a)]); }
+            else if let Some(data::Object::Vector(v) | data::Object::Record(v)) = self.object_if(v) { pending.extend(v.iter().rev().copied().map(CharTableSlot::Value)); }
+            else if let Some(data::Object::CharTable(t)) = self.object_if(v) {
+                pending.extend(t.print_slots().into_iter().rev());
+            }
+            else if let Some(data::Object::HashTable(t)) = self.object_if(v) {
+                let entries: Vec<Value> = t.entries().flat_map(|(_, k, v)| [k, v]).collect();
+                pending.extend(entries.into_iter().rev().map(CharTableSlot::Value));
+            }
+            else if quoted {
+                for (_, _, properties) in self.print_string_properties(v).into_iter().rev() {
+                    pending.extend(properties.into_iter().rev().map(|(_, value)| CharTableSlot::Value(value)));
                 }
             }
         }
-        self.print_object(value, quoted, &options, 0)
+        // Objects seen once never take a label.
+        graph.marks.retain(|_, mark| *mark != CircleMark::Once);
+        Ok(())
+    }
+
+    /// print_circle_candidate_p: conses, nonempty strings and arrays, and
+    /// under print-gensym uninterned symbols.
+    fn circle_candidate(&self, v: Value, gensym: bool) -> bool {
+        v.tag() == 3
+            || (gensym && self.printed_as_gensym(v) && !self.obarray_symbol_names.contains_key(&(v.payload() as usize - 1)))
+            || matches!(self.object_if(v), Some(data::Object::Record(_) | data::Object::CharTable(_) | data::Object::HashTable(_)))
+            || matches!(self.object_if(v), Some(data::Object::Vector(v)) if !v.is_empty())
+            || self.str_view(v).is_some_and(|s| !s.bytes().is_empty())
+    }
+
+    /// Store the marks in print-number-table as print.c does: entries keep
+    /// the insertion order of the traversal, and objects seen once are
+    /// removed. Sub-char-tables have no Lisp key and stay private. A new
+    /// table goes to the variable's SLOT; without one (an overriding
+    /// binding) nothing outlives the call to see it.
+    fn publish_print_number_table(&mut self, slot: Option<usize>, mut table: Value, graph: &PrintGraph) -> Result<()> {
+        if !matches!(self.object_if(table), Some(data::Object::HashTable(_))) {
+            let Some(slot) = slot.filter(|_| !graph.inserted.is_empty()) else { return Ok(()) };
+            table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new(hash::Test::Eq, hash::Weakness::None, 0))));
+            self.set_print_number_table(slot, table)?;
+        }
+        for &key in &graph.inserted { self.declaration_hash_put(table, key, Value::TRUE)?; }
+        let Some(data::Object::HashTable(t)) = self.object_if(table) else { unreachable!() };
+        let entries: Vec<(Value, Value)> = t.entries().map(|(_, key, mark)| (key, mark)).collect();
+        for (key, mark) in entries {
+            match graph.marks.get(&(0, key.0)) {
+                Some(CircleMark::Pending(n)) => self.declaration_hash_put(table, key, Value::integer(-n)?)?,
+                Some(CircleMark::Printed(n)) => self.declaration_hash_put(table, key, Value::integer(*n)?)?,
+                Some(CircleMark::Other(_)) => {}
+                Some(CircleMark::Once) | None => if mark == Value::TRUE { self.declaration_hash_remove(table, key)? },
+            }
+        }
+        Ok(())
+    }
+
+    /// print.c assigns Vprint_number_table directly, without watchers.
+    fn set_print_number_table(&mut self, slot: usize, value: Value) -> Result<()> {
+        let local = self.variable_binding_slot(slot, true)?;
+        if self.slots[local].value != value { self.slots[local].value = value; }
+        Ok(())
     }
 
     fn print_char_table_slots(&self, prefix: &str, slots: &[char_table::CharTableSlot], quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
@@ -203,17 +311,11 @@ impl Vm {
                 CharTableSlot::Value(v) => self.print_object(*v, quoted, options, depth + 1)?,
                 CharTableSlot::Node(node) => {
                     let key = (1, char_table::char_table_node_id(node) as u64);
-                    let prefix = {
-                        let mut graph = options.graph.borrow_mut();
-                        if graph.counts.get(&key).is_some_and(|&n| n > 1) {
-                            if let Some(id) = graph.labels.get(&key) {
-                                parts.push(format!("#{id}#"));
-                                continue;
-                            }
-                            let id = graph.labels.len() + 1;
-                            graph.labels.insert(key, id);
-                            format!("#{id}=")
-                        } else { String::new() }
+                    let label = options.graph.borrow_mut().label(key);
+                    let prefix = match label {
+                        Label::Refer(id) => { parts.push(format!("#{id}#")); continue; }
+                        Label::Define(id) => format!("#{id}="),
+                        Label::Plain | Label::Text(_) => String::new(),
                     };
                     prefix + &self.print_sub_char_table_body(node, quoted, options, depth + 1)?
                 }
@@ -273,12 +375,16 @@ impl Vm {
             if !options.circle && container && let Some(depth) = graph.path.iter().position(|&p| p == value.0) {
                 return Ok(format!("#{depth}"));
             }
-            if graph.counts.get(&key).is_some_and(|&n| n > 1) {
-                if let Some(id) = graph.labels.get(&key) { return Ok(format!("#{id}#")); }
-                let id = graph.labels.len() + 1;
-                graph.labels.insert(key, id);
-                format!("#{id}=")
-            } else { String::new() }
+            match graph.label(key) {
+                Label::Refer(id) => return Ok(format!("#{id}#")),
+                Label::Define(id) => format!("#{id}="),
+                // A caller's string entry prints in place of the object.
+                Label::Text(text) if self.str_view(text).is_some() => {
+                    drop(graph);
+                    return self.print_body(text, false, options, depth);
+                }
+                Label::Plain | Label::Text(_) => String::new(),
+            }
         };
         {
             let mut graph = options.graph.borrow_mut();
@@ -303,7 +409,8 @@ impl Vm {
             let mut hex = false;
             for (i, &code) in codes.iter().enumerate() {
                 use std::fmt::Write;
-                if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && quoted) {
+                // princ into a buffer escapes a unibyte string's raw bytes too.
+                if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
                     if !view.is_multibyte() && code >= 128 && !options.nonascii {
                         return Err("printing raw-byte strings to callbacks is not supported".into());
                     }
@@ -392,7 +499,7 @@ impl Vm {
                 let (car, cdr) = self.cons_pair(tail)?;
                 parts.push(self.print_object(car, quoted, options, depth + 1)?);
                 tail = cdr;
-                if tail.tag() == 3 && options.graph.borrow().counts.get(&(0, tail.0)).is_some_and(|&n| n > 1) {
+                if tail.tag() == 3 && options.graph.borrow().shared((0, tail.0)) {
                     parts.push(format!(". {}", self.print_object(tail, quoted, options, depth + 1)?));
                     tail = Value::NIL;
                 }
@@ -466,14 +573,39 @@ impl Vm {
 /// (print.c being_printed), which a container met again prints as #DEPTH
 /// without print-circle; QUOTES counts the quote shorthands in progress,
 /// which take no depth of their own but still bound the recursion.
-struct PrintGraph { counts: HashMap<(u8, u64), usize>, labels: HashMap<(u8, u64), usize>, nesting: usize, path: Vec<u64>, quotes: usize }
+/// MARKS is print.c's number table for print-circle; INSERTED lists the
+/// Lisp keys preprocessing added to it, in order.
+struct PrintGraph { marks: HashMap<(u8, u64), CircleMark>, inserted: Vec<Value>, nesting: usize, path: Vec<u64>, quotes: usize }
+/// A Vprint_number_table value: `t' seen once, -N shared and unprinted,
+/// N printed, or any other value a caller stored.
+#[derive(Clone, Copy, PartialEq)]
+enum CircleMark { Once, Pending(i64), Printed(i64), Other(Value) }
+enum Label { Plain, Define(i64), Refer(i64), Text(Value) }
+impl PrintGraph {
+    /// print_object's table step: `#N=` the first time a shared object
+    /// prints, `#N#` after.
+    fn label(&mut self, key: (u8, u64)) -> Label {
+        match self.marks.get(&key).copied() {
+            Some(CircleMark::Pending(n)) => { self.marks.insert(key, CircleMark::Printed(n)); Label::Define(n) }
+            Some(CircleMark::Printed(n)) => Label::Refer(n),
+            Some(CircleMark::Other(v)) => Label::Text(v),
+            Some(CircleMark::Once) | None => Label::Plain,
+        }
+    }
+    /// A list tail with a table entry prints as a dotted cdr.
+    fn shared(&self, key: (u8, u64)) -> bool {
+        matches!(self.marks.get(&key), Some(CircleMark::Pending(_) | CircleMark::Printed(_) | CircleMark::Other(_)))
+    }
+}
 struct PrintOptions {
     graph: std::cell::RefCell<PrintGraph>,
     length: Option<usize>, level: Option<i64>, quoted: bool, newlines: bool,
     nonascii: bool, multibyte: bool, controls: bool, circle: bool, gensym: bool,
+    /// Output goes to a multibyte buffer, as print_string's does.
+    buffer: bool,
 }
 impl Default for PrintOptions {
-    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false } }
+    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false } }
 }
 impl PrintOptions {
     fn set(&mut self, key: &str, value: Value) -> bool {

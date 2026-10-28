@@ -51,6 +51,12 @@ fn flush_standard_output(cx) {
 }}
 
 fn written(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
+/// Printing with change hooks to run: the insertion's bracket, in Lisp.
+fn print_hooked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let insert = crate::prim::subr_named("romacs--insert-printed").expect("print_finish subr");
+    let args = vec![saved[2], saved[1], insert];
+    Ok(Step::Call { f: cx.intern("romacs--print-insert"), args, then: written, saved: vec![saved[0]] })
+}
 fn destination(cx: &mut Leaf<'_>, stream: Value) -> Out {
     if stream == Value::NIL {
         let symbol = cx.intern("standard-output");
@@ -66,8 +72,16 @@ fn output(cx: &mut Leaf<'_>, result: Value, text: Value, stream: Value) -> Next 
         return Ok(Step::Done(result));
     }
     if matches!(cx.kind(stream), leaf::Kind::Buffer | leaf::Kind::ByteBuffer | leaf::Kind::Marker) {
-        cx.print_into_buffer(text, stream)?;
-        return Ok(Step::Done(result));
+        if !cx.print_runs_lisp(text, stream)? {
+            cx.print_into_buffer(text, stream)?;
+            return Ok(Step::Done(result));
+        }
+        // The printed text carries no properties, as insert_1_both's.
+        let view = cx.string_view(text)?;
+        let (bytes, multibyte) = (view.bytes().to_vec(), view.is_multibyte());
+        let saved = vec![result, cx.make_string(bytes, multibyte), stream];
+        if super::insdel::half_missing(cx)? { return super::insdel::install_half(cx, print_hooked, saved); }
+        return print_hooked(cx, Value::NIL, &saved);
     }
     next_char(cx, vec![result, text, stream, Value::integer(0).unwrap()])
 }

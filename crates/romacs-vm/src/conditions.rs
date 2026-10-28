@@ -322,52 +322,59 @@ impl Vm {
             _ => Err("string required".into()),
         }
     }
+    /// GNU Ferror_message_string and print_error_message.
     fn error_message(&mut self, error: Value) -> Checked<Value> {
-        let (condition, data) = self
-            .cons_pair(error)
-            .map_err(|_| Fault::wrong(self.intern_symbol("consp"), error))?;
-        let id = self.symbol_id(condition)?;
-        let property = self.intern_symbol("error-message");
-        let message = self.get_property(id, property);
-        let mut message = self
-            .message_string(message)
-            .unwrap_or("peculiar error")
-            .to_owned();
-        let mut values = self
-            .list_values(data)
-            .map_err(|_| Fault::wrong(self.intern_symbol("listp"), data))?;
-        let is_error = condition == self.intern_symbol("error");
-        let file_error = self.intern_symbol("file-error");
-        let is_file_error = self.condition_matches(condition, file_error);
-        // Only the condition's message template is quote-substituted; an
-        // explicit error/file-error message is user data and stays literal.
-        message = message.replace('\'', "’");
-        if (is_error || is_file_error) && !values.is_empty() {
-            message = self
-                .message_string(values.remove(0))
-                .unwrap_or("peculiar error")
-                .to_owned();
+        let listp = self.intern_symbol("listp");
+        let (condition, data) = if error == Value::NIL { (Value::NIL, Value::NIL) }
+            else { self.cons_pair(error).map_err(|_| Fault::wrong(listp, error))? };
+        let error_symbol = self.intern_symbol("error");
+        // (error STRING) is its own message.
+        if condition == error_symbol && let Ok((message, Value::NIL)) = self.cons_pair(data)
+            && self.str_view(message).is_some() {
+            return Ok(message);
         }
-        if !values.is_empty() {
-            message.push_str(": ");
-            let rendered: Vec<_> = values
-                .into_iter()
-                .map(|v| {
-                    if is_file_error {
-                        self.message_string(v)
-                            .map(str::to_owned)
-                            .unwrap_or_else(|_| self.display(v).unwrap_or_default())
-                    } else {
-                        self.display(v).unwrap_or_default()
-                    }
-                })
-                .collect();
-            message.push_str(&rendered.join(", "));
+        let (mut template, mut tail, file_error) = if condition == error_symbol {
+            let data = if data.tag() == 3 { data } else { Value::NIL };
+            let (template, tail) = self.cons_pair(data).unwrap_or((Value::NIL, Value::NIL));
+            (template, tail, false)
+        } else {
+            let id = self.symbol_id(condition)?;
+            let property = self.intern_symbol("error-message");
+            let template = self.get_property(id, property);
+            // Only the condition's template is quote-substituted; an explicit
+            // error/file-error message is user data and stays literal.
+            let template = match self.message_string(template) {
+                Ok(text) if text.contains('\'') => {
+                    let text = text.replace('\'', "’");
+                    self.allocate_object(data::Object::String(Box::new(data::LispString::new(&text))))
+                }
+                _ => template,
+            };
+            let file_error = self.intern_symbol("file-error");
+            (template, data, self.condition_matches(condition, file_error))
+        };
+        if file_error && let Ok((first, rest)) = self.cons_pair(tail) {
+            (template, tail) = (first, rest);
         }
-        Ok(
-            self.allocate_object(data::Object::String(Box::new(data::LispString::new(
-                &message,
-            )))),
-        )
+        // user-error, end-of-file and file-error data print with princ.
+        let princ = file_error || condition == self.intern_symbol("user-error") || condition == self.intern_symbol("end-of-file");
+        let print = |vm: &mut Self, value: Value, quoted: bool| vm.print_render(value, quoted, Value::NIL, true)
+            .map_err(|message| Fault { condition: "error", values: vec![vm.allocate_object(data::Object::String(Box::new(data::LispString::new(&message))))] });
+        let mut message = String::new();
+        let mut separator = Some(": ");
+        match self.str_view(template).map(|s| s.bytes().is_empty()) {
+            None => message.push_str("peculiar error"),
+            Some(false) => message.push_str(&print(self, template, false)?),
+            Some(true) => separator = None,
+        }
+        let mut seen = HashSet::default();
+        while let Ok((item, rest)) = self.cons_pair(tail) {
+            if !seen.insert(tail.0) { return Err(Fault { condition: "circular-list", values: vec![data] }); }
+            message.push_str(separator.unwrap_or(""));
+            separator = Some(", ");
+            message.push_str(&print(self, item, !princ)?);
+            tail = rest;
+        }
+        Ok(self.allocate_object(data::Object::String(Box::new(data::LispString::new(&message)))))
     }
 }
