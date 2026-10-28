@@ -164,7 +164,7 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
     use std::io::{Read, Write};
     use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     fn nonblocking(fd: i32) -> std::io::Result<()> {
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -204,7 +204,7 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
         return output;
     }
     let started = crate::host::monotonic();
-    let child = Command::new(&request.argv[0])
+    let child = crate::host::command(&request.argv[0])
         .args(&request.argv[1..])
         .current_dir(&request.directory)
         .stdin(Stdio::piped())
@@ -284,10 +284,8 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
         std::thread::sleep(Duration::from_millis(5));
     }
     // Keep the leader unreaped until its group is killed, pinning the numeric PID.
-    unsafe {
-        libc::kill(-pid, libc::SIGKILL);
-        libc::kill(pid, libc::SIGKILL);
-    }
+    let _ = crate::host::kill(-pid, libc::SIGKILL);
+    let _ = crate::host::kill(pid, libc::SIGKILL);
     stdin.take();
     match child.wait() {
         Ok(status) => output.status = status.code(),

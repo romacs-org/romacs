@@ -160,9 +160,9 @@ impl Drop for Table {
     /// host outlives the VM, so these and the deleted children then pass to
     /// the host's reaper where GNU leaves them to init.
     fn drop(&mut self) {
-        let deleted = std::mem::take(&mut self.deleted).into_iter().map(|(pid, file)| Orphan { pid, pidfd: pidfd_open(pid), file });
+        let deleted = std::mem::take(&mut self.deleted).into_iter().map(|(pid, file)| Orphan { pid, pidfd: crate::host::pidfd_open(pid), file });
         let live = self.channels.values_mut().filter(|c| c.pidfd.is_some() && c.pid > 0).map(|c| {
-            unsafe { libc::kill(-c.pid, libc::SIGHUP) };
+            let _ = crate::host::kill(-c.pid, libc::SIGHUP);
             Orphan { pid: c.pid, pidfd: c.pidfd.take(), file: None }
         });
         let orphans: Vec<Orphan> = deleted.chain(live).collect();
@@ -232,11 +232,8 @@ impl Reaper {
     }
 
     fn start(&'static self, start: Start) -> io::Result<OwnedFd> {
-        let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
-        if fd < 0 {
-            return Err(last_error());
-        }
-        let wake = unsafe { OwnedFd::from_raw_fd(fd) };
+        let wake = crate::host::eventfd()?;
+        let fd = wake.as_raw_fd();
         start(Box::new(move || self.run(fd)))?;
         Ok(wake)
     }
@@ -283,15 +280,6 @@ pub(crate) fn last_error() -> io::Error {
     io::Error::last_os_error()
 }
 
-/// emacs_pipe: a close-on-exec pipe (read end, write end).
-pub(crate) fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
-    let mut fds = [0; 2];
-    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
-        return Err(last_error());
-    }
-    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
-}
-
 pub(crate) fn set_nonblocking(fd: RawFd) -> io::Result<()> {
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
     if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
@@ -302,33 +290,6 @@ pub(crate) fn set_nonblocking(fd: RawFd) -> io::Result<()> {
 
 pub(crate) fn dup(fd: &OwnedFd) -> io::Result<OwnedFd> {
     fd.try_clone()
-}
-
-/// allocate_pty with posix_openpt: the master and the slave's name.
-pub(crate) fn allocate_pty() -> io::Result<(OwnedFd, Vec<u8>)> {
-    let fd = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return Err(last_error());
-    }
-    let master = unsafe { OwnedFd::from_raw_fd(fd) };
-    if unsafe { libc::grantpt(fd) } != 0 || unsafe { libc::unlockpt(fd) } != 0 {
-        return Err(last_error());
-    }
-    let mut name = [0u8; 64];
-    if unsafe { libc::ptsname_r(fd, name.as_mut_ptr().cast(), name.len()) } != 0 {
-        return Err(last_error());
-    }
-    let len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
-    Ok((master, name[..len].to_vec()))
-}
-
-pub(crate) fn open_tty(name: &[u8]) -> io::Result<OwnedFd> {
-    let path = std::ffi::CString::new(name).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return Err(last_error());
-    }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 /// sysdep.c child_setup_tty: the terminal modes a pty child starts with.
@@ -383,7 +344,7 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     // A process creation retries a reaper that failed to start.
     REAPER.adopt(Vec::new(), spawn_reaper);
     let os = |b: &[u8]| std::ffi::OsStr::from_bytes(b).to_os_string();
-    let mut command = std::process::Command::new(os(&spec.argv[0]));
+    let mut command = crate::host::command(os(&spec.argv[0]));
     command.args(spec.argv[1..].iter().map(|a| os(a)));
     command.env_clear();
     for entry in spec.env {
@@ -427,15 +388,7 @@ pub(crate) fn accessible_directory(dir: &[u8]) -> io::Result<()> {
     if !crate::host::metadata(std::ffi::OsStr::from_bytes(dir))?.file_type().is_dir() {
         return Err(io::Error::from_raw_os_error(libc::ENOTDIR));
     }
-    if unsafe { libc::access(path.as_ptr(), libc::X_OK) } != 0 {
-        return Err(last_error());
-    }
-    Ok(())
-}
-
-pub(crate) fn pidfd_open(pid: i32) -> Option<OwnedFd> {
-    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
-    (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
+    crate::host::access(&path, libc::X_OK, crate::host::Ids::Real)
 }
 
 /// child_status_changed: a nonblocking waitpid, or None if unchanged.
@@ -466,43 +419,6 @@ pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
             return Err(error);
         }
     }
-}
-
-/// connect_network_socket's nonblocking connect: a close-on-exec stream
-/// socket to ADDR, connected or (EINPROGRESS) connecting.
-pub(crate) fn connect_nonblocking(addr: std::net::SocketAddr) -> io::Result<OwnedFd> {
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let len = match addr {
-        std::net::SocketAddr::V4(a) => {
-            let sin = unsafe { &mut *(&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr_in>() };
-            sin.sin_family = libc::AF_INET as libc::sa_family_t;
-            sin.sin_port = a.port().to_be();
-            sin.sin_addr = libc::in_addr { s_addr: u32::from_ne_bytes(a.ip().octets()) };
-            size_of::<libc::sockaddr_in>()
-        }
-        std::net::SocketAddr::V6(a) => {
-            let sin6 = unsafe { &mut *(&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr_in6>() };
-            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
-            sin6.sin6_port = a.port().to_be();
-            sin6.sin6_flowinfo = a.flowinfo();
-            sin6.sin6_addr = libc::in6_addr { s6_addr: a.ip().octets() };
-            sin6.sin6_scope_id = a.scope_id();
-            size_of::<libc::sockaddr_in6>()
-        }
-    };
-    let s = unsafe { libc::socket(i32::from(storage.ss_family), libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
-    if s < 0 {
-        return Err(last_error());
-    }
-    let socket = unsafe { OwnedFd::from_raw_fd(s) };
-    if unsafe { libc::connect(s, (&storage as *const libc::sockaddr_storage).cast(), len as libc::socklen_t) } != 0 {
-        let error = last_error();
-        // EINTR leaves a nonblocking connect in progress, as EINPROGRESS does.
-        if !matches!(error.raw_os_error(), Some(libc::EINPROGRESS | libc::EINTR)) {
-            return Err(error);
-        }
-    }
-    Ok(socket)
 }
 
 /// emacs_read: Ok(0) at end of file.
@@ -564,13 +480,6 @@ pub(crate) fn poll(fds: &[(RawFd, i16)], timeout: Option<std::time::Duration>) -
         return Err(error);
     }
     Ok(set.iter().map(|p| p.revents).collect())
-}
-
-pub(crate) fn kill(pid: i32, signal: i32) -> io::Result<()> {
-    if unsafe { libc::kill(pid, signal) } != 0 {
-        return Err(last_error());
-    }
-    Ok(())
 }
 
 /// emacs_get_tty_pgrp: the foreground group of the pty on FD.
@@ -636,8 +545,8 @@ mod tests {
         let file = dir.join("orphan");
         std::fs::write(&file, "").unwrap();
         let pid = std::process::Command::new("true").spawn().unwrap().id() as i32;
-        reaper.adopt(vec![Orphan { pid, pidfd: pidfd_open(pid), file: None }], refuse);
-        reaper.adopt(vec![Orphan { pid, pidfd: pidfd_open(pid), file: Some(file.clone()) }], refuse);
+        reaper.adopt(vec![Orphan { pid, pidfd: crate::host::pidfd_open(pid), file: None }], refuse);
+        reaper.adopt(vec![Orphan { pid, pidfd: crate::host::pidfd_open(pid), file: Some(file.clone()) }], refuse);
         assert!(reaper.lock().wake.is_none());
         assert_eq!(reaper.lock().orphans.iter().map(|o| o.pid).collect::<Vec<_>>(), [pid]);
         poll_until("the orphan to exit", || state(pid) == Some('Z'));

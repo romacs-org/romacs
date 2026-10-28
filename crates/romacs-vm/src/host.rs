@@ -1,16 +1,22 @@
-//! The host boundary: the VM's and its embedders' host queries and file
-//! effects go through this module, so a world builder can later record and
-//! classify each one. `tests/host_boundary_lint.rs` keeps other sources from
-//! calling the host APIs it names directly.
+//! The host boundary: the VM's and its embedders' host queries and effects
+//! (files, processes, sockets) go through this module, so a world builder can
+//! later record and classify each one. `tests/host_boundary_lint.rs` keeps
+//! other sources from calling the host APIs it names directly.
+//!
+//! No read descriptor leaves this module (`Input`). Output files, pipes,
+//! ptys, sockets and children are made only here, so a refusal at these entry
+//! points also covers the descriptor calls made on them elsewhere.
 //!
 //! Only `Mode::Off` exists, in which each function is a direct passthrough:
 //! it returns exactly what the host call returns.
 use std::cell::Cell;
-use std::ffi::{CStr, OsString};
+use std::ffi::{CStr, OsStr, OsString};
 use std::fs::{File, FileType, Metadata};
 use std::io;
-use std::os::fd::OwnedFd;
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Instant, SystemTime};
 
 pub use std::fs::OpenOptions;
@@ -208,10 +214,22 @@ pub fn absolute(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     std::path::absolute(path)
 }
 
-/// faccessat with the effective ids: whether MODE access to PATH is allowed.
-pub fn access(path: &CStr, mode: i32) -> io::Result<()> {
-    if unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), mode, libc::AT_EACCESS) } == 0 { Ok(()) }
-    else { Err(io::Error::last_os_error()) }
+/// Whose ids an access check uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ids {
+    Effective,
+    Real,
+}
+
+/// faccessat: whether IDS may access PATH in MODE.
+pub fn access(path: &CStr, mode: i32, ids: Ids) -> io::Result<()> {
+    let flags = match ids { Ids::Effective => libc::AT_EACCESS, Ids::Real => 0 };
+    status(unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), mode, flags) })
+}
+
+/// A C call's 0-or-error result.
+fn status(result: libc::c_int) -> io::Result<()> {
+    if result == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
 }
 
 pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
@@ -405,6 +423,162 @@ pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<(
 
 pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()> {
     std::os::unix::fs::fchown(file, uid, gid)
+}
+
+/// fchmodat: PATH's mode bits, a symlink's own under NOFOLLOW.
+pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
+    let flags = if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 };
+    status(unsafe { libc::fchmodat(libc::AT_FDCWD, path.as_ptr(), mode as libc::mode_t, flags) })
+}
+
+/// renameat2 with RENAME_NOREPLACE: EEXIST rather than replace TO.
+pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
+    status(unsafe { libc::renameat2(libc::AT_FDCWD, from.as_ptr(), libc::AT_FDCWD, to.as_ptr(), libc::RENAME_NOREPLACE) })
+}
+
+/// utimensat: both of PATH's times set to TIME (seconds, nanoseconds), or
+/// now; a symlink's own under NOFOLLOW.
+pub fn set_times(path: &CStr, time: Option<(i64, i64)>, nofollow: bool) -> io::Result<()> {
+    let stamp = match time {
+        Some((seconds, nanos)) => libc::timespec { tv_sec: seconds as libc::time_t, tv_nsec: nanos as _ },
+        None => libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_NOW },
+    };
+    let flags = if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 };
+    status(unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), [stamp, stamp].as_ptr(), flags) })
+}
+
+/// mkostemp: a new close-on-exec file named TEMPLATE with its trailing
+/// XXXXXX replaced, and that name.
+pub fn temp_file(template: &Path) -> io::Result<(PathBuf, File)> {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    let mut name = template.as_os_str().as_bytes().to_vec();
+    name.push(0);
+    let fd = unsafe { libc::mkostemp(name.as_mut_ptr().cast(), libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let file = unsafe { File::from_raw_fd(fd) };
+    name.pop();
+    Ok((PathBuf::from(OsString::from_vec(name)), file))
+}
+
+// Processes. A child, and every descriptor this process holds besides its
+// standard streams, comes from a function here: the descriptor and child
+// calls elsewhere (read, write, poll, fcntl, ioctl, the termios calls, fsync,
+// close, waitpid, shutdown, accept) act only on what these returned.
+
+/// Every child process starts from a Command made here.
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    Command::new(program)
+}
+
+/// kill(2): SIGNAL to PID, a process group when negative. Signal 0 asks
+/// only whether PID exists and may be signalled.
+pub fn kill(pid: i32, signal: i32) -> io::Result<()> {
+    status(unsafe { libc::kill(pid, signal) })
+}
+
+/// A pidfd for PID, readable once it exits.
+pub fn pidfd_open(pid: i32) -> Option<OwnedFd> {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd as libc::c_int) })
+}
+
+/// emacs_pipe: a close-on-exec pipe (read end, write end).
+pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
+    let mut fds = [0; 2];
+    status(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) })?;
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+}
+
+/// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
+pub fn eventfd() -> io::Result<OwnedFd> {
+    let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// allocate_pty with posix_openpt: the master and the slave's name.
+pub fn allocate_pty() -> io::Result<(OwnedFd, Vec<u8>)> {
+    let fd = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let master = unsafe { OwnedFd::from_raw_fd(fd) };
+    if unsafe { libc::grantpt(fd) } != 0 || unsafe { libc::unlockpt(fd) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut name = [0u8; 64];
+    if unsafe { libc::ptsname_r(fd, name.as_mut_ptr().cast(), name.len()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+    Ok((master, name[..len].to_vec()))
+}
+
+/// The pty slave NAME, opened without becoming the controlling terminal.
+pub fn open_tty(name: &[u8]) -> io::Result<OwnedFd> {
+    let path = std::ffi::CString::new(name).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+// Sockets.
+
+/// HOST:PORT's addresses, from the C library's resolver.
+pub fn resolve(host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
+    use std::net::ToSocketAddrs;
+    (host, port).to_socket_addrs().map(Iterator::collect)
+}
+
+pub fn listen(addr: SocketAddr) -> io::Result<TcpListener> {
+    TcpListener::bind(addr)
+}
+
+pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
+    TcpStream::connect(addr)
+}
+
+/// connect_network_socket's nonblocking connect: a close-on-exec stream
+/// socket to ADDR, connected or (EINPROGRESS) connecting.
+pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
+    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let len = match addr {
+        SocketAddr::V4(a) => {
+            let sin = unsafe { &mut *(&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr_in>() };
+            sin.sin_family = libc::AF_INET as libc::sa_family_t;
+            sin.sin_port = a.port().to_be();
+            sin.sin_addr = libc::in_addr { s_addr: u32::from_ne_bytes(a.ip().octets()) };
+            size_of::<libc::sockaddr_in>()
+        }
+        SocketAddr::V6(a) => {
+            let sin6 = unsafe { &mut *(&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr_in6>() };
+            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+            sin6.sin6_port = a.port().to_be();
+            sin6.sin6_flowinfo = a.flowinfo();
+            sin6.sin6_addr = libc::in6_addr { s6_addr: a.ip().octets() };
+            sin6.sin6_scope_id = a.scope_id();
+            size_of::<libc::sockaddr_in6>()
+        }
+    };
+    let s = unsafe { libc::socket(i32::from(storage.ss_family), libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
+    if s < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let socket = unsafe { OwnedFd::from_raw_fd(s) };
+    if unsafe { libc::connect(s, (&storage as *const libc::sockaddr_storage).cast(), len as libc::socklen_t) } != 0 {
+        let error = io::Error::last_os_error();
+        // EINTR leaves a nonblocking connect in progress, as EINPROGRESS does.
+        if !matches!(error.raw_os_error(), Some(libc::EINPROGRESS | libc::EINTR)) {
+            return Err(error);
+        }
+    }
+    Ok(socket)
 }
 
 #[cfg(test)]
