@@ -219,3 +219,14 @@ fn per_buffer_default_survives_moving_collection() {
         "a new buffer inherits the moved default"
     );
 }
+
+/// lread.c:5559 DEFVARs `values' and then clears its `declared_special', so
+/// a closure captures a `let' of it. GNU 32.0.50 -Q --batch, same form:
+/// (nil t nil 2).
+#[test]
+fn values_is_bound_but_not_special() {
+    let mut vm = Vm::new();
+    let printed = vm.eval_source("(list (special-variable-p 'values) (boundp 'values) values \
+        (funcall (let ((values 2)) (lambda () values))))").unwrap().display().unwrap();
+    assert_eq!(printed, "(nil t nil 2)");
+}

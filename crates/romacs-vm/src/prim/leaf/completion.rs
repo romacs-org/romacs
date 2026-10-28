@@ -80,4 +80,17 @@ impl Leaf<'_> {
             .string_match_no_data(pattern, string, translation)?
             .is_some())
     }
+
+    /// dired.c file_name_completion matches `completion-regexp-list' with
+    /// the standard canonical table when ignoring case, whatever the current
+    /// buffer's case table.
+    pub(crate) fn file_completion_regexp_match(
+        &mut self,
+        pattern: Value,
+        string: Value,
+        fold: bool,
+    ) -> std::result::Result<bool, Fault> {
+        let translation = fold.then(CaseTranslation::standard);
+        Ok(self.vm.string_match_no_data(pattern, string, translation)?.is_some())
+    }
 }

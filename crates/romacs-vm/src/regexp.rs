@@ -3,7 +3,7 @@ use crate::{coordinates::*, data::Object, *};
 use romacs_regex_engine::{self as regex, EmacsStr, MatchRegisters};
 #[path = "regexp_syntax.rs"]
 mod syntax;
-pub(crate) use syntax::parse_syntax_descriptor;
+pub(crate) use syntax::{parse_syntax_descriptor, VmSyntax};
 
 #[derive(Default)]
 pub(super) struct MatchState {
@@ -24,6 +24,8 @@ pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
             | Primitive::MatchData
             | Primitive::ReSearchForward
             | Primitive::ReSearchBackward
+            | Primitive::SearchForward
+            | Primitive::SearchBackward
             | Primitive::SyntaxTable
             | Primitive::StandardSyntaxTable
             | Primitive::CopySyntaxTable
@@ -97,6 +99,7 @@ impl Vm {
             let pattern = vm.regexp_input(pattern)?;
             let input = vm.regexp_input(string)?;
             let syntax = vm.regexp_syntax(Some(string))?;
+            let syntax = syntax::VmSyntax::new(vm, syntax);
             let mut compiled = regex::regex_compile_lisp_with_translation(
                 &EmacsStr::new(&pattern.bytes, pattern.multibyte), false, translation,
             ).map_err(|e| Fault::Text("invalid-regexp", e.to_string()))?;
@@ -205,7 +208,7 @@ impl Vm {
         // Only Rust memory is allocated below: retained cells cannot move.
         let mut cells = Vec::new();
         let mut tail = list;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while tail.tag() == 3 {
             if !seen.insert(tail.0) { return Err(Fault::Circular(list)); }
             let (value, next) = self.cons_pair(tail).map_err(Fault::Error)?;
@@ -269,13 +272,16 @@ impl Vm {
     fn regexp_preserve(&self) -> bool {
         self.slots[self.names["inhibit-changing-match-data"]].value != Value::NIL
     }
+    /// The current buffer's binding: case-fold-search is often buffer-local.
+    fn regexp_case_fold(&mut self) -> SearchResult<bool> {
+        Ok(self.variable_value(self.names["case-fold-search"])? != Value::NIL)
+    }
     fn regexp_compile(
-        &self,
         pattern: &Input,
         multibyte: bool,
+        folded: bool,
         syntax: &syntax::VmSyntax,
     ) -> SearchResult<regex::CompiledPattern> {
-        let folded = self.slots[self.names["case-fold-search"]].value != Value::NIL;
         let translation = folded.then(regex::CaseTranslation::standard);
         let mut compiled = regex::regex_compile_lisp_with_translation(
             &EmacsStr::new(&pattern.bytes, pattern.multibyte),
@@ -468,7 +474,7 @@ impl Vm {
         let mut tail = reuse;
         let mut previous = None;
         let mut i = 0;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while tail.tag() == 3 {
             if !seen.insert(tail.0) {
                 return Err(Fault::Text(
@@ -506,7 +512,7 @@ impl Vm {
             ModifySyntaxEntry => (2..=3).contains(&n),
             LookingAt | MatchString => (1..=2).contains(&n),
             StringMatch => (2..=4).contains(&n),
-            ReSearchForward | ReSearchBackward => (1..=4).contains(&n),
+            ReSearchForward | ReSearchBackward | SearchForward | SearchBackward => (1..=4).contains(&n),
             MatchData => n <= 3,
             _ => n == 1,
         };
@@ -562,8 +568,10 @@ impl Vm {
             if pos < 0 || pos as usize > input.len() {
                 return Err(Fault::Signal("args-out-of-range", vec![args[1], args[2]]));
             }
+            let folded = self.regexp_case_fold()?;
             let syntax = self.regexp_syntax(Some(args[1]))?;
-            let compiled = self.regexp_compile(&pattern, input.multibyte, &syntax)?;
+            let syntax = syntax::VmSyntax::new(self, syntax);
+            let compiled = Self::regexp_compile(&pattern, input.multibyte, folded, &syntax)?;
             let byte = input.byte(pos as usize);
             let found = regex::re_search(
                 &compiled,
@@ -586,13 +594,21 @@ impl Vm {
             }
             return Ok(Value::NIL);
         }
-        let count = if matches!(p, ReSearchForward | ReSearchBackward) && args[3] != Value::NIL {
+        let count = if matches!(p, ReSearchForward | ReSearchBackward | SearchForward | SearchBackward) && args[3] != Value::NIL {
             self.regexp_int(args[3])?
         } else {
             1
         };
-        let count = if p == ReSearchBackward { -count } else { count };
-        let pattern = self.regexp_input(args[0])?;
+        let count = if matches!(p, ReSearchBackward | SearchBackward) { -count } else { count };
+        let mut pattern = self.regexp_input(args[0])?;
+        // search_command with RE false: the same search over STRING quoted,
+        // which matches exactly where the literal does, with the same folding.
+        if matches!(p, SearchForward | SearchBackward) {
+            pattern.bytes = pattern.bytes.iter().flat_map(|&b| {
+                let special = b"[*.\\?+^$".contains(&b);
+                if special { vec![b'\\', b] } else { vec![b] }
+            }).collect();
+        }
         let index = self.buffer_index()?;
         let (input, base_byte, base_char, original) = match &self.objects[index] {
             Object::Buffer(t) => {
@@ -658,8 +674,12 @@ impl Vm {
         if count == 0 {
             return Ok(Value::integer(original_char as i64)?);
         }
+        let folded = self.regexp_case_fold()?;
         let syntax = self.regexp_syntax(None)?;
-        let compiled = self.regexp_compile(&pattern, input.multibyte, &syntax)?;
+        let syntax = syntax::VmSyntax::new(self, syntax);
+        let compiled = Self::regexp_compile(&pattern, input.multibyte, folded, &syntax)?;
+        // Match data is saved once, from the last success, after the engine.
+        let (mut matched, mut overflow) = (None, false);
         let limit = input.byte(bound - base_char);
         let mut point = original;
         let mut failed = false;
@@ -683,10 +703,9 @@ impl Vm {
                     original,
                 )
             };
-            if regex::take_matcher_overflow() {
-                return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
-            }
-            let Some((_, registers)) = found else {
+            // An overflow still keeps an earlier iteration's match data.
+            overflow = regex::take_matcher_overflow();
+            let Some((_, registers)) = found.filter(|_| !overflow) else {
                 failed = true;
                 break;
             };
@@ -695,9 +714,16 @@ impl Vm {
             } else {
                 registers.start[0]
             } as usize;
+            matched = Some(registers);
+        }
+        drop(syntax);
+        if let Some(registers) = matched {
             if !self.regexp_preserve() && (p != LookingAt || args[1] == Value::NIL) {
                 self.regexp_save(&input, &registers, base_char, true);
             }
+        }
+        if overflow {
+            return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
         }
         if p == LookingAt {
             return Ok(if failed { Value::NIL } else { Value::TRUE });

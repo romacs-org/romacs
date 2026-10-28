@@ -99,10 +99,60 @@ impl Vm {
         let mut buffer: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
         buffer.state.name = Some(actual.clone());
         buffer.case_tables = self.buffer_standard_case_roots()?;
+        let directory = self.inherited_directory();
         let value = self.allocate_object(Object::Buffer(Box::new(buffer)));
+        self.set_directory_of(value.index(0)? - 1, directory);
         let slot = self.slot(&format!("#:vm2-buffer:{actual}"));
         self.slots[slot].value = value;
+        // Fget_buffer_create: no undo for buffers whose names start with a space.
+        let undo = if actual.starts_with(' ') { Value::TRUE } else { Value::NIL };
+        self.set_undo_list_of(value.index(0)? - 1, undo);
+        let mut order = self.buffer_order();
+        order.push(value);
+        self.set_buffer_order(&order);
         Ok(value)
+    }
+    /// GNU's Vbuffer_alist order: creation order, with buried buffers moved
+    /// to the end; kept as a list in a traced hidden slot.
+    pub(crate) fn buffer_order(&mut self) -> Vec<Value> {
+        let slot = self.slot(BUFFER_ORDER);
+        let list = self.slots[slot].value;
+        if list == Value::UNBOUND { Vec::new() } else { self.list_values(list).unwrap_or_default() }
+    }
+    /// The buffer list's order without creating its slot.
+    pub(crate) fn buffer_order_snapshot(&self) -> Vec<Value> {
+        let Some(&slot) = self.names.get(BUFFER_ORDER) else { return Vec::new() };
+        let list = self.slots[slot].value;
+        if list == Value::UNBOUND { Vec::new() } else { self.list_values(list).unwrap_or_default() }
+    }
+    /// *scratch* exists from startup in GNU; VM2 makes it on first use, so
+    /// until it has been made once, its name counts as taken.
+    pub(crate) fn scratch_unmade(&self) -> bool {
+        !self.names.contains_key("#:vm2-buffer:*scratch*")
+    }
+    pub(crate) fn set_buffer_order(&mut self, buffers: &[Value]) {
+        let list = self.list_value(buffers);
+        let slot = self.slot(BUFFER_ORDER);
+        self.slots[slot].value = list;
+    }
+    /// Frename_buffer's renaming: BUFFER (live) is now NAME, keeping its
+    /// place in the buffer list.
+    pub(crate) fn rename_buffer_model(&mut self, buffer: Value, name: &str) -> Result<()> {
+        let old = self.buffer_state(buffer)?.name.clone().ok_or("buffer has no name")?;
+        let old_slot = self.slot(&format!("#:vm2-buffer:{old}"));
+        if self.slots[old_slot].value == buffer { self.slots[old_slot].value = Value::UNBOUND; }
+        let slot = self.slot(&format!("#:vm2-buffer:{name}"));
+        self.slots[slot].value = buffer;
+        self.buffer_state_mut(buffer)?.name = Some(name.to_owned());
+        self.display_state.version += 1;
+        Ok(())
+    }
+    /// Fbury_buffer_internal: BUFFER moves to the end of the buffer list.
+    pub(crate) fn bury_buffer_model(&mut self, buffer: Value) {
+        let mut order = self.buffer_order();
+        order.retain(|&b| b != buffer);
+        order.push(buffer);
+        self.set_buffer_order(&order);
     }
     pub(crate) fn kill_buffer_model(&mut self, value: Value) -> Result<()> {
         if !self.buffer_state(value)?.live || self.objects.iter().any(|object| {
@@ -113,6 +163,9 @@ impl Vm {
                 self.slots[*slot].value = Value::UNBOUND;
             }
         }
+        let mut order = self.buffer_order();
+        order.retain(|&b| b != value);
+        self.set_buffer_order(&order);
         let windows: Vec<Value> = self.objects.iter().enumerate().filter_map(|(i, object)| {
             match object {
                 Object::Window(w) if w.buffer == value => Some(Value::reference(i + 1, 0)),
@@ -120,10 +173,9 @@ impl Vm {
             }
         }).collect();
         if self.slots[self.buffer_slot].value == value || !windows.is_empty() {
-            let replacement = self.names.iter().filter_map(|(name, slot)| {
-                let candidate = self.slots[*slot].value;
-                if name.starts_with("#:vm2-buffer:")
-                    && candidate != value
+            // The first other live buffer in the buffer list, as other-buffer.
+            let replacement = order.iter().copied().find(|&candidate| {
+                candidate != value
                     && (windows.is_empty() || matches!(self.object_if(candidate), Some(Object::Buffer(_))))
                     && self.buffer_state(candidate).is_ok_and(|state| {
                         state.live && state.name.as_deref().is_some_and(|n| !n.starts_with(' '))
@@ -131,13 +183,7 @@ impl Vm {
                     && !self.objects.iter().any(|object| {
                         matches!(object, Object::Window(w) if w.mini && w.buffer == candidate)
                     })
-                {
-                    Some((*slot, candidate))
-                } else {
-                    None
-                }
-            }).min_by_key(|(slot, _)| *slot).map(|(_, candidate)| candidate)
-                .map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))?;
+            }).map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))?;
             let point = match self.object(replacement)? {
                 Object::Buffer(b) => b.char_of_byte(b.point)?.0,
                 Object::ByteBuffer(b) => b.point.0,
@@ -149,6 +195,8 @@ impl Vm {
                 self.set_marker_object(pt, point, replacement)?;
                 self.set_marker_object(start, Value::integer(1)?, replacement)?;
                 let w = self.window_mut(window)?;
+                // replace_buffer_in_windows_safely undedicates the window.
+                w.dedicated = Value::NIL;
                 w.buffer = replacement;
                 w.end_distance = 0;
                 w.end_valid = false;
@@ -194,9 +242,9 @@ impl Vm {
         let index = value.index(0)? - 1;
         self.objects[index] = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer {
-                state, bytes: vec![], syntax_table: Value::NIL, case_tables: [Value::NIL; 4],
-                point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0),
-                properties: Default::default(), per_buffer: retained,
+                state, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, case_tables: [Value::NIL; 4],
+                point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0), saved_restrictions: Vec::new(), saved_points: Vec::new(),
+                properties: Default::default(), had_intervals: false, per_buffer: retained, held: None,
             })),
             _ => {
                 let mut empty: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
@@ -208,13 +256,13 @@ impl Vm {
         self.display_state.version += 1;
         Ok(())
     }
+    /// get-text-property on a string.
     fn string_property_primitive(
         &mut self,
-        p: Primitive,
         start: usize,
         object: Value,
     ) -> Result<Value> {
-        let key_value = self.stack[start + if p == Primitive::PutProperty { 2 } else { 1 }];
+        let key_value = self.stack[start + 1];
         let slot = key_value
             .index(7)?
             .checked_sub(1)
@@ -230,41 +278,21 @@ impl Vm {
             usize::try_from(self.stack[start].as_integer()?).map_err(|_| "index out of range")?;
         if Self::image_value(object) {
             let text = self.string_value(object)?;
-            if p == Primitive::GetProperty && at <= text.chars().count() {
+            if at <= text.chars().count() {
                 return Ok(Value::NIL);
             }
             return Err("immutable image string or index out of range".into());
         }
-        let end = if p == Primitive::PutProperty {
-            Some(
-                usize::try_from(self.stack[start + 1].as_integer()?)
-                    .map_err(|_| "index out of range")?,
-            )
-        } else {
-            None
-        };
-        let value = if p == Primitive::PutProperty {
-            self.stack[start + 3]
-        } else {
-            Value::NIL
-        };
-        let (Object::String(s) | Object::RawString(s)) = &mut self.objects[object.index(0)? - 1] else {
+        let (Object::String(s) | Object::RawString(s)) = &self.objects[object.index(0)? - 1] else {
             return Err("string required".into());
         };
         let b = s.byte_offset(CharOffset(at)).ok_or("index out of range")?;
-        if let Some(end) = end {
-            let e = s.byte_offset(CharOffset(end)).ok_or("index out of range")?;
-            s.properties
-                .put(ByteOffset(b.min(e))..ByteOffset(b.max(e)), &key, value);
-            Ok(Value::NIL)
-        } else {
-            if at == s.len() {
-                return Ok(Value::NIL);
-            }
-            Ok(s.properties
-                .get_property(ByteOffset(b), &key)
-                .unwrap_or(Value::NIL))
+        if at == s.len() {
+            return Ok(Value::NIL);
         }
+        Ok(s.properties
+            .get_property(ByteOffset(b), &key)
+            .unwrap_or(Value::NIL))
     }
     pub(super) fn string_bytes(&self, v: Value) -> Result<Vec<u8>> {
         if Self::image_value(v) {
@@ -291,6 +319,9 @@ impl Vm {
     }
     pub(super) fn ensure_buffer_writable(&mut self) -> Result<()> {
         self.buffer_index()?;
+        if self.change_prepared {
+            return Ok(());
+        }
         let read_only = self.slot("buffer-read-only");
         let inhibited = self.slot("inhibit-read-only");
         if self.variable_value(read_only)? != Value::NIL
@@ -312,7 +343,6 @@ impl Vm {
                 p,
                 Primitive::Insert
                     | Primitive::DeleteRegion
-                    | Primitive::PutProperty
                     | Primitive::GotoChar
                     | Primitive::Narrow
                     | Primitive::Widen
@@ -330,16 +360,15 @@ impl Vm {
         if (p as usize) >= SetMultibyte as usize {
             return self.edge_primitive(p, start, n);
         }
+        let args = self.buffer_primitive_args(p, start, n)?;
         let valid = match p {
             Remainder | DeleteRegion | Substring | Narrow => n == 2,
             SetBuffer | GotoChar | CharToByte | ByteToChar => n == 1,
-            CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen | BufferString => {
+            CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen => {
                 n == 0
             }
             CharAfter => n <= 1,
             Insert => true,
-            SearchForward => (1..=3).contains(&n),
-            PutProperty => (4..=5).contains(&n),
             GetProperty => (2..=3).contains(&n),
             _ => false,
         };
@@ -348,14 +377,14 @@ impl Vm {
         }
         if p == Remainder {
             return Value::integer(
-                self.stack[start]
+                args[0]
                     .as_integer()?
-                    .checked_rem(self.stack[start + 1].as_integer()?)
+                    .checked_rem(args[1].as_integer()?)
                     .ok_or("arithmetic error")?,
             );
         }
         if p == SetBuffer {
-            let mut v = self.stack[start];
+            let mut v = args[0];
             if let Some(name) = self.eval_buffer_name(v)? {
                 v = if name == "*scratch*" { self.create_named_buffer(&name, false)? }
                     else { self.named_buffer(&name).ok_or_else(|| format!("no buffer named {name}"))? };
@@ -364,15 +393,15 @@ impl Vm {
             self.slots[self.buffer_slot].value = v;
             return Ok(v);
         }
-        let object = if (p == PutProperty && n == 5) || (p == GetProperty && n == 3) {
-            self.stack[start + n - 1]
+        let object = if p == GetProperty && n == 3 {
+            args[n - 1]
         } else {
             Value::NIL
         };
         if object != Value::NIL
             && (Self::image_value(object) || matches!(self.object(object), Ok(Object::String(_) | Object::RawString(_))))
         {
-            return self.string_property_primitive(p, start, object);
+            return self.string_property_primitive(start, object);
         }
         let index = if object != Value::NIL {
             if !matches!(
@@ -392,7 +421,7 @@ impl Vm {
             self.ensure_buffer_writable()?;
         }
         if matches!(self.objects[index], Object::ByteBuffer(_)) {
-            return self.byte_buffer_primitive(p, start, n, index);
+            return self.byte_buffer_primitive(p, start, n, index, &args);
         }
         let mut inserted_properties = properties::Properties::new();
         let inserted = if p == Insert {
@@ -414,13 +443,11 @@ impl Vm {
                 }
             }
             bytes
-        } else if p == SearchForward {
-            self.string_bytes(self.stack[start])?
         } else {
             vec![]
         };
-        let key = if matches!(p, PutProperty | GetProperty) {
-            let value = self.stack[start + if p == PutProperty { 2 } else { 1 }];
+        let key = if p == GetProperty {
+            let value = args[1];
             let slot = value.index(7)?.checked_sub(1).ok_or("symbol required")?;
             Some(
                 self.names
@@ -430,6 +457,23 @@ impl Vm {
                     .0
                     .clone(),
             )
+        } else {
+            None
+        };
+        // Fchar_after: a marker's byte position, from the marker's own
+        // buffer, is read against this buffer's accessible region.
+        let char_after_marker = if p == CharAfter && n > 0 {
+            match self.object_if(args[0]) {
+                Some(Object::Marker(marker)) => {
+                    let anchor = marker.anchor.ok_or("Marker does not point anywhere")?;
+                    let Some(Object::Buffer(owner)) = self.object_if(marker.buffer) else {
+                        return Err("Marker does not point anywhere".into());
+                    };
+                    Some(ByteOffset(owner.anchors.resolve(anchor).ok_or("Marker does not point anywhere")? as usize))
+                }
+                Some(Object::Bignum(_)) => return Ok(Value::NIL),
+                _ => None,
+            }
         } else {
             None
         };
@@ -447,28 +491,24 @@ impl Vm {
             Ok(r)
         };
         match p {
-            BufferString => {
-                let mut s = Box::new(data::LispString::new(t.as_str()));
-                s.properties = t.properties.clone();
-                Ok(self.allocate_object(Object::String(s)))
-            }
             Point => Value::integer((t.char_of_byte(t.point)?.0 + 1) as i64),
             PointMin => Value::integer((t.char_of_byte(accessible.start)?.0 + 1) as i64),
             PointMax => Value::integer((t.char_of_byte(accessible.end)?.0 + 1) as i64),
             BufferSize => Value::integer(t.len_chars() as i64),
             GotoChar => {
-                let value = self.stack[start];
-                let c = value.as_integer()?.saturating_sub(1).max(0) as usize;
+                let c = args[0].as_integer()?.saturating_sub(1).max(0) as usize;
                 t.point = t
                     .byte_of_char(CharOffset(c.min(t.len_chars())))?
                     .clamp(accessible.start, accessible.end);
-                Ok(value)
+                Ok(self.stack[start])
             }
             CharAfter => {
-                let b = if n == 0 || self.stack[start] == Value::NIL {
+                let b = if let Some(b) = char_after_marker {
+                    b
+                } else if n == 0 || args[0] == Value::NIL {
                     t.point
                 } else {
-                    let c = self.stack[start].as_integer()?;
+                    let c = args[0].as_integer()?;
                     if c < 1 {
                         return Ok(Value::NIL);
                     }
@@ -491,48 +531,19 @@ impl Vm {
                 Ok(Value::NIL)
             }
             DeleteRegion => {
-                let r = region(self.stack[start], self.stack[start + 1])?;
+                let r = region(args[0], args[1])?;
                 t.replace(r, b"")?;
                 self.finish_annotation_edit(self.slots[self.buffer_slot].value)?;
                 Ok(Value::NIL)
             }
             Substring => {
-                let r = region(self.stack[start], self.stack[start + 1])?;
+                let r = region(args[0], args[1])?;
                 let string = Box::new(data::LispString::new(t.slice(r)?));
                 Ok(self.allocate_object(Object::String(string)))
             }
-            SearchForward => {
-                let bound = if n > 1 && self.stack[start + 1] != Value::NIL {
-                    t.byte_of_char(position(self.stack[start + 1])?)?
-                } else {
-                    accessible.end
-                };
-                if bound < t.point || bound > accessible.end {
-                    return Err("index out of range".into());
-                }
-                let found = if inserted.is_empty() {
-                    Some(t.point)
-                } else {
-                    t.bytes()[t.point.0..bound.0]
-                        .windows(inserted.len())
-                        .position(|s| s == inserted)
-                        .map(|b| ByteOffset(t.point.0 + b + inserted.len()))
-                };
-                if let Some(b) = found {
-                    t.point = b;
-                    Value::integer((t.char_of_byte(b)?.0 + 1) as i64)
-                } else if n > 2 && self.stack[start + 2] != Value::NIL {
-                    if self.stack[start + 2] != Value::TRUE {
-                        t.point = bound;
-                    }
-                    Ok(Value::NIL)
-                } else {
-                    Err("search failed".into())
-                }
-            }
             Narrow => {
-                let a = t.byte_of_char(position(self.stack[start])?)?;
-                let b = t.byte_of_char(position(self.stack[start + 1])?)?;
+                let a = t.byte_of_char(position(args[0])?)?;
+                let b = t.byte_of_char(position(args[1])?)?;
                 t.narrow(a.min(b)..a.max(b))?;
                 Ok(Value::NIL)
             }
@@ -541,7 +552,7 @@ impl Vm {
                 Ok(Value::NIL)
             }
             CharToByte | ByteToChar => {
-                let value = self.stack[start].as_integer()?;
+                let value = args[0].as_integer()?;
                 if value < 1 {
                     return Ok(Value::NIL);
                 }
@@ -561,13 +572,8 @@ impl Vm {
                     .map(|p| Value::integer((p + 1) as i64))
                     .unwrap_or(Ok(Value::NIL))
             }
-            PutProperty => {
-                let r = region(self.stack[start], self.stack[start + 1])?;
-                t.put_property(r, key.as_ref().unwrap(), self.stack[start + 3]);
-                Ok(Value::NIL)
-            }
             GetProperty => {
-                let at = t.byte_of_char(position(self.stack[start])?)?;
+                let at = t.byte_of_char(position(args[0])?)?;
                 if at < accessible.start || at > accessible.end {
                     return Err("index out of range".into());
                 }
@@ -582,6 +588,30 @@ impl Vm {
 
 impl Vm {
     /// I/O embeddings can retain arbitrary octets without passing through text.
+    /// The arguments of a legacy buffer primitive, a marker in a position
+    /// slot replaced by its position (CHECK_FIXNUM_COERCE_MARKER); other
+    /// arguments, such as a property value, are left alone.
+    fn buffer_primitive_args(&self, p: Primitive, start: usize, n: usize) -> Result<Vec<Value>> {
+        use Primitive::*;
+        let positions: &[usize] = match p {
+            GotoChar | CharToByte | GetProperty => &[0],
+            DeleteRegion | Substring | Narrow => &[0, 1],
+            _ => &[],
+        };
+        let mut args = self.stack[start..start + n].to_vec();
+        for &slot in positions {
+            if let Some(&value) = args.get(slot)
+                && matches!(self.object_if(value), Some(Object::Marker(_)))
+            {
+                let position = self.marker_position_value(value)?;
+                if position == Value::NIL {
+                    return Err("Marker does not point anywhere".into());
+                }
+                args[slot] = position;
+            }
+        }
+        Ok(args)
+    }
     pub(crate) fn byte_string(&mut self, bytes: &[u8]) -> Value {
         self.allocate_object(Object::Bytes(bytes.to_vec()))
     }
@@ -652,8 +682,15 @@ impl Vm {
         let index = self.buffer_index()?;
         if p == BufferString {
             let o = match &self.objects[index] {
-                Object::Buffer(t) => Object::String(Box::new(data::LispString::new(t.as_str()))),
-                Object::ByteBuffer(b) => Object::Bytes(b.bytes.clone()),
+                Object::Buffer(t) => {
+                    let accessible = t.accessible();
+                    let mut s = data::LispString::new(t.slice(accessible.clone())?);
+                    s.properties = t.properties.slice(accessible);
+                    Object::String(Box::new(s))
+                }
+                Object::ByteBuffer(b) => {
+                    Object::Bytes(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
+                }
                 _ => unreachable!(),
             };
             return Ok(self.allocate_object(o));
@@ -682,7 +719,8 @@ impl Vm {
             if n != 1 {
                 return Err("wrong primitive arity".into());
             }
-            let result = self.byte_buffer_primitive(InsertFileBytes, start, n, index);
+            let args = self.stack[start..start + n].to_vec();
+            let result = self.byte_buffer_primitive(InsertFileBytes, start, n, index, &args);
             if result.is_ok() {
                 self.display_state.version += 1;
             }
@@ -709,6 +747,16 @@ impl Vm {
                 }
             }
             (Object::ByteBuffer(b), true) => {
+                if !b.saved_restrictions.is_empty() {
+                    return Err("cannot decode buffer with a saved restriction".into());
+                }
+                if !b.saved_points.is_empty() {
+                    return Err("cannot decode buffer with a saved excursion".into());
+                }
+                // VM2-IFC-HELD1: its markers are held for insert-file-contents.
+                if b.held.is_some() {
+                    return Err("cannot decode buffer while insert-file-contents decides its coding".into());
+                }
                 {
                 let mut a: crate::annotations::AnnotatedBuffer = Text::decode_binary(b)?.into();
                 a.state = b.state.clone();
@@ -730,6 +778,7 @@ impl Vm {
         start: usize,
         n: usize,
         index: usize,
+        args: &[Value],
     ) -> Result<Value> {
         use Primitive::*;
         let inserted = if p == Insert {
@@ -740,9 +789,10 @@ impl Vm {
                 } else {
                     match self.object(v)? {
                         Object::Bytes(b) => out.extend_from_slice(b),
-                        // ASCII is byte-identical; non-ASCII requires an explicit encoder.
-                        Object::String(s) if s.as_str().is_ascii() => {
-                            out.extend_from_slice(s.as_str().as_bytes())
+                        // A unibyte string's bytes and ASCII text are copied as
+                        // they are; other text requires an explicit encoder.
+                        Object::String(s) | Object::RawString(s) if !s.is_multibyte() || s.bytes().is_ascii() => {
+                            out.extend_from_slice(s.bytes())
                         }
                         _ => return Err("bytes required; encode text explicitly".into()),
                     }
@@ -750,21 +800,14 @@ impl Vm {
             }
             out
         } else if p == InsertFileBytes {
-            let path = String::from_utf8(self.string_bytes(self.stack[start])?)
+            let path = String::from_utf8(self.string_bytes(args[0])?)
                 .map_err(|_| "invalid filename")?;
             std::fs::read(path).map_err(|e| e.to_string())?
-        } else if p == SearchForward {
-            let v = self.stack[start];
-            match self.object(v)? {
-                Object::Bytes(b) => b.clone(),
-                Object::String(s) if s.as_str().is_ascii() => s.as_str().as_bytes().to_vec(),
-                _ => return Err("bytes required".into()),
-            }
         } else {
             vec![]
         };
-        let key = if matches!(p, PutProperty | GetProperty) {
-            let v = self.stack[start + if p == PutProperty { 2 } else { 1 }];
+        let key = if p == GetProperty {
+            let v = args[1];
             let slot = v.index(7)?.checked_sub(1).ok_or("symbol required")?;
             Some(
                 self.names
@@ -797,16 +840,15 @@ impl Vm {
             PointMax => Value::integer((r.end.0 + 1) as i64),
             BufferSize => Value::integer(b.bytes.len() as i64),
             GotoChar => {
-                let v = self.stack[start];
-                b.point = ByteOffset(v.as_integer()?.saturating_sub(1).max(0) as usize)
+                b.point = ByteOffset(args[0].as_integer()?.saturating_sub(1).max(0) as usize)
                     .clamp(r.start, r.end);
-                Ok(v)
+                Ok(self.stack[start])
             }
             CharAfter => {
-                let at = if n == 0 || self.stack[start] == Value::NIL {
+                let at = if n == 0 || args[0] == Value::NIL {
                     b.point
                 } else {
-                    let i = self.stack[start].as_integer()?;
+                    let i = args[0].as_integer()?;
                     if i < 1 {
                         return Ok(Value::NIL);
                     }
@@ -824,52 +866,23 @@ impl Vm {
                 if p == InsertFileBytes {
                     b.point = at;
                     let count = Value::integer(inserted.len() as i64)?;
-                    Ok(self.list_value(&[self.stack[start], count]))
+                    Ok(self.list_value(&[args[0], count]))
                 } else {
                     Ok(Value::NIL)
                 }
             }
             DeleteRegion => {
-                b.replace(region(self.stack[start], self.stack[start + 1])?, b"")?;
+                b.replace(region(args[0], args[1])?, b"")?;
                 Ok(Value::NIL)
             }
             Substring => {
-                let r = region(self.stack[start], self.stack[start + 1])?;
+                let r = region(args[0], args[1])?;
                 let bytes = b.bytes[r.start.0..r.end.0].to_vec();
                 Ok(self.allocate_object(Object::Bytes(bytes)))
             }
-            SearchForward => {
-                let bound = if n > 1 && self.stack[start + 1] != Value::NIL {
-                    pos(self.stack[start + 1])?
-                } else {
-                    r.end
-                };
-                if bound < b.point || bound > r.end {
-                    return Err("index out of range".into());
-                }
-                let found = if inserted.is_empty() {
-                    Some(b.point.0)
-                } else {
-                    b.bytes[b.point.0..bound.0]
-                        .windows(inserted.len())
-                        .position(|s| s == inserted)
-                        .map(|p| b.point.0 + p + inserted.len())
-                };
-                if let Some(p) = found {
-                    b.point = ByteOffset(p);
-                    Value::integer((p + 1) as i64)
-                } else if n > 2 && self.stack[start + 2] != Value::NIL {
-                    if self.stack[start + 2] != Value::TRUE {
-                        b.point = bound;
-                    }
-                    Ok(Value::NIL)
-                } else {
-                    Err("search failed".into())
-                }
-            }
             Narrow => {
-                let a = pos(self.stack[start])?;
-                let z = pos(self.stack[start + 1])?;
+                let a = pos(args[0])?;
+                let z = pos(args[1])?;
                 let r = a.min(z)..a.max(z);
                 if r.end.0 > b.bytes.len() {
                     return Err("index out of range".into());
@@ -883,29 +896,15 @@ impl Vm {
                 Ok(Value::NIL)
             }
             CharToByte | ByteToChar => {
-                let p = self.stack[start].as_integer()?;
+                let p = args[0].as_integer()?;
                 if p < 1 || p as u64 > b.bytes.len() as u64 + 1 {
                     Ok(Value::NIL)
                 } else {
-                    Ok(self.stack[start])
+                    Ok(args[0])
                 }
-            }
-            PutProperty => {
-                let mut changed = false;
-                for p in region(self.stack[start], self.stack[start + 1])?.start.0
-                    ..region(self.stack[start], self.stack[start + 1])?.end.0
-                {
-                    changed |= b.properties
-                        .entry(ByteOffset(p))
-                        .or_default()
-                        .insert(key.as_ref().unwrap().clone(), self.stack[start + 3])
-                        != Some(self.stack[start + 3]);
-                }
-                if changed { b.state.record_change(false); }
-                Ok(Value::NIL)
             }
             GetProperty => {
-                let p = pos(self.stack[start])?;
+                let p = pos(args[0])?;
                 if p < r.start || p > r.end {
                     return Err("index out of range".into());
                 }
@@ -1007,12 +1006,16 @@ mod tests {
         let mut b = bytes::ByteBuffer {
             state: Default::default(),
             syntax_table: Value::NIL,
+            category_table: Value::NIL,
             case_tables: [Value::NIL; 4],
             bytes: vec![0xce, 0xbb],
             point: ByteOffset(1),
             restriction: ByteOffset(0)..ByteOffset(2),
+            saved_restrictions: Vec::new(), saved_points: Vec::new(),
             properties: Default::default(),
+            had_intervals: false,
             per_buffer: Default::default(),
+            held: None,
         };
         b.properties
             .entry(ByteOffset(1))
@@ -1313,79 +1316,337 @@ mod tests {
     }
 }
 
+/// The hidden slot holding the buffer list's order.
+const BUFFER_ORDER: &str = "#:vm2-buffer-order";
+
+fn buffer_object(vm: &Vm, object: Value) -> bool {
+    matches!(vm.object_if(object), Some(Object::Buffer(_) | Object::ByteBuffer(_)))
+}
+
+/// A text-property primitive's change: an Add or Set plist, the names to
+/// Remove, or a Face combined into each character's `face' (append or
+/// prepend, add-face-text-property).
+pub(crate) enum PropertyEdit { Add(Value), Set(Value), Remove(Vec<Value>), Face { face: Value, append: bool } }
+
+/// What a property primitive will install, and the undo entries
+/// (BEG END PROP OLD-VALUE) it records, for OBJECT's characters START..END
+/// (buffer positions; 0 for strings).
+pub(crate) struct PropertyPlan {
+    pub object: Value,
+    pub start: i64,
+    pub end: i64,
+    pub range: std::ops::Range<ByteOffset>,
+    /// Where GNU's interval walk starts changing text (the interval its
+    /// retry check watches).
+    pub first: ByteOffset,
+    properties: properties::Properties,
+    undo: Vec<(i64, i64, Value, Value)>,
+}
+
 impl Vm {
-    pub(crate) fn add_text_properties_native(
+    /// The pending change of a property primitive: what textprop.c's
+    /// add_text_properties_1 (Add), set_text_properties (Set) and
+    /// Fremove_text_properties / Fremove_list_of_text_properties (Remove)
+    /// would do to OBJECT's START..END, or None when GNU returns nil before
+    /// touching the buffer. With FORCE, the change hooks have already run
+    /// and the plan stands even when nothing differs any more.
+    pub(crate) fn property_plan(
         &mut self,
+        edit: &PropertyEdit,
         start: Value,
         end: Value,
-        plist: Value,
         object: Value,
-    ) -> crate::prim::Out {
+        force: bool,
+    ) -> std::result::Result<Option<PropertyPlan>, crate::prim::Fault> {
         use crate::prim::Fault;
-        let pairs = self.text_property_pairs(plist)?;
-        if pairs.is_empty() {
-            return Ok(Value::NIL);
-        }
         let object = if object == Value::NIL {
             self.buffer_index().map_err(Fault::Error)?;
             self.slots[self.buffer_slot].value
         } else {
             object
         };
-        let Some((range, mut properties)) = self.text_property_region(start, end, object)? else {
-            return Ok(Value::NIL);
+        let pairs = match edit {
+            PropertyEdit::Add(plist) | PropertyEdit::Set(plist) => self.text_property_pairs(*plist)?,
+            PropertyEdit::Remove(_) | PropertyEdit::Face { .. } => Vec::new(),
         };
-        let pairs = pairs
-            .into_iter()
-            .map(|(key, value)| self.text_property_key(key).map(|key| (key, value)))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut changed = false;
-        for (key, value) in pairs {
-            let mut at = range.start;
-            while at < range.end {
-                changed |= properties.get_property(at, &key) != Some(value);
-                at = properties.next_change(at, range.end);
+        let names = match edit {
+            PropertyEdit::Remove(names) => names.clone(),
+            _ => Vec::new(),
+        };
+        if !force && matches!(edit, PropertyEdit::Add(_)) && pairs.is_empty() { return Ok(None); }
+        if !force && matches!(edit, PropertyEdit::Remove(_)) && names.is_empty() { return Ok(None); }
+        let Some((range, mut properties)) = self.text_property_region(start, end, object)? else {
+            return Ok(None);
+        };
+        if matches!(edit, PropertyEdit::Set(_)) && pairs.is_empty() {
+            // A nil plist over a whole string drops its intervals; text
+            // that never had any is left alone (nil).
+            let whole = self.str_view(object).is_some_and(|s| range.start.0 == 0 && range.end.0 == s.bytes().len());
+            if !properties.has_intervals() && !force { return Ok(None); }
+            if whole && !buffer_object(self, object) {
+                let first = range.start;
+                return Ok(Some(PropertyPlan { object, start: 0, end: 0, range, first, properties: properties::Properties::new(), undo: Vec::new() }));
             }
-            properties.put(range.clone(), &key, value);
         }
-        if !changed {
-            return Ok(Value::NIL);
+        let old = properties.clone();
+        let mut changed = matches!(edit, PropertyEdit::Set(_));
+        // Undo entries (BEG END PROP OLD), interval by interval in order.
+        let buffer = buffer_object(self, object);
+        let char_at = |vm: &Self, at: ByteOffset| -> std::result::Result<i64, Fault> {
+            match vm.object_if(object) {
+                Some(Object::Buffer(b)) => Ok(b.char_of_byte(at).map_err(|e| Fault::Error(e.to_string()))?.0 as i64 + 1),
+                _ => Ok(at.0 as i64 + 1),
+            }
+        };
+        let mut undo = Vec::new();
+        let mut first = None;
+        match edit {
+            PropertyEdit::Add(_) => {
+                let pairs = pairs.into_iter().map(|(k, v)| self.text_property_key(k).map(|key| (k, key, v)))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let mut at = range.start;
+                while at < range.end {
+                    let next = old.next_change(at, range.end);
+                    for (symbol, key, value) in &pairs {
+                        let before = old.get_property(at, key);
+                        if before != Some(*value) {
+                            changed = true;
+                            first.get_or_insert(at);
+                            if buffer { undo.push((char_at(self, at)?, char_at(self, next)?, *symbol, before.unwrap_or(Value::NIL))); }
+                        }
+                    }
+                    at = next;
+                }
+                for (_, key, value) in &pairs { properties.put(range.clone(), key, *value); }
+            }
+            PropertyEdit::Face { face, append } => {
+                // add_properties with TEXT_PROPERTY_APPEND / _PREPEND.
+                let symbol = self.intern("face");
+                let mut at = range.start;
+                while at < range.end {
+                    let next = old.next_change(at, range.end);
+                    let before = old.get_property(at, "face");
+                    if before != Some(*face) {
+                        changed = true;
+                        first.get_or_insert(at);
+                        if buffer { undo.push((char_at(self, at)?, char_at(self, next)?, symbol, before.unwrap_or(Value::NIL))); }
+                        let combined = match before {
+                            None => *face,
+                            Some(old_face) => self.combined_face(old_face, *face, *append),
+                        };
+                        properties.put(at..next, "face", combined);
+                    }
+                    at = next;
+                }
+            }
+            PropertyEdit::Remove(_) => {
+                let keys = names.iter().map(|&n| self.text_property_key(n).map(|key| (n, key)))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let mut at = range.start;
+                while at < range.end {
+                    let next = old.next_change(at, range.end);
+                    for (symbol, key) in &keys {
+                        if let Some(before) = old.get_property(at, key) {
+                            changed = true;
+                            first.get_or_insert(at);
+                            if buffer { undo.push((char_at(self, at)?, char_at(self, next)?, *symbol, before)); }
+                        }
+                    }
+                    at = next;
+                }
+                for (_, key) in &keys { properties.remove(range.clone(), key); }
+            }
+            PropertyEdit::Set(_) => {
+                let pairs = pairs.into_iter().map(|(k, v)| self.text_property_key(k).map(|key| (k, key, v)))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                if buffer {
+                    let mut at = range.start;
+                    while at < range.end {
+                        let next = old.next_change(at, range.end);
+                        let (b, e) = (char_at(self, at)?, char_at(self, next)?);
+                        let present: Vec<(String, Value)> = old.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+                        // set_properties: each old property PROPERTIES gives
+                        // another value, then each new one the text lacked.
+                        for (key, value) in &present {
+                            // property_value is Qunbound for a key PROPERTIES lacks.
+                            let wanted = pairs.iter().find(|(_, k, _)| k == key).map(|(_, _, v)| *v);
+                            if wanted != Some(*value) { let symbol = self.intern(key); undo.push((b, e, symbol, *value)); }
+                        }
+                        for (symbol, key, _) in &pairs {
+                            if !present.iter().any(|(k, _)| k == key) { undo.push((b, e, *symbol, Value::NIL)); }
+                        }
+                        at = next;
+                    }
+                }
+                for key in properties.properties_keys() { properties.remove(range.clone(), &key); }
+                // The newest key reads first; GNU keeps PROPERTIES' own order.
+                for (_, key, value) in pairs.iter().rev() { properties.put(range.clone(), key, *value); }
+            }
         }
-        if Self::image_value(object) {
+        if !changed && !force { return Ok(None); }
+        let (start, end) = if buffer { (char_at(self, range.start)?, char_at(self, range.end)?) } else { (0, 0) };
+        let first = first.unwrap_or(range.start);
+        Ok(Some(PropertyPlan { object, start, end, range, first, properties, undo }))
+    }
+
+    /// modify_text_properties' tail for BUFFER, after its hooks: with HOOKS
+    /// (modification hooks not inhibited) deactivate-mark is set; then the
+    /// first-change entry and the modification count.
+    pub(crate) fn property_modify_tail(&mut self, buffer: Value, hooks: bool) -> std::result::Result<(), crate::prim::Fault> {
+        use crate::prim::Fault;
+        let current = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let result = (|| -> std::result::Result<(), Fault> {
+            if hooks {
+                self.mark_deactivated()?;
+            }
+            if !self.buffer_state(buffer).map_err(Fault::Error)?.modified() {
+                self.record_first_change().map_err(Fault::Error)?;
+            }
+            let index = buffer.index(0).map_err(Fault::Error)? - 1;
+            match &mut self.objects[index] {
+                Object::Buffer(b) => b.state.record_change(false),
+                Object::ByteBuffer(b) => b.state.record_change(false),
+                _ => {}
+            }
+            Ok(())
+        })();
+        self.slots[self.buffer_slot].value = current;
+        result
+    }
+
+    /// Install PLAN, recording its undo entries first for a buffer.
+    pub(crate) fn property_install(&mut self, plan: PropertyPlan) -> std::result::Result<(), crate::prim::Fault> {
+        use crate::prim::Fault;
+        if Self::image_value(plan.object) {
             return Err(Fault::Error("immutable image string".into()));
         }
-        if matches!(self.object_if(object), Some(Object::Buffer(_))) {
+        let index = plan.object.index(0).map_err(Fault::Error)? - 1;
+        if buffer_object(self, plan.object) && !plan.undo.is_empty() {
             let current = self.slots[self.buffer_slot].value;
-            self.slots[self.buffer_slot].value = object;
-            let result = self.check_text_property_edit(object, range.clone());
+            self.slots[self.buffer_slot].value = plan.object;
+            let result = plan.undo.iter().try_for_each(|(beg, end, prop, value)| {
+                self.record_property_change(*beg, *end, *prop, *value).map_err(Fault::Error)
+            });
             self.slots[self.buffer_slot].value = current;
             result?;
         }
-        let index = object.index(0).map_err(Fault::Error)? - 1;
         match &mut self.objects[index] {
             Object::Buffer(buffer) => {
-                buffer.properties = properties;
-                buffer.state.record_change(false);
+                buffer.properties = plan.properties;
                 self.display_state.version += 1;
             }
-            Object::String(string) | Object::RawString(string) => string.properties = properties,
+            Object::String(string) | Object::RawString(string) => string.properties = plan.properties,
             Object::Bytes(bytes) => {
                 let mut string = Box::new(data::LispString::from_bytes(bytes.clone(), false));
-                string.properties = properties;
-                self.objects[index] = if string.is_utf8() {
-                    Object::String(string)
-                } else {
-                    Object::RawString(string)
-                };
+                string.properties = plan.properties;
+                self.objects[index] = if string.is_utf8() { Object::String(string) } else { Object::RawString(string) };
             }
-            Object::ByteBuffer(_) => {
-                return Err(Fault::Error(
-                    "bulk text properties in unibyte buffers are not implemented".into(),
-                ));
+            Object::ByteBuffer(buffer) => {
+                buffer.had_intervals |= plan.properties.has_intervals();
+                buffer.properties = plan.properties.to_map();
+                self.display_state.version += 1;
             }
             _ => unreachable!(),
         }
-        Ok(Value::TRUE)
+        Ok(())
+    }
+
+    /// The whole of a property change that runs no Lisp: HOOKS says whether
+    /// modification hooks were not inhibited (none being set).
+    pub(crate) fn property_apply(&mut self, plan: PropertyPlan, hooks: bool) -> std::result::Result<(), crate::prim::Fault> {
+        if buffer_object(self, plan.object) { self.property_modify_tail(plan.object, hooks)?; }
+        self.property_install(plan)
+    }
+
+    /// A property edit on a string, which has no change hooks.
+    pub(crate) fn property_edit_now(&mut self, edit: &PropertyEdit, start: Value, end: Value, object: Value) -> crate::prim::Out {
+        match self.property_plan(edit, start, end, object, false)? {
+            Some(plan) => { self.property_apply(plan, false)?; Ok(Value::TRUE) }
+            None => Ok(Value::NIL),
+        }
+    }
+
+    /// A marker in BUFFER at character POSITION, advancing over text inserted
+    /// there with ADVANCES (insertion-type t).
+    pub(crate) fn watch_marker(&mut self, buffer: Value, position: i64, advances: bool) -> std::result::Result<Value, crate::prim::Fault> {
+        let bias = if advances { crate::anchors::Bias::Right } else { crate::anchors::Bias::Left };
+        let marker = self.allocate_object(Object::Marker(Box::new(crate::annotations::Marker { buffer: Value::NIL, anchor: None, bias })));
+        let position = Value::integer(position).map_err(crate::prim::Fault::Error)?;
+        self.set_marker_object(marker, position, buffer).map_err(crate::prim::Fault::Error)?;
+        Ok(marker)
+    }
+    /// MARKER's position, then point it nowhere.
+    pub(crate) fn release_marker(&mut self, marker: Value) -> std::result::Result<i64, crate::prim::Fault> {
+        use crate::prim::Fault;
+        let position = self.marker_position_value(marker).map_err(Fault::Error)?.as_integer().map_err(Fault::Error)?;
+        self.set_marker_object(marker, Value::NIL, Value::NIL).map_err(Fault::Error)?;
+        Ok(position)
+    }
+    /// The byte offset of character POSITION in BUFFER.
+    pub(crate) fn byte_position(&self, buffer: Value, position: i64) -> std::result::Result<ByteOffset, crate::prim::Fault> {
+        let index = usize::try_from(position - 1).map_err(|_| crate::prim::Fault::Error("position out of range".into()))?;
+        match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => b.byte_of_char(CharOffset(index)).map_err(|e| crate::prim::Fault::Error(e.to_string())),
+            _ => Ok(ByteOffset(index)),
+        }
+    }
+    /// The character position of byte AT in BUFFER.
+    pub(crate) fn char_position(&self, buffer: Value, at: ByteOffset) -> std::result::Result<i64, crate::prim::Fault> {
+        match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => Ok(b.char_of_byte(at).map_err(|e| crate::prim::Fault::Error(e.to_string()))?.0 as i64 + 1),
+            _ => Ok(at.0 as i64 + 1),
+        }
+    }
+
+    /// The run of BUFFER's properties at AT: where it ends, and its
+    /// properties as a plist (symbols and values, traced once returned).
+    pub(crate) fn property_run_at(&mut self, buffer: Value, at: ByteOffset) -> std::result::Result<(ByteOffset, Value), crate::prim::Fault> {
+        use crate::prim::Fault;
+        let (properties, end) = match self.object(buffer).map_err(Fault::Error)? {
+            Object::Buffer(b) => (b.properties.clone(), ByteOffset(b.len_bytes())),
+            Object::ByteBuffer(b) => (properties::Properties::from_map(&b.properties), ByteOffset(b.bytes.len())),
+            _ => return Err(Fault::Error("buffer required".into())),
+        };
+        let run_end = if at < end { properties.next_change(at, end) } else { end };
+        let pairs: Vec<(String, Value)> = properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+        let mut items = Vec::with_capacity(pairs.len() * 2);
+        for (key, value) in pairs { items.push(self.intern(&key)); items.push(value); }
+        Ok((run_end, self.list_value(&items)))
+    }
+
+    /// add_properties' face combination: a list (other than an anonymous
+    /// face, which starts with a keyword) gains FACE in front or, copied, at
+    /// the end; a single face becomes a two-element list.
+    fn combined_face(&mut self, old: Value, face: Value, append: bool) -> Value {
+        let cons = |vm: &mut Self, car, cdr| { vm.conses.push((car, cdr)); Value::reference(vm.conses.len() - 1, 3) };
+        let anonymous = self.cons_pair(old).ok().is_some_and(|(head, _)| {
+            head.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).is_some_and(|n| n.starts_with(':'))
+        });
+        if self.cons_pair(old).is_ok() && !anonymous {
+            if !append { return cons(self, face, old); }
+            let items = self.list_values(old).unwrap_or_default();
+            let tail = cons(self, face, Value::NIL);
+            return items.into_iter().rev().fold(tail, |rest, item| cons(self, item, rest));
+        }
+        let tail = cons(self, if append { face } else { old }, Value::NIL);
+        cons(self, if append { old } else { face }, tail)
+    }
+
+    /// verify_interval_modification's hooks: the distinct `modification-hooks'
+    /// values of the characters in RANGE of BUFFER, in order.
+    pub(crate) fn modification_hooks_in(&mut self, buffer: Value, range: std::ops::Range<ByteOffset>) -> std::result::Result<Vec<Value>, crate::prim::Fault> {
+        let runs = self.property_runs(buffer, range);
+        let current = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let mut hooks = Vec::new();
+        let result = runs.iter().try_for_each(|(_, plist)| {
+            let value = self.text_property_in(plist, "modification-hooks")?;
+            if value != Value::NIL && hooks.last() != Some(&value) { hooks.push(value); }
+            Ok(())
+        });
+        self.slots[self.buffer_slot].value = current;
+        result.map(|()| hooks)
     }
 
     fn text_property_pairs(
@@ -1401,7 +1662,7 @@ impl Vm {
         }
         let mut pairs = Vec::new();
         let mut tail = plist;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Ok((key, rest)) = self.cons_pair(tail) {
             if !seen.insert(tail.0) {
                 return Err(Fault::Circular(plist));
@@ -1532,7 +1793,9 @@ impl Vm {
                     {
                         return Err(range_error());
                     }
-                    (range, properties::Properties::from_map(&buffer.properties))
+                    let mut properties = properties::Properties::from_map(&buffer.properties);
+                    if buffer.had_intervals { properties.mark_intervals(); }
+                    (range, properties)
                 }
                 _ => unreachable!(),
             }
@@ -1540,7 +1803,7 @@ impl Vm {
         Ok(Some((range, properties)))
     }
 
-    fn text_property_variable(
+    pub(crate) fn text_property_variable(
         &mut self,
         name: &str,
     ) -> std::result::Result<Value, crate::prim::Fault> {
@@ -1555,7 +1818,7 @@ impl Vm {
         })
     }
 
-    fn text_property_find(
+    pub(crate) fn text_property_find(
         &self,
         list: Value,
         matches: impl Fn(Value) -> bool,
@@ -1597,18 +1860,20 @@ impl Vm {
             .map_err(Fault::Error)
     }
 
-    fn text_property_at(
+    /// textget over one character's properties PLIST (`char_properties'):
+    /// the property itself, else its category's, an alias's, or the default.
+    pub(crate) fn text_property_in(
         &mut self,
-        properties: &properties::Properties,
-        at: ByteOffset,
+        plist: &[(String, Value)],
         key: &str,
     ) -> std::result::Result<Value, crate::prim::Fault> {
         use crate::prim::Fault;
-        if let Some(value) = properties.get_property(at, key) {
+        let get = |name: &str| plist.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
+        if let Some(value) = get(key) {
             return Ok(value);
         }
         let symbol = Value::reference(self.slot(key) + 1, 7);
-        if let Some(category) = properties.get_property(at, "category")
+        if let Some(category) = get("category")
             && (category == Value::NIL
                 || category == Value::TRUE
                 || (category.tag() == 7 && category != Value::UNBOUND))
@@ -1627,7 +1892,7 @@ impl Vm {
             while let Ok((alias, next)) = self.cons_pair(tail) {
                 // GNU aliases consult the direct plist, never the category.
                 if let Some(name) = self.text_property_name(alias)
-                    && let Some(value) = properties.get_property(at, name)
+                    && let Some(value) = get(name)
                     && value != Value::NIL
                 {
                     return Ok(value);
@@ -1642,38 +1907,71 @@ impl Vm {
         Ok(self.plist_lookup(defaults, symbol))
     }
 
-    fn text_property_signal(&mut self, name: &str, data: &[Value]) -> crate::prim::Fault {
+    /// The properties of BUFFER's character at AT, newest first.
+    pub(crate) fn char_properties(&self, buffer: Value, at: ByteOffset) -> Vec<(String, Value)> {
+        let own = |pairs: Vec<(&str, Value)>| pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+        match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => own(b.properties.properties_at(at)),
+            Some(Object::ByteBuffer(b)) => own(properties::Properties::from_map(&b.properties).properties_at(at)),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The property runs of BUFFER over RANGE: each run's start and its
+    /// characters' properties, read without copying the buffer's runs.
+    pub(crate) fn property_runs(&self, buffer: Value, range: std::ops::Range<ByteOffset>) -> Vec<(ByteOffset, Vec<(String, Value)>)> {
+        let runs = |properties: &properties::Properties| {
+            let mut runs = Vec::new();
+            let mut at = range.start;
+            while at < range.end {
+                runs.push((at, properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect()));
+                at = properties.next_change(at, range.end);
+            }
+            runs
+        };
+        match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => runs(&b.properties),
+            Some(Object::ByteBuffer(b)) => runs(&properties::Properties::from_map(&b.properties)),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Whether BUFFER's text has an interval tree (verify_interval_modification
+    /// checks nothing without one).
+    pub(crate) fn buffer_has_intervals(&self, buffer: Value) -> bool {
+        match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => b.properties.has_intervals(),
+            Some(Object::ByteBuffer(b)) => b.had_intervals || !b.properties.is_empty(),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn text_property_signal(&mut self, name: &str, data: &[Value]) -> crate::prim::Fault {
         let symbol = Value::reference(self.slot(name) + 1, 7);
         crate::prim::Fault::Signal(symbol, self.list_value(data))
     }
 
-    fn check_text_property_edit(
+    /// prepare_to_modify_buffer's read-only checks over RANGE of buffer
+    /// OBJECT (verify_interval_modification's text-read-only, and
+    /// buffer-read-only).
+    pub(crate) fn check_text_property_edit(
         &mut self,
         object: Value,
         range: std::ops::Range<ByteOffset>,
     ) -> std::result::Result<(), crate::prim::Fault> {
-        use crate::prim::Fault;
-        let Object::Buffer(buffer) = self.object(object).map_err(Fault::Error)? else {
-            unreachable!()
-        };
-        let properties = buffer.properties.clone();
-        let modified = buffer.state.modified();
         let inhibit = self.text_property_variable("inhibit-read-only")?;
         let read_only =
             self.text_property_variable("buffer-read-only")? != Value::NIL && inhibit == Value::NIL;
-        if read_only
-            && self.text_property_at(&properties, range.start, "inhibit-read-only")? == Value::NIL
-        {
+        let runs = self.property_runs(object, range.clone());
+        let first = self.char_properties(object, range.start);
+        if read_only && self.text_property_in(&first, "inhibit-read-only")? == Value::NIL {
             return Err(self.text_property_signal("buffer-read-only", &[object]));
         }
         let selective = self.cons_pair(inhibit).is_ok();
         let ignore = inhibit != Value::NIL && !selective;
-        let hooks = self.text_property_variable("inhibit-modification-hooks")? == Value::NIL;
-        let mut property_hooks = false;
-        let mut at = range.start;
-        while at < range.end {
-            let value = self.text_property_at(&properties, at, "read-only")?;
-            let express = self.text_property_at(&properties, at, "inhibit-read-only")?
+        for (_, plist) in &runs {
+            let value = self.text_property_in(plist, "read-only")?;
+            let express = self.text_property_in(plist, "inhibit-read-only")?
                 != Value::NIL
                 || (value != Value::NIL
                     && selective
@@ -1691,27 +1989,6 @@ impl Vm {
             if read_only && !express {
                 return Err(self.text_property_signal("buffer-read-only", &[object]));
             }
-            property_hooks |= hooks
-                && self.text_property_at(&properties, at, "modification-hooks")? != Value::NIL;
-            at = properties.next_change(at, range.end);
-        }
-        if hooks {
-            for name in [
-                "before-change-functions",
-                "after-change-functions",
-                "first-change-hook",
-            ] {
-                if (name != "first-change-hook" || !modified)
-                    && self.text_property_variable(name)? != Value::NIL
-                {
-                    property_hooks = true;
-                }
-            }
-        }
-        if property_hooks {
-            return Err(Fault::Error(
-                "text property changes with modification hooks are not implemented".into(),
-            ));
         }
         Ok(())
     }

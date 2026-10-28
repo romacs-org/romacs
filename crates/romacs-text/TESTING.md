@@ -19,15 +19,13 @@ and the production-size integration reproducer are not weakened in debug.
 Run from the repository root:
 
 ```sh
-scripts/tier0 romacs-text romacs-chars
-scripts/premerge-text
-python3 scripts/premerge_text_test.py
+python3 scripts/dev-loop romacs-text --lib --test structural --test gnudiff
+python3 scripts/dev-loop romacs-text --profile gate --lib --test structural --test gnudiff
+python3 scripts/dev-loop romacs-chars --profile gate
 ```
 
-`premerge-text` runs the full-strength models, structural controls, GNU oracle
-and character tests in release. It checks the effective release configuration
-for the library and an integration target and refuses debug assertions, an
-unverifiable configuration, compilation failure or any failing test. Passing
-`--release` alone is not proof of full-strength budgets when profile overrides
-are present. Keep generated timing and gate reports under `target/evidence/`,
-not beside maintained fixtures.
+The `gate` profile is release code generation without debug assertions, so it
+runs the full-strength models, structural controls, GNU oracle and character
+tests. Passing `--release` alone is not proof of full-strength budgets when
+profile overrides are present. Keep generated timing and gate reports under
+`target/evidence/`, not beside maintained fixtures.

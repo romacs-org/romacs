@@ -16,7 +16,7 @@ impl Vm {
             // Resolve exactly as indirect-function: non-symbols are themselves,
             // unbound symbols yield nil, aliases follow function cells.
             let mut function = args[0];
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             while function.tag() == 7 && function != Value::UNBOUND {
                 let slot = function.index(7)? - 1;
                 if !seen.insert(slot) { return Err("cyclic function indirection".into()); }

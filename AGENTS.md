@@ -23,6 +23,21 @@ copying GNU Emacs's internal architecture.
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised
   representation boundaries and provide intentional introspection APIs.
+- Treat GNU Lisp as a source of behavior, not of architecture. Keep the Elisp API
+  real packages observe; replace an implementation whose design is platform or era
+  baggage (tty/termcap, per-window-system backend dispatch, charset-era MULE, byte
+  code in data files, startup rituals) with an API-compatible one in `rlisp/`, and
+  record it in DIVERGENCES.md. Keeping a mechanism because GNU has it is
+  museum-keeping; deleting one because GNU has it is vandalism. Replace it when a
+  better mechanism exists and real packages still work.
+- A compatibility shim exists so old code does not error; it never preserves the
+  defect beneath it.
+- Keep one mechanism per job. A second mechanism for the same job is debt, even
+  when both are new.
+- When a mechanism moves to Rust, keep the policy users customize reachable from
+  Lisp.
+- Back structural and performance claims with measurements on the owner's
+  hardware.
 - Keep working behavior and user data intact while improving the machine.
 
 ## Testing loop

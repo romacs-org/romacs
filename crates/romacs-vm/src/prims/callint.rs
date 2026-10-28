@@ -222,7 +222,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "self-insert-command" => "(list (prefix-numeric-value current-prefix-arg) last-command-event)",
         "goto-char" => "(goto-char--read-natnum-interactive \"Go to char: \")",
         "delete-region" | "narrow-to-region" => "r",
-        "widen" | "garbage-collect" => "",
+        "widen" | "garbage-collect" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
         "erase-buffer" => "*",
         "search-forward" => "MSearch: ",
         "re-search-forward" => "sRE search: ",
@@ -472,7 +472,7 @@ fn keys(cx: &mut Leaf<'_>, saved: &[Value]) -> std::result::Result<Vec<Value>, F
     let keys = if saved[KEYS] != Value::NIL {
         saved[KEYS]
     } else {
-        let symbol = cx.intern("#:command-keys");
+        let symbol = cx.intern(super::keyboard::COMMAND_KEYS);
         cx.variable_value(symbol)?.unwrap_or(Value::NIL)
     };
     Ok(if cx.kind(keys) == Kind::Vector { cx.vector_values(keys)? } else { vec![] })

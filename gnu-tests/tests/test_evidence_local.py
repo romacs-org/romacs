@@ -214,16 +214,6 @@ class EvidenceLocalTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'run observations'):
                 member_evidence.build(ROOT, self.data)
 
-    def test_mutant_copy_lists_use_policy_not_run_outputs(self):
-        for name in ('parity_ratchet_mutants', 'honest_ratchet_mutants'):
-            spec = importlib.util.spec_from_file_location(name, ROOT / 'tools' / (name + '.py'))
-            assert spec is not None and spec.loader is not None
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            self.assertIn(binding.POLICY, module.COPY)
-            self.assertNotIn('gnu-tests/MEMBER-EVIDENCE.json', module.COPY)
-            self.assertTrue(all((ROOT / path).exists() for path in module.COPY))
-
     def test_old_output_paths_are_not_source_exemptions(self):
         self.assertEqual(binding.OUTPUTS, frozenset(('parity-ratchet.json',)))
 

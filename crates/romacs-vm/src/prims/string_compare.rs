@@ -102,3 +102,35 @@ pub(super) fn prefix(
         fold,
     )
 }
+
+/// Symbol names compare as their strings (minibuf.c Fassoc_string).
+fn name_string(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<Option<Vec<u32>>, Fault> {
+    if cx.kind(value) == crate::prim::leaf::Kind::Symbol {
+        let name = cx.symbol_name(value)?;
+        let name = cx.string(&name);
+        return Ok(Some(codes(&cx.string_view(name)?)));
+    }
+    if matches!(cx.kind(value), crate::prim::leaf::Kind::String | crate::prim::leaf::Kind::Bytes) {
+        return Ok(Some(codes(&cx.string_view(value)?)));
+    }
+    Ok(None)
+}
+
+defsubr! { name = "assoc-string", gnu = "minibuf.c:2203", effect = Reads,
+fn assoc_string(cx, key: Value, list: Value; optional fold: Value) {
+    // GNU checks KEY only when an element's string is compared with it.
+    let key_codes = name_string(cx, key)?;
+    let mut tail = list;
+    let mut seen = std::collections::HashSet::new();
+    while let Some((element, rest)) = cx.pair(tail) {
+        if !seen.insert(tail.0) { return Err(Fault::Circular(list)); }
+        let candidate = cx.pair(element).map_or(element, |(car, _)| car);
+        if let Some(candidate) = name_string(cx, candidate)? {
+            let key = key_codes.as_deref().ok_or(Fault::Wrong("stringp", key))?;
+            let (order, _) = compare(cx, &candidate, key, fold != Value::NIL)?;
+            if order == Ordering::Equal { return Ok(element); }
+        }
+        tail = rest;
+    }
+    Ok(Value::NIL)
+}}

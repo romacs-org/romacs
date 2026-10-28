@@ -25,7 +25,7 @@ struct Entry {
 }
 #[derive(Default)]
 pub(super) struct SourceCache {
-    entries: HashMap<String, Entry>,
+    entries: NameMap<String, Entry>,
     stats: SourceCacheStats,
     store: Option<PathBuf>,
     prepared: Vec<prepared::Prepared>,
@@ -155,7 +155,7 @@ impl Vm {
         self.expanded_symbols.clear();
         let (function, compiled) = self.compile_request(form)?;
         self.source_cache.stats.compilations += 1;
-        let mut names = HashSet::new();
+        let mut names = NameSet::default();
         collect_symbols(form, &mut names);
         names.extend(self.expanded_symbols.iter().cloned());
         for f in compiled.iter().map(|&id| &self.functions[id]) {
@@ -421,7 +421,7 @@ fn contains_local_object(form: &Form) -> bool {
         _ => false,
     }
 }
-fn collect_symbols(f: &Form, out: &mut HashSet<String>) {
+fn collect_symbols(f: &Form, out: &mut NameSet<String>) {
     match f {
         Form::Sym(s) => {
             out.insert(s.clone());

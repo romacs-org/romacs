@@ -82,8 +82,12 @@ pub(crate) type Out = std::result::Result<Value, Fault>;
 
 /// The variable slot holding the closure -> interactive-spec table.
 pub(crate) const INTERACTIVE_TABLE: &str = "#:vm2-interactive-specs";
+/// The echo area's current message (xdisp.c echo_area_buffer contents).
+pub(crate) const ECHO_AREA_MESSAGE: &str = "#:vm2-echo-area-message";
 /// Lazy native root, traced and forwarded like INTERACTIVE_TABLE.
 pub(crate) const FONT_ALTERNATIVE_FAMILIES: &str = "#:vm2-font-alternative-families";
+/// xfaces.c Vface_alternative_font_registry_alist: staticpro'd, not a Lisp variable.
+pub(crate) const FONT_ALTERNATIVE_REGISTRIES: &str = "#:vm2-font-alternative-registries";
 
 /// A T2 continuation. A plain `fn` pointer: it cannot capture Rust state, so
 /// the only Values it sees are the callback's result and the saved registers.
@@ -163,6 +167,9 @@ mod leaf {
         Window,
         Frame,
         Terminal,
+        WindowConfiguration,
+        Sqlite,
+        Process,
         Invalid,
     }
 
@@ -179,6 +186,63 @@ mod leaf {
             self.vm.slots[slot].value = raw;
             self.vm.display_state.set_font_alternative_families(names);
         }
+        pub(crate) fn set_font_alternative_registries(&mut self, raw: Value) {
+            let slot = self.vm.slot(super::FONT_ALTERNATIVE_REGISTRIES);
+            self.vm.slots[slot].value = raw;
+            self.vm.display_state.free_realized_faces();
+        }
+        pub(crate) fn theme_face_attribute(&mut self, face: &str, keyword: &str, value: Value) {
+            self.vm.theme_face_attribute(face, keyword, value);
+        }
+        /// The bytes of a DOC file, read once per path and modification time.
+        pub(crate) fn doc_file_bytes(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<Vec<u8>>> {
+            let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+            if let Some((cached, at, bytes)) = &self.vm.doc_file && cached == path && *at == modified {
+                return Some(bytes.clone());
+            }
+            let bytes = std::sync::Arc::new(std::fs::read(path).ok()?);
+            self.vm.doc_file = Some((path.to_path_buf(), modified, bytes.clone()));
+            Some(bytes)
+        }
+        pub(crate) fn mktime_offset(&self) -> i64 { self.vm.mktime_offset }
+        pub(crate) fn set_mktime_offset(&mut self, offset: i64) { self.vm.mktime_offset = offset; }
+        pub(crate) fn tz_rule_dstoff(&self) -> i64 { self.vm.tz_rule_dstoff }
+        pub(crate) fn set_tz_rule_dstoff(&mut self, offset: i64) { self.vm.tz_rule_dstoff = offset; }
+        pub(crate) fn local_zone(&self) -> crate::LocalZone { self.vm.local_zone.clone() }
+        pub(crate) fn recent_keys(&mut self, include_commands: bool) -> Value { self.vm.recent_keys_value(include_commands) }
+        pub(crate) fn record_recent_key(&mut self, value: Value, command: bool) { self.vm.record_recent_value(value, command) }
+        pub(crate) fn clear_recent_keys(&mut self) { self.vm.recent_keys.clear() }
+        pub(crate) fn set_local_zone(&mut self, zone: crate::LocalZone) { self.vm.local_zone = zone; }
+        pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
+            self.symbol_slot(v)
+        }
+        /// notify_variable_watchers from a leaf; a watcher's signal is the fault.
+        pub(crate) fn notify(&mut self, slot: usize, value: Value, operation: &str, place: Option<Value>) -> std::result::Result<(), Fault> {
+            if self.vm.trapped.is_empty() { return Ok(()); }
+            self.vm.notify_watchers_at(slot, value, operation, place).map_err(|text| match self.vm.propagated_escape.take() {
+                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
+                _ => Fault::Error(text),
+            })
+        }
+        pub(crate) fn variable_watchable(&self, watcher: Value) -> bool {
+            super::native_watcher(self.vm, watcher).is_some()
+        }
+        pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
+            self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
+        }
+        pub(crate) fn trapped_variable(&self, symbol: Value) -> std::result::Result<bool, Fault> {
+            let slot = self.symbol_slot(symbol)?;
+            Ok(self.vm.variable_trapped(self.vm.indirect_variable(slot)))
+        }
+        pub(crate) fn request_redisplay(&mut self) {
+            self.vm.display_state.free_realized_faces();
+        }
+        pub(crate) fn trap_variable(&mut self, symbol: Value, trapped: bool) -> std::result::Result<(), Fault> {
+            let slot = self.symbol_slot(symbol)?;
+            let base = self.vm.indirect_variable(slot);
+            self.vm.set_variable_trapped(base, trapped);
+            Ok(())
+        }
         pub(crate) fn set_font_selection_order(&mut self, order: [romacs_layout_input::FontSelectionAttribute; 4]) {
             self.vm.display_state.set_font_selection_order(order);
         }
@@ -194,8 +258,13 @@ mod leaf {
         }
         /// A line boundary without moving point (GNU editfns.c).
         pub fn line_boundary_position(&mut self, count: Value, end: bool) -> super::Out {
-            let count = if count == Value::NIL { 1 } else {
-                count.integer_value().ok_or(Fault::Wrong("integerp", count))?
+            // CHECK_INTEGER: a bignum counts past either end of the buffer.
+            let count = if count == Value::NIL { 1 } else if let Some(n) = count.integer_value() { n } else {
+                match self.bigint_value(count) {
+                    Some(n) if n.sign() == num_bigint::Sign::Minus => Value::MIN_FIXNUM,
+                    Some(_) => Value::MAX_FIXNUM,
+                    None => return Err(Fault::Wrong("integerp", count)),
+                }
             };
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
             let (chars, point, low, high) = match &self.vm.objects[index] {
@@ -209,6 +278,29 @@ mod leaf {
                 data::Object::ByteBuffer(b) => (b.bytes.iter().map(|&b| b as char).collect(), b.point.0, b.restriction.start.0, b.restriction.end.0),
                 _ => unreachable!(),
             };
+            if end {
+                // editfns.c eol: find_before_next_newline (PT, 0, N - (N <= 0)):
+                // the COUNTth newline from point, or the accessible end
+                // when there are fewer.
+                let count = count - i64::from(count <= 0);
+                let mut pos = point;
+                if count > 0 {
+                    for _ in 0..count {
+                        match (pos..high).find(|&at| chars[at] == '\n') {
+                            Some(at) => pos = at + 1,
+                            None => return Ok(Value::integer(high as i64 + 1).unwrap()),
+                        }
+                    }
+                    return Ok(Value::integer(pos as i64).unwrap());
+                }
+                for _ in count..0 {
+                    match (low..pos).rev().find(|&at| chars[at] == '\n') {
+                        Some(at) => pos = at,
+                        None => return Ok(Value::integer(low as i64 + 1).unwrap()),
+                    }
+                }
+                return Ok(Value::integer(pos as i64 + 1).unwrap());
+            }
             let mut pos = point;
             while pos > low && chars[pos-1] != '\n' { pos -= 1; }
             let lines = count.saturating_sub(1);
@@ -225,7 +317,6 @@ mod leaf {
                     while pos > low && chars[pos-1] != '\n' { pos -= 1; }
                 }
             }
-            if end { while pos < high && chars[pos] != '\n' { pos += 1; } }
             Ok(Value::integer(pos as i64 + 1).unwrap())
         }
         /// Point of the current buffer as a 1-based character position.
@@ -254,6 +345,12 @@ mod leaf {
         pub(crate) fn closure_document(&self, closure: Value) -> Value {
             closure.index_if(4).and_then(|i| self.vm.closures.get(i))
                 .map(|c| c.metadata.get(4).copied().unwrap_or(c.document)).unwrap_or(Value::NIL)
+        }
+        /// A closure's (REQUIRED, POSITIONAL, REST) parameter counts.
+        pub(crate) fn closure_arity(&self, closure: Value) -> Option<(usize, usize, bool)> {
+            let c = self.vm.closures.get(closure.index_if(4)?)?;
+            let f = self.vm.functions.get(c.function)?;
+            Some((f.required, f.arity, f.rest))
         }
         pub(crate) fn set_interactive_spec(&mut self, closure: Value, spec: Value, thunk: Value) -> std::result::Result<(), Fault> {
             let slot = self.vm.slot(super::INTERACTIVE_TABLE);
@@ -293,6 +390,18 @@ mod leaf {
         pub(crate) fn kill_buffer(&mut self, buffer: Value) -> std::result::Result<(), Fault> {
             self.vm.kill_buffer_model(buffer).map_err(Fault::Error)
         }
+        pub(crate) fn save_excursion_data(&mut self) -> std::result::Result<Value, Fault> {
+            self.vm.save_excursion_data().map_err(Fault::Error)
+        }
+        pub(crate) fn restore_excursion_data(&mut self, data: Value) -> std::result::Result<Value, Fault> {
+            self.vm.restore_excursion_data(data).map_err(Fault::Error)
+        }
+        pub(crate) fn save_restriction_data(&mut self) -> std::result::Result<Value, Fault> {
+            self.vm.save_restriction_data().map_err(Fault::Error)
+        }
+        pub(crate) fn restore_restriction_data(&mut self, data: Value) -> std::result::Result<(), Fault> {
+            self.vm.restore_restriction_data(data).map_err(Fault::Error)
+        }
         pub(crate) fn buffer_state(&self, buffer: Value) -> Option<&crate::bytes::BufferState> {
             self.vm.buffer_state(buffer).ok()
         }
@@ -307,7 +416,7 @@ mod leaf {
             Value::reference(i, 3)
         }
         pub fn buffer_name_exists(&self, name: &str) -> bool {
-            name == "*scratch*" || self.vm.names.get(&format!("#:vm2-buffer:{name}"))
+            (name == "*scratch*" && self.vm.scratch_unmade()) || self.vm.names.get(&format!("#:vm2-buffer:{name}"))
                 .is_some_and(|&slot| {
                     self.vm.buffer_state(self.vm.slots[slot].value).ok()
                         .is_some_and(|state| state.live && state.name.as_deref() == Some(name))
@@ -735,6 +844,9 @@ mod leaf {
         pub fn equal(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
             self.vm.equal(a, b)
         }
+        pub fn equal_including_properties(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
+            self.vm.equal_including_properties(a, b)
+        }
         fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
             v.index_if(7)
                 .and_then(|i| i.checked_sub(1))
@@ -765,6 +877,25 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
+            self.vm.dynamic[binding].1 = value;
+            Ok(true)
+        }
+        pub fn provide_feature(&mut self, feature: Value, subfeatures: Value) -> std::result::Result<(), Fault> {
+            self.vm.provide_feature(feature, subfeatures)
+        }
+        /// The value saved by the oldest local let of V in BUFFER, if any.
+        pub fn local_toplevel_cell(&mut self, v: Value, buffer: Value) -> std::result::Result<Option<Value>, Fault> {
+            if v == Value::NIL || v == Value::TRUE { return Ok(None); }
+            let slot = self.symbol_slot(v)?;
+            let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
+            let value = self.vm.dynamic[binding].1;
+            if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
+        }
+        /// Replace that saved value; false when there is no such let.
+        pub fn local_toplevel_cell_set(&mut self, v: Value, buffer: Value, value: Value) -> std::result::Result<bool, Fault> {
+            if v == Value::NIL || v == Value::TRUE { return Ok(false); }
+            let slot = self.symbol_slot(v)?;
+            let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -801,6 +932,7 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
+            self.notify(slot, value, "set", Some(Value::NIL))?;
             // Only an INTERNED keyword is SYMBOL_NOWRITE (GNU lread.c
             // intern_sym); an uninterned `:x' is an ordinary variable.
             let name = &self.vm.symbol_names[slot];
@@ -882,7 +1014,10 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.symbol_slot(v)?;
-            self.vm.set_variable_value(slot, value).map_err(Fault::Error)
+            self.vm.set_variable_value(slot, value).map_err(|text| match self.vm.propagated_escape.take() {
+                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
+                _ => Fault::Error(text),
+            })
         }
         /// Publish NEW as an alias of BASE once `defvaralias` has validated
         /// it. nil and t are immediates in VM2, so an alias of either targets
@@ -1061,7 +1196,7 @@ mod leaf {
                 (value, false)
             };
             let mut target = definition;
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             while !is_macro && target != Value::NIL && self.kind(target) == Kind::Symbol {
                 if target == v || !seen.insert(target.0) {
                     return Err(Fault::CyclicFunctionIndirection(v));
@@ -1150,10 +1285,7 @@ mod leaf {
         }
         /// Fresh symbol slot outside the obarray; never re-enters the VM.
         pub fn make_symbol(&mut self, name: &str) -> Value {
-            let value = self.vm.generated_symbol(expand::generated_id());
-            let slot = value.index_if(7).unwrap() - 1;
-            self.vm.symbol_names[slot] = name.to_owned();
-            value
+            self.vm.uninterned_symbol(name)
         }
         /// GNU `get_keymap (OBJECT, 0, 0)` (keymap.c:178): OBJECT if it is a
         /// keymap, else the keymap at the end of its function chain, else
@@ -1236,6 +1368,9 @@ mod leaf {
                     Some(data::Object::Window(_)) => Kind::Window,
                     Some(data::Object::Frame(_)) => Kind::Frame,
                     Some(data::Object::Terminal(_)) => Kind::Terminal,
+                    Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
+                    Some(data::Object::Sqlite(_)) => Kind::Sqlite,
+                    Some(data::Object::Process(_)) => Kind::Process,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -1283,6 +1418,19 @@ mod leaf {
         /// Callers validate the Lisp character index before entering the substrate.
         pub fn char_table_element(&self, table: Value, index: usize) -> super::Out {
             self.vm.char_table_get(table, index).map_err(Fault::Error)
+        }
+        /// The value of a VM-private `#:vm2-' slot, unbound reading as nil.
+        pub fn hidden_value(&mut self, name: &str) -> Value {
+            let slot = self.vm.slot(name);
+            match self.vm.slots[slot].value { Value::UNBOUND => Value::NIL, value => value }
+        }
+        pub fn set_hidden_value(&mut self, name: &str, value: Value) {
+            let slot = self.vm.slot(name);
+            self.vm.slots[slot].value = value;
+        }
+        /// TABLE's own value at INDEX or its default, ignoring the parent.
+        pub fn char_table_own_element(&self, table: Value, index: usize) -> super::Out {
+            self.vm.char_table_own(table, index).map_err(Fault::Error)
         }
         pub fn make_char_table(&mut self, purpose: Value, init: Value) -> super::Out {
             let mut plist = self.symbol_plist(purpose)?;
@@ -1334,7 +1482,7 @@ mod leaf {
                     return Err(Fault::Wrong("char-table-p", parent));
                 }
                 let mut next = parent;
-                let mut seen = HashSet::new();
+                let mut seen = HashSet::default();
                 while let Some(data::Object::CharTable(t)) = self.vm.object_if(next) {
                     if next == table || !seen.insert(next.0) { return Err(Fault::Error("Attempt to make a chartable be its own parent".into())); }
                     next = t.parent;
@@ -1401,6 +1549,8 @@ mod leaf {
     // Buffer text for prims/fileio.rs (src/prim/leaf/fileio.rs). A child
     // module, so it sees `vm`.
     mod map_keymap;
+    mod keymap_copy;
+    mod category;
     mod fileio;
     mod filelock;
     mod file_attributes;
@@ -1411,6 +1561,9 @@ mod leaf {
     mod charset;
     mod coding;
     mod point_predicates;
+    mod subst_char;
+    mod translate_region;
+    mod json;
     mod overlays;
     mod invisible;
     mod buffer_locals;
@@ -1424,13 +1577,24 @@ mod leaf {
     mod search;
     mod skip_chars;
     mod word_motion;
+    mod syntax_scan;
+    pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
     mod value_order;
     mod completion;
     mod backtrace;
     mod text_properties;
+    pub(crate) use text_properties::{PropertyBegin, Retry};
+    mod undo;
+    mod insdel;
+    mod sqlite;
+    mod process;
+    pub(crate) use process::CallOutput;
+    mod random;
+    mod width;
+    mod coding_safe;
 }
-pub(crate) use leaf::{Leaf, Kind};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput};
 
 /// Realize C-initialized coding variables before their first Lisp observation.
 /// Like the charset slot hook, this preserves allocation-free VM construction.
@@ -1582,6 +1746,11 @@ pub(crate) fn arity(value: Value) -> Option<(usize, Option<usize>)> {
     })
 }
 
+/// The generated subr declared as NAME.
+pub(crate) fn subr_named(name: &str) -> Option<Value> {
+    GENERATED.iter().position(|d| d.name == name).map(|i| Value::reference(PRIMITIVES.len() + i, 6))
+}
+
 pub(crate) fn name(v: Value) -> Option<&'static str> {
     Some(descriptor(v.index_if(6)?)?.name())
 }
@@ -1594,6 +1763,32 @@ pub(crate) fn legacy_value(p: Primitive) -> Option<Value> {
         .map(|i| Value::reference(i, 6))
 }
 
+/// A watcher that is a native leaf subr, which can run at a write point
+/// without re-entering the engine. Symbols are resolved to their function.
+pub(crate) fn native_watcher(vm: &Vm, mut watcher: Value) -> Option<&'static PrimDesc> {
+    for _ in 0..64 {
+        if let Some(d) = generated(watcher) { return matches!(d.body, Body::Leaf(_)).then_some(d); }
+        let slot = watcher.index_if(7)?.checked_sub(1)?;
+        watcher = vm.slots.get(slot)?.function;
+    }
+    None
+}
+pub(crate) fn call_native_watcher(vm: &mut Vm, watcher: Value, args: &[Value]) -> crate::Result<()> {
+    let Some(d) = native_watcher(vm, watcher) else { return Err("VM2 variable watcher is not a native subr".into()); };
+    let Body::Leaf(f) = d.body else { unreachable!("native_watcher checks the body") };
+    let (condition, data) = if args.len() < d.min || d.max.is_some_and(|m| args.len() > m) {
+        let n = Value::integer(args.len() as i64).unwrap();
+        vm.condition("wrong-number-of-arguments", &[watcher, n])
+    } else {
+        match no_collection(vm, |vm| f(&mut Leaf::new(vm), args)) {
+            Ok(_) => return Ok(()),
+            Err(fault) => vm.fault(fault),
+        }
+    };
+    // funcall_subr passes the watcher's own signal through the write.
+    vm.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+    Err(format!("variable watcher {} signalled", d.name))
+}
 /// Tag-6 payloads at or above `PRIMITIVES.len()` name generated primitives.
 #[inline(always)]
 pub(crate) fn generated(v: Value) -> Option<&'static PrimDesc> {
@@ -1619,6 +1814,20 @@ fn no_collection<R>(vm: &mut Vm, run: impl FnOnce(&mut Vm) -> R) -> R {
 }
 
 impl Vm {
+    /// The legacy `expand-file-name' row (kept for its ordinal) runs the
+    /// defsubr's expansion, refusing where a file name handler would be called.
+    pub(crate) fn expand_file_name_legacy(&mut self, name: Value, default: Value) -> crate::Result<Value> {
+        let expanded = no_collection(self, |vm| prims::expand_file_name::expand(&mut Leaf::new(vm), name, default));
+        match expanded {
+            Ok(Some(value)) => Ok(value),
+            Ok(None) => Err("VM2 expand-file-name matching file name handler is unsupported".into()),
+            Err(fault) => {
+                let (condition, data) = self.fault(fault);
+                self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                Err("expand-file-name signalled".into())
+            }
+        }
+    }
     /// Legacy fset shares the checked Leaf cell writer without exposing Vm to leaves.
     pub(crate) fn set_function_leaf(
         &mut self,
@@ -1717,7 +1926,8 @@ impl Vm {
     /// Evaluate the built-in T3 Lisp prelude (`prims/prelude.el`): callback
     /// loops written in Lisp over leaf cursors, so their state is registers.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
-        self.eval_source_raw(prims::PRELUDE)
+        self.eval_source_raw(prims::PRELUDE)?;
+        self.eval_source_raw(prims::PROCESS_PRELUDE)
     }
 }
 

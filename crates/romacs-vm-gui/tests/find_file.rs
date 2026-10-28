@@ -698,12 +698,14 @@ fn dired_exact_filename_mapping_refresh_and_stale_entry_refusal() {
     let mut presentation = presentation::Presentation::new();
     for name in ["line\nname.txt", "tab\tname.txt", "back\\name.txt", "λ space.txt"] {
         let path = fixture.root.join(name);
+        // The exact path, whatever its representation: an ASCII name read
+        // from the directory is unibyte, as GNU's directory-files leaves it.
         assert_eq!(printed(&mut vm, &format!(
-            "(progn (dired-goto-file {}) (dired-get-filename))", quoted(path.to_str().unwrap()))),
-            quoted(path.to_str().unwrap()), "DIRED_EXACT_PATH_NOT_DISPLAY_PARSE");
+            "(progn (dired-goto-file {0}) (equal (dired-get-filename) {0}))", quoted(path.to_str().unwrap()))),
+            "t", "DIRED_EXACT_PATH_NOT_DISPLAY_PARSE");
         let opened = presentation.command(&mut vm, &mut commands, CommandEvent::Character(13)).unwrap().unwrap();
         assert!(opened.signal.is_none(), "DIRED_ESCAPED_NATIVE_OPEN: {opened:?}");
-        assert_eq!(printed(&mut vm, "buffer-file-name"), quoted(path.to_str().unwrap()), "DIRED_ESCAPED_VISIT_IDENTITY");
+        assert_eq!(printed(&mut vm, &format!("(equal buffer-file-name {})", quoted(path.to_str().unwrap()))), "t", "DIRED_ESCAPED_VISIT_IDENTITY");
         assert_eq!(printed(&mut vm, "(buffer-string)"), quoted(name), "DIRED_ESCAPED_VISIT_BYTES");
         vm.eval_source("(romacs-select-buffer exact-directory-view)").unwrap();
     }
@@ -716,7 +718,8 @@ fn dired_exact_filename_mapping_refresh_and_stale_entry_refusal() {
         "stale", "DIRED_STALE_ENTRY_MUST_NOT_CREATE_FILE_VISIT");
     assert!(!fixture.root.join("λ space.txt").exists());
     vm.eval_source("(dired-revert) (dired-goto-file \"new.txt\")").unwrap();
-    assert_eq!(printed(&mut vm, "(file-name-nondirectory (dired-get-filename))"), "\"new.txt\"");
+    // A name read from the directory is unibyte, as GNU's directory-files leaves it.
+    assert_eq!(printed(&mut vm, "(equal (file-name-nondirectory (dired-get-filename)) \"new.txt\")"), "t");
 }
 
 #[test]
@@ -772,7 +775,7 @@ fn dired_native_keys_browse_refresh_and_return() {
         let moved = presentation.command(&mut vm, &mut commands, CommandEvent::Character(key)).unwrap().unwrap();
         assert!(moved.signal.is_none(), "DIRED_NATIVE_CHILD_PARENT: {moved:?}");
     }
-    assert_eq!(printed(&mut vm, "(file-name-nondirectory (dired-get-filename))"), "\"child\"");
+    assert_eq!(printed(&mut vm, "(equal (file-name-nondirectory (dired-get-filename)) \"child\")"), "t");
     std::fs::write(fixture.root.join("added.txt"), "added").unwrap();
     let refreshed = presentation.command(&mut vm, &mut commands, CommandEvent::Character(103)).unwrap().unwrap();
     assert!(refreshed.signal.is_none(), "DIRED_NATIVE_REFRESH: {refreshed:?}");

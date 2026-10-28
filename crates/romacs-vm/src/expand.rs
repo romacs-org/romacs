@@ -301,6 +301,11 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
         }
         "prog1" | "prog2" => {
             let index = usize::from(head == "prog2");
+            if args.len() <= index && head == "prog1" {
+                // eval_sub: the special form's own arity error.
+                let data = Form::List(vec![Form::Sym("prog1".into()), Form::Int(0)]);
+                return Ok(Some(call("signal", vec![quote(Form::Sym("wrong-number-of-arguments".into())), quote(data)])));
+            }
             if args.len() <= index {
                 return Err(format!("{head} has too few arguments"));
             }

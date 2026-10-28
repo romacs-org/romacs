@@ -1,10 +1,10 @@
-//! GNU xfaces.c alternative family setter. Only list spines are copied;
+//! GNU xfaces.c alternative family and registry setters. Only list spines are copied;
 //! interning is deliberately ordered after each complete spine validation.
 use super::*;
 
 fn proper_spine(cx: &Leaf<'_>, original: Value) -> std::result::Result<Vec<Value>, Fault> {
     let mut values = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut tail = original;
     while let Some((car, cdr)) = cx.pair(tail) {
         if !seen.insert(tail.0) {
@@ -47,5 +47,24 @@ fn set_alternative_font_family_alist(cx, alist: Value) {
     }
     let result = copied_list(cx, converted);
     cx.set_font_alternative_families(result, names);
+    Ok(result)
+}}
+
+defsubr! { name = "internal-set-alternative-font-registry-alist", gnu = "xfaces.c:5940", effect = Global,
+fn set_alternative_font_registry_alist(cx, alist: Value) {
+    // Copy the outer spine, then each entry's spine, downcasing its members.
+    // Romacs font selection does not consult registries yet; the copy is kept
+    // traced, as GNU keeps it staticpro'd, and realized faces are discarded.
+    let rows = proper_spine(cx, alist)?;
+    let mut converted = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut members = Vec::new();
+        for member in proper_spine(cx, row)? {
+            members.push(cx.case_convert(member, true)?);
+        }
+        converted.push(copied_list(cx, members));
+    }
+    let result = copied_list(cx, converted);
+    cx.set_font_alternative_registries(result);
     Ok(result)
 }}

@@ -9,5 +9,6 @@ fn named_void_function_diagnostics_do_not_inflate_the_live_registry() {
     ]);
     let (bound, panics) = romacs_introspect_live::vm2_registry(&universe);
     assert!(panics.is_empty(), "{panics:?}");
-    assert_eq!(bound, vec!["car"]);
+    // `and` is a special form, fbound as in GNU.
+    assert_eq!(bound, vec!["and", "car"]);
 }

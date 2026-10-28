@@ -139,6 +139,20 @@ impl Vm {
         })
     }
 
+    /// GNU eval.c:766: the oldest SPECPDL_LET_LOCAL of exactly this symbol
+    /// in BUFFER, by the symbol each binding recorded and its owner buffer.
+    /// An ordinary or localized Boolean variable's local let was made on a
+    /// private slot; a per-buffer forwarded one on its own slot without the
+    /// LET_DEFAULT flag.
+    pub(super) fn local_toplevel_binding(&mut self, slot: usize, buffer: Value) -> Option<usize> {
+        let symbol = Value::reference(slot + 1, 7);
+        let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
+        self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
+            let (bound, _, owner, let_default) = self.dynamic[at];
+            owner == buffer && if buffer_forwarded { bound == slot && !let_default } else { bound != slot }
+        })
+    }
+
     fn allocate_local_binding_slot(&mut self) -> usize {
         if let Some(slot) = self.free_local_binding_slots.pop() {
             return slot;
@@ -202,7 +216,7 @@ impl Vm {
         }
     }
     /// Publish SLOT's local TABLE, retaining native Boolean forwarding.
-    fn install_local_table(&mut self, slot: usize, table: Value, explicit: bool) {
+    pub(super) fn install_local_table(&mut self, slot: usize, table: Value, explicit: bool) {
         self.slots[slot].local = table;
         self.slots[slot].explicit_local = explicit;
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
@@ -236,7 +250,7 @@ impl Vm {
         let slot = self.indirect_variable(slot);
         // Built-in automatic locals stay heap-free until first lookup, as
         // required by cold VM/code-image construction.
-        if (slot == self.truncate_lines_slot || self.names.get("case-symbols-as-words") == Some(&slot)) && self.local_table(slot)?.is_none() {
+        if (slot == self.truncate_lines_slot || slot == self.case_symbols_slot) && self.local_table(slot)?.is_none() {
             let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
             self.install_local_table(slot, table, false);
         }
@@ -266,6 +280,10 @@ impl Vm {
         Ok(self.slots[local].value)
     }
     pub(super) fn set_variable_value(&mut self, slot: usize, value: Value) -> Result<()> {
+        if !self.trapped.is_empty() {
+            if value == Value::UNBOUND { self.notify_watchers_at(slot, value, "makunbound", Some(Value::NIL))?; }
+            else { self.notify_watchers(slot, value, "set")?; }
+        }
         let base = self.indirect_variable(slot);
         if let Some(fwd) = self.native_forwarding(base) {
             if value == Value::UNBOUND {
@@ -293,6 +311,7 @@ impl Vm {
         Ok(())
     }
     pub(super) fn bind_variable(&mut self, slot: usize, value: Value) -> Result<()> {
+        if !self.trapped.is_empty() { self.notify_watchers(slot, value, "let")?; }
         let base = self.indirect_variable(slot);
         let local = self.variable_binding_slot(base, false)?;
         if let Some(fwd) = self.native_forwarding(base) && local == base {
@@ -382,6 +401,9 @@ impl Vm {
             MakeVariableBufferLocal => {
                 self.slots[slot].explicit_local = false;
                 if self.local_table(slot)?.is_none() {
+                    // data.c Fmake_variable_buffer_local: a plain void
+                    // variable's default becomes nil; a localized one keeps it.
+                    if self.slots[slot].value == Value::UNBOUND { self.slots[slot].value = Value::NIL; }
                     let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
                     self.install_local_table(slot, table, false);
                 }

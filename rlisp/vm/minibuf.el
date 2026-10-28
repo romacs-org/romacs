@@ -5,15 +5,20 @@
 
 ;;; Commentary:
 
-;; Evaluated once per VM, on the first prompt, by prims/minibuf.rs. GNU's
-;; read_minibuf (minibuf.c:573) runs a recursive command loop, which calls
-;; Lisp per key, so that loop is Lisp here (PRIMITIVE-DOCTRINE section 3).
+;; Evaluated once per VM, after keyboard.el, the Lisp half of keyboard.c,
+;; by prims/keyboard.rs on the first use of either. GNU's read_minibuf
+;; (minibuf.c:573) runs a recursive command loop, which calls Lisp per key,
+;; so that loop is Lisp here (PRIMITIVE-DOCTRINE section 3): keyboard.el's.
 ;; Every value it keeps across a command is a register of a traced frame.
 ;; GNU minibuf.c `minibuf_level'.
 
 ;;; Code:
 
 (defvar romacs--minibuf-level 0)
+;; minibuf.c minibuf_prompt and, per active minibuffer, the command loop
+;; level it was entered at (minibuf_c_loop_level); innermost first.
+(defvar romacs--minibuf-prompts nil)
+(defvar romacs--minibuf-loop-levels nil)
 ;; simple.el:2008; read_minibuf binds it while the prompt is active.
 (defvar minibuffer-default nil)
 
@@ -51,76 +56,6 @@ innermost-loop checks, which need recursive minibuffers)."
 (unless (lookup-key minibuffer-local-map "\r")
   (define-key minibuffer-local-map "\r" 'exit-minibuffer))
 
-(defun romacs--minibuf-read-event ()
-  "Next event from `unread-command-events', or nil at the end of the input.
-keyboard.c read_char: an unread (t . EVENT) or (no-record . EVENT) is EVENT.
-With no unread event and no keyboard macro, read_char redisplays and waits
-for the keyboard: here the host's, when one is attached (host_input.rs)."
-  (if unread-command-events
-      (let ((event (car unread-command-events)))
-        (setq unread-command-events (cdr unread-command-events))
-        (if (and (consp event) (memq (car event) '(t no-record))) (cdr event) event))
-    (and (not executing-kbd-macro) (romacs--minibuf-host-input-p)
-         (romacs--read-host-event))))
-
-(defun romacs--minibuf-host-input-p ()
-  "Non-nil when the embedder attached a keyboard (Vm::set_host_input)."
-  (and (boundp 'romacs--host-input) romacs--host-input))
-
-(defun romacs--minibuf-read-key-sequence ()
-  "A complete key sequence, or nil when the input (the macro) has ended.
-keyboard.c read_key_sequence returns 0 at the end of a keyboard macro."
-  (let ((event (romacs--minibuf-read-event)) keys)
-    (when event
-      (setq keys (vector event))
-      (while (and keys (keymapp (key-binding keys t)))
-        (setq event (romacs--minibuf-read-event))
-        (setq keys (and event (apply #'vector (append keys (list event))))))
-      keys)))
-
-(defun romacs--minibuf-command-loop ()
-  "keyboard.c command_loop_2/command_loop_1, for one minibuffer.
-An `error' inside a command is reported and the loop continues (cmd_error);
-any other signal, such as `quit', leaves the minibuffer."
-  (let (keys)
-    (setq last-command this-command real-last-command real-this-command)
-    (while (setq keys (romacs--minibuf-read-key-sequence))
-      (let ((command (key-binding keys t)))
-        (setq last-command-event (aref keys (1- (length keys))))
-        (if (null command)
-            (message "%S is undefined" keys)
-          (setq this-command command real-this-command command
-                current-prefix-arg prefix-arg prefix-arg nil)
-          (condition-case err
-              (unless (and (fboundp 'romacs-delete-selection-before-command)
-                           (romacs-delete-selection-before-command command))
-                (call-interactively command))
-            (error (setq prefix-arg nil) (message "%S" err)))
-          (setq last-command this-command real-last-command real-this-command))))
-    nil))
-
-(defun romacs--minibuf-recursive-edit ()
-  "keyboard.c recursive_edit_1: catch `exit'; t quits, a string is an
-error, a function is called (minibuffer-quit-recursive-edit throws one)."
-  (let ((val (catch 'exit (romacs--minibuf-command-loop))))
-    (cond ((eq val t) (signal 'quit nil))
-          ((stringp val) (signal 'error (list val)))
-          ((functionp val) (funcall val)))
-    nil))
-
-(defun romacs--minibuf-append-face (start end face)
-  "Fadd_face_text_property (START END FACE t): FACE goes last."
-  (while (< start end)
-    (let ((old (get-text-property start 'face)) (next (1+ start)))
-      (while (and (< next end) (eq (get-text-property next 'face) old))
-        (setq next (1+ next)))
-      (put-text-property start next 'face
-                         (cond ((null old) face)
-                               ((and (consp old) (not (keywordp (car old))))
-                                (append old (list face)))
-                               (t (list old face))))
-      (setq start next))))
-
 (defun romacs--read-minibuf (prompt keymap initial pos histvar default)
   "minibuf.c read_minibuf (minibuf.c:573) after its argument checks."
   (when (and (> romacs--minibuf-level 0) (not enable-recursive-minibuffers))
@@ -130,7 +65,7 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
   ;; minibuf.c:653: outside a keyboard macro batch GNU reads stdin; VM2
   ;; without a host keyboard has no terminal input, which batch GNU reports
   ;; at end of file. With a host keyboard (the GUI) it is interactive GNU.
-  (unless (or executing-kbd-macro (romacs--minibuf-host-input-p))
+  (unless (or executing-kbd-macro (romacs--host-input-p))
     (signal 'end-of-file '("Error reading from stdin")))
   ;; read_minibuf specbinds `minibuffer-default' and increments
   ;; minibuf_level; both are restored by the unwind below. (setq, not let:
@@ -138,6 +73,12 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
   (let* ((outer-prefix current-prefix-arg)
          (outer-default minibuffer-default)
          (outer-level romacs--minibuf-level)
+         ;; window.c:8428: the entry's window configuration saves the caller
+         ;; only inside a minibuffer, and its restore puts it back.
+         (outer-selected (and (> outer-level 0) romacs--minibuf-selected-window))
+         (outer-prompts romacs--minibuf-prompts)
+         (outer-keys romacs--command-keys)
+         (outer-loop-levels romacs--minibuf-loop-levels)
          (level (1+ outer-level))
          (buffer (get-buffer-create (format " *Minibuf-%d*" level)))
          (calling-buffer (current-buffer))
@@ -148,30 +89,39 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
          val)
     ;; minibuf.c:794: an unbound history variable starts as nil.
     (unless (boundp histvar) (set histvar nil))
-    (setq minibuffer-default default romacs--minibuf-level level)
+    (setq minibuffer-default default romacs--minibuf-level level
+          romacs--minibuf-prompts (cons (copy-sequence prompt) outer-prompts)
+          romacs--minibuf-loop-levels (cons romacs--command-loop-level outer-loop-levels))
     (unwind-protect
         (progn
           (set-buffer buffer)
           (set-window-buffer mini buffer)
+          ;; minibuf.c:827.
+          (when (or (= level 1) (not (eq mini calling-window)))
+            (setq romacs--minibuf-selected-window calling-window))
           (select-window mini)
           (set-buffer buffer)
           (setq mark-active nil)
-          (erase-buffer)
-          (insert prompt)
-          (when (> (point) 1)
-            (put-text-property 1 (point) 'front-sticky t)
-            (put-text-property 1 (point) 'rear-nonsticky t)
-            (put-text-property 1 (point) 'field t)
-            (let ((list minibuffer-prompt-properties))
-              (while (consp list)
-                (let ((key (car list)))
-                  (setq list (cdr list))
-                  (when (consp list)
-                    (let ((value (car list)))
-                      (setq list (cdr list))
-                      (if (eq key 'face)
-                          (romacs--minibuf-append-face 1 (point) value)
-                        (put-text-property 1 (point) key value))))))))
+          ;; minibuf.c:274: the erase and the prompt bypass read-only text
+          ;; and change hooks.
+          (let ((inhibit-read-only t)
+                (inhibit-modification-hooks t))
+            (erase-buffer)
+            (insert prompt)
+            (when (> (point) 1)
+              (put-text-property 1 (point) 'front-sticky t)
+              (put-text-property 1 (point) 'rear-nonsticky t)
+              (put-text-property 1 (point) 'field t)
+              (let ((list minibuffer-prompt-properties))
+                (while (consp list)
+                  (let ((key (car list)))
+                    (setq list (cdr list))
+                    (when (consp list)
+                      (let ((value (car list)))
+                        (setq list (cdr list))
+                        (if (eq key 'face)
+                            (add-face-text-property 1 (point) value t)
+                          (put-text-property 1 (point) key value)))))))))
           (setq prompt-end (point))
           (when initial
             (insert initial)
@@ -179,7 +129,8 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
           (use-local-map keymap)
           (when (and minibuffer-setup-hook (fboundp 'run-hooks))
             (run-hooks 'minibuffer-setup-hook))
-          (romacs--minibuf-recursive-edit)
+          ;; keyboard.el's command loop, reading the macro or the host.
+          (romacs--recursive-edit-1)
           (set-buffer buffer)
           (setq val (if minibuffer-allow-text-properties
                         (buffer-substring prompt-end (point-max))
@@ -192,9 +143,18 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
       ;; may have deleted it; GNU's record_unwind_current_buffer likewise
       ;; restores the buffer only if it is live).
       (setq current-prefix-arg outer-prefix prefix-arg nil
-            minibuffer-default outer-default romacs--minibuf-level outer-level)
+            minibuffer-default outer-default romacs--minibuf-level outer-level
+            romacs--minibuf-selected-window outer-selected
+            romacs--minibuf-prompts outer-prompts romacs--minibuf-loop-levels outer-loop-levels
+            romacs--command-keys outer-keys)
       (set-buffer buffer)
-      (erase-buffer)
+      ;; minibuf.c:1186: past the read-only prompt, with no hooks, and
+      ;; leaving deactivate-mark alone.
+      (let ((inhibit-read-only t)
+            (inhibit-modification-hooks t)
+            (old-deactivate-mark deactivate-mark))
+        (erase-buffer)
+        (setq deactivate-mark old-deactivate-mark))
       (set-window-buffer mini mini-buffer)
       (when (window-live-p calling-window)
         (select-window calling-window))
@@ -206,4 +166,74 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
       (when (and history-add-new-input histstring (fboundp 'add-to-history))
         (add-to-history histvar histstring)))
     val))
+
+;;;; minibuf.c's queries over the active minibuffers
+
+(defun romacs--minibuffer-depth-of (buffer)
+  "minibuf.c this_minibuffer_depth: BUFFER's level as an active minibuffer, or 0."
+  (let ((level romacs--minibuf-level) (depth 0))
+    (while (and (= depth 0) (> level 0))
+      (if (eq buffer (get-buffer (format " *Minibuf-%d*" level)))
+          (setq depth level)
+        (setq level (1- level))))
+    depth))
+
+(defun romacs--innermost-minibuffer-p (buffer)
+  "minibuf.c Finnermost_minibuffer_p."
+  (and (> romacs--minibuf-level 0)
+       (eq (or buffer (current-buffer))
+           (get-buffer (format " *Minibuf-%d*" romacs--minibuf-level)))))
+
+(defun romacs--minibuffer-innermost-command-loop-p (buffer)
+  "minibuf.c Fminibuffer_innermost_command_loop_p."
+  (let ((depth (romacs--minibuffer-depth-of (or buffer (current-buffer)))))
+    (and (> depth 0)
+         (eql (nth (- romacs--minibuf-level depth) romacs--minibuf-loop-levels)
+              romacs--command-loop-level))))
+
+(defun romacs--minibuffer-prompt ()
+  "minibuf.c Fminibuffer_prompt."
+  (copy-sequence (car romacs--minibuf-prompts)))
+
+(defun romacs--minibuffer-prompt-end ()
+  "minibuf.c Fminibuffer_prompt_end: in a minibuffer, the end of the
+prompt's field; elsewhere `point-min'."
+  (if (not (minibufferp (current-buffer)))
+      (point-min)
+    (let ((end (field-end (point-min))))
+      (if (and (= end (point-max)) (null (get-char-property (point-min) 'field)))
+          (point-min)
+        end))))
+
+(defun romacs--minibuffer-contents (properties)
+  "minibuf.c Fminibuffer_contents, or without PROPERTIES its -no-properties."
+  (if properties
+      (buffer-substring (romacs--minibuffer-prompt-end) (point-max))
+    (buffer-substring-no-properties (romacs--minibuffer-prompt-end) (point-max))))
+
+(defun romacs--yes-or-no-p (prompt)
+  "fns.c Fyes_or_no_p, without dialog boxes: ask until the answer read
+from the minibuffer is \"yes\" or \"no\"."
+  (unless (stringp prompt) (signal 'wrong-type-argument (list 'stringp prompt)))
+  (if use-short-answers
+      (y-or-n-p prompt)
+    (let* ((length (length prompt))
+           (prompt (concat prompt
+                           (if (and (> length 0)
+                                    (not (string-match-p "\\`[[:blank:]]\\'" (string (aref prompt (1- length))))))
+                               " " "")
+                           yes-or-no-prompt))
+           (enable-recursive-minibuffers t)
+           ;; So `repeat' repeats the command that asked.
+           (real-this-command real-this-command)
+           answer)
+      (catch 'romacs--answered
+        (while t
+          (setq answer (downcase (read-from-minibuffer prompt nil nil nil 'yes-or-no-p-history)))
+          (cond ((equal answer "yes") (throw 'romacs--answered t))
+                ((equal answer "no") (throw 'romacs--answered nil)))
+          (ding)
+          (discard-input)
+          (message "Please answer yes or no.")
+          (sleep-for 2))))))
 )

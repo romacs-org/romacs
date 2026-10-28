@@ -152,14 +152,14 @@ impl Vm {
             _ => Err("text buffer required".into()),
         }
     }
-    fn annotated_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
+    pub(super) fn annotated_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
         let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
         match self.objects.get_mut(i) {
             Some(Object::Buffer(b)) => Ok(b),
             _ => Err("text buffer required".into()),
         }
     }
-    fn marker(&self, v: Value) -> Result<&Marker> {
+    pub(super) fn marker(&self, v: Value) -> Result<&Marker> {
         match self.object(v)? {
             Object::Marker(m) => Ok(m),
             _ => Err("marker required".into()),
@@ -177,6 +177,20 @@ impl Vm {
         self.annotated(v)?;
         Ok(v)
     }
+    /// MARKER's insertion type: Right advances it on insertion at its position.
+    pub(super) fn set_marker_bias(&mut self, x: Value, b: Bias) -> Result<()> {
+        let m = self.marker(x)?.clone();
+        if let Some(a) = m.anchor {
+            let tree = &mut self.annotated_mut(m.buffer)?.anchors;
+            let pos = tree.resolve(a).unwrap();
+            assert!(tree.set(a, pos, b));
+        }
+        let Object::Marker(m) = &mut self.objects[x.index(0)? - 1] else {
+            unreachable!()
+        };
+        m.bias = b;
+        Ok(())
+    }
     pub(super) fn marker_position_value(&self, v: Value) -> Result<Value> {
         let m = self.marker(v)?;
         match m.anchor {
@@ -188,7 +202,7 @@ impl Vm {
             None => Ok(Value::NIL),
         }
     }
-    fn scalar_position(&self, v: Value) -> Result<i64> {
+    pub(super) fn scalar_position(&self, v: Value) -> Result<i64> {
         if let Ok(n) = v.as_integer() {
             return Ok(n);
         }
@@ -372,7 +386,7 @@ impl Vm {
         }
         Ok(())
     }
-    fn overlay_property(&self, v: Value, key: Value) -> Result<Value> {
+    pub(crate) fn overlay_property(&self, v: Value, key: Value) -> Result<Value> {
         Ok(self
             .overlay(v)?
             .properties
@@ -416,6 +430,108 @@ impl Vm {
         };
         let raw = self.annotation_raw(object, at)?;
         self.annotation_resolve(&raw, property)
+    }
+
+    /// editfns.c Fget_pos_property: the PROPERTY a character inserted at
+    /// POSITION would get, from the highest overlay that would cover it,
+    /// else from the text property it would inherit (textprop.c
+    /// text_property_stickiness).
+    pub(crate) fn get_pos_property_values(
+        &mut self,
+        position: Value,
+        property: Value,
+        object: Value,
+    ) -> std::result::Result<Value, crate::prim::Fault> {
+        use crate::prim::Fault;
+        let pos = self.scalar_position(position).map_err(Fault::Error)?;
+        let object = match self.object_if(object) {
+            _ if object == Value::NIL => self.current_annotation_buffer().map_err(Fault::Error)?,
+            Some(Object::Window(w)) => w.buffer,
+            _ => object,
+        };
+        // Fget_text_property: (args-out-of-range AT AT) outside the text.
+        let raw_at = |vm: &mut Self, at: i64| -> std::result::Result<Vec<(String, Value)>, Fault> {
+            match usize::try_from(at).ok().map(|at| vm.annotation_raw(object, at)) {
+                Some(Ok(raw)) => Ok(raw),
+                Some(Err(e)) if e != "index out of range" => Err(Fault::Error(e)),
+                _ => {
+                    let at = Value::integer(at).map_err(Fault::Error)?;
+                    let condition = vm.intern("args-out-of-range");
+                    let data = vm.list_value(&[at, at]);
+                    Err(Fault::Signal(condition, data))
+                }
+            }
+        };
+        let text_property = |vm: &mut Self, at: i64, key: Value| -> std::result::Result<Value, Fault> {
+            let raw = raw_at(vm, at)?;
+            vm.annotation_resolve(&raw, key).map_err(Fault::Error)
+        };
+        if !matches!(self.object_if(object), Some(Object::Buffer(_))) {
+            return text_property(self, pos, property);
+        }
+        let b = self.annotated(object).map_err(Fault::Error)?;
+        let begv = b.char_of_byte(b.accessible().start).map_err(Fault::Error)?.0 as i64 + 1;
+        let max = b.len_chars() as i64 + 1;
+        let byte = |n: i64| b.byte_of_char(CharOffset((n.clamp(1, max) - 1) as usize)).map(|b| b.0 as u32);
+        let (at, low, high) = (byte(pos), byte(pos - 1), byte(pos + 1));
+        let (at, low, high) = (at.map_err(Fault::Error)?, low.map_err(Fault::Error)?, high.map_err(Fault::Error)?);
+        let mut candidates = Vec::new();
+        // ITREE_FOREACH (posn - 1, posn + 1): every overlay meeting that span.
+        self.visit_overlay_bytes(object, ByteOffset(low as usize)..ByteOffset(high as usize), false, |overlay, _| candidates.push(overlay))
+            .map_err(Fault::Error)?;
+        let mut best: Option<(Value, Value)> = None;
+        for overlay in candidates {
+            let value = self.overlay_property(overlay, property).map_err(Fault::Error)?;
+            let Some((start, end)) = self.overlay_range(overlay).map_err(Fault::Error)? else { continue };
+            let o = self.overlay(overlay).map_err(Fault::Error)?;
+            let covers = start <= at && at <= end
+                && !(start == at && o.front == Bias::Right)
+                && !(end == at && o.rear != Bias::Right);
+            if value == Value::NIL || !covers { continue; }
+            if best.is_none_or(|(winner, _)| self.overlay_order_key(winner) < self.overlay_order_key(overlay)) {
+                best = Some((overlay, value));
+            }
+        }
+        if let Some((_, value)) = best { return Ok(value); }
+        // text_property_stickiness: rear-sticky by default, unless
+        // text-property-default-nonsticky or rear-nonsticky says otherwise;
+        // front-sticky inherits from after; a conflict prefers the side
+        // whose value is non-nil, rear first.
+        let nonsticky = self.slot("text-property-default-nonsticky");
+        let defaults = self.variable_value(nonsticky).map_err(Fault::Error)?;
+        let mut default = Value::NIL;
+        let mut tail = defaults;
+        while let Ok((entry, rest)) = self.cons_pair(tail) {
+            if self.cons_pair(entry).is_ok_and(|(key, _)| key == property) { default = entry; break; }
+            tail = rest;
+        }
+        let ignore_previous = pos <= begv;
+        let member = |vm: &Self, mut list: Value| -> bool {
+            while let Ok((item, rest)) = vm.cons_pair(list) {
+                if item == property { return true; }
+                list = rest;
+            }
+            false
+        };
+        let rear_sticky = !(ignore_previous || self.cons_pair(default).is_ok_and(|(_, tail)| tail != Value::NIL)) && {
+            let key = self.intern("rear-nonsticky");
+            let rear = text_property(self, pos - 1, key)?;
+            !(if self.cons_pair(rear).is_ok() { member(self, rear) } else { rear != Value::NIL })
+        };
+        let key = self.intern("front-sticky");
+        let front = text_property(self, pos, key)?;
+        let front_sticky = front == Value::TRUE || (self.cons_pair(front).is_ok() && member(self, front));
+        let stickiness = match (rear_sticky, front_sticky) {
+            (true, false) => -1,
+            (false, true) => 1,
+            (false, false) => 0,
+            (true, true) => if ignore_previous || text_property(self, pos - 1, property)? == Value::NIL { 1 } else { -1 },
+        };
+        match stickiness {
+            1 => text_property(self, pos, property),
+            -1 if pos > begv => text_property(self, pos - 1, property),
+            _ => Ok(Value::NIL),
+        }
     }
 
     pub(super) fn annotation_primitive(
@@ -513,17 +629,7 @@ impl Vm {
                 Value::NIL
             }),
             SetMarkerInsertionType => {
-                let m = self.marker(x)?.clone();
-                let b = bias(args[1]);
-                if let Some(a) = m.anchor {
-                    let tree = &mut self.annotated_mut(m.buffer)?.anchors;
-                    let pos = tree.resolve(a).unwrap();
-                    assert!(tree.set(a, pos, b));
-                }
-                let Object::Marker(m) = &mut self.objects[x.index(0)? - 1] else {
-                    unreachable!()
-                };
-                m.bias = b;
+                self.set_marker_bias(x, bias(args[1]))?;
                 Ok(args[1])
             }
             InsertBeforeMarkers => {
@@ -782,6 +888,87 @@ impl Vm {
         limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error))
     }
 
+    /// textprop.c Ftext_property_not_all: the first position in START..END
+    /// whose PROPERTY (as `get-text-property' reads it) is not eq to VALUE.
+    /// A property is constant within an interval, so a per-position scan
+    /// returns GNU's interval start.
+    pub(crate) fn text_property_not_all_values(
+        &mut self,
+        start: Value,
+        end: Value,
+        property: Value,
+        value: Value,
+        object: Value,
+    ) -> crate::prim::Out {
+        self.text_property_scan(start, end, property, value, object, false)
+    }
+
+    /// textprop.c Ftext_property_any.
+    pub(crate) fn text_property_any_values(
+        &mut self,
+        start: Value,
+        end: Value,
+        property: Value,
+        value: Value,
+        object: Value,
+    ) -> crate::prim::Out {
+        self.text_property_scan(start, end, property, value, object, true)
+    }
+
+    /// The first position from START to END whose PROPERTY is (EQUAL) or is
+    /// not (otherwise) `eq' to VALUE.
+    fn text_property_scan(
+        &mut self,
+        start: Value,
+        end: Value,
+        property: Value,
+        value: Value,
+        object: Value,
+        equal: bool,
+    ) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let object = self.property_query_object(object)?;
+        // CHECK_STRING_OR_BUFFER comes first in validate_interval_range.
+        if self.str_view(object).is_none() && !matches!(self.object_if(object), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
+            return Err(Fault::Wrong("buffer-or-string-p", object));
+        }
+        let (mut from, mut to) = (self.text_property_position(start)?, self.text_property_position(end)?);
+        // validate_interval_range answers an empty range before checking it.
+        if from == to { return Ok(Value::NIL); }
+        if from > to { std::mem::swap(&mut from, &mut to); }
+        // validate_interval_range: BEGV..ZV of a buffer, 0..length of a string.
+        let (low, high) = if let Some(string) = self.str_view(object) { (0, string.len() as i64) } else {
+            match self.object_if(object) {
+                Some(Object::Buffer(b)) => {
+                    let r = b.accessible();
+                    (b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1, b.char_of_byte(r.end).map_err(Fault::Error)?.0 as i64 + 1)
+                }
+                Some(Object::ByteBuffer(b)) => (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+                _ => return Err(Fault::Wrong("buffer-or-string-p", object)),
+            }
+        };
+        if from < low || to > high { return Err(Fault::Range(start, end)); }
+        // No text or no property intervals: GNU consults no plist at all,
+        // not even default-text-properties.
+        let intervals = match self.object_if(object) {
+            Some(Object::String(s) | Object::RawString(s)) => !s.properties.is_empty(),
+            Some(Object::Buffer(b)) => !b.properties.is_empty(),
+            Some(Object::ByteBuffer(b)) => !b.properties.is_empty(),
+            _ => false,
+        };
+        // Every position's PROPERTY is then nil.
+        if low == high || !intervals {
+            return Ok(if (value == Value::NIL) != equal { Value::NIL } else { Value::integer(from).map_err(Fault::Error)? });
+        }
+        for at in from..to {
+            let raw = self.annotation_raw(object, at as usize).map_err(Fault::Error)?;
+            if (self.annotation_resolve(&raw, property).map_err(Fault::Error)? == value) == equal {
+                return Value::integer(at).map_err(Fault::Error);
+            }
+        }
+        Ok(Value::NIL)
+    }
+
     pub(crate) fn next_single_char_property_change_values(
         &mut self,
         position: Value,
@@ -870,6 +1057,89 @@ impl Vm {
             at = next;
         }
         Value::integer(bound).map_err(Fault::Error)
+    }
+
+    /// The positions in OBJECT's accessible text, from its start, where its
+    /// text properties change: the starts of its property runs (GNU's
+    /// intervals, merged where their plists are equal).
+    pub(crate) fn property_run_starts(&self, object: Value) -> std::result::Result<Vec<i64>, crate::prim::Fault> {
+        use crate::prim::Fault;
+        let (bytes, start) = match self.object_if(object) {
+            Some(Object::Buffer(b)) => {
+                let r = b.accessible();
+                (r.clone(), b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1)
+            }
+            _ => {
+                let len = self.str_view(object).map_or(0, |s| s.bytes().len());
+                (ByteOffset(0)..ByteOffset(len), 0)
+            }
+        };
+        let mut starts = vec![start];
+        let mut at = bytes.start;
+        while at < bytes.end {
+            let next = self.property_next_text_boundary(object, at, bytes.end);
+            if next >= bytes.end { break; }
+            starts.push(self.property_query_scalar(object, next)?);
+            at = next;
+        }
+        Ok(starts)
+    }
+
+    /// textget: OBJECT's text property PROP at character POSITION (no
+    /// overlays), with category, aliases and default text properties.
+    pub(crate) fn property_textget(&self, object: Value, position: i64, prop: Value) -> std::result::Result<Value, crate::prim::Fault> {
+        let raw = self.annotation_raw(object, position as usize).map_err(crate::prim::Fault::Error)?;
+        self.annotation_resolve(&raw, prop).map_err(crate::prim::Fault::Error)
+    }
+
+    /// fix_position of a non-nil LIMIT.
+    fn property_limit(&self, limit: Value) -> std::result::Result<Option<i64>, crate::prim::Fault> {
+        if limit == Value::NIL { Ok(None) } else { Ok(Some(self.text_property_position(limit)?)) }
+    }
+
+    /// textprop.c Fnext_single_property_change: the next position after
+    /// POSITION where PROP's text-property value changes, before LIMIT and
+    /// the end of OBJECT; else LIMIT.
+    pub(crate) fn next_single_property_change_values(&mut self, position: Value, prop: Value, object: Value, limit: Value) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let object = self.property_query_object(object)?;
+        let limit = self.property_limit(limit)?;
+        let (pos, _, end) = self.property_query_cursor(object, position, false)?;
+        let none = || limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error));
+        if pos >= end { return none(); }
+        let here = self.property_textget(object, pos, prop)?;
+        for b in self.property_run_starts(object)?.into_iter().filter(|&b| b > pos) {
+            if limit.is_some_and(|l| b >= l) { return none(); }
+            if self.property_textget(object, b, prop)? != here { return Value::integer(b).map_err(Fault::Error); }
+        }
+        none()
+    }
+
+    /// textprop.c Fprevious_single_property_change (PROP given) and
+    /// Fprevious_property_change (PROP None, any property): the previous
+    /// position before POSITION where the value changes, after LIMIT and the
+    /// start of OBJECT; else LIMIT.
+    pub(crate) fn previous_property_change_values(&mut self, position: Value, prop: Option<Value>, object: Value, limit: Value) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let object = self.property_query_object(object)?;
+        let limit = self.property_limit(limit)?;
+        let (pos, _, _) = self.property_query_cursor(object, position, false)?;
+        let none = || limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error));
+        let starts = self.property_run_starts(object)?;
+        let start = starts[0];
+        let lower = limit.unwrap_or(start);
+        if pos <= start { return none(); }
+        // The run holding the character before POSITION, walked back over
+        // runs with the same value of PROP.
+        let run = |b: i64| *starts.iter().rev().find(|&&s| s < b).unwrap_or(&start);
+        let mut b = run(pos);
+        if let Some(prop) = prop {
+            let here = self.property_textget(object, pos - 1, prop)?;
+            while b > start && limit.is_none_or(|l| b > l) && self.property_textget(object, b - 1, prop)? == here {
+                b = run(b);
+            }
+        }
+        if b <= start || b <= lower { none() } else { Value::integer(b).map_err(Fault::Error) }
     }
 
     fn property_query_object(

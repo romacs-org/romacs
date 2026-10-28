@@ -38,7 +38,8 @@ fn frame_graph_edges_move_and_retain_constant_storage() {
     let terminal = vm.frame(frame).unwrap().terminal;
     assert_ne!(terminal, old_terminal, "terminal fixture must move");
     assert_eq!(vm.heap_stats().collections, before + 1);
-    assert_eq!(vm.display(vm.frame(frame).unwrap().parameters[0].1).unwrap(), "(\"frame-only-owner\")", "frame parameters must be forwarded");
+    let owner = vm.frame(frame).unwrap().parameters.iter().find(|(key, _)| *key == Value::TRUE).unwrap().1;
+    assert_eq!(vm.display(owner).unwrap(), "(\"frame-only-owner\")", "frame parameters must be forwarded");
     assert_eq!(vm.window(vm.frame(frame).unwrap().selected).unwrap().frame, frame, "window backlink must be forwarded");
     let data::Object::Terminal(t) = vm.object(terminal).unwrap() else { panic!("terminal type") };
     assert_eq!(t.frame, frame, "terminal frame edge must be forwarded");
@@ -217,11 +218,8 @@ fn g3a_margins_start_and_stale_end() {
             .unwrap_err()
             .contains("layout")
     );
-    assert!(
-        vm.eval_source_raw("(set-window-start nil 2 t)")
-            .unwrap_err()
-            .contains("NOFORCE")
-    );
+    // NOFORCE sets the start without forcing it on redisplay.
+    yes(&mut vm, "(and (= (set-window-start nil 2 t) 2) (= (window-start) 2))");
     assert_eq!(run(&mut vm, "(set-window-start nil nil)"), Value::NIL);
 }
 #[test]

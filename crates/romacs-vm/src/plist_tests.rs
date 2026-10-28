@@ -53,6 +53,9 @@ fn an_uninterned_symbol_referenced_only_by_its_own_plist_keeps_it_across_compact
         ),
     );
     assert_eq!(defined.map(|_| ()), Ok(()), "put on an uninterned symbol must succeed");
+    // `load-history' keeps each loaded file's entry, as GNU's does; it is
+    // not the object under test, so drop it before measuring.
+    assert_eq!(show(&mut vm, "(setq load-history nil)"), "nil");
     vm.collect(&mut []);
     let dropped = vm.heap_stats();
     // Nothing in Lisp names the symbol; only its own plist does (self).

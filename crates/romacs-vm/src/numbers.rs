@@ -11,9 +11,11 @@ pub(super) fn print_float(n: f64) -> String {
     if n.is_infinite() {
         return format!("{}1.0e+INF", if n.is_sign_negative() { "-" } else { "" });
     }
-    // GNU starts at DBL_DIG significant digits, increasing until the decimal
+    // gnulib dtoastr starts at DBL_DIG significant digits (1 below DBL_MIN,
+    // where subnormals have fewer), increasing until the decimal
     // round-trips. %g's fixed/scientific threshold follows that precision.
-    for precision in 15..=17 {
+    let first = if n.abs() < f64::MIN_POSITIVE { 1 } else { 15 };
+    for precision in first..=17 {
         let scientific = format!("{:.*e}", precision - 1, n);
         if scientific
             .parse::<f64>()

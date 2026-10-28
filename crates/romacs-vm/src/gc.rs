@@ -206,7 +206,7 @@ impl Vm {
                 .sum::<usize>();
         // Native nodes may be retained by both tables and suspended cursors.
         // Keep this accounting separate from the moving arena object counts.
-        let mut native_nodes = HashSet::new();
+        let mut native_nodes = HashSet::default();
         s.live_bytes += self.objects.len() * std::mem::size_of::<data::Object>()
             + self
                 .objects
@@ -218,6 +218,9 @@ impl Vm {
                     data::Object::Window(w) => w.storage_bytes(),
                     data::Object::Frame(f) => f.storage_bytes(),
                     data::Object::Terminal(t) => t.storage_bytes(),
+                    data::Object::WindowConfiguration(c) => c.storage_bytes(),
+                    data::Object::Sqlite(h) => h.storage_bytes(),
+                    data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
                     data::Object::Bytes(v) => v.len(),
                     data::Object::BoolVector(v) => size_of::<data::BoolVector>() + v.bytes.len(),
@@ -264,6 +267,9 @@ impl Vm {
                     data::Object::Window(w) => w.storage_bytes(),
                     data::Object::Frame(f) => f.storage_bytes(),
                     data::Object::Terminal(t) => t.storage_bytes(),
+                    data::Object::WindowConfiguration(c) => c.storage_bytes(),
+                    data::Object::Sqlite(h) => h.storage_bytes(),
+                    data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(true),
                     data::Object::Bytes(v) => v.capacity(),
                     data::Object::BoolVector(v) => size_of::<data::BoolVector>() + v.bytes.capacity(),
@@ -307,6 +313,10 @@ impl Vm {
         let mut pending = roots.to_vec();
         pending.extend_from_slice(&self.stack);
         pending.extend_from_slice(&self.external_roots);
+        for code in &self.suspended_code {
+            // SAFETY: each entry's engine is suspended in a nested call.
+            unsafe { code.visit_values(&mut |v| pending.push(*v)) };
+        }
         pending.extend(self.permanent_symbol_names.values().copied());
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         if let Some(escape) = &mut self.propagated_escape {
@@ -316,8 +326,8 @@ impl Vm {
             handler.visit_values(&mut |v| pending.push(*v));
         }
         self.backtrace.visit_values(&mut |v| pending.push(*v));
-        let mut local_live = HashSet::new();
-        let mut obarray_symbols_live = HashSet::new();
+        let mut local_live = HashSet::default();
+        let mut obarray_symbols_live = HashSet::default();
         for (slot, s) in self.slots.iter().enumerate() {
             if self.obarray_symbol_names.contains_key(&slot) { continue; }
             if let Some(Some(VariableRedirect::Alias(target))) = self.variable_redirects.get(slot) {
@@ -337,6 +347,7 @@ impl Vm {
         // cell (forwarded.rs). Per-buffer values are traced with their buffer.
         self.forwarded.visit_values(&mut |v| pending.push(*v));
         pending.extend_from_slice(&self.standard_case_tables);
+        pending.push(self.command_point.1);
         self.charsets.trace(&mut pending);
         for &(slot, old, buffer, _) in &self.dynamic {
             // Both saved and active values stay roots even if Lisp switches
@@ -366,7 +377,7 @@ impl Vm {
             }
         }
         let mut marked = 0;
-        let mut native_nodes = HashSet::new();
+        let mut native_nodes = HashSet::default();
         // Weak hash tables reached by marking; their entries are not traced
         // until `weak_round` (the ephemeron fixpoint) decides which survive.
         let mut weak_tables = vec![];
@@ -411,8 +422,9 @@ impl Vm {
                         _ => {}
                     }
                 }
-                self.execution
-                    .trace_function(id, &mut pending, &mut code_pending);
+                for program in std::iter::once(&self.execution).chain(&self.spare_programs) {
+                    program.trace_function(id, &mut pending, &mut code_pending);
+                }
             }
             let Some(mut v) = pending.pop() else { continue };
             // Walk the cdr spine directly: a list is the common editor graph,
@@ -469,6 +481,9 @@ impl Vm {
                     data::Object::Obarray(t) => t.visit_values(&mut |v| pending.push(*v)),
                     data::Object::Frame(f) => f.visit_values(&mut |v| pending.push(*v)),
                     data::Object::Terminal(t) => t.visit_values(&mut |v| pending.push(*v)),
+                    data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| pending.push(*v)),
+                    data::Object::Sqlite(_) => {}
+                    data::Object::Process(p) => p.visit_values(&mut |v| pending.push(*v)),
                     data::Object::Vector(values) | data::Object::Record(values) => pending.extend_from_slice(values),
                     data::Object::CharTable(t) => t.visit_values_seen(&mut native_nodes, &mut |v| pending.push(*v)),
                     data::Object::SubCharTable(node) => char_table::visit_char_table_node_values(node, &mut native_nodes, &mut |v| pending.push(*v)),
@@ -532,11 +547,14 @@ impl Vm {
                 continue;
             };
             let (buffer, anchor) = (m.buffer, m.anchor);
-            if let Some(anchor) = anchor
-                && let Ok(index) = buffer.index(0)
-                && let Some(data::Object::Buffer(b)) = self.objects.get_mut(index.saturating_sub(1))
-            {
-                b.anchors.remove(anchor);
+            let Some(anchor) = anchor else { continue };
+            let Ok(index) = buffer.index(0) else { continue };
+            match self.objects.get_mut(index.saturating_sub(1)) {
+                Some(data::Object::Buffer(b)) => { b.anchors.remove(anchor); }
+                Some(data::Object::ByteBuffer(b)) => {
+                    if let Some(held) = &mut b.held { held.anchors.remove(anchor); }
+                }
+                _ => {}
             }
         }
         // Dead-owner entries have been swept. Discard only their unowned
@@ -670,6 +688,7 @@ impl Vm {
         }
         self.forwarded.visit_values(&mut |v| rewrite(v));
         for v in &mut self.standard_case_tables { rewrite(v); }
+        rewrite(&mut self.command_point.1);
         self.charsets.rewrite(&rewrite);
         for (_, v, buffer, _) in &mut self.dynamic {
             rewrite(v);
@@ -695,6 +714,9 @@ impl Vm {
                     data::Object::Window(w) => w.visit_values(&mut |v| rewrite(v)),
                     data::Object::Frame(f) => f.visit_values(&mut |v| rewrite(v)),
                     data::Object::Terminal(t) => t.visit_values(&mut |v| rewrite(v)),
+                    data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| rewrite(v)),
+                    data::Object::Sqlite(_) => {}
+                    data::Object::Process(p) => p.visit_values(&mut |v| rewrite(v)),
                     data::Object::Buffer(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::ByteBuffer(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::Marker(m) => m.visit_values(&mut |v| rewrite(v)),
@@ -731,7 +753,13 @@ impl Vm {
                 rewrite(&mut Arc::get_mut(lazy).expect("lazy body is private at a wait point").body);
             }
         }
-        self.execution.visit_values(&mut |v| rewrite(v));
+        for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {
+            program.visit_values(&mut |v| rewrite(v));
+        }
+        for code in &self.suspended_code {
+            // SAFETY: as in the mark phase.
+            unsafe { code.visit_values(&mut |v| rewrite(v)) };
+        }
         self.conditions.visit_values(&mut |v| rewrite(v));
         self.objects
             .shrink_to(self.objects.len().saturating_mul(2).max(1024));
@@ -765,7 +793,7 @@ mod tests {
         second.root = Arc::clone(&first.root);
         second.ascii = first.ascii.clone();
         let native_bytes = char_table::CharTableNode::storage_bytes(
-            &first.root, false, &mut HashSet::new(),
+            &first.root, false, &mut HashSet::default(),
         );
         vm.objects.push(data::Object::CharTable(Box::new(first)));
         vm.objects.push(data::Object::CharTable(Box::new(second)));
@@ -864,7 +892,7 @@ mod tests {
     #[test]
     fn statistics_measure_real_storage_and_exclude_private_slots() {
         fn rows(vm: &mut Vm) -> HashMap<String, Vec<i64>> {
-            let mut result = HashMap::new();
+            let mut result = HashMap::default();
             let mut list = vm.garbage_collect_statistics();
             while list != Value::NIL {
                 let (mut row, next) = vm.cons_pair(list).unwrap();

@@ -283,4 +283,370 @@ shortens ends the walk early."
       (setq tail (cdr tail)))
     (or answer (car found))))
 
+;; textprop.c's char-property motion, composed as its C composes the
+;; overlay and text-property primitives.
+
+(defun romacs--fixnum-coerce-marker (value)
+  "CHECK_FIXNUM_COERCE_MARKER: VALUE as a fixnum, a marker's position."
+  (cond ((markerp value)
+         (or (marker-position value) (error "Marker does not point anywhere")))
+        ((integerp value) value)
+        (t (signal 'wrong-type-argument (list 'integer-or-marker-p value)))))
+
+(defun next-char-property-change (position &optional limit)
+  "Return the position of next text property or overlay change.
+textprop.c Fnext_char_property_change: the nearer of the next overlay
+change and LIMIT bounds `next-property-change'."
+  (let ((temp (next-overlay-change position)))
+    (if limit
+        (let ((limit (romacs--fixnum-coerce-marker limit)))
+          (if (< limit temp) (setq temp limit))))
+    (next-property-change position nil temp)))
+
+(defun previous-char-property-change (position &optional limit)
+  "Return the position of previous text property or overlay change.
+textprop.c Fprevious_char_property_change."
+  (let ((temp (previous-overlay-change position)))
+    (if limit
+        (let ((limit (romacs--fixnum-coerce-marker limit)))
+          (if (> limit temp) (setq temp limit))))
+    (previous-property-change position nil temp)))
+
+(defun previous-single-char-property-change (position prop &optional object limit)
+  "Return the position of previous text property or overlay change for PROP.
+textprop.c Fprevious_single_char_property_change."
+  (if (stringp object)
+      (or (previous-single-property-change position prop object limit)
+          (if (null limit) 0
+            (if (integerp limit) limit
+              (signal 'wrong-type-argument (list 'fixnump limit)))))
+    (if (and object (not (bufferp object)))
+        (signal 'wrong-type-argument (list 'bufferp object)))
+    (save-current-buffer
+      (if object (set-buffer object))
+      (setq position (romacs--fixnum-coerce-marker position))
+      (setq limit (if limit (romacs--fixnum-coerce-marker limit) (point-min)))
+      (if (<= position limit)
+          (max limit (point-min))
+        (let ((initial (get-char-property (- position (if (>= position 0) 1 0)) prop object)))
+          (catch 'romacs--found
+            (while t
+              (setq position (previous-char-property-change position limit))
+              (if (<= position limit)
+                  (throw 'romacs--found limit)
+                (unless (eq (get-char-property (1- position) prop object) initial)
+                  (throw 'romacs--found position))))))))))
+
+;; editfns.c fields: find_field (editfns.c:374) and the five primitives over
+;; it. A field is a run of characters whose `field' char-property is `eq';
+;; stickiness decides which field a position between two belongs to.
+(defun romacs--find-field (pos merge-at-boundary beg-limit end-limit end)
+  "editfns.c find_field: the start, or with END the end, of the field at POS."
+  (setq pos (if pos (romacs--fixnum-coerce-marker pos) (point)))
+  (let* ((after-field (get-char-property pos 'field))
+         (before-field (if (> pos (point-min)) (get-char-property (1- pos) 'field) after-field))
+         (at-field-start nil)
+         (at-field-end nil))
+    (unless merge-at-boundary
+      (let ((field (get-pos-property pos 'field)))
+        (unless (eq field after-field) (setq at-field-end t))
+        (unless (eq field before-field) (setq at-field-start t))
+        ;; Not a zero-length field but a non-editable one, such as a prompt.
+        (when (and (null field) at-field-start at-field-end)
+          (setq at-field-end nil at-field-start nil))))
+    (if end
+        (if at-field-end pos
+          (when (and merge-at-boundary (eq after-field 'boundary))
+            (setq pos (next-single-char-property-change pos 'field nil end-limit)))
+          (or (next-single-char-property-change pos 'field nil end-limit) (point-max)))
+      (if at-field-start pos
+        (when (and merge-at-boundary (eq before-field 'boundary))
+          (setq pos (previous-single-char-property-change pos 'field nil beg-limit)))
+        (or (previous-single-char-property-change pos 'field nil beg-limit) (point-min))))))
+
+(defun field-beginning (&optional pos escape-from-edge limit)
+  "Return the beginning of the field surrounding POS (editfns.c:521)."
+  (romacs--find-field pos escape-from-edge limit nil nil))
+
+(defun field-end (&optional pos escape-from-edge limit)
+  "Return the end of the field surrounding POS (editfns.c:536)."
+  (romacs--find-field pos escape-from-edge nil limit t))
+
+(defun field-string (&optional pos)
+  "Return the contents of the field surrounding POS as a string (editfns.c:499)."
+  (setq pos (if pos (romacs--fixnum-coerce-marker pos) (point)))
+  (buffer-substring (romacs--find-field pos nil nil nil nil) (romacs--find-field pos nil nil nil t)))
+
+(defun field-string-no-properties (&optional pos)
+  "Return the contents of the field around POS, without text properties (editfns.c:510)."
+  (setq pos (if pos (romacs--fixnum-coerce-marker pos) (point)))
+  (buffer-substring-no-properties (romacs--find-field pos nil nil nil nil)
+                                  (romacs--find-field pos nil nil nil t)))
+
+(defun delete-field (&optional pos)
+  "Delete the field surrounding POS (editfns.c:486)."
+  (setq pos (if pos (romacs--fixnum-coerce-marker pos) (point)))
+  (let ((beg (romacs--find-field pos nil nil nil nil))
+        (end (romacs--find-field pos nil nil nil t)))
+    (if (< beg end) (delete-region beg end))))
+
+;; buffer.c's `find-buffer'.
+(defun find-buffer (variable value)
+  "Return the buffer with buffer-local VARIABLE `equal' to VALUE.
+If there is no such live buffer, return nil.
+See also `find-buffer-visiting'."
+  (catch 'romacs--find-buffer
+    (dolist (buffer (buffer-list))
+      (when (equal value (buffer-local-value variable buffer))
+        (throw 'romacs--find-buffer buffer)))
+    nil))
+
+;; eval.c's `buffer-local-toplevel-value' and its setter.
+
+(defun buffer-local-toplevel-value (symbol &optional buffer)
+  "Return SYMBOL's toplevel buffer-local value in BUFFER.
+\"Toplevel\" means outside of any let binding.
+BUFFER defaults to the current buffer.
+If SYMBOL has no local value in BUFFER, signals an error."
+  (let ((buffer (or buffer (current-buffer))))
+    (unless (local-variable-p symbol buffer) (signal 'void-variable (list symbol)))
+    (let ((cell (romacs--local-toplevel-cell symbol buffer)))
+      (if cell (cdr cell) (buffer-local-value symbol buffer)))))
+
+(defun set-buffer-local-toplevel-value (symbol value &optional buffer)
+  "Set SYMBOL's toplevel buffer-local value in BUFFER to VALUE.
+\"Toplevel\" means outside of any let-binding.
+BUFFER defaults to the current buffer.
+Makes SYMBOL buffer-local in BUFFER if it was not already."
+  (unless (romacs--set-local-toplevel-cell symbol (or buffer (current-buffer)) value)
+    (if buffer
+        (save-current-buffer (set-buffer buffer) (set (make-local-variable symbol) value))
+      (set (make-local-variable symbol) value)))
+  nil)
+
+;; window.c's `minibuffer-selected-window'. minibuf.el, loaded on the
+;; first minibuffer read, records the window as read_minibuf does.
+
+(defvar romacs--minibuf-selected-window nil)
+
+(defun minibuffer-selected-window ()
+  "Return window selected just before minibuffer window was selected.
+Return nil if the selected window is not a minibuffer window."
+  (and (boundp 'romacs--minibuf-level)
+       (> romacs--minibuf-level 0)
+       (window-minibuffer-p (selected-window))
+       (window-live-p romacs--minibuf-selected-window)
+       romacs--minibuf-selected-window))
+
+;; eval.c's `func-arity' and its `lambda_arity'.  Closure parameter
+;; counts come from the compiled function.
+
+(defun romacs--lambda-arity (fun)
+  (unless (consp (cdr fun)) (signal 'invalid-function (list fun)))
+  (let ((args (car (cdr fun))) (min 0) (max 0) optional result)
+    (while (and (consp args) (not result))
+      (let ((next (car args)))
+        (cond ((not (symbolp next)) (signal 'invalid-function (list fun)))
+              ((eq next '&rest) (setq result (cons min 'many)))
+              ((eq next '&optional) (setq optional t))
+              (t (unless optional (setq min (1+ min)))
+                 (setq max (1+ max)))))
+      (setq args (cdr args)))
+    (cond (result)
+          (args (signal 'invalid-function (list fun)))
+          (t (cons min max)))))
+
+(defun func-arity (function)
+  "Return minimum and maximum number of args allowed for FUNCTION.
+FUNCTION must be a function of some kind.
+The returned value is a cons cell (MIN . MAX).  MIN is the minimum number
+of args.  MAX is the maximum number, or the symbol `many', for a
+function with `&rest' args, or `unevalled' for a special form."
+  (let ((original function) result)
+    (while (not result)
+      (setq function original)
+      (when (and (symbolp function) function)
+        (setq function (symbol-function function))
+        (when (symbolp function) (setq function (indirect-function function))))
+      (when (and (consp function) (eq (car function) 'macro))
+        (setq function (cdr function)))
+      (cond ((subrp function) (setq result (subr-arity function)))
+            ((closurep function) (setq result (romacs--closure-arity function)))
+            ((null function) (signal 'void-function (list original)))
+            ((not (and (consp function) (symbolp (car function))))
+             (signal 'invalid-function (list original)))
+            ((eq (car function) 'lambda)
+             (setq result (romacs--lambda-arity function)))
+            ((eq (car function) 'autoload)
+             (autoload-do-load function original nil))
+            (t (signal 'invalid-function (list original)))))
+    result))
+
+;; buffer.c's `set-buffer-major-mode' and editfns.c's
+;; `insert-buffer-substring', composed of the primitives their C calls.
+
+(defun set-buffer-major-mode (buffer)
+  "Set an appropriate major mode for BUFFER.
+For the *scratch* buffer, use `initial-major-mode', otherwise choose a mode
+according to the default value of `major-mode'.
+Use this function before selecting the buffer, since it may need to inspect
+the current buffer's major mode."
+  (unless (bufferp buffer) (signal 'wrong-type-argument (list 'bufferp buffer)))
+  (unless (buffer-live-p buffer) (error "Attempt to set major mode for a dead buffer"))
+  (let ((function (if (equal (buffer-name buffer) "*scratch*")
+                      (symbol-value 'initial-major-mode)
+                    (let ((default (default-value 'major-mode)))
+                      (if (and (null default) (null (get major-mode 'mode-class)))
+                          major-mode
+                        default)))))
+    (when function
+      (save-current-buffer
+        (set-buffer buffer)
+        (funcall function)))
+    nil))
+
+(defun insert-buffer-substring (buffer &optional start end)
+  "Insert before point a substring of the contents of BUFFER.
+BUFFER may be a buffer or a buffer name.
+Arguments START and END are character positions specifying the substring.
+They default to the values of (point-min) and (point-max) in BUFFER.
+
+Point and before-insertion markers move forward to end up after the
+inserted text.
+Any other markers at the point of insertion remain before the text.
+
+If the current buffer is multibyte and BUFFER is unibyte, or vice
+versa, strings are converted from unibyte to multibyte or vice versa
+using `string-make-multibyte' or `string-make-unibyte', which see."
+  (let ((buf (get-buffer buffer)))
+    (unless buf
+      (if (stringp buffer)
+          (error "No buffer named %s" buffer)
+        (error "Invalid buffer argument")))
+    (unless (buffer-live-p buf) (error "Selecting deleted buffer"))
+    (insert
+     (save-current-buffer
+       (set-buffer buf)
+       (let ((b (if start (romacs--fixnum-coerce-marker start) (point-min)))
+             (e (if end (romacs--fixnum-coerce-marker end) (point-max))))
+         (when (> b e) (setq b (prog1 e (setq e b))))
+         (unless (and (<= (point-min) b) (<= e (point-max)))
+           (signal 'args-out-of-range (list start end)))
+         ;; update_buffer_properties runs these before the text is read.
+         (when (and (boundp 'buffer-access-fontify-functions) buffer-access-fontify-functions)
+           (error "VM2 insert-buffer-substring with buffer-access-fontify-functions is unsupported"))
+         (buffer-substring b e))))
+    nil))
+
+;; fns.c's `secure-hash' and `md5': extract_data_from_object chooses and
+;; encodes the data, and `romacs--secure-hash' digests it.
+
+(defun romacs--hash-data (object start end coding-system noerror)
+  "The encoded bytes of OBJECT from START to END to digest.
+fns.c extract_data_from_object."
+  (cond
+   ((stringp object)
+    (unless coding-system
+      (setq coding-system (if (multibyte-string-p object)
+                              (coding-system-priority-list t)
+                            'raw-text)))
+    (unless (coding-system-p coding-system)
+      (if noerror
+          (setq coding-system 'raw-text)
+        (signal 'coding-system-error (list coding-system))))
+    (when (multibyte-string-p object)
+      (let ((last-coding-system-used last-coding-system-used))
+        (setq object (encode-coding-string object coding-system))))
+    (substring-no-properties object start end))
+   ((bufferp object)
+    (let ((text
+           (with-current-buffer object
+             (let ((b (if start (romacs--fixnum-coerce-marker start) (point-min)))
+                   (e (if end (romacs--fixnum-coerce-marker end) (point-max))))
+               (when (> b e) (setq b (prog1 e (setq e b))))
+               (unless (and (<= (point-min) b) (<= e (point-max)))
+                 (signal 'args-out-of-range (list start end)))
+               (unless coding-system
+                 ;; As write-region decides it.
+                 (if coding-system-for-write
+                     (setq coding-system coding-system-for-write)
+                   (let ((force-raw-text nil))
+                     (setq coding-system buffer-file-coding-system)
+                     (when (or (null coding-system)
+                               (not (local-variable-p 'buffer-file-coding-system)))
+                       (setq coding-system nil)
+                       (unless enable-multibyte-characters (setq force-raw-text t)))
+                     (when (and (null coding-system) (buffer-file-name object))
+                       (let ((val (find-operation-coding-system
+                                   'write-region b e (buffer-file-name object))))
+                         (when (and (consp val) (cdr val)) (setq coding-system (cdr val)))))
+                     (when (and (null coding-system) buffer-file-coding-system)
+                       (setq coding-system buffer-file-coding-system))
+                     (when (and (not force-raw-text)
+                                (boundp 'select-safe-coding-system-function)
+                                (fboundp select-safe-coding-system-function))
+                       (setq coding-system (funcall select-safe-coding-system-function
+                                                    b e coding-system nil)))
+                     (when force-raw-text (setq coding-system 'raw-text))))
+                 (unless (coding-system-p coding-system)
+                   (if noerror
+                       (setq coding-system 'raw-text)
+                     (signal 'coding-system-error (list coding-system)))))
+               (buffer-substring-no-properties b e)))))
+      (if (multibyte-string-p text)
+          (encode-coding-string text coding-system)
+        text)))
+   ((eq object 'iv-auto)
+    (if (natnump start)
+        (error "secure-hash `iv-auto' random data is not implemented")
+      (error "Without a length, `iv-auto' can't be used; see Elisp manual")))
+   (t (signal 'error (cons "Invalid object argument"
+                           (if (consp object) object (list (or object "nil"))))))))
+
+(defun secure-hash (algorithm object &optional start end binary)
+  "Return the secure hash of OBJECT, a buffer or string.
+ALGORITHM is a symbol specifying the hash to use:
+- md5      corresponds to MD5, produces a 32-character signature
+- sha1     corresponds to SHA-1, produces a 40-character signature
+- sha224   corresponds to SHA-2 (SHA-224), produces a 56-character signature
+- sha256   corresponds to SHA-2 (SHA-256), produces a 64-character signature
+- sha384   corresponds to SHA-2 (SHA-384), produces a 96-character signature
+- sha512   corresponds to SHA-2 (SHA-512), produces a 128-character signature
+- sha3-224 corresponds to SHA-3 (SHA3-224), produces a 56-character signature
+- sha3-256 corresponds to SHA-3 (SHA3-256), produces a 64-character signature
+- sha3-384 corresponds to SHA-3 (SHA3-384), produces a 96-character signature
+- sha3-512 corresponds to SHA-3 (SHA3-512), produces a 128-character signature
+
+The two optional arguments START and END are positions specifying for
+which part of OBJECT to compute the hash.  If nil or omitted, uses the
+whole OBJECT.
+
+The full list of algorithms can be obtained with `secure-hash-algorithms'.
+
+If BINARY is non-nil, returns a string in binary form.  In this case,
+the function returns a unibyte string whose length is half the number
+of characters it returns when BINARY is nil."
+  (unless (symbolp algorithm) (signal 'wrong-type-argument (list 'symbolp algorithm)))
+  (romacs--secure-hash algorithm (romacs--hash-data object start end nil nil) binary))
+
+(defun md5 (object &optional start end coding-system noerror)
+  "Return MD5 message digest of OBJECT, a buffer or string.
+The two optional arguments START and END are character positions
+specifying for which part of OBJECT the message digest should be
+computed.  CODING-SYSTEM encodes the text; by default it is what writing
+a buffer would use, or the most preferred coding system for a string.
+If NOERROR is non-nil, silently assume the `raw-text' coding if the
+guesswork fails."
+  (romacs--secure-hash 'md5 (romacs--hash-data object start end coding-system noerror)))
+
+;; GNU safe_calln (eval.c): a signal from FUNCTION is muted, logged to
+;; *Messages* only (add_to_log), and the call returns nil.  syntax.c calls
+;; `internal--syntax-propertize' this way in the middle of a scan.
+(defun romacs--safe-call (function &rest args)
+  (let ((inhibit-redisplay t))
+    (condition-case err (apply function args)
+      (t (let ((inhibit-message t))
+           (message "%s" (format "Error muted by safe_call: %S signaled %S" (cons function args) err)))
+         nil))))
+
 ;;; prelude.el ends here

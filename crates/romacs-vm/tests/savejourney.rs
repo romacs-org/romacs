@@ -47,8 +47,13 @@ impl Fixture {
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
+        // A private parent with one stable caseable entry, so a fixture
+        // that defers to its parent measures there, not in shared TMPDIR.
         std::fs::create_dir(&path).unwrap();
-        Self(path)
+        std::fs::write(path.join("Witness"), b"stable").unwrap();
+        let probe = path.join("probe");
+        std::fs::create_dir(&probe).unwrap();
+        Self(probe)
     }
     fn call(&self, vm: &mut Vm, suffix: &str) -> String {
         eval(
@@ -62,8 +67,28 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).unwrap();
+        std::fs::remove_dir_all(self.0.parent().unwrap()).unwrap();
     }
+}
+/// `set-auto-coding' passes ENCODE_FILE's unibyte name to
+/// `auto-coding-alist-lookup', which asks about it: the encoded name answers
+/// as its multibyte spelling; bytes that are not UTF-8 are refused.
+#[test]
+fn filename_case_encoded_unibyte_name() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.0.join("λ"), b"unchanged").unwrap();
+    let mut vm = Vm::new();
+    let path = fixture.0.join("λ");
+    let name = serde_json::to_string(&path).unwrap();
+    let bytes: Vec<String> = path.to_str().unwrap().bytes().map(|b| b.to_string()).collect();
+    assert_eq!(
+        eval(&mut vm, &format!("(list (file-name-case-insensitive-p {name}) (file-name-case-insensitive-p (unibyte-string {})))", bytes.join(" "))),
+        "(nil nil)"
+    );
+    assert_eq!(
+        eval(&mut vm, "(condition-case e (file-name-case-insensitive-p (unibyte-string 47 255)) (error e))"),
+        "(error \"VM2 file-name-case-insensitive-p of a non-UTF-8 unibyte file name is unsupported\")"
+    );
 }
 #[test]
 fn filename_case_actual_file_directory_missing_and_type_contract() {
@@ -110,22 +135,16 @@ fn filename_case_actual_file_directory_missing_and_type_contract() {
     );
 }
 #[test]
+// A directory with nothing to measure defers to its parent, as GNU's walk
+// up the tree does; the fixture's parent has caseable entries.
 fn filename_case_unknown_is_not_a_platform_constant() {
     let fixture = Fixture::new();
     let mut vm = Vm::new();
     for name in ["", "missing"] {
-        assert_eq!(
-            fixture.call(&mut vm, name),
-            "(error \"VM2 filesystem case sensitivity unknown: no unambiguous ASCII case witness\")",
-            "EMPTY_DIRECTORY_REFUSAL"
-        );
+        assert_eq!(fixture.call(&mut vm, name), "nil", "EMPTY_DIRECTORY_MEASURES_PARENT");
     }
     std::fs::write(fixture.0.join("123"), b"unchanged").unwrap();
-    assert_eq!(
-        fixture.call(&mut vm, "123"),
-        "(error \"VM2 filesystem case sensitivity unknown: no unambiguous ASCII case witness\")",
-        "NO_CASEABLE_ENTRY_REFUSAL"
-    );
+    assert_eq!(fixture.call(&mut vm, "123"), "nil", "NO_CASEABLE_ENTRY_MEASURES_PARENT");
 }
 #[test]
 fn filename_case_real_alternate_hardlink_is_not_case_folding() {
@@ -133,11 +152,8 @@ fn filename_case_real_alternate_hardlink_is_not_case_folding() {
     std::fs::write(fixture.0.join("a"), b"unchanged").unwrap();
     std::fs::hard_link(fixture.0.join("a"), fixture.0.join("A")).unwrap();
     let mut vm = Vm::new();
-    assert_eq!(
-        fixture.call(&mut vm, "a"),
-        "(error \"VM2 filesystem case sensitivity unknown: no unambiguous ASCII case witness\")",
-        "REAL_HARDLINK_IS_NOT_FOLDING"
-    );
+    // The hardlinked pair is no witness; the parent directory measures.
+    assert_eq!(fixture.call(&mut vm, "a"), "nil", "REAL_HARDLINK_IS_NOT_FOLDING");
     std::fs::remove_file(fixture.0.join("A")).unwrap();
     std::fs::write(fixture.0.join("A"), b"different inode").unwrap();
     assert_eq!(

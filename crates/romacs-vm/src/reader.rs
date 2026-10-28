@@ -25,8 +25,10 @@ impl CharacterCode for u32 {
 }
 
 enum Input<'a> {
+    /// GNU internal multibyte text: UTF-8 plus the 4- and 5-byte forms of
+    /// characters above U+10FFFF and the 2-byte raw-byte forms.
     Host {
-        text: &'a str,
+        text: &'a [u8],
         byte: usize,
     },
     String {
@@ -45,6 +47,11 @@ enum Input<'a> {
         root: usize,
     },
 }
+/// Bytes CODE occupies in GNU internal text.
+fn host_width(code: u32) -> usize {
+    crate::lstring::char_string(code, &mut [0; 5])
+}
+
 struct Reader<'a, 'v> {
     input: Input<'a>,
     at: usize,
@@ -61,11 +68,12 @@ impl Reader<'_, '_> {
     fn get(&mut self) -> Result<Option<u32>> {
         match &mut self.input {
             Input::Host { text, byte } => {
-                let c = text[*byte..].chars().next();
-                if let Some(c) = c {
-                    *byte += c.len_utf8();
+                if *byte >= text.len() {
+                    return Ok(None);
                 }
-                Ok(c.map(u32::from))
+                let (c, width) = crate::lstring::decode_char(&text[*byte..]).ok_or("invalid source character")?;
+                *byte += width;
+                Ok(Some(c))
             }
             Input::String {
                 root,
@@ -120,11 +128,7 @@ impl Reader<'_, '_> {
     }
     fn unget(&mut self, c: u32) -> Result<()> {
         match &mut self.input {
-            Input::Host { byte, .. } => {
-                *byte -= char::from_u32(c)
-                    .ok_or("invalid host character")?
-                    .len_utf8()
-            }
+            Input::Host { byte, .. } => *byte -= host_width(c),
             Input::String {
                 root,
                 character,
@@ -184,7 +188,7 @@ impl Reader<'_, '_> {
         };
         self.lookahead = None;
         self.at += match self.input {
-            Input::Host { .. } => char::from_u32(c).unwrap().len_utf8(),
+            Input::Host { .. } => host_width(c),
             _ => 1,
         };
         Ok(c)
@@ -222,8 +226,37 @@ impl Reader<'_, '_> {
             }
         }
     }
+    /// lread.c `#:' / `#_': what makes the following name empty.
+    fn empty_symbol_follows(c: u32) -> bool {
+        c <= 32 || c == 0xa0 || b"\"';#()[]`,".iter().any(|&b| u32::from(b) == c)
+    }
+    /// A symbol token from FIRST up to a delimiter, backslash escapes
+    /// taken literally; true when any character was escaped.
+    fn symbol_token(&mut self, first: u32) -> Result<(String, bool)> {
+        let mut token = String::new();
+        let mut escaped = first == 92;
+        token.push(
+            char::from_u32(if escaped { self.next()? } else { first })
+                .ok_or("non-Unicode symbol name is not supported")?,
+        );
+        while self.peek().is_some_and(|c| !Self::delimiter(c)) {
+            let c = self.next()?;
+            if c == 92 {
+                escaped = true;
+                token.push(char::from_u32(self.next()?).ok_or("non-Unicode symbol name is not supported")?);
+            } else {
+                token.push(char::from_u32(c).ok_or("non-Unicode symbol name is not supported")?);
+            }
+        }
+        self.unread_lookahead()?;
+        Ok((token, escaped))
+    }
     fn delimiter(c: u32) -> bool {
         c.is_ascii_whitespace() || [40, 41, 91, 93, 34, 59, 39, 96, 44].contains(&c)
+    }
+    /// lread.c read_char_literal: what may follow `?C'.
+    fn char_literal_follows(c: u32) -> bool {
+        c <= 32 || b"\"';()[]#?`,.".iter().any(|&b| u32::from(b) == c)
     }
     fn dot_follows(next: Option<u32>) -> bool {
         next.is_none_or(|c| {
@@ -266,6 +299,34 @@ impl Reader<'_, '_> {
             &[text],
             format!("invalid-read-syntax {datum}"),
         )
+    }
+    /// GNU lread.c read_bool_vector: `#&LENGTH"BYTES"`, a unibyte string of
+    /// exactly ceil(LENGTH/8) bytes (or one more, as Emacs 19 printed it).
+    fn bool_vector(&mut self, depth: usize) -> Result<Value> {
+        let mut length: usize = 0;
+        loop {
+            match self.peek() {
+                Some(c @ 48..=57) => {
+                    self.next()?;
+                    length = length.checked_mul(10).and_then(|n| n.checked_add((c - 48) as usize))
+                        .filter(|&n| n <= isize::MAX as usize / 8).ok_or_else(|| self.syntax("#&"))?;
+                }
+                Some(34) => break,
+                _ => { self.next()?; return Err(self.syntax("#&")); }
+            }
+        }
+        let string = self.form_inner(depth + 1)?;
+        let view = self.vm.str_view(string).ok_or("bool-vector literal string")?;
+        // Host-source literals keep ASCII text multibyte; its bytes are the same.
+        let (multibyte, bytes) = (view.is_multibyte() && !view.bytes().is_ascii(), view.bytes().to_vec());
+        let size = length.div_ceil(8);
+        if multibyte || !(bytes.len() == size || length == bytes.len().saturating_sub(1) * 8) {
+            return Err(self.syntax("#&..."));
+        }
+        let mut vector = crate::bool_vector::BoolVector::new(length, false)?;
+        vector.bytes.copy_from_slice(&bytes[..size]);
+        vector.mask_padding();
+        Ok(self.vm.allocate_object(Object::BoolVector(Box::new(vector))))
     }
     /// GNU lread.c:3852 `#s(...)`: a record, or, when the first element is
     /// the symbol `hash-table`, a table built by `hash_table_from_plist`
@@ -653,12 +714,51 @@ impl Reader<'_, '_> {
                 }
                 n as i64
             }
+            78 => self.character_name()?,
             // Unsupported modifier syntax must not silently become a different character.
-            67 | 77 | 83 | 72 | 65 | 94 | 78 => {
+            67 | 77 | 83 | 72 | 65 | 94 => {
                 return Err("unsupported character modifier/name escape".into());
             }
             _ => c as i64,
         })
+    }
+    /// lread.c read_char_escape's `\N{NAME}', NAME read as GNU does
+    /// (whitespace runs fold to one space, no non-ASCII). `U+XXXX' is
+    /// decoded here; any other NAME is GNU's Lisp `char-from-name' with
+    /// IGNORE-CASE, called as a function stream is (roots kept).
+    fn character_name(&mut self) -> Result<i64> {
+        if self.next()? != 123 {
+            return Err("Expected opening brace after \\N".into());
+        }
+        let mut name = String::new();
+        loop {
+            let c = self.next()?;
+            if c == 125 { break; }
+            if c >= 0x80 {
+                return Err(format!("Invalid character U+{c:04X} in character name"));
+            }
+            let c = char::from_u32(c).unwrap();
+            if c.is_ascii_whitespace() {
+                if name.ends_with(' ') { continue; }
+                name.push(' ');
+            } else {
+                name.push(c);
+            }
+            if name.len() >= 200 { return Err("Character name too long".into()); }
+        }
+        if name.is_empty() { return Err("Empty character name".into()); }
+        let Some(hex) = name.strip_prefix("U+") else {
+            let function = self.vm.intern("char-from-name");
+            let string = self.vm.byte_string(name.as_bytes());
+            let code = self.vm.reader_call(function, &[string, Value::TRUE])?;
+            return code.integer_value()
+                .filter(|&code| (0..=0x10ffff).contains(&code) && !(0xd800..=0xdfff).contains(&code))
+                .ok_or_else(|| format!("\\N{{{name}}}"));
+        };
+        u32::from_str_radix(hex, 16).ok()
+            .filter(|&code| !hex.starts_with('+') && code <= 0x10ffff && !(0xd800..=0xdfff).contains(&code))
+            .map(i64::from)
+            .ok_or_else(|| format!("\\N{{{name}}}"))
     }
     fn form(&mut self, depth: usize) -> Result<Value> {
         #[cfg(test)]
@@ -756,10 +856,29 @@ impl Reader<'_, '_> {
                 115 => self.record(depth),
                 94 => self.table(depth),
                 40 => self.property_string(depth),
+                38 => self.bool_vector(depth),
                 98 | 66 => self.radix_integer(2),
                 111 | 79 => self.radix_integer(8),
                 120 | 88 => self.radix_integer(16),
                 c @ 48..=57 => self.numbered_dispatch(c, depth),
+                // ## -- the interned symbol whose name is empty.
+                35 => Ok(self.vm.intern("")),
+                // #:X uninterned, #_X without shorthand (VM2 has none): a
+                // symbol whatever the token looks like; nothing after it is
+                // the empty name.
+                dispatch @ (58 | 95) => {
+                    let uninterned = dispatch == 58;
+                    let name = match self.peek() {
+                        Some(c) if !Self::empty_symbol_follows(c) => { let first = self.next()?; self.symbol_token(first)?.0 }
+                        _ => String::new(),
+                    };
+                    Ok(if uninterned { self.vm.uninterned_symbol(&name) } else { self.vm.intern(&name) })
+                }
+                // #! starts an executable file's first line: skip it.
+                33 => {
+                    while self.peek().is_some_and(|c| c != 10) { self.next()?; }
+                    self.form_inner(depth)
+                }
                 _ => Err("unsupported # reader syntax".into()),
             },
             63 => {
@@ -774,7 +893,7 @@ impl Reader<'_, '_> {
                 };
                 let following = self.peek();
                 self.unread_lookahead()?;
-                if following.is_some_and(|c| !Self::delimiter(c)) {
+                if following.is_some_and(|c| !Self::char_literal_follows(c)) {
                     return Err("invalid character literal".into());
                 }
                 let base = n & !0x0fc00000;
@@ -874,36 +993,15 @@ impl Reader<'_, '_> {
                 }
             }
             first => {
-                let mut token = String::new();
-                let mut escaped = first == 92;
-                token.push(
-                    char::from_u32(if escaped { self.next()? } else { first })
-                        .ok_or("non-Unicode symbol name is not supported")?,
-                );
-                while self.peek().is_some_and(|c| !Self::delimiter(c)) {
-                    let c = self.next()?;
-                    if c == 92 {
-                        escaped = true;
-                        token.push(
-                            char::from_u32(self.next()?)
-                                .ok_or("non-Unicode symbol name is not supported")?,
-                        );
-                    } else {
-                        token.push(
-                            char::from_u32(c).ok_or("non-Unicode symbol name is not supported")?,
-                        );
-                    }
-                }
-                self.unread_lookahead()?;
+                let (token, escaped) = self.symbol_token(first)?;
                 if !escaped {
                     // GNU also accepts decimal integers with a trailing dot.
                     let integer = token.strip_suffix('.').unwrap_or(&token);
-                    if let Ok(n) = integer.parse::<i64>() {
-                        return Value::integer(n);
-                    }
                     let digits = integer.strip_prefix(['+', '-']).unwrap_or(integer);
                     if !digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit()) {
-                        return Err("fixnum overflow (bignums not implemented)".into());
+                        // A fixnum when it fits, else a bignum.
+                        let n: num_bigint::BigInt = integer.parse().map_err(|_| "invalid integer")?;
+                        return Ok(self.vm.bigint(n));
                     }
                     // A lone `.' token here was followed by `)` or `]`,
                     // which GNU's dot test excludes (`dot_follows`): it is
@@ -939,6 +1037,13 @@ impl Reader<'_, '_> {
 }
 
 impl Vm {
+    /// A fresh symbol outside the obarray, as `make-symbol' makes.
+    pub(crate) fn uninterned_symbol(&mut self, name: &str) -> Value {
+        let value = self.generated_symbol(crate::expand::generated_id());
+        let slot = value.index_if(7).unwrap() - 1;
+        self.symbol_names[slot] = name.to_owned();
+        value
+    }
     /// Interning is stable for this VM's lifetime, independent of moving GC.
     pub(crate) fn intern(&mut self, name: &str) -> Value {
         match name {
@@ -960,7 +1065,13 @@ impl Vm {
         &mut self,
         source: &str,
     ) -> Result<Option<(Value, usize, usize)>> {
-        self.read_source_signal(source).map_err(|(text, _)| text)
+        self.read_internal_span(source.as_bytes())
+    }
+    pub(super) fn read_internal_span(
+        &mut self,
+        source: &[u8],
+    ) -> Result<Option<(Value, usize, usize)>> {
+        self.read_internal_signal(source).map_err(|(text, _)| text)
     }
     /// `read_source_span`, also returning GNU's exact `(CONDITION . DATA)`
     /// when the reader knows it. Both values are unrooted: use them before
@@ -969,11 +1080,14 @@ impl Vm {
         &mut self,
         source: &str,
     ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
-        let input = Input::Host {
-            text: source,
-            byte: 0,
-        };
-        self.read_input(input)
+        self.read_internal_signal(source.as_bytes())
+    }
+    /// `read_source_signal` over GNU internal multibyte text.
+    pub(super) fn read_internal_signal(
+        &mut self,
+        source: &[u8],
+    ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
+        self.read_input(Input::Host { text: source, byte: 0 })
     }
     fn read_input(
         &mut self,
@@ -1204,6 +1318,8 @@ impl Vm {
             0 => match self.object(value)? {
                 Object::Bignum(_)
                 | Object::Record(_)
+                | Object::BoolVector(_)
+                | Object::HashTable(_)
                 | Object::CharTable(_)
                 | Object::SubCharTable(_) => {
                     Ok(Form::Object(crate::handle::FormObject::new(self, value)))
@@ -1325,7 +1441,7 @@ mod tests {
         let source = r#"("first" ["second" ("third")] '"fourth" . "tail")"#;
         let mut reader = Reader {
             input: Input::Host {
-                text: source,
+                text: source.as_bytes(),
                 byte: 0,
             },
             at: 0,

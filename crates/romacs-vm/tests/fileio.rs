@@ -33,7 +33,10 @@ fn lisp(path: &std::path::Path) -> String {
     serde_json::to_string(path.to_str().unwrap()).unwrap()
 }
 
-const ORG: &str = "* Heading\nλ body\n";
+/// ASCII: the bare registry (before mule-conf.el) has no coding system
+/// that decodes UTF-8, so text these tests read stays 7-bit; GNU's UTF-8
+/// decoding is proven in the loadup regime (real_ert_load.rs).
+const ORG: &str = "* Heading\nA body\n";
 
 fn reviewed_child_output(child: std::process::Child, marker: &str) -> std::process::Output {
     child_output_with_timeout(child, marker, std::time::Duration::from_secs(5))
@@ -315,15 +318,15 @@ fn visiting_inserts_decoded_text_and_names_the_buffer() {
     vm.set_collection_floor(1);
     let f = lisp(&f);
     for (source, gnu) in [
-        (format!("(with-temp-buffer (let ((r (insert-file-contents {f} t))) (list (equal (car r) {f}) (cdr r) (equal (buffer-string) \"* Heading\nλ body\n\") (point) (equal buffer-file-name {f}) last-coding-system-used deactivate-mark)))"),
-         "(t (17) t 1 t utf-8-unix t)"),
-        (format!("(with-temp-buffer (insert \"AB\") (goto-char 2) (let ((r (insert-file-contents {f}))) (list (cdr r) (equal (buffer-string) \"A* Heading\nλ body\nB\") (point) buffer-file-name last-coding-system-used)))"),
-         "((17) t 2 nil utf-8-unix)"),
+        (format!("(with-temp-buffer (let ((r (insert-file-contents {f} t))) (list (equal (car r) {f}) (cdr r) (equal (buffer-string) \"* Heading\nA body\n\") (point) (equal buffer-file-name {f}) last-coding-system-used deactivate-mark)))"),
+         "(t (17) t 1 t undecided-unix t)"),
+        (format!("(with-temp-buffer (insert \"AB\") (goto-char 2) (let ((r (insert-file-contents {f}))) (list (cdr r) (equal (buffer-string) \"A* Heading\nA body\nB\") (point) buffer-file-name last-coding-system-used)))"),
+         "((17) t 2 nil undecided-unix)"),
         (format!("(with-temp-buffer (let ((r (insert-file-contents {f} nil 2 9))) (list (cdr r) (buffer-string) last-coding-system-used)))"),
          "((7) \"Heading\" undecided)"),
         (format!("(with-temp-buffer (insert \"AB\") (let ((m (copy-marker 2)) (m2 (copy-marker 2 t))) (goto-char 2) (insert-file-contents {f}) (list (marker-position m) (marker-position m2) (point))))"),
          "(2 19 2)"),
-        (format!("(with-temp-buffer (insert \"ABCD\") (narrow-to-region 2 3) (goto-char 3) (insert-file-contents {f}) (list (point) (point-min) (point-max) (progn (widen) (equal (buffer-string) \"AB* Heading\nλ body\nCD\"))))"),
+        (format!("(with-temp-buffer (insert \"ABCD\") (narrow-to-region 2 3) (goto-char 3) (insert-file-contents {f}) (list (point) (point-min) (point-max) (progn (widen) (equal (buffer-string) \"AB* Heading\nA body\nCD\"))))"),
          "(3 2 20 t)"),
         (format!("(with-temp-buffer (setq buffer-read-only t) (let ((inhibit-read-only t)) (cdr (insert-file-contents {f}))))"), "(17)"),
         // An expanded name comes back as the caller's own string (EQ).
@@ -348,9 +351,12 @@ fn an_edited_visit_saves_back_byte_identically() {
          (list (write-region nil nil buffer-file-name nil t) last-coding-system-used))",
         lisp(&f)
     );
-    assert_eq!(eval(&mut vm, &source), "(nil utf-8-unix)");
-    assert_eq!(std::fs::read(&f).unwrap(), "* Heading\nλ body\nédit\n".as_bytes());
-    // CR survives untouched: VM2 never converts EOL on write (utf-8-unix).
+    // Bare VM: no mule-conf, so choose_write_coding_system's nil choice
+    // (raw-text-unix in GNU) is the native no-conversion (VM2-FILEIO1);
+    // real_ert_load.rs proves GNU's utf-8-unix choice in the loadup regime.
+    assert_eq!(eval(&mut vm, &source), "(nil no-conversion)");
+    assert_eq!(std::fs::read(&f).unwrap(), "* Heading\nA body\nédit\n".as_bytes());
+    // CR survives untouched: a unix-EOL coding never converts EOL on write.
     let crlf = d.join("crlf");
     let source = format!("(with-temp-buffer (insert \"a\\r\\nb\") (write-region nil nil {}))", lisp(&crlf));
     assert_eq!(eval(&mut vm, &source), "nil");
@@ -379,10 +385,39 @@ fn write_region_writes_regions_strings_offsets_and_visits() {
         assert!(value == "nil" || value == "(3 5)", "{source}: {value}");
         assert_eq!(std::fs::read(&path).unwrap(), bytes, "{source}");
     }
+    // A unibyte buffer is written as its octets (raw-text, fileio.c:5385).
+    let source = format!("(with-temp-buffer (set-buffer-multibyte nil) (insert \"a\\351\\n\") (list (write-region nil nil {}) last-coding-system-used))", lisp(&f("ub")));
+    assert_eq!(eval(&mut vm, &source), "(nil no-conversion)");
+    assert_eq!(std::fs::read(f("ub")).unwrap(), b"a\xe9\n");
+    // The bare registry has no utf-8: naming it is GNU's coding-system-error,
+    // raised before the file is opened.
+    let source = format!("(let ((coding-system-for-write 'utf-8)) (condition-case e (write-region \"x\" nil {}) (error e)))", lisp(&f("none")));
+    assert_eq!(eval(&mut vm, &source), "(coding-system-error utf-8)");
+    assert!(!f("none").exists());
     let (vs, other) = (lisp(&f("vs")), lisp(&f("other")));
     let source = format!("(with-temp-buffer (insert \"x\") (write-region nil nil {vs} nil {other}) (list (equal buffer-file-name {other}) (condition-case e (insert-file-contents {other}) (file-missing 'missing))))");
     assert_eq!(eval(&mut vm, &source), "(t missing)");
     assert_eq!(std::fs::read(f("vs")).unwrap(), b"x");
+}
+
+/// choose_write_coding_system's Lisp calls (prims/write_coding.rs): the
+/// alist's function entry and `select-safe-coding-system-function', the latter
+/// on the widened buffer of a nil START. Each collects; the registers carry
+/// the choice across.
+#[test]
+fn write_region_coding_calls_survive_collection() {
+    let d = dir("coding-calls");
+    let mut vm = Vm::new();
+    vm.set_collection_floor(1);
+    let f = lisp(&d.join("out.gc"));
+    let source = format!(r#"(progn
+      (defalias 'rt-alist (lambda (args) (garbage-collect) (make-list 64 (length args)) 'undecided))
+      (defalias 'rt-select (lambda (from to default &rest _) (garbage-collect) (setq rt-seen (list from to (point-min) (point-max) default)) default))
+      (let ((file-coding-system-alist '(("\\.gc\\'" . rt-alist))) (select-safe-coding-system-function 'rt-select))
+        (with-temp-buffer (insert "héllo\n") (narrow-to-region 2 3)
+          (list (write-region nil nil {f}) last-coding-system-used rt-seen (point-min) (point-max)))))"#);
+    assert_eq!(eval(&mut vm, &source), "(nil undecided-unix (1 7 1 7 undecided) 2 3)");
+    assert_eq!(std::fs::read(d.join("out.gc")).unwrap(), "h\u{e9}llo\n".as_bytes());
 }
 
 #[test]
@@ -430,32 +465,36 @@ fn unsupported_reads_refuse_and_leave_the_buffer_alone() {
     std::fs::write(&bom, b"\xef\xbb\xbfx").unwrap();
     let mut vm = Vm::new();
     let (crlf, latin, nul, bom) = (lisp(&crlf), lisp(&latin), lisp(&nul), lisp(&bom));
+    // Bootstrap regime: the bare registry defines no coding category, so
+    // detection finds nothing in 8-bit text and the undecided raw decoder
+    // would insert raw bytes, which VM2 buffer text cannot hold.
+    let raw = "insert-file-contents of raw bytes into a multibyte buffer";
     for (form, message) in [
-        (format!("(insert-file-contents {crlf})"), "insert-file-contents detection of CR, NUL or ESC bytes"),
-        (format!("(let ((coding-system-for-read 'utf-8)) (insert-file-contents {crlf}))"), "insert-file-contents EOL detection of CR bytes"),
-        (format!("(insert-file-contents {latin})"), "insert-file-contents of bytes that are not UTF-8"),
-        (format!("(insert-file-contents {nul})"), "insert-file-contents detection of CR, NUL or ESC bytes"),
-        // GNU detects utf-8-with-signature and drops the BOM.
-        (format!("(insert-file-contents {bom})"), "insert-file-contents detection of a UTF-8 signature (BOM)"),
-        (format!("(let ((coding-system-for-read 'latin-1)) (insert-file-contents {crlf}))"), "coding-system-for-read other than nil, undecided, utf-8 and utf-8-unix"),
+        (format!("(insert-file-contents {latin})"), raw),
+        (format!("(insert-file-contents {bom})"), raw),
         (format!("(insert-file-contents {crlf} nil nil nil t)"), "insert-file-contents REPLACE"),
         (format!("(let ((after-change-functions (list 'ignore))) (insert-file-contents {nul} nil 0 1))"), "insert-file-contents with change hooks"),
         // Anchor the nonmatching basename: random TMPDIR components may contain x.
-        (format!("(let ((file-name-handler-alist '((\"/handler-only\\\\'\" . ignore)))) (insert-file-contents {crlf}))"), "insert-file-contents detection of CR, NUL or ESC bytes"),
+        (format!("(let ((file-name-handler-alist '((\"/handler-only\\\\'\" . ignore)))) (insert-file-contents {latin}))"), raw),
         // The matching control must still refuse before touching the buffer or file.
         (format!("(let ((file-name-handler-alist '((\"/crlf\\\\'\" . ignore)))) (insert-file-contents {crlf}))"), "expand-file-name matching file name handler"),
-        (format!("(let ((coding-system-for-write 'latin-1)) (write-region \"x\" nil {crlf}))"), "coding-system-for-write other than nil, utf-8 and utf-8-unix"),
+        (format!("(let ((selective-display t)) (write-region nil nil {crlf}))"), "write-region with selective-display t"),
         (format!("(let ((write-region-annotate-functions '(ignore))) (write-region \"x\" nil {crlf}))"), "write-region annotations"),
         (format!("(write-region \"x\" nil {crlf} nil nil nil t)"), "write-region MUSTBENEW confirmation"),
     ] {
-        let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e {form} (error e)) (buffer-string) (point)))");
-        assert_eq!(eval(&mut vm, &source), format!("((error \"VM2 {message} is unsupported\") \"keep\" 3)"), "{form}");
+        let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e {form} (error e)) (buffer-string) (point) last-coding-system-used))");
+        assert_eq!(eval(&mut vm, &source), format!("((error \"VM2 {message} is unsupported\") \"keep\" 3 nil)"), "{form}");
     }
     // Refused writes did not touch the file.
     assert_eq!(std::fs::read(d.join("crlf")).unwrap(), b"a\r\nb\r\n");
-    // CR is fine where GNU does not convert it.
-    let source = format!("(with-temp-buffer (let ((coding-system-for-read 'utf-8-unix)) (list (cdr (insert-file-contents {crlf})) (buffer-string) last-coding-system-used)))");
-    assert_eq!(eval(&mut vm, &source), "((6) \"a\\r\\nb\\r\\n\" utf-8-unix)");
+    // 7-bit text decodes in the bare regime as in GNU: EOL detection, and a
+    // NUL byte selects no-conversion.
+    let source = format!("(with-temp-buffer (list (cdr (insert-file-contents {crlf})) (equal (buffer-string) \"a\nb\n\") last-coding-system-used))");
+    assert_eq!(eval(&mut vm, &source), "((4) t undecided-dos)");
+    let source = format!("(with-temp-buffer (list (cdr (insert-file-contents {nul})) (equal (buffer-string) \"a\\0b\") last-coding-system-used))");
+    assert_eq!(eval(&mut vm, &source), "((3) t no-conversion)");
+    let source = format!("(with-temp-buffer (let ((coding-system-for-read 'no-conversion)) (list (cdr (insert-file-contents {crlf})) (equal (buffer-string) \"a\\r\nb\\r\n\") last-coding-system-used)))");
+    assert_eq!(eval(&mut vm, &source), "((6) t no-conversion)");
 }
 
 /// `buffer-file-name' is the one Lisp object a visit leaves behind, held in
@@ -478,7 +517,7 @@ fn the_visited_file_name_survives_a_moving_collection() {
     vm.collect_garbage();
     let after = rooted.get(&mut vm).unwrap();
     assert_ne!(format!("{after:?}"), bits, "the collection did not move the name; the test proves nothing");
-    let live = eval(&mut vm, "(with-current-buffer romacs-gc-b (list buffer-file-name (equal (buffer-string) \"* Heading\nλ body\n\")))");
+    let live = eval(&mut vm, "(with-current-buffer romacs-gc-b (list buffer-file-name (equal (buffer-string) \"* Heading\nA body\n\")))");
     assert_eq!(live, format!("({} t)", lisp(&f)));
     let same = eval(&mut vm, "(with-current-buffer romacs-gc-b (eq buffer-file-name (with-current-buffer romacs-gc-b buffer-file-name)))");
     assert_eq!(same, "t");

@@ -22,16 +22,8 @@ const ORACLE: &str = include_str!("../evidence/hash-read-syntax/oracle.py");
 
 /// (case id, ledger row, VM2's exact answer).
 const DIVERGENT: &[(&str, &str, &str)] = &[
-    // Completed numbered aliases are now checked against the GNU answer.
-    // A table read from SOURCE being compiled has no source spelling.
-    ("r-source-literal", "VM2-READ1", "VM2-ERROR source datum required"),
-    // Hash-table limits/circles explicitly refuse; nested list print-level
-    // now agrees with GNU and therefore has no divergence pin.
-    ("p-print-length", "VM2-EV2", "(SIGNAL (error))"),
-    ("p-print-length-0", "VM2-EV2", "(SIGNAL (error))"),
-    ("p-circle-shared", "VM2-EV2", "(SIGNAL (error))"),
-    ("p-self-ref-circle", "VM2-EV2", "(SIGNAL (error))"),
-    ("p-self-ref-nocircle", "VM2-EV2", "(SIGNAL (error))"),
+    // Completed numbered aliases, hash-table print-length/print-circle and
+    // self-reference, and nested list print-level now agree with GNU.
     // The dot is read as GNU does; two pre-existing reader boundaries remain.
     // GNU's "expected )" after a dotted tail is VM2's internal message
     // (also pinned as read-from-string/0170).

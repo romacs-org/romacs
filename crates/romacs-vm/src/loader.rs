@@ -61,6 +61,27 @@ impl Vm {
     pub fn load_report(&self) -> serde_json::Value {
         serde_json::json!({"completed_files":self.loader.completed_files,"completed_forms":self.loader.completed_forms,"steps":self.loader.steps})
     }
+    /// fns.c Fprovide up to its load hooks: record FEATURE (always noting it
+    /// for the autoload queue) and SUBFEATURES.
+    pub(crate) fn provide_feature(&mut self, feature: Value, subfeature: Value) -> std::result::Result<(), prim::Fault> {
+        self.symbol_plist(feature).map_err(|_| prim::Fault::Wrong("symbolp", feature))?;
+        if subfeature != Value::NIL && subfeature.tag() != 3 {
+            return Err(prim::Fault::Wrong("listp", subfeature));
+        }
+        let present = self.feature_present(feature).map_err(prim::Fault::Error)?;
+        self.autoload_note_provide();
+        if !present {
+            let slot = self.slot("features");
+            let old = self.slots[slot].value;
+            self.conses.push((feature, old));
+            self.slots[slot].value = Value::reference(self.conses.len() - 1, 3);
+        }
+        if subfeature != Value::NIL {
+            let key = self.intern("subfeatures");
+            self.put_symbol_property(feature, key, subfeature).map_err(prim::Fault::Error)?;
+        }
+        Ok(())
+    }
     fn feature_present(&self, feature: Value) -> Result<bool> {
         if !matches!(feature.tag(), 7) && feature != Value::NIL && feature != Value::TRUE {
             return Err("symbol required".into());
@@ -293,10 +314,28 @@ impl Vm {
         if path.extension().is_some_and(|s| s == "elc") {
             return Err("compiled .elc input is not supported".into());
         }
-        let path = std::fs::canonicalize(path)
+        // GNU names the file as openp found it, expanded but not resolved
+        // through symlinks (hist_file_name, lread.c:1452): that name is
+        // `load-file-name', its `load-history' entry and the after-load
+        // argument. The canonical path detects recursion and reads.
+        let named = expanded_path(path)?;
+        let path = std::fs::canonicalize(&named)
             .map_err(|e| format!("file missing: {}: {e}", path.display()))?;
-        if self.loader.active.len() >= 128 || self.loader.active.contains(&path) {
+        if self.loader.active.len() >= 128 {
             return Err(format!("recursive source load: {}", path.display()));
+        }
+        // lread.c Fload: a file may be in progress three times; the fourth
+        // signals (error "Recursive load" FILE . LOADS-IN-PROGRESS).
+        if self.loader.active.iter().filter(|active| **active == path).count() > 3 {
+            let text = |vm: &mut Self, s: String| vm.literal(&Form::String(s));
+            let mut data = vec![text(self, "Recursive load".into())?, text(self, path.to_string_lossy().into_owned())?];
+            for active in self.loader.active.clone().iter().rev() {
+                data.push(text(self, active.to_string_lossy().into_owned())?);
+            }
+            let condition = self.intern("error");
+            let data = self.list_value(&data);
+            self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+            return Err(format!("Recursive load: {}", path.display()));
         }
         let bytes =
             std::fs::read(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;
@@ -306,7 +345,7 @@ impl Vm {
         let old_file = self.slots[file_slot].value;
         let old_progress = self.slots[progress_slot].value;
         self.slots[file_slot].value =
-            self.literal(&Form::String(path.to_string_lossy().into_owned()))?;
+            self.literal(&Form::String(named.clone()))?;
         self.slots[progress_slot].value = Value::TRUE;
         // Root both old scoped values across nested executor collections.
         let mark = self.dynamic.len();
@@ -314,6 +353,16 @@ impl Vm {
         self.dynamic.push((file_slot, old_file, self.slots[self.buffer_slot].value, false));
         self.backtrace.bind(self.dynamic.len(), Value::reference(progress_slot + 1, 7));
         self.dynamic.push((progress_slot, old_progress, self.slots[self.buffer_slot].value, false));
+        // loadhist_initialize (lread.c:1031): `load' binds current-load-list
+        // to (FILE), so LOADHIST_ATTACH conses this file's definitions before
+        // its name and macroexp-file-name finds the file being loaded.
+        let history_slot = self.slot("current-load-list");
+        let file = self.slots[file_slot].value;
+        let history = self.list_value(&[file]);
+        if let Err(error) = self.bind_variable(history_slot, history) {
+            self.unbind(self.dynamic.len() - mark);
+            return Err(error);
+        }
         self.loader.active.push(path.clone());
         // GNU readevalloop (src/lread.c:2183-2188) decides ONCE per load:
         // forms are eagerly macroexpanded only if `internal-macroexpand-for-
@@ -337,13 +386,16 @@ impl Vm {
             let mut at = 0;
             let mut ordinal = 0;
             let mut result = Value::NIL;
+            // The line of byte `counted`, kept as reading advances: counting
+            // from the start for each form made a file's load quadratic.
+            let (mut line, mut counted) = (1, 0);
             loop {
-                let read = self.read_source_span(&source[at..]);
+                let read = self.read_internal_span(&source[at..]);
                 let Some((value, begin, used)) = read.map_err(|e| {
                     format!(
                         "{}: line {} form {}: reader: {e}",
                         path.display(),
-                        source[..at].bytes().filter(|b| *b == b'\n').count() + 1,
+                        source[..at].iter().filter(|b| **b == b'\n').count() + 1,
                         ordinal + 1
                     )
                 })?
@@ -351,11 +403,16 @@ impl Vm {
                     break;
                 };
                 ordinal += 1;
-                let form_source = &source[at + begin..at + used];
+                // A form holding characters outside Unicode has no exact
+                // &str text: it is reported lossily and not compile-cached.
+                let exact = std::str::from_utf8(&source[at + begin..at + used]).ok();
+                let form_source = String::from_utf8_lossy(&source[at + begin..at + used]);
                 let form = self.source_form(value, 0)?;
+                line += source[counted..at + begin].iter().filter(|b| **b == b'\n').count();
+                counted = at + begin;
                 let step = self.loader.steps.len();
-                self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":source[..at+begin].bytes().filter(|b|*b==b'\n').count()+1,"source":form_source,"status":"entered"}));
-                let evaluated = self.eval_load_toplevel(&form, Some(form_source), lazy, 0);
+                self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":line,"source":form_source,"status":"entered"}));
+                let evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
                 match evaluated {
                     Ok(v) => {
                         result = v;
@@ -368,7 +425,7 @@ impl Vm {
                         return Err(format!(
                             "{}: line {} form {}: {}: {e}",
                             path.display(),
-                            source[..at + begin].bytes().filter(|b| *b == b'\n').count() + 1,
+                            source[..at + begin].iter().filter(|b| **b == b'\n').count() + 1,
                             ordinal,
                             form_source.trim().chars().take(180).collect::<String>()
                         ));
@@ -377,6 +434,7 @@ impl Vm {
                 at += used;
             }
             self.loader.completed_files += 1;
+            self.build_load_history(history_slot)?;
             Ok(result)
         })();
         self.lazy_regime = saved_regime;
@@ -384,12 +442,62 @@ impl Vm {
         self.file_specials = saved_file_specials;
         self.expanded_macros = saved_expanded_macros;
         self.expanded_symbols = saved_expanded_symbols;
-        self.loader.active.pop();
         self.unbind(self.dynamic.len() - mark);
+        // lread.c:1538: run the eval-after-load forms for this file, with
+        // the last form's value rooted across them. The file stays among the
+        // loads in progress until they finish, as GNU's unwind keeps it.
+        let result = result.and_then(|result| {
+            let hook_slot = self.slot("do-after-load-evaluation");
+            let hook = self.slots[hook_slot].function;
+            if hook == Value::UNBOUND || hook == Value::NIL {
+                return Ok(result);
+            }
+            let call = Form::List(vec![Form::Sym("do-after-load-evaluation".into()), Form::String(named)]);
+            let rooted = handle::FormObject::new(self, result);
+            self.eval_load_toplevel(&call, None, false, 0)?;
+            rooted.value(self)
+        });
+        self.loader.active.pop();
         result
     }
+    /// lread.c build_load_history for an entire file: the file's entry,
+    /// `current-load-list' in definition order, replaces any older entry
+    /// for the same name at the front of `load-history'.
+    fn build_load_history(&mut self, history_slot: usize) -> Result<()> {
+        let current = self.variable_value(history_slot)?;
+        let mut entry = self.list_values(current)?;
+        entry.reverse();
+        let Some(&file) = entry.first() else { return Ok(()) };
+        let name = self.source_string(file).ok().map(str::to_owned);
+        let slot = self.slot("load-history");
+        let mut kept = vec![];
+        let history = self.variable_value(slot)?;
+        for old in self.list_values(history)? {
+            let same = matches!(self.cons_pair(old), Ok((head, _)) if name.is_some() && self.source_string(head).ok() == name.as_deref());
+            if !same { kept.push(old); }
+        }
+        let entry = self.list_value(&entry);
+        kept.insert(0, entry);
+        let history = self.list_value(&kept);
+        self.set_variable_value(slot, history)
+    }
 }
-fn decode_source(bytes: &[u8]) -> Result<String> {
+/// An absolute file name with `.' and `..' resolved lexically, as
+/// expand-file-name would leave openp's result.
+fn expanded_path(path: &Path) -> Result<String> {
+    let absolute = std::path::absolute(path).map_err(|e| format!("file missing: {}: {e}", path.display()))?;
+    let mut parts: Vec<std::path::Component> = vec![];
+    for part in absolute.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => { if parts.len() > 1 { parts.pop(); } }
+            other => parts.push(other),
+        }
+    }
+    Ok(parts.iter().collect::<std::path::PathBuf>().to_string_lossy().into_owned())
+}
+/// Source text as GNU internal multibyte bytes.
+fn decode_source(bytes: &[u8]) -> Result<Vec<u8>> {
     let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
     let header = String::from_utf8_lossy(
         bytes
@@ -415,18 +523,48 @@ fn decode_source(bytes: &[u8]) -> Result<String> {
         .or_else(|| name.strip_suffix("-mac"))
         .unwrap_or(name);
     let mut source = match base {
-        "utf-8" | "utf-8-emacs" => {
-            String::from_utf8(bytes.to_vec()).map_err(|_| "source is not valid UTF-8")?
+        "utf-8" => {
+            String::from_utf8(bytes.to_vec()).map_err(|_| "source is not valid UTF-8")?.into_bytes()
         }
-        "latin-1" | "iso-latin-1" | "iso-8859-1" => bytes.iter().map(|b| char::from(*b)).collect(),
-        "us-ascii" if bytes.is_ascii() => String::from_utf8(bytes.to_vec()).unwrap(),
+        "utf-8-emacs" => utf_8_emacs(bytes),
+        "latin-1" | "iso-latin-1" | "iso-8859-1" => bytes.iter().map(|b| char::from(*b)).collect::<String>().into_bytes(),
+        "us-ascii" if bytes.is_ascii() => bytes.to_vec(),
         _ => return Err(format!("unsupported source coding system: {name}")),
     };
+    // CR and LF are single bytes in every internal character sequence.
     if name.ends_with("-dos") {
-        source = source.replace("\r\n", "\n");
+        let mut out = Vec::with_capacity(source.len());
+        for (i, &b) in source.iter().enumerate() {
+            if !(b == b'\r' && source.get(i + 1) == Some(&b'\n')) { out.push(b); }
+        }
+        source = out;
     }
     if name.ends_with("-mac") {
-        source = source.replace('\r', "\n");
+        for b in &mut source { if *b == b'\r' { *b = b'\n'; } }
     }
     Ok(source)
+}
+
+/// GNU's utf-8-emacs decoder: its own internal encoding, every byte that
+/// starts no valid character becoming a raw-byte character. As in coding.c,
+/// the internal 2-byte raw-byte forms (C0/C1 leads) and surrogate codes are
+/// not characters in a file.
+fn utf_8_emacs(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let decoded = crate::lstring::decode_char(&bytes[at..])
+            .filter(|_| bytes[at] < 0x80 || bytes[at] > 0xc1)
+            .filter(|&(code, _)| !(0xd800..=0xdfff).contains(&code));
+        match decoded {
+            Some((_, width)) => { out.extend_from_slice(&bytes[at..at + width]); at += width; }
+            None => {
+                let mut raw = [0; 5];
+                let n = crate::lstring::char_string(crate::lstring::BYTE8_OFFSET + u32::from(bytes[at]), &mut raw);
+                out.extend_from_slice(&raw[..n]);
+                at += 1;
+            }
+        }
+    }
+    out
 }

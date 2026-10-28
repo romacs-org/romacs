@@ -50,7 +50,7 @@ impl Vm {
             SwitchToBuffer => (1..=3).contains(&n),
             ForwardLine | MenuBarMode | ForceModeLineUpdate => n <= 1,
             LocateLibrary => (1..=4).contains(&n),
-            EraseBuffer | EmacsLispMode | Daemonp | DaemonInitialized => n == 0,
+            EmacsLispMode | Daemonp | DaemonInitialized => n == 0,
             _ => false,
         };
         if !valid {
@@ -74,7 +74,7 @@ impl Vm {
                     if p == SwitchToBuffer && name.is_empty() {
                         return Err("empty buffer name".into());
                     }
-                    if p == SwitchToBuffer || name == "*scratch*" {
+                    if p == SwitchToBuffer || (name == "*scratch*" && self.scratch_unmade()) {
                         self.create_named_buffer(&name, false)?
                     } else { self.named_buffer(&name).unwrap_or(Value::NIL) }
                 } else if matches!(
@@ -91,63 +91,37 @@ impl Vm {
                 }
                 Ok(value)
             }
-            EraseBuffer | ForwardLine => {
-                let count = if p == ForwardLine {
-                    if n == 0 || self.stack[start] == Value::NIL {
-                        1
-                    } else {
-                        self.stack[start].as_integer()?
-                    }
+            ForwardLine => {
+                let count = if n == 0 || self.stack[start] == Value::NIL {
+                    1
                 } else {
-                    0
+                    self.stack[start].as_integer()?
                 };
                 let index = self.buffer_index()?;
-                if p == EraseBuffer {
-                    self.ensure_buffer_writable()?;
-                }
                 let shortage = match &mut self.objects[index] {
                     Object::Buffer(b) => {
-                        if p == EraseBuffer {
-                            b.widen();
-                            let end = b.as_str().len();
-                            b.replace(ByteOffset(0)..ByteOffset(end), b"")?;
-                            0
-                        } else {
-                            let range = b.accessible();
-                            let (pos, shortage) = line_motion(
-                                &b.as_str().as_bytes()[range.start.0..range.end.0],
-                                b.point.0 - range.start.0,
-                                count,
-                            );
-                            b.point = ByteOffset(pos + range.start.0);
-                            shortage
-                        }
+                        let range = b.accessible();
+                        let (pos, shortage) = line_motion(
+                            &b.as_str().as_bytes()[range.start.0..range.end.0],
+                            b.point.0 - range.start.0,
+                            count,
+                        );
+                        b.point = ByteOffset(pos + range.start.0);
+                        shortage
                     }
                     Object::ByteBuffer(b) => {
-                        if p == EraseBuffer {
-                            let end = b.bytes.len();
-                            b.restriction = ByteOffset(0)..ByteOffset(end);
-                            b.replace(ByteOffset(0)..ByteOffset(end), b"")?;
-                            0
-                        } else {
-                            let range = b.restriction.clone();
-                            let (pos, shortage) = line_motion(
-                                &b.bytes[range.start.0..range.end.0],
-                                b.point.0 - range.start.0,
-                                count,
-                            );
-                            b.point = ByteOffset(pos + range.start.0);
-                            shortage
-                        }
+                        let range = b.restriction.clone();
+                        let (pos, shortage) = line_motion(
+                            &b.bytes[range.start.0..range.end.0],
+                            b.point.0 - range.start.0,
+                            count,
+                        );
+                        b.point = ByteOffset(pos + range.start.0);
+                        shortage
                     }
                     _ => unreachable!(),
                 };
-                if p == EraseBuffer {
-                    self.finish_annotation_edit(self.slots[self.buffer_slot].value)?;
-                    Ok(Value::NIL)
-                } else {
-                    Value::integer(shortage)
-                }
+                Value::integer(shortage)
             }
             EmacsLispMode => {
                 self.buffer_index()?;

@@ -127,7 +127,7 @@ def gnu_oracle_binary(_cache=[]):
 def fingerprint(root=ROOT):
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
     selected = {p for p in paths if p and (p.startswith(('gnu-lisp/', 'rlisp/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex-engine/')) or p in ['Cargo.toml', 'Cargo.lock'])}
-    selected.update(['scripts/lisp-census.py', 'scripts/lisp-census-oracle.el', 'scripts/prove-lisp-census.py', 'scripts/regenerate-lisp-census.py', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
+    selected.update(['scripts/lisp-census.py', 'scripts/lisp-census-oracle.el', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
     # Include new files in lisp and the tool, not merely the tracked manifest.
     selected.update(str(p.relative_to(root)) for p in (root / 'gnu-lisp').rglob('*.el'))
     selected.update(str(p.relative_to(root)) for p in (root / 'crates/romacs-vm').rglob('*.rs'))
@@ -173,6 +173,8 @@ BOOTSTRAP_CHAIN = ['emacs-lisp/debug-early', 'emacs-lisp/byte-run', 'emacs-lisp/
                    'keymap', 'version', 'widget', 'custom', 'emacs-lisp/map-ynp', 'international/mule',
                    'international/mule-conf', 'env', 'format', 'bindings', 'window', 'files',
                    'emacs-lisp/macroexp']
+POST_MACROEXP_CHAIN = ['cus-face', 'faces', 'loaddefs', 'button', 'emacs-lisp/cl-preloaded', 'emacs-lisp/oclosure',
+                       'obarray', 'abbrev']
 
 
 def macroexp_bootstrap_form(root=None):
@@ -184,16 +186,49 @@ def macroexp_bootstrap_form(root=None):
     return source[start:end].strip()
 
 
+def gv_bootstrap_form(root=None):
+    """loadup.el's `(require 'gv)' conditional, verbatim."""
+    source = ((root or ROOT) / 'gnu-lisp/loadup.el').read_text()
+    start = source.index("(when (interpreted-function-p (symbol-function 'add-hook))")
+    end = source.index('(load "emacs-lisp/cl-preloaded")', start)
+    return source[start:end].strip()
+
+
 def bootstrap_chain(root=None):
     root = root or ROOT
     chain = []
     for name in BOOTSTRAP_CHAIN:
+        if name == 'subr':
+            # romacs-loadup-bootstrap.el's adaptation: subr.el's defvars own
+            # these maps in GNU, so the native skeleton yields them first.
+            chain.append("(progn (current-global-map) (mapc #'makunbound '(global-map esc-map ctl-x-map)))")
         chain.append(root / 'gnu-lisp' / f'{name}.el')
         if name == 'window':
             chain.append("(setq resize-mini-windows 'grow-only)")
             chain.append("(setq load-source-file-function #'load-with-code-conversion)")
     chain.append(macroexp_bootstrap_form(root))
+    # loadup.el:159-200 next: faces, the autoloads (gv's among them) that
+    # macroexp's eager expansion of `push' and `setf' needs, GNU's own gv
+    # conditional, then cl-preloaded (the obsolete-file warning's
+    # bytecomp needs it).
+    for name in POST_MACROEXP_CHAIN:
+        if name == 'emacs-lisp/cl-preloaded':
+            chain.append(gv_bootstrap_form(root))
+        chain.append(root / 'gnu-lisp' / f'{name}.el')
     return chain
+
+
+
+def load_path(root=None):
+    """GNU's installed load-path, as gnu-tests/run.py load_path: the Lisp
+    root, then the immediate subdirectories its generated subdirs.el names
+    (reverse name order, obsolete last, term and VCS/backup names omitted)."""
+    lisp = (root or ROOT) / 'gnu-lisp'
+    names = sorted(p.name for p in lisp.iterdir() if p.is_dir()
+                   and p.name not in ('term', 'RCS', 'CVS', 'Old')
+                   and not p.name.startswith('=') and not p.name.endswith(('~', '.orig', '.rej')))
+    ordered = [n for n in reversed(names) if n != 'obsolete'] + (['obsolete'] if 'obsolete' in names else [])
+    return [lisp] + [lisp / name for name in ordered]
 
 
 def chain_consensus(rows):
@@ -469,7 +504,7 @@ def main():
         oracle = json.loads(p.stdout.splitlines()[-1])['files']
     if len(files) != len(oracle):
         raise RuntimeError('oracle omitted files')
-    load_paths = [ROOT / 'gnu-lisp'] + sorted(p for p in (ROOT / 'gnu-lisp').rglob('*') if p.is_dir())
+    load_paths = load_path()
     binary_tmp = tempfile.TemporaryDirectory(prefix='census-binary-', dir=env['TMPDIR'])
     binary = Path(binary_tmp.name) / 'romacs-vm-census'
     shutil.copy2(target / 'release/romacs-vm-census', binary)

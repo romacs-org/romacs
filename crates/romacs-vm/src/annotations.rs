@@ -158,8 +158,8 @@ impl Vm {
             let compiled = self.function(
                 items[0].list().unwrap(),
                 &items[1..],
-                &HashMap::new(),
-                &HashSet::new(),
+                &NameMap::default(),
+                &NameSet::default(),
             );
             self.macros = macros;
             let (function, _) = compiled.expect("valid built-in annotation function");
@@ -626,7 +626,9 @@ impl Vm {
         }
         Ok(out)
     }
-    fn annotation_insert_inherit(&mut self, start: usize, n: usize) -> Result<Value> {
+    /// insert-and-inherit's storage: the arguments at point, inheriting the
+    /// sticky properties around it, before the markers there with BEFORE.
+    pub(crate) fn annotation_insert_inherit(&mut self, start: usize, n: usize, before: bool) -> Result<Value> {
         let index = self.buffer_index()?;
         let Object::Buffer(t) = &self.objects[index] else {
             return Err("text buffer required".into());
@@ -647,7 +649,7 @@ impl Vm {
             vec![]
         };
         let inherited = self.annotation_inherited(left, right, same_run)?;
-        self.buffer_primitive(Primitive::Insert, start, n)?;
+        self.buffer_primitive(if before { Primitive::InsertBeforeMarkers } else { Primitive::Insert }, start, n)?;
         let Object::Buffer(t) = &mut self.objects[index] else {
             unreachable!()
         };
@@ -663,16 +665,11 @@ impl Vm {
             return Ok("t");
         }
         let slot = value.index(7)?.checked_sub(1).ok_or("symbol required")?;
-        self.names
-            .iter()
-            .find(|(_, v)| {
-                #[cfg(test)]
-                self.variable_read_probes
-                    .set(self.variable_read_probes.get() + 1);
-                **v == slot
-            })
-            .map(|(k, _)| k.as_str())
-            .ok_or("symbol required".into())
+        #[cfg(test)]
+        self.variable_read_probes.set(self.variable_read_probes.get() + 1);
+        // Only an interned symbol names a property: its name maps back to it.
+        let name = self.symbol_names.get(slot).ok_or("symbol required")?;
+        if self.names.get(name) == Some(&slot) { Ok(name.as_str()) } else { Err("symbol required".into()) }
     }
     fn annotation_variable(&self, name: &str) -> Value {
         self.names
@@ -941,21 +938,37 @@ impl Vm {
             return self.annotation_yank_primitive(p, start, n);
         }
         if p == InsertInherit {
-            return self.annotation_insert_inherit(start, n);
+            return self.annotation_insert_inherit(start, n, false);
         }
         if p == BufferSubstring {
             if n != 2 {
                 return Err("wrong primitive arity".into());
             }
+            let a = self.scalar_position(self.stack[start])?;
+            let b = self.scalar_position(self.stack[start + 1])?;
             let index = self.buffer_index()?;
+            if let Object::ByteBuffer(bb) = &self.objects[index] {
+                // A unibyte buffer's substring is unibyte; its positions are bytes.
+                let at = |v: i64| usize::try_from(v).ok().and_then(|v| v.checked_sub(1)).ok_or("index out of range");
+                let (a, b) = (at(a)?, at(b)?);
+                let range = a.min(b)..a.max(b);
+                if range.start < bb.restriction.start.0 || range.end > bb.restriction.end.0 {
+                    return Err("index out of range".into());
+                }
+                if bb.properties.range(ByteOffset(range.start)..ByteOffset(range.end)).next().is_some() {
+                    return Err("VM2 buffer-substring of unibyte text with properties is unsupported".into());
+                }
+                let bytes = bb.bytes[range].to_vec();
+                return Ok(self.make_lisp_string(bytes, false));
+            }
             let Object::Buffer(t) = &self.objects[index] else {
                 return Err("text buffer required".into());
             };
-            let a = usize::try_from(self.stack[start].as_integer()?)
+            let a = usize::try_from(a)
                 .ok()
                 .and_then(|v| v.checked_sub(1))
                 .ok_or("index out of range")?;
-            let b = usize::try_from(self.stack[start + 1].as_integer()?)
+            let b = usize::try_from(b)
                 .ok()
                 .and_then(|v| v.checked_sub(1))
                 .ok_or("index out of range")?;
@@ -1000,8 +1013,9 @@ impl Vm {
         } else {
             object
         };
+        // validate_interval_range: CHECK_FIXNUM_COERCE_MARKER.
         let at =
-            usize::try_from(self.stack[start].as_integer()?).map_err(|_| "index out of range")?;
+            usize::try_from(self.scalar_position(self.stack[start])?).map_err(|_| "index out of range")?;
         let raw = self.annotation_raw(object, at)?;
         if raw_query {
             let mut values = vec![];

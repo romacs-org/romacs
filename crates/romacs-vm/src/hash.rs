@@ -477,7 +477,12 @@ impl Vm {
     }
     /// GNU `internal_equal` (plain `equal`): cycle-aware and depth-limited.
     pub(super) fn equal(&self, a: Value, b: Value) -> Hashed<bool> {
-        self.equal_at(a, b, 0, &mut HashMap::new())
+        self.equal_at(a, b, 0, &mut HashMap::default(), false)
+    }
+    /// internal_equal with EQUAL_INCLUDING_PROPERTIES: strings must also
+    /// carry equal text properties at every position.
+    pub(crate) fn equal_including_properties(&self, a: Value, b: Value) -> Hashed<bool> {
+        self.equal_at(a, b, 0, &mut HashMap::default(), true)
     }
     fn equal_at(
         &self,
@@ -485,6 +490,7 @@ impl Vm {
         mut b: Value,
         mut depth: usize,
         seen: &mut HashMap<u64, Vec<u64>>,
+        props: bool,
     ) -> Hashed<bool> {
         loop {
             if depth > 10 {
@@ -516,10 +522,10 @@ impl Vm {
                 (Shape::Bignum(x), Shape::Bignum(y)) => return Ok(x == y),
                 (Shape::BoolVector(x), Shape::BoolVector(y)) => return Ok(x == y),
                 (Shape::Text { bytes: x, chars: m }, Shape::Text { bytes: y, chars: n }) => {
-                    return Ok(m == n && x == y);
+                    return Ok(m == n && x == y && (!props || self.string_intervals_equal(a, b)?));
                 }
                 (Shape::Cons, Shape::Cons) => {
-                    let (tail, other, verdict) = self.equal_spine(a, b, depth, seen, false)?;
+                    let (tail, other, verdict) = self.equal_spine(a, b, depth, seen, false, props)?;
                     if let Some(verdict) = verdict {
                         return Ok(verdict);
                     }
@@ -528,9 +534,9 @@ impl Vm {
                     depth += 1;
                 }
                 (Shape::Vector(x), Shape::Vector(y))
-                | (Shape::Record(x), Shape::Record(y)) => return self.equal_items(x, y, depth, seen),
+                | (Shape::Record(x), Shape::Record(y)) => return self.equal_items(x, y, depth, seen, props),
                 (Shape::Closure(f, x), Shape::Closure(g, y)) => {
-                    return Ok(f == g && self.equal_items(x, y, depth, seen)?);
+                    return Ok(f == g && self.equal_items(x, y, depth, seen, props)?);
                 }
                 (Shape::Marker(x, p), Shape::Marker(y, q)) => {
                     return Ok(x == y && (x == Value::NIL || p == q));
@@ -540,8 +546,8 @@ impl Vm {
                         return Ok(false);
                     }
                     for (&(k, v), &(l, w)) in p.iter().zip(q) {
-                        if !self.equal_at(k, l, depth + 1, seen)?
-                            || !self.equal_at(v, w, depth + 1, seen)?
+                        if !self.equal_at(k, l, depth + 1, seen, props)?
+                            || !self.equal_at(v, w, depth + 1, seen, props)?
                         {
                             return Ok(false);
                         }
@@ -552,18 +558,39 @@ impl Vm {
             }
         }
     }
+    /// compare_string_intervals: the same properties, with `equal' values,
+    /// over every run of either string (the texts are already equal).
+    fn string_intervals_equal(&self, a: Value, b: Value) -> Hashed<bool> {
+        let internal = |_: crate::prim::Fault| HashFault::Internal("text property runs".into());
+        let mut starts = self.property_run_starts(a).map_err(internal)?;
+        starts.extend(self.property_run_starts(b).map_err(internal)?);
+        starts.sort_unstable();
+        starts.dedup();
+        let len = self.str_view(a).map_or(0, |v| v.chars as i64);
+        for at in starts.into_iter().filter(|&at| at < len) {
+            let x = self.annotation_raw(a, at as usize).map_err(HashFault::Internal)?;
+            let y = self.annotation_raw(b, at as usize).map_err(HashFault::Internal)?;
+            if x.len() != y.len() { return Ok(false); }
+            for (key, value) in &x {
+                let Some((_, other)) = y.iter().find(|(k, _)| k == key) else { return Ok(false) };
+                if !self.equal(*value, *other)? { return Ok(false); }
+            }
+        }
+        Ok(true)
+    }
     fn equal_items(
         &self,
         x: &[Value],
         y: &[Value],
         depth: usize,
         seen: &mut HashMap<u64, Vec<u64>>,
+        props: bool,
     ) -> Hashed<bool> {
         if x.len() != y.len() {
             return Ok(false);
         }
         for (&x, &y) in x.iter().zip(y) {
-            if !self.equal_at(x, y, depth + 1, seen)? {
+            if !self.equal_at(x, y, depth + 1, seen, props)? {
                 return Ok(false);
             }
         }
@@ -579,6 +606,7 @@ impl Vm {
         depth: usize,
         seen: &mut HashMap<u64, Vec<u64>>,
         b_circular: bool,
+        props: bool,
     ) -> Hashed<(Value, Value, Option<bool>)> {
         // GNU `FOR_EACH_TAIL_STEP_CYCLEP`: the tortoise starts at the head and
         // only advances at power-of-two steps that are multiples of 4096.
@@ -590,7 +618,7 @@ impl Vm {
             }
             let (x, a_next) = self.cons_pair(a).map_err(HashFault::Internal)?;
             let (y, b_next) = self.cons_pair(b).map_err(HashFault::Internal)?;
-            if !self.equal_at(x, y, depth + 1, seen)? {
+            if !self.equal_at(x, y, depth + 1, seen, props)? {
                 return Ok((a, b, Some(false)));
             }
             b = b_next;
@@ -603,7 +631,7 @@ impl Vm {
                 let verdict = if b_circular {
                     true
                 } else {
-                    b.tag() == 3 && self.equal_spine(b, a, depth, seen, true)?.2 == Some(true)
+                    b.tag() == 3 && self.equal_spine(b, a, depth, seen, true, props)?.2 == Some(true)
                 };
                 return Ok((a, b, Some(verdict)));
             }
@@ -1052,7 +1080,7 @@ impl Vm {
     }
     /// GNU 30+ printed representation: `eql`, nil weakness and size are implicit.
     pub(super) fn display_table(&self, t: &HashTable, depth: usize) -> Result<String> {
-        let bytes = self.print_table(t, |vm, v| vm.display_depth(v, depth + 1).map(String::into_bytes))?;
+        let bytes = self.print_table(t, None, |vm, v| vm.display_depth(v, depth + 1).map(String::into_bytes))?;
         String::from_utf8(bytes).map_err(|e| e.to_string())
     }
     /// GNU `print_object`'s PVEC_HASH_TABLE arm (print.c:2631-2675): the
@@ -1061,9 +1089,12 @@ impl Vm {
     /// in entry order. ELEMENT prints each key and value with the CALLER's
     /// printer, so `prin1`/`princ` and their escapes apply inside the table
     /// exactly as they do outside it.
+    /// `#s(hash-table ...)`, with at most LIMIT entries (print-length) then
+    /// "...".
     pub(super) fn print_table(
         &self,
         t: &HashTable,
+        limit: Option<usize>,
         mut element: impl FnMut(&Self, Value) -> Result<Vec<u8>>,
     ) -> Result<Vec<u8>> {
         let mut out = "#s(hash-table".to_owned();
@@ -1079,10 +1110,12 @@ impl Vm {
         let mut out = out.into_bytes();
         if t.count() > 0 {
             let mut items = vec![];
-            for (_, k, v) in t.entries() {
+            let shown = limit.unwrap_or(usize::MAX).min(t.count());
+            for (_, k, v) in t.entries().take(shown) {
                 items.push(element(self, k)?);
                 items.push(element(self, v)?);
             }
+            if shown < t.count() { items.push(b"...".to_vec()); }
             out.extend_from_slice(b" data (");
             out.extend(items.join(&b' '));
             out.push(b')');

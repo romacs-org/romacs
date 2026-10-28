@@ -2,6 +2,10 @@
 use super::*;
 
 const ROOT: &str = "#:vm2-coding-system-registry";
+/// coding.c coding_categories[].id: the coding system set up for each
+/// category (nil while its id is -1), and coding_priorities[].
+const CATEGORY_SYSTEMS: &str = "#:vm2-coding-category-systems";
+const PRIORITIES: &str = "#:vm2-coding-priorities";
 const CATEGORIES: [&str; 21] = [
     "iso-7",
     "iso-7-tight",
@@ -60,16 +64,24 @@ impl Leaf<'_> {
         }
         let kind = self.vector_get(attrs, num(3))?;
         let utf8 = kind == self.intern("utf-8");
-        if !utf8 && kind != self.intern("raw-text") {
-            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8 and raw-text)".into()));
+        let charset = kind == self.intern("charset");
+        let utf16 = kind == self.intern("utf-16");
+        // setup_coding_system (coding.c:5706): an undecided type encodes
+        // through encode_coding_raw_text; decoding it means detection.
+        let raw = kind == self.intern("raw-text") || (encode && kind == self.intern("undecided"));
+        if !utf8 && !charset && !utf16 && !raw {
+            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, UTF-16, charset and raw-text)".into()));
         }
         for index in [6, 7, 9, 10] {
             if self.vector_get(attrs, num(index))? != Value::NIL {
                 return Err(Fault::Error("string coding translation tables and conversion hooks are not implemented".into()));
             }
         }
-        let bom = if utf8 { self.vector_get(attrs, num(24))? } else { Value::NIL };
-        if self.pair(bom).is_some() { return Err(Fault::Error("string coding BOM-pair detection is not implemented".into())); }
+        let bom = if utf8 || utf16 { self.vector_get(attrs, num(24))? } else { Value::NIL };
+        // Encoding with a BOM pair only writes the BOM; decoding detects.
+        if self.pair(bom).is_some() && !(utf16 && encode) {
+            return Err(Fault::Error("string coding BOM-pair detection is not implemented".into()));
+        }
         let tokens = if encode && utf8 && !source.is_multibyte() {
             coding_encode_unibyte(source.bytes())
         } else { source.chars().map(|code| {
@@ -78,17 +90,26 @@ impl Leaf<'_> {
             else if code < 128 { CodingToken::Byte(code as u8) }
             else { CodingToken::Character(code) }
         }).collect::<Vec<_>>() };
+        // UTF-16 line ends are characters, found and converted after decoding.
+        let tokens = if utf16 && !encode { self.coding_decode_utf16(attrs, bom, &tokens)? } else { tokens };
         let detected = if !encode && !inhibit && self.kind(eol) == Kind::Vector { coding_eol(&tokens) } else { None };
         let mode = if inhibit { 0 } else if let Some(mode) = detected { mode }
             else if eol == self.intern("dos") { 1 } else if eol == self.intern("mac") { 2 } else { 0 };
         let precise = if let Some(mode) = detected { self.vector_get(eol, num(mode as i64))? } else { name };
+        let mut runs = Vec::new();
         let (bytes, multibyte) = if encode {
             let mut bytes = Vec::new();
             if utf8 && bom != Value::NIL { bytes.extend_from_slice(&[239, 187, 191]); }
-            for token in tokens { match token {
+            if utf16 {
+                self.coding_encode_utf16(attrs, bom, &tokens, mode, &mut bytes)?;
+                return self.coding_string_result(buffer, last, precise, bytes, false, Vec::new());
+            }
+            if charset {
+                self.coding_encode_charset(attrs, &tokens, &mut bytes)?;
+            } else { for token in tokens { match token {
                 CodingToken::Byte(byte) => bytes.push(byte),
                 CodingToken::Character(code) => coding_emit(code, &mut bytes),
-            }}
+            }}}
             (coding_encode_eol(bytes, mode), false)
         } else {
             let tokens = if utf8 {
@@ -96,6 +117,11 @@ impl Leaf<'_> {
                     .into_iter().map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect()
             } else { tokens };
             let tokens = coding_decode_eol(tokens, mode);
+            let tokens = if charset {
+                let (tokens, found) = self.coding_decode_charset(attrs, &tokens)?;
+                runs = found;
+                tokens
+            } else { tokens };
             let for_unibyte = !utf8 && self.vector_get(attrs, num(12))? != Value::NIL;
             let codes = tokens.into_iter().map(|token| match token {
                     CodingToken::Character(code) if for_unibyte => 0u32.wrapping_sub(code) & 255,
@@ -107,11 +133,163 @@ impl Leaf<'_> {
             for code in codes { if for_unibyte { bytes.push(code as u8); } else { coding_emit(code, &mut bytes); } }
             (bytes, !for_unibyte)
         };
+        self.coding_string_result(buffer, last, precise, bytes, multibyte, runs)
+    }
+    fn coding_string_result(&mut self, buffer: Value, last: Value, precise: Value, bytes: Vec<u8>, multibyte: bool, runs: Vec<(usize, usize, usize)>) -> super::super::Out {
         if buffer != Value::NIL && buffer != Value::TRUE {
             return Err(Fault::Error("string coding output to buffers is not implemented".into()));
         }
         self.variable_set(last, precise)?;
-        Ok(self.make_string(bytes, multibyte))
+        let result = self.make_string(bytes, multibyte);
+        // produce_charset: each run of characters a non-ASCII charset decoded.
+        let key = self.intern("charset");
+        for (from, to, id) in runs {
+            let name = self.vm.charsets.records[self.vm.charsets.ids[id]].attrs[1];
+            let properties = self.coding_list(&[key, name]);
+            self.add_text_properties(num(from as i64), num(to as i64), properties, result)?;
+        }
+        Ok(result)
+    }
+}
+
+impl Leaf<'_> {
+    /// coding.c decode_coding_utf_16: 16-bit units in the coding system's
+    /// byte order after an optional BOM; a surrogate pair is one character,
+    /// a broken one yields its two bytes as characters (and, as in GNU, a
+    /// non-surrogate after it leaves the high half pending); an odd final
+    /// byte stays a raw byte and a final pending high surrogate is dropped.
+    fn coding_decode_utf16(&mut self, attrs: Value, bom: Value, tokens: &[CodingToken]) -> std::result::Result<Vec<CodingToken>, Fault> {
+        let big = self.vector_get(attrs, num(25))? == self.intern("big");
+        let unit = |a: u8, b: u8| if big { u32::from(a) << 8 | u32::from(b) } else { u32::from(b) << 8 | u32::from(a) };
+        let char_token = |c: u32| if c < 128 { CodingToken::Byte(c as u8) } else { CodingToken::Character(c) };
+        let mut at = 0;
+        if bom == Value::TRUE {
+            if let [CodingToken::Byte(a), CodingToken::Byte(b), ..] = tokens {
+                if unit(*a, *b) == 0xFEFF { at = 2; }
+            }
+        }
+        let (mut out, mut surrogate) = (Vec::with_capacity(tokens.len() / 2), 0);
+        while at < tokens.len() {
+            let CodingToken::Byte(c1) = tokens[at] else { out.push(tokens[at]); at += 1; continue; };
+            let Some(&second) = tokens.get(at + 1) else { out.push(CodingToken::Byte(c1)); break; };
+            at += 2;
+            let CodingToken::Byte(c2) = second else { out.extend([CodingToken::Byte(c1), second]); continue; };
+            let c = unit(c1, c2);
+            if surrogate != 0 {
+                if (0xDC00..=0xDFFF).contains(&c) {
+                    out.push(CodingToken::Character(0x10000 + (((surrogate - 0xD800) << 10) | (c - 0xDC00))));
+                    surrogate = 0;
+                } else {
+                    let (a, b) = if big { (surrogate >> 8, surrogate & 0xff) } else { (surrogate & 0xff, surrogate >> 8) };
+                    out.extend([char_token(a), char_token(b)]);
+                    if (0xD800..=0xDBFF).contains(&c) { surrogate = c; } else { out.push(char_token(c)); }
+                }
+            } else if (0xD800..=0xDBFF).contains(&c) {
+                surrogate = c;
+            } else {
+                out.push(char_token(c));
+            }
+        }
+        Ok(out)
+    }
+    /// coding.c encode_coding_utf_16: a BOM unless the system has none,
+    /// then each character as one unit or a surrogate pair; raw bytes and
+    /// other non-Unicode characters become the default character. Line ends
+    /// convert as characters.
+    fn coding_encode_utf16(&mut self, attrs: Value, bom: Value, tokens: &[CodingToken], mode: usize, bytes: &mut Vec<u8>) -> std::result::Result<(), Fault> {
+        let big = self.vector_get(attrs, num(25))? == self.intern("big");
+        let default = self.vector_get(attrs, num(11))?.integer_value().unwrap_or(32) as u32;
+        let mut emit = |u: u32| {
+            let pair = [(u >> 8) as u8, u as u8];
+            bytes.extend(if big { pair } else { [pair[1], pair[0]] });
+        };
+        if bom != Value::NIL { emit(0xFEFF); }
+        for &token in tokens {
+            let c = match token {
+                CodingToken::Byte(b) if b < 128 => u32::from(b),
+                CodingToken::Byte(_) => default,
+                CodingToken::Character(c) if c > 0x10FFFF => default,
+                CodingToken::Character(c) => c,
+            };
+            if c == u32::from(b'\n') && mode != 0 {
+                emit(u32::from(b'\r'));
+                if mode == 2 { continue; }
+            }
+            if c < 0x10000 { emit(c); } else {
+                let c = c - 0x10000;
+                emit((c >> 10) + 0xD800);
+                emit((c & 0x3FF) + 0xDC00);
+            }
+        }
+        Ok(())
+    }
+    /// coding.c decode_coding_charset: each byte's charset-valids entry
+    /// names the charsets (smallest dimension first) that may start a code
+    /// there; the first that decodes the code's bytes wins, and a byte none
+    /// decodes stays a raw byte.
+    /// Also returns ADD_CHARSET_DATA's runs: (from, to, charset id) over
+    /// output characters, a run continuing across undecodable bytes.
+    fn coding_decode_charset(&mut self, attrs: Value, tokens: &[CodingToken]) -> std::result::Result<(Vec<CodingToken>, Vec<(usize, usize, usize)>), Fault> {
+        let valids = self.vector_get(attrs, num(16))?;
+        let ascii = self.named_charset_id("ascii")?;
+        let (mut runs, mut last_id, mut last_offset) = (Vec::new(), ascii, 0);
+        let mut out = Vec::with_capacity(tokens.len());
+        let mut at = 0;
+        while at < tokens.len() {
+            let CodingToken::Byte(byte) = tokens[at] else { out.push(tokens[at]); at += 1; continue; };
+            let entry = self.vector_get(valids, num(i64::from(byte)))?;
+            let ids = if entry.integer_value().is_some() { vec![entry] } else { self.coding_items(entry)? };
+            let mut decoded = None;
+            for id in ids {
+                let i = self.vm.charsets.ids[id.integer_value().unwrap() as usize];
+                let dim = self.vm.charsets.records[i].dimension as usize;
+                let Some(code) = tokens.get(at..at + dim).and_then(|bytes| bytes.iter().try_fold(0u32, |code, token| match token {
+                    CodingToken::Byte(b) => Some(code << 8 | u32::from(*b)),
+                    CodingToken::Character(_) => None,
+                })) else { continue };
+                if let Some(c) = self.charset_decode(i, code)? { decoded = Some((c, dim, id.integer_value().unwrap() as usize)); break; }
+            }
+            match decoded {
+                Some((c, dim, id)) => {
+                    if id != ascii && id != last_id {
+                        if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
+                        (last_id, last_offset) = (id, out.len());
+                    }
+                    out.push(CodingToken::Character(c));
+                    at += dim;
+                }
+                None => { out.push(CodingToken::Byte(byte)); at += 1; }
+            }
+        }
+        if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
+        Ok((out, runs))
+    }
+    /// coding.c encode_coding_charset: ASCII as itself when the coding
+    /// system is ASCII compatible, raw bytes as themselves, other characters
+    /// by the first charset of the charset list that encodes them, else the
+    /// default character.
+    fn coding_encode_charset(&mut self, attrs: Value, tokens: &[CodingToken], bytes: &mut Vec<u8>) -> std::result::Result<(), Fault> {
+        let ascii_compatible = self.vector_get(attrs, num(5))? != Value::NIL;
+        let list = self.vector_get(attrs, num(4))?;
+        let charsets: Vec<usize> = self.coding_items(list)?.into_iter()
+            .map(|id| self.vm.charsets.ids[id.integer_value().unwrap() as usize]).collect();
+        let default = self.vector_get(attrs, num(11))?.integer_value().unwrap_or(32) as u8;
+        for &token in tokens {
+            let c = match token {
+                CodingToken::Byte(byte) if byte >= 128 || ascii_compatible => { bytes.push(byte); continue; }
+                CodingToken::Byte(byte) => u32::from(byte),
+                CodingToken::Character(c) => c,
+            };
+            let mut encoded = None;
+            for &i in &charsets {
+                if let Some(code) = self.charset_encode(i, c)? { encoded = Some((code, self.vm.charsets.records[i].dimension)); break; }
+            }
+            match encoded {
+                Some((code, dim)) => bytes.extend((0..dim).rev().map(|n| (code >> (8 * n)) as u8)),
+                None => bytes.push(default),
+            }
+        }
+        Ok(())
     }
 }
 
@@ -161,6 +339,24 @@ fn coding_decode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> 
         at += 1;
     }
     result
+}
+
+/// Decoding BYTES with the `utf-8' coding system (no BOM, line ends
+/// detected unless INHIBIT_EOL) as coding_convert_string does, without a
+/// coding-system lookup: the internal bytes of the multibyte result.
+pub(super) fn decode_utf8_detecting_eol(bytes: &[u8], inhibit_eol: bool) -> Vec<u8> {
+    let tokens: Vec<CodingToken> = bytes.iter().map(|&b| CodingToken::Byte(b)).collect();
+    let mode = if inhibit_eol { 0 } else { coding_eol(&tokens).unwrap_or(0) };
+    let tokens = coding_decode_utf8(&tokens, false, false).into_iter()
+        .map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect();
+    let mut out = Vec::with_capacity(bytes.len());
+    for token in coding_decode_eol(tokens, mode) {
+        match token {
+            CodingToken::Byte(byte) => coding_emit(u32::from(byte), &mut out),
+            CodingToken::Character(code) => coding_emit(code, &mut out),
+        }
+    }
+    out
 }
 
 // GNU consume_chars validates internal byte8 forms even in unibyte input.
@@ -299,9 +495,9 @@ impl Leaf<'_> {
             .rev()
             .fold(Value::NIL, |tail, &v| self.cons(v, tail))
     }
-    fn coding_items(&self, mut list: Value) -> std::result::Result<Vec<Value>, Fault> {
+    pub(super) fn coding_items(&self, mut list: Value) -> std::result::Result<Vec<Value>, Fault> {
         let original = list;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut result = Vec::new();
         while let Some((car, cdr)) = self.pair(list) {
             if !seen.insert(list.0) {
@@ -323,7 +519,7 @@ impl Leaf<'_> {
         }
     }
     fn coding_plist_get(&self, mut plist: Value, prop: Value) -> std::result::Result<Value, Fault> {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some((key, rest)) = self.pair(plist) {
             if !seen.insert(plist.0) {
                 return Err(Fault::Circular(plist));
@@ -346,7 +542,7 @@ impl Leaf<'_> {
     ) -> std::result::Result<Value, Fault> {
         let mut tail = plist;
         let mut last = None;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some((key, rest)) = self.pair(tail) {
             if !seen.insert(tail.0) {
                 return Err(Fault::Circular(plist));
@@ -400,7 +596,7 @@ impl Leaf<'_> {
         let text = self.symbol_name(name)?;
         let mut tail = old;
         let mut found = false;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some((item, rest)) = self.pair(tail) {
             if !seen.insert(tail.0) {
                 return Err(Fault::Circular(old));
@@ -473,6 +669,13 @@ impl Leaf<'_> {
             categories.push(self.intern(&name));
             let slot = self.vm.slot(&name);
             self.vm.slots[slot].value = no_conversion;
+        }
+        // syms_of_coding: which argument of each operation names its target.
+        let target_idx = self.intern("target-idx");
+        for (operation, index) in [("insert-file-contents", 0), ("write-region", 2), ("call-process", 0),
+                                   ("call-process-region", 2), ("start-process", 2), ("open-network-stream", 3)] {
+            let operation = self.intern(operation);
+            self.put_symbol_property(operation, target_idx, num(index))?;
         }
         let list = self.coding_list(&categories);
         let slot = self.vm.slot("coding-category-list");
@@ -601,7 +804,7 @@ impl Leaf<'_> {
         self.coding_symbol(alias)?;
         let spec = self.coding_required(name)?;
         let mut aliases = self.vector_get(spec, num(1))?;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         loop {
             if !seen.insert(aliases.0) {
                 return Err(Fault::Circular(aliases));
@@ -1125,7 +1328,7 @@ impl Leaf<'_> {
                 }
                 let mut valid = [0; 256];
                 let mut tail = args[15];
-                let mut seen = HashSet::new();
+                let mut seen = HashSet::default();
                 while let Some((v, next)) = self.pair(tail) {
                     if !seen.insert(tail.0) {
                         return Err(Fault::Circular(args[15]));
@@ -1176,6 +1379,360 @@ impl Leaf<'_> {
         }
         let attrs = self.vector(&attrs);
         self.coding_publish(args[0], attrs, eol)?;
+        // Fdefine_coding_system_internal: the first definition in a category,
+        // or a redefinition of that same system, sets the category up.
+        let systems = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let current = self.vector_get(systems, num(category))?;
+        if current == Value::NIL || current == args[0] {
+            self.vector_set(systems, num(category), args[0])?;
+        }
         Ok(Value::NIL)
+    }
+    /// Hidden category vectors, created in syms_of_coding's initial state.
+    fn coding_category_state(&mut self, name: &str) -> super::super::Out {
+        let slot = self.vm.slot(name);
+        let value = self.vm.slots[slot].value;
+        if value != Value::UNBOUND { return Ok(value); }
+        let initial: Vec<Value> = if name == PRIORITIES { (0..CATEGORIES.len() as i64).map(num).collect() }
+            else { vec![Value::NIL; CATEGORIES.len()] };
+        let vector = self.vector(&initial);
+        self.vm.slots[slot].value = vector;
+        Ok(vector)
+    }
+    /// coding.c Fset_coding_system_priority.
+    pub fn set_coding_system_priority(&mut self, systems: &[Value]) -> super::super::Out {
+        self.coding_init()?;
+        let categories = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let priorities = self.coding_category_state(PRIORITIES)?;
+        let mut changed = [false; CATEGORIES.len()];
+        let mut order = Vec::with_capacity(CATEGORIES.len());
+        for &system in systems {
+            let spec = self.coding_required(system)?;
+            let attrs = self.vector_get(spec, num(0))?;
+            let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
+            if changed[category] { continue; }
+            changed[category] = true;
+            order.push(category);
+            if self.vector_get(categories, num(category as i64))? != Value::NIL {
+                self.vector_set(categories, num(category as i64), system)?;
+            }
+            let variable = self.intern(&format!("coding-category-{}", CATEGORIES[category]));
+            self.variable_set(variable, system)?;
+        }
+        for i in 0..CATEGORIES.len() {
+            let category = self.vector_get(priorities, num(i as i64))?.integer_value().unwrap_or(0) as usize;
+            if !changed[category] { order.push(category); }
+        }
+        let mut names = Vec::with_capacity(order.len());
+        for (i, &category) in order.iter().enumerate() {
+            self.vector_set(priorities, num(i as i64), num(category as i64))?;
+            names.push(self.intern(&format!("coding-category-{}", CATEGORIES[category])));
+        }
+        let list = self.coding_list(&names);
+        let variable = self.intern("coding-category-list");
+        self.variable_set(variable, list)?;
+        Ok(Value::NIL)
+    }
+    /// coding.c Fcoding_system_priority_list: the base names of the systems
+    /// set up for each category, in priority order.
+    pub fn coding_system_priority_list(&mut self, highestp: Value) -> super::super::Out {
+        self.coding_init()?;
+        let categories = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let priorities = self.coding_category_state(PRIORITIES)?;
+        let mut bases = Vec::new();
+        for i in 0..CATEGORIES.len() {
+            let category = self.vector_get(priorities, num(i as i64))?;
+            let system = self.vector_get(categories, category)?;
+            if system == Value::NIL { continue; }
+            let spec = self.coding_spec(system)?;
+            let attrs = self.vector_get(spec, num(0))?;
+            let base = self.vector_get(attrs, num(0))?;
+            if highestp != Value::NIL { return Ok(base); }
+            bases.push(base);
+        }
+        Ok(self.coding_list(&bases))
+    }
+}
+
+/// coding.c EOL_SEEN_* bits.
+const EOL_SEEN_LF: u8 = 1;
+const EOL_SEEN_CR: u8 = 2;
+const EOL_SEEN_CRLF: u8 = 4;
+
+/// adjust_coding_eol_type's choice for the EOL bits seen: the index of the
+/// unix, dos or mac subsidiary, LF winning over CRLF over CR.
+fn eol_index(seen: u8) -> Option<usize> {
+    if seen & EOL_SEEN_LF != 0 { Some(0) } else if seen & EOL_SEEN_CRLF != 0 { Some(1) }
+    else if seen & EOL_SEEN_CR != 0 { Some(2) } else { None }
+}
+const CATEGORY_UTF_8_AUTO: usize = 6;
+const CATEGORY_UTF_8_NOSIG: usize = 7;
+const CATEGORY_UTF_8_SIG: usize = 8;
+const CATEGORY_CHARSET: usize = 14;
+const CATEGORY_RAW_TEXT: usize = 19;
+const MASK_UTF_8: u32 = 1 << CATEGORY_UTF_8_AUTO | 1 << CATEGORY_UTF_8_NOSIG | 1 << CATEGORY_UTF_8_SIG;
+const MASK_UTF_16: u32 = 0b11111 << 9;
+const MASK_ANY: u32 = (1 << CATEGORIES.len()) - 1;
+
+/// coding.c coding_detection_info.
+#[derive(Default)]
+struct DetectInfo { checked: u32, found: u32, rejected: u32 }
+
+/// coding.c detect_coding_utf_8 over BYTES, of which the first HEAD_ASCII
+/// are ASCII. GNU detects before CODING_MODE_LAST_BLOCK is set, so a
+/// sequence cut short by the end of the text does not reject.
+fn detect_utf_8(bytes: &[u8], head_ascii: usize, info: &mut DetectInfo) -> bool {
+    info.checked |= MASK_UTF_8;
+    let mut at = head_ascii;
+    let mut nchars = head_ascii;
+    let mut bom = false;
+    if at == 0 && bytes.len() > 3 && bytes[..3] == [0xEF, 0xBB, 0xBF] {
+        bom = true;
+        at = 3;
+        nchars += 1;
+    }
+    'chars: loop {
+        let Some(&c) = bytes.get(at) else { break };
+        at += 1;
+        if c < 0x80 {
+            nchars += 1;
+            if c == b'\r' && bytes.get(at) == Some(&b'\n') { at += 1; nchars += 1; }
+            continue;
+        }
+        // Each continuation octet, then the lead forms of 2..5 octets; GNU's
+        // 5-octet test also requires c < MAX_MULTIBYTE_LEADING_CODE (0xF8),
+        // so no 5-octet form is accepted.
+        for leading in [0xE0u8 & c == 0xC0, 0xF0 & c == 0xE0, 0xF8 & c == 0xF0, 0xFC & c == 0xF8 && c < 0xF8] {
+            let Some(&next) = bytes.get(at) else { break 'chars };
+            at += 1;
+            if next & 0xC0 != 0x80 {
+                info.rejected |= MASK_UTF_8;
+                return false;
+            }
+            if leading { nchars += 1; continue 'chars; }
+        }
+        info.rejected |= MASK_UTF_8;
+        return false;
+    }
+    if bom {
+        info.found |= MASK_UTF_8;
+    } else {
+        info.rejected |= 1 << CATEGORY_UTF_8_SIG;
+        if nchars < bytes.len() { info.found |= 1 << CATEGORY_UTF_8_AUTO | 1 << CATEGORY_UTF_8_NOSIG; }
+    }
+    true
+}
+
+impl Leaf<'_> {
+    /// decode_coding_gap's ASCII fast path (coding.c:7928-7970): for
+    /// all-ASCII BYTES and an ASCII-compatible coding with undecided EOL,
+    /// check_ascii's EOL bits pick the subsidiary (an index into its EOL
+    /// vector), which the string decoder does not do.
+    pub(crate) fn coding_ascii_eol(&mut self, bytes: &[u8], attrs: Value) -> std::result::Result<Option<usize>, Fault> {
+        if !bytes.is_ascii() || self.vector_get(attrs, num(5))? == Value::NIL
+            || self.flag_variable("disable-ascii-optimization")? || self.flag_variable("inhibit-eol-conversion")? {
+            return Ok(None);
+        }
+        let mut seen = 0;
+        let mut at = 0;
+        while at < bytes.len() {
+            match bytes[at] {
+                b'\r' if bytes.get(at + 1) == Some(&b'\n') => { seen |= EOL_SEEN_CRLF; at += 1; }
+                b'\r' => seen |= EOL_SEEN_CR,
+                b'\n' => seen |= EOL_SEEN_LF,
+                _ => {}
+            }
+            at += 1;
+        }
+        Ok(eol_index(seen))
+    }
+
+    fn flag_variable(&mut self, name: &str) -> std::result::Result<bool, Fault> {
+        let symbol = self.intern(name);
+        Ok(self.variable_value(symbol)?.is_some_and(|v| v != Value::NIL))
+    }
+
+    /// coding.c detect_coding for a coding system with attribute vector ATTRS
+    /// over BYTES: the system found, if any, and the EOL subsidiary index
+    /// (adjust_coding_eol_type) its scan saw.
+    /// Only the undecided type and the utf-8-auto category detect; the
+    /// detectors VM2 implements are UTF-8's and the charset category's, and
+    /// reaching any other (ISO-2022 escapes, UTF-16 for text with NUL and
+    /// 8-bit bytes, CCL and CJK categories) refuses rather than guess.
+    pub(crate) fn coding_detect(&mut self, bytes: &[u8], attrs: Value) -> std::result::Result<(Option<Value>, Option<usize>), Fault> {
+        let refuse = |what: &str| Fault::Error(format!("VM2 coding detection of {what} is unsupported"));
+        let kind = self.vector_get(attrs, num(3))?;
+        let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
+        if category == CATEGORY_UTF_8_AUTO && kind != self.intern("undecided") {
+            let systems = self.vector_get(attrs, num(24))?;
+            let Some((sig, nosig)) = self.pair(systems) else { return Ok((None, None)) };
+            let head_ascii = bytes.iter().take_while(|&&b| b < 0x80).count();
+            if head_ascii == bytes.len() { return Ok((Some(nosig), None)) }
+            let mut info = DetectInfo::default();
+            if !detect_utf_8(bytes, head_ascii, &mut info) { return Ok((None, None)) }
+            return Ok((Some(if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig }), None));
+        }
+        if kind != self.intern("undecided") {
+            return Ok((None, None));
+        }
+        // inhibit_flag (encode_inhibit_flag (ATTR), VARIABLE).
+        let inhibit = |this: &mut Self, index: i64, variable: &str| -> std::result::Result<bool, Fault> {
+            let flag = this.vector_get(attrs, num(index))?;
+            let encoded = if flag == Value::NIL { -1 } else if flag == Value::TRUE { 1 } else { 0 };
+            Ok(0 < encoded + i32::from(this.flag_variable(variable)?))
+        };
+        let inhibit_nbd = inhibit(self, 27, "inhibit-null-byte-detection")?;
+        let inhibit_ied = inhibit(self, 28, "inhibit-iso-escape-detection")?;
+        let prefer_utf_8 = self.vector_get(attrs, num(29))? != Value::NIL;
+        let scan_eol = !self.flag_variable("disable-ascii-optimization")? && !self.flag_variable("inhibit-eol-conversion")?;
+        let (mut head_ascii, mut null_byte, mut eight_bit, mut eol_seen) = (0, false, false, 0u8);
+        let mut at = 0;
+        while at < bytes.len() {
+            let c = bytes[at];
+            if c & 0x80 != 0 {
+                eight_bit = true;
+                if null_byte { break }
+            } else if c < 0x20 {
+                if matches!(c, 0x1B | 0x0E | 0x0F) && !inhibit_ied {
+                    return Err(refuse("ISO-2022 escape and shift codes"));
+                } else if c == 0 && !inhibit_nbd {
+                    null_byte = true;
+                    if eight_bit { break }
+                } else if scan_eol {
+                    if c == b'\r' {
+                        if bytes.get(at + 1) == Some(&b'\n') {
+                            eol_seen |= EOL_SEEN_CRLF;
+                            at += 1;
+                            if !eight_bit { head_ascii += 1; }
+                        } else {
+                            eol_seen |= EOL_SEEN_CR;
+                        }
+                    } else if c == b'\n' {
+                        eol_seen |= EOL_SEEN_LF;
+                    }
+                }
+                if !eight_bit { head_ascii += 1; }
+            } else if !eight_bit {
+                head_ascii += 1;
+            }
+            at += 1;
+        }
+        if !null_byte && !eight_bit && head_ascii >= bytes.len() {
+            return Ok((None, eol_index(eol_seen)));
+        }
+        let systems = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let priorities = self.coding_category_state(PRIORITIES)?;
+        let mut order = Vec::with_capacity(CATEGORY_RAW_TEXT);
+        for i in 0..CATEGORY_RAW_TEXT {
+            let category = self.vector_get(priorities, num(i as i64))?.integer_value().unwrap_or(0) as usize;
+            order.push((category, self.vector_get(systems, num(category as i64))?));
+        }
+        let mut info = DetectInfo::default();
+        let mut chosen = None;
+        // With every byte 7-bit only ISO-2022 could be found, and its
+        // escapes already refused, so the walk finds nothing.
+        if head_ascii < bytes.len() {
+            if null_byte {
+                info.checked |= !MASK_UTF_16;
+                info.rejected |= !MASK_UTF_16;
+            } else if prefer_utf_8 && detect_utf_8(bytes, head_ascii, &mut info) {
+                info.checked |= !MASK_UTF_8;
+                info.rejected |= !MASK_UTF_8;
+            }
+            for &(category, system) in &order {
+                let bit = 1u32 << category;
+                if system == Value::NIL {
+                    info.rejected |= bit;
+                } else if category >= CATEGORY_RAW_TEXT {
+                    continue;
+                } else if info.checked & bit != 0 {
+                    if info.found & bit != 0 { chosen = Some((category, system)); break }
+                } else if (CATEGORY_UTF_8_AUTO..=CATEGORY_UTF_8_SIG).contains(&category) {
+                    if detect_utf_8(bytes, head_ascii, &mut info) && info.found & bit != 0 { chosen = Some((category, system)); break }
+                } else if category == CATEGORY_CHARSET {
+                    if self.detect_charset(system, bytes, head_ascii, &mut info)? && info.found & bit != 0 { chosen = Some((category, system)); break }
+                } else {
+                    return Err(refuse(&format!("the {} category", CATEGORIES[category])));
+                }
+            }
+        }
+        let found = if let Some((category, system)) = chosen {
+            if category == CATEGORY_UTF_8_AUTO {
+                let attrs = self.coding_required(system)?;
+                let attrs = self.vector_get(attrs, num(0))?;
+                let systems = self.vector_get(attrs, num(24))?;
+                match self.pair(systems) {
+                    Some((sig, nosig)) => if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig },
+                    None => system,
+                }
+            } else {
+                system
+            }
+        } else if null_byte {
+            self.intern("no-conversion")
+        } else if info.rejected & MASK_ANY == MASK_ANY {
+            self.intern("raw-text")
+        } else if info.rejected != 0 {
+            match order.iter().find(|(category, _)| info.rejected & 1 << category == 0) {
+                Some(&(_, system)) => system,
+                None => return Ok((None, eol_index(eol_seen))),
+            }
+        } else {
+            return Ok((None, eol_index(eol_seen)));
+        };
+        Ok((Some(found), eol_index(eol_seen)))
+    }
+
+    /// coding.c detect_coding_charset over BYTES for SYSTEM, the system set
+    /// up for the charset category: every code must start at a byte its
+    /// charset-valids entry accepts and fit the code space of one of the
+    /// entry's charsets; an 8-bit byte makes it found. For an `iso-8859-' or
+    /// `iso-latin-' system a C1 byte also needs `latin-extra-code-table'.
+    fn detect_charset(&mut self, system: Value, bytes: &[u8], head_ascii: usize, info: &mut DetectInfo) -> std::result::Result<bool, Fault> {
+        info.checked |= 1 << CATEGORY_CHARSET;
+        let spec = self.coding_required(system)?;
+        let attrs = self.vector_get(spec, num(0))?;
+        let valids = self.vector_get(attrs, num(16))?;
+        let name = self.symbol_name(system)?;
+        let check_latin_extra = name.starts_with("iso-8859-") || name.starts_with("iso-latin-");
+        let symbol = self.intern("latin-extra-code-table");
+        let table = self.variable_value(symbol)?.filter(|&table| self.kind(table) == Kind::Vector);
+        let mut at = if self.vector_get(attrs, num(5))? != Value::NIL { head_ascii } else { 0 };
+        let mut found = false;
+        let accepted = 'codes: loop {
+            let Some(&c) = bytes.get(at) else { break true };
+            at += 1;
+            let entry = self.vector_get(valids, num(i64::from(c)))?;
+            if entry == Value::NIL { break false }
+            if c >= 0x80 {
+                if c < 0xA0 && check_latin_extra {
+                    let extra = match table { Some(table) => self.vector_get(table, num(i64::from(c)))?, None => Value::NIL };
+                    if extra == Value::NIL { break false }
+                }
+                found = true;
+            }
+            // A charset id, or a list of them, smallest dimension first.
+            // IDX carries across the list: a later charset continues after
+            // the bytes an earlier one consumed, as GNU's loop does.
+            let ids = if entry.integer_value().is_some() { vec![entry] } else { self.coding_items(entry)? };
+            let mut idx = 1;
+            for id in ids {
+                let record = &self.vm.charsets.records[self.vm.charsets.ids[id.integer_value().unwrap() as usize]];
+                let (dim, space) = (record.dimension as usize, record.space);
+                while idx < dim {
+                    // too_short
+                    let Some(&c) = bytes.get(at) else { break 'codes false };
+                    at += 1;
+                    let byte = (dim - 1 - idx) * 2;
+                    if !(space[byte]..=space[byte + 1]).contains(&u32::from(c)) { break }
+                    idx += 1;
+                }
+                if idx == dim { continue 'codes }
+            }
+            break false
+        };
+        let bit = 1 << CATEGORY_CHARSET;
+        if !accepted { info.rejected |= bit; } else { info.found |= if found { bit } else { 0 }; }
+        Ok(accepted)
     }
 }

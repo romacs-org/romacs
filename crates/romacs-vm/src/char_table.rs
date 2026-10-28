@@ -124,7 +124,7 @@ mod tests {
             if *value == Value::TRUE { count += 1; }
         });
         assert_eq!(count, 16, "each physical slot is visited once, not each incoming edge");
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         visit_char_table_node_values(&table.root, &mut seen, &mut |_| {});
         let mut revisits = 0;
         visit_char_table_node_values(&shared, &mut seen, &mut |_| { revisits += 1; });
@@ -298,24 +298,83 @@ mod tests {
 
 impl Vm {
     pub(super) fn initialize_case_table_slot(&mut self, name: &str, slot: usize) {
-        if name != "case-table" { return; }
+        // The syms_of_* Fput (PURPOSE, Qchar_table_extra_slots, N) calls
+        // (casetab.c, coding.c, character.c, xdisp.c).
+        let Some(count) = (match name {
+            "case-table" => Some(3),
+            "translation-table" => Some(2),
+            "char-script-table" | "glyphless-char-display" => Some(1),
+            _ => None,
+        }) else { return; };
         // Realize GNU's predefined plist on first symbol access, not Vm::new.
         let property = self.intern("char-table-extra-slots");
         let tail = Value::reference(self.conses.len(), 3);
-        self.conses.push((Value::integer(3).unwrap(), Value::NIL));
+        self.conses.push((Value::integer(count).unwrap(), Value::NIL));
         let plist = Value::reference(self.conses.len(), 3);
         self.conses.push((property, tail));
         self.slots[slot].plist = plist;
     }
 
+    /// GNU UNIPROP_TABLE_P: purpose `char-code-property-table', 5 extras.
+    pub(crate) fn is_uniprop_table(&self, t: &CharTable) -> bool {
+        self.names.get("char-code-property-table")
+            .is_some_and(|&slot| t.purpose == Value::reference(slot + 1, 7) && t.extras.len() == 5)
+    }
+
+    /// The codes of VALUE when it is a compressed uniprop block
+    /// (GNU UNIPROP_COMPRESSED_FORM_P: a string starting with 1 or 2).
+    pub(crate) fn uniprop_compressed(&self, value: Value) -> Option<Vec<u32>> {
+        let codes: Vec<u32> = self.str_view(value)?.chars().collect();
+        matches!(codes.first(), Some(1 | 2)).then_some(codes)
+    }
+
+    /// TABLE's own value for INDEX, its default for nil, never its parent's
+    /// (char_table_ref_simple).
+    pub(crate) fn char_table_own(&self, table: Value, index: usize) -> Result<Value> {
+        let data::Object::CharTable(t) = self.object(table)? else { return Err("char-table required".into()); };
+        let mut value = t.get(index)?;
+        // GNU sub_char_table_ref uncompresses the block in place; reading
+        // it without storing keeps this lookup read-only.
+        if self.is_uniprop_table(t) {
+            if let Some(codes) = self.uniprop_compressed(value) {
+                value = uniprop_block(&codes)?[index % 128];
+                if value == Value::NIL { value = t.default; }
+            }
+        }
+        Ok(value)
+    }
+
     pub(crate) fn char_table_get(&self, mut table: Value, index: usize) -> Result<Value> {
         loop {
-            let data::Object::CharTable(t) = self.object(table)? else { return Err("char-table required".into()); };
-            let value = t.get(index)?;
+            let value = self.char_table_own(table, index)?;
+            let data::Object::CharTable(t) = self.object(table)? else { unreachable!("checked char-table") };
             if value != Value::NIL || !matches!(self.object_if(t.parent), Some(data::Object::CharTable(_))) { return Ok(value); }
             table = t.parent;
         }
     }
+}
+
+/// GNU uniprop_table_uncompress: the 128 values of a compressed block, whose
+/// CODES start with 1 (simple: start index, then values, 0 meaning nil) or
+/// 2 (run-length: each value optionally followed by 128 + count).
+pub(crate) fn uniprop_block(codes: &[u32]) -> Result<Vec<Value>> {
+    let mut values = vec![Value::NIL; 128];
+    let mut chars = codes[1..].iter().copied().peekable();
+    if codes[0] == 1 {
+        let start = chars.next().ok_or("incomplete Unicode property block")? as usize;
+        for (index, code) in (start..128).zip(chars) {
+            values[index] = if code == 0 { Value::NIL } else { Value::integer(i64::from(code)).unwrap() };
+        }
+    } else {
+        let mut index = 0;
+        while let Some(code) = chars.next() {
+            let count = if chars.peek().is_some_and(|&next| next >= 128) { chars.next().unwrap() as usize - 128 } else { 1 };
+            if index + count > 128 { return Err("Unicode property block exceeds 128 characters".into()); }
+            values[index..index + count].fill(Value::integer(i64::from(code)).unwrap());
+            index += count;
+        }
+    }
+    Ok(values)
 }
 
 /// Cloning a handle retains native storage after its parent slot is replaced.
@@ -337,7 +396,7 @@ pub(super) struct CharTableNode {
 
 impl CharTableNode {
     pub(super) const WIDTHS: [usize; 4] = [65536, 4096, 128, 1];
-    const SIZES: [usize; 4] = [64, 16, 32, 128];
+    pub(super) const SIZES: [usize; 4] = [64, 16, 32, 128];
 
     fn new(depth: usize, min_char: usize, value: Value) -> CharTableNodeHandle {
         Arc::new(Mutex::new(Self {
@@ -356,7 +415,7 @@ impl CharTableNode {
 
     pub(super) fn checked_get(handle: &CharTableNodeHandle, index: usize) -> Result<Value> {
         let mut current = Arc::clone(handle);
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         loop {
             if !seen.insert(char_table_node_id(&current)) { return Err("cyclic sub-char-table".into()); }
             let slot = {
@@ -384,6 +443,15 @@ impl CharTableNode {
         }
     }
 
+    /// HANDLE's own geometry, without its children: a node keeps its depth
+    /// and first character for life.
+    pub(super) fn validate_node(handle: &CharTableNodeHandle, depth: usize, min_char: usize) -> Result<()> {
+        let node = handle.lock().unwrap();
+        if depth > 3 || node.depth != depth || node.min_char != min_char || node.slots.len() != Self::SIZES[depth] {
+            return Err("invalid sub-char-table geometry".into());
+        }
+        Ok(())
+    }
     pub(super) fn validate_traversal(handle: &CharTableNodeHandle, depth: usize, min_char: usize) -> Result<()> {
         let slots = {
             let node = handle.lock().unwrap();
@@ -502,7 +570,7 @@ pub(super) struct CharTable {
 // Lisp copy-sequence shares payload values, never native subdivision nodes.
 impl Clone for CharTable {
     fn clone(&self) -> Self {
-        let mut copies = HashMap::new();
+        let mut copies = HashMap::default();
         let root = CharTableNode::deep_copy(&self.root, &mut copies);
         let ascii = Self::ascii_from_root(&root);
         Self {
@@ -588,6 +656,27 @@ impl CharTable {
         } else { CharTableNode::checked_get(&self.root, index)? };
         Ok(if value == Value::NIL { self.default } else { value })
     }
+    /// char_table_ref_and_range at slot granularity: INDEX's value (the
+    /// default for nil) and the inclusive character range of its slot.
+    pub(crate) fn span(&self, index: usize) -> Result<(Value, usize, usize)> {
+        if index >= Self::LEN { return Err("index out of range".into()); }
+        let mut current = Arc::clone(&self.root);
+        loop {
+            let (slot, from, width) = {
+                let node = current.lock().unwrap();
+                let width = CharTableNode::WIDTHS[node.depth];
+                let at = (index - node.min_char) / width;
+                (node.slots.get(at).cloned().ok_or("invalid sub-char-table geometry")?, node.min_char + at * width, width)
+            };
+            match slot {
+                CharTableSlot::Value(value) => {
+                    let value = if value == Value::NIL { self.default } else { value };
+                    return Ok((value, from, from + width - 1));
+                }
+                CharTableSlot::Node(child) => current = child,
+            }
+        }
+    }
     pub fn set(&mut self, index: usize, value: Value) -> Result<()> {
         self.set_range(index, index, value)
     }
@@ -616,8 +705,14 @@ impl CharTable {
         if from < 128 { self.ascii = Self::ascii_from_root(&self.root); }
         Ok(())
     }
+    /// Rewrite every character entry (not purpose, default, parent or
+    /// extras), as map_char_table + set-char-table-range would.
+    pub(crate) fn map_entries(&mut self, map: &mut impl FnMut(&mut Value)) {
+        visit_char_table_node_values(&self.root, &mut HashSet::default(), map);
+        self.ascii = Self::ascii_from_root(&self.root);
+    }
     pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        self.visit_values_seen(&mut HashSet::new(), visit);
+        self.visit_values_seen(&mut HashSet::default(), visit);
     }
     pub(super) fn visit_values_seen(&mut self, seen: &mut HashSet<usize>, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.purpose);
@@ -631,7 +726,7 @@ impl CharTable {
         visit_char_table_node_values(&self.root, seen, visit);
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
-        self.storage_bytes_seen(capacity, &mut HashSet::new())
+        self.storage_bytes_seen(capacity, &mut HashSet::default())
     }
     pub(super) fn storage_bytes_seen(&self, capacity: bool, seen: &mut HashSet<usize>) -> usize {
         size_of::<Self>()

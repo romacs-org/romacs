@@ -19,6 +19,12 @@ impl Leaf<'_> {
     pub(crate) fn kill_local(&mut self, symbol: Value) -> Out {
         let Some(slot) = self.local_symbol(symbol)? else { return Ok(symbol) };
         let buffer = self.decode_buffer(Value::NIL)?;
+        // Fkill_local_variable reports makunbound with the current buffer, for
+        // a localized variable only (a plain one returns first).
+        let base = self.vm.indirect_variable(self.symbol_slot_of(symbol)?);
+        let localized = self.vm.local_table(base).map_err(Fault::Error)?.is_some()
+            || matches!(self.vm.forwarding(base), Some(Fwd::Buffer(_)));
+        if localized { self.notify(base, Value::NIL, "makunbound", Some(buffer))?; }
         self.clear_local_slot(slot, buffer)?;
         Ok(symbol)
     }
@@ -84,13 +90,14 @@ impl Leaf<'_> {
             if self.vm.local_binding_slots.contains(&slot) || self.vm.indirect_variable(slot) != slot { continue; }
             let symbol = Value::reference(slot + 1, 7);
             if !self.has_buffer_local(symbol, buffer)? { continue; }
+            let file_coding = self.vm.names.get("buffer-file-coding-system") == Some(&slot);
             if let Some(Fwd::Buffer(_)) = self.vm.forwarding(slot) {
-                self.clear_local_slot(slot, buffer)?;
+                // buffer_permanent_local_flags (buffer.c:4811).
+                if !(file_coding && kill_permanent == Value::NIL) { self.clear_local_slot(slot, buffer)?; }
                 continue;
             }
             let property = self.vm.symbol_property(symbol, permanent).map_err(Fault::Error)?;
-            let builtin_permanent = slot == self.vm.truncate_lines_slot
-                || self.vm.names.get("buffer-file-coding-system") == Some(&slot);
+            let builtin_permanent = slot == self.vm.truncate_lines_slot || file_coding;
             if kill_permanent == Value::NIL && (property != Value::NIL || builtin_permanent) {
                 if property == permanent_hook {
                     let value = match self.buffer_local_read(symbol, buffer) {
@@ -117,8 +124,8 @@ impl Leaf<'_> {
         if kill_permanent == reset { self.vm.reset_forwarded_visit(index); }
         let case_tables = self.standard_case_roots()?;
         match &mut self.vm.objects[index] {
-            Object::Buffer(b) => { b.local_keymap = Value::NIL; b.syntax_table = Value::NIL; b.case_tables = case_tables; }
-            Object::ByteBuffer(b) => { b.syntax_table = Value::NIL; b.case_tables = case_tables; }
+            Object::Buffer(b) => { b.local_keymap = Value::NIL; b.syntax_table = Value::NIL; b.category_table = Value::NIL; b.case_tables = case_tables; }
+            Object::ByteBuffer(b) => { b.syntax_table = Value::NIL; b.category_table = Value::NIL; b.case_tables = case_tables; }
             _ => unreachable!(),
         }
         self.vm.reset_forwarded_modes(index);

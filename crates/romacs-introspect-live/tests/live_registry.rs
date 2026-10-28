@@ -91,6 +91,7 @@ fn enumeration_does_not_invoke_candidates() {
     assert!(failures.is_empty(), "{failures:?}");
     assert!(found.contains(&"car".to_owned()));
     assert!(found.contains(&"error".to_owned()));
-    assert!(!found.contains(&"and".to_owned()));
+    // GNU's special forms are subrs in their function cells: fboundp is t.
+    assert!(found.contains(&"and".to_owned()));
     assert!(!found.contains(&"surely-not-a-function-q7".to_owned()));
 }

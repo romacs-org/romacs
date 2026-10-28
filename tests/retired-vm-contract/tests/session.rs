@@ -11,7 +11,7 @@ fn one_vm_owns_successive_evaluation_requests() {
     assert_eq!(evaluate(&mut vm, "(setq wire1 2)"), "2");
     assert_eq!(evaluate(&mut vm, "(+ wire1 1)"), "3");
     assert_eq!(evaluate(&mut vm, "(selected-frame)"), "#<frame initial>");
-    assert_eq!(evaluate(&mut vm, "(fboundp 'recursive-edit)"), "nil");
+    assert_eq!(evaluate(&mut vm, "(fboundp 'recursive-edit)"), "t");
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn message_formats_session_values_and_frame_identity() {
     );
     assert_eq!(
         evaluate(&mut vm, "(message \"%s\" (fboundp 'recursive-edit))"),
-        "\"nil\""
+        "\"t\""
     );
 }
 

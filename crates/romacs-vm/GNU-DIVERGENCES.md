@@ -795,3 +795,25 @@ these sets signal an error before moving point instead of approximating
 syntax-table-dependent classification. `tests/skip_chars.rs` preserves that
 explicit refusal. This subset supports GNU's unchanged `mail-header-extract`;
 it does not establish full GNU mail-library or MIME-encoding compatibility.
+
+## VM2-SQLITE1 — Bundled SQLite library
+
+sqlite.c's primitives run on SQLite 3.53.2, compiled from the amalgamation
+bundled with `libsqlite3-sys` 0.38, so no system library is needed. GNU pin
+`45b0f7699df36b3849edc3bdef37d4cb9e75b9ea` links the host's library (3.54.0
+on the reference host). `sqlite-version` and SQLite's own error messages
+follow the bundled version. Text columns are decoded by the native `utf-8`
+decoder with line-end detection, as GNU's `utf-8` coding system decodes
+them, without looking `utf-8` up: a Lisp redefinition of that coding system
+does not affect rows.
+
+## VM2-WIDTH1 — String widths without compositions
+
+`char-width` and `string-width` follow character.c's `char_width` over
+`char-width-table`, `tab-width`, `ctl-arrow` and the buffer or standard
+display table. `string-width` does not apply automatic compositions from
+`composition-function-table`: each character is measured on its own, so a
+sequence GNU composes is counted per character. In pinned GNU batch that
+differs for a character followed by an emoji modifier or variation
+selector: 👍🏽 and ❤️ are 2 columns in GNU, 4 and 1 here. Text with a `composition` property signals an
+explicit not-implemented error, since VM2 has no composition table.

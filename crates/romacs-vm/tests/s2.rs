@@ -120,6 +120,8 @@ fn long_apply_and_rest_chains_do_not_retain_native_frames() {
 
 #[test]
 fn unsupported_places_and_malformed_argument_lists_remain_rejections() {
+    // A repeated parameter is not malformed: GNU binds it again, the last
+    // binding winning (tests/real_ert_load.rs).
     for form in [
         json!(["setf", ["nth", 0, "xs"], 2]),
         json!(["push", 1, ["nth", 0, "xs"]]),
@@ -128,7 +130,6 @@ fn unsupported_places_and_malformed_argument_lists_remain_rejections() {
         json!(["lambda", ["&rest"], 1]),
         json!(["lambda", ["&rest", "x", "y"], 1]),
         json!(["lambda", ["&optional", "&optional", "x"], 1]),
-        json!(["lambda", ["x", "x"], 1]),
     ] {
         assert!(Vm::new().compile(&Form::from_json(form).unwrap()).is_err());
     }

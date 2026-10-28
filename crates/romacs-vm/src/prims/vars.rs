@@ -124,8 +124,8 @@ fn default_value_subr(cx, symbol: Value) {
 // replaced by the end of its function chain (indirect_function, data.c:2550;
 // a macro's cell reads `(macro . F)` through symbol_definition); an autoload
 // reached through a symbol is a function unless its TYPE (fifth element) is
-// non-nil. Then: a subr (VM2 never puts a special form in a function cell, so
-// none is unevalled), a closure, or a cons whose car is `lambda'.
+// non-nil. Then: a subr that is not a special form (UNEVALLED), a closure, or
+// a cons whose car is `lambda'.
 defsubr! { name = "functionp", gnu = "eval.c:3087", effect = Global,
 fn functionp(cx, object: Value) {
     Ok(if function_p(cx, object)? { Value::TRUE } else { Value::NIL })
@@ -153,7 +153,7 @@ pub(crate) fn function_p(cx: &mut Leaf<'_>, mut object: Value) -> std::result::R
         }
     }
     Ok(match cx.kind(object) {
-        Kind::Subr | Kind::Closure => true,
+        Kind::Subr | Kind::Closure => crate::prim::name(object).and_then(super::special_forms::special_form_min).is_none(),
         Kind::Cons => cx.pair(object).is_some_and(|(head, _)| head == cx.intern("lambda")),
         _ => false,
     })
@@ -215,4 +215,34 @@ fn set_default_toplevel_value(cx, symbol: Value, value: Value) {
         set_default(cx, symbol, value)?;
     }
     Ok(Value::NIL)
+}}
+
+// eval.c:842/861 buffer-local-toplevel-value and its setter (prelude.el)
+// read and replace the value a local let saved, through these.
+defsubr! { name = "romacs--local-toplevel-cell", gnu = "eval.c:766", effect = Global,
+fn local_toplevel_cell(cx, symbol: Value, buffer: Value) {
+    let symbol = self::symbol(cx, symbol)?;
+    Ok(match cx.local_toplevel_cell(symbol, buffer)? { Some(value) => cx.cons(Value::TRUE, value), None => Value::NIL })
+}}
+defsubr! { name = "romacs--set-local-toplevel-cell", gnu = "eval.c:766", effect = Global,
+fn set_local_toplevel_cell(cx, symbol: Value, buffer: Value, value: Value) {
+    let symbol = self::symbol(cx, symbol)?;
+    Ok(if cx.local_toplevel_cell_set(symbol, buffer, value)? { Value::TRUE } else { Value::NIL })
+}}
+
+// Findirect_variable: the end of OBJECT's variable-alias chain; anything
+// else is itself. defvaralias refuses cycles, so the chain ends.
+defsubr! { name = "indirect-variable", gnu = "data.c:1291", effect = Reads,
+fn indirect_variable(cx, object: Value) {
+    if !(object == Value::NIL || object == Value::TRUE || cx.kind(object) == Kind::Symbol) {
+        return Ok(object);
+    }
+    let mut symbol = object;
+    for _ in 0..=cx.list_limit() {
+        match cx.variable_alias(symbol)? {
+            Some(base) => symbol = base,
+            None => return Ok(symbol),
+        }
+    }
+    Err(Fault::Circular(object))
 }}

@@ -103,6 +103,7 @@ mod control_tests {
             apply_function: None,
             apply_mark: None,
             stack_used: 0,
+            apply_scratch: Vec::new(),
             depth_base: 0,
             regs: std::ptr::null_mut(),
             function: 0,
@@ -220,6 +221,7 @@ mod control_tests {
             apply_function: None,
             apply_mark: None,
             stack_used: 0,
+            apply_scratch: Vec::new(),
             depth_base: 0,
             regs: std::ptr::null_mut(),
             function: 0,
@@ -633,6 +635,25 @@ impl Program {
         }
     }
 }
+/// A suspended engine's lowered code and entry caches, visited in place by
+/// the collector while a nested call runs (`Vm::suspended_code`): copying
+/// them into the root list cost a pass over all code per `read' call.
+pub(super) struct SuspendedCode {
+    code: *mut Vec<Vec<Inst>>,
+    entries: *mut Vec<EntryCache>,
+}
+impl SuspendedCode {
+    /// SAFETY: the engine owning both vectors stays suspended, neither moved
+    /// nor touched, until this reference is popped.
+    pub(super) unsafe fn visit_values(&self, visit: &mut impl FnMut(&mut Value)) {
+        unsafe {
+            visit_code(&mut *self.code, visit);
+            for entry in &mut *self.entries {
+                visit(&mut entry.target);
+            }
+        }
+    }
+}
 fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {
     for inst in code.iter_mut().flatten() {
         visit(&mut inst.value);
@@ -710,7 +731,9 @@ fn checked_unbind(e: &mut Engine<'_>, n: usize) -> Option<Escape> {
             let data = e.vm.list_value(&[predicate, value]);
             return Some(Escape::Signal(condition, data));
         }
-        e.vm.unbind(1);
+        if e.vm.unbind_one().is_err() {
+            return e.vm.propagated_escape.take();
+        }
     }
     None
 }
@@ -754,7 +777,7 @@ fn signal_hook(e: &mut Engine<'_>, condition: Value, data: Value, failed_depth: 
     e.vm.gc_threshold = threshold;
     e.vm.stack = stack;
     e.vm.external_roots = external;
-    e.vm.execution = Program::default();
+    e.vm.end_nested_execution();
     e.code.resize_with(e.vm.functions.len(), Vec::new);
     // Rebase from the suspended allocation, which may now need a larger
     // width because compiling the hook introduced a wider function.
@@ -803,7 +826,15 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                 "error"
             };
             let slot = e.vm.slot(condition);
-            Escape::Signal(Value::reference(slot + 1, 7), Value::NIL)
+            // A plain error keeps its message as data, as GNU's `error' does.
+            let data = match original.as_deref() {
+                Some(message) if condition == "error" => {
+                    let message = e.vm.make_lisp_string(message.as_bytes().to_vec(), true);
+                    e.vm.list_value(&[message])
+                }
+                _ => Value::NIL,
+            };
+            Escape::Signal(Value::reference(slot + 1, 7), data)
         }
     };
     let failed_depth = e.failed_eval_depth.take();
@@ -918,7 +949,9 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                 if name == "excessive-lisp-nesting" {
                     original = Some(format!("Lisp nesting exceeds `max-lisp-eval-depth': {}", e.vm.display(data).unwrap_or_default()));
                 }
-                if matches!(name.as_str(), "void-function" | "void-variable") {
+                // GNU's printed error, (CONDITION . DATA): an eval caller's
+                // message names the real signal; void-* always do.
+                if matches!(name.as_str(), "void-function" | "void-variable") || (original.is_none() && e.propagate) {
                     let values = e.vm.display(data).unwrap_or_default();
                     original = Some(format!("({name}{})", values.strip_prefix('(').and_then(|s| s.strip_suffix(')')).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default()));
                 }
@@ -979,6 +1012,9 @@ pub(super) struct Engine<'a> {
     code: Vec<Vec<Inst>>,
     rest: RestStack,
     stack_used: usize,
+    /// The (OFFSET, COUNT) windows `apply` wrote at the end of the
+    /// registers, cleared on exit with the used prefix.
+    apply_scratch: Vec<(usize, usize)>,
     frames: Vec<Frame>,
     // Physical continuations can own several real calls (an apply chain).
     // K machinery itself has no public activation.
@@ -1016,18 +1052,50 @@ pub(super) struct Engine<'a> {
 }
 impl Engine<'_> {
     fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        self.rest.visit_values(visit);
-        if let Some(function) = &mut self.apply_function { visit(function); }
         visit_code(&mut self.code, visit);
         for entry in &mut self.entries {
             visit(&mut entry.target);
         }
+        self.visit_state_values(visit);
+    }
+    /// Every Value but the code and entry caches, which `suspend_code` hands
+    /// to the collector in place.
+    fn visit_state_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        self.rest.visit_values(visit);
+        if let Some(function) = &mut self.apply_function { visit(function); }
         for control in &mut self.controls {
             control.visit_values(visit);
         }
         if let Some(exit) = &mut self.escape {
             exit.visit_values(visit);
         }
+    }
+    /// Root this engine's state across a nested call that may collect: its
+    /// code and entries by reference, the rest copied into `external_roots'.
+    /// Returns the root mark for `resume_code`.
+    /// The code reference is taken last, and from the two fields only: the
+    /// caller must reach the Vm through `self.vm` alone until `resume_code`,
+    /// which drops the reference before reborrowing the engine.
+    pub(super) fn suspend_code(&mut self) -> usize {
+        let roots = self.vm.external_roots.len();
+        let mut suspended = Vec::new();
+        self.visit_state_values(&mut |value| suspended.push(*value));
+        self.vm.external_roots.extend(suspended);
+        let code = SuspendedCode {
+            code: std::ptr::addr_of_mut!(self.code),
+            entries: std::ptr::addr_of_mut!(self.entries),
+        };
+        self.vm.suspended_code.push(code);
+        roots
+    }
+    /// Drop the code reference, then take back the forwarded state values.
+    pub(super) fn resume_code(&mut self, roots: usize) {
+        self.vm.suspended_code.pop();
+        let forwarded = self.vm.external_roots[roots..].to_vec();
+        let mut forwarded = forwarded.into_iter();
+        self.visit_state_values(&mut |value| *value = forwarded.next().unwrap());
+        debug_assert!(forwarded.next().is_none());
+        self.vm.external_roots.truncate(roots);
     }
 }
 #[cfg(test)]
@@ -1053,6 +1121,7 @@ pub(super) fn assert_opaque_rest_compaction() {
             activations: vec![(0, Some(desc))],
         },
         stack_used: 0,
+        apply_scratch: Vec::new(),
         frames: vec![],
         call_marks: vec![None],
         native_mark: None,
@@ -1130,8 +1199,22 @@ impl Vm {
         stack.copy_from_slice(&self.external_roots[roots..stack_end]);
         self.stack = stack;
         self.external_roots.truncate(roots);
-        self.execution = Program::default();
+        self.end_nested_execution();
         result
+    }
+
+    /// After a nested engine run, whose program the suspended engine does not
+    /// own: keep it, registers all NIL again and lowered code intact, for the
+    /// next nested run instead of reallocating, refilling and relowering.
+    pub(super) fn end_nested_execution(&mut self) {
+        let program = std::mem::take(&mut self.execution);
+        if !program.registers.is_empty() {
+            self.spare_programs.push(program);
+        }
+    }
+    /// Every retained program: the current one and the nested spares.
+    pub(super) fn programs_mut(&mut self) -> impl Iterator<Item = &mut Program> {
+        std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut())
     }
 
     pub(crate) fn pending_eval_escape(&self) -> Option<(Value, Value)> {
@@ -1184,6 +1267,11 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         return Err(error);
     }
     let mut program = std::mem::take(&mut vm.execution);
+    if program.registers.is_empty() {
+        if let Some(spare) = vm.spare_programs.pop() {
+            program = spare;
+        }
+    }
     program.code.resize_with(vm.functions.len(), Vec::new);
     if let Err(error) = lower_function(
         vm,
@@ -1199,7 +1287,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     }
     let size = vm
         .register_width
-        .checked_mul(513)
+        .checked_mul(MIN_FRAMES)
         .and_then(|n| n.checked_add(4096))
         .ok_or("register storage overflow")?;
     vm.stack = std::mem::take(&mut program.registers);
@@ -1213,6 +1301,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     program.rest.activations.push((0, None));
     let mut engine = Engine {
         stack_used: vm.functions[function].regs.max(args.len()),
+        apply_scratch: Vec::new(),
         depth_base: vm.eval_depth,
         vm,
         code: program.code,
@@ -1268,6 +1357,9 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // Only entered frames can have written values. Clear that prefix, not all
     // reserved frames; retaining zeroed storage avoids reinitializing it.
     engine.vm.stack[..engine.stack_used].fill(Value::NIL);
+    for &(offset, count) in &engine.apply_scratch {
+        engine.vm.stack[offset..offset + count].fill(Value::NIL);
+    }
     engine.rest.values.clear();
     engine.rest.activations.clear();
     engine.vm.execution = Program {
@@ -1449,8 +1541,6 @@ fn lower(vm: &Vm, op: Op) -> Inst {
                     (Primitive::Equal, 2) => equal,
                     (Primitive::Cons, 2) => cons,
                     (Primitive::Remainder, 2) => remainder,
-                    (Primitive::Insert, 1) => insert_string,
-                    (Primitive::SearchForward, 1..=3) => search_character,
                     (Primitive::Aref, 2) | (Primitive::Length, 1) => sequence_read,
                     (Primitive::CharAfter, 0 | 1)
                     | (
@@ -1463,6 +1553,9 @@ fn lower(vm: &Vm, op: Op) -> Inst {
                     | (Primitive::GotoChar, 1) => buffer_read,
                     _ => direct,
                 };
+            } else if e == 1 && prim::generated(target).is_some_and(|d| d.name == "insert") {
+                i.value = target;
+                i.handler = insert_string;
             }
         }
         _ => {}
@@ -1621,13 +1714,11 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
 #[cold]
 #[inline(never)]
 fn poll_collect(e: &mut Engine<'_>) {
-    // Snapshot every active Value copy, then forward in place without moving
-    // instruction buffers: suspended PCs and entry pointers stay valid.
-    let mut roots = Vec::new();
-    e.visit_values(&mut |v| roots.push(*v));
-    e.vm.collect(&mut roots);
-    let mut forwarded = roots.into_iter();
-    e.visit_values(&mut |v| *v = forwarded.next().unwrap());
+    // Forward in place without moving instruction buffers: suspended PCs and
+    // entry pointers stay valid.
+    let roots = e.suspend_code();
+    e.vm.collect(&mut []);
+    e.resume_code(roots);
 }
 // Like GNU bytecode.c:638-646, only a plain, bound symbol takes the slot
 // read. Inspect the live set-only redirect on every entry: localization need
@@ -1811,6 +1902,10 @@ fn depth_room_cold(e: &mut Engine<'_>, attempted: usize) -> bool {
     }
     fits
 }
+/// Activations the register storage holds before it first widens. Each is
+/// reserved at the widest function compiled so far, so a single wide
+/// function multiplies this; deeper calls widen on demand (`frame_room`).
+const MIN_FRAMES: usize = 17;
 /// Grow only on a cold storage boundary, rebasing all activation pointers.
 unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
     let needed = (e.frames.len() + 3).checked_mul(e.vm.register_width)?;
@@ -1973,10 +2068,8 @@ unsafe fn invoke(
     unsafe {
         if target.tag() != 4 {
             let entry = *e.entries.get_unchecked((*pc).site);
-            if entry.target == target
-                && let Some(call) = entry.primitive
-            {
-                return cached_primitive(e, r, pc, target, start, argc, call);
+            if entry.target == target && entry.primitive.is_some() {
+                return cached_primitive(e, r, pc, target, start, argc);
             }
             return resolve_entry(e, r, pc, target, start, argc);
         }
@@ -1992,6 +2085,7 @@ unsafe fn invoke(
         let Some(r) = frame_room(e, r) else { return fail(e, "register storage overflow"); };
         if entry.simple_arity == argc {
             let new = r.add(e.vm.functions.get_unchecked(e.function).regs.max(1));
+            let mark = call_mark(e, r, pc, target, start, argc);
             match argc {
                 0 => {}
                 1 => *new = *r.add(start),
@@ -2001,7 +2095,7 @@ unsafe fn invoke(
                 }
                 n => std::ptr::copy(r.add(start), new, n),
             }
-            return enter_frame(e, r, pc, new, function, None, target, start, argc);
+            return enter_frame_marked(e, r, pc, new, function, None, mark);
         }
         let closure = &e.vm.closures[target.payload() as usize];
         let f = e.vm.functions.get_unchecked(function);
@@ -2010,6 +2104,29 @@ unsafe fn invoke(
             return closure_arity_error(e, function, argc);
         }
         let new = r.add(e.vm.functions.get_unchecked(e.function).regs.max(1));
+        let dst = new.add(f.captures);
+        let positional = argc.min(f.arity);
+        // The arguments may lie where the new frame goes (`apply`'s spread
+        // window once storage has widened): read them all before writing
+        // the frame (the backtrace entry, then rest values, then the
+        // positional ones by memmove) and only then write the captures.
+        let mark = call_mark(e, r, pc, target, start, argc);
+        let f = e.vm.functions.get_unchecked(function);
+        let closure = &e.vm.closures[target.payload() as usize];
+        let rest = if f.rest {
+            let begin = e.rest.values.len();
+            for i in positional..argc {
+                e.rest.values.push(*r.add(start + i));
+            }
+            Some(OpaqueRest {
+                reg: f.captures + f.arity,
+                start: begin,
+                end: e.rest.values.len(),
+            })
+        } else {
+            None
+        };
+        std::ptr::copy(r.add(start), dst, positional);
         match closure.captures.len() {
             0 => {}
             1 => *new = closure.captures[0],
@@ -2019,35 +2136,13 @@ unsafe fn invoke(
             }
             n => std::ptr::copy_nonoverlapping(closure.captures.as_ptr(), new, n),
         }
-        let dst = new.add(f.captures);
-        let positional = argc.min(f.arity);
-        match positional {
-            0 => {}
-            1 => *dst = *r.add(start),
-            2 => {
-                *dst = *r.add(start);
-                *dst.add(1) = *r.add(start + 1);
-            }
-            n => std::ptr::copy(r.add(start), dst, n),
-        }
         for i in positional..f.arity {
             *dst.add(i) = Value::NIL;
         }
-        let rest = if f.rest {
-            let begin = e.rest.values.len();
-            for i in positional..argc {
-                e.rest.values.push(*r.add(start + i));
-            }
+        if f.rest {
             *dst.add(f.arity) = Value::NIL;
-            Some(OpaqueRest {
-                reg: f.captures + f.arity,
-                start: begin,
-                end: e.rest.values.len(),
-            })
-        } else {
-            None
-        };
-        enter_frame(e, r, pc, new, function, rest, target, start, argc)
+        }
+        enter_frame_marked(e, r, pc, new, function, rest, mark)
     }
 }
 #[cold]
@@ -2161,7 +2256,7 @@ unsafe fn resolve_entry(
                     simple_arity: usize::MAX,
                     primitive: Some(call),
                 };
-                return cached_primitive(e, r, pc, target, start, argc, call);
+                return cached_primitive(e, r, pc, target, start, argc);
             }
         }
         invoke_full(e, r, pc, target, start, argc)
@@ -2178,22 +2273,12 @@ unsafe fn invoke_full(
 ) -> Value {
     unsafe {
         let function = target;
-        let mut target = target;
-        let mut aliases = 0;
-        while target.tag() == 7 && target != Value::UNBOUND {
-            let slot = target.payload() as usize - 1;
-            if e.vm.macros.contains(&slot) && !e.vm.expanding.contains(&slot) {
-                return fail(e, &format!("invalid function: macro {} is not callable", e.vm.symbol_names[slot]));
-            }
-            let Some(entry) = e.vm.slots.get(slot) else {
-                return fail(e, "invalid symbol");
-            };
-            target = entry.function;
-            aliases += 1;
-            if aliases > e.vm.slots.len() {
-                return fail(e, "cyclic function indirection");
-            }
-        }
+        // Out of line: the alias walk's address-taken scratch would stop
+        // every tail dispatch below, so a funcall or apply in a loop grew
+        // the native stack.
+        let Some(target) = t2_resolve(e, target) else {
+            return Value::UNBOUND;
+        };
         if target == Value::reference(Primitive::Apply as usize, 6) {
             return apply(e, r, pc, start, argc);
         }
@@ -2201,25 +2286,34 @@ unsafe fn invoke_full(
             || target == Value::reference(Primitive::Signal as usize, 6)
         {
             enter_native(e, r, pc, target, start, argc);
-            if argc != 2 {
+            let signal = target == Value::reference(Primitive::Signal as usize, 6);
+            if !(argc == 2 || (signal && argc == 1)) {
                 return fail(e, "wrong primitive arity");
             }
-            if target == Value::reference(Primitive::Signal as usize, 6) {
-                let condition = *r.add(start);
+            if signal {
+                // eval.c Fsignal/signal_or_quit: an error object with DATA
+                // omitted re-signals itself; nil with non-list DATA is `error'.
+                let data = if argc == 2 { *r.add(start + 1) } else { Value::NIL };
+                let mut condition = *r.add(start);
+                if condition.tag() == 3 && data == Value::NIL {
+                    let Ok((condition, data)) = e.vm.cons_pair(condition) else { return fail(e, "invalid error object") };
+                    e.escape = Some(Escape::Signal(condition, data));
+                    return Value::UNBOUND;
+                }
+                if condition == Value::NIL && data.tag() != 3 {
+                    condition = e.vm.intern("error");
+                }
+                e.escape = Some(Escape::Signal(condition, data));
                 if condition != Value::NIL
                     && condition != Value::TRUE
                     && (condition.tag() != 7 || condition == Value::UNBOUND)
                 {
+                    e.escape = None;
                     return wrong_type(e, "symbolp", condition);
                 }
+                return Value::UNBOUND;
             }
-            e.escape = Some(
-                if target == Value::reference(Primitive::Throw as usize, 6) {
-                    Escape::Throw(*r.add(start), *r.add(start + 1))
-                } else {
-                    Escape::Signal(*r.add(start), *r.add(start + 1))
-                },
-            );
+            e.escape = Some(Escape::Throw(*r.add(start), *r.add(start + 1)));
             return Value::UNBOUND;
         }
         if target.tag() == 6 {
@@ -2267,18 +2361,12 @@ unsafe fn apply(
     unsafe {
         enter_apply(e, r, pc, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
-        // prepare_apply writes the disjoint scratch window at the allocation end.
-        e.stack_used = e.vm.stack.len();
-        match e.vm.prepare_apply(base + start, argc) {
-            Ok((target, offset, count)) => {
-                e.apply_function = Some(target);
-                invoke_full(e, r, pc, target, offset - base, count)
-            },
-            Err(error) => {
-                e.error = Some(error);
-                Value::UNBOUND
-            }
-        }
+        // Out of line: the Result's error drop would stop the tail dispatch.
+        let Some((target, offset, count)) = t2_prepare_apply(e, base + start, argc) else {
+            return Value::UNBOUND;
+        };
+        e.apply_function = Some(target);
+        invoke_full(e, r, pc, target, offset - base, count)
     }
 }
 #[inline(always)]
@@ -2294,12 +2382,35 @@ unsafe fn enter_frame(
     argc: usize,
 ) -> Value {
     unsafe {
-        let mark = if let Some(mark) = e.native_mark.take() {
+        let mark = call_mark(e, r, pc, target, start, argc);
+        enter_frame_marked(e, r, pc, new, function, rest, mark)
+    }
+}
+/// The backtrace entry of the call about to enter: its arguments are read
+/// here, so a caller whose arguments may lie under the new frame (`apply`'s
+/// spread window) takes it before writing the frame.
+#[inline(always)]
+unsafe fn call_mark(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, target: Value, start: usize, argc: usize) -> usize {
+    unsafe {
+        if let Some(mark) = e.native_mark.take() {
             e.vm.backtrace.resolve_pending(target);
             mark
         } else {
             trace_call(e, r, pc, target, start, argc)
-        };
+        }
+    }
+}
+#[inline(always)]
+unsafe fn enter_frame_marked(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    new: *mut Value,
+    function: usize,
+    rest: Option<OpaqueRest>,
+    mark: usize,
+) -> Value {
+    unsafe {
         e.call_marks.push(Some(e.apply_mark.take().unwrap_or(mark)));
         let base = rest.map_or(e.rest.values.len(), |rest| rest.start);
         e.rest.activations.push((base, rest));
@@ -2422,11 +2533,9 @@ unsafe fn generated_step(
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let reader = matches!(prim::name(target), Some("read" | "read-from-string"));
         let saved_depth = e.vm.eval_depth;
-        let roots = e.vm.external_roots.len();
+        let mut roots = e.vm.external_roots.len();
         if reader {
-            let mut suspended = Vec::new();
-            e.visit_values(&mut |value| suspended.push(*value));
-            e.vm.external_roots.extend(suspended);
+            roots = e.suspend_code();
             e.vm.eval_depth = e.depth_base + e.frames.len();
             e.vm.propagated_escape = None;
             e.vm.propagated_escape_hooked = false;
@@ -2437,11 +2546,7 @@ unsafe fn generated_step(
             return take_step(e, r, pc, step);
         }
         // Rewrite in place: suspended PCs and entry pointers must not move.
-        let forwarded = e.vm.external_roots[roots..].to_vec();
-        let mut forwarded = forwarded.into_iter();
-        e.visit_values(&mut |value| *value = forwarded.next().unwrap());
-        debug_assert!(forwarded.next().is_none());
-        e.vm.external_roots.truncate(roots);
+        e.resume_code(roots);
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Vec::new);
@@ -2753,10 +2858,15 @@ fn t2_prepare_apply(
     start: usize,
     argc: usize,
 ) -> Option<(Value, usize, usize)> {
-    // prepare_apply writes the disjoint scratch window at the end.
-    e.stack_used = e.vm.stack.len();
+    // prepare_apply writes a disjoint scratch window at the end.
     match e.vm.prepare_apply(start, argc) {
-        Ok(window) => Some(window),
+        Ok(window) => {
+            match e.apply_scratch.iter_mut().find(|(offset, _)| *offset == window.1) {
+                Some((_, count)) => *count = (*count).max(window.2),
+                None => e.apply_scratch.push((window.1, window.2)),
+            }
+            Some(window)
+        }
         Err(error) => {
             e.error = Some(error);
             None
@@ -2807,19 +2917,19 @@ unsafe fn t2_enter_closure(
             return closure_arity_error(e, function, argc);
         }
         let new = r.add(k_width(r));
-        std::ptr::copy_nonoverlapping(closure.captures.as_ptr(), new, closure.captures.len());
         let dst = new.add(f.captures);
         let positional = argc.min(f.arity);
-        std::ptr::copy(r.add(start), dst, positional);
-        for i in positional..f.arity {
-            *dst.add(i) = Value::NIL;
-        }
+        // As in the cached entry: read every argument, the backtrace's
+        // included, before writing the frame, which may overlap `apply`'s
+        // spread window after widening.
+        let mark = call_mark(e, r, pc, target, start, argc);
+        let f = &e.vm.functions[function];
+        let closure = &e.vm.closures[target.payload() as usize];
         let rest = if f.rest {
             let begin = e.rest.values.len();
             for i in positional..argc {
                 e.rest.values.push(*r.add(start + i));
             }
-            *dst.add(f.arity) = Value::NIL;
             Some(OpaqueRest {
                 reg: f.captures + f.arity,
                 start: begin,
@@ -2828,7 +2938,15 @@ unsafe fn t2_enter_closure(
         } else {
             None
         };
-        enter_frame(e, r, pc, new, function, rest, target, start, argc)
+        std::ptr::copy(r.add(start), dst, positional);
+        std::ptr::copy_nonoverlapping(closure.captures.as_ptr(), new, closure.captures.len());
+        for i in positional..f.arity {
+            *dst.add(i) = Value::NIL;
+        }
+        if f.rest {
+            *dst.add(f.arity) = Value::NIL;
+        }
+        enter_frame_marked(e, r, pc, new, function, rest, mark)
     }
 }
 // Resolve the ordinary primitive family once per call site. Each cached call
@@ -2837,13 +2955,12 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
     use Primitive::*;
     match p {
         ClosureMetadata | ClosureDocument | MakeInterpretedClosure => Vm::interpreted_closure_primitive,
-        SelfInsertCommand | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine
-        | DeleteChar | DeleteBackwardChar | ThisCommandKeys => {
+        ForwardChar | BackwardChar | BeginningOfLine | EndOfLine => {
             Vm::command_primitive
         }
         TempBuffer => Vm::eval_buffer_primitive,
         DeepEqual | Min | Append | Prin1ToString => Vm::eval_data_primitive,
-        GetBuffer | EraseBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
+        GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive
         }
@@ -2903,7 +3020,7 @@ fn primitive_value(
     // allocations below: `list_value` only pushes, and collection is request
     // driven, which is the same sequencing `condition_call` and `hash_call` rely
     // on.
-    if (Primitive::SelfInsertCommand as usize..=Primitive::ThisCommandKeys as usize)
+    if (Primitive::ForwardChar as usize..=Primitive::EndOfLine as usize)
         .contains(&(p as usize))
     {
         let mut signal = None;
@@ -2961,7 +3078,10 @@ fn primitive_value(
     match call(e.vm, p, start, argc) {
         Ok(value) => Some(value),
         Err(error) => {
-            if let Some((condition, data)) = e.vm.primitive_condition(p, start, argc, &error) {
+            // A variable watcher's own signal travels behind set/makunbound's text.
+            if matches!(p, Primitive::Set | Primitive::Makunbound) && let Some(escape) = e.vm.propagated_escape.take() {
+                e.escape = Some(escape);
+            } else if let Some((condition, data)) = e.vm.primitive_condition(p, start, argc, &error) {
                 e.escape = Some(Escape::Signal(condition, data));
             }
             e.error = Some(error);
@@ -2969,6 +3089,9 @@ fn primitive_value(
         }
     }
 }
+/// A primitive through the site's entry cache, which holds its call. Six
+/// register arguments: a seventh on the stack would stop every caller from
+/// tail-calling it, so each funcall or apply of a primitive kept a frame.
 unsafe fn cached_primitive(
     e: &mut Engine<'_>,
     r: *mut Value,
@@ -2976,9 +3099,9 @@ unsafe fn cached_primitive(
     target: Value,
     start: usize,
     argc: usize,
-    call: PrimitiveCall,
 ) -> Value {
     unsafe {
+        let call = e.entries.get_unchecked((*pc).site).primitive.expect("cached primitive call");
         enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
@@ -3035,7 +3158,7 @@ unsafe fn primitive(
 unsafe fn widen_registers(e: &mut Engine<'_>, r: *mut Value, width: usize) -> Option<*mut Value> {
     unsafe {
         let width = width.max(e.vm.register_width);
-        let frames = (e.frames.len() + 3).max(513).checked_next_power_of_two()?;
+        let frames = (e.frames.len() + 3).max(MIN_FRAMES).checked_next_power_of_two()?;
         let size = width.checked_mul(frames)?.checked_add(4096)?;
         let old_base = e.vm.stack.as_ptr();
         let current = r.offset_from(old_base) as usize;
@@ -3090,10 +3213,10 @@ unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Opti
         e.vm.gc_threshold = threshold;
         e.vm.stack = stack;
         e.vm.external_roots = external;
-        e.vm.execution = Program::default();
+        e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
             fail(e, "register storage overflow");
             return None;
         };
@@ -3160,10 +3283,10 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         e.vm.gc_threshold = threshold;
         e.vm.stack = stack;
         e.vm.external_roots = external;
-        e.vm.execution = Program::default();
+        e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
             fail(e, "register storage overflow");
             return None;
         };
@@ -3230,10 +3353,10 @@ unsafe fn reentrant_load(
         e.vm.gc_threshold = threshold;
         e.vm.stack = stack;
         e.vm.external_roots = external;
-        e.vm.execution = Program::default();
+        e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
             return fail(e, "register storage overflow");
         };
         if e.vm.stack.len() < size { e.vm.stack.resize(size, Value::NIL); }
@@ -3299,7 +3422,7 @@ macro_rules! numeric {
 }
 numeric!(mul, |x: Value, y: Value| ((x.0 as i64) >> 2)
     .checked_mul((y.0 as i64) >> 2)
-    .and_then(|n| Value::integer(n).ok()));
+    .and_then(|n| Value::fixnum(n)));
 numeric!(add, |x: Value, y: Value| (x.0 as i64)
     .checked_add((y.0 - 1) as i64)
     .map(|n| Value(n as u64)));
@@ -3330,36 +3453,52 @@ unsafe fn insert_string(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
         if e.vm.slots[i.b].function != i.value {
             return direct(e, r, pc);
         }
-        let s = *r.add(i.d);
-        let t = e.vm.slots[e.vm.buffer_slot].value;
-        if s == Value::NIL || s.tag() != 0 || t == Value::NIL || t.tag() != 0 || s == t {
-            return direct(e, r, pc);
+        match quiet_insert(e.vm, *r.add(i.d)) {
+            None => direct(e, r, pc),
+            Some(false) => fail(e, "an insertion's undo record or deactivate-mark failed"),
+            Some(true) => {
+                *r.add(i.a) = Value::NIL;
+                advance(e, r, pc)
+            }
         }
-        let a = s.payload() as usize - 1;
-        let b = t.payload() as usize - 1;
-        if a.max(b) >= e.vm.objects.len() {
-            return direct(e, r, pc);
-        }
-        if e.vm.ensure_buffer_writable().is_err() {
-            return direct(e, r, pc);
-        }
-        let (source, target) = if a < b {
-            let (x, y) = e.vm.objects.split_at_mut(b);
-            (&x[a], &mut y[0])
-        } else {
-            let (x, y) = e.vm.objects.split_at_mut(a);
-            (&y[0], &mut x[b])
-        };
-        let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
-            return direct(e, r, pc);
-        };
-        if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
-            return direct(e, r, pc);
-        }
-        e.vm.display_state.version += 1;
-        *r.add(i.a) = Value::NIL;
-        advance(e, r, pc)
     }
+}
+/// `insert_string''s insertion of string S at the end of the current
+/// buffer when it runs no Lisp: None for the general call, Some(false) if
+/// its undo record or mark deactivation failed. Kept out of line, as
+/// `buffer_read_value' is, so the handler's dispatch stays a tail call.
+#[inline(never)]
+fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
+    let t = vm.slots[vm.buffer_slot].value;
+    if s == Value::NIL || s.tag() != 0 || t == Value::NIL || t.tag() != 0 || s == t {
+        return None;
+    }
+    let a = s.payload() as usize - 1;
+    let b = t.payload() as usize - 1;
+    if a.max(b) >= vm.objects.len() {
+        return None;
+    }
+    // Only an insertion that runs no Lisp skips the general bracket.
+    let quiet = vm.quiet_insertion()?;
+    let (source, target) = if a < b {
+        let (x, y) = vm.objects.split_at_mut(b);
+        (&x[a], &mut y[0])
+    } else {
+        let (x, y) = vm.objects.split_at_mut(a);
+        (&y[0], &mut x[b])
+    };
+    let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
+        return None;
+    };
+    let length = chars.len();
+    if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
+        return None;
+    }
+    if vm.quiet_inserted(quiet, length).is_err() {
+        return Some(false);
+    }
+    vm.display_state.version += 1;
+    Some(true)
 }
 unsafe fn remainder(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
@@ -3372,63 +3511,7 @@ unsafe fn remainder(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value
         if x.tag() != 1 || y.tag() != 1 || y.0 as i64 >> 2 == 0 {
             return direct(e, r, pc);
         }
-        *r.add(i.a) = Value::integer((x.0 as i64 >> 2) % (y.0 as i64 >> 2)).unwrap();
-        advance(e, r, pc)
-    }
-}
-unsafe fn search_character(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
-    unsafe {
-        let i = &*pc;
-        if e.vm.slots[i.b].function != i.value {
-            return direct(e, r, pc);
-        }
-        let needle = *r.add(i.d);
-        if needle == Value::NIL || needle.tag() != 0 {
-            return direct(e, r, pc);
-        }
-        let Some(data::Object::String(s)) = e.vm.objects.get(needle.payload() as usize - 1) else {
-            return direct(e, r, pc);
-        };
-        if s.len() != 1 {
-            return direct(e, r, pc);
-        }
-        let ch = s.get(coordinates::CharOffset(0)).unwrap() as u32;
-        let width = s.as_str().len();
-        let v = e.vm.slots[e.vm.buffer_slot].value;
-        if v == Value::NIL || v.tag() != 0 {
-            return direct(e, r, pc);
-        }
-        let Some(data::Object::Buffer(t)) = e.vm.objects.get_mut(v.payload() as usize - 1) else {
-            return direct(e, r, pc);
-        };
-        let bound = if i.e > 1 && *r.add(i.d + 1) != Value::NIL {
-            let x = *r.add(i.d + 1);
-            if x.tag() != 1 || x.0 as i64 >> 2 < 1 {
-                return direct(e, r, pc);
-            }
-            let Ok(b) = t.byte_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1))
-            else {
-                return direct(e, r, pc);
-            };
-            b
-        } else {
-            t.accessible().end
-        };
-        if bound < t.point || bound > t.accessible().end {
-            return direct(e, r, pc);
-        }
-        let value = if let Some(at) = t.find_character(ch, t.point, bound) {
-            t.point = coordinates::ByteOffset(at.0 + width);
-            Value::integer((t.char_of_byte(t.point).unwrap().0 + 1) as i64).unwrap()
-        } else if i.e > 2 && *r.add(i.d + 2) != Value::NIL {
-            if *r.add(i.d + 2) != Value::TRUE {
-                t.point = bound;
-            }
-            Value::NIL
-        } else {
-            return direct(e, r, pc);
-        };
-        *r.add(i.a) = value;
+        *r.add(i.a) = Value::fixnum((x.0 as i64 >> 2) % (y.0 as i64 >> 2)).unwrap();
         advance(e, r, pc)
     }
 }
@@ -3447,8 +3530,8 @@ unsafe fn sequence_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
         };
         let result = if i.e == 1 {
             match object {
-                data::Object::String(s) | data::Object::RawString(s) => Value::integer(s.len() as i64).ok(),
-                data::Object::Vector(s) | data::Object::Record(s) => Value::integer(s.len() as i64).ok(),
+                data::Object::String(s) | data::Object::RawString(s) => Value::fixnum(s.len() as i64),
+                data::Object::Vector(s) | data::Object::Record(s) => Value::fixnum(s.len() as i64),
                 _ => None,
             }
         } else {
@@ -3460,7 +3543,7 @@ unsafe fn sequence_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
             match object {
                 data::Object::String(s) | data::Object::RawString(s) => s
                     .char_code(coordinates::CharOffset(at))
-                    .and_then(|c| Value::integer(c as i64).ok()),
+                    .and_then(|c| Value::fixnum(c as i64)),
                 data::Object::Vector(s) | data::Object::Record(s) => s.get(at).copied(),
                 _ => None,
             }
@@ -3478,75 +3561,73 @@ unsafe fn buffer_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
         if e.vm.slots[i.b].function != i.value {
             return direct(e, r, pc);
         }
-        let v = e.vm.slots[e.vm.buffer_slot].value;
-        if v == Value::NIL || v.tag() != 0 {
-            return direct(e, r, pc);
-        }
-        let Some(data::Object::Buffer(t)) = e.vm.objects.get_mut(v.payload() as usize - 1) else {
+        let x = if i.e == 0 { Value::NIL } else { *r.add(i.d) };
+        let Some(value) = buffer_read_value(e.vm, i.value, x) else {
             return direct(e, r, pc);
         };
-        let kind = (i.value.0 >> 3) as usize;
-        let accessible = t.accessible();
-        let number = if kind == Primitive::CharAfter as usize {
-            let x = if i.e == 0 { Value::NIL } else { *r.add(i.d) };
-            if x != Value::NIL
-                && x.tag() == 1
-                && x.0 as i64 >> 2 >= 1
-                && accessible.start.0 == 0
-                && accessible.end.0 == t.len_bytes()
-            {
-                let Ok(ch) =
-                    t.character_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1))
-                else {
-                    return direct(e, r, pc);
-                };
-                *r.add(i.a) = ch
-                    .map(|n| Value::integer(n as i64).unwrap())
-                    .unwrap_or(Value::NIL);
-                return advance(e, r, pc);
-            }
-            let p = if x == Value::NIL {
-                t.point
-            } else {
-                if x.tag() != 1 || x.0 as i64 >> 2 < 1 {
-                    return direct(e, r, pc);
-                }
-                let Ok(b) = t.byte_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1))
-                else {
-                    return direct(e, r, pc);
-                };
-                b
-            };
-            if accessible.contains(&p) {
-                t.character_at(p).unwrap()
-            } else {
-                None
-            }
-        } else if kind == Primitive::GotoChar as usize {
-            let x = *r.add(i.d);
-            if x.tag() != 1 {
-                return direct(e, r, pc);
-            }
-            let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
-            t.point = t
-                .byte_of_char(coordinates::CharOffset(c.min(t.len_chars())))
-                .unwrap()
-                .clamp(accessible.start, accessible.end);
-            Some(x.0 as i64 >> 2)
-        } else if kind == Primitive::Point as usize {
-            Some((t.char_of_byte(t.point).unwrap().0 + 1) as i64)
-        } else if kind == Primitive::PointMin as usize {
-            Some((t.char_of_byte(accessible.start).unwrap().0 + 1) as i64)
-        } else if kind == Primitive::PointMax as usize {
-            Some((t.char_of_byte(accessible.end).unwrap().0 + 1) as i64)
-        } else {
-            Some(t.len_chars() as i64)
-        };
-        *r.add(i.a) = number
-            .map(|n| Value::integer(n).unwrap())
-            .unwrap_or(Value::NIL);
+        *r.add(i.a) = value;
         advance(e, r, pc)
     }
+}
+/// The fast buffer read of `buffer_read' (char-after, goto-char, point,
+/// point-min, point-max, buffer-size) with argument X, or None for the
+/// general call. Kept out of line: its locals would otherwise stay live
+/// across the handler's dispatch to the next instruction, which then
+/// cannot be a tail call, and every loop iteration keeps a native frame.
+#[inline(never)]
+fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
+    let v = vm.slots[vm.buffer_slot].value;
+    if v == Value::NIL || v.tag() != 0 {
+        return None;
+    }
+    let Some(data::Object::Buffer(t)) = vm.objects.get_mut(v.payload() as usize - 1) else {
+        return None;
+    };
+    let kind = (target.0 >> 3) as usize;
+    let accessible = t.accessible();
+    let number = if kind == Primitive::CharAfter as usize {
+        if x != Value::NIL
+            && x.tag() == 1
+            && x.0 as i64 >> 2 >= 1
+            && accessible.start.0 == 0
+            && accessible.end.0 == t.len_bytes()
+        {
+            let ch = t.character_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1)).ok()?;
+            return Some(ch.map(|n| Value::fixnum(n as i64).unwrap()).unwrap_or(Value::NIL));
+        }
+        let p = if x == Value::NIL {
+            t.point
+        } else {
+            if x.tag() != 1 || x.0 as i64 >> 2 < 1 {
+                return None;
+            }
+            t.byte_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1)).ok()?
+        };
+        if accessible.contains(&p) {
+            t.character_at(p).unwrap()
+        } else {
+            None
+        }
+    } else if kind == Primitive::GotoChar as usize {
+        if x.tag() != 1 {
+            return None;
+        }
+        let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
+        t.point = t
+            .byte_of_char(coordinates::CharOffset(c.min(t.len_chars())))
+            .unwrap()
+            .clamp(accessible.start, accessible.end);
+        Some(x.0 as i64 >> 2)
+    } else if kind == Primitive::Point as usize {
+        Some((t.char_of_byte(t.point).unwrap().0 + 1) as i64)
+    } else if kind == Primitive::PointMin as usize {
+        Some((t.char_of_byte(accessible.start).unwrap().0 + 1) as i64)
+    } else if kind == Primitive::PointMax as usize {
+        Some((t.char_of_byte(accessible.end).unwrap().0 + 1) as i64)
+    } else {
+        Some(t.len_chars() as i64)
+    };
+    Some(number.map(|n| Value::fixnum(n).unwrap()).unwrap_or(Value::NIL))
 }
 unsafe fn cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
@@ -3627,7 +3708,10 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 Op::SetGlobal(slot, reg) => {
                     let value = *r.add(reg);
                     if let Err(error) = e.vm.set_variable_value(slot, value) {
-                        if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
+                        // A variable watcher's own signal, else a forwarded store fault.
+                        if let Some(escape) = e.vm.propagated_escape.take() {
+                            e.escape = Some(escape);
+                        } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
                             e.escape = Some(Escape::Signal(condition, data));
                         }
                         return Err(error);
@@ -3636,6 +3720,10 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 Op::Bind(slot, reg) => {
                     let value = *r.add(reg);
                     if let Err(error) = e.vm.bind_variable(slot, value) {
+                        if let Some(escape) = e.vm.propagated_escape.take() {
+                            e.escape = Some(escape);
+                            return Err(error);
+                        }
                         if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
                             e.escape = Some(Escape::Signal(condition, data));
                         }

@@ -151,6 +151,25 @@ fn table_entries_are_unique_and_cite_gnu() {
     }
 }
 
+/// Plain C specials cite their DEFVAR line exactly, never overlap the
+/// forwarded table, and stay localizable like ordinary variables.
+#[test]
+fn c_specials_cite_their_defvar_and_are_localizable() {
+    let source = std::path::PathBuf::from(std::env::var("ROMACS_GNU_SOURCE").expect("pinned GNU source")).join("src");
+    let forwarded: std::collections::HashSet<_> = C_VARIABLES.iter().map(|v| v.name).collect();
+    let mut seen = std::collections::HashSet::new();
+    for v in C_SPECIALS {
+        assert!(seen.insert(v.name) && !forwarded.contains(v.name), "duplicate {}", v.name);
+        let (file, line) = v.gnu.split_once(':').expect("FILE:LINE");
+        let text = std::fs::read_to_string(source.join(file)).unwrap();
+        let at = text.lines().nth(line.parse::<usize>().unwrap() - 1).unwrap_or("");
+        assert!(at.contains("DEFVAR_") && at.contains(&format!("\"{}\"", v.name)), "{}: {} is not its DEFVAR", v.name, v.gnu);
+    }
+    let mut vm = Vm::new();
+    let source = "(list (special-variable-p 'show-trailing-whitespace) (with-temp-buffer (set (make-local-variable 'show-trailing-whitespace) t) (local-variable-p 'show-trailing-whitespace)) show-trailing-whitespace)";
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(t t nil)");
+}
+
 /// These loader DEFVAR_LISPs begin at Qnil in syms_of_lread. The dumped GNU
 /// image has run Lisp that filled its history (and `load' rebinds its list), so
 /// the transcripts cannot show the C-time value; this pins it, and that both

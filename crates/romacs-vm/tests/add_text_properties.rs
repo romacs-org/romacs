@@ -153,18 +153,21 @@ fn property_values_survive_collection_and_invalid_plists_are_atomic() {
 }
 
 #[test]
-fn unsupported_callbacks_and_property_keys_refuse_without_mutation() {
+fn change_hooks_run_and_unsupported_keys_refuse_without_mutation() {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    // GNU (lexical): the hook runs once; inhibited, it does not run again.
     let source = r#"(with-temp-buffer (insert "abc")
-      (let ((calls 0) (before-change-functions (list (lambda (&rest args) (setq calls (1+ calls))))))
+      (let* ((calls 0) (before-change-functions (list (lambda (&rest args) (setq calls (1+ calls))))))
         (list (condition-case e (add-text-properties 1 4 '(p 7)) (error e))
           (get-text-property 1 'p) calls
-          (let ((inhibit-modification-hooks t)) (add-text-properties 1 4 '(p 7)))
-          (condition-case e (add-text-properties 1 4 (list 'p 8 (make-symbol "p") 9)) (error e))
+          (let ((inhibit-modification-hooks t)) (add-text-properties 1 4 '(p 8)))
+          calls (get-text-property 1 'p)
+          (condition-case e (add-text-properties 1 4 (list 'p 9 (make-symbol "p") 9)) (error e))
           (get-text-property 1 'p) (point))))"#;
     assert_eq!(
         vm.eval_source(source).unwrap().display().unwrap(),
-        "((error \"text property changes with modification hooks are not implemented\") nil 0 t (error \"text property keys other than interned symbols are not implemented\") 7 4)"
+        "(t 7 1 t 1 8 (error \"text property keys other than interned symbols are not implemented\") 8 4)"
     );
 }
 

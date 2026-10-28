@@ -65,7 +65,7 @@ impl Vm {
         // only direct edges here; index descendants lazily only when unboxing
         // reaches them, then optimize each changed function once.
         // Shared mutable captures retain location semantics after macro expansion.
-        let mut functions = HashMap::new();
+        let mut functions = HashMap::default();
         let mut root = self.binding_summary(Bindings::index(&b.code, &b.sites, b.next));
         let mut pending = Vec::new();
         for &op in &b.code {

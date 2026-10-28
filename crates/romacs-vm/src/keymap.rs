@@ -1,6 +1,9 @@
 //! Keymaps use a traced, Lisp-mutable cons graph, with character tables for dense maps.
 //! No Rust side table caches bindings: setcdr/nconc edits remain authoritative.
 use super::*;
+
+/// A walk stopped at a menu filter it has no result for yet.
+pub(crate) const KEYMAP_FILTER_PENDING: &str = "keymap menu filter must be evaluated (VM2 key-binding and define-key do not)";
 use data::Object;
 
 struct KeyEvent { value: Value, input_index: usize }
@@ -31,8 +34,10 @@ impl Vm {
         // and a bare VM must stay bare: the collector's tests assert exact heap
         // contents and arena indices, so a skeleton allocated in the constructor
         // silently rewrites what "empty heap" means for every one of them.
-        // Installing on first keymap use keeps both properties true.
-        if self.names.contains_key("global-map") {
+        // Installing on first keymap use keeps both properties true. The
+        // internal map marks installation: reading a form interns
+        // `global-map' before any keymap primitive runs.
+        if self.names.contains_key("#:vm2-global-keymap") {
             return;
         }
         self.initialize_keymaps();
@@ -44,6 +49,13 @@ impl Vm {
             let map = self.sparse_keymap(Value::NIL);
             self.declare_special_raw(name, map);
         }
+        // keyboard.c init_kboard: the terminal's input-decode-map starts
+        // empty and its local-function-key-map inherits function-key-map.
+        let decode = self.sparse_keymap(Value::NIL);
+        self.declare_special_raw("input-decode-map", decode);
+        let head = self.keymap_symbol("keymap");
+        let local = self.keymap_cons(head, self.slots[self.names["function-key-map"]].value);
+        self.declare_special_raw("local-function-key-map", local);
         for (name, alias, event) in [("esc-map", "ESC-prefix", 27), ("ctl-x-map", "Control-X-prefix", 24)] {
             let map = self.slots[self.names[name]].value;
             let slot = self.slot(alias);
@@ -56,6 +68,19 @@ impl Vm {
         self.declare_special_raw("meta-prefix-char", Value::integer(27).unwrap());
         self.initialize_command_bindings(global);
     }
+    /// One `lookup-key' walk with FILTERS as the known menu-filter results:
+    /// the binding, or the first filter still to run.
+    pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)
+        -> Result<std::result::Result<Value, (Value, Value, Value)>> {
+        self.keymap_filters = filters;
+        self.keymap_pending_filter = None;
+        let result = self.key_events(key).and_then(|events| self.lookup_keymap_key(map, &events, defaults));
+        self.keymap_filters.clear();
+        match result {
+            Err(e) if e == KEYMAP_FILTER_PENDING => Ok(Err(self.keymap_pending_filter.take().expect("pending filter"))),
+            other => other.map(Ok),
+        }
+    }
     pub(super) fn resolve_keymap(&self, mut value: Value) -> Option<Value> {
         for _ in 0..=self.slots.len() {
             if let Ok((head, _)) = self.cons_pair(value) {
@@ -66,21 +91,38 @@ impl Vm {
         }
         None
     }
-    fn keymap_definition(&self, mut value: Value) -> Result<Value> {
+    /// keymap.c get_keyelt with AUTOLOAD: a menu item's `:filter' result
+    /// comes from `keymap_filters'; one not computed yet is left pending
+    /// for the caller to run (KEYMAP_FILTER_PENDING).
+    fn keymap_definition(&mut self, mut value: Value) -> Result<Value> {
         for _ in 0..=64 {
             let Ok((head, tail)) = self.cons_pair(value) else { return Ok(value); };
             if self.names.get("menu-item").is_some_and(|&s| head == Value::reference(s + 1, 7)) {
+                let item = value;
                 let Ok((_, definition)) = self.cons_pair(tail) else { return Ok(value); };
+                let object = self.cons_pair(definition).map_or(definition, |p| p.0);
                 let mut properties = definition;
+                let mut filter = None;
                 for _ in 0..=self.list_limit() {
                     let Ok((key, next)) = self.cons_pair(properties) else { break; };
+                    if self.cons_pair(next).is_err() { break; }
                     if self.names.get(":filter").is_some_and(|&s| key == Value::reference(s + 1, 7)) {
-                        return Err("keymap menu filters are not supported".into());
+                        filter = Some(self.cons_pair(next)?.0);
+                        break;
                     }
                     properties = next;
                     if properties == definition { return Err("circular menu item".into()); }
                 }
-                value = self.cons_pair(definition).map_or(definition, |p| p.0);
+                value = match filter {
+                    None => object,
+                    Some(filter) => match self.keymap_filters.iter().find(|(i, _)| *i == item) {
+                        Some(&(_, result)) => result,
+                        None => {
+                            self.keymap_pending_filter = Some((item, filter, object));
+                            return Err(KEYMAP_FILTER_PENDING.into());
+                        }
+                    },
+                };
             } else if self.str_view(head).is_some() {
                 value = tail;
             } else { return Ok(value); }
@@ -295,6 +337,26 @@ impl Vm {
             Err("Invalid base event".into())
         }
     }
+    /// keyboard.c lucid_event_type_list_p: a proper list of symbols and
+    /// fixnums not headed by a mode-line-like area symbol.
+    fn lucid_event_type_list_p(&self, object: Value) -> bool {
+        let Ok((head, _)) = self.cons_pair(object) else { return false };
+        if ["help-echo", "vertical-line", "mode-line", "tab-line", "header-line"].iter()
+            .any(|name| self.names.get(*name).is_some_and(|&slot| head == Value::reference(slot + 1, 7))) {
+            return false;
+        }
+        let mut tail = object;
+        for _ in 0..=self.list_limit() {
+            match self.cons_pair(tail) {
+                Ok((element, rest)) => {
+                    if element.integer_value().is_none() && element.tag() != 7 && element != Value::NIL && element != Value::TRUE { return false; }
+                    tail = rest;
+                }
+                Err(_) => return tail == Value::NIL,
+            }
+        }
+        false
+    }
     fn key_events(&mut self, sequence: Value) -> Result<Vec<KeyEvent>> {
         let (raw, bytes) = if let Some(view) = self.str_view(sequence) {
             (view.chars().map(|c| Value::integer(c as i64).unwrap()).collect(), !view.is_multibyte())
@@ -305,7 +367,17 @@ impl Vm {
         let mut events = vec![];
         for (input_index, mut event) in raw.into_iter().enumerate() {
             if event.tag() == 3 {
-                event = self.key_event_from_list(event)?;
+                // keymap.c: a modifier list (lucid_event_type_list_p) is
+                // converted; another list, such as a mouse click, stands
+                // for its EVENT_HEAD. A character head would be define-key's
+                // (FROM . TO) range, which VM2 does not store.
+                event = if self.lucid_event_type_list_p(event) {
+                    self.key_event_from_list(event)?
+                } else {
+                    let head = self.cons_pair(event)?.0;
+                    if head.integer_value().is_some() { return Err("character range key events are unsupported".into()); }
+                    head
+                };
             }
             if event.tag() == 7 {
                 event = self.canonical_key_event_symbol(event)?;
@@ -319,7 +391,7 @@ impl Vm {
                     c &= !meta;
                 }
                 event = Value::integer(c)?;
-            } else if event.tag() != 7 && event != Value::TRUE && self.str_view(event).is_none() {
+            } else if event.tag() != 7 && event != Value::NIL && event != Value::TRUE && self.str_view(event).is_none() {
                 return Err("integer or symbol event required".into());
             }
             events.push(KeyEvent { value: event, input_index });
@@ -341,7 +413,15 @@ impl Vm {
         Ok(Value::NIL)
     }
     fn lookup_keymap_key(&mut self, map: Value, events: &[KeyEvent], defaults: bool) -> Result<Value> {
-        let mut map = self.resolve_keymap(map).ok_or("keymap required")?;
+        // lookup_key_1: a cons is searched as it is, so a list of keymaps
+        // acts as their composition; nil is an empty keymap.
+        let is_list = map == Value::NIL || map.tag() == 3;
+        if events.is_empty() && is_list { return Ok(map); }
+        let mut map = match self.resolve_keymap(map) {
+            Some(map) => map,
+            None if is_list => { let keymap = self.intern("keymap"); self.keymap_cons(keymap, map) }
+            None => return Err("keymap required".into()),
+        };
         for (i, event) in events.iter().enumerate() {
             let event = event.value;
             let binding = self.keymap_entry(map, event, true, defaults)?.unwrap_or(Value::NIL);
@@ -416,7 +496,8 @@ impl Vm {
                 Ok(Value::NIL)
             }
             KeyBinding => {
-                if n > 2 && args[2..].iter().any(|v| *v != Value::NIL) { return Err("key-binding position/no-remap not supported".into()); }
+                // VM2 key-binding never remaps, which is NO-REMAP t's lookup.
+                if n > 3 && args[3] != Value::NIL { return Err("key-binding POSITION not supported".into()); }
                 let events = self.key_events(args[0])?;
                 let index = self.buffer_index()?;
                 let Object::Buffer(buffer) = &self.objects[index] else { return Err("Unicode buffer required".into()); };

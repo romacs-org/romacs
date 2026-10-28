@@ -5,7 +5,7 @@ use super::*;
 fn list(cx: &mut Leaf<'_>, items: &[Value]) -> Value {
     cx.coding_list(items)
 }
-fn realize(cx: &mut Leaf<'_>, name: Value, saved: Vec<Value>, then: crate::prim::Then) -> Next {
+pub(super) fn realize(cx: &mut Leaf<'_>, name: Value, saved: Vec<Value>, then: crate::prim::Then) -> Next {
     let form = cx.coding_define_form(name, true)?;
     if form == Value::NIL {
         return then(cx, Value::NIL, &saved);
@@ -213,3 +213,74 @@ defsubr! { name = "decode-coding-string", gnu = "coding.c:10487", effect = Globa
 fn decode_coding_string(cx, string: Value, coding: Value; optional nocopy: Value, buffer: Value) -> Step {
     convert_string(cx, false, string, coding, nocopy, buffer)
 }}
+
+defsubr! { name = "set-safe-terminal-coding-system-internal", gnu = "coding.c:10704", effect = Global,
+fn set_safe_terminal_coding_system_internal(cx, coding: Value) {
+    // Romacs writes no terminal output; the checked coding is kept for
+    // whatever later encodes for a terminal (safe_terminal_coding).
+    if cx.kind(coding) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", coding)); }
+    let coding = cx.coding_check(coding)?;
+    let slot = cx.intern("#:vm2-safe-terminal-coding");
+    cx.variable_set(slot, coding)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "set-coding-system-priority", gnu = "coding.c:10875", effect = Global,
+fn set_coding_system_priority(cx; rest systems) { cx.set_coding_system_priority(systems) }}
+
+defsubr! { name = "coding-system-priority-list", gnu = "coding.c:10933", effect = Reads,
+fn coding_system_priority_list(cx; optional highestp: Value) { cx.coding_system_priority_list(highestp) }}
+
+defsubr! { name = "set-terminal-coding-system-internal", gnu = "coding.c:10682", effect = Global,
+fn set_terminal_coding_system_internal(cx, coding: Value; optional terminal: Value) {
+    let (terminal, _, _) = cx.windows().terminal_codings(terminal)?;
+    if cx.kind(coding) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", coding)); }
+    // setup_coding_system treats nil as undecided.
+    let coding = if cx.coding_check(coding)? == Value::NIL { cx.intern("undecided") } else { coding };
+    cx.windows().set_terminal_coding(terminal, false, coding)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "terminal-coding-system", gnu = "coding.c:10720", effect = Reads,
+fn terminal_coding_system(cx; optional terminal: Value) {
+    let (_, coding, _) = cx.windows().terminal_codings(terminal)?;
+    // For backward compatibility, undecided reads as nil.
+    Ok(if coding == cx.intern("undecided") { Value::NIL } else { coding })
+}}
+
+defsubr! { name = "set-keyboard-coding-system-internal", gnu = "coding.c:10735", effect = Global,
+fn set_keyboard_coding_system_internal(cx, coding: Value; optional terminal: Value) {
+    let (terminal, _, _) = cx.windows().terminal_codings(terminal)?;
+    if cx.kind(coding) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", coding)); }
+    let coding = if coding == Value::NIL { cx.intern("no-conversion") } else { cx.coding_check(coding)?; coding };
+    cx.windows().set_terminal_coding(terminal, true, coding)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "keyboard-coding-system", gnu = "coding.c:10753", effect = Reads,
+fn keyboard_coding_system(cx; optional terminal: Value) {
+    let (_, _, coding) = cx.windows().terminal_codings(terminal)?;
+    Ok(coding)
+}}
+
+defsubr! { name = "find-coding-systems-region-internal", gnu = "coding.c:9087", effect = Reads,
+fn find_coding_systems_region_internal(cx, start: Value, end: Value; optional exclude: Value) {
+    cx.find_coding_systems_region(start, end, exclude)
+}}
+
+// Ffind_operation_coding_system: the coding pair the alist for OPERATION
+// gives its target, calling a function entry with the whole argument list.
+defsubr! { name = "find-operation-coding-system", gnu = "coding.c:10763", effect = Global,
+fn find_operation_coding_system(cx, operation: Value; rest arguments) -> Step {
+    let args: Vec<Value> = std::iter::once(operation).chain(arguments.iter().copied()).collect();
+    match cx.find_operation_coding(&args)? {
+        Ok(value) => Ok(Step::Done(value)),
+        Err(function) => {
+            let list = cx.coding_list(&args);
+            Ok(Step::Call { f: function, args: vec![list], then: operation_coding_found, saved: vec![] })
+        }
+    }
+}}
+fn operation_coding_found(cx: &mut Leaf<'_>, val: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(cx.operation_coding_pair(val)?))
+}

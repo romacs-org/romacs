@@ -196,9 +196,24 @@ fn returned(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
     Ok(Step::Done(value))
 }
 
+/// A unibyte non-ASCII NAME is an encoded file name (ENCODE_FILE's output,
+/// which `set-auto-coding-function' receives). VM2 file names are UTF-8, so
+/// its bytes name the same file as the multibyte string they spell.
+fn decoded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fault> {
+    let view = cx.string_view(name)?;
+    if view.is_multibyte() || view.bytes().is_ascii() { return Ok(name); }
+    let bytes = view.bytes().to_vec();
+    super::filename::utf8_file_names(cx, "file-name-case-insensitive-p")?;
+    if std::str::from_utf8(&bytes).is_err() {
+        return Err(Fault::Error("VM2 file-name-case-insensitive-p of a non-UTF-8 unibyte file name is unsupported".into()));
+    }
+    Ok(cx.make_string(bytes, true))
+}
+
 defsubr! { name = "file-name-case-insensitive-p", gnu = "fileio.c:2688", effect = Global,
 fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
     cx.string_bytes(filename)?;
+    let filename = decoded_name(cx, filename)?;
     let expansion = cx.intern("expand-file-name");
     if super::fileio::find_file_name_handler(cx, filename, expansion)? != Value::NIL {
         return Err(Fault::Error("VM2 file-name-case-insensitive-p expand-file-name handler is unsupported".into()));
@@ -220,11 +235,9 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
 
 // Deliberately differs from pinned GNU's Linux constant: observe existing
 // directory entries only. Never create a probe or infer from the OS name.
+// Like GNU, a directory that cannot tell defers to its ancestors.
 #[cfg(unix)]
 fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    use std::os::unix::fs::MetadataExt;
-    let identity = |m: &std::fs::Metadata| (m.dev(), m.ino());
     let mut directory = path;
     loop {
         match std::fs::metadata(directory) {
@@ -240,6 +253,40 @@ fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bo
             Err(_) => return Err("cannot stat path"),
         }
     }
+    // fileio.c Ffile_name_case_insensitive_p: a directory that cannot say
+    // defers to its parent; the answer is still the nearest measurement.
+    loop {
+        match stable_case_witness(directory) {
+            Err(NO_WITNESS) => directory = directory.parent().ok_or(NO_WITNESS)?,
+            result => return result,
+        }
+    }
+}
+
+const NO_WITNESS: &str = "no unambiguous ASCII case witness";
+const ENTRY_CHANGED: &str = "entry changed during probe";
+const DIRECTORY_CHANGED: &str = "directory changed during probe";
+
+/// `case_witness', observed again (at most 8 times) while DIRECTORY or the
+/// witnessing entry changes under the probe: visits and saves ask about
+/// directories other processes write to, and only a stable observation
+/// answers.
+#[cfg(unix)]
+fn stable_case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'static str> {
+    let mut observation = case_witness(directory);
+    for _ in 1..8 {
+        if !matches!(observation, Err(ENTRY_CHANGED | DIRECTORY_CHANGED)) { break; }
+        observation = case_witness(directory);
+    }
+    observation
+}
+
+/// Classify DIRECTORY's filesystem from one of its own entries.
+#[cfg(unix)]
+fn case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'static str> {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    use std::os::unix::fs::MetadataExt;
+    let identity = |m: &std::fs::Metadata| (m.dev(), m.ino());
     let directory_before = std::fs::metadata(directory).map_err(|_| "cannot stat directory")?;
     let entries = std::fs::read_dir(directory).map_err(|_| "cannot read directory")?;
     let mut names = std::collections::HashSet::new();
@@ -256,7 +303,7 @@ fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bo
     for name in &names {
         let original = directory.join(name);
         let before =
-            std::fs::symlink_metadata(&original).map_err(|_| "entry changed during probe")?;
+            std::fs::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
         // Special files and symlinks are not reliable filesystem witnesses.
         if !(before.is_file() || before.is_dir()) {
             continue;
@@ -279,9 +326,9 @@ fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bo
                 continue;
             };
             let after =
-                std::fs::symlink_metadata(&original).map_err(|_| "entry changed during probe")?;
+                std::fs::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
             let directory_after =
-                std::fs::metadata(directory).map_err(|_| "directory changed during probe")?;
+                std::fs::metadata(directory).map_err(|_| DIRECTORY_CHANGED)?;
             if identity(&before) != identity(&after)
                 || identity(&directory_before) != identity(&directory_after)
                 || directory_before.mtime() != directory_after.mtime()
@@ -289,12 +336,12 @@ fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bo
                 || directory_before.ctime() != directory_after.ctime()
                 || directory_before.ctime_nsec() != directory_after.ctime_nsec()
             {
-                return Err("directory changed during probe");
+                return Err(DIRECTORY_CHANGED);
             }
             return Ok(result);
         }
     }
-    Err("no unambiguous ASCII case witness")
+    Err(NO_WITNESS)
 }
 
 // An explicitly listed alternate spelling with the same inode is a hardlink,

@@ -272,7 +272,12 @@ impl Vm {
             return Ok(out);
         }
         if let Some(crate::data::Object::HashTable(t)) = self.object_if(value) {
-            return self.print_table(t, |vm, v| vm.format_print(v, quoted, depth + 1));
+            return self.print_table(t, None, |vm, v| vm.format_print(v, quoted, depth + 1));
+        }
+        if let Some(crate::data::Object::Process(process)) = self.object_if(value) {
+            // print.c PVEC_PROCESS: princ prints the bare name.
+            let name = self.process_name_text(process);
+            return Ok(if quoted { format!("#<process {name}>") } else { name }.into_bytes());
         }
         self.display(value).map(String::into_bytes)
     }

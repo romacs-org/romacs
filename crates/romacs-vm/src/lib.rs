@@ -24,13 +24,30 @@ mod oclosure;
 mod host_input;
 mod terminal_host;
 mod process_jobs;
+mod subprocess;
 mod environment;
+mod watchers;
+mod user_db;
+mod processors;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
-use std::collections::{HashMap, HashSet};
+// Maps keyed by slots and ids the VM allocates use FxHash. Maps keyed by
+// names, which Lisp, files and the network supply, use foldhash with a random
+// seed per map, so a precomputed set of colliding names cannot make their
+// lookups quadratic.
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+type NameMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
+type NameSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
 use std::sync::Arc;
 mod code_image;
+mod sqlite;
+mod random;
+mod digest;
+mod posix_tz;
+mod tzfile;
+mod undo;
+mod insdel;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
@@ -81,6 +98,7 @@ mod productivity;
 mod protocol;
 mod reader;
 mod regexp;
+mod syntax_scan;
 mod surface;
 mod tails;
 mod prim;
@@ -202,10 +220,15 @@ impl Value {
         (self.0 >> 3) - u64::from(self.0 & 7 == 2 && self != Self::TRUE)
     }
     pub fn integer(n: i64) -> Result<Self> {
-        if !(Self::MIN_FIXNUM..=Self::MAX_FIXNUM).contains(&n) {
-            return Err("fixnum overflow (bignums not implemented)".into());
-        }
-        Ok(Self(((n as u64) << 2) | 1))
+        Self::fixnum(n).ok_or_else(|| "fixnum overflow (bignums not implemented)".into())
+    }
+    /// The fixnum N, allocation-free for threaded handlers: a Result's error
+    /// String, or an out-of-line call returning through a stack slot, stops
+    /// LLVM from tail-dispatching to the next handler, so loops would grow
+    /// the native stack.
+    #[inline(always)]
+    pub fn fixnum(n: i64) -> Option<Self> {
+        (Self::MIN_FIXNUM..=Self::MAX_FIXNUM).contains(&n).then_some(Self(((n as u64) << 2) | 1))
     }
     fn integer_value(self) -> Option<i64> {
         (self.tag() == 1).then_some((self.0 as i64) >> 2)
@@ -269,21 +292,16 @@ enum Primitive {
     GotoChar,
     CharAfter,
     DeleteRegion,
-    SelfInsertCommand,
     ForwardChar,
     BackwardChar,
     BeginningOfLine,
     EndOfLine,
-    DeleteChar,
-    DeleteBackwardChar,
-    ThisCommandKeys,
     Substring,
     SearchForward,
     Narrow,
     Widen,
     CharToByte,
     ByteToChar,
-    PutProperty,
     GetProperty,
     SetMultibyte,
     BufferString,
@@ -399,7 +417,6 @@ enum Primitive {
     SelectedWindow,
     SelectedFrame,
     WindowBuffer,
-    SetWindowBuffer,
     WindowStart,
     WindowPoint,
     FramePixelWidth,
@@ -459,7 +476,6 @@ enum Primitive {
     Append,
     Prin1ToString,
     GetBuffer,
-    EraseBuffer,
     ForwardLine,
     SwitchToBuffer,
     EmacsLispMode,
@@ -482,6 +498,7 @@ enum Primitive {
     ClosureMetadata,
     ClosureDocument,
     MakeInterpretedClosure,
+    SearchBackward,
 }
 const PRIMITIVES: &[(&str, Primitive)] = &[
     ("+", Primitive::Add),
@@ -512,29 +529,26 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("%", Primitive::Remainder),
     ("current-buffer", Primitive::CurrentBuffer),
     ("set-buffer", Primitive::SetBuffer),
-    ("insert", Primitive::Insert),
+    // The storage kernel under `insert' (prims/insdel.rs), which runs no hooks.
+    ("#:vm2-insert", Primitive::Insert),
     ("point", Primitive::Point),
     ("point-min", Primitive::PointMin),
     ("point-max", Primitive::PointMax),
     ("buffer-size", Primitive::BufferSize),
     ("goto-char", Primitive::GotoChar),
     ("char-after", Primitive::CharAfter),
-    ("delete-region", Primitive::DeleteRegion),
-    ("self-insert-command", Primitive::SelfInsertCommand),
+    // The storage kernel under `delete-region' (prims/insdel.rs), which runs no hooks.
+    ("#:vm2-delete-region", Primitive::DeleteRegion),
     ("forward-char", Primitive::ForwardChar),
     ("backward-char", Primitive::BackwardChar),
     ("beginning-of-line", Primitive::BeginningOfLine),
     ("end-of-line", Primitive::EndOfLine),
-    ("delete-char", Primitive::DeleteChar),
-    ("delete-backward-char", Primitive::DeleteBackwardChar),
-    ("this-command-keys", Primitive::ThisCommandKeys),
     ("buffer-substring-no-properties", Primitive::Substring),
     ("search-forward", Primitive::SearchForward),
     ("narrow-to-region", Primitive::Narrow),
     ("widen", Primitive::Widen),
     ("position-bytes", Primitive::CharToByte),
     ("byte-to-position", Primitive::ByteToChar),
-    ("put-text-property", Primitive::PutProperty),
     ("get-text-property", Primitive::GetProperty),
     ("set-buffer-multibyte", Primitive::SetMultibyte),
     ("buffer-string", Primitive::BufferString),
@@ -554,7 +568,9 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("load", Primitive::Load),
     ("require", Primitive::Require),
     ("eval", Primitive::Eval),
-    ("provide", Primitive::Provide),
+    // `provide' is a T2 defsubr (prims/provide.rs) so it can run load hooks;
+    // the row stays because legacy primitive references are table ordinals.
+    ("#:vm2-provide", Primitive::Provide),
     ("featurep", Primitive::Featurep),
     ("message", Primitive::Message),
     ("list", Primitive::List),
@@ -563,8 +579,11 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("stringp", Primitive::Stringp),
     ("null", Primitive::Null),
     ("nconc", Primitive::Nconc),
-    ("expand-file-name", Primitive::ExpandFileName),
-    ("file-directory-p", Primitive::FileDirectoryP),
+    // T2 defsubrs (prims/expand_file_name.rs, prims/filesave.rs) so they can
+    // call file name handlers; the rows stay because legacy primitive
+    // references are table ordinals.
+    ("#:vm2-expand-file-name", Primitive::ExpandFileName),
+    ("#:vm2-file-directory-p", Primitive::FileDirectoryP),
     ("max", Primitive::Max),
     ("boundp", Primitive::Boundp),
     ("defalias", Primitive::Defalias),
@@ -576,7 +595,8 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("text-properties-at", Primitive::RawPropertiesAt),
     ("get-char-property", Primitive::GetCharProperty),
     ("buffer-substring", Primitive::BufferSubstring),
-    ("insert-and-inherit", Primitive::InsertInherit),
+    // The storage kernel under `insert-and-inherit' (prims/insdel.rs), which runs no hooks.
+    ("#:vm2-insert-and-inherit", Primitive::InsertInherit),
     ("kill-new", Primitive::KillNew),
     ("current-kill", Primitive::CurrentKill),
     ("#:vm2-yank-part", Primitive::YankPart),
@@ -597,7 +617,8 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
         "set-marker-insertion-type",
         Primitive::SetMarkerInsertionType,
     ),
-    ("insert-before-markers", Primitive::InsertBeforeMarkers),
+    // The storage kernel under `insert-before-markers' (prims/insdel.rs), which runs no hooks.
+    ("#:vm2-insert-before-markers", Primitive::InsertBeforeMarkers),
     ("make-overlay", Primitive::MakeOverlay),
     ("move-overlay", Primitive::MoveOverlay),
     ("delete-overlay", Primitive::DeleteOverlay),
@@ -658,7 +679,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("selected-window", Primitive::SelectedWindow),
     ("selected-frame", Primitive::SelectedFrame),
     ("window-buffer", Primitive::WindowBuffer),
-    ("set-window-buffer", Primitive::SetWindowBuffer),
     ("window-start", Primitive::WindowStart),
     ("window-point", Primitive::WindowPoint),
     ("frame-pixel-width", Primitive::FramePixelWidth),
@@ -699,7 +719,8 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("make-sparse-keymap", Primitive::MakeSparseKeymap),
     ("keymapp", Primitive::Keymapp),
     ("key-binding", Primitive::KeyBinding),
-    ("lookup-key", Primitive::LookupKey),
+    // `lookup-key' is a T2 subr (prims/keymap.rs) so menu filters can run.
+    ("#:vm2-lookup-key", Primitive::LookupKey),
     ("global-set-key", Primitive::GlobalSetKey),
     ("current-global-map", Primitive::CurrentGlobalMap),
     ("use-local-map", Primitive::UseLocalMap),
@@ -719,7 +740,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("append", Primitive::Append),
     ("prin1-to-string", Primitive::Prin1ToString),
     ("get-buffer", Primitive::GetBuffer),
-    ("erase-buffer", Primitive::EraseBuffer),
     ("forward-line", Primitive::ForwardLine),
     ("switch-to-buffer", Primitive::SwitchToBuffer),
     ("emacs-lisp-mode", Primitive::EmacsLispMode),
@@ -740,6 +760,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("#:vm2-closure-metadata", Primitive::ClosureMetadata),
     ("#:vm2-closure-document", Primitive::ClosureDocument),
     ("make-interpreted-closure", Primitive::MakeInterpretedClosure),
+    ("search-backward", Primitive::SearchBackward),
 ];
 #[cfg(test)]
 mod rest_tests;
@@ -862,8 +883,8 @@ struct LazyBody {
     args: Vec<Form>,
     names: Vec<Name>,
     cells: Vec<bool>,
-    local_specials: HashSet<String>,
-    pending_specials: HashSet<String>,
+    local_specials: NameSet<String>,
+    pending_specials: NameSet<String>,
     dynamic_scope: bool,
     /// A form whose expansion failed and was deferred to its reach (GNU
     /// expands each form when evaluation reaches it). Its own root is
@@ -891,9 +912,9 @@ impl Name {
 struct Builder {
     code: Vec<Op>,
     next: usize,
-    env: HashMap<Name, Binding>,
+    env: NameMap<Name, Binding>,
     sites: Vec<Vec<usize>>,
-    local_specials: HashSet<String>,
+    local_specials: NameSet<String>,
 }
 impl Builder {
     fn reg(&mut self) -> usize {
@@ -914,7 +935,6 @@ fn lambda_arity(args: &[Form]) -> Result<(usize, usize, bool)> {
     let mut required = 0;
     let mut optional = false;
     let mut rest = false;
-    let mut seen = HashSet::new();
     for (i, arg) in args.iter().enumerate() {
         let name = arg.name()?;
         if name.source() == Some("&optional") && !optional && !rest {
@@ -925,10 +945,11 @@ fn lambda_arity(args: &[Form]) -> Result<(usize, usize, bool)> {
             rest = true;
             continue;
         }
-        if name.source().is_some_and(|n| n.starts_with('&')) || !seen.insert(name.clone()) {
+        // GNU binds a repeated name again; the last binding wins.
+        if name.source().is_some_and(|n| n.starts_with('&')) {
             return Err("invalid lambda argument list".into());
         }
-        if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
+        if matches!(name.source(), Some("nil" | "t")) {
             return Err("cannot bind a constant".into());
         }
         if !optional && !rest {
@@ -1011,9 +1032,34 @@ pub(crate) enum SpecialKind {
     FileLocal = 1,
     Global = 2,
 }
+/// One recent_keys entry: an input character or event symbol, or the
+/// command it ran, which `recent-keys' shows as (nil . COMMAND).
+#[derive(Clone)]
+pub(crate) enum RecentKey { Char(i64), Event(String), Command(String) }
+/// lossage_limit's default.
+pub(crate) const RECENT_KEYS: usize = 300;
+
+/// timefns.c's local time zone after set-time-zone-rule: the process's
+/// TZ (the start), the system wall clock (nil or `wall'), GNU's utc_tz
+/// (t or 0), or a rule string.
+#[derive(Clone)]
+pub(crate) enum LocalZone { Process, Wall, Utc, Rule(String) }
+
 pub struct Vm {
     charsets: charset::Registry,
     standard_case_tables: [Value; 4],
+    /// undo.c's point_before_last_command_or_undo and its buffer.
+    command_point: (i64, Value),
+    /// A storage kernel runs inside insdel's bracket, which checked read-only.
+    change_prepared: bool,
+    /// The storage kernels' argument stack, reused across changes
+    /// (`insdel::edit_kernel').
+    kernel_stack: Vec<Value>,
+    /// The slots insdel's bracket reads on every change, once resolved.
+    change_slots: Option<insdel::ChangeSlots>,
+    case_symbols_slot: usize,
+    /// buffer-undo-list's per-buffer index, once looked up.
+    undo_list_slot: u16,
     display_state: display::DisplayState,
     window_state: window::WindowState,
     world_version: u64,
@@ -1051,15 +1097,21 @@ pub struct Vm {
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
     process_jobs: process_jobs::Jobs,
+    /// GNU process.c chan_process and friends: subprocess descriptors.
+    subprocesses: subprocess::Table,
     environment_snapshot: Option<Vec<Vec<u8>>>,
+    /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
+    trapped: HashSet<usize>,
+    /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
+    doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
-    pending_specials: HashSet<String>,
+    pending_specials: NameSet<String>,
     /// Names a one-argument top-level `(defvar NAME)` declared in the file
     /// being loaded: special for the rest of that file only (GNU Fdefvar,
     /// eval.c:990-996, consing onto the `internal-interpreter-environment'
     /// that readevalloop binds once per file). Saved and restored per load.
-    file_specials: HashSet<String>,
+    file_specials: NameSet<String>,
     /// Set by the loader for exactly one root compilation of a file's form,
     /// so that compilation (and nothing nested in it) starts from
     /// `file_specials`.
@@ -1071,11 +1123,13 @@ pub struct Vm {
     /// Consumed by the next `function` call: keep every capture register.
     keep_captures: bool,
     expanded_macros: Vec<(usize, u64)>,
-    expanded_symbols: HashSet<String>,
+    expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
     buffer_slot: usize,
     multibyte_slot: usize,
     truncate_lines_slot: usize,
+    /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
+    defun_start_epoch: u64,
     variable_redirects: Vec<Option<VariableRedirect>>,
     /// Storage of GNU's built-in (C) variables; collector roots (`gc.rs`).
     forwarded: forwarded::Forwarded,
@@ -1086,7 +1140,7 @@ pub struct Vm {
     gc_retained: usize,
     gc_threshold: usize,
     gc_floor: usize,
-    names: HashMap<String, usize>,
+    names: NameMap<String, usize>,
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
@@ -1095,19 +1149,44 @@ pub struct Vm {
     generated_symbols: HashMap<GeneratedName, usize>,
     generated_slots: HashMap<usize, GeneratedName>,
     slots: Vec<Slot>,
-    specials: HashSet<String>,
+    specials: NameSet<String>,
     functions: Vec<Arc<Function>>,
     request_code: request_code::RequestCode,
     register_width: usize,
     execution: threaded::Program,
+    /// Programs of finished nested engine runs (registers all NIL again,
+    /// lowered code kept), reused by the next nested run
+    /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
+    /// collector reach them as they reach `execution`.
+    spare_programs: Vec<threaded::Program>,
     closures: Vec<Closure>,
     cells: Vec<Value>,
     cell_pairs: HashMap<usize, Value>,
+    /// fns.c `random's generator, seeded from entropy as at GNU startup.
+    random: random::Random,
+    /// glibc's localtime_offset: the last mktime result's difference from
+    /// its local time, where the next encode-time starts its search.
+    mktime_offset: i64,
+    /// glibc's rule_dstoff, which __tzfile_default lends a rule-less TZ.
+    tz_rule_dstoff: i64,
+    /// The local time zone set-time-zone-rule installed.
+    local_zone: LocalZone,
+    /// keyboard.c recent_keys: the last input events and the commands they
+    /// ran, as names (the heap may compact under the command loop).
+    recent_keys: std::collections::VecDeque<RecentKey>,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
+    /// Suspended engines' code and entry caches, traced and forwarded in place.
+    suspended_code: Vec<threaded::SuspendedCode>,
+    /// Menu-item `:filter' results for the keymap walk in progress, as
+    /// (menu item, result); set and cleared around one walk, which never
+    /// collects.
+    keymap_filters: Vec<(Value, Value)>,
+    /// The first filter that walk needed: (menu item, filter, definition).
+    keymap_pending_filter: Option<(Value, Value, Value)>,
     dynamic: Vec<(usize, Value, Value, bool)>,
     conditions: conditions::Registry,
     /// Embedder `Rooted` handles; see handle.rs.
@@ -1129,9 +1208,17 @@ impl Vm {
         self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
     }
     pub fn new() -> Self {
+        // emacs_wd is taken when Emacs starts, not when first used.
+        let _ = environment::startup_directory();
         let mut vm = Self {
             charsets: charset::Registry::default(),
             standard_case_tables: [Value::NIL; 4],
+            command_point: (0, Value::NIL),
+            change_prepared: false,
+            kernel_stack: Vec::new(),
+            change_slots: None,
+            case_symbols_slot: usize::MAX,
+            undo_list_slot: u16::MAX,
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
             world_version: 1,
@@ -1149,7 +1236,7 @@ impl Vm {
             execution_fatal: false,
             loader: loader::Loader::default(),
             source_cache: source_cache::SourceCache::default(),
-            macros: HashSet::new(),
+            macros: HashSet::default(),
             expanding: vec![],
             compile_depth: 0,
             eval_depth: 0,
@@ -1161,53 +1248,66 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             process_jobs: process_jobs::Jobs::default(),
+            subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
+            trapped: HashSet::default(),
+            doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
             propagate_next: false,
-            pending_specials: HashSet::new(),
-            file_specials: HashSet::new(),
+            pending_specials: NameSet::default(),
+            file_specials: NameSet::default(),
             seed_file_specials: false,
             lazy_regime: false,
             defer_expansion_errors: false,
             keep_captures: false,
             expanded_macros: vec![],
-            expanded_symbols: HashSet::new(),
+            expanded_symbols: NameSet::default(),
             image: None,
             buffer_slot: 0,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
+            defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
             fixnum_slots: [usize::MAX; 2],
-            local_binding_slots: HashSet::new(),
+            local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_retained: 0,
             gc_threshold: 16384,
             gc_floor: 16384,
-            names: HashMap::new(),
+            names: NameMap::default(),
             symbol_names: vec![],
-            obarray_symbol_names: HashMap::new(),
-            permanent_symbol_names: HashMap::new(),
+            obarray_symbol_names: HashMap::default(),
+            permanent_symbol_names: HashMap::default(),
             native_case_roots: std::array::from_fn(|_| std::sync::Weak::new()),
             obarray_free_slots: Vec::new(),
-            generated_symbols: HashMap::new(),
-            generated_slots: HashMap::new(),
+            generated_symbols: HashMap::default(),
+            generated_slots: HashMap::default(),
             slots: vec![],
-            specials: HashSet::new(),
+            specials: NameSet::default(),
             functions: vec![],
             request_code: request_code::RequestCode::default(),
             register_width: 1,
             execution: threaded::Program::default(),
+            spare_programs: Vec::new(),
             closures: vec![],
             cells: vec![],
-            cell_pairs: HashMap::new(),
+            cell_pairs: HashMap::default(),
+            random: random::Random::from_entropy(),
+            mktime_offset: 0,
+            tz_rule_dstoff: 0,
+            local_zone: LocalZone::Process,
+            recent_keys: std::collections::VecDeque::new(),
             conses: vec![],
             objects: vec![],
             caches: vec![],
             stack: vec![],
             external_roots: vec![],
+            suspended_code: vec![],
+            keymap_filters: Vec::new(),
+            keymap_pending_filter: None,
             dynamic: vec![],
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),
@@ -1239,7 +1339,11 @@ impl Vm {
         vm.initialize_loader();
         vm.initialize_autoload();
         vm.declare_fileio_specials();
-        vm.specials.extend(["process-environment".into(), "initial-environment".into()]);
+        vm.specials.extend(["process-environment".into(), "initial-environment".into(), "exec-path".into()]);
+        // C specials are special before their symbols are first interned, so
+        // already-read forms compile their bindings dynamically.
+        vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
+            .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
@@ -1266,6 +1370,11 @@ impl Vm {
             "current-prefix-arg",
             "last-command-event",
             "command-history",
+            // keyboard.c this_command_keys, this_single_command_key_start
+            // and raw_keybuf (prims/keyboard.rs, rlisp/vm/keyboard.el).
+            "romacs--command-keys",
+            "romacs--single-command-key-start",
+            "romacs--raw-command-keys",
             // minibuf.c / buffer.c DEFVARs read by call-interactively's
             // add-to-history fallback and `*' code. GNU's buffer-read-only
             // is per-buffer; VM2's is one global (DIVERGENCES VM2-CALLINT1).
@@ -1283,6 +1392,7 @@ impl Vm {
         vm.declare_special_raw("completion-ignore-case", Value::NIL);
         vm.declare_special_raw("completion-regexp-list", Value::NIL);
         vm.declare_special_raw("case-symbols-as-words", Value::NIL);
+        vm.case_symbols_slot = vm.slot("case-symbols-as-words");
         // The automatic local table is initialized lazily by variable_binding_slot.
         vm.declare_special_raw("inhibit-changing-match-data", Value::NIL);
         vm.declare_special_raw("#:vm2-match-buffer", Value::NIL);
@@ -1359,6 +1469,7 @@ impl Vm {
         self.initialize_case_table_slot(name, i);
         self.initialize_face_slot(name, i);
         self.initialize_environment_slot(name);
+        self.initialize_c_special(name, i);
         if name == "charset-list" { self.ensure_charsets(); }
         prim::initialize_coding_slot(self, name);
         if name == "obarray" {
@@ -1413,10 +1524,10 @@ impl Vm {
         let seed = if std::mem::take(&mut self.seed_file_specials) {
             self.file_specials.clone()
         } else {
-            HashSet::new()
+            NameSet::default()
         };
         let result = self
-            .function(&[], std::slice::from_ref(form), &HashMap::new(), &seed)
+            .function(&[], std::slice::from_ref(form), &NameMap::default(), &seed)
             .map(|(id, _)| id);
         self.compile_depth -= 1;
         if self.compile_depth == 0 {
@@ -1432,14 +1543,14 @@ impl Vm {
         &mut self,
         args: &[Form],
         body: &[Form],
-        outer: &HashMap<Name, Binding>,
-        local_specials: &HashSet<String>,
+        outer: &NameMap<Name, Binding>,
+        local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         let keep_captures = std::mem::take(&mut self.keep_captures);
         let mut b = Builder {
             code: vec![],
             next: 0,
-            env: HashMap::new(),
+            env: NameMap::default(),
             sites: vec![],
             local_specials: local_specials.clone(),
         };
@@ -1461,7 +1572,6 @@ impl Vm {
         let mut required = 0;
         let mut optional = false;
         let mut rest = false;
-        let mut seen = HashSet::new();
         for (i, arg) in args.iter().enumerate() {
             let name = arg.name()?;
             if name.source() == Some("&optional") && !optional && !rest {
@@ -1472,7 +1582,7 @@ impl Vm {
                 rest = true;
                 continue;
             }
-            if name.source().is_some_and(|n| n.starts_with('&')) || !seen.insert(name) {
+            if name.source().is_some_and(|n| n.starts_with('&')) {
                 return Err("invalid lambda argument list".into());
             }
             if !optional && !rest {
@@ -1485,7 +1595,7 @@ impl Vm {
         }
         for arg in &parameters {
             let name = arg.name()?;
-            if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
+            if matches!(name.source(), Some("nil" | "t")) {
                 return Err("cannot bind a constant".into());
             }
             let reg = b.reg();
@@ -1697,7 +1807,7 @@ impl Vm {
             Form::Sym(nil) if nil == "nil" => vec![],
             _ => return Err("invalid lazy body".into()),
         };
-        let outer: HashMap<Name, Binding> = lazy
+        let outer: NameMap<Name, Binding> = lazy
             .names
             .iter()
             .zip(&lazy.cells)
@@ -1811,7 +1921,7 @@ impl Vm {
                 b.emit(Op::Const(r, object.value(self)?));
                 Ok(r)
             }
-            Form::Sym(s) if s == "nil" || s == "t" || s == "lexical-binding" => {
+            Form::Sym(s) if s == "nil" || s == "t" => {
                 let r = b.reg();
                 b.emit(Op::Const(
                     r,
@@ -1878,6 +1988,7 @@ impl Vm {
                 let rest = &a[1..];
                 match head {
                     "save-excursion" => self.save_excursion(b, rest),
+                    "save-restriction" => self.save_restriction(b, rest),
                     "progn" => self.progn(b, rest),
                     "catch" if !rest.is_empty() => {
                         let tag = self.expr(b, &rest[0])?;
@@ -1963,7 +2074,10 @@ impl Vm {
                                 self.expr(b, &lowered)?;
                             }
                         } else if head == "defconst" {
-                            return Err("defconst needs an initializer".into());
+                            let quote = |f: Form| Form::List(vec![Form::Sym("quote".into()), f]);
+                            let data = Form::List(vec![Form::Sym("defconst".into()), Form::Int(1)]);
+                            let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("wrong-number-of-arguments".into())), quote(data)]);
+                            return self.expr(b, &signal);
                         } else {
                             b.local_specials.insert(name.into());
                         }
@@ -1999,7 +2113,7 @@ impl Vm {
                         b.emit(Op::Const(r, Value::NIL));
                         for pair in rest.chunks_exact(2) {
                             let name = pair[0].name()?;
-                            if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
+                            if matches!(name.source(), Some("nil" | "t")) {
                                 return Err("cannot set a constant".into());
                             }
                             r = self.expr(b, &pair[1])?;
@@ -2056,12 +2170,7 @@ impl Vm {
                                 }
                                 _ => return Err("bad let binding".into()),
                             };
-                            if name.source() == Some("lexical-binding")
-                                && matches!(init, Some(Form::Sym(value)) if value == "t")
-                            {
-                                continue;
-                            }
-                            if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
+                            if matches!(name.source(), Some("nil" | "t")) {
                                 return Err("cannot bind a constant".into());
                             }
                             let value = if let Some(f) = init {
@@ -2098,18 +2207,30 @@ impl Vm {
                         Ok(r)
                     }
                     _ => {
-                        if matches!(
-                            head,
-                            "lambda"
-                                | "function"
-                                | "defun"
-                                | "setq"
-                                | "if"
-                                | "while"
-                                | "let"
-                                | "let*"
-                                | "quote"
-                        ) {
+                        // eval_sub: a special form given too few arguments
+                        // (or, for quote and function, too many).
+                        if prim::prims::special_forms::special_form_min(head).is_some() {
+                            let quote = |f: Form| Form::List(vec![Form::Sym("quote".into()), f]);
+                            // Fdefvar and Fdefconst refuse a fourth argument themselves.
+                            if matches!(head, "defvar" | "defconst") && rest.len() > 3 {
+                                if !matches!(rest[0], Form::Sym(_) | Form::Generated(_)) {
+                                    let data = Form::List(vec![Form::Sym("symbolp".into()), rest[0].clone()]);
+                                    let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("wrong-type-argument".into())), quote(data)]);
+                                    return self.expr(b, &signal);
+                                }
+                                let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("error".into())),
+                                    quote(Form::List(vec![Form::String("Too many arguments".into())]))]);
+                                return self.expr(b, &signal);
+                            }
+                            let data = Form::List(vec![Form::Sym(head.into()), Form::Int(rest.len() as i64)]);
+                            let signal = Form::List(vec![
+                                Form::Sym("signal".into()),
+                                quote(Form::Sym("wrong-number-of-arguments".into())),
+                                quote(data),
+                            ]);
+                            return self.expr(b, &signal);
+                        }
+                        if matches!(head, "lambda" | "defun") {
                             return Err(format!("invalid or unsupported {head}"));
                         }
                         let (target, args) = if head == "funcall" {
@@ -2161,7 +2282,7 @@ impl Vm {
     fn condition_case(&mut self, b: &mut Builder, rest: &[Form]) -> Result<usize> {
         // Macro-generated handler variables carry identity, not an interned name.
         let variable = rest[0].name()?;
-        if matches!(variable.source(), Some("t" | "lexical-binding")) {
+        if variable.source() == Some("t") {
             return Err("cannot bind a constant".into());
         }
         let mut clauses = Vec::new();
@@ -2339,30 +2460,56 @@ impl Vm {
         self.external_roots.clear();
         outcome
     }
+    /// The echo area's message for `current-message`, as an embedder that
+    /// renders the echo area itself shows or clears it.
+    pub fn set_echo_area_message(&mut self, text: Option<&str>) {
+        let value = text.map_or(Value::NIL, |t| self.make_lisp_string(t.as_bytes().to_vec(), !t.is_ascii()));
+        let slot = self.slot(prim::ECHO_AREA_MESSAGE);
+        self.slots[slot].value = value;
+    }
+    /// Unwinding restores every binding; a watcher's signal is dropped here
+    /// only because an escape is already in flight (see `unbind_one`).
     fn unbind(&mut self, n: usize) {
         for _ in 0..n {
+            let _ = self.unbind_one();
+        }
+    }
+    /// Restore the innermost binding, notifying watchers (`unlet`) first. A
+    /// watcher's signal is returned after the restore, in propagated_escape.
+    pub(crate) fn unbind_one(&mut self) -> Result<()> {
+        let mut watched = Ok(());
+        {
             let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
             let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
+            if !self.trapped.is_empty() && let Some(base) = symbol.and_then(|s| s.index_if(7)).map(|i| i - 1) {
+                watched = self.notify_watchers(base, value, "unlet");
+            }
             self.backtrace.unbind(self.dynamic.len());
+            // A local let restores the owner's current local binding, if it
+            // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
+            // may have been killed and made again inside the let.
             if let Some(base) = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1)
-                && self.localized_boolean(base).is_some() && self.local_binding_slots.contains(&slot)
+                && self.local_binding_slots.contains(&slot)
             {
                 if self.live_buffer_value(owner) {
                     let table = self.slots[base].local;
-                    if let Some(local) = self.declaration_hash_get(table, owner).expect("localized Boolean table") {
+                    if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
+                        // set-buffer-local-toplevel-value may have saved any object.
+                        let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
                         self.slots[local.index(7).expect("private binding") - 1].value = value;
                     }
                 }
-                continue;
+                return watched;
             }
             if let Some(fwd) = self.native_forwarding(slot) {
                 self.unbind_forwarded(fwd, value, owner, let_default);
-                continue;
+                return watched;
             }
             if slot != self.buffer_slot || value == Value::NIL || self.live_buffer_value(value) {
                 self.slots[slot].value = value;
             }
         }
+        watched
     }
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
@@ -2370,7 +2517,7 @@ impl Vm {
         if matches!(p, ClosureMetadata | ClosureDocument | MakeInterpretedClosure) { return self.interpreted_closure_primitive(p, start, n); }
         if p == TempBuffer { return self.eval_buffer_primitive(p, start, n); }
         if matches!(p, DeepEqual | Min | Append | Prin1ToString) { return self.eval_data_primitive(p, start, n); }
-        if matches!(p, GetBuffer | EraseBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized) { return self.eval_buffer_primitive(p, start, n); }
+        if matches!(p, GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized) { return self.eval_buffer_primitive(p, start, n); }
         if (p as usize) >= SymbolValue as usize {
             return self.variable_primitive(p, start, n);
         }
@@ -2428,10 +2575,14 @@ impl Vm {
             return result;
         }
         if p == Message {
-            if n == 1 && self.stack[start] == Value::NIL {
+            // The echo area holds the last message; (message nil) clears it.
+            let echo = self.slot(prim::ECHO_AREA_MESSAGE);
+            if n >= 1 && self.stack[start] == Value::NIL {
+                self.slots[echo].value = Value::NIL;
                 return Ok(Value::NIL);
             }
             let value = self.format_string(start, n)?;
+            self.slots[echo].value = value;
             eprintln!("{}", self.source_string(value)?);
             return Ok(value);
         }
@@ -2500,6 +2651,9 @@ impl Vm {
                             | data::Object::Obarray(_)
                             | data::Object::Frame(_)
                             | data::Object::Terminal(_)
+                            | data::Object::WindowConfiguration(_)
+                            | data::Object::Sqlite(_)
+                            | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
                             }
@@ -2539,6 +2693,9 @@ impl Vm {
                 data::Object::Window(w) => Ok(format!("#<window {}>", w.id)),
                 data::Object::Frame(_) => Ok("#<frame initial>".into()),
                 data::Object::Terminal(_) => Ok("#<terminal initial>".into()),
+                data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
+                data::Object::Sqlite(h) => Ok(h.describe()),
+                data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
                 data::Object::Marker(_) => Ok("#<marker>".into()),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),
                 data::Object::ByteBuffer(_) => Ok("#<byte-buffer>".into()),
@@ -2621,7 +2778,7 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
     loop {
         let mut reads = vec![0usize; regs];
         let mut writes = vec![0usize; regs];
-        let mut targets = HashSet::new();
+        let mut targets = HashSet::default();
         for &op in &code {
             let mut read = |r: usize| reads[r] += 1;
             match op {

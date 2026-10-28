@@ -29,7 +29,6 @@ fn documented_reader_boundaries_are_not_claimed_as_gnu_parity() {
         (r#"(let ((r (read-from-string (concat "a" (string 160) "b")))) (list (length (symbol-name (car r))) (cdr r)))"#, "(3 3)"),
         (r#"(let ((r (read-from-string (concat "a" (string 11) "b")))) (list (length (symbol-name (car r))) (cdr r)))"#, "(1 1)"),
         (r#"(list (numberp (car (read-from-string "2.25e+INF"))) (numberp (car (read-from-string "-3.75e+INF"))))"#, "(nil nil)"),
-        (r#"(read-from-string "2305843009213693952")"#, "(invalid-read-syntax \"fixnum overflow (bignums not implemented) at byte 19\")"),
         (r#"(read-from-string "(a . b c)")"#, "(invalid-read-syntax \"dotted list requires one tail at byte 8\")"),
         (r#"(let ((i 0) (s "0")) (while (< i 256) (setq s (concat "(" s ")")) (setq i (1+ i))) (cdr (read-from-string s)))"#, "513"),
         (r#"(let ((i 0) (s "0")) (while (< i 257) (setq s (concat "(" s ")")) (setq i (1+ i))) (cdr (read-from-string s)))"#, "(invalid-read-syntax \"reader nesting limit exceeded at byte 257\")"),

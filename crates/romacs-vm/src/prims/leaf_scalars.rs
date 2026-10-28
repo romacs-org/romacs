@@ -3,7 +3,7 @@ use super::*;
 
 // GNU XFLOATINT uses mpz_get_d_rounded: decimal rendering followed by
 // correctly rounded strtod (bignum.c:412), including overflow to infinity.
-fn number(cx: &Leaf<'_>, value: Value) -> std::result::Result<f64, Fault> {
+pub(super) fn number(cx: &Leaf<'_>, value: Value) -> std::result::Result<f64, Fault> {
     if let Some(n) = value.integer_value() {
         return Ok(n as f64);
     }

@@ -121,11 +121,11 @@ fn run_window_scroll_functions(cx; optional window: Value) -> Step {
     // GNU passes the hook WINDOW as given, nil when omitted, not the
     // decoded window (window.c:3867).
     let (_, buffer, start) = cx.windows().scroll_functions_call(window)?;
-    // GNU binds the current buffer to WINDOW's and runs the hook only when
-    // `window-scroll-functions` is non-nil (window.c:3862); with it nil the
-    // buffer switch is unobservable, so VM2 makes no Lisp call at all.
+    // GNU switches to WINDOW's buffer, then runs the hook only when
+    // `window-scroll-functions` is non-nil there (window.c:3862), where it
+    // may be buffer-local; with it nil the switch is unobservable.
     let hook = cx.intern("window-scroll-functions");
-    if cx.variable_value(hook)?.is_none_or(|v| v == Value::NIL) {
+    if cx.buffer_local_read(hook, buffer)? == Value::NIL {
         return Ok(Step::Done(Value::NIL));
     }
     // (let ((old (current-buffer)))
@@ -207,4 +207,146 @@ fn frame_bottom_divider_width(cx; optional frame: Value) {
 defsubr! { name = "active-minibuffer-window", gnu = "minibuf.c:215", effect = Reads,
 fn active_minibuffer_window(cx) {
     cx.windows().active_minibuffer_window()
+}}
+
+defsubr! { name = "frame-first-window", gnu = "window.c:390", effect = Reads,
+fn frame_first_window(cx; optional frame_or_window: Value) {
+    cx.windows().frame_first_window(frame_or_window)
+}}
+
+defsubr! { name = "window-prev-buffers", gnu = "window.c:2322", effect = Reads,
+fn window_prev_buffers(cx; optional window: Value) {
+    cx.windows().window_buffers(window, false)
+}}
+
+defsubr! { name = "set-window-prev-buffers", gnu = "window.c:2339", effect = Global,
+fn set_window_prev_buffers(cx, window: Value, prev_buffers: Value) {
+    cx.windows().set_window_buffers(window, prev_buffers, false)
+}}
+
+defsubr! { name = "window-next-buffers", gnu = "window.c:2353", effect = Reads,
+fn window_next_buffers(cx; optional window: Value) {
+    cx.windows().window_buffers(window, true)
+}}
+
+defsubr! { name = "set-window-next-buffers", gnu = "window.c:2362", effect = Global,
+fn set_window_next_buffers(cx, window: Value, next_buffers: Value) {
+    cx.windows().set_window_buffers(window, next_buffers, true)
+}}
+
+// Fset_window_buffer: a window that gets another buffer first records the
+// old one (record-window-buffer, window.el); set_window_buffer then runs
+// window-scroll-functions in the new buffer.
+defsubr! { name = "set-window-buffer", gnu = "window.c:4432", effect = Global,
+fn set_window_buffer(cx, window: Value, buffer_or_name: Value; optional keep_margins: Value) -> Step {
+    let (window, buffer, changed) = cx.windows().set_window_buffer_check(window, buffer_or_name)?;
+    // A window strongly dedicated to its buffer keeps it; a weakly
+    // dedicated one stops being dedicated.
+    if changed {
+        if let Some(name) = cx.windows().strongly_dedicated(window)? {
+            let template = cx.string("Window is dedicated to `%s'");
+            let name = cx.string(&name);
+            let message = cx.format_message(template, &[name])?;
+            let data = cx.cons(message, Value::NIL);
+            return Err(Fault::Signal(cx.intern("error"), data));
+        }
+        cx.windows().set_window_dedicated_p(window, Value::NIL)?;
+    }
+    let record = cx.intern("record-window-buffer");
+    // Bootstrap regimes that have not loaded window.el have nothing to record.
+    if changed && cx.fboundp(record) {
+        return Ok(Step::Call { f: record, args: vec![window], then: show_buffer, saved: vec![window, buffer, keep_margins] });
+    }
+    show_buffer(cx, Value::NIL, &[window, buffer, keep_margins])
+}}
+fn show_buffer(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    cx.windows().set_window_buffer(saved[0], saved[1], saved[2])?;
+    let run = cx.intern("run-window-scroll-functions");
+    Ok(Step::Call { f: run, args: vec![saved[0]], then: shown, saved: vec![] })
+}
+fn shown(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
+
+defsubr! { name = "set-window-dedicated-p", gnu = "window.c:2297", effect = Global,
+fn set_window_dedicated_p(cx, window: Value, flag: Value) {
+    cx.windows().set_window_dedicated_p(window, flag)
+}}
+
+defsubr! { name = "window-body-width", gnu = "window.c:1140", effect = Reads,
+fn window_body_width(cx; optional window: Value, pixelwise: Value) {
+    cx.windows().window_body_size(window, pixelwise, true)
+}}
+
+defsubr! { name = "window-body-height", gnu = "window.c:1165", effect = Reads,
+fn window_body_height(cx; optional window: Value, pixelwise: Value) {
+    cx.windows().window_body_size(window, pixelwise, false)
+}}
+
+// Frame visibility (frame.c). VM2's one frame is always visible, as a
+// terminal frame is in GNU batch: visibility requests change nothing, and
+// making the sole frame invisible needs FORCE.
+defsubr! { name = "make-frame-visible", gnu = "frame.c:3505", effect = Global,
+fn make_frame_visible(cx; optional frame: Value) {
+    cx.windows().decode_live_frame(frame)
+}}
+
+defsubr! { name = "make-frame-invisible", gnu = "frame.c:3549", effect = Global,
+fn make_frame_invisible(cx; optional frame: Value, force: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    if force == Value::NIL {
+        return Err(Fault::Error("Attempt to make invisible the sole visible or iconified frame".into()));
+    }
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "iconify-frame", gnu = "frame.c:3591", effect = Global,
+fn iconify_frame(cx; optional frame: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "frame-visible-p", gnu = "frame.c:3633", effect = Reads,
+fn frame_visible_p(cx, frame: Value) {
+    if cx.windows().frame_live_p(frame) == Value::NIL { return Err(Fault::Wrong("frame-live-p", frame)); }
+    Ok(Value::TRUE)
+}}
+
+defsubr! { name = "visible-frame-list", gnu = "frame.c:3652", effect = Reads,
+fn visible_frame_list(cx) {
+    let frame = cx.windows().decode_live_frame(Value::NIL)?;
+    Ok(cx.cons(frame, Value::NIL))
+}}
+
+defsubr! { name = "raise-frame", gnu = "frame.c:3667", effect = Global,
+fn raise_frame(cx; optional frame: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "lower-frame", gnu = "frame.c:3686", effect = Global,
+fn lower_frame(cx; optional frame: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::NIL)
+}}
+
+// Fredisplay: nil while a keyboard macro runs, else t. VM2 cannot redraw
+// synchronously (VM2-REDISPLAY1); the host redraws after the command.
+defsubr! { name = "redisplay", gnu = "dispnew.c:7020", effect = Global,
+fn redisplay(cx; optional _force: Value) {
+    let macro_ = cx.intern("executing-kbd-macro");
+    Ok(if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { Value::NIL } else { Value::TRUE })
+}}
+
+defsubr! { name = "pos-visible-in-window-p", gnu = "window.c:1998", effect = Reads,
+fn pos_visible_in_window_p(cx; optional pos: Value, window: Value, partially: Value) {
+    cx.windows().pos_visible_in_window_p(pos, window, partially)
+}}
+
+defsubr! { name = "window-pixel-left", gnu = "window.c:1001", effect = Reads,
+fn window_pixel_left(cx; optional window: Value) {
+    cx.windows().window_pixel_edge(window, false)
+}}
+
+defsubr! { name = "window-pixel-top", gnu = "window.c:1009", effect = Reads,
+fn window_pixel_top(cx; optional window: Value) {
+    cx.windows().window_pixel_edge(window, true)
 }}

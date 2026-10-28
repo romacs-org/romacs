@@ -174,11 +174,18 @@ impl Leaf<'_> {
             view.chars().map(|code| u8::try_from(code).map_err(|_| Fault::NotUnicode(text))).collect::<std::result::Result<Vec<_>, _>>()?
         } else { view.bytes().to_vec() };
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let buffer = self.current_buffer()?;
+        let unmodified = !self.vm.buffer_state(buffer).map_err(Fault::Error)?.modified();
+        let (point, _, _) = self.vm.point_extent()?;
         match &mut self.vm.objects[index] {
             data::Object::Buffer(target) => target.replace(target.point..target.point, &bytes),
             data::Object::ByteBuffer(target) => target.replace(target.point..target.point, &bytes),
             _ => unreachable!(),
         }.map_err(Fault::Error)?;
+        // insert_1_both's record_insert, and prepare's deactivate-mark.
+        let (after, _, _) = self.vm.point_extent()?;
+        self.vm.record_insert(index, point, after - point, unmodified).map_err(Fault::Error)?;
+        if self.variable_value(hooks)?.unwrap_or(Value::NIL) == Value::NIL { self.vm.mark_deactivated()?; }
         self.vm.display_state.version += 1;
         Ok(())
     }

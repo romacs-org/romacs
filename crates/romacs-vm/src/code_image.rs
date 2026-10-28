@@ -44,6 +44,10 @@ impl Vm {
         {
             return Err("code image requires a private quiescent world without cells".into());
         }
+        // The trap set is runtime state an image does not carry yet.
+        if !self.trapped.is_empty() {
+            return Err("VM2 code image of a world with variable watchers is unsupported".into());
+        }
         let mut builder = ImageBuilder::default();
         builder.string_raw(""); // directory is always string zero
         for _ in &self.functions {
@@ -106,7 +110,7 @@ impl Vm {
         // Generated, uninterned slots are existing GC roots. They keep literal
         // identity stable while cold bodies remain undecoded, even if the
         // original variable/plist is changed before a body's first call.
-        let mut literal_slots = HashMap::new();
+        let mut literal_slots = HashMap::default();
         for (id, f) in self.functions.iter().enumerate() {
             // Keep stable image ordinals without serializing retired request IR.
             if !self.request_code.live[id] {
@@ -364,7 +368,7 @@ impl Vm {
     // Every reachable Lisp object is strand-owned; only encoded bytes stay
     // shared. One memo covers data roots and the generated cold-literal roots.
     fn restore_private_image_roots(&mut self) -> Result<()> {
-        let mut copies = HashMap::new();
+        let mut copies = HashMap::default();
         let mut pending = Vec::new();
         for slot in 0..self.slots.len() {
             let value = self.private_image_root(self.slots[slot].value, &mut copies, &mut pending)?;

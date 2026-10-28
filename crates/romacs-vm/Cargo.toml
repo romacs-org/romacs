@@ -17,12 +17,21 @@ num-bigint = "0.4"
 stacker.workspace = true
 libc.workspace = true
 sha2 = "0.11"
+# fns.c secure-hash: MD5 and SHA-1 (SHA-3 is crate::digest).
+md-5 = "0.11"
+sha1 = "0.11"
 unicode-segmentation = "1.13.2"
 unicode-width = "0.2.2"
 # Narrow ICU4X casing provider: simple scalar + contextual full-string Unicode.
 icu_casemap = "=2.3.0"
 icu_locale_core = "=2.3.0"
 ropey_stable = { package = "ropey", version = "=1.6.1", default-features = false, features = ["simd"] }
+# FxHash for maps keyed by VM-allocated slots and ids; foldhash, seeded per
+# map, for maps keyed by names that Lisp, files and the network supply.
+rustc-hash = "2"
+foldhash = "0.2"
+# SQLite for sqlite.c's primitives, built from the bundled amalgamation.
+libsqlite3-sys = { version = "0.38", features = ["bundled"] }
 
 [build-dependencies]
 sha2 = "0.11"

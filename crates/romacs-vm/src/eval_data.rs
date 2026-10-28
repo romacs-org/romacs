@@ -28,19 +28,8 @@ impl Vm {
                 if n == 0 {
                     return Err("wrong primitive arity".into());
                 }
-                let mut out = self.stack[start];
-                self.number(out)?;
-                for i in 1..n {
-                    let v = self.stack[start + i];
-                    let number = self.number(v)?;
-                    if number.is_nan() {
-                        return Ok(v);
-                    }
-                    if self.numeric_cmp(v, out)? == Some(std::cmp::Ordering::Less) {
-                        out = v;
-                    }
-                }
-                Ok(out)
+                let args = self.stack[start..start + n].to_vec();
+                self.minmax(&args, std::cmp::Ordering::Less)
             }
             Append => {
                 if n == 0 {
@@ -89,7 +78,7 @@ impl Vm {
         // Iterative worklist also handles cyclic conses/vectors without keeping
         // a Rust recursive borrow or imposing a limit on long flat lists.
         let mut pending = vec![(a, b)];
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some((a, b)) = pending.pop() {
             if a == b || !seen.insert((a.0, b.0)) {
                 continue;
@@ -132,16 +121,18 @@ impl Vm {
     }
 
     pub(super) fn print_render(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool) -> Result<String> {
-        for name in ["float-output-format", "print-gensym", "print-continuous-numbering", "print-number-table", "print-integers-as-characters", "print-unreadable-function", "print-charset-text-property", "print-symbols-bare"] {
+        for name in ["float-output-format", "print-continuous-numbering", "print-number-table", "print-integers-as-characters", "print-unreadable-function", "print-charset-text-property", "print-symbols-bare"] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;
-            if v != Value::UNBOUND && v != Value::NIL { return Err(format!("printing {name} is not supported")); }
+            // Text properties print unpruned, which is GNU's `t'.
+            let supported = v == Value::UNBOUND || v == Value::NIL || (name == "print-charset-text-property" && v == Value::TRUE);
+            if !supported { return Err(format!("printing {name} is not supported")); }
         }
         let mut options = PrintOptions::default();
         for (key, name) in [("length", "print-length"), ("level", "print-level"), ("quoted", "print-quoted"),
             ("escape-newlines", "print-escape-newlines"), ("escape-nonascii", "print-escape-nonascii"),
             ("escape-multibyte", "print-escape-multibyte"), ("escape-control-characters", "print-escape-control-characters"),
-            ("circle", "print-circle")] {
+            ("circle", "print-circle"), ("gensym", "print-gensym")] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;
             if v != Value::UNBOUND { options.set(key, v); }
@@ -174,7 +165,10 @@ impl Vm {
                     pending.push(CharTableSlot::Node(std::sync::Arc::clone(node)));
                     continue;
                 }
-                if v.tag() != 3 && !matches!(self.object_if(v), Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::CharTable(_))) && !self.str_view(v).is_some_and(|s| !s.bytes().is_empty()) { continue; }
+                // print_circle_candidate_p: uninterned symbols too under print-gensym.
+                let gensym = options.gensym && self.printed_as_gensym(v)
+                    && !self.obarray_symbol_names.contains_key(&(v.payload() as usize - 1));
+                if !gensym && v.tag() != 3 && !matches!(self.object_if(v), Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::CharTable(_) | data::Object::HashTable(_))) && !self.str_view(v).is_some_and(|s| !s.bytes().is_empty()) { continue; }
                 let count = options.graph.get_mut().counts.entry((0, v.0)).or_default();
                 *count += 1;
                 if *count > 1 { continue; }
@@ -182,6 +176,11 @@ impl Vm {
                 else if let Some(data::Object::Vector(v) | data::Object::Record(v)) = self.object_if(v) { pending.extend(v.iter().copied().map(CharTableSlot::Value)); }
                 else if let Some(data::Object::CharTable(t)) = self.object_if(v) {
                     pending.extend(t.print_slots());
+                }
+                else if let Some(data::Object::HashTable(t)) = self.object_if(v) {
+                    // Entries print in order; push them reversed onto the stack.
+                    let entries: Vec<Value> = t.entries().flat_map(|(_, k, v)| [k, v]).collect();
+                    pending.extend(entries.into_iter().rev().map(CharTableSlot::Value));
                 }
                 else if quoted {
                     for (_, _, properties) in self.print_string_properties(v) {
@@ -254,14 +253,26 @@ impl Vm {
         runs
     }
 
+    /// A symbol print-gensym marks with `#:': one not interned in the
+    /// initial obarray.
+    fn printed_as_gensym(&self, value: Value) -> bool {
+        value.index_if(7).and_then(|n| n.checked_sub(1))
+            .is_some_and(|slot| self.symbol_names.get(slot).is_some_and(|name| self.names.get(name) != Some(&slot)))
+    }
+
     fn print_object(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
         let key = match self.object_if(value) {
             Some(data::Object::SubCharTable(node)) => (1, char_table::char_table_node_id(node) as u64),
             _ => (0, value.0),
         };
+        let container = value.tag() == 3 || matches!(self.object_if(value),
+            Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::HashTable(_)));
         let prefix = {
             let mut graph = options.graph.borrow_mut();
-            if graph.nesting >= 100 { return Err("print nesting limit exceeded".into()); }
+            if graph.nesting + graph.quotes >= 100 { return Err("print nesting limit exceeded".into()); }
+            if !options.circle && container && let Some(depth) = graph.path.iter().position(|&p| p == value.0) {
+                return Ok(format!("#{depth}"));
+            }
             if graph.counts.get(&key).is_some_and(|&n| n > 1) {
                 if let Some(id) = graph.labels.get(&key) { return Ok(format!("#{id}#")); }
                 let id = graph.labels.len() + 1;
@@ -269,9 +280,17 @@ impl Vm {
                 format!("#{id}=")
             } else { String::new() }
         };
-        options.graph.borrow_mut().nesting += 1;
+        {
+            let mut graph = options.graph.borrow_mut();
+            graph.nesting += 1;
+            graph.path.push(value.0);
+        }
         let body = self.print_body(value, quoted, options, depth);
-        options.graph.borrow_mut().nesting -= 1;
+        {
+            let mut graph = options.graph.borrow_mut();
+            graph.nesting -= 1;
+            graph.path.pop();
+        }
         body.map(|body| prefix + &body)
     }
 
@@ -341,14 +360,32 @@ impl Vm {
             if options.quoted {
                 if let Ok((arg, end)) = self.cons_pair(cdr) {
                     if end == Value::NIL {
-                        let prefix = match car.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).map(String::as_str) { Some("quote") => Some("'"), Some("function") => Some("#'"), _ => None };
-                        if let Some(prefix) = prefix { return Ok(format!("{prefix}{}", self.print_object(arg, quoted, options, depth)?)); }
+                        // Only the interned `quote' and `function', not namesakes.
+                        let interned = |name: &str| self.names.get(name).is_some_and(|&slot| car == Value::reference(slot + 1, 7));
+                        let prefix = if interned("quote") { Some("'") } else if interned("function") { Some("#'") } else { None };
+                        if let Some(prefix) = prefix {
+                            // print.c's shorthand is tail recursion: the quoted
+                            // object takes this list's depth, so it is not on
+                            // the path, and a quote cycle is bounded by depth.
+                            let own = {
+                                let mut graph = options.graph.borrow_mut();
+                                graph.nesting -= 1;
+                                graph.quotes += 1;
+                                graph.path.pop()
+                            };
+                            let printed = self.print_object(arg, quoted, options, depth);
+                            let mut graph = options.graph.borrow_mut();
+                            graph.nesting += 1;
+                            graph.quotes -= 1;
+                            graph.path.extend(own);
+                            return Ok(format!("{prefix}{}", printed?));
+                        }
                     }
                 }
             }
             let mut parts = Vec::new();
             let mut tail = value;
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             while tail.tag() == 3 {
                 if options.length.is_some_and(|n| parts.len() >= n) { parts.push("...".into()); return Ok(format!("({})", parts.join(" "))); }
                 if !seen.insert(tail.0) { return Err("circular list printing requires print-circle".into()); }
@@ -374,9 +411,7 @@ impl Vm {
             });
         }
         if let Some(data::Object::HashTable(t)) = self.object_if(value) {
-            if options.circle { return Err("hash-table print-circle is not supported".into()); }
-            if options.length.is_some() { return Err("hash-table print-length is not supported".into()); }
-            let bytes = self.print_table(t, |vm, v| vm.print_object(v, quoted, options, depth + 1).map(String::into_bytes))?;
+            let bytes = self.print_table(t, options.length, |vm, v| vm.print_object(v, quoted, options, depth + 1).map(String::into_bytes))?;
             return String::from_utf8(bytes).map_err(|e| e.to_string());
         }
         if let Some(data::Object::Float(n)) = self.object_if(value) {
@@ -392,12 +427,13 @@ impl Vm {
             });
         }
         if let Some(name) = value.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)) {
-            if name.is_empty() { return Ok("##".into()); }
-            if !quoted { return Ok(name.clone()); }
+            let prefix = if options.gensym && self.printed_as_gensym(value) { "#:" } else { "" };
+            if name.is_empty() { return Ok(if prefix.is_empty() { "##" } else { prefix }.into()); }
+            if !quoted { return Ok(format!("{prefix}{name}")); }
             let unsigned = name.strip_prefix(['+', '-']).unwrap_or(name);
             let numeric = unsigned.starts_with(|c: char| c.is_ascii_digit() || c == '.') && name.parse::<f64>().is_ok();
             let confusing = numeric || name.starts_with('?') || (name.starts_with('.') && !name.chars().nth(1).is_some_and(char::is_alphabetic));
-            let mut text = String::new();
+            let mut text = String::from(prefix);
             for (i, c) in name.chars().enumerate() {
                 if (i == 0 && confusing) || c <= ' ' || c == '\u{a0}' || "\"\\';#(),`[]".contains(c) { text.push('\\'); }
                 text.push(c);
@@ -406,6 +442,11 @@ impl Vm {
         }
         if let Some(data::Object::Obarray(table)) = self.object_if(value) {
             return Ok(format!("#<obarray n={}>", table.len()));
+        }
+        if let Some(data::Object::Process(process)) = self.object_if(value) {
+            // print.c PVEC_PROCESS: the name, inside #<process ...> when escaping.
+            let name = self.process_name_text(process);
+            return Ok(if quoted { format!("#<process {name}>") } else { name });
         }
         if let Some(data::Object::CharTable(table)) = self.object_if(value) {
             return self.print_char_table_slots("#^", &table.print_slots(), quoted, options, depth);
@@ -421,14 +462,18 @@ impl Vm {
 }
 
 #[derive(Default)]
-struct PrintGraph { counts: HashMap<(u8, u64), usize>, labels: HashMap<(u8, u64), usize>, nesting: usize }
+/// NESTING is the print depth; PATH the objects being printed at each depth
+/// (print.c being_printed), which a container met again prints as #DEPTH
+/// without print-circle; QUOTES counts the quote shorthands in progress,
+/// which take no depth of their own but still bound the recursion.
+struct PrintGraph { counts: HashMap<(u8, u64), usize>, labels: HashMap<(u8, u64), usize>, nesting: usize, path: Vec<u64>, quotes: usize }
 struct PrintOptions {
     graph: std::cell::RefCell<PrintGraph>,
     length: Option<usize>, level: Option<i64>, quoted: bool, newlines: bool,
-    nonascii: bool, multibyte: bool, controls: bool, circle: bool,
+    nonascii: bool, multibyte: bool, controls: bool, circle: bool, gensym: bool,
 }
 impl Default for PrintOptions {
-    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false } }
+    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false } }
 }
 impl PrintOptions {
     fn set(&mut self, key: &str, value: Value) -> bool {
@@ -442,8 +487,34 @@ impl PrintOptions {
             "escape-multibyte" => self.multibyte = on,
             "escape-control-characters" => self.controls = on,
             "circle" => self.circle = on,
+            "gensym" => self.gensym = on,
             _ => return false,
         }
         true
     }
 }
+
+impl Vm {
+    /// A process's name, for printing.
+    pub(crate) fn process_name_text(&self, process: &crate::subprocess::Process) -> String {
+        self.str_view(process.get(crate::subprocess::Slot::Name))
+            .map(|view| String::from_utf8_lossy(view.bytes).into_owned())
+            .unwrap_or_default()
+    }
+    /// data.c minmax_driver: markers become their positions, a later
+    /// argument wins only when strictly better (ties keep the first, with
+    /// its own type), and a NaN that does not win is returned at once.
+    pub(super) fn minmax(&mut self, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
+        let mut accum = self.coerce_number(args[0], true)?;
+        for &arg in &args[1..] {
+            let value = self.coerce_number(arg, true)?;
+            if self.numeric_cmp(value, accum)? == Some(better) {
+                accum = value;
+            } else if self.number(value)?.is_nan() {
+                return Ok(value);
+            }
+        }
+        Ok(accum)
+    }
+}
+

@@ -2,7 +2,7 @@
 
 Source: `retired/romacs-core-2026-10-19`, `crates/romacs/tests/vm2_batch.rs` and `crates/romacs/src/vm2_session.rs`.
 
-The surviving contract exercises `romacs_vm::Vm` directly: persistent evaluation requests, arithmetic, frame identity, the absence of the inherited recursive editor, formatted messages, first-error termination within a source request, and heap-backed session state across observed collections. The error test additionally checks that a failed request leaves the VM usable without executing later forms.
+The surviving contract exercises `romacs_vm::Vm` directly: persistent evaluation requests, arithmetic, frame identity, `recursive-edit` bound as in GNU (it was absent until VM2 gained its Lisp command loop; the inherited core editor stays retired), formatted messages, first-error termination within a source request, and heap-backed session state across observed collections. The error test additionally checks that a failed request leaves the VM usable without executing later forms.
 
 The tagged `vm2_session.rs` contains no unit tests. Its VM evaluation loop is the runtime behavior represented here; its argument parser is not retained as a second implementation.
 

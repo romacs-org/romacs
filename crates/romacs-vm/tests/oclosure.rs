@@ -137,7 +137,8 @@ fn precise_types_preserve_legacy_type_of() {
 #[test]
 fn lexical_dispatcher_assertion_does_not_change_binding_mode() {
     check("(list (let ((lexical-binding t)) lexical-binding) (let* ((lexical-binding t) (x lexical-binding)) x))", "(t t)");
-    for source in ["(let ((lexical-binding nil)) 7)", "(let ((lexical-binding (progn t))) 7)"] {
-        assert!(Vm::new().eval_source(source).is_err(), "{source}");
-    }
+    // Binding it nil does not select dynamic binding, here as in GNU's
+    // already-lexical code: the closure still captures x.
+    check("(let ((lexical-binding nil)) (let ((x 1)) (funcall (let ((x 2)) (lambda () x)))))", "2");
+    check("(let ((lexical-binding (progn t))) 7)", "7");
 }

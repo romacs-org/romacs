@@ -183,8 +183,9 @@
       (unless (eq (car leaves) keep) (romacs-gui-delete (car leaves)))
       (setq leaves (cdr leaves)))
     (select-window keep)))
-(defvar scroll-conservatively 101
-  "Scroll only enough to reveal point; zero requests automatic centering.")
+;; scroll-conservatively is a C variable (xdisp.c); Romacs prefers scrolling
+;; only enough to reveal point.
+(setq scroll-conservatively 101)
 (defvar last-command nil)
 (defvar romacs-gui-goal-column nil)
 (defun romacs-gui-vertical-motion (lines)
@@ -232,6 +233,10 @@
 (defun romacs-gui-write-visited-buffer ()
   "Write after supersession verification or explicit overwrite consent."
   (write-region nil nil buffer-file-name nil t)
+  ;; As GNU's basic-save-buffer-1 and -2: keep the coding the save used.
+  (if buffer-file-coding-system-explicit
+      (setcar buffer-file-coding-system-explicit last-coding-system-used))
+  (setq buffer-file-coding-system last-coding-system-used)
   (romacs-gui-echo "Saved"))
 (defun romacs-gui-save-buffer ()
   "Save modified visited text; ask before overwriting a superseded file."

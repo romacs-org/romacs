@@ -422,7 +422,6 @@
  "pinned": {
   "princ/0034": "SIGNAL-VS-VALUE",
   "princ/0036": "VALUE",
-  "princ/0037": "SIGNAL-VS-VALUE",
-  "princ/0039": "SIGNAL-VS-VALUE"
+  "princ/0037": "SIGNAL-VS-VALUE"
  }
 }

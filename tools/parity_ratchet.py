@@ -317,7 +317,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
         copy = pathlib.Path(tmp) / 'romacs-vm-census'
         shutil.copy2(binary, copy)
         digest = hashlib.sha256(copy.read_bytes()).hexdigest()
-        load_paths = [root / 'gnu-lisp'] + sorted(p for p in (root / 'gnu-lisp').rglob('*') if p.is_dir())
+        load_paths = lc.load_path(root)
         preload = lc.bootstrap_chain(root) if mode == 'warm' else ()
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             rows = list(pool.map(lambda pair: lc.run_file(pair[0], pair[1], copy, load_paths, timeout, preload),

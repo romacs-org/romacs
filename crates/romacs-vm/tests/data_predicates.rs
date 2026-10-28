@@ -65,7 +65,7 @@ fn sequencep_gnu_objects() {
 fn data_predicates_preserve_exact_construction_refusals() {
     let mut vm = Vm::new();
     for (source, expected) in [
-        ("(condition-case e (read-from-string \"2305843009213693952\") (error e))", "(invalid-read-syntax \"fixnum overflow (bignums not implemented) at byte 19\")"),
+        ("(condition-case e (read-from-string \"2305843009213693952\") (error e))", "(2305843009213693952 . 19)"),
         ("(condition-case e (string-to-number \"2305843009213693952\") (error e))", "(error \"string-to-number: bignum results are not supported\")"),
     ] {
         assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), expected, "exact boundary refusal: {source}");

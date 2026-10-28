@@ -79,7 +79,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | MakeLocalVariable => (1, Some(1)),
         Cons
         | Throw
-        | Signal
         | Aref
         | Assq
         | PlistGet
@@ -112,7 +111,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | DefvarSetDefault
         | DeepEqual
         | Set => (2, Some(2)),
-        Apply => (2, None),
+        Apply => (1, None),
         Aset
         | Put
         | YankPropertyRun
@@ -125,10 +124,10 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | SetWindowParameter
         | MakeObsolete
         | SetAdvertisedCallingConvention => (3, Some(3)),
-        CurrentBuffer | Point | PointMin | PointMax | BufferSize | ThisCommandKeys | Widen
+        CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen
         | BufferString | EncodeBufferUtf8 | DecodeBufferUtf8 | CacheStats | CacheClear
         | CacheEntries | MakeMarker | SyntaxTable | StandardSyntaxTable | SelectedWindow
-        | SelectedFrame | CurrentGlobalMap | EraseBuffer | EmacsLispMode | Daemonp
+        | SelectedFrame | CurrentGlobalMap | EmacsLispMode | Daemonp
         | DaemonInitialized | ReadHostEvent => (0, Some(0)),
         CharAfter | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine | CopySyntaxTable
         | WindowBuffer | WindowStart | WindowPoint | FramePixelWidth | FramePixelHeight
@@ -138,13 +137,13 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | MakeSparseKeymap | ForwardLine | MenuBarMode | ForceModeLineUpdate | TempBuffer => {
             (0, Some(1))
         }
-        SelfInsertCommand | DeleteChar | DeleteBackwardChar | Eval | Provide | Featurep
+        Eval | Provide | Featurep
         | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | CopyMarker | LookingAt
-        | MatchString | SelectWindow | Macroexpand => (1, Some(2)),
-        SearchForward | Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
-        PutProperty | SplitWindowInternal => (4, Some(5)),
+        | MatchString | SelectWindow | Macroexpand | Signal => (1, Some(2)),
+        Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
+        SplitWindowInternal => (4, Some(5)),
         GetProperty | Defalias | GetCharProperty | SetMarker | DefineError | Gethash
-        | ModifySyntaxEntry | SetWindowBuffer | SetWindowMargins | SetWindowStart
+        | ModifySyntaxEntry | SetWindowMargins | SetWindowStart
         | SetWindowNewPixel | LookupKey | ClosureDocument => (2, Some(3)),
         Load => (1, Some(5)),
         YankFinalize => (4, Some(4)),
@@ -153,7 +152,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         RemoveOverlays => (0, Some(4)),
         StringMatch => (2, Some(4)),
         MatchData => (0, Some(3)),
-        ReSearchForward | ReSearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
+        ReSearchForward | ReSearchBackward | SearchForward | SearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
         WindowVscroll | WindowEnd | WindowTotalHeight | WindowResizeApply | WindowTotalWidth => {
             (0, Some(2))
         }

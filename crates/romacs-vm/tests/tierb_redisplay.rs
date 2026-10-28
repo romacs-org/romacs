@@ -59,7 +59,7 @@ fn redisplay(vm: &mut Vm, text_rows: u32) -> (usize, usize) {
 fn conservative_reveal_preserves_point_and_minimizes_scrolling() {
     let mut vm = long_buffer(12);
     vm.set_collection_floor(1);
-    eval(&mut vm, "(defvar scroll-conservatively 101)");
+    eval(&mut vm, "(setq scroll-conservatively 101)");
     assert_eq!(redisplay(&mut vm, 12), (1, 1));
     for target in 2..=201 {
         goto_line(&mut vm, target);
@@ -75,7 +75,7 @@ fn conservative_reveal_preserves_point_and_minimizes_scrolling() {
 #[test]
 fn conservative_threshold_and_partial_rows_remain_explicit() {
     let mut vm = long_buffer(12);
-    eval(&mut vm, "(defvar scroll-conservatively 1)");
+    eval(&mut vm, "(setq scroll-conservatively 1)");
     goto_line(&mut vm, 13);
     assert_eq!(redisplay(&mut vm, 12), (2, 13));
     goto_line(&mut vm, 40);

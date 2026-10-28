@@ -128,7 +128,7 @@ fn sort(cx, sequence: Value; rest options) -> Step {
     if sequence == Value::NIL { return Ok(Step::Done(sequence)); }
     let values = if cx.pair(sequence).is_some() {
         let mut values = Vec::new();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut tail = sequence;
         while let Some((car, cdr)) = cx.pair(tail) {
             if !seen.insert(tail.0) { return Err(Fault::Circular(sequence)); }

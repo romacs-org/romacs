@@ -16,8 +16,7 @@
 ;; startup and by fontification called directly. Measured consequence: a real
 ;; TTY keystroke->redisplay loop is +2% under PGO while startup is -17%. If
 ;; interactive latency is the goal, this file has to drive an actual TTY
-;; session (see tools/bench/pty-run.py, which makes that deterministic) rather
-;; than call font-lock functions in batch.
+;; session rather than call font-lock functions in batch.
 
 (defun nm-pgo--edit-pass (file mode-fn iters)
   "Fontify and edit around FILE the way interactive editing does."

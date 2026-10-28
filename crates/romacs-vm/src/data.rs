@@ -15,6 +15,9 @@ pub(super) enum Object {
     Window(Box<window::Window>),
     Frame(Box<frame::Frame>),
     Terminal(Box<frame::Terminal>),
+    WindowConfiguration(Box<crate::window::WindowConfiguration>),
+    Sqlite(Box<crate::sqlite::Handle>),
+    Process(Box<crate::subprocess::Process>),
     String(Box<LispString>),
     RawString(Box<LispString>),
     Vector(Vec<Value>),
@@ -415,18 +418,21 @@ impl Vm {
         start: usize,
         argc: usize,
     ) -> Result<(Value, usize, usize)> {
-        if argc < 2 {
+        if argc < 1 {
             return Err("wrong primitive arity".into());
         }
-        let target = self.stack[start];
+        // GNU eval.c Fapply: FUNCTION, ARGS..., then the spread list; with a
+        // single argument the list's first element is the function.
         let tail = self.list_values(self.stack[start + argc - 1])?;
-        let mut values = self.stack[start + 1..start + argc - 1].to_vec();
+        let mut values = self.stack[start..start + argc - 1].to_vec();
         values.extend(tail);
+        let target = values.first().copied().unwrap_or(Value::NIL);
+        let values = values.get(1..).unwrap_or_default();
         if values.len() > 4096 {
             return Err("apply argument limit exceeded".into());
         }
         let offset = self.stack.len() - 4096;
-        self.stack[offset..offset + values.len()].copy_from_slice(&values);
+        self.stack[offset..offset + values.len()].copy_from_slice(values);
         Ok((target, offset, values.len()))
     }
     #[inline(never)]
@@ -488,6 +494,13 @@ impl Vm {
         if p == Primitive::Featurep && error == "featurep subfeature fault" {
             let fault = self.feature_subfeature_matches(x, y).err()?;
             return Some(self.fault(fault));
+        }
+        // get_keymap (keymap.c): (wrong-type-argument keymapp OBJECT).
+        if matches!(p, Primitive::LookupKey | Primitive::UseLocalMap) && error == "keymap required" {
+            let condition = self.intern("wrong-type-argument");
+            let keymapp = self.intern("keymapp");
+            let data = self.list_value(&[keymapp, x]);
+            return Some((condition, data));
         }
         // The bulk-verified core primitives re-derive GNU's exact data.
         if let Some((condition, values)) = self.core_condition(p, start, argc, error) {
@@ -600,7 +613,8 @@ impl Vm {
                 }
                 Aref | Aset if matches!(self.object_if(x), Some(Object::Record(_))) => ("fixnump", y),
                 Aref | Aset => ("integerp", y),
-                Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec => {
+                CharAfter => ("integer-or-marker-p", x),
+                Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
                     let value = self.stack[start..start + argc]
                         .iter()
                         .copied()
@@ -694,6 +708,9 @@ impl Vm {
                         | Object::Obarray(_)
                             | Object::Frame(_)
                             | Object::Terminal(_)
+                            | Object::WindowConfiguration(_)
+                            | Object::Sqlite(_)
+                            | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_) => Err("array required".into()),
                     };
@@ -739,6 +756,9 @@ impl Vm {
                         | Object::Obarray(_)
                         | Object::Frame(_)
                         | Object::Terminal(_)
+                        | Object::WindowConfiguration(_)
+                            | Object::Sqlite(_)
+                            | Object::Process(_)
                         | Object::HashTable(_)
                     | Object::SyntaxTable(_) => {
                         return Err("array required".into());
@@ -786,6 +806,9 @@ impl Vm {
                         | Object::Obarray(_)
                             | Object::Frame(_)
                             | Object::Terminal(_)
+                            | Object::WindowConfiguration(_)
+                            | Object::Sqlite(_)
+                            | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_)
                 ) {

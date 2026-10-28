@@ -2,6 +2,9 @@
 use crate::{data::Object, *};
 #[path = "redisplay.rs"]
 mod redisplay;
+#[path = "window_config.rs"]
+mod config;
+pub(crate) use config::WindowConfiguration;
 const ROOT: &str = "#:vm2-root-window";
 const MINI: &str = "#:vm2-minibuffer-window";
 const SELECTED: &str = "#:vm2-selected-window";
@@ -34,7 +37,17 @@ pub(super) struct Window {
     pub vscroll_px: u32,
     /// Deferred scroll, applied after the frozen frame paints (D-ML1).
     pub pending_vscroll: Option<u32>,
+    /// GNU `w->hscroll`, in columns. The display does not apply it yet
+    /// (VM2-HSCROLL1).
+    pub hscroll: i64,
     pub parameters: Vec<(Value, Value)>,
+    /// GNU `w->prev_buffers` and `w->next_buffers`: Lisp lists kept for
+    /// window.el's buffer history (`window-prev-buffers`).
+    pub prev_buffers: Value,
+    pub next_buffers: Value,
+    /// GNU `w->dedicated`: nil, t (strongly dedicated) or another value
+    /// (weakly dedicated), as set-window-dedicated-p left it.
+    pub dedicated: Value,
     /// GNU `w->new_total`, `w->new_normal`, `w->normal_lines` and
     /// `w->normal_cols` (window.h): Lisp objects, set by `make_window`
     /// (window.c:4599) to 0, 0, 1.0 and 1.0. `window_resize_apply`
@@ -47,6 +60,8 @@ pub(super) struct Window {
     /// GNU `w->use_time` (window.c:767): `window_select_count` at the last
     /// recorded selection, 0 for a window never selected that way.
     pub use_time: u64,
+    /// GNU `w->cursor_off_p` (dispnew.c internal-show-cursor).
+    pub cursor_off: bool,
     pub end_distance: usize,
     pub end_valid: bool,
     pub force_start: bool,
@@ -73,13 +88,18 @@ impl Window {
             left_margin: 0,
             vscroll_px: 0,
             pending_vscroll: None,
+            hscroll: 0,
             right_margin: 0,
             parameters: vec![],
+            prev_buffers: Value::NIL,
+            next_buffers: Value::NIL,
+            dedicated: Value::NIL,
             new_total: Value::NIL,
             new_normal: Value::NIL,
             normal_lines: Value::NIL,
             normal_cols: Value::NIL,
             use_time: 0,
+            cursor_off: false,
             end_distance: 0,
             end_valid: false,
             force_start: false,
@@ -97,6 +117,9 @@ impl Window {
             &mut self.new_normal,
             &mut self.normal_lines,
             &mut self.normal_cols,
+            &mut self.prev_buffers,
+            &mut self.next_buffers,
+            &mut self.dedicated,
         ] {
             f(v);
         }
@@ -168,6 +191,10 @@ impl Vm {
         Ok(false)
     }
 
+    /// The buffer the frame's minibuffer window shows (VM2 has one frame).
+    pub(crate) fn minibuffer_window_buffer(&self) -> Option<Value> {
+        self.window(self.window_root_peek(MINI)).ok().map(|w| w.buffer)
+    }
     /// The root/selected/minibuffer window, read without interning: the
     /// slot exists once `ensure_windows` has run.
     fn window_root_peek(&self, name: &str) -> Value {
@@ -280,6 +307,85 @@ impl Vm {
             return Err("buffer required".into());
         };
         b.point = b.byte_of_char(coordinates::CharOffset((pos - 1) as usize))?;
+        Ok(())
+    }
+    /// GNU window_discard_buffer_from_window (ALL false): BUFFER leaves
+    /// WINDOW's previous-buffers alist and next-buffers list, spliced out
+    /// destructively as GNU does.
+    pub(super) fn discard_buffer_from_window(&mut self, buffer: Value, window: Value) -> Result<()> {
+        let (prev, next) = (self.window(window)?.prev_buffers, self.window(window)?.next_buffers);
+        let prev = self.discard_buffer_from_list(buffer, prev, true)?;
+        let next = self.discard_buffer_from_list(buffer, next, false)?;
+        let w = self.window_mut(window)?;
+        w.prev_buffers = prev;
+        w.next_buffers = next;
+        Ok(())
+    }
+    /// LIST without the elements that are BUFFER (or, with ALIST, whose car is).
+    fn discard_buffer_from_list(&mut self, buffer: Value, list: Value, alist: bool) -> Result<Value> {
+        let (mut head, mut previous, mut tail) = (list, None::<Value>, list);
+        while let Ok((element, rest)) = self.cons_pair(tail) {
+            let key = if alist { self.cons_pair(element).map_or(Value::NIL, |(k, _)| k) } else { element };
+            if key == buffer {
+                match previous {
+                    None => head = rest,
+                    Some(cell) => {
+                        if Self::image_value(cell) {
+                            return Err("cannot mutate immutable image".into());
+                        }
+                        self.conses[cell.index(3)?].1 = rest;
+                    }
+                }
+            } else {
+                previous = Some(tail);
+            }
+            tail = rest;
+        }
+        Ok(head)
+    }
+    /// set_window_buffer: show live BUFFER in live window V (src/window.c).
+    pub(super) fn set_window_buffer_value(&mut self, v: Value, b: Value, keep: bool) -> Result<()> {
+        let buffer = self.display_buffer(b)?;
+        // GNU computes `samebuf` BEFORE assigning, then skips the
+        // whole marker/scroll reset when KEEP-MARGINS is set and the
+        // buffer is unchanged (src/window.c:4367, the
+        // `!(keep_margins_p && samebuf)` guard). Its comment
+        // explains why: resetting hscroll/vscroll breaks image-mode
+        // and doc-view-mode on every frame resize.
+        let samebuf = self.window(v)?.buffer == buffer;
+        if !(keep && samebuf) {
+            let (point, st) = (self.window(v)?.point, self.window(v)?.start);
+            // GNU takes the buffer's own point, `BUF_PT (b)`, not 1
+            // (src/window.c:4375). Resetting to 1 loses an
+            // unselected window's position: verified on live GNU
+            // 32.0.50, assigning a buffer whose point is 7 leaves
+            // window-point at 7 and selecting the window puts point
+            // at 7.
+            let pos = {
+                let Object::Buffer(buf) = self.object(buffer)? else {
+                    return Err("buffer required".into());
+                };
+                Value::integer((buf.char_of_byte(buf.point)?.0 + 1) as i64)?
+            };
+            self.set_marker_object(point, pos, buffer)?;
+            // GNU restores `b->last_window_start` here; VM2 keeps no
+            // per-buffer last window start, so it starts at 1. See
+            // DIVERGENCES.md VM2-WB1.
+            self.set_marker_object(st, Value::integer(1)?, buffer)?;
+            self.window_mut(v)?.hscroll = 0;
+        }
+        self.discard_buffer_from_window(buffer, v)?;
+        let w = self.window_mut(v)?;
+        w.buffer = buffer;
+        w.end_distance = 0;
+        w.end_valid = false;
+        // GNU resets margins when KEEP-MARGINS is nil
+        // (src/window.c:4397), independently of the guard above.
+        if !keep {
+            w.left_margin = 0;
+            w.right_margin = 0;
+        }
+        self.display_state.version += 1;
         Ok(())
     }
     /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time
@@ -831,6 +937,7 @@ impl Vm {
             let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
             changes.push((index, b.len_chars() - end_char));
         }
+        self.display_state.hosted = true;
         for (index, distance) in changes {
             let Object::Window(w) = &mut self.objects[index] else {
                 unreachable!()
@@ -849,7 +956,7 @@ impl Vm {
         use Primitive::*;
         let valid = match p {
             SelectedWindow => n == 0,
-            SetWindowPoint | SetWindowBuffer => n >= 2 && n <= 3 && (p != SetWindowPoint || n == 2),
+            SetWindowPoint => n == 2,
             SetWindowStart | SetWindowMargins | SetWindowNewPixel => n >= 2 && n <= 3,
             SetWindowParameter => n == 3,
             SplitWindowInternal => n == 4 || n == 5,
@@ -885,7 +992,11 @@ impl Vm {
             p,
             SelectedWindow | FrameSelectedWindow | MinibufferWindow | FrameRootWindow
         ) {
-            if p != SelectedWindow {
+            // frame-root-window and frame-selected-window take FRAME-OR-WINDOW:
+            // a valid window stands for its frame (window.c WINDOW_VALID_P).
+            let window = matches!(p, FrameSelectedWindow | FrameRootWindow)
+                && self.window(a).is_ok_and(|w| !w.dead);
+            if p != SelectedWindow && !window {
                 self.frame_arg(a)?;
             }
             return Ok(self.window_root(if p == MinibufferWindow {
@@ -923,7 +1034,6 @@ impl Vm {
                 | WindowEnd
                 | SetWindowMargins
                 | WindowMargins
-                | SetWindowBuffer
         );
         let dead_ok = matches!(
             p,
@@ -941,66 +1051,29 @@ impl Vm {
                 e,
             )?,
             WindowBuffer => self.window(v)?.buffer,
-            SetWindowBuffer => {
-                let buffer = self.display_buffer(b)?;
-                let keep = c != Value::NIL;
-                // GNU computes `samebuf` BEFORE assigning, then skips the
-                // whole marker/scroll reset when KEEP-MARGINS is set and the
-                // buffer is unchanged (src/window.c:4367, the
-                // `!(keep_margins_p && samebuf)` guard). Its comment
-                // explains why: resetting hscroll/vscroll breaks image-mode
-                // and doc-view-mode on every frame resize.
-                let samebuf = self.window(v)?.buffer == buffer;
-                if !(keep && samebuf) {
-                    let (point, st) = (self.window(v)?.point, self.window(v)?.start);
-                    // GNU takes the buffer's own point, `BUF_PT (b)`, not 1
-                    // (src/window.c:4375). Resetting to 1 loses an
-                    // unselected window's position: verified on live GNU
-                    // 32.0.50, assigning a buffer whose point is 7 leaves
-                    // window-point at 7 and selecting the window puts point
-                    // at 7.
-                    let pos = {
-                        let Object::Buffer(buf) = self.object(buffer)? else {
-                            return Err("buffer required".into());
-                        };
-                        Value::integer((buf.char_of_byte(buf.point)?.0 + 1) as i64)?
-                    };
-                    self.set_marker_object(point, pos, buffer)?;
-                    // GNU restores `b->last_window_start` here; VM2 keeps no
-                    // per-buffer last window start, so it starts at 1. See
-                    // DIVERGENCES.md VM2-WB1.
-                    self.set_marker_object(st, Value::integer(1)?, buffer)?;
-                }
-                let w = self.window_mut(v)?;
-                w.buffer = buffer;
-                w.end_distance = 0;
-                w.end_valid = false;
-                // GNU resets margins when KEEP-MARGINS is nil
-                // (src/window.c:4397), independently of the guard above.
-                if !keep {
-                    w.left_margin = 0;
-                    w.right_margin = 0;
-                }
-                Value::NIL
-            }
             WindowPoint => self.window_point_value(v)?,
             SetWindowPoint => {
                 if v == self.window_root(SELECTED) {
-                    self.set_buffer_point_for_window(v, b)?;
+                    // CHECK_FIXNUM_COERCE_MARKER replaces POS when the
+                    // window's buffer is not current, so that POS is returned.
+                    let coerced = self.window(v)?.buffer != self.slots[self.buffer_slot].value;
+                    let pos = if coerced && matches!(self.object_if(b), Some(Object::Marker(_))) { self.marker_position_value(b)? } else { b };
+                    self.set_buffer_point_for_window(v, pos)?;
+                    if coerced { pos } else { b }
                 } else {
                     self.set_marker_object(self.window(v)?.point, b, self.window(v)?.buffer)?;
+                    b
                 }
-                b
             }
             WindowStart => self.marker_position_value(self.window(v)?.start)?,
             SetWindowStart => {
-                if c != Value::NIL {
-                    return Err("VM2 NOFORCE redisplay selection is unsupported".into());
-                }
                 self.set_marker_object(self.window(v)?.start, b, self.window(v)?.buffer)?;
                 let w = self.window_mut(v)?;
                 w.end_valid = false;
-                w.force_start = true;
+                // NOFORCE lets redisplay move the start to keep point visible.
+                if c == Value::NIL {
+                    w.force_start = true;
+                }
                 b
             }
             WindowEnd => {
@@ -1149,7 +1222,6 @@ impl Vm {
             SelectWindow
                 | DeleteWindowInternal
                 | SplitWindowInternal
-                | SetWindowBuffer
                 | SetWindowPoint
                 | SetWindowStart
                 | SetWindowParameter
@@ -1292,10 +1364,15 @@ impl<'a> Windows<'a> {
         let w = self.live(window)?;
         Self::int(self.get(w)?.use_time as i64)
     }
-    /// VM2 has no `set-window-dedicated-p` yet, so no window is dedicated.
     pub(crate) fn window_dedicated_p(&mut self, window: Value) -> Out {
-        self.live(window)?;
-        Ok(Value::NIL)
+        let w = self.live(window)?;
+        Ok(self.get(w)?.dedicated)
+    }
+    /// Fset_window_dedicated_p: FLAG, stored on a live WINDOW.
+    pub(crate) fn set_window_dedicated_p(&mut self, window: Value, flag: Value) -> Out {
+        let w = self.live(window)?;
+        self.vm.window_mut(w).map_err(internal)?.dedicated = flag;
+        Ok(flag)
     }
     /// Decorations VM2 does not draw: header/tab lines, scroll bars and
     /// dividers are 0 pixels (window.c:1224-1269 on a live window).
@@ -1327,6 +1404,95 @@ impl<'a> Windows<'a> {
             && x.height > line;
         Self::int(if wants { i64::from(line) } else { 0 })
     }
+    /// window_body_width / window_body_height (window.c): WINDOW's text
+    /// area in canonical characters (PIXELWISE nil, or `remap' with no face
+    /// remapping) or pixels. The width loses the margins and, on a frame
+    /// that is not a window system's, the column of the vertical bar a
+    /// window left of another has; the height loses the mode line. VM2 has
+    /// no fringes, scroll bars, dividers, header or tab lines.
+    /// window_pixel_left / window_pixel_top: the window's frame-relative
+    /// pixel edge.
+    /// GNU window.c:1998 Fpos_visible_in_window_p. pos_visible_p (xdisp.c:1703)
+    /// sees nothing on the initial frame, batch's, which no host lays out. A
+    /// displayed window would need display simulation (VM2-POSVIS1).
+    pub(crate) fn pos_visible_in_window_p(&mut self, pos: Value, window: Value, _partially: Value) -> Out {
+        let w = self.live(window)?;
+        let posint = if pos == Value::TRUE {
+            None
+        } else if pos == Value::NIL && w == self.vm.window_root(SELECTED) {
+            // PT: the current buffer's point, whichever buffer W shows.
+            let index = self.vm.buffer_index().map_err(internal)?;
+            Some(match &self.vm.objects[index] {
+                Object::Buffer(b) => b.char_of_byte(b.point).map_err(internal)?.0 as i64 + 1,
+                Object::ByteBuffer(b) => b.point.0 as i64 + 1,
+                _ => return Err(internal("buffer required".into())),
+            })
+        } else if pos == Value::NIL {
+            let point = self.get(w)?.point;
+            Some(self.vm.marker_position_value(point).map_err(internal)?.as_integer().map_err(internal)?)
+        } else {
+            Some(match self.vm.object_if(pos) {
+                Some(Object::Marker(_)) => {
+                    let at = self.vm.marker_position_value(pos).map_err(internal)?;
+                    at.as_integer().map_err(|_| internal("Marker does not point anywhere".into()))?
+                }
+                // fix_position saturates a bignum.
+                Some(Object::Bignum(n)) => if n.sign() == num_bigint::Sign::Minus { i64::MIN } else { i64::MAX },
+                _ => pos.as_integer().map_err(|_| Fault::Wrong("integer-or-marker-p", pos))?,
+            })
+        };
+        let (start, buffer) = { let x = self.get(w)?; (x.start, x.buffer) };
+        let top = self.vm.marker_position_value(start).map_err(internal)?.as_integer().map_err(internal)?;
+        let Object::Buffer(b) = self.vm.object(buffer).map_err(internal)? else {
+            return Err(internal("buffer required".into()));
+        };
+        let accessible = b.accessible();
+        let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
+        let (begv, zv) = (char_at(accessible.start)?, char_at(accessible.end)?);
+        if posint.is_some_and(|p| p < top || p > zv) || top < begv || top > zv || !self.vm.display_state.hosted {
+            return Ok(Value::NIL);
+        }
+        Err(internal("VM2 pos-visible-in-window-p in a displayed window is unsupported".into()))
+    }
+    pub(crate) fn window_pixel_edge(&mut self, window: Value, top: bool) -> Out {
+        let w = self.valid(window)?;
+        let x = self.get(w)?;
+        Value::integer(i64::from(if top { x.y } else { x.x })).map_err(internal)
+    }
+    pub(crate) fn window_body_size(&mut self, window: Value, pixelwise: Value, width: bool) -> Out {
+        let w = self.live(window)?;
+        let (column, line) = (i64::from(self.vm.window_state.column), i64::from(self.vm.window_state.line));
+        let remap = pixelwise == self.vm.intern("remap");
+        if remap {
+            let slot = self.vm.slot("face-remapping-alist");
+            let alist = self.vm.variable_value(slot).map_err(internal)?;
+            if alist != Value::NIL && alist != Value::UNBOUND {
+                return Err(Fault::Error("VM2 window body sizes in remapped face characters are unsupported".into()));
+            }
+        }
+        let chars = pixelwise == Value::NIL || remap;
+        let size = if width {
+            let (right, margins, pixels) = {
+                let x = self.get(w)?;
+                (i64::from(x.x) + i64::from(x.width), i64::from(x.left_margin + x.right_margin) * column, i64::from(x.width))
+            };
+            let root = self.vm.window_root_peek(ROOT);
+            let rightmost = self.vm.window(root).map_or(true, |r| right >= i64::from(r.x) + i64::from(r.width));
+            let window_system = {
+                let slot = self.vm.slot("window-system");
+                let value = self.vm.slots[slot].value;
+                value != Value::NIL && value != Value::UNBOUND
+            };
+            let bar = if !window_system && !rightmost { column } else { 0 };
+            let px = pixels - bar - margins;
+            if chars { px / column } else { px }
+        } else {
+            let mode_line = self.window_mode_line_height(window)?.integer_value().unwrap_or(0);
+            let px = i64::from(self.get(w)?.height) - mode_line;
+            if chars { px / line } else { px }
+        };
+        Self::int(size.max(0))
+    }
     /// window.c:8639: (LEFT RIGHT OUTSIDE-MARGINS PERSISTENT). VM2 draws no
     /// fringes.
     pub(crate) fn window_fringes(&mut self, window: Value) -> Out {
@@ -1348,8 +1514,51 @@ impl<'a> Windows<'a> {
     }
     /// frame.c:327: VM2 returns the initial/termcap type t, but retains
     /// graphical character metrics (documented hybrid, VM2-WIN5).
+    /// decode_live_frame: the selected frame for nil, else FRAME if live.
+    pub(crate) fn decode_live_frame(&mut self, frame: Value) -> std::result::Result<Value, Fault> {
+        self.live_frame(frame)?;
+        Ok(if frame == Value::NIL { self.frame() } else { frame })
+    }
+    /// GNU frame.c:2103 select-frame through do_switch_frame: selecting the
+    /// selected frame returns it. VM2 has one live frame.
+    pub(crate) fn select_frame(&mut self, frame: Value) -> Out {
+        if self.frame_live_p(frame) == Value::NIL {
+            return Err(Fault::Wrong("frame-live-p", frame));
+        }
+        if frame != self.frame() {
+            return Err(internal("VM2 switching to another frame is unsupported".into()));
+        }
+        Ok(frame)
+    }
     pub(crate) fn frame_live_p(&mut self, object: Value) -> Value {
         if matches!(self.vm.object_if(object), Some(Object::Frame(f)) if f.live) { Value::TRUE } else { Value::NIL }
+    }
+    /// The frame's parameter alist entries, most recently added first
+    /// (frame.c f->param_alist). FRAME nil is the selected frame.
+    pub(crate) fn frame_parameter_entries(&mut self, frame: Value) -> std::result::Result<Vec<(Value, Value)>, Fault> {
+        self.any_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        Ok(self.vm.frame(frame).map_err(internal)?.parameters.clone())
+    }
+    pub(crate) fn check_live_frame(&mut self, frame: Value) -> std::result::Result<(), Fault> {
+        self.live_frame(frame)
+    }
+    /// FRAME_COLS and FRAME_LINES of the frame's text area.
+    pub(crate) fn frame_text_size(&mut self) -> (i64, i64) {
+        let state = &self.vm.window_state;
+        (i64::from(state.width / state.column.max(1)), i64::from(state.height / state.line.max(1)))
+    }
+    /// frame.c store_frame_param: replace an existing entry's value, else
+    /// push a new entry onto the front.
+    pub(crate) fn store_frame_parameter(&mut self, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
+        self.live_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        let parameters = &mut self.vm.frame_mut(frame).map_err(internal)?.parameters;
+        match parameters.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, v)) => *v = value,
+            None => parameters.insert(0, (key, value)),
+        }
+        Ok(())
     }
     pub(crate) fn frame_p(&self, object: Value) -> Value {
         if matches!(self.vm.object_if(object), Some(Object::Frame(_))) { Value::TRUE } else { Value::NIL }
@@ -1377,6 +1586,47 @@ impl<'a> Windows<'a> {
         };
         matches!(self.vm.object_if(terminal), Some(Object::Terminal(t)) if t.live).then_some(terminal)
     }
+    /// decode_live_terminal, then the (terminal, keyboard) coding names.
+    pub(crate) fn terminal_codings(&mut self, object: Value) -> std::result::Result<(Value, Value, Value), Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        let terminal = self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        match self.vm.object_if(terminal) {
+            Some(Object::Terminal(t)) => Ok((terminal, t.terminal_coding, t.keyboard_coding)),
+            _ => Err(Fault::Wrong("terminal-live-p", object)),
+        }
+    }
+    pub(crate) fn set_terminal_coding(&mut self, terminal: Value, keyboard: bool, coding: Value) -> std::result::Result<(), Fault> {
+        let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
+        if let Some(Object::Terminal(t)) = self.vm.objects.get_mut(index) {
+            if keyboard { t.keyboard_coding = coding; } else { t.terminal_coding = coding; }
+        }
+        Ok(())
+    }
+    /// decode_any_window: nil is the selected window; dead windows count.
+    fn any_window(&mut self, window: Value) -> std::result::Result<Value, Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        let window = if window == Value::NIL { self.vm.window_root(SELECTED) } else { window };
+        if matches!(self.vm.object_if(window), Some(Object::Window(_))) { Ok(window) } else { Err(Fault::Wrong("windowp", window)) }
+    }
+    pub(crate) fn set_cursor_off(&mut self, window: Value, off: bool) -> std::result::Result<(), Fault> {
+        let window = self.any_window(window)?;
+        self.vm.window_mut(window).map_err(internal)?.cursor_off = off;
+        Ok(())
+    }
+    pub(crate) fn cursor_off(&mut self, window: Value) -> std::result::Result<bool, Fault> {
+        let window = self.any_window(window)?;
+        Ok(self.get(window)?.cursor_off)
+    }
+    /// terminal.c Fframe_initial_p. VM2's one terminal is GNU's
+    /// output_initial kind, so every live frame is an initial frame.
+    pub(crate) fn frame_initial_p(&mut self, frame: Value) -> Out {
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        if let Some(Object::Frame(f)) = self.vm.object_if(frame) {
+            return Ok(if f.live { Value::TRUE } else { Value::NIL });
+        }
+        // decode_terminal yields NULL for anything else: nil, not an error.
+        Ok(if self.terminal(frame).is_some() { Value::TRUE } else { Value::NIL })
+    }
     pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {
         if self.terminal(object).is_some() { Value::TRUE } else { Value::NIL }
     }
@@ -1388,6 +1638,68 @@ impl<'a> Windows<'a> {
         self.terminal(terminal).ok_or(Fault::Wrong("terminal-live-p", terminal))?;
         // GNU returns nil for output_initial. There is no TTY backend here.
         Ok(Value::NIL)
+    }
+    /// Fset_window_buffer's checks: WINDOW live and BUFFER-OR-NAME a live
+    /// buffer (Fget_buffer, then CHECK_BUFFER). Returns the window, the
+    /// buffer, and whether the window shows another buffer now.
+    pub(crate) fn set_window_buffer_check(&mut self, window: Value, buffer_or_name: Value) -> std::result::Result<(Value, Value, bool), Fault> {
+        let v = self.live(window)?;
+        let buffer = if matches!(self.vm.object_if(buffer_or_name), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
+            buffer_or_name
+        } else {
+            let view = self.vm.str_view(buffer_or_name).ok_or(Fault::Wrong("stringp", buffer_or_name))?;
+            let name = view.as_str().ok_or(Fault::NotUnicode(buffer_or_name))?.to_owned();
+            self.vm.named_buffer(&name).unwrap_or(Value::NIL)
+        };
+        if buffer == Value::NIL {
+            return Err(Fault::Wrong("bufferp", Value::NIL));
+        }
+        if !self.vm.buffer_state(buffer).is_ok_and(|s| s.live) {
+            return Err(Fault::Error("Attempt to display deleted buffer".into()));
+        }
+        Ok((v, buffer, self.get(v)?.buffer != buffer))
+    }
+    /// The name of the buffer WINDOW is strongly dedicated to, if it is.
+    pub(crate) fn strongly_dedicated(&mut self, window: Value) -> std::result::Result<Option<String>, Fault> {
+        let w = self.get(window)?;
+        if w.dedicated != Value::TRUE { return Ok(None); }
+        let buffer = w.buffer;
+        Ok(Some(self.vm.buffer_state(buffer).ok().and_then(|s| s.name.clone()).unwrap_or_default()))
+    }
+    /// set_window_buffer, after Fset_window_buffer's checks.
+    pub(crate) fn set_window_buffer(&mut self, window: Value, buffer: Value, keep_margins: Value) -> Out {
+        self.vm.set_window_buffer_value(window, buffer, keep_margins != Value::NIL).map_err(internal)?;
+        Ok(Value::NIL)
+    }
+    /// GNU `window-prev-buffers` (NEXT false) / `window-next-buffers`.
+    pub(crate) fn window_buffers(&mut self, window: Value, next: bool) -> Out {
+        let v = self.live(window)?;
+        let w = self.get(v)?;
+        Ok(if next { w.next_buffers } else { w.prev_buffers })
+    }
+    /// GNU `set-window-prev-buffers` (NEXT false) / `set-window-next-buffers`.
+    pub(crate) fn set_window_buffers(&mut self, window: Value, buffers: Value, next: bool) -> Out {
+        let v = self.live(window)?;
+        let w = self.get_mut(v)?;
+        if next { w.next_buffers = buffers } else { w.prev_buffers = buffers }
+        Ok(buffers)
+    }
+    /// window.c Fframe_first_window: the top-left live window of FRAME-OR-WINDOW's frame.
+    pub(crate) fn frame_first_window(&mut self, frame_or_window: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        let frame = if frame_or_window == Value::NIL {
+            self.frame()
+        } else if self.window_valid_p(frame_or_window) != Value::NIL {
+            self.get(frame_or_window)?.frame
+        } else {
+            self.live_frame(frame_or_window)?;
+            frame_or_window
+        };
+        let mut window = self.vm.frame(frame).map_err(internal)?.root;
+        while let Some(&child) = self.get(window)?.children.first() {
+            window = child;
+        }
+        Ok(window)
     }
     pub(crate) fn window_list(&mut self, frame: Value, minibuf: Value, window: Value) -> Out {
         self.vm.ensure_windows().map_err(internal)?;
@@ -1424,6 +1736,32 @@ impl<'a> Windows<'a> {
         Ok(windows.into_iter().find(|&w| {
             self.get(w).is_ok_and(|w| w.live() && w.buffer == buffer && (!w.mini || self.vm.names.get("romacs--minibuf-level").is_some_and(|&i| self.vm.slots[i].value.integer_value().is_some_and(|depth| depth > 0))))
         }).unwrap_or(Value::NIL))
+    }
+    /// GNU window.c:748.
+    pub(crate) fn set_window_combination_limit(&mut self, window: Value, limit: Value) -> Out {
+        if window == Value::NIL { return Err(Fault::Wrong("window-valid-p", window)); }
+        let window = self.valid(window)?;
+        if self.get(window)?.children.is_empty() {
+            return Err(Fault::Error("Combination limit is meaningful for internal windows only".into()));
+        }
+        self.get_mut(window)?.combination_limit = limit;
+        Ok(limit)
+    }
+    /// GNU window.c:1278.
+    pub(crate) fn window_hscroll(&mut self, window: Value) -> Out {
+        let window = self.live(window)?;
+        Self::int(self.get(window)?.hscroll)
+    }
+    /// GNU window.c:1313 and set_window_hscroll: clipped to 0..most-positive-fixnum.
+    pub(crate) fn set_window_hscroll(&mut self, window: Value, ncol: Value) -> Out {
+        let n = ncol.integer_value().ok_or(Fault::Wrong("fixnump", ncol))?;
+        let window = self.live(window)?;
+        let n = n.clamp(0, Value::MAX_FIXNUM);
+        let w = self.get_mut(window)?;
+        if w.hscroll != n { w.end_valid = false; }
+        w.hscroll = n;
+        self.vm.display_state.version += 1;
+        Self::int(n)
     }
     pub(crate) fn window_combination_limit(&mut self, window: Value) -> Out {
         if window == Value::NIL { return Err(Fault::Wrong("window-valid-p", window)); }

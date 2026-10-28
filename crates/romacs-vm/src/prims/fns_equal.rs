@@ -153,3 +153,15 @@ fn delete_from_list(cx: &mut Leaf<'_>, elt: Value, mut seq: Value) -> Out {
 fn not_list(cx: &mut Leaf<'_>, object: Value) -> Out {
     Ok(if object == Value::NIL || cx.pair(object).is_some() { Value::NIL } else { Value::TRUE })
 }
+
+defsubr! { name = "equal-including-properties", gnu = "fns.c:2822", effect = Pure,
+fn equal_including_properties(cx, o1: Value, o2: Value) {
+    let same = cx.equal_including_properties(o1, o2).map_err(|e| match e {
+        crate::hash::HashFault::Wrong(p, v) => Fault::Wrong(p, v),
+        crate::hash::HashFault::Error("circular-list", Some(v)) => Fault::Circular(v),
+        crate::hash::HashFault::Error(m, _) => Fault::Error(m.into()),
+        crate::hash::HashFault::Internal(m) => Fault::Error(m),
+        _ => Fault::Error("equal-including-properties failed".into()),
+    })?;
+    Ok(if same { Value::TRUE } else { Value::NIL })
+}}

@@ -47,8 +47,8 @@ pub const STAND_INS: [(&str, &str, &str); 13] = [
 static FILES: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// Queue FILE for [`visit_queued`]. Relative names stay relative: the
-/// evaluator expands them against the process directory (DIVERGENCES.md
-/// VM2-PATH2), which is where `romacs FILE` was typed.
+/// evaluator expands them against the current buffer's `default-directory`,
+/// which starts as the process directory, where `romacs FILE` was typed.
 pub fn visit_at_startup(file: &str) {
     FILES.lock().unwrap().push(file.into());
 }
@@ -257,11 +257,6 @@ fn gnu_defined(vm: &mut Vm, command: &str) -> Result<bool, String> {
 
 /// Bind every stand-in key: GNU's command where loadup defined it, else romacs's.
 fn bind_journey_keys(vm: &mut Vm, after_loadup: bool) -> Result<Vec<Binding>, String> {
-    // Install VM2's keymaps through a keymap primitive BEFORE any form names
-    // `global-map`: VM2's lazy keymap setup treats an interned `global-map`
-    // symbol as "already installed", and `global-set-key` then panics on the
-    // missing internal map (crates/romacs-vm/src/keymap.rs ensure_keymaps).
-    vm.eval_source("(keymapp nil)")?;
     let mut bindings = vec![];
     for (key, gnu, romacs) in STAND_INS {
         let gnu_defined = after_loadup && gnu_defined(vm, gnu)?;
@@ -307,11 +302,14 @@ fn policy(vm: &mut Vm, root: Option<&std::path::Path>, name: &str, embedded: &st
 }
 
 fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root: Option<&std::path::Path>) -> Result<Started, String> {
+    // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
+    vm.install_lisp_prelude()?;
     policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
     policy(vm, root, "romacs-find-file.el", include_str!("../../../rlisp/romacs-find-file.el"))?;
     policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     policy(vm, root, "romacs-extended-command.el", include_str!("../../../rlisp/romacs-extended-command.el"))?;
     initialize_editing_from_sources(vm, root)?;
+    initialize_coding(vm, root)?;
     policy(vm, root, "romacs-dired.el", include_str!("../../../rlisp/romacs-dired.el"))?;
     policy(vm, root, "romacs-term.el", include_str!("../../../rlisp/romacs-term.el"))?;
     policy(vm, root, "vm/process.el", include_str!("../../../rlisp/vm/process.el"))?;
@@ -414,7 +412,7 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
             "kill-new", "current-kill", "backward-word", "kill-word", "backward-kill-word",
         ][..]),
     ] {
-        let spans = crate::loadup::form_spans(source)?;
+        let spans = gnu_form_spans(source)?;
         for name in names {
             if !matches!(*name, "kill-new" | "current-kill")
                 && vm.eval_source(&format!("(fboundp '{name})"))? != romacs_vm::Fixed::NIL { continue; }
@@ -429,6 +427,96 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
         }
     }
     Ok(())
+}
+
+/// `form_spans` of an embedded GNU source, scanned once per thread: editing
+/// and coding take forms from the same large files (subr.el, files.el).
+fn gnu_form_spans(source: &'static str) -> Result<std::rc::Rc<Vec<(usize, usize, usize)>>, String> {
+    type Scans = std::collections::HashMap<usize, std::rc::Rc<Vec<(usize, usize, usize)>>>;
+    thread_local! { static SCANS: std::cell::RefCell<Scans> = Default::default(); }
+    let key = source.as_ptr() as usize;
+    if let Some(spans) = SCANS.with(|scans| scans.borrow().get(&key).cloned()) { return Ok(spans); }
+    let spans = std::rc::Rc::new(crate::loadup::form_spans(source)?);
+    SCANS.with(|scans| scans.borrow_mut().insert(key, spans.clone()));
+    Ok(spans)
+}
+
+/// The workspace's file coding: without loadup only coding.c's built-in
+/// systems exist, so a visit of UTF-8 text would find nothing. Evaluate,
+/// verbatim from the pinned mirror, mule.el's `define-coding-system' and
+/// visit bookkeeping and mule-conf.el's fundamental, Latin-1 and UTF-8
+/// definitions. Visiting and saving then choose codings as GNU does:
+/// mule.el's `set-auto-coding' (BOM signatures, `coding:' cookies and
+/// `auto-coding-functions') is `set-auto-coding-function', and mule-cmds.el's
+/// `select-safe-coding-system' is `select-safe-coding-system-function', with
+/// the byte-run.el, subr.el, files.el and mule-util.el helpers they call. Finally
+/// romacs-coding.el sets the state GNU's locale startup reaches. Each head
+/// names exactly one top-level form.
+fn initialize_coding(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
+    for (source, heads) in [
+        (include_str!("../../../gnu-lisp/emacs-lisp/byte-run.el"), &[
+            "(defalias 'function-put", "(defalias 'byte-run--set-speed",
+            "(defmacro eval-and-compile", "(defmacro defsubst",
+        ][..]),
+        (include_str!("../../../gnu-lisp/subr.el"), &[
+            "(defun caar", "(defmacro ignore-errors", "(defsubst string-match-p", "(defun ensure-list",
+        ][..]),
+        (include_str!("../../../gnu-lisp/files.el"), &[
+            "(defvar find-file-literally", "(put 'find-file-literally",
+            "(defvar inhibit-local-variables-regexps", "(defvar inhibit-local-variables-suffixes",
+            "(defvar inhibit-local-variables-ignore-case", "(defun inhibit-local-variables-p",
+            "(defvar file-name-version-regexp", "(defun file-name-sans-versions",
+            "(defvar file-auto-mode-skip", "(defun set-auto-mode-1",
+        ][..]),
+        (include_str!("../../../gnu-lisp/international/mule-util.el"), &["(defmacro with-coding-priority"][..]),
+        (include_str!("../../../gnu-lisp/international/mule.el"), &[
+            "(defun define-coding-system", "(defun coding-system-type",
+            "(defun coding-system-category", "(defun coding-system-get", "(defun coding-system-equal",
+            "(defvar-local buffer-file-coding-system-explicit",
+            "(defcustom auto-coding-alist", "(defcustom auto-coding-regexp-alist",
+            "(defun auto-coding-regexp-alist-lookup", "(defvar auto-coding-file-name",
+            "(defcustom auto-coding-functions", "(defvar set-auto-coding-for-load",
+            "(defun auto-coding-alist-lookup",
+            "(put 'enable-character-translation 'permanent-local",
+            "(put 'enable-character-translation 'safe-local-variable",
+            "(defun find-auto-coding", "(defun set-auto-coding", "(setq set-auto-coding-function",
+            "(defun after-insert-file-set-coding", "(defun find-new-buffer-file-coding-system",
+            "(defun sgml-xml-auto-coding-function", "(defun sgml-html-meta-auto-coding-function",
+        ][..]),
+        (include_str!("../../../gnu-lisp/international/mule-conf.el"), &[
+            "(define-coding-system-alias 'binary", "(define-coding-system-alias 'unix",
+            "(define-coding-system-alias 'dos", "(define-coding-system-alias 'mac",
+            "(define-coding-system 'prefer-utf-8", "(define-coding-system 'raw-text",
+            "(define-coding-system 'no-conversion-multibyte", "(define-coding-system 'iso-latin-1",
+            "(define-coding-system-alias 'iso-8859-1", "(define-coding-system-alias 'latin-1",
+            "(define-coding-system 'utf-8", "(define-coding-system 'utf-8-with-signature",
+            "(define-coding-system 'utf-8-auto", "(define-coding-system-alias 'mule-utf-8",
+            "(define-coding-system-alias 'cp65001", "(define-coding-system 'utf-8-emacs",
+            "(define-coding-system-alias 'emacs-internal",
+            "(aset latin-extra-code-table ?\\221", "(aset latin-extra-code-table ?\\222",
+            "(aset latin-extra-code-table ?\\223", "(aset latin-extra-code-table ?\\224",
+            "(aset latin-extra-code-table ?\\225", "(aset latin-extra-code-table ?\\226",
+        ][..]),
+        (include_str!("../../../gnu-lisp/international/mule-cmds.el"), &[
+            "(defun coding-system-change-eol-conversion", "(defun coding-system-change-text-conversion",
+            "(defvar sort-coding-systems-predicate", "(defun sort-coding-systems",
+            "(defun find-coding-systems-region", "(defvar last-coding-system-specified",
+            "(defvar select-safe-coding-system-accept-default-p",
+            "(defun select-safe-coding-system", "(setq select-safe-coding-system-function",
+            "(defvar language-info-alist", "(defun get-language-info",
+            "(defcustom current-language-environment",
+        ][..]),
+    ] {
+        let spans = gnu_form_spans(source)?;
+        for head in heads {
+            let forms: Vec<_> = spans.iter().map(|&(start, end, _)| &source[start..end])
+                .filter(|form| form.strip_prefix(head).is_some_and(|tail| tail.starts_with(char::is_whitespace)))
+                .collect();
+            let [form] = forms[..] else { return Err(format!("Expected one GNU coding form: {head}")) };
+            vm.eval_source(form)?;
+        }
+    }
+    policy(vm, root, "romacs-coding.el", include_str!("../../../rlisp/romacs-coding.el"))
 }
 
 /// Evaluate sorted `.el` command modules beside GNU's runtime Lisp directory.
