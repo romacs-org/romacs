@@ -583,6 +583,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-file-truename", gnu: "buffer.c:5446", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     CVariable { name: "buffer-read-only", gnu: "buffer.c:5458", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "buffer-file-format", gnu: "buffer.c:5837", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // define-minor-mode records a buffer's enabled minor modes here, and
+    // command-completion-default-include-p reads them; nil in a new buffer.
+    CVariable { name: "local-minor-modes", gnu: "buffer.c:5249", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // Local only when set; permanent (buffer.c:4811 buffer_permanent_local_flags).
     CVariable { name: "buffer-file-coding-system", gnu: "buffer.c:5314", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "mark-active", gnu: "buffer.c:5795", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
@@ -964,7 +967,7 @@ impl Vm {
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
         matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name")
+            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "local-minor-modes" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name")
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {

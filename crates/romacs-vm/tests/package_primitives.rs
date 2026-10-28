@@ -3,8 +3,8 @@
 //! exists), frame-first-window, timer-idle-list, and the subrs in the
 //! special forms' function cells, print-gensym as gnosis's serializer
 //! binds it, `random' seeded as GNU seeds glibc's generator,
-//! overlay-properties, byte-to-string, the base64 region coders and
-//! command-modes.
+//! overlay-properties, byte-to-string, the base64 region coders,
+//! command-modes and local-minor-modes.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -48,6 +48,7 @@ const CASES: &str = r###"
 (let ((f (make-interpreted-closure nil '(1) '(t) nil '(interactive nil r-mode s-mode)))) (aref f 5))
 (let ((f (make-interpreted-closure nil '(1) '(t) nil '(interactive nil r-mode s-mode)))) (funcall f))
 (let ((g (make-interpreted-closure nil '(1) '(t) nil '(interactive "p")))) (list (command-modes g) (aref g 5)))
+(with-temp-buffer (list (boundp 'local-minor-modes) local-minor-modes (local-variable-p 'local-minor-modes) (special-variable-p 'local-minor-modes) (default-value 'local-minor-modes) (progn (setq local-minor-modes '(foo-mode)) (kill-all-local-variables) (list local-minor-modes (with-temp-buffer local-minor-modes) (local-variable-p 'local-minor-modes) (default-value 'local-minor-modes) (buffer-local-value 'local-minor-modes (current-buffer)))) (assq 'local-minor-modes (buffer-local-variables)) (let ((local-minor-modes '(x))) (list local-minor-modes (default-value 'local-minor-modes))) (progn (set-default 'local-minor-modes '(d)) (prog1 (list (default-value 'local-minor-modes) local-minor-modes (with-temp-buffer local-minor-modes)) (set-default 'local-minor-modes nil)))))
 "###;
 
 /// Cases whose change hooks run Lisp, which needs the Lisp prelude.
