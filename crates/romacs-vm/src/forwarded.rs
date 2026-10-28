@@ -786,31 +786,40 @@ const UNBINDABLE: &str = "Built-in variable may not be unbound : ";
 impl Vm {
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
+    /// A fenced built-in variable is the forwarding the fence keeps; a
+    /// fenced plain one is `Fwd::Fence`.
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
-        match self.access_forwarding(slot) {
-            Some(Fwd::Fence(_)) => self.fenced_forwarding(slot),
-            fwd => fwd,
+        self.resolve_redirect(slot);
+        match self.variable_redirects.get(slot).copied().flatten() {
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => Some(self.fenced_forwarding(slot).unwrap_or(fwd)),
+            Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
+            _ => None,
         }
     }
-    /// [`Vm::forwarding`] as the access paths dispatch on it: a fenced cell
-    /// is `Fwd::Fence`.
+    /// [`Vm::forwarding`] as the access paths dispatch on it: every fenced
+    /// variable is `Fwd::Fence`.
     fn access_forwarding(&mut self, slot: usize) -> Option<Fwd> {
-        if self.variable_redirects.get(slot).copied().flatten().is_none() {
-            let name = self.symbol_names.get(slot)?.clone();
-            if self.names.get(&name) != Some(&slot) {
-                return None;
-            }
-            self.initialize_variable_redirect(&name, slot);
-        }
+        self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             _ => None,
         }
     }
+    /// Initialise interned SLOT's lazy redirect.
+    #[inline(always)]
+    fn resolve_redirect(&mut self, slot: usize) {
+        if self.variable_redirects.get(slot).copied().flatten().is_none()
+            && let Some(name) = self.symbol_names.get(slot)
+            && self.names.get(name) == Some(&slot)
+        {
+            let name = name.clone();
+            self.initialize_variable_redirect(&name, slot);
+        }
+    }
     /// [`Vm::forwarding`] without caching, for `&self` readers.
     pub(super) fn forwarding_ref(&self, slot: usize) -> Option<Fwd> {
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::Forwarded(Fwd::Fence(_))) => self.fenced_forwarding(slot),
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => Some(self.fenced_forwarding(slot).unwrap_or(fwd)),
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             Some(_) => None,
             None => {
@@ -1281,7 +1290,7 @@ impl Vm {
                 Ok(())
             }
             Fwd::Obj(_) | Fwd::Int(_) => Err(unlocalizable(&self.symbol_names[slot])),
-            Fwd::Fence(_) => unreachable!("forwarding() looks through the fence"),
+            Fwd::Fence(_) => self.fenced(slot, Access::Write, |vm| vm.make_local_variable(slot)),
         }
     }
     /// The condition GNU signals for a forwarded store fault rendered by

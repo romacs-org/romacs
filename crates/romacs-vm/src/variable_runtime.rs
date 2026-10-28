@@ -358,9 +358,6 @@ impl Vm {
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
         if self.protected_variable_slot(slot) || self.symbol_names[slot].starts_with(':') { return Err("setting constant".into()); }
-        if self.fenced_variable(slot) {
-            return self.fenced(slot, crate::world::Access::Write, |vm| vm.make_local_variable(slot));
-        }
         if let Some(fwd) = self.forwarding(slot) { return self.make_forwarded_local(slot, fwd); }
         let value = self.variable_value(slot)?;
         let table = if let Some(table) = self.local_table(slot)? { table } else {
@@ -416,12 +413,6 @@ impl Vm {
                 Ok(if p == Set { value } else { symbol })
             }
             MakeLocalVariable => { self.make_local_variable(slot)?; Ok(symbol) }
-            // These read or write the toplevel or saved value, never a let's.
-            MakeVariableBufferLocal | DefvarBoundp | DefvarSetDefault if self.fenced_variable(slot) => {
-                use crate::world::Access::*;
-                let access = match p { DefvarBoundp => SavedRead, _ => SavedWrite };
-                self.fenced(slot, access, |vm| vm.variable_primitive(p, start, n))
-            }
             SymbolValue => {
                 let value = self.variable_value(slot)?;
                 if value == Value::UNBOUND { Err("unbound variable".into()) } else { Ok(value) }
@@ -435,6 +426,7 @@ impl Vm {
                 match self.forwarding(slot) {
                     Some(forwarded::Fwd::Buffer(_)) => Ok(symbol),
                     Some(forwarded::Fwd::Bool(_)) => { self.promote_boolean_local(slot, false)?; Ok(symbol) }
+                    Some(forwarded::Fwd::Fence(_)) => self.fenced(slot, crate::world::Access::Write, |vm| vm.variable_primitive(p, start, n)),
                     _ => Err(forwarded::unlocalizable(&self.symbol_names[slot])),
                 }
             }
@@ -458,6 +450,11 @@ impl Vm {
             },
             // A built-in variable is always bound (GNU Fboundp), so `defvar'
             // never replaces its value.
+            // These read or write the toplevel or saved value, never a let's.
+            DefvarBoundp | DefvarSetDefault if matches!(self.native_forwarding(slot), Some(forwarded::Fwd::Fence(_))) => {
+                let access = if p == DefvarBoundp { crate::world::Access::SavedRead } else { crate::world::Access::SavedWrite };
+                self.fenced(slot, access, |vm| vm.variable_primitive(p, start, n))
+            }
             DefvarBoundp if self.native_forwarding(slot).is_some() => Ok(Value::TRUE),
             DefvarSetDefault if self.native_forwarding(slot).is_some() => {
                 let fwd = self.native_forwarding(slot).unwrap();

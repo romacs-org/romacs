@@ -221,11 +221,6 @@ impl Vm {
         }
     }
 
-    /// Whether the variable at SLOT is behind the fence.
-    pub(crate) fn fenced_variable(&self, slot: usize) -> bool {
-        matches!(self.variable_redirects.get(slot), Some(Some(VariableRedirect::Forwarded(Fwd::Fence(_)))))
-    }
-
     /// F on the variable at SLOT as its own redirect has it, unchecked. The
     /// redirect F leaves is the one the fence keeps; one F made buffer-local
     /// (`make-local-variable`, already refused) leaves the fence. Any other
