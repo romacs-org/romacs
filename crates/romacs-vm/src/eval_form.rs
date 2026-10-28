@@ -16,8 +16,9 @@
 //! compiler source. Objects with no source spelling (closures, buffers, ...)
 //! are carried as themselves (`Form::Object`), so they evaluate and stay
 //! `eq'; list, string and vector structure is copied, so nested quoted
-//! structure is not `eq' to the original; bare symbols in an alist, which
-//! GNU treats as locally special, are ignored.
+//! structure is not `eq' to the original. A bare symbol in the alist is
+//! locally special, as in GNU: the form's `let' bindings of it, and those of
+//! the closures it makes, are dynamic.
 use super::*;
 
 impl Vm {
@@ -55,6 +56,7 @@ impl Vm {
             }
         }
         let mut bindings = Vec::new();
+        let mut specials = NameSet::default();
         if lexical.tag() == 3 {
             let mut seen = HashSet::default();
             let mut tail = lexical;
@@ -75,6 +77,9 @@ impl Vm {
                     if name.tag() == 7 && name != Value::NIL && name != Value::TRUE && seen.insert(name.0) {
                         bindings.push((name, value));
                     }
+                } else if entry.tag() == 7 && entry != Value::TRUE {
+                    // A bare symbol declares its name locally special.
+                    specials.insert(self.display(entry)?);
                 }
                 tail = next;
             }
@@ -109,7 +114,13 @@ impl Vm {
             form = Form::List(vec![Form::Sym("let".into()), Form::List(bindings), form]);
         }
         let saved = std::mem::replace(&mut self.dynamic_scope, lexical == Value::NIL);
+        // The environment's local specials seed the compilation as a file's
+        // `(defvar NAME)' declarations do, in place of the caller's.
+        let saved_specials = std::mem::replace(&mut self.file_specials, specials);
+        self.seed_file_specials = true;
         let compiled = self.compile(&form);
+        self.seed_file_specials = false;
+        self.file_specials = saved_specials;
         self.dynamic_scope = saved;
         let function = compiled?;
         self.propagate_next = true;

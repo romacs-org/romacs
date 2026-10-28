@@ -299,8 +299,16 @@ impl Vm {
             && let [Form::Sym(head), Form::Sym(name)] = items.as_slice()
             && head == "defvar"
             && !matches!(name.as_str(), "nil" | "t")
+            && self.file_specials.insert(name.clone())
         {
-            self.file_specials.insert(name.clone());
+            // macroexpand--all-toplevel records the declaration in the
+            // file's `macroexp--dynvars' (macroexp.el), which macros such as
+            // eval-and-compile hand to `eval' as its lexical environment.
+            let symbol = self.intern(name);
+            let dynvars = self.slot("macroexp--dynvars");
+            let declared = self.variable_value(dynvars)?;
+            let declared = self.keymap_cons(symbol, declared);
+            self.set_variable_value(dynvars, declared)?;
         }
         result
     }
