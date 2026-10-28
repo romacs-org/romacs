@@ -239,7 +239,7 @@ pub(super) fn refuse_handler(cx: &mut Leaf<'_>, filename: Value, operation: &str
 /// GNU Finsert_file_contents (fileio.c:4057) up to the coding decision:
 /// the read-only and visit checks, the handler refusal, the open (a
 /// visited missing file goes on to notfound with no bytes), the
-/// regular-file and change-hook refusals, the read of BEG..END and the lock
+/// regular-file refusal, the read of BEG..END and the lock
 /// checks. Every refusal precedes the first change to the buffer. GNU
 /// decides the coding system before reading when the buffer has text and
 /// after reading otherwise; insert_coding.rs follows both orders, so this
@@ -306,10 +306,6 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
         return Err(refuse("insert-file-contents REPLACE"));
     }
     let inhibit = var(cx, "inhibit-read-only")?; if !visiting && end_offset > beg_offset { cx.fileio_check_insertion(inhibit)?; }
-    if !visiting && end_offset > beg_offset && (var(cx, "before-change-functions")? != Value::NIL
-        || var(cx, "first-change-hook")? != Value::NIL || cx.fileio_has_insertion_hooks()?) {
-        return Err(refuse("insert-file-contents with change hooks"));
-    }
     let mut bytes = vec![];
     {
         use std::io::{Read as _, Seek, SeekFrom};

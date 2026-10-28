@@ -25,7 +25,9 @@ use crate::forwarded::VisitedModtime;
 // CODING the decision; INSERTED a fixnum (bytes read, then characters
 // inserted); MODTIME the visited modtime (see `modtime_value'); ERRNO the
 // open error of a visited missing file, else 0; DATA decide_coding_unwind's
-// cons; FLAGS the bits and stage below.
+// cons; FLAGS the bits and stage below; PREPARED nil until a modifying read
+// prepares its change, then where the read resumes (RESUME_*); BEHIND,
+// IN_FRONT and OVERLAYS the hooks the change found for its after-change.
 const ORIG: usize = 0;
 const VISIT: usize = 1;
 const BEG: usize = 2;
@@ -40,7 +42,16 @@ const DATA: usize = 10;
 const FLAGS: usize = 11;
 /// Where the 3 KiB tail `set-auto-coding-function' sees starts in BYTES.
 const TAIL: usize = 12;
-const REGISTERS: usize = 13;
+const PREPARED: usize = 13;
+const BEHIND: usize = 14;
+const IN_FRONT: usize = 15;
+const OVERLAYS: usize = 16;
+const REGISTERS: usize = 17;
+
+/// A read of an empty buffer prepares before its coding decision.
+const RESUME_UNDECIDED: i64 = 1;
+/// A read whose decision came first prepares after it.
+const RESUME_DECIDED: i64 = 2;
 
 /// empty_undo_list_p (fileio.c:4126).
 const EMPTY_UNDO: i64 = 1;
@@ -160,12 +171,52 @@ pub(super) fn start(cx: &mut Leaf<'_>, read: Read) -> Next {
         }
         return alist(cx, r, Value::NIL);
     }
+    if has(&r, MODIFYING) && inserted > 0 { return prepare(cx, r, RESUME_UNDECIDED); }
+    read_undecided(cx, r)
+}
+
+fn read_undecided(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
     // fileio.c:5008, after the read and before this decision.
-    if inserted > 0 {
+    if count(&r) > 0 {
         let deactivate = cx.intern("deactivate-mark");
         cx.variable_set(deactivate, Value::TRUE)?;
     }
     decide_empty(cx, r)
+}
+
+/// fileio.c:4889: prepare_to_modify_buffer (PT, PT) for a modifying read,
+/// after a decision made first and before one made after the read. The
+/// read-only checks, then the before-change Lisp when any can run.
+fn prepare(cx: &mut Leaf<'_>, mut r: Vec<Value>, resume: i64) -> Next {
+    r[PREPARED] = fixnum(resume)?;
+    let point = cx.point_char()?;
+    let prepared = cx.prepare_change(point, point)?;
+    (r[BEHIND], r[IN_FRONT]) = (prepared.behind, prepared.in_front);
+    let insert_hooks = prepared.behind != Value::NIL || prepared.in_front != Value::NIL;
+    if (prepared.before || cx.after_change_runs(false, insert_hooks)?) && super::insdel::half_missing(cx)? {
+        return super::insdel::install_half(cx, reprepare, r);
+    }
+    if prepared.before {
+        let undoable = if prepared.undoable { Value::TRUE } else { Value::NIL };
+        let args = vec![cx.current_buffer()?, fixnum(point)?, fixnum(point)?, Value::NIL, undoable];
+        return Ok(Step::Call { f: cx.intern("romacs--before-change"), args, then: before_changed, saved: r });
+    }
+    resume_read(cx, r)
+}
+
+fn reprepare(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let resume = saved[PREPARED].integer_value().expect("resume register");
+    prepare(cx, saved.to_vec(), resume)
+}
+
+fn before_changed(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
+    let mut r = saved.to_vec();
+    r[OVERLAYS] = super::insdel::found_overlays(cx, before);
+    resume_read(cx, r)
+}
+
+fn resume_read(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
+    if r[PREPARED].integer_value() == Some(RESUME_UNDECIDED) { read_undecided(cx, r) } else { decided(cx, r) }
 }
 
 /// The name `set-auto-coding-function' receives: ENCODE_FILE (filename),
@@ -414,6 +465,9 @@ fn for_unibyte(cx: &mut Leaf<'_>, coding: Value) -> std::result::Result<bool, Fa
 /// fileio.c:5086-5101: visiting by a for-unibyte coding makes the buffer
 /// unibyte, through Fset_buffer_multibyte when nothing was read.
 fn decided(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
+    if has(&r, DECIDED_FIRST) && has(&r, MODIFYING) && count(&r) > 0 && r[PREPARED] == Value::NIL {
+        return prepare(cx, r, RESUME_DECIDED);
+    }
     // fileio.c:5008, after the read that followed this decision.
     if has(&r, DECIDED_FIRST) && count(&r) > 0 {
         let deactivate = cx.intern("deactivate-mark");
@@ -510,22 +564,40 @@ fn decode_bytes(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<Option<(V
     Ok(Some((decoded, name)))
 }
 
-/// Insert DECODED at point (fileio.c:5105-5137), after the refusals that
-/// must precede any change, then the visit bookkeeping (5141-5169) and
+/// Insert DECODED at point (fileio.c:5105-5137) and signal the change of
+/// a modifying read, then the visit bookkeeping (5141-5169) and
 /// `last-coding-system-used'.
 fn insert_decoded(cx: &mut Leaf<'_>, mut r: Vec<Value>, decoded: Option<(Value, Value)>) -> Next {
     let mut inserted = 0;
     if let Some((text, name)) = decoded {
         let view = cx.string_view(text)?;
-        let (bytes, multibyte, chars) = (view.bytes().to_vec(), view.is_multibyte(), view.len());
-        if has(&r, MODIFYING) && chars > 0 && var(cx, "after-change-functions")? != Value::NIL {
-            return Err(refuse("insert-file-contents with change hooks"));
-        }
+        let (bytes, multibyte) = (view.bytes().to_vec(), view.is_multibyte());
         inserted = cx.insert_before_point(&bytes, multibyte)?;
         if multibyte { cx.fileio_copy_string_properties(text)?; }
         r[CODING] = name;
     }
     r[INSERTED] = fixnum(inserted as i64)?;
+    // fileio.c:5132: signal_after_change (PT, 0, INSERTED), point before the text.
+    let insert_hooks = r[BEHIND] != Value::NIL || r[IN_FRONT] != Value::NIL;
+    if has(&r, MODIFYING) && inserted > 0 && cx.after_change_runs(r[OVERLAYS] != Value::NIL, insert_hooks)? {
+        if super::insdel::half_missing(cx)? { return super::insdel::install_half(cx, signal_inserted, r); }
+        return signal_inserted(cx, Value::NIL, &r);
+    }
+    visited(cx, r)
+}
+
+fn signal_inserted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let point = cx.point_char()?;
+    let args = vec![cx.current_buffer()?, fixnum(point)?, fixnum(point + count(saved))?, fixnum(0)?,
+                    saved[BEHIND], saved[IN_FRONT], saved[OVERLAYS]];
+    Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: signalled, saved: saved.to_vec() })
+}
+
+fn signalled(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    visited(cx, saved.to_vec())
+}
+
+fn visited(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
     if r[VISIT] != Value::NIL {
         if has(&r, EMPTY_UNDO) { cx.bset("buffer-undo-list", Value::NIL)?; }
         cx.bset("buffer-file-name", r[ORIG])?;

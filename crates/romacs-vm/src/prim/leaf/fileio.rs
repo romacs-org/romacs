@@ -237,22 +237,6 @@ impl Leaf<'_> {
         Ok(())
     }
 
-    pub fn fileio_has_insertion_hooks(&mut self) -> std::result::Result<bool, Fault> {
-        let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let data::Object::Buffer(t) = &self.vm.objects[index] else { return Ok(false) };
-        let at = t.point;
-        let left = (at > t.accessible().start).then(|| ByteOffset(at.0 - 1));
-        let right = (at < t.accessible().end).then_some(at);
-        for (pos, insertion_hook) in [(left, "insert-behind-hooks"), (right, "insert-in-front-hooks")] {
-            if let Some(pos) = pos {
-                for key in ["modification-hooks", insertion_hook] {
-                    if self.fileio_text_property(pos, key)? != Value::NIL { return Ok(true) }
-                }
-            }
-        }
-        Ok(false)
-    }
-
     /// Insert decoded text at point of the current buffer and leave point
     /// BEFORE it, as `insert-file-contents' does (it inserts into the gap at
     /// PT and never moves PT). BYTES are internal multibyte text when
