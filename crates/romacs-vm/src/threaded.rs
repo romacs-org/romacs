@@ -715,22 +715,11 @@ impl Control {
         }
     }
 }
-/// GNU do_one_unbind can signal while restoring an integer forwarding:
-/// set-default-toplevel-value can replace the saved value with any object.
-/// Consume the offending entry before signalling, like unbind_to's pop.
+/// Unbind N bindings; the first whose restore signals (a watcher, or an
+/// integer forwarding given a non-integer by set-default-toplevel-value)
+/// is consumed and its escape returned, like unbind_to's pop.
 fn checked_unbind(e: &mut Engine<'_>, n: usize) -> Option<Escape> {
     for _ in 0..n {
-        let &(slot, value, _, _) = e.vm.dynamic.last().expect("compiler balances bindings");
-        if matches!(e.vm.forwarding(slot), Some(crate::forwarded::Fwd::Int(_)))
-            && value.integer_value().is_none()
-        {
-            e.vm.dynamic.pop();
-            e.vm.backtrace.unbind(e.vm.dynamic.len());
-            let predicate = Value::reference(e.vm.slot("integerp") + 1, 7);
-            let condition = Value::reference(e.vm.slot("wrong-type-argument") + 1, 7);
-            let data = e.vm.list_value(&[predicate, value]);
-            return Some(Escape::Signal(condition, data));
-        }
         if e.vm.unbind_one().is_err() {
             return e.vm.propagated_escape.take();
         }
@@ -1351,7 +1340,8 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         }
         break;
     }
-    engine.vm.unbind(engine.vm.dynamic.len() - mark);
+    // A normal return has already unbound through return_unbind.
+    engine.vm.unwind(engine.vm.dynamic.len() - mark);
     engine.vm.signal_handlers.truncate(handler_mark);
     engine.vm.backtrace.leave(backtrace_mark);
     // Only entered frames can have written values. Clear that prefix, not all
@@ -1378,12 +1368,15 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
 }
 fn lower_function(
     vm: &mut Vm,
-    code: &mut [Vec<Inst>],
+    code: &mut Vec<Vec<Inst>>,
     entries: &mut Vec<EntryCache>,
     inline_bodies: &mut Vec<Option<InlineBody>>,
     free_entries: &mut Vec<usize>,
     id: usize,
 ) -> Result<()> {
+    // A variable watcher can compile functions while this engine is
+    // suspended at a write, with no resize after it.
+    if id >= code.len() { code.resize_with(vm.functions.len().max(id + 1), Vec::new); }
     if code[id].is_empty() {
         vm.materialize_image_function(id)?;
         code[id] = vm.functions[id]
@@ -2571,13 +2564,20 @@ unsafe fn take_step(
     e: &mut Engine<'_>,
     r: *mut Value,
     pc: *const Inst,
-    step: std::result::Result<prim::Step, (Value, Value)>,
+    step: std::result::Result<prim::Step, Option<(Value, Value)>>,
 ) -> Continue {
     unsafe {
         let mut handlers = None;
         let (f, args, then, saved) = match step {
-            Err((condition, data)) => {
+            Err(Some((condition, data))) => {
                 e.escape = Some(Escape::Signal(condition, data));
+                return Continue::Stop;
+            }
+            // A watcher's escape, its handler search already done.
+            Err(None) => {
+                e.escape = e.vm.propagated_escape.take();
+                e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
+                e.failed_eval_depth = e.vm.propagated_eval_depth.take();
                 return Continue::Stop;
             }
             Ok(prim::Step::Collect) => {
@@ -3078,9 +3078,11 @@ fn primitive_value(
     match call(e.vm, p, start, argc) {
         Ok(value) => Some(value),
         Err(error) => {
-            // A variable watcher's own signal travels behind set/makunbound's text.
-            if matches!(p, Primitive::Set | Primitive::Makunbound) && let Some(escape) = e.vm.propagated_escape.take() {
+            // A variable watcher's own signal travels behind the write's text.
+            if matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault) && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
+                e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
+                e.failed_eval_depth = e.vm.propagated_eval_depth.take();
             } else if let Some((condition, data)) = e.vm.primitive_condition(p, start, argc, &error) {
                 e.escape = Some(Escape::Signal(condition, data));
             }

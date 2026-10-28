@@ -2470,49 +2470,72 @@ impl Vm {
         let slot = self.slot(prim::ECHO_AREA_MESSAGE);
         self.slots[slot].value = value;
     }
-    /// Unwinding restores every binding; a watcher's signal is dropped here
-    /// only because an escape is already in flight (see `unbind_one`).
-    fn unbind(&mut self, n: usize) {
+    /// Unwinding pops every binding; one whose restore signals keeps its
+    /// value, as GNU's popped entry does. That signal is dropped and the
+    /// escape already in flight kept (see `unbind_one`).
+    fn unwind(&mut self, n: usize) {
         for _ in 0..n {
+            let pending = (self.propagated_escape.take(), std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
             let _ = self.unbind_one();
+            (self.propagated_escape, self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
         }
     }
-    /// Restore the innermost binding, notifying watchers (`unlet`) first. A
-    /// watcher's signal is returned after the restore, in propagated_escape.
-    pub(crate) fn unbind_one(&mut self) -> Result<()> {
-        let mut watched = Ok(());
-        {
-            let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
-            let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
-            if !self.trapped.is_empty() && let Some(base) = symbol.and_then(|s| s.index_if(7)).map(|i| i - 1) {
-                watched = self.notify_watchers(base, value, "unlet");
-            }
-            self.backtrace.unbind(self.dynamic.len());
-            // A local let restores the owner's current local binding, if it
-            // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
-            // may have been killed and made again inside the let.
-            if let Some(base) = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1)
-                && self.local_binding_slots.contains(&slot)
-            {
-                if self.live_buffer_value(owner) {
-                    let table = self.slots[base].local;
-                    if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
-                        // set-buffer-local-toplevel-value may have saved any object.
-                        let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
-                        self.slots[local.index(7).expect("private binding") - 1].value = value;
-                    }
-                }
-                return watched;
-            }
-            if let Some(fwd) = self.native_forwarding(slot) {
-                self.unbind_forwarded(fwd, value, owner, let_default);
-                return watched;
-            }
-            if slot != self.buffer_slot || value == Value::NIL || self.live_buffer_value(value) {
-                self.slots[slot].value = value;
+    /// GNU `unbind_to` on normal completion: a restore that signals
+    /// propagates, and the bindings under it unwind with that escape.
+    fn unbind(&mut self, n: usize) -> Result<()> {
+        for left in (0..n).rev() {
+            if let Err(error) = self.unbind_one() {
+                self.unwind(left);
+                return Err(error);
             }
         }
-        watched
+        Ok(())
+    }
+    /// Leave a region that finished with RESULT, popping its N bindings:
+    /// unbind on normal completion, unwind under an escape.
+    fn unbind_after<T>(&mut self, n: usize, result: Result<T>) -> Result<T> {
+        match result {
+            Ok(value) => self.unbind(n).map(|()| value),
+            Err(error) => { self.unwind(n); Err(error) }
+        }
+    }
+    /// GNU `unbind_to` for the innermost binding: pop it, then notify its
+    /// watchers and restore (`do_one_unbind`). A watcher's signal, left in
+    /// propagated_escape, aborts the restore. A plain variable reports
+    /// `unlet'; a localized default (SPECPDL_LET_DEFAULT, or a SPECPDL_LET
+    /// whose variable became local) restores through set_default_internal,
+    /// which reports `set'.
+    pub(crate) fn unbind_one(&mut self) -> Result<()> {
+        let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
+        let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
+        self.backtrace.unbind(self.dynamic.len());
+        let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
+        // A local let restores the owner's current local binding, if it
+        // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
+        // may have been killed and made again inside the let.
+        if let Some(base) = base && self.local_binding_slots.contains(&slot) {
+            if self.live_buffer_value(owner) {
+                let table = self.slots[base].local;
+                if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
+                    if self.variable_trapped(base) { self.notify_watchers_at(base, value, "unlet", Some(owner))?; }
+                    // set-buffer-local-toplevel-value may have saved any object.
+                    let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
+                    self.slots[local.index(7).expect("private binding") - 1].value = value;
+                }
+            }
+            return Ok(());
+        }
+        if let Some(fwd) = self.native_forwarding(slot) {
+            return self.unbind_forwarded(slot, fwd, value, owner, let_default);
+        }
+        if let Some(base) = base && self.variable_trapped(base) {
+            if self.local_table(base)?.is_some() { self.notify_watchers_at(base, value, "set", Some(Value::NIL))?; }
+            else { self.notify_watchers(base, value, "unlet")?; }
+        }
+        if slot != self.buffer_slot || value == Value::NIL || self.live_buffer_value(value) {
+            self.slots[slot].value = value;
+        }
+        Ok(())
     }
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {

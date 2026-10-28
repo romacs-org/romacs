@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "86ab70a9398d87e31c9ac8541e0fc5c6a4f6aa2004beb790a8e4f888bbb3e20c",
+  "source_fingerprint": "f6c86618e0f70ea8b6f12ea6a2216b18a03bde9e4ba52681fdaeb7f4fddb155c",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -114,7 +114,7 @@
   "#:vm2-set-interactive-form": {
    "name": "#:vm2-set-interactive-form",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:684"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:725"
   },
   "#:vm2-temp-buffer": {
    "name": "#:vm2-temp-buffer",
@@ -253,7 +253,7 @@
   "add-variable-watcher": {
    "name": "add-variable-watcher",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:33"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:38"
   },
   "all-completions": {
    "name": "all-completions",
@@ -856,7 +856,7 @@
   "command-modes": {
    "name": "command-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:758"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:799"
   },
   "command-remapping": {
    "name": "command-remapping",
@@ -866,7 +866,7 @@
   "commandp": {
    "name": "commandp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:693"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:734"
   },
   "compare-strings": {
    "name": "compare-strings",
@@ -1880,7 +1880,7 @@
   "get-variable-watchers": {
    "name": "get-variable-watchers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:58"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:64"
   },
   "getenv-internal": {
    "name": "getenv-internal",
@@ -3403,7 +3403,7 @@
   "remove-variable-watcher": {
    "name": "remove-variable-watcher",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:47"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:49"
   },
   "rename-buffer": {
    "name": "rename-buffer",
@@ -3944,7 +3944,7 @@
   "set-buffer-redisplay": {
    "name": "set-buffer-redisplay",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:66"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:72"
   },
   "set-case-table": {
    "name": "set-case-table",

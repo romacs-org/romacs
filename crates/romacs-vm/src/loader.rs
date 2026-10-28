@@ -39,8 +39,6 @@ impl Vm {
         for name in [
             "features",
             "load-path",
-            "load-file-name",
-            "load-in-progress",
             "load-prefer-newer",
             "dump-mode",
             "command-line-args",
@@ -340,27 +338,29 @@ impl Vm {
         let bytes =
             std::fs::read(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;
         let source = decode_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-        let file_slot = self.slot("load-file-name");
-        let progress_slot = self.slot("load-in-progress");
-        let old_file = self.slots[file_slot].value;
-        let old_progress = self.slots[progress_slot].value;
-        self.slots[file_slot].value =
-            self.literal(&Form::String(named.clone()))?;
-        self.slots[progress_slot].value = Value::TRUE;
-        // Root both old scoped values across nested executor collections.
-        let mark = self.dynamic.len();
-        self.backtrace.bind(self.dynamic.len(), Value::reference(file_slot + 1, 7));
-        self.dynamic.push((file_slot, old_file, self.slots[self.buffer_slot].value, false));
-        self.backtrace.bind(self.dynamic.len(), Value::reference(progress_slot + 1, 7));
-        self.dynamic.push((progress_slot, old_progress, self.slots[self.buffer_slot].value, false));
+        // Each public variable binds as a `let' does, in pinned GNU's order:
+        // Fload's lread--unescaped-character-literals, then
+        // load-with-code-conversion's load-in-progress (held over the
+        // after-load forms) and file names, then readevalloop's. GNU's
+        // bindings of the reading buffer (standard-input, eval-buffer-list,
+        // lexical-binding) have no counterpart: VM2 reads the file's bytes.
+        let file = self.literal(&Form::String(named.clone()))?;
+        let history_slot = self.slot("current-load-list");
+        let outer = self.dynamic.len();
+        let bound = self.bind_named(&[("lread--unescaped-character-literals", Value::NIL), ("load-in-progress", Value::TRUE)]);
+        let inner = self.dynamic.len();
         // loadhist_initialize (lread.c:1031): `load' binds current-load-list
         // to (FILE), so LOADHIST_ATTACH conses this file's definitions before
         // its name and macroexp-file-name finds the file being loaded.
-        let history_slot = self.slot("current-load-list");
-        let file = self.slots[file_slot].value;
-        let history = self.list_value(&[file]);
-        if let Err(error) = self.bind_variable(history_slot, history) {
-            self.unbind(self.dynamic.len() - mark);
+        let bound = bound.and_then(|()| {
+            let dynvars = self.slot("macroexp--dynvars");
+            let dynvars = self.variable_value(dynvars)?;
+            let history = self.list_value(&[file]);
+            self.bind_named(&[("inhibit-file-name-operation", Value::NIL), ("load-file-name", file), ("load-true-file-name", file),
+                ("macroexp--dynvars", dynvars), ("current-load-list", history)])
+        });
+        if let Err(error) = bound {
+            self.unwind(self.dynamic.len() - outer);
             return Err(error);
         }
         self.loader.active.push(path.clone());
@@ -442,7 +442,7 @@ impl Vm {
         self.file_specials = saved_file_specials;
         self.expanded_macros = saved_expanded_macros;
         self.expanded_symbols = saved_expanded_symbols;
-        self.unbind(self.dynamic.len() - mark);
+        let result = self.unbind_after(self.dynamic.len() - inner, result);
         // lread.c:1538: run the eval-after-load forms for this file, with
         // the last form's value rooted across them. The file stays among the
         // loads in progress until they finish, as GNU's unwind keeps it.
@@ -457,8 +457,18 @@ impl Vm {
             self.eval_load_toplevel(&call, None, false, 0)?;
             rooted.value(self)
         });
+        let result = self.unbind_after(self.dynamic.len() - outer, result);
         self.loader.active.pop();
         result
+    }
+    /// Bind each (NAME VALUE) in order as `let' does. A watcher's signal
+    /// leaves the bindings made so far for the caller to unwind.
+    fn bind_named(&mut self, bindings: &[(&str, Value)]) -> Result<()> {
+        for &(name, value) in bindings {
+            let slot = self.slot(name);
+            self.bind_variable(slot, value)?;
+        }
+        Ok(())
     }
     /// lread.c build_load_history for an entire file: the file's entry,
     /// `current-load-list' in definition order, replaces any older entry
@@ -479,7 +489,11 @@ impl Vm {
         let entry = self.list_value(&entry);
         kept.insert(0, entry);
         let history = self.list_value(&kept);
-        self.set_variable_value(slot, history)
+        self.set_variable_value(slot, history)?;
+        // lread.c:2112 stores t without notifying; the load's unbinding
+        // restores the outer list.
+        let fwd = self.native_forwarding(history_slot).expect("current-load-list is forwarded");
+        self.set_forwarded(history_slot, fwd, Value::TRUE, forwarded::SetFlag::Set).map_err(forwarded::fault_text)
     }
 }
 /// An absolute file name with `.' and `..' resolved lexically, as
