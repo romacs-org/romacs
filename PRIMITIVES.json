@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "8a7ab03416434198de76880987537c5d8b7f1adaebe2e0f416ef54850e0878c6",
+  "source_fingerprint": "d57090895bc77769a7bdf2241b5bf1efd5fc91e50df072c5557ada8bf1daa7c4",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -1577,7 +1577,7 @@
   "find-file-name-handler": {
    "name": "find-file-name-handler",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:411"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:405"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -2068,7 +2068,7 @@
   "insert-file-contents": {
    "name": "insert-file-contents",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:252"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:249"
   },
   "insert-file-contents-literally": {
    "name": "insert-file-contents-literally",
@@ -2383,7 +2383,7 @@
   "locate-file-internal": {
    "name": "locate-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:608"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:602"
   },
   "locate-library": {
    "name": "locate-library",
@@ -2876,7 +2876,7 @@
   "next-read-file-uses-dialog-p": {
    "name": "next-read-file-uses-dialog-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:731"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:725"
   },
   "next-single-char-property-change": {
    "name": "next-single-char-property-change",
@@ -3529,7 +3529,7 @@
   "romacs--code-converting-work": {
    "name": "romacs--code-converting-work",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:401"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:417"
   },
   "romacs--decode-output": {
    "name": "romacs--decode-output",
@@ -3544,12 +3544,12 @@
   "romacs--insert-file-contents-format": {
    "name": "romacs--insert-file-contents-format",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:689"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:800"
   },
   "romacs--insert-file-contents-undecide": {
    "name": "romacs--insert-file-contents-undecide",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:391"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:407"
   },
   "romacs--insert-printed": {
    "name": "romacs--insert-printed",
@@ -3845,7 +3845,7 @@
   "romacs--write-region-body": {
    "name": "romacs--write-region-body",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:496"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:490"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",
@@ -5228,7 +5228,7 @@
   "write-region": {
    "name": "write-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:427"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:421"
   },
   "yank-handle-category-property": {
    "name": "yank-handle-category-property",

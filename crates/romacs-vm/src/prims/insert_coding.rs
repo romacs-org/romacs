@@ -46,12 +46,20 @@ const PREPARED: usize = 13;
 const BEHIND: usize = 14;
 const IN_FRONT: usize = 15;
 const OVERLAYS: usize = 16;
-const REGISTERS: usize = 17;
+/// REPLACE: (MARKER OLDPOS OLDEND), point as a marker (restore_point_unwind)
+/// restored at the end, where point was and where the replaced text ended.
+const POINT: usize = 17;
+/// REPLACE: (FROM . TEXT), the decoded middle that replaces the buffer's
+/// differing text at FROM.
+const MIDDLE: usize = 18;
+const REGISTERS: usize = 19;
 
 /// A read of an empty buffer prepares before its coding decision.
 const RESUME_UNDECIDED: i64 = 1;
 /// A read whose decision came first prepares after it.
 const RESUME_DECIDED: i64 = 2;
+/// A REPLACE prepares the middle's insertion after deleting the old one.
+const RESUME_REPLACE: i64 = 3;
 
 /// empty_undo_list_p (fileio.c:4126).
 const EMPTY_UNDO: i64 = 1;
@@ -216,7 +224,15 @@ fn before_changed(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
 }
 
 fn resume_read(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
-    if r[PREPARED].integer_value() == Some(RESUME_UNDECIDED) { read_undecided(cx, r) } else { decided(cx, r) }
+    match r[PREPARED].integer_value() {
+        Some(RESUME_UNDECIDED) => read_undecided(cx, r),
+        Some(RESUME_REPLACE) => {
+            let (_, middle) = cx.pair(r[MIDDLE]).expect("replace middle register");
+            let name = r[CODING];
+            insert_decoded(cx, r, Some((middle, name)))
+        }
+        _ => decided(cx, r),
+    }
 }
 
 /// The name `set-auto-coding-function' receives: ENCODE_FILE (filename),
@@ -465,6 +481,9 @@ fn for_unibyte(cx: &mut Leaf<'_>, coding: Value) -> std::result::Result<bool, Fa
 /// fileio.c:5086-5101: visiting by a for-unibyte coding makes the buffer
 /// unibyte, through Fset_buffer_multibyte when nothing was read.
 fn decided(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
+    if r[REPLACE] != Value::NIL && r[PREPARED] == Value::NIL && { let (_, begv, zv) = cx.point_extent()?; begv < zv } {
+        return replace(cx, r);
+    }
     if has(&r, DECIDED_FIRST) && has(&r, MODIFYING) && count(&r) > 0 && r[PREPARED] == Value::NIL {
         return prepare(cx, r, RESUME_DECIDED);
     }
@@ -484,6 +503,65 @@ fn decided(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
     }
     let decoded = decode(cx, &r)?;
     insert_decoded(cx, r, decoded)
+}
+
+/// fileio.c:4684-4880, REPLACE of a non-empty accessible region: the
+/// whole file decoded, then only the text between its longest common
+/// head and tail with the buffer (on character boundaries) is replaced,
+/// so markers in the unchanged parts stay. The deletion and the middle's
+/// insertion are ordinary changes with their hooks; point is preserved as
+/// a marker and restored at the end (restore_point_unwind, not on a
+/// non-local exit).
+fn replace(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
+    let decoded = decode(cx, &r)?;
+    let (text, name) = match decoded {
+        Some(pair) => pair,
+        None => (cx.byte_string(&[]), r[CODING]),
+    };
+    let (_, begv, zv) = cx.point_extent()?;
+    let old = cx.region_text(begv, zv)?;
+    let multibyte = !cx.buffer_shape()?.unibyte;
+    let (old, new) = (cx.string_view(old)?.bytes().to_vec(), cx.string_view(text)?.bytes().to_vec());
+    if multibyte && !cx.string_view(text)?.is_multibyte() && new.iter().any(|&b| b >= 0x80) {
+        return Err(refuse("insert-file-contents of raw bytes into a multibyte buffer"));
+    }
+    let (start, end, middle) = common_ends(&old, &new, multibyte);
+    let chars = |bytes: &[u8]| if multibyte { bytes.iter().filter(|&&b| b & 0xc0 != 0x80).count() } else { bytes.len() } as i64;
+    let (from, to) = (begv + chars(&old[..start]), begv + chars(&old[..end]));
+    let marker = cx.editor_point_marker()?;
+    let point = fixnum(cx.point_char()?)?;
+    r[POINT] = cx.coding_list(&[marker, point, fixnum(to)?]);
+    let middle = cx.make_string(new[middle].to_vec(), multibyte && cx.string_view(text)?.is_multibyte());
+    r[MIDDLE] = cx.cons(fixnum(from)?, middle);
+    r[CODING] = name;
+    r[PREPARED] = fixnum(RESUME_REPLACE)?;
+    let args = vec![fixnum(from)?, fixnum(to)?];
+    Ok(Step::Call { f: cx.intern("delete-region"), args, then: replace_deleted, saved: r })
+}
+
+fn replace_deleted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let r = saved.to_vec();
+    let (from, middle) = cx.pair(r[MIDDLE]).expect("replace middle register");
+    if cx.string_chars(middle) == Some(0) { return insert_decoded(cx, r, None); }
+    // The middle goes where the old one was (SET_PT_BOTH (temp, ...)).
+    cx.goto_char_position(from.integer_value().expect("replace position"))?;
+    prepare(cx, r, RESUME_REPLACE)
+}
+
+/// The byte ranges of OLD and NEW that differ, as fileio.c:4758-4805
+/// computes them: the common head, the common tail not overlapping it in
+/// either text, both widened to character boundaries in a multibyte
+/// buffer. Returns OLD's START..END and NEW's middle.
+fn common_ends(old: &[u8], new: &[u8], multibyte: bool) -> (usize, usize, std::ops::Range<usize>) {
+    let head = |b: u8| !multibyte || b & 0xc0 != 0x80;
+    let mut start = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+    if start == new.len() { return (start, old.len(), start..start); }
+    while start > 0 && start < old.len() && !head(old[start]) { start -= 1; }
+    let limit = start.max(new.len().saturating_sub(old.len() - start));
+    let (mut end, mut at) = (old.len(), new.len());
+    while limit < at && old[end - 1] == new[at - 1] { end -= 1; at -= 1; }
+    while end < old.len() && !head(old[end]) { end += 1; }
+    (start, end, start..new.len() - (old.len() - end))
 }
 
 fn made_unibyte(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
@@ -577,27 +655,56 @@ fn insert_decoded(cx: &mut Leaf<'_>, mut r: Vec<Value>, decoded: Option<(Value, 
         r[CODING] = name;
     }
     r[INSERTED] = fixnum(inserted as i64)?;
-    // fileio.c:5132: signal_after_change (PT, 0, INSERTED), point before the text.
+    // fileio.c:5132: signal_after_change (PT, 0, INSERTED), point before the
+    // text; a REPLACE's insert_from_buffer (4859) signals with point after
+    // it, then puts point back before it.
     let insert_hooks = r[BEHIND] != Value::NIL || r[IN_FRONT] != Value::NIL;
-    if has(&r, MODIFYING) && inserted > 0 && cx.after_change_runs(r[OVERLAYS] != Value::NIL, insert_hooks)? {
+    let replacing = replacing(&r);
+    if replacing && inserted > 0 { let point = cx.point_char()?; cx.goto_char_position(point + inserted as i64)?; }
+    if (has(&r, MODIFYING) || replacing) && inserted > 0 && cx.after_change_runs(r[OVERLAYS] != Value::NIL, insert_hooks)? {
         if super::insdel::half_missing(cx)? { return super::insdel::install_half(cx, signal_inserted, r); }
         return signal_inserted(cx, Value::NIL, &r);
     }
-    visited(cx, r)
+    signalled(cx, Value::NIL, &r)
 }
+
+fn replacing(r: &[Value]) -> bool { r[PREPARED].integer_value() == Some(RESUME_REPLACE) }
 
 fn signal_inserted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let point = cx.point_char()?;
-    let args = vec![cx.current_buffer()?, fixnum(point)?, fixnum(point + count(saved))?, fixnum(0)?,
+    let start = if replacing(saved) { point - count(saved) } else { point };
+    let args = vec![cx.current_buffer()?, fixnum(start)?, fixnum(start + count(saved))?, fixnum(0)?,
                     saved[BEHIND], saved[IN_FRONT], saved[OVERLAYS]];
     Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: signalled, saved: saved.to_vec() })
 }
 
 fn signalled(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    if replacing(saved) && count(saved) > 0 && let Some((from, _)) = cx.pair(saved[MIDDLE]) {
+        cx.goto_char_position(from.integer_value().expect("replace position"))?;
+    }
     visited(cx, saved.to_vec())
 }
 
-fn visited(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
+/// restore_window_points (fileio.c:4005) for point, after a REPLACE that
+/// inserted text: a point that was inside the replaced text keeps its
+/// relative distance into the new text (bug#19161).
+fn spread_point(cx: &mut Leaf<'_>, r: &mut [Value]) -> std::result::Result<(), Fault> {
+    let (Some((marker, tail)), Some((from, middle))) = (cx.pair(r[POINT]), cx.pair(r[MIDDLE])) else { return Ok(()) };
+    let inserted = cx.string_chars(middle).unwrap_or(0) as i64;
+    let (oldpos, rest) = cx.pair(tail).expect("point register");
+    let (oldend, _) = cx.pair(rest).expect("point register");
+    let (from, oldpos, oldend) = (from.integer_value().unwrap(), oldpos.integer_value().unwrap(), oldend.integer_value().unwrap());
+    if inserted == 0 || oldpos <= from || oldpos > oldend { return Ok(()); }
+    let growth = inserted as f64 / (oldend - from) as f64;
+    let newpos = from + (growth * (oldpos - from) as f64) as i64;
+    cx.release_watch(marker)?;
+    let marker = cx.editor_position_marker(newpos)?;
+    r[POINT] = cx.cons(marker, tail);
+    Ok(())
+}
+
+fn visited(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
+    spread_point(cx, &mut r)?;
     if r[VISIT] != Value::NIL {
         if has(&r, EMPTY_UNDO) { cx.bset("buffer-undo-list", Value::NIL)?; }
         cx.bset("buffer-file-name", r[ORIG])?;
@@ -661,6 +768,10 @@ fn formatted(cx: &mut Leaf<'_>, inserted: Value, saved: &[Value]) -> Next {
 /// fileio.c:5308-5333: a visited missing file signals now; else
 /// (ORIG INSERTED).
 fn finish(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
+    if let Some((marker, _)) = cx.pair(r[POINT]) {
+        if let Some(Some(point)) = cx.marker_position(marker) { cx.goto_char_position(point)?; }
+        cx.release_watch(marker)?;
+    }
     let errno = r[ERRNO].integer_value().unwrap_or(0) as i32;
     if errno != 0 {
         let error = std::io::Error::from_raw_os_error(errno);

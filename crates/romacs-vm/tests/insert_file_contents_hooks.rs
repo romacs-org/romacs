@@ -64,3 +64,37 @@ fn insert_file_contents_runs_change_hooks_as_gnu() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// REPLACE (fileio.c:4684-4880, restore_window_points): only the text
+// between the common head and tail changes, as a deletion and an insertion
+// with their hooks; markers in the unchanged parts stay, point inside the
+// replaced text is spread over the new text, and a file that is the
+// buffer's head truncates it. Narrowing limits the replaced region.
+const REPLACE_CASES: &str = r##"
+(progn (insert TEXT) (goto-char PT) (let ((mb (copy-marker 2)) (md (copy-marker 7))) (setq-local after-change-functions (list (lambda (b e l) (ifc-log 'a b e l)))) (setq-local before-change-functions (list (lambda (b e) (ifc-log 'b b e)))) NARROW (let ((ret (insert-file-contents FILE nil nil nil t))) (widen) (list (buffer-string) (point) (marker-position mb) (marker-position md) (cadr ret) (reverse log)))))
+"##;
+
+#[test]
+fn insert_file_contents_replace_matches_gnu() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-replace-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let files = [("f1", &b"abc12def"[..]), ("f2", b"abc"), ("f3", "\u{3bb}b".as_bytes()), ("f4", b"xbcy"), ("f5", b"")];
+    for (name, bytes) in files { std::fs::write(dir.join(name), bytes).unwrap(); }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let cases = [("abcXYZdef", "f1", "(point-max)", "nil"), ("abcdef", "f2", "(point-max)", "nil"),
+                 ("\u{3bb}a", "f3", "(point-max)", "nil"), ("abcXYZdef", "f1", "5", "nil"),
+                 ("abcd", "f4", "(point-max)", "(narrow-to-region 2 4)"), ("abc", "f5", "2", "nil"),
+                 ("abc", "f2", "2", "nil")];
+    let failures: Vec<String> = cases.iter().map(|(text, file, point, narrow)| {
+            REPLACE_CASES.trim().replace("TEXT", &serde_json::to_string(text).unwrap()).replace("FILE", &lisp(&dir.join(file)))
+                .replace("PT", point).replace("NARROW", narrow)
+        })
+        .filter_map(|expression| {
+            let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
+            (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
+        })
+        .collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
