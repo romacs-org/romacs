@@ -776,22 +776,24 @@ impl Vm {
             if self.overlay_get(overlay, face)? != Value::NIL { faced.push(range); }
         }
         let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
-        // The host paints no control character but newline; one stands in
-        // for it as a space, inexact, and the iterator refuses it anyway.
-        let text: String = b.as_str().get(bytes.clone()).ok_or("measured range is not text")?
-            .chars().map(|c| if c.is_control() && c != '\n' { ' ' } else { c }).collect();
+        let original = b.as_str().get(bytes.clone()).ok_or("measured range is not text")?;
+        let mut text = String::with_capacity(original.len());
         let mut face_runs: Vec<FaceRun> = vec![];
         let mut exact = vec![];
-        for (at, ch) in text.char_indices() {
+        for (at, ch) in original.char_indices() {
             let byte = ByteOffset(bytes.start + at);
             let value = b.properties.get_property(byte, "face").unwrap_or(Value::NIL);
             let (face, whole) = self.painted_face(&names, value)?;
-            let original = b.as_str()[byte.0..].chars().next();
-            exact.push(original == Some(ch) && whole && b.properties.get_property(byte, "font-lock-face").is_none_or(|v| v == Value::NIL)
+            // The host paints no control character but newline; a space
+            // stands in for one, inexact, and the iterator refuses it anyway.
+            let control = ch.is_control() && ch != '\n';
+            exact.push(!control && whole && b.properties.get_property(byte, "font-lock-face").is_none_or(|v| v == Value::NIL)
                 && !faced.iter().any(|range| range.contains(&byte)));
+            let start = text.len();
+            text.push(if control { ' ' } else { ch });
             match face_runs.last_mut() {
-                Some(last) if last.face == face => last.bytes.end = at + ch.len_utf8(),
-                _ => face_runs.push(FaceRun { bytes: at..at + ch.len_utf8(), face }),
+                Some(last) if last.face == face => last.bytes.end = text.len(),
+                _ => face_runs.push(FaceRun { bytes: start..text.len(), face }),
             }
         }
         let input = romacs_layout_input::MeasureInput {
