@@ -22,6 +22,7 @@ mod command;
 mod interpreted_closure;
 mod oclosure;
 mod host_input;
+mod layout_host;
 mod terminal_host;
 mod process_jobs;
 mod subprocess;
@@ -31,6 +32,7 @@ mod user_db;
 mod processors;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
+pub use layout_host::LayoutHost;
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
 // Maps keyed by slots and ids the VM allocates use FxHash. Maps keyed by
 // names, which Lisp, files and the network supply, use foldhash with a random
@@ -572,7 +574,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     // the row stays because legacy primitive references are table ordinals.
     ("#:vm2-provide", Primitive::Provide),
     ("featurep", Primitive::Featurep),
-    ("message", Primitive::Message),
+    ("#:vm2-message", Primitive::Message), // T2 defsubr now (prims/message.rs); the ordinal stays.
     ("list", Primitive::List),
     ("member", Primitive::Member),
     ("nth", Primitive::Nth),
@@ -1098,6 +1100,11 @@ pub struct Vm {
     propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
+    /// The embedder's layout while one is attached (layout_host.rs).
+    layout_host: Option<Box<dyn layout_host::LayoutHost>>,
+    /// keyboard.c timer_idleness_start_time: when the command loop began
+    /// waiting idle for a key, while it does.
+    idle_since: Option<std::time::Instant>,
     process_jobs: process_jobs::Jobs,
     /// GNU process.c chan_process and friends: subprocess descriptors.
     subprocesses: subprocess::Table,
@@ -1250,6 +1257,8 @@ impl Vm {
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
+            layout_host: None,
+            idle_since: None,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
@@ -2463,6 +2472,13 @@ impl Vm {
         self.external_roots.clear();
         outcome
     }
+    /// Declare that this embedder renders the echo area: printing to `t`
+    /// in an interactive session then goes there, as GNU's does on a
+    /// terminal (print.c PRINTPREPARE), not to standard output.
+    pub fn set_echo_area_host(&mut self, rendered: bool) {
+        let slot = self.slot(prim::ECHO_AREA_HOST);
+        self.slots[slot].value = if rendered { Value::TRUE } else { Value::NIL };
+    }
     /// The echo area's message for `current-message`, as an embedder that
     /// renders the echo area itself shows or clears it.
     pub fn set_echo_area_message(&mut self, text: Option<&str>) {
@@ -2470,49 +2486,72 @@ impl Vm {
         let slot = self.slot(prim::ECHO_AREA_MESSAGE);
         self.slots[slot].value = value;
     }
-    /// Unwinding restores every binding; a watcher's signal is dropped here
-    /// only because an escape is already in flight (see `unbind_one`).
-    fn unbind(&mut self, n: usize) {
+    /// Unwinding pops every binding; one whose restore signals keeps its
+    /// value, as GNU's popped entry does. That signal is dropped and the
+    /// escape already in flight kept (see `unbind_one`).
+    fn unwind(&mut self, n: usize) {
         for _ in 0..n {
+            let pending = (self.propagated_escape.take(), std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
             let _ = self.unbind_one();
+            (self.propagated_escape, self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
         }
     }
-    /// Restore the innermost binding, notifying watchers (`unlet`) first. A
-    /// watcher's signal is returned after the restore, in propagated_escape.
-    pub(crate) fn unbind_one(&mut self) -> Result<()> {
-        let mut watched = Ok(());
-        {
-            let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
-            let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
-            if !self.trapped.is_empty() && let Some(base) = symbol.and_then(|s| s.index_if(7)).map(|i| i - 1) {
-                watched = self.notify_watchers(base, value, "unlet");
-            }
-            self.backtrace.unbind(self.dynamic.len());
-            // A local let restores the owner's current local binding, if it
-            // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
-            // may have been killed and made again inside the let.
-            if let Some(base) = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1)
-                && self.local_binding_slots.contains(&slot)
-            {
-                if self.live_buffer_value(owner) {
-                    let table = self.slots[base].local;
-                    if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
-                        // set-buffer-local-toplevel-value may have saved any object.
-                        let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
-                        self.slots[local.index(7).expect("private binding") - 1].value = value;
-                    }
-                }
-                return watched;
-            }
-            if let Some(fwd) = self.native_forwarding(slot) {
-                self.unbind_forwarded(fwd, value, owner, let_default);
-                return watched;
-            }
-            if slot != self.buffer_slot || value == Value::NIL || self.live_buffer_value(value) {
-                self.slots[slot].value = value;
+    /// GNU `unbind_to` on normal completion: a restore that signals
+    /// propagates, and the bindings under it unwind with that escape.
+    fn unbind(&mut self, n: usize) -> Result<()> {
+        for left in (0..n).rev() {
+            if let Err(error) = self.unbind_one() {
+                self.unwind(left);
+                return Err(error);
             }
         }
-        watched
+        Ok(())
+    }
+    /// Leave a region that finished with RESULT, popping its N bindings:
+    /// unbind on normal completion, unwind under an escape.
+    fn unbind_after<T>(&mut self, n: usize, result: Result<T>) -> Result<T> {
+        match result {
+            Ok(value) => self.unbind(n).map(|()| value),
+            Err(error) => { self.unwind(n); Err(error) }
+        }
+    }
+    /// GNU `unbind_to` for the innermost binding: pop it, then notify its
+    /// watchers and restore (`do_one_unbind`). A watcher's signal, left in
+    /// propagated_escape, aborts the restore. A plain variable reports
+    /// `unlet'; a localized default (SPECPDL_LET_DEFAULT, or a SPECPDL_LET
+    /// whose variable became local) restores through set_default_internal,
+    /// which reports `set'.
+    pub(crate) fn unbind_one(&mut self) -> Result<()> {
+        let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
+        let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
+        self.backtrace.unbind(self.dynamic.len());
+        let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
+        // A local let restores the owner's current local binding, if it
+        // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
+        // may have been killed and made again inside the let.
+        if let Some(base) = base && self.local_binding_slots.contains(&slot) {
+            if self.live_buffer_value(owner) {
+                let table = self.slots[base].local;
+                if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
+                    if self.variable_trapped(base) { self.notify_watchers_at(base, value, "unlet", Some(owner))?; }
+                    // set-buffer-local-toplevel-value may have saved any object.
+                    let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
+                    self.slots[local.index(7).expect("private binding") - 1].value = value;
+                }
+            }
+            return Ok(());
+        }
+        if let Some(fwd) = self.native_forwarding(slot) {
+            return self.unbind_forwarded(slot, fwd, value, owner, let_default);
+        }
+        if let Some(base) = base && self.variable_trapped(base) {
+            if self.local_table(base)?.is_some() { self.notify_watchers_at(base, value, "set", Some(Value::NIL))?; }
+            else { self.notify_watchers(base, value, "unlet")?; }
+        }
+        if slot != self.buffer_slot || value == Value::NIL || self.live_buffer_value(value) {
+            self.slots[slot].value = value;
+        }
+        Ok(())
     }
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
@@ -2586,7 +2625,22 @@ impl Vm {
             }
             let value = self.format_string(start, n)?;
             self.slots[echo].value = value;
-            eprintln!("{}", self.source_string(value)?);
+            // GNU writes the bytes it formatted: a unibyte string's as they
+            // are, a raw-byte character as its byte.
+            let view = self.str_view(value).ok_or("message: format made no string")?;
+            let mut line = Vec::with_capacity(view.bytes().len() + 1);
+            if view.is_multibyte() {
+                for code in view.chars() {
+                    match char::from_u32(code) {
+                        Some(c) => line.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+                        None => line.push(code as u8),
+                    }
+                }
+            } else {
+                line.extend_from_slice(view.bytes());
+            }
+            line.push(b'\n');
+            let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), &line);
             return Ok(value);
         }
         if p == Fset || (List as usize..=Memq as usize).contains(&(p as usize)) {

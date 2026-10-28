@@ -215,10 +215,17 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
     let args = &a[1..];
     let mut fresh = Fresh;
     let expanded = match head.as_str() {
-        "defface" if args.len() >= 3 => call(
-            "#:vm2-defface",
-            vec![quote(args[0].clone()), args[1].clone()],
-        ),
+        // cus-face.el:37 custom-declare-face records SPEC as the face's
+        // `face-defface-spec' and DOC as its `face-documentation'; GNU's
+        // own `defface' then leaves a face so declared alone.
+        "defface" if args.len() >= 3 => {
+            let spec = fresh.symbol();
+            binding(spec.clone(), args[1].clone(), progn(&[
+                call("put", vec![quote(args[0].clone()), quote(s("face-defface-spec")), spec.clone()]),
+                call("put", vec![quote(args[0].clone()), quote(s("face-documentation")), args[2].clone()]),
+                call("#:vm2-defface", vec![quote(args[0].clone()), spec]),
+            ]))
+        }
         "with-current-buffer" if !args.is_empty() => binding(
             s("#:vm2-current-buffer"),
             call("current-buffer", vec![]),

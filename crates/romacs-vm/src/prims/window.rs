@@ -338,7 +338,7 @@ fn redisplay(cx; optional _force: Value) {
 
 defsubr! { name = "pos-visible-in-window-p", gnu = "window.c:1998", effect = Reads,
 fn pos_visible_in_window_p(cx; optional pos: Value, window: Value, partially: Value) {
-    cx.windows().pos_visible_in_window_p(pos, window, partially)
+    cx.pos_visible_in_window_p(pos, window, partially)
 }}
 
 defsubr! { name = "window-pixel-left", gnu = "window.c:1001", effect = Reads,
@@ -351,8 +351,8 @@ fn window_pixel_top(cx; optional window: Value) {
     cx.windows().window_pixel_edge(window, true)
 }}
 
-// GNU's motion over the initial terminal frame's display, until a host lays
-// the frame out (DIVERGENCES.md VM2-WTPS1).
+// GNU's motion over the initial terminal frame's display, or over the host's
+// layout once a host lays the frame out (DIVERGENCES.md VM2-WTPS1).
 defsubr! { name = "window-text-pixel-size", gnu = "xdisp.c:12078", effect = Reads,
 fn window_text_pixel_size(cx; optional window: Value, from: Value, to: Value, x_limit: Value, y_limit: Value, mode_lines: Value, ignore_line_at_end: Value) {
     cx.window_text_pixel_size(window, crate::prim::TextSizeArgs { from, to, x_limit, y_limit, mode_lines, ignore_line_at_end })
@@ -365,7 +365,7 @@ fn buffer_text_pixel_size(cx; optional buffer_or_name: Value, window: Value, x_l
 
 defsubr! { name = "posn-at-point", gnu = "keyboard.c:13054", effect = Reads,
 fn posn_at_point(cx; optional pos: Value, window: Value) {
-    cx.windows().posn_at_point(pos, window)
+    cx.posn_at_point(pos, window)
 }}
 
 defsubr! { name = "frame-native-width", gnu = "frame.c:4381", effect = Reads,

@@ -95,7 +95,7 @@ impl GuiHost {
         match *event {
             HostEvent::Closed => shared.closed = true,
             HostEvent::Resize { width, height } => shared.size = Some((width, height)),
-            HostEvent::Key(_) | HostEvent::Background => {}
+            HostEvent::Key(_) | HostEvent::Background | HostEvent::Timeout => {}
         }
     }
 }
@@ -141,18 +141,20 @@ impl HostInput for GuiHost {
         Ok(ends)
     }
 
-    fn next_event(&mut self) -> Result<HostEvent, String> {
+    fn next_event(&mut self, timeout: Option<Duration>) -> Result<HostEvent, String> {
+        let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
         loop {
             let queued = next_queued(&mut self.shared.borrow_mut());
             let event = match queued {
                 Next::Closed => return Ok(HostEvent::Closed),
                 Next::Event(event) => event,
                 Next::Wait => {
-                    match crate::terminal_wait::wait(self.sender.input(), &self.terminal_ready, None) {
+                    let left = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
+                    match crate::terminal_wait::wait(self.sender.input(), &self.terminal_ready, left) {
                         crate::terminal_wait::Wake::Input(event) => event,
                         crate::terminal_wait::Wake::Terminal => return Ok(HostEvent::Background),
                         crate::terminal_wait::Wake::Closed => return Err("input closed while reading".into()),
-                        crate::terminal_wait::Wake::Timeout => unreachable!("prompt has no timer"),
+                        crate::terminal_wait::Wake::Timeout => return Ok(HostEvent::Timeout),
                     }
                 },
             };

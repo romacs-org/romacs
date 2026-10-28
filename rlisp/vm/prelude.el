@@ -643,10 +643,53 @@ guesswork fails."
 ;; *Messages* only (add_to_log), and the call returns nil.  syntax.c calls
 ;; `internal--syntax-propertize' this way in the middle of a scan.
 (defun romacs--safe-call (function &rest args)
+  (romacs--muted-call "Error muted by safe_call" function args))
+
+(defun romacs--muted-call (log function args)
+  "Apply FUNCTION to ARGS with redisplay inhibited; a signal returns nil.
+The signal is logged, after LOG, to *Messages* only, as GNU's add_to_log."
   (let ((inhibit-redisplay t))
     (condition-case err (apply function args)
       (t (let ((inhibit-message t))
-           (message "%s" (format "Error muted by safe_call: %S signaled %S" (cons function args) err)))
+           (message "%s" (format "%s: %S signaled %S" log (cons function args) err)))
          nil))))
+
+;; GNU handle_fontified_prop (xdisp.c): where the text redisplay shows has a
+;; nil `fontified' char property, call `fontification-functions' with that
+;; position, each through dsafe_call1 and with the variable itself bound to
+;; nil.  A buffer-local `t' runs the global functions; a global `t' is
+;; ignored.  Redisplay then reads the property again: a function that left
+;; it nil is not called again in that stretch, so none can loop.
+(defun romacs--redisplay-fontify (start end)
+  "Run `fontification-functions' over the unfontified text from START to END.
+Redisplay calls this in the buffer of a window showing START to END."
+  (let ((buffer (current-buffer)) (pos start))
+    (while (and pos (< pos end) fontification-functions (not memory-full))
+      (if (get-char-property pos 'fontified)
+          (setq pos (next-single-char-property-change pos 'fontified nil end))
+        (romacs--run-fontification-functions pos)
+        (if (not (buffer-live-p buffer))
+            (setq pos nil)
+          ;; GNU's fig leaf: back to the displayed buffer, whose text the
+          ;; functions may have shortened.
+          (set-buffer buffer)
+          (setq end (min end (point-max)))
+          (unless (get-char-property pos 'fontified)
+            (setq pos (next-single-char-property-change pos 'fontified nil end))))))))
+
+(defun romacs--run-fontification-functions (pos)
+  (let ((functions fontification-functions)
+        (fontification-functions nil))
+    (if (or (not (consp functions)) (eq (car functions) 'lambda))
+        (romacs--muted-call "Error during redisplay" functions (list pos))
+      (while (consp functions)
+        (if (not (eq (car functions) t))
+            (romacs--muted-call "Error during redisplay" (car functions) (list pos))
+          (let ((globals (default-value 'fontification-functions)))
+            (while (consp globals)
+              (unless (eq (car globals) t)
+                (romacs--muted-call "Error during redisplay" (car globals) (list pos)))
+              (setq globals (cdr globals)))))
+        (setq functions (cdr functions))))))
 
 ;;; prelude.el ends here

@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "66dddc6aa59dfd85787787682a041f6eed699476dcf5fb387ef0c92cb3c0a171",
+    "input_hash": "ad4ff414bfdecf8e469f8f53bbaafe1e3eeaa7508557df97ca1b06759588b468",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4304
+    "vm2_universe": 4325
   },
   "schema": 2,
   "vm2": {
-    "count": 991,
+    "count": 995,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -32,6 +32,7 @@
       "#:vm2-insert-and-inherit",
       "#:vm2-insert-before-markers",
       "#:vm2-lookup-key",
+      "#:vm2-message",
       "#:vm2-provide",
       "#:vm2-set-interactive-form",
       "#:vm2-temp-buffer",
@@ -220,6 +221,7 @@
       "decode-time",
       "defalias",
       "default-boundp",
+      "default-file-modes",
       "default-toplevel-value",
       "default-value",
       "defconst",
@@ -730,6 +732,7 @@
       "romacs--save-excursion",
       "romacs--save-restriction",
       "romacs--secure-hash",
+      "romacs--set-idle",
       "romacs--set-local-toplevel-cell",
       "romacs--signal-description",
       "romacs--term-close",
@@ -780,6 +783,7 @@
       "set-charset-priority",
       "set-coding-system-priority",
       "set-default",
+      "set-default-file-modes",
       "set-default-toplevel-value",
       "set-file-modes",
       "set-file-times",

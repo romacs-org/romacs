@@ -43,7 +43,7 @@ fn subr_arity_reports_current_native_handler_bounds() {
         ("eval-cache-stats", "(0 . 0)"),
         ("eval-cache-clear", "(0 . 0)"),
         ("eval-cache-entries", "(0 . 0)"),
-        ("romacs--read-host-event", "(0 . 0)"),
+        ("romacs--read-host-event", "(0 . 1)"),
         ("#:vm2-yank-part", "(1 . 1)"),
         ("#:vm2-yank-finalize", "(4 . 4)"),
         ("#:vm2-yank-property-run", "(3 . 3)"),

@@ -68,7 +68,7 @@ fn terminal_output_is_applied_while_a_real_minibuffer_waits() {
         fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
             self.seen.borrow_mut().push(frame.frame.windows[0].snapshot.text.utf8.clone()); Ok(vec![])
         }
-        fn next_event(&mut self) -> Result<HostEvent, String> {
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
             self.reads += 1;
             match self.reads {
                 1 => { let mut state=self.state.borrow_mut(); state.snapshot.text = "one\nλtwo\nDURING_PROMPT".into(); state.snapshot.revision += 1; state.pending = true; Ok(HostEvent::Background) }

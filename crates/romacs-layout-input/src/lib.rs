@@ -124,3 +124,23 @@ pub struct WindowSnapshot {
     /// FaceHandle indexes this owned table; entry zero is the default face.
     pub faces: Vec<Face>,
 }
+
+/// One window's display input for a measurement: what the host would lay
+/// out for these faces and text, without presenting it. Entry zero of
+/// `faces` is the default face, as in `WindowSnapshot`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeasureInput {
+    pub font_selection: FontSelectionState,
+    pub font_alternatives: FontAlternativeState,
+    pub faces: Vec<Face>,
+    pub text: TextSlice,
+}
+
+/// The host's geometry for a `MeasureInput`, in whole pixels: each
+/// character's advance and the row height its face gives it, in text
+/// order (a newline advances 0), and each face's row height.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Measured {
+    pub glyphs: Vec<(u32, u32)>,
+    pub face_heights: Vec<u32>,
+}

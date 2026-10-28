@@ -280,11 +280,18 @@ impl Vm {
         Ok(self.slots[local].value)
     }
     pub(super) fn set_variable_value(&mut self, slot: usize, value: Value) -> Result<()> {
-        if !self.trapped.is_empty() {
-            if value == Value::UNBOUND { self.notify_watchers_at(slot, value, "makunbound", Some(Value::NIL))?; }
-            else { self.notify_watchers(slot, value, "set")?; }
-        }
         let base = self.indirect_variable(slot);
+        if self.variable_trapped(base) {
+            if value == Value::UNBOUND { self.notify_watchers_at(base, value, "makunbound", Some(Value::NIL))?; }
+            else {
+                self.notify_watchers(base, value, "set")?;
+                // set_internal's set_default_internal reports again.
+                if let Some(forwarded::Fwd::Buffer(i)) = self.forwarding(base) {
+                    let buffer = self.buffer_index()?;
+                    if self.sets_shadowed_default(base, i, buffer) { self.notify_watchers_at(base, value, "set", Some(Value::NIL))?; }
+                }
+            }
+        }
         if let Some(fwd) = self.native_forwarding(base) {
             if value == Value::UNBOUND {
                 return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
@@ -310,18 +317,36 @@ impl Vm {
         }
         Ok(())
     }
+    /// GNU `specbind`: record the binding, then `do_specbind` notifies the
+    /// watchers and stores, so unbinding restores the value saved before
+    /// any watcher ran, and a watcher's signal leaves the binding to undo.
+    /// A per-buffer variable's default binding goes through
+    /// set_default_internal, which reports `set'.
     pub(super) fn bind_variable(&mut self, slot: usize, value: Value) -> Result<()> {
-        if !self.trapped.is_empty() { self.notify_watchers(slot, value, "let")?; }
         let base = self.indirect_variable(slot);
         let local = self.variable_binding_slot(base, false)?;
-        if let Some(fwd) = self.native_forwarding(base) && local == base {
-            return self.bind_forwarded(base, fwd, value).map_err(forwarded::fault_text);
-        }
-        let localized = self.local_table(base)?.is_some();
+        let forwarded = self.native_forwarding(base).filter(|_| local == base);
+        let binding = match forwarded {
+            Some(fwd) => self.forwarded_binding(base, fwd).map_err(forwarded::fault_text)?,
+            None => (local, self.slots[local].value, self.slots[self.buffer_slot].value, self.local_table(base)?.is_some()),
+        };
         if base != self.buffer_slot {
             self.backtrace.bind(self.dynamic.len(), Value::reference(base + 1, 7));
         }
-        self.dynamic.push((local, self.slots[local].value, self.slots[self.buffer_slot].value, localized));
+        self.dynamic.push(binding);
+        let mut local = local;
+        if self.variable_trapped(base) {
+            if matches!(forwarded, Some(forwarded::Fwd::Buffer(_))) && binding.3 {
+                self.notify_watchers_at(base, value, "set", Some(Value::NIL))?;
+            } else {
+                self.notify_watchers(base, value, "let")?;
+            }
+            // set_internal finds the binding to store into after the watchers.
+            local = self.variable_binding_slot(base, false)?;
+        }
+        if let Some(fwd) = forwarded {
+            return self.store_forwarded_binding(base, fwd, value, binding.3).map_err(forwarded::fault_text);
+        }
         self.slots[local].value = if self.localized_boolean(base).is_some() { if value == Value::NIL { Value::NIL } else { Value::TRUE } } else { value };
         Ok(())
     }
@@ -429,10 +454,15 @@ impl Vm {
                 let value = self.dynamic.iter().find(|(s,_,_,_)| *s==slot).map(|(_,v,_,_)| *v).unwrap_or(self.slots[slot].value);
                 Ok(truth(value != Value::UNBOUND))
             }
+            // GNU defvar: Fset_default, or a let-shadowed toplevel binding's
+            // saved value written in place, without notification.
             DefvarSetDefault => {
                 let value = self.stack[start+1];
                 if let Some((_,old,_,_)) = self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot) { *old = value; }
-                else { self.slots[slot].value = value; }
+                else {
+                    self.notify_watchers_at(slot, value, "set", Some(Value::NIL))?;
+                    self.slots[slot].value = value;
+                }
                 Ok(value)
             }
             _ => Err("invalid variable primitive".into()),

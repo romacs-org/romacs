@@ -77,6 +77,10 @@ pub(crate) enum Fault {
     WrongNumberOfArguments(Value, Value),
     /// `(setting-constant SYMBOL)`, GNU `data.c:908`.
     SettingConstant(Value),
+    /// A variable watcher's signal, already raised and searched, waiting in
+    /// `propagated_escape': the engine resumes it rather than signalling
+    /// again, so handlers run once.
+    Escape,
 }
 pub(crate) type Out = std::result::Result<Value, Fault>;
 
@@ -84,6 +88,10 @@ pub(crate) type Out = std::result::Result<Value, Fault>;
 pub(crate) const INTERACTIVE_TABLE: &str = "#:vm2-interactive-specs";
 /// The echo area's current message (xdisp.c echo_area_buffer contents).
 pub(crate) const ECHO_AREA_MESSAGE: &str = "#:vm2-echo-area-message";
+/// Non-nil once an embedder renders the echo area (`Vm::set_echo_area_host`).
+pub(crate) const ECHO_AREA_HOST: &str = "#:vm2-echo-area-host";
+/// The echo-area message printing last made, which later prints extend.
+pub(crate) const ECHO_AREA_PRINTED: &str = "#:vm2-echo-area-printed";
 /// Lazy native root, traced and forwarded like INTERACTIVE_TABLE.
 pub(crate) const FONT_ALTERNATIVE_FAMILIES: &str = "#:vm2-font-alternative-families";
 /// xfaces.c Vface_alternative_font_registry_alist: staticpro'd, not a Lisp variable.
@@ -205,6 +213,8 @@ mod leaf {
             Some(bytes)
         }
         pub(crate) fn mktime_offset(&self) -> i64 { self.vm.mktime_offset }
+        pub(crate) fn idle_since(&self) -> Option<std::time::Instant> { self.vm.idle_since }
+        pub(crate) fn set_idle_since(&mut self, since: Option<std::time::Instant>) { self.vm.idle_since = since; }
         pub(crate) fn set_mktime_offset(&mut self, offset: i64) { self.vm.mktime_offset = offset; }
         pub(crate) fn tz_rule_dstoff(&self) -> i64 { self.vm.tz_rule_dstoff }
         pub(crate) fn set_tz_rule_dstoff(&mut self, offset: i64) { self.vm.tz_rule_dstoff = offset; }
@@ -219,13 +229,19 @@ mod leaf {
         /// notify_variable_watchers from a leaf; a watcher's signal is the fault.
         pub(crate) fn notify(&mut self, slot: usize, value: Value, operation: &str, place: Option<Value>) -> std::result::Result<(), Fault> {
             if self.vm.trapped.is_empty() { return Ok(()); }
-            self.vm.notify_watchers_at(slot, value, operation, place).map_err(|text| match self.vm.propagated_escape.take() {
-                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
-                _ => Fault::Error(text),
-            })
+            self.vm.notify_watchers_at(slot, value, operation, place).map_err(|text| self.watcher_fault(text))
         }
-        pub(crate) fn variable_watchable(&self, watcher: Value) -> bool {
-            super::native_watcher(self.vm, watcher).is_some()
+        /// A write's failure as a fault: a watcher's signal stays pending as
+        /// itself. A leaf cannot carry a `throw' out, so one is refused by name.
+        fn watcher_fault(&mut self, text: String) -> Fault {
+            match self.vm.propagated_escape {
+                Some(crate::threaded::Escape::Signal(..) | crate::threaded::Escape::Error { .. }) => Fault::Escape,
+                Some(crate::threaded::Escape::Throw(..)) => {
+                    self.vm.propagated_escape = None;
+                    Fault::Error("VM2 throw out of a variable watcher of a native write is unsupported".into())
+                }
+                _ => Fault::Error(text),
+            }
         }
         pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
             self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
@@ -462,6 +478,19 @@ mod leaf {
                 .str_view(v)
                 .map(|view| view.to_owned())
                 .ok_or(Fault::Wrong("stringp", v))
+        }
+        /// GNU string-lessp's order, compared in place: a symbol orders by
+        /// its name, a string by its characters.
+        pub(crate) fn string_order(&self, a: Value, b: Value) -> std::result::Result<std::cmp::Ordering, Fault> {
+            self.with_name_chars(a, |a| self.with_name_chars(b, |b| a.cmp(b)))?
+        }
+        fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
+            -> std::result::Result<R, Fault> {
+            let name = if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
+                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) };
+            if let Some(name) = name { return Ok(f(&mut name.chars().map(u32::from))); }
+            let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
+            Ok(f(&mut view.chars()))
         }
         pub(crate) fn casing_multibyte(&mut self) -> std::result::Result<bool, Fault> {
             let i = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -964,7 +993,6 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
-            self.notify(slot, value, "set", Some(Value::NIL))?;
             // Only an INTERNED keyword is SYMBOL_NOWRITE (GNU lread.c
             // intern_sym); an uninterned `:x' is an ordinary variable.
             let name = &self.vm.symbol_names[slot];
@@ -973,8 +1001,13 @@ mod leaf {
             {
                 return Err(Fault::SettingConstant(v));
             }
+            self.notify(slot, value, "set", Some(Value::NIL))?;
             // GNU set_default_internal, SYMBOL_FORWARDED arm (data.c:2085).
             if let Some(fwd) = self.vm.native_forwarding(slot) {
+                // A global variable's set_internal reports again.
+                if self.vm.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_))) {
+                    self.notify(slot, value, "set", Some(Value::NIL))?;
+                }
                 self.vm.set_forwarded_default(slot, fwd, value, crate::forwarded::SetFlag::Set)?;
                 return Ok(value);
             }
@@ -1046,16 +1079,15 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.symbol_slot(v)?;
-            self.vm.set_variable_value(slot, value).map_err(|text| match self.vm.propagated_escape.take() {
-                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
-                _ => Fault::Error(text),
-            })
+            self.vm.set_variable_value(slot, value).map_err(|text| self.watcher_fault(text))
         }
         /// Publish NEW as an alias of BASE once `defvaralias` has validated
         /// it. nil and t are immediates in VM2, so an alias of either targets
         /// the named slot, holding its own constant value.
         pub fn make_variable_alias(&mut self, new: Value, base: Value) -> std::result::Result<(), Fault> {
             let new = self.symbol_slot(new)?;
+            // eval.c:713: NEW's watchers see the alias before it is made.
+            self.notify(new, base, "defvaralias", Some(Value::NIL))?;
             let base = if base == Value::NIL || base == Value::TRUE {
                 let slot = self.vm.slot(if base == Value::NIL { "nil" } else { "t" });
                 self.vm.slots[slot].value = base;
@@ -1628,6 +1660,7 @@ mod leaf {
     mod coding_safe;
     mod display_motion;
     mod display_elements;
+    mod display_hosted;
     mod text_pixel_size;
     pub(crate) use text_pixel_size::TextSizeArgs;
 }
@@ -1819,6 +1852,7 @@ pub(crate) fn call_native_watcher(vm: &mut Vm, watcher: Value, args: &[Value]) -
     } else {
         match no_collection(vm, |vm| f(&mut Leaf::new(vm), args)) {
             Ok(_) => return Ok(()),
+            Err(Fault::Escape) => return Err(format!("variable watcher {} signalled", d.name)),
             Err(fault) => vm.fault(fault),
         }
     };
@@ -1882,17 +1916,18 @@ impl Vm {
         }
     }
     /// Enter one generated primitive. Arity and every fault become GNU
-    /// condition+data. A leaf's value comes back as `Step::Done`.
+    /// condition+data, except `Fault::Escape' (None), whose escape waits in
+    /// `propagated_escape'. A leaf's value comes back as `Step::Done`.
     pub(crate) fn call_generated(
         &mut self,
         target: Value,
         start: usize,
         argc: usize,
-    ) -> std::result::Result<Step, (Value, Value)> {
+    ) -> std::result::Result<Step, Option<(Value, Value)>> {
         let d = generated(target).expect("generated primitive");
         if argc < d.min || d.max.is_some_and(|m| argc > m) {
             let n = Value::integer(argc as i64).unwrap();
-            return Err(self.condition("wrong-number-of-arguments", &[target, n]));
+            return Err(Some(self.condition("wrong-number-of-arguments", &[target, n])));
         }
         let args: Vec<Value> = self.stack[start..start + argc].to_vec();
         let run = |vm: &mut Vm| {
@@ -1909,7 +1944,7 @@ impl Vm {
         } else {
             no_collection(self, run)
         };
-        step.map_err(|fault| self.fault(fault))
+        step.map_err(|fault| self.step_fault(fault))
     }
     /// Run a T2 continuation with the callback's value and the saved registers.
     pub(crate) fn resume_generated(
@@ -1917,12 +1952,27 @@ impl Vm {
         then: Then,
         result: Value,
         saved: &[Value],
-    ) -> std::result::Result<Step, (Value, Value)> {
+    ) -> std::result::Result<Step, Option<(Value, Value)>> {
         no_collection(self, |vm| then(&mut Leaf::new(vm), result, saved))
-            .map_err(|fault| self.fault(fault))
+            .map_err(|fault| self.step_fault(fault))
     }
+    fn step_fault(&mut self, fault: Fault) -> Option<(Value, Value)> {
+        (!matches!(fault, Fault::Escape)).then(|| self.fault(fault))
+    }
+    /// FAULT as condition+data. A pending `Fault::Escape' is taken and
+    /// signalled afresh, by callers that cannot resume it.
     pub(super) fn fault(&mut self, fault: Fault) -> (Value, Value) {
         match fault {
+            Fault::Escape => match self.propagated_escape.take() {
+                Some(crate::threaded::Escape::Signal(condition, data)) => (condition, data),
+                Some(crate::threaded::Escape::Error { condition, object, .. }) => {
+                    (condition, self.cons_pair(object).expect("normalized signal object").1)
+                }
+                _ => {
+                    let text = self.make_lisp_string(b"VM2 variable watcher escape was lost".to_vec(), false);
+                    self.condition("error", &[text])
+                }
+            },
             Fault::Wrong(pred, v) => {
                 let p = self.intern(pred);
                 self.condition("wrong-type-argument", &[p, v])

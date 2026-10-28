@@ -20,11 +20,9 @@ impl Leaf<'_> {
         let Some(slot) = self.local_symbol(symbol)? else { return Ok(symbol) };
         let buffer = self.decode_buffer(Value::NIL)?;
         // Fkill_local_variable reports makunbound with the current buffer, for
-        // a localized variable only (a plain one returns first).
-        let base = self.vm.indirect_variable(self.symbol_slot_of(symbol)?);
-        let localized = self.vm.local_table(base).map_err(Fault::Error)?.is_some()
-            || matches!(self.vm.forwarding(base), Some(Fwd::Buffer(_)));
-        if localized { self.notify(base, Value::NIL, "makunbound", Some(buffer))?; }
+        // a localized variable only (a plain or forwarded one returns first).
+        let localized = self.vm.forwarding(slot).is_none() && self.vm.local_table(slot).map_err(Fault::Error)?.is_some();
+        if localized { self.notify(slot, Value::NIL, "makunbound", Some(buffer))?; }
         self.clear_local_slot(slot, buffer)?;
         Ok(symbol)
     }

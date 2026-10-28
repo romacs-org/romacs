@@ -58,6 +58,8 @@ impl Presentation {
         if let Ok(Some(romacs_vm::CommandOutcome { signal: Some(signal), .. })) = &outcome {
             let message = crate::echo::signal_message(vm, signal)?;
             crate::echo::show(vm, &message)?;
+        } else {
+            crate::echo::show_current_message(vm)?;
         }
         crate::eval_last_sexp::after_command(vm)?;
         outcome
@@ -81,9 +83,10 @@ impl Presentation {
         if self.in_flight.is_some_and(|(actual, _)| actual == presentation) { self.in_flight = None; }
     }
 
-    pub fn wait(&self) -> Duration {
-        if self.in_flight.is_some() { Duration::from_millis(1) }
-        else { Duration::from_millis(100) }
+    /// How long to block for input: briefly while a paint is in flight, whose
+    /// completion nothing signals; otherwise until input or a wake.
+    pub fn wait(&self) -> Option<Duration> {
+        self.in_flight.is_some().then(|| Duration::from_millis(1))
     }
 }
 
@@ -110,7 +113,7 @@ mod tests {
             Ok(vec![])
         }
 
-        fn next_event(&mut self) -> Result<romacs_vm::HostEvent, String> {
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
             self.0.pop_front()
                 .map(|code| romacs_vm::HostEvent::Key(key(code)))
                 .ok_or_else(|| "prompt input exhausted".into())

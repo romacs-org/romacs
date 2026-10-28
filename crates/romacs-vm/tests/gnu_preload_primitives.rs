@@ -163,12 +163,12 @@ fn variable_watchers_follow_gnu_registration() {
     ]);
 }
 
+// Their calls are compared in tests/variable_watchers.rs.
 #[test]
-fn lisp_variable_watchers_are_refused_explicitly() {
-    let mut vm = Vm::new();
-    let refused = romacs(&mut vm, "(condition-case e (add-variable-watcher 'wy (lambda (&rest _) nil)) (error (car (cdr e))))");
-    assert_eq!(refused, "VM2 add-variable-watcher with a Lisp watch function is unsupported");
-    assert_eq!(romacs(&mut vm, "(get 'wy 'watchers)"), "nil", "a refused watcher is not recorded");
+fn lisp_variable_watchers_run_in_the_bare_registry() {
+    compare(&[
+        "(progn (defvar wy 1) (setq wl nil) (add-variable-watcher 'wy (lambda (s n o w) (setq wl (cons (list s n o w wy) wl)))) (setq wy 2) (let ((wy 3)) wy) (list wy wl (length (get 'wy 'watchers))))",
+    ]);
 }
 
 #[test]

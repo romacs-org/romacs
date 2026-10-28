@@ -6,7 +6,26 @@
 //!
 //! Rows are logical lines of the frame's line height: `romacs-layout2` paints
 //! one logical line per row and does not wrap (DIVERGENCES.md VM2-RD1).
-use crate::{coordinates::CharOffset, data::Object, *};
+//!
+//! The rows a window shows are what its redisplay fontifies
+//! ([`Vm::displayed_range`]).
+use crate::{
+    coordinates::{ByteOffset, CharOffset},
+    data::Object,
+    *,
+};
+
+/// The byte where the `rows` logical lines from `from` end: after their last
+/// newline, or `zv`.
+fn rows_end(text: &str, from: usize, rows: usize, zv: usize) -> usize {
+    let Some(last) = rows.checked_sub(1) else { return from };
+    text.as_bytes()[from..zv]
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| **c == b'\n')
+        .nth(last)
+        .map_or(zv, |(i, _)| from + i + 1)
+}
 
 impl Vm {
     /// Text-area rows of the window with `text_height` pixels: (fully
@@ -117,6 +136,24 @@ impl Vm {
         }
         let position = Value::integer((b.char_of_byte(coordinates::ByteOffset(at))?.0 + 1) as i64)?;
         self.set_marker_object(start_marker, position, buffer).map(drop)
+    }
+
+    /// The character positions `window`, showing the current buffer, spans
+    /// with a `text_height`-pixel text area: from its start through the end
+    /// of its last displayed row, counting the rows layout paints from
+    /// -vscroll. None when it shows no text.
+    pub(crate) fn displayed_range(&self, window: Value, text_height: u32) -> Result<Option<(usize, usize)>> {
+        let w = self.window(window)?;
+        let (rows, start) = (self.window_rows(text_height.saturating_add(w.vscroll_px)).1, w.start);
+        let start = self.marker_position_value(start)?.integer_value().unwrap_or(1).max(1) as usize;
+        let Object::Buffer(b) = self.object(self.slots[self.buffer_slot].value)? else {
+            return Ok(None);
+        };
+        let accessible = b.accessible();
+        let from = b.byte_of_char(CharOffset(start - 1))?.0.clamp(accessible.start.0, accessible.end.0);
+        let to = rows_end(b.as_str(), from, rows, accessible.end.0);
+        let (start, end) = (b.char_of_byte(ByteOffset(from))?.0 + 1, b.char_of_byte(ByteOffset(to))?.0 + 1);
+        Ok((start < end).then_some((start, end)))
     }
 
     fn set_window_point_position(&mut self, window: Value, position: Value) -> Result<()> {

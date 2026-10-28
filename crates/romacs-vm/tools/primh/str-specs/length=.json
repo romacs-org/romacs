@@ -9,7 +9,7 @@
   "fns.c"
  ],
  "gnu_def": "fns.c:226",
- "rust": "src/prims/str.rs:238",
+ "rust": "src/prims/str.rs:228",
  "args": [],
  "probes": [
   "(length= (quote (1 . tail)) 1)",

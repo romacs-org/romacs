@@ -17,6 +17,10 @@ impl Leaf<'_> {
         if unsafe { libc::fchmodat(libc::AT_FDCWD, path.as_ptr(), mode as libc::mode_t, if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 }) } == 0 { Ok(()) }
         else { Err(std::io::Error::last_os_error()) }
     }
+    /// umask: replace the process's file mode creation mask.
+    pub fn filesave_set_umask(&self, mask: u32) {
+        unsafe { libc::umask(mask as libc::mode_t) };
+    }
     pub fn filesave_rename(&self, from: &str, to: &str, replace: bool) -> std::io::Result<()> {
         if replace { return std::fs::rename(from, to) }
         let from = std::ffi::CString::new(from).map_err(|_| std::io::Error::from_raw_os_error(libc::EINVAL))?;

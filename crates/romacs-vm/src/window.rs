@@ -789,20 +789,17 @@ impl Vm {
         self.window_leaf_ids(root, &mut ids)?;
         let mini = self.window_root(MINI);
         ids.push(self.window(mini)?.id);
+        let live = |vm: &Self, id| {
+            vm.objects.iter().enumerate().find_map(|(i, o)| match o {
+                Object::Window(w) if w.id == id && w.live() => Some(Value::reference(i + 1, 0)),
+                _ => None,
+            })
+        };
         let outcome = (|| {
             let mut snapshots = vec![];
             for id in ids {
-                let v = self
-                    .objects
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, o)| match o {
-                        Object::Window(w) if w.id == id && w.live() => {
-                            Some(Value::reference(i + 1, 0))
-                        }
-                        _ => None,
-                    })
-                    .ok_or("window deleted during frame snapshot")?;
+                // Lisp run by an earlier window's redisplay may delete this one.
+                let Some(v) = live(self, id) else { continue };
                 let w = self.window(v)?;
                 let (x, y, width, height) = (
                     w.x + w.left_margin * self.window_state.column,
@@ -812,7 +809,12 @@ impl Vm {
                     ),
                     w.height,
                 );
-                snapshots.push((x, y, self.snapshot_window(v, width, height)?));
+                match self.snapshot_window(v, width, height) {
+                    Ok(snapshot) => snapshots.push((x, y, snapshot)),
+                    // ... or its own.
+                    Err(_) if live(self, id).is_none() => {}
+                    Err(error) => return Err(error),
+                }
             }
             Ok(snapshots)
         })();
@@ -1247,6 +1249,13 @@ pub(crate) struct TextArea {
     pub mode_line: i64,
     pub column: i64,
     pub line: i64,
+    /// A host has laid the frame out and measures for it (VM2-WTPS1):
+    /// then MODE_LINE is the host's band, and these are the text area's
+    /// pixel width and height and its vertical scroll.
+    pub hosted: bool,
+    pub body_width: i64,
+    pub body_height: i64,
+    pub vscroll: i64,
 }
 /// The window surface `prims/window.rs` declares as primitives (GNU
 /// window.c, frame.c and minibuf.c's `active-minibuffer-window`). Reached only
@@ -1427,25 +1436,18 @@ impl<'a> Windows<'a> {
     /// no fringes, scroll bars, dividers, header or tab lines.
     /// window_pixel_left / window_pixel_top: the window's frame-relative
     /// pixel edge.
-    /// GNU window.c:1998 Fpos_visible_in_window_p. pos_visible_p (xdisp.c:1703)
-    /// sees nothing on the initial frame, batch's, which no host lays out. A
-    /// displayed window would need display simulation (VM2-POSVIS1).
-    pub(crate) fn pos_visible_in_window_p(&mut self, pos: Value, window: Value, _partially: Value) -> Out {
-        self.pos_visible(pos, window, "pos-visible-in-window-p")
-    }
-    /// keyboard.c:13054 Fposn_at_point: pos-visible-in-window-p with
-    /// PARTIALLY t, then posn-at-x-y at the coordinates it reports. The
-    /// initial frame shows nothing, so the answer there is nil.
-    pub(crate) fn posn_at_point(&mut self, pos: Value, window: Value) -> Out {
-        let window = if window == Value::NIL { self.vm.selected_window_value().map_err(internal)? } else { window };
-        self.pos_visible(pos, window, "posn-at-point")
-    }
-    /// The refusal for a question about what a host has laid out: its
-    /// published layout cannot answer it (VM2-POSVIS1).
-    fn displayed_window(caller: &str) -> Fault {
+    /// The refusal for a question about what a host has laid out, when no
+    /// host layout is attached to answer it (VM2-POSVIS1).
+    pub(crate) fn displayed_window(caller: &str) -> Fault {
         internal(format!("VM2 {caller} in a displayed window is unsupported"))
     }
-    fn pos_visible(&mut self, pos: Value, window: Value, caller: &str) -> Out {
+    /// Fpos_visible_in_window_p's checks before pos_visible_p: the live
+    /// window, the position to ask about (-1 for t) and the window start,
+    /// or None when
+    /// nothing is visible -- POS above the window start or outside the
+    /// accessible text, or the initial frame, which no host lays out.
+    /// A displayed window with no host layout refuses as CALLER.
+    pub(crate) fn pos_visible(&mut self, pos: Value, window: Value, caller: &str) -> std::result::Result<Option<(Value, i64, i64)>, Fault> {
         let w = self.live(window)?;
         let posint = if pos == Value::TRUE {
             None
@@ -1480,22 +1482,29 @@ impl<'a> Windows<'a> {
         let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
         let (begv, zv) = (char_at(accessible.start)?, char_at(accessible.end)?);
         if posint.is_some_and(|p| p < top || p > zv) || top < begv || top > zv || !self.vm.display_state.hosted {
-            return Ok(Value::NIL);
+            return Ok(None);
         }
-        Err(Self::displayed_window(caller))
+        if !self.vm.has_layout_host() { return Err(Self::displayed_window(caller)); }
+        Ok(Some((w, posint.unwrap_or(-1), top)))
     }
     /// decode_live_window and what xdisp.c init_iterator reads of the
     /// window. The terminal frame model holds until a host lays the frame
-    /// out; a host's layout cannot answer for it (VM2-WTPS1).
+    /// out; then the host's layout answers, if one is attached (VM2-WTPS1).
     pub(crate) fn text_area(&mut self, window: Value, caller: &str) -> std::result::Result<TextArea, Fault> {
         let w = self.live(window)?;
-        if self.vm.display_state.hosted { return Err(Self::displayed_window(caller)); }
-        let mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0);
+        let hosted = self.vm.display_state.hosted;
+        if hosted && !self.vm.has_layout_host() { return Err(Self::displayed_window(caller)); }
+        let mut mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0);
+        if hosted && mode_line != 0 {
+            mode_line = i64::from(self.vm.host_mode_line_height(w).map_err(internal)?);
+        }
         let (column, line) = (i64::from(self.vm.window_state.column), i64::from(self.vm.window_state.line));
         let root = self.vm.window_root_peek(ROOT);
         let (root_x, root_width) = self.vm.window(root).map_or((0, 0), |r| (i64::from(r.x), i64::from(r.width)));
         let x = self.get(w)?;
         let (left, width) = (i64::from(x.x), i64::from(x.width));
+        let body_width = (width - i64::from(x.left_margin + x.right_margin) * column).max(0);
+        let body_height = (i64::from(x.height) - mode_line).max(0);
         Ok(TextArea {
             window: w,
             buffer: x.buffer,
@@ -1508,6 +1517,10 @@ impl<'a> Windows<'a> {
             mode_line,
             column,
             line,
+            hosted,
+            body_width,
+            body_height,
+            vscroll: i64::from(x.vscroll_px),
         })
     }
     pub(crate) fn window_pixel_edge(&mut self, window: Value, top: bool) -> Out {
