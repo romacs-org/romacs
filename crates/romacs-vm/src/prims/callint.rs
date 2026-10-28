@@ -161,13 +161,13 @@ fn form_of(cx: &mut Leaf<'_>, cmd: Value) -> Next {
                 Ok(Step::Done(list(cx, &[interactive, spec])))
             }
         },
-        // GNU's CLOSURE_INTERACTIVE slot; VM2 closures carry it in the
-        // compiler's registration table. A closure created without an
-        // `interactive' form, and OClosures (none exist in VM2), give nil.
-        Kind::Closure => Ok(Step::Done(match cx.interactive_spec(fun) {
-            Some((spec, _)) => list(cx, &[interactive, spec]),
-            None => Value::NIL,
-        })),
+        // GNU's CLOSURE_INTERACTIVE slot is VM2's registration table; without it an OClosure asks
+        // the generic `oclosure-interactive-form' (data.c:1186), other closures give nil.
+        Kind::Closure => match cx.interactive_spec(fun) {
+            Some((spec, _)) => Ok(Step::Done(list(cx, &[interactive, spec]))),
+            None if oclosure_p(cx, fun) =>
+                Ok(Step::Call { f: cx.intern("oclosure-interactive-form"), args: vec![fun], then: loaded_form, saved: vec![] }),
+            None => Ok(Step::Done(Value::NIL)) },
         Kind::Cons => {
             let head = cx.pair(fun).expect("cons").0;
             if head == cx.intern("autoload") {
@@ -752,11 +752,11 @@ pub(super) fn command_predicate(
             if cx.interactive_spec(fun).is_some() {
                 true
             } else {
-                let doc = cx.closure_document(fun);
-                let saved_doc = cx.pair(doc).is_some_and(|(file, offset)|
-                    matches!(cx.kind(file), Kind::String | Kind::Bytes) && offset.integer_value().is_some());
-                generic = doc != Value::NIL && !matches!(cx.kind(doc), Kind::String | Kind::Bytes)
-                    && doc.integer_value().is_none() && !saved_doc;
+                // A docstring slot holding no docstring marks an OClosure,
+                // such as nadvice's advice, whose interactive form a generic
+                // function computes: `interactive-form' asks it below
+                // (eval.c:2330-2345).
+                generic = oclosure_p(cx, fun);
                 false
             }
         }
@@ -833,3 +833,18 @@ fn command_modes(cx, command: Value) {
         _ => Ok(Value::NIL),
     }
 }}
+
+fn loaded_form(_: &mut Leaf<'_>, form: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(form))
+}
+
+/// eval.c/data.c: a closure whose docstring slot holds neither nil nor a
+/// valid docstring (a string, an integer, a (FILE . OFFSET) reference) is
+/// an OClosure, whose interactive form a generic function computes.
+fn oclosure_p(cx: &mut Leaf<'_>, fun: Value) -> bool {
+    let doc = cx.closure_document(fun);
+    let saved_doc = cx.pair(doc).is_some_and(|(file, offset)|
+        matches!(cx.kind(file), Kind::String | Kind::Bytes) && offset.integer_value().is_some());
+    doc != Value::NIL && !matches!(cx.kind(doc), Kind::String | Kind::Bytes)
+        && doc.integer_value().is_none() && !saved_doc
+}
