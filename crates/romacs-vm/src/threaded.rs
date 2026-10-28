@@ -1277,7 +1277,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     let size = vm
         .register_width
         .checked_mul(MIN_FRAMES)
-        .and_then(|n| n.checked_add(4096))
+        .and_then(|n| n.checked_add(vm.spread_reserve))
         .ok_or("register storage overflow")?;
     vm.stack = std::mem::take(&mut program.registers);
     vm.stack.resize(size, Value::NIL);
@@ -1902,7 +1902,7 @@ const MIN_FRAMES: usize = 17;
 /// Grow only on a cold storage boundary, rebasing all activation pointers.
 unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
     let needed = (e.frames.len() + 3).checked_mul(e.vm.register_width)?;
-    if needed <= e.vm.stack.len().checked_sub(4096)? {
+    if needed <= e.vm.stack.len().checked_sub(e.vm.spread_reserve)? {
         Some(r)
     } else {
         unsafe { widen_registers(e, r, e.vm.register_width) }
@@ -2355,7 +2355,7 @@ unsafe fn apply(
         enter_apply(e, r, pc, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         // Out of line: the Result's error drop would stop the tail dispatch.
-        let Some((target, offset, count)) = t2_prepare_apply(e, base + start, argc) else {
+        let Some((r, target, offset, count)) = t2_prepare_apply(e, r, base + start, argc) else {
             return Value::UNBOUND;
         };
         e.apply_function = Some(target);
@@ -2630,7 +2630,7 @@ unsafe fn take_step(
             (depth + 2)
                 .checked_mul(e.vm.register_width)
                 .zip(offset.checked_add(width))
-                .is_some_and(|(limit, end)| end <= limit && end <= e.vm.stack.len() - 4096)
+                .is_some_and(|(limit, end)| end <= limit && end <= e.vm.stack.len() - e.vm.spread_reserve)
         };
         // The register width is the widest compiled function so far, so a
         // request wider than every function compiled yet (the first T2 call
@@ -2785,7 +2785,7 @@ unsafe fn t2_dispatch(
         match p {
             Primitive::Apply => {
                 enter_apply(e, r, pc, start, argc);
-                let Some((target, offset, count)) = t2_prepare_apply(e, base + start, argc) else {
+                let Some((r, target, offset, count)) = t2_prepare_apply(e, r, base + start, argc) else {
                     return Value::UNBOUND;
                 };
                 e.apply_function = Some(target);
@@ -2850,26 +2850,41 @@ unsafe fn t2_invoke_full(
 ) -> Value {
     unsafe { invoke_full(e, r, pc, target, start, argc) }
 }
-/// Spread `apply`'s arguments; `None` after recording the error.
+/// Spread `apply`'s arguments; `None` after recording the error.  A spread
+/// wider than the stack's reserved tail widens the reserve first, rebasing
+/// every activation (offsets are unchanged), so the caller's registers move.
 #[cold]
 #[inline(never)]
-fn t2_prepare_apply(
+unsafe fn t2_prepare_apply(
     e: &mut Engine<'_>,
+    r: *mut Value,
     start: usize,
     argc: usize,
-) -> Option<(Value, usize, usize)> {
-    // prepare_apply writes a disjoint scratch window at the end.
-    match e.vm.prepare_apply(start, argc) {
-        Ok(window) => {
-            match e.apply_scratch.iter_mut().find(|(offset, _)| *offset == window.1) {
-                Some((_, count)) => *count = (*count).max(window.2),
-                None => e.apply_scratch.push((window.1, window.2)),
+) -> Option<(*mut Value, Value, usize, usize)> {
+    let mut r = r;
+    loop {
+        // prepare_apply writes a disjoint scratch window at the end.
+        match e.vm.prepare_apply(start, argc) {
+            Ok(Ok(window)) => {
+                match e.apply_scratch.iter_mut().find(|(offset, _)| *offset == window.1) {
+                    Some((_, count)) => *count = (*count).max(window.2),
+                    None => e.apply_scratch.push((window.1, window.2)),
+                }
+                return Some((r, window.0, window.1, window.2));
             }
-            Some(window)
-        }
-        Err(error) => {
-            e.error = Some(error);
-            None
+            Ok(Err(count)) => {
+                let Some(reserve) = count.checked_next_power_of_two() else {
+                    fail(e, "register storage overflow");
+                    return None;
+                };
+                e.vm.spread_reserve = reserve;
+                let width = e.vm.register_width;
+                r = unsafe { widen_registers(e, r, width) }?;
+            }
+            Err(error) => {
+                e.error = Some(error);
+                return None;
+            }
         }
     }
 }
@@ -3161,7 +3176,7 @@ unsafe fn widen_registers(e: &mut Engine<'_>, r: *mut Value, width: usize) -> Op
     unsafe {
         let width = width.max(e.vm.register_width);
         let frames = (e.frames.len() + 3).max(MIN_FRAMES).checked_next_power_of_two()?;
-        let size = width.checked_mul(frames)?.checked_add(4096)?;
+        let size = width.checked_mul(frames)?.checked_add(e.vm.spread_reserve)?;
         let old_base = e.vm.stack.as_ptr();
         let current = r.offset_from(old_base) as usize;
         let regs = e.regs.offset_from(old_base) as usize;
@@ -3218,7 +3233,7 @@ unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Opti
         e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(e.vm.spread_reserve)) else {
             fail(e, "register storage overflow");
             return None;
         };
@@ -3288,7 +3303,7 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(e.vm.spread_reserve)) else {
             fail(e, "register storage overflow");
             return None;
         };
@@ -3358,7 +3373,7 @@ unsafe fn reentrant_load(
         e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(e.vm.spread_reserve)) else {
             return fail(e, "register storage overflow");
         };
         if e.vm.stack.len() < size { e.vm.stack.resize(size, Value::NIL); }

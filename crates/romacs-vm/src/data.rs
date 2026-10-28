@@ -413,11 +413,13 @@ impl Vm {
         Ok(values)
     }
     #[inline(never)]
+    /// `apply`'s spread window: (FUNCTION, OFFSET, COUNT), or Err(COUNT)
+    /// when COUNT arguments do not fit the stack's reserved tail.
     pub(super) fn prepare_apply(
         &mut self,
         start: usize,
         argc: usize,
-    ) -> Result<(Value, usize, usize)> {
+    ) -> Result<std::result::Result<(Value, usize, usize), usize>> {
         if argc < 1 {
             return Err("wrong primitive arity".into());
         }
@@ -428,12 +430,12 @@ impl Vm {
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
         let values = values.get(1..).unwrap_or_default();
-        if values.len() > 4096 {
-            return Err("apply argument limit exceeded".into());
+        if values.len() > self.spread_reserve {
+            return Ok(Err(values.len()));
         }
-        let offset = self.stack.len() - 4096;
+        let offset = self.stack.len() - self.spread_reserve;
         self.stack[offset..offset + values.len()].copy_from_slice(values);
-        Ok((target, offset, values.len()))
+        Ok(Ok((target, offset, values.len())))
     }
     #[inline(never)]
     pub(super) fn primitive_call(
