@@ -148,6 +148,21 @@ mod tests {
         assert!(tall > line, "{tall} > {line}");
     }
 
+    /// A row a plain newline starts measures alone, whatever the line
+    /// before holds: gnosis's review centres each line with an overlay
+    /// string, then measures the next line.  The line holding the string
+    /// still refuses.
+    #[test]
+    fn a_row_after_a_plain_newline_measures_without_the_line_before() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer) (insert "first line\nwhich fuse") (goto-char 1) (set-window-start nil 1))"#);
+        let plain = h.eval("(window-text-pixel-size nil 12 22 1000)");
+        h.eval(r#"(overlay-put (make-overlay 1 11) 'before-string (propertize " " 'display '(space :align-to 30)))"#);
+        assert_eq!(h.eval("(window-text-pixel-size nil 12 22 1000)"), plain);
+        assert_eq!(h.eval("(condition-case e (window-text-pixel-size nil 1 11) (error (car (cdr e))))"),
+                   "\"VM2 window-text-pixel-size of text the host does not lay out as GNU displays it in a displayed window is unsupported\"");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]

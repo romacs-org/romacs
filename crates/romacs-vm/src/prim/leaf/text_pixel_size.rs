@@ -83,7 +83,11 @@ impl Leaf<'_> {
             if vertical_offset != 0 { return Err(unsupported("from a vertical offset in a displayed window")); }
             let mut hosted = Hosted::new(source);
             let cx = hosted_context(&mut hosted, cx, area)?;
-            let origin = hosted.source().visible_line_start(start)?;
+            // GNU starts at the previous visible line start and moves to
+            // START (window-text-pixel-size, xdisp.c); a host that breaks
+            // rows only at newlines starts START's row at START when a plain
+            // newline precedes it, so the text before cannot change it.
+            let origin = if hosted.source().starts_row(start)? { start } else { hosted.source().visible_line_start(start)? };
             hosted.reset(origin)?;
             let it = motion::screen_line_start(&mut hosted, &cx, start)?;
             let on_newline = hosted.source().char_after(start)? == Some(0x0a);

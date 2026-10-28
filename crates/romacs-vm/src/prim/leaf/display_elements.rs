@@ -139,6 +139,15 @@ impl<'l, 'a> Source<'l, 'a> {
         }
         Ok(p)
     }
+    /// Whether a row starts at POS for a host that breaks rows only at
+    /// newlines: the character before it is a newline that is visible and
+    /// not replaced, so no text before POS can reach POS's row.
+    pub(super) fn starts_row(&mut self, pos: i64) -> R<bool> {
+        if pos <= self.view.begv { return Ok(true); }
+        if self.char_after(pos - 1)? != Some(0x0a) { return Ok(false); }
+        let invisible = self.property(pos - 1, self.syms.invisible)?.0;
+        Ok(self.leaf.invisible_kind(invisible)? == 0 && self.property(pos - 1, self.syms.display)?.0 == Value::NIL)
+    }
     /// find_newline_no_quit backward from POS - 1: the line start before it.
     fn line_start_before(&self, pos: i64) -> R<i64> {
         let (low, at) = (self.leaf.buffer_byte(self.view.buffer, self.view.begv)?, self.leaf.buffer_byte(self.view.buffer, pos - 1)?);
