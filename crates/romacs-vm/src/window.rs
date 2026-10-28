@@ -1411,6 +1411,36 @@ impl<'a> Windows<'a> {
         self.vm.window_mut(w).map_err(internal)?.dedicated = flag;
         Ok(flag)
     }
+    /// GNU window.c:4492 force-window-update: nil repaints every window, a
+    /// live window itself, a buffer (or its name) every window showing it;
+    /// t when something was marked, nil for anything else (no error).
+    pub(crate) fn force_window_update(&mut self, object: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        if object == Value::NIL {
+            self.vm.display_state.free_realized_faces();
+            return Ok(Value::TRUE);
+        }
+        if let Some(Object::Window(w)) = self.vm.object_if(object) && w.live() {
+            let id = w.id;
+            self.vm.display_state.repaint_window(id);
+            return Ok(Value::TRUE);
+        }
+        let buffer = match self.vm.str_view(object).and_then(|v| v.as_str()).map(str::to_owned) {
+            Some(name) => self.vm.named_buffer(&name).unwrap_or(Value::NIL),
+            None => object,
+        };
+        if !matches!(self.vm.object_if(buffer), Some(Object::Buffer(b)) if b.state.live) { return Ok(Value::NIL); }
+        let selected = self.vm.window_root(SELECTED);
+        let (_, windows) = self.candidates(selected, Value::TRUE, Value::TRUE)?;
+        let ids: Vec<u64> = windows.into_iter().filter_map(|w| self.get(w).ok().filter(|w| w.live() && w.buffer == buffer).map(|w| w.id)).collect();
+        for &id in &ids { self.vm.display_state.repaint_window(id); }
+        Ok(if ids.is_empty() { Value::NIL } else { Value::TRUE })
+    }
+    /// GNU dispnew.c:3252 redraw-display: clear and redisplay every frame.
+    pub(crate) fn redraw_display(&mut self) -> Out {
+        self.vm.display_state.free_realized_faces();
+        Ok(Value::NIL)
+    }
     /// Decorations VM2 does not draw: header/tab lines, scroll bars and
     /// dividers are 0 pixels (window.c:1224-1269 on a live window).
     pub(crate) fn live_zero(&mut self, window: Value) -> Out {
@@ -1684,6 +1714,20 @@ impl<'a> Windows<'a> {
             Some(Object::Terminal(t)) => Ok((terminal, t.terminal_coding, t.keyboard_coding)),
             _ => Err(Fault::Wrong("terminal-live-p", object)),
         }
+    }
+    /// decode_live_terminal, then its parameter alist.
+    pub(crate) fn terminal_params(&mut self, object: Value) -> std::result::Result<(Value, Value), Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        let terminal = self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        match self.vm.object_if(terminal) {
+            Some(Object::Terminal(t)) => Ok((terminal, t.params)),
+            _ => Err(Fault::Wrong("terminal-live-p", object)),
+        }
+    }
+    pub(crate) fn set_terminal_params(&mut self, terminal: Value, params: Value) -> std::result::Result<(), Fault> {
+        let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
+        if let Some(Object::Terminal(t)) = self.vm.objects.get_mut(index) { t.params = params; }
+        Ok(())
     }
     pub(crate) fn set_terminal_coding(&mut self, terminal: Value, keyboard: bool, coding: Value) -> std::result::Result<(), Fault> {
         let index = terminal.index(0).map_err(internal)?.saturating_sub(1);

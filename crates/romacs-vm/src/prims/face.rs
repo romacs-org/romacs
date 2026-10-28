@@ -89,6 +89,38 @@ fn make_lisp_face(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
     cx.face_insert(face, frame, vector)
 }
 
+defsubr! { name = "internal-copy-lisp-face", gnu = "xfaces.c:3145", effect = Global,
+fn internal_copy_lisp_face(cx, from: Value, to: Value, frame: Value, new_frame: Value) {
+    if cx.kind(from) != Kind::Symbol { return Err(Fault::Wrong("symbolp", from)); }
+    if cx.kind(to) != Kind::Symbol { return Err(Fault::Wrong("symbolp", to)); }
+    let live = |cx: &mut Leaf<'_>, frame: Value| if frame == Value::NIL { Err(Fault::Wrong("frame-live-p", frame)) } else { cx.face_frame(frame, false) };
+    // lface_from_face_name (F, FROM, true): FROM's lface or "Invalid face".
+    let (source, target) = if frame == Value::TRUE { (Value::NIL, Value::NIL) } else {
+        let new_frame = if new_frame == Value::NIL { frame } else { new_frame };
+        (live(cx, frame)?, live(cx, new_frame)?)
+    };
+    let resolved = resolve(cx, from, true)?;
+    let lface = cx.face_lookup(resolved, source)?;
+    if lface == Value::NIL { return Err(signal(cx, "Invalid face", from)); }
+    let copy = make_lisp_face(cx, to, target)?;
+    for index in 0..LFACE_VECTOR_SIZE {
+        let index = Value::integer(index as i64).unwrap();
+        let value = cx.vector_get(lface, index)?;
+        cx.vector_set(copy, index, value)?;
+    }
+    // A frame's realized faces follow its named faces (face_change).
+    let no_inherit = cx.intern("face-no-inherit");
+    if target != Value::NIL && cx.face_property(to, no_inherit)? == Value::NIL {
+        let name = cx.symbol_name(to)?;
+        for (index, keyword) in LFACE_ATTRIBUTES.iter().enumerate() {
+            let value = cx.vector_get(copy, Value::integer((index + 1) as i64).unwrap())?;
+            let mirrored = theme_value(cx, keyword, value, target)?;
+            cx.theme_face_attribute(&name, keyword, mirrored);
+        }
+    }
+    Ok(to)
+}}
+
 defsubr! { name = "internal-get-lisp-face-attribute", gnu = "xfaces.c:4230", effect = Reads,
 fn internal_get_lisp_face_attribute(cx, face: Value, attribute: Value; optional frame: Value) {
     let frame = if frame == Value::TRUE { Value::NIL } else { cx.face_frame(frame, true)? };
