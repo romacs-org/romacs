@@ -1,7 +1,7 @@
 //! print-circle labels, print-continuous-numbering and print-number-table
 //! against pinned GNU: labels follow GNU's preprocessing order, and with
 //! continuous numbering the table survives between print calls, `princ'
-//! included.
+//! included; an override binds numbering for one call.
 use romacs_vm::Vm;
 
 const CASES: &str = r##"
@@ -23,6 +23,12 @@ const CASES: &str = r##"
 (let ((print-circle t) (print-continuous-numbering t) print-number-table (s (make-symbol "g")) (print-gensym t)) (list (prin1-to-string (list s)) (prin1-to-string s)))
 (let ((print-circle t) (print-continuous-numbering t) print-number-table (a (list 1))) (with-temp-buffer (prin1 (list a a) (current-buffer)) (prin1 a (current-buffer)) (buffer-string)))
 (let ((print-circle t) (print-continuous-numbering t) print-number-table (s "hi")) (list (prin1-to-string (list s s)) (with-temp-buffer (let ((standard-output (current-buffer))) (princ s)) (buffer-string)) (let (acc) (princ s (lambda (c) (push c acc))) (concat (nreverse acc))) (with-temp-buffer (princ s (current-buffer)) (princ "\377" (current-buffer)) (buffer-string))))
+(let ((print-circle t) (print-continuous-numbering t) print-number-table (a (list 1))) (prin1-to-string (list a a)) (list (prin1-to-string (list a a) nil '(t (circle . t))) (prin1-to-string (list a a)) (hash-table-count print-number-table)))
+(let ((print-circle t) (print-continuous-numbering t) print-number-table (a (list 1)) (b (list 2))) (list (prin1-to-string (list a a)) (prin1-to-string (list b b) nil t) (prin1-to-string (list b b)) (gethash a print-number-table) (gethash b print-number-table)))
+(let ((print-circle t) print-number-table (a (list 1))) (list (prin1-to-string (list a a) nil '((continuous-numbering . t))) (prin1-to-string a) (hash-table-p print-number-table) (gethash a print-number-table)))
+(let ((print-circle t) (print-continuous-numbering t) print-number-table (a (list 1))) (prin1-to-string (list a a)) (list (prin1-to-string (list a a) nil '((continuous-numbering))) (gethash a print-number-table)))
+(let ((print-circle t) (print-continuous-numbering t) print-number-table (tb (make-hash-table :test 'eq)) (a (list 1))) (list (prin1-to-string (list a a) nil `((number-table . ,tb))) (prin1-to-string a nil `((number-table . ,tb))) (gethash a tb) print-number-table (prin1-to-string a)))
+(let ((print-circle t) (print-continuous-numbering t) (tb (make-hash-table :test 'eq)) (a (list 1))) (puthash a 3 tb) (let ((print-number-table tb)) (prin1-to-string (list a a) nil '((number-table)))))
 (list (prin1-to-string "\377" t) (prin1-to-string (list "\377" (string-to-multibyte "\377")) t) (with-temp-buffer (princ "\377" (current-buffer)) (princ (vector "\377" "é") (current-buffer)) (buffer-string)) (let (acc) (princ "\377" (lambda (c) (push c acc))) acc))
 "##;
 

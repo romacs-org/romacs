@@ -137,31 +137,41 @@ impl Vm {
             let v = self.variable_value(slot)?;
             if v != Value::UNBOUND { options.set(key, v); }
         }
-        if overrides == Value::TRUE { options = PrintOptions::default(); }
-        else if overrides != Value::NIL {
-            for setting in self.list_values(overrides)? {
-                if setting == Value::TRUE { options = PrintOptions::default(); continue; }
-                let (key, v) = self.cons_pair(setting)?;
-                let key = key.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).ok_or("symbol required")?.clone();
-                if !options.set(&key, v) { return Err("unsupported printing override".into()); }
+        let continuous = self.slot("print-continuous-numbering");
+        let mut continuous = !matches!(self.variable_value(continuous)?, Value::NIL | Value::UNBOUND);
+        // An overriding number table is bound for this call only, as
+        // print_bind_overrides binds it; `t' binds every default.
+        let mut bound_table = None;
+        let settings = if overrides == Value::TRUE { vec![overrides] } else { self.list_values(overrides)? };
+        for setting in settings {
+            if setting == Value::TRUE {
+                (options, continuous, bound_table) = (PrintOptions::default(), false, Some(Value::NIL));
+                continue;
+            }
+            let (key, v) = self.cons_pair(setting)?;
+            let key = key.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).ok_or("symbol required")?.clone();
+            match key.as_str() {
+                "continuous-numbering" => continuous = v != Value::NIL,
+                "number-table" => bound_table = Some(v),
+                _ if options.set(&key, v) => {}
+                _ => return Err("unsupported printing override".into()),
             }
         }
         if buffer_output { (options.nonascii, options.buffer) = (true, true); }
         // print.c print: the number table and its index survive between
         // calls only while print-continuous-numbering and the table are set.
-        let continuous = self.slot("print-continuous-numbering");
-        let continuous = !matches!(self.variable_value(continuous)?, Value::NIL | Value::UNBOUND);
         let table_slot = self.slot("print-number-table");
-        let mut table = self.variable_value(table_slot)?;
+        let mut table = match bound_table { Some(table) => table, None => self.variable_value(table_slot)? };
         if !continuous || matches!(table, Value::NIL | Value::UNBOUND) {
             self.print_number_index = 0;
             table = Value::NIL;
-            self.set_print_number_table(table_slot, table)?;
+            if bound_table.is_none() { self.set_print_number_table(table_slot, table)?; }
         }
         if !options.circle { return self.print_object(value, quoted, &options, 0); }
         self.print_preprocess(value, quoted, &mut options, continuous, table)?;
         let printed = self.print_object(value, quoted, &options, 0);
-        self.publish_print_number_table(table_slot, table, options.graph.get_mut())?;
+        let slot = if bound_table.is_none() { Some(table_slot) } else { None };
+        self.publish_print_number_table(slot, table, options.graph.get_mut())?;
         printed
     }
 
@@ -253,10 +263,12 @@ impl Vm {
 
     /// Store the marks in print-number-table as print.c does: entries keep
     /// the insertion order of the traversal, and objects seen once are
-    /// removed. Sub-char-tables have no Lisp key and stay private.
-    fn publish_print_number_table(&mut self, slot: usize, mut table: Value, graph: &PrintGraph) -> Result<()> {
+    /// removed. Sub-char-tables have no Lisp key and stay private. A new
+    /// table goes to the variable's SLOT; without one (an overriding
+    /// binding) nothing outlives the call to see it.
+    fn publish_print_number_table(&mut self, slot: Option<usize>, mut table: Value, graph: &PrintGraph) -> Result<()> {
         if !matches!(self.object_if(table), Some(data::Object::HashTable(_))) {
-            if graph.inserted.is_empty() { return Ok(()); }
+            let Some(slot) = slot.filter(|_| !graph.inserted.is_empty()) else { return Ok(()) };
             table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new(hash::Test::Eq, hash::Weakness::None, 0))));
             self.set_print_number_table(slot, table)?;
         }
