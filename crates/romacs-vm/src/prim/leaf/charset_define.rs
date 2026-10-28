@@ -4,6 +4,17 @@ impl Leaf<'_> {
         if value == Value::NIL { return Ok((Value::NIL, Value::NIL)); }
         self.pair(value).ok_or(Fault::Wrong("listp", value))
     }
+    /// The directory a relative charset map name expands against:
+    /// `default-directory', else the working directory.
+    fn charset_map_base(&mut self) -> std::result::Result<std::path::PathBuf, Fault> {
+        use std::os::unix::ffi::OsStringExt;
+        let default_symbol = self.intern("default-directory");
+        let default = self.variable_value(default_symbol)?.unwrap_or(Value::NIL);
+        if matches!(self.kind(default), Kind::String | Kind::Bytes) {
+            return Ok(std::path::PathBuf::from(std::ffi::OsString::from_vec(self.string_view(default)?.bytes().to_vec())));
+        }
+        crate::host::current_dir().map_err(|e| Fault::Error(e.to_string()))
+    }
     fn charset_map_entries(&mut self, map: Value, min: u32, max: u32) -> std::result::Result<Vec<crate::charset::map::Entry>, Fault> {
         if matches!(self.kind(map), Kind::String | Kind::Bytes) {
             use std::os::unix::ffi::OsStringExt;
@@ -23,17 +34,13 @@ impl Leaf<'_> {
                 tail = rest;
             }
             if std::path::Path::new(&filename).is_absolute() { directories = vec![std::path::PathBuf::new()]; }
-            let default_symbol = self.intern("default-directory");
-            let default = self.variable_value(default_symbol)?.unwrap_or(Value::NIL);
-            let base = if matches!(self.kind(default), Kind::String | Kind::Bytes) {
-                std::path::PathBuf::from(std::ffi::OsString::from_vec(self.string_view(default)?.bytes().to_vec()))
-            } else { crate::host::current_dir().map_err(|e| Fault::Error(e.to_string()))? };
             for directory in directories {
-                let directory = if directory.is_absolute() { directory } else { base.join(directory) };
                 for suffix in [".map", ".txt"] {
                     let mut suffixed = filename.clone();
                     suffixed.push(suffix);
                     let path = directory.join(suffixed);
+                    // openp: only a relative candidate reads the directory.
+                    let path = if path.is_absolute() { path } else { self.charset_map_base()?.join(path) };
                     match crate::host::read_file(path) {
                         Ok(bytes) => return Ok(crate::charset::map::read_entries(&bytes, min, max)),
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
