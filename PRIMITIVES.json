@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "6480b32663d3c8896681ca7a26dd2a97fc0ecd72fcbd10ee076359d37b8d8e64",
+  "source_fingerprint": "3ef4328ad829b7339d47b70c10364ac262a5a92b72adfdfa7ad1ed9b730d94b2",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -376,7 +376,7 @@
   "base64-decode-region": {
    "name": "base64-decode-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/base64.rs:171"
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:182"
   },
   "base64-decode-string": {
    "name": "base64-decode-string",
@@ -386,7 +386,7 @@
   "base64-encode-region": {
    "name": "base64-encode-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/base64.rs:157"
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:168"
   },
   "base64-encode-string": {
    "name": "base64-encode-string",
@@ -396,7 +396,7 @@
   "base64url-encode-region": {
    "name": "base64url-encode-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/base64.rs:162"
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:173"
   },
   "base64url-encode-string": {
    "name": "base64url-encode-string",
