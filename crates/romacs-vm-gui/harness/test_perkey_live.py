@@ -66,6 +66,30 @@ class Delivery(unittest.TestCase):
         self.assertTrue(pk.invalid({'valid': True, 'problems': [], 'phases': {}, 'idle': [(1e6, 10), (5e7, 10)]}))
 
 
+class Latency(unittest.TestCase):
+    def sample(self, sequence, rendered=5_000_000, unchanged=False):
+        return {'diagnostic': 'latency-key', 'key_sequence': sequence,
+                'key_to_render_observed_ns': None if unchanged or rendered is None else rendered,
+                **({'unchanged': True} if unchanged else {})}
+
+    def test_one_sample_per_key_each_rendered_or_unchanged(self):
+        samples = [self.sample(7), self.sample(8, unchanged=True), self.sample(9)]
+        self.assertEqual(pk.latency_check(samples, 3), ([5_000_000, 5_000_000], 1, []))
+
+    def test_one_sample_cannot_stand_for_the_other_keys(self):
+        self.assertTrue(pk.latency_check([self.sample(7)], 3)[2])
+
+    def test_a_key_with_no_render_time_is_refused_not_dropped(self):
+        rendered, _, problems = pk.latency_check([self.sample(1), self.sample(2, rendered=None)], 2)
+        self.assertEqual(rendered, [5_000_000])
+        self.assertTrue(problems)
+
+    def test_samples_must_be_distinct_keys_of_one_run(self):
+        self.assertTrue(pk.latency_check([self.sample(1), self.sample(1)], 2)[2])
+        self.assertTrue(pk.latency_check([self.sample(1), self.sample(3)], 2)[2])
+        self.assertTrue(pk.latency_check([self.sample(None), self.sample(2)], 2)[2])
+
+
 class Summaries(unittest.TestCase):
     def test_idle_phases_must_agree_unless_both_negligible(self):
         self.assertEqual(pk.idle_rate([(100_000, 10), (300_000, 10)]), 20_000)

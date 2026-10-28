@@ -9,7 +9,8 @@ typed with wtype into that compositor only.  A session runs, in order:
 
 Counted sessions count the evaluator thread alone (`perf stat -t`,
 instructions:u) over each phase; latency sessions run without perf and
-with --trace-latency, and read key-enqueue -> render-observed samples.
+with --trace-latency, and read key-enqueue -> render-observed samples: one
+per key, each rendered or explicitly unchanged, or the phase is refused.
 
 A phase counts only if
   * exactly N command replies arrived, each naming the key's bound command
@@ -118,6 +119,28 @@ def delivery(replies, command, keys):
             problems.append(f'unexpected reply {reply}')
             break
     return problems
+
+
+def latency_check(samples, keys):
+    """Render times of one phase's latency-key SAMPLES, how many keys needed no
+    paint, and problems.  Each of the KEYS keys must have exactly one sample,
+    the phase's samples one contiguous run of key sequences, and each sample
+    either a render time or the binary's explicit `unchanged' (a frame nothing
+    changed is not repainted).  A sample with neither, such as a key with no
+    enqueue time, is refused, never dropped."""
+    problems = []
+    sequences = [s.get('key_sequence') for s in samples]
+    if len(samples) != keys:
+        problems.append(f'{len(samples)} latency samples for {keys} keys')
+    if len(set(sequences)) != len(sequences) or None in sequences:
+        problems.append(f'latency samples without unique key sequences: {sequences}')
+    elif sequences and sorted(sequences) != list(range(min(sequences), min(sequences) + len(sequences))):
+        problems.append(f'latency samples are not one run of keys: {sorted(sequences)}')
+    rendered = [s['key_to_render_observed_ns'] for s in samples if s.get('key_to_render_observed_ns') is not None]
+    unchanged = sum(1 for s in samples if s.get('key_to_render_observed_ns') is None and s.get('unchanged') is True)
+    if len(rendered) + unchanged != len(samples):
+        problems.append(f'{len(samples) - len(rendered) - unchanged} latency samples with no render time')
+    return rendered, unchanged, problems
 
 
 def idle_rate(idles):
@@ -304,11 +327,15 @@ class Session:
         stderr_records = records(self.stderr)
         new = stderr_records[start:]
         paints = [r for r in new if r.get('diagnostic') == 'paint']
-        latencies = [r['key_to_render_observed_ns'] for r in new
-                     if r.get('diagnostic') == 'latency-key' and r.get('key_to_render_observed_ns') is not None]
+        problems = delivery(replies, command, keys)
+        latencies, unchanged = [], 0
+        if self.latency:
+            latencies, unchanged, missing = latency_check(
+                [r for r in new if r.get('diagnostic') == 'latency-key'], keys)
+            problems += missing
         return {'instructions': count, 'seconds': seconds, 'replies': replies,
                 'paints': len(paints), 'point': text_point(stderr_records), 'latency_ns': latencies,
-                'problems': delivery(replies, command, keys)}
+                'unchanged_keys': unchanged, 'problems': problems}
 
     def measure(self):
         keys = self.args.keys
@@ -418,11 +445,12 @@ def invalid(result):
 def latencies(sessions):
     found = {}
     for name in PHASES:
-        values = [v for result in sessions if not result['phases'][name]['problems']
-                  for v in result['phases'][name]['latency_ns']]
+        phases = [result['phases'][name] for result in sessions if not result['phases'][name]['problems']]
+        values = [v for phase in phases for v in phase['latency_ns']]
         if values:
             found[name] = {'p50_ms': percentile(values, .5) / 1e6, 'p95_ms': percentile(values, .95) / 1e6,
-                           'max_ms': max(values) / 1e6, 'samples': len(values)}
+                           'max_ms': max(values) / 1e6, 'samples': len(values),
+                           'unchanged_keys': sum(phase['unchanged_keys'] for phase in phases)}
     return found
 
 
