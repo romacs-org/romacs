@@ -206,6 +206,14 @@ impl Vm {
     }
 
     pub(super) fn retire_code(&mut self, marks: &[bool]) {
+        for program in self.programs_mut() {
+            program.retire_code(marks);
+        }
+        // With no request code dead, no cache becomes free: skip rescanning
+        // every live body.
+        if !(0..marks.len()).any(|id| !marks[id] && self.request_code.live[id]) {
+            return;
+        }
         let mut used_caches = vec![false; self.caches.len()];
         // Undecoded image bodies still own their original cache ordinals.
         used_caches[..self.request_code.image_caches].fill(true);
@@ -240,9 +248,6 @@ impl Vm {
                 };
                 self.request_code.free_caches.push(id);
             }
-        }
-        for program in self.programs_mut() {
-            program.retire_code(marks);
         }
     }
 }

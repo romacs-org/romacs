@@ -623,6 +623,10 @@ impl Program {
         }
     }
     pub(super) fn retire_code(&mut self, marks: &[bool]) {
+        // Nothing to drop or compact: keep the entry table as it is.
+        if self.free_entries.is_empty() && self.code.iter().enumerate().all(|(id, code)| code.is_empty() || marks[id]) {
+            return;
+        }
         let old = std::mem::take(&mut self.entries);
         let old_inline = std::mem::take(&mut self.inline_bodies);
         self.free_entries.clear();

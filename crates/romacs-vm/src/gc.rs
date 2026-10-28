@@ -186,6 +186,14 @@ impl Vm {
         debug_assert!(self.stack.is_empty(), "a nested run returned its registers");
         self.stack = self.suspended_stacks.pop().expect("a suspended register stack");
     }
+    /// SLOTS as a dense membership table over every symbol slot.
+    fn slot_set<'a>(&self, slots: impl Iterator<Item = &'a usize>) -> Vec<bool> {
+        let mut set = vec![false; self.slots.len()];
+        for &slot in slots {
+            set[slot] = true;
+        }
+        set
+    }
     /// [`Stress`]: collect at every Nth Lisp entry; 0 turns it off.
     pub fn set_gc_stress(&mut self, every: u32) {
         self.gc_stress = Stress { every, ..Stress::default() };
@@ -440,8 +448,11 @@ impl Vm {
         self.backtrace.visit_values(&mut |v| pending.push(*v));
         let mut local_live = HashSet::default();
         let mut obarray_symbols_live = HashSet::default();
+        // Membership by slot, tested for every symbol and slot visited below.
+        let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
+        let local_binding = self.slot_set(self.local_binding_slots.iter());
         for (slot, s) in self.slots.iter().enumerate() {
-            if self.obarray_symbol_names.contains_key(&slot) { continue; }
+            if in_obarray[slot] { continue; }
             if let Some(Some(VariableRedirect::Alias(target))) = self.variable_redirects.get(slot) {
                 pending.push(Value::reference(target + 1, 7));
             }
@@ -451,7 +462,7 @@ impl Vm {
             // buffer-local table are roots for every slot, interned or not.
             pending.push(s.plist);
             pending.push(s.local);
-            if !self.local_binding_slots.contains(&slot) {
+            if !local_binding[slot] {
                 pending.push(s.value);
             }
         }
@@ -465,7 +476,7 @@ impl Vm {
             // Both saved and active values stay roots even if Lisp switches
             // away from their buffer during the dynamic extent.
             pending.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
-            if self.local_binding_slots.contains(&slot) {
+            if local_binding[slot] {
                 local_live.insert(slot);
             }
         }
@@ -524,12 +535,15 @@ impl Vm {
                 for op in &self.functions[id].code {
                     let mut op = *op;
                     op.visit_values(&mut |v| pending.push(*v));
+                    // Only a symbol interned in an obarray of its own can die.
+                    let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
                     match op {
                         Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _) | Op::DeclareSpecial(slot)
-                        | Op::Define(slot, _) | Op::DefineMacro(slot, _) | Op::ResolveHead(_, slot) => pending.push(Value::reference(slot + 1, 7)),
+                        | Op::Define(slot, _) | Op::DefineMacro(slot, _) | Op::ResolveHead(_, slot) => pending.extend(symbol(slot)),
                         Op::Closure(_, child, _) => code_pending.push(child),
                         Op::Direct(_, slot, cache, _, _) | Op::Prepared(_, _, slot, cache, _, _) => {
-                            pending.extend([Value::reference(slot + 1, 7), self.caches[cache].target]);
+                            pending.extend(symbol(slot));
+                            pending.push(self.caches[cache].target);
                         }
                         _ => {}
                     }
@@ -556,7 +570,7 @@ impl Vm {
             let tag = v.tag();
             if tag == 7 && v != Value::UNBOUND {
                 let slot = v.payload() as usize - 1;
-                if let Some(&name) = self.obarray_symbol_names.get(&slot) {
+                if in_obarray.get(slot).copied().unwrap_or(false) && let Some(&name) = self.obarray_symbol_names.get(&slot) {
                     if obarray_symbols_live.insert(slot) {
                         let s = &self.slots[slot];
                         pending.extend([name, s.value, s.function, s.plist, s.local]);
