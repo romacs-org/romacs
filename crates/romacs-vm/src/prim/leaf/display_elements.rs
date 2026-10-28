@@ -334,9 +334,9 @@ impl<'l, 'a> Source<'l, 'a> {
     /// A string's characters with its own invisible and, unless it came
     /// from a display property, display properties.
     fn string(&mut self, string: Value, origin: Origin) -> R<()> {
-        let chars: Vec<(usize, u32)> = {
+        let (chars, unibyte): (Vec<(usize, u32)>, bool) = {
             let view = self.leaf.vm.str_view(string).ok_or_else(|| fault("display string required"))?;
-            if !view.is_multibyte() { view.bytes().iter().enumerate().map(|(i, &b)| (i, unibyte_char(b))).collect() }
+            if !view.is_multibyte() { (view.bytes().iter().enumerate().map(|(i, &b)| (i, unibyte_char(b))).collect(), true) }
             else {
                 let (bytes, mut at, mut out) = (view.bytes(), 0, vec![]);
                 while at < bytes.len() {
@@ -344,10 +344,10 @@ impl<'l, 'a> Source<'l, 'a> {
                     out.push((at, c));
                     at += width;
                 }
-                out
+                (out, false)
             }
         };
-        if self.look.unibyte_via_language && chars.iter().any(|&(_, c)| c > 0x7f) {
+        if self.look.unibyte_via_language && unibyte && chars.iter().any(|&(_, c)| c > 0x7f) {
             return Err(unsupported("of a unibyte string with `unibyte-display-via-language-environment'"));
         }
         let end_byte = self.leaf.vm.str_view(string).map_or(0, |v| v.bytes().len());

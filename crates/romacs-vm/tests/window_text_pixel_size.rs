@@ -87,6 +87,7 @@ const CASES: &str = r###"
 (progn (insert "ab") (let ((x (make-overlay 2 2))) (overlay-put x 'before-string "\t") (dolist (s '("A" "BB")) (overlay-put (make-overlay 2 2) 'before-string s)) (delete-overlay x) (dolist (s '("\t" "C")) (overlay-put (make-overlay 2 2) 'before-string s))) (window-text-pixel-size))
 (progn (insert "a" (propertize "X" 'display (string-to-unibyte "\351\200z")) "b") (let ((o (make-overlay 1 1))) (overlay-put o 'before-string (string-to-unibyte "\351z")) (overlay-put o 'after-string (string-to-unibyte "\200"))) (setq line-prefix (string-to-unibyte "\377")) (list (window-text-pixel-size) (window-text-pixel-size nil 2 3)))
 (progn (insert "abc\n") (setq mode-line-format nil) (list (window-text-pixel-size nil nil nil nil nil t) (progn (setq mode-line-format "x") (window-text-pixel-size nil nil nil nil nil t)) (progn (set-window-parameter nil 'mode-line-format 'none) (prog1 (window-text-pixel-size nil nil nil nil nil t) (set-window-parameter nil 'mode-line-format nil)))))
+(let ((unibyte-display-via-language-environment t)) (insert "a" (propertize "X" 'display "é中\t") "b") (overlay-put (make-overlay 2 2) 'before-string "ü中\t") (setq line-prefix "ñ中" wrap-prefix "中ö") (insert (make-string 100 ?y)) (list (window-text-pixel-size) (window-text-pixel-size nil 1 3) (window-text-pixel-size nil 3 4)))
 "###;
 
 /// window.el's callers, on side windows as keymap-popup and Hermes make them.
