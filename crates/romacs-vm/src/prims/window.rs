@@ -194,14 +194,19 @@ fn frame_char_width(cx; optional frame: Value) {
     cx.windows().frame_char_size(frame, true)
 }}
 
+defsubr! { name = "frame-internal-border-width", gnu = "frame.c:4524", effect = Reads,
+fn frame_internal_border_width(cx; optional frame: Value) {
+    cx.windows().frame_absent_width(frame)
+}}
+
 defsubr! { name = "frame-right-divider-width", gnu = "frame.c:4531", effect = Reads,
 fn frame_right_divider_width(cx; optional frame: Value) {
-    cx.windows().frame_divider_width(frame)
+    cx.windows().frame_absent_width(frame)
 }}
 
 defsubr! { name = "frame-bottom-divider-width", gnu = "frame.c:4538", effect = Reads,
 fn frame_bottom_divider_width(cx; optional frame: Value) {
-    cx.windows().frame_divider_width(frame)
+    cx.windows().frame_absent_width(frame)
 }}
 
 defsubr! { name = "active-minibuffer-window", gnu = "minibuf.c:215", effect = Reads,
@@ -376,4 +381,31 @@ fn frame_native_width(cx; optional frame: Value) {
 defsubr! { name = "frame-native-height", gnu = "frame.c:4401", effect = Reads,
 fn frame_native_height(cx; optional frame: Value) {
     cx.windows().frame_native_size(frame, false)
+}}
+
+// GNU's iterator over the window's display, or over the host's layout once
+// a host lays the frame out (DIVERGENCES.md VM2-VMOTION1).
+defsubr! { name = "vertical-motion", gnu = "indent.c:2207", effect = Global,
+fn vertical_motion(cx, lines: Value; optional window: Value, cur_col: Value) {
+    cx.vertical_motion(lines, window, cur_col)
+}}
+
+defsubr! { name = "line-pixel-height", gnu = "xdisp.c:1545", effect = Reads,
+fn line_pixel_height(cx) {
+    cx.line_pixel_height()
+}}
+
+defsubr! { name = "window-scroll-bars", gnu = "window.c:8898", effect = Reads,
+fn window_scroll_bars(cx; optional window: Value) {
+    cx.windows().window_scroll_bars(window)
+}}
+
+defsubr! { name = "window-left-column", gnu = "window.c:1017", effect = Reads,
+fn window_left_column(cx; optional window: Value) {
+    cx.windows().window_char_edge(window, false)
+}}
+
+defsubr! { name = "window-top-line", gnu = "window.c:1029", effect = Reads,
+fn window_top_line(cx; optional window: Value) {
+    cx.windows().window_char_edge(window, true)
 }}

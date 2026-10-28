@@ -10,14 +10,14 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, tab_advance};
+use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, LineWrap, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
     let snapshot = WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![] }, mode_line: None,
-        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, faces: vec![face.clone()],
+        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), faces: vec![face.clone()],
     };
     let frame = layout(&snapshot, 1)?;
     Ok((frame.char_height.ceil() as u32, frame.char_width.ceil() as u32))
@@ -121,7 +121,7 @@ fn color(rgb: [u8; 3]) -> Color {
     Color::from_pixel((u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2]))
 }
 
-/// One logical line per visual line, LTR, no wrapping, cursor or policy evaluation.
+/// LTR rows, continued or truncated as GNU does without fringes; no cursor or policy evaluation.
 /// Byte positions are relative to the owned UTF-8 text, not VM heap references.
 pub fn layout(snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyphBuffer, String> {
     let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;
@@ -186,52 +186,87 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         GlyphRowRole::Text,
         Some(Rect::new(ox, oy, snapshot.width as f32, body_height)),
     );
+    // GNU on a frame without fringes: a row ends where its next glyph
+    // would pass the text area less the continuation (`\\') or
+    // truncation (`$') glyph, which it shows there (display_line,
+    // move_it_in_display_line_to). Rows are laid out from the start of
+    // the window start's line, so a window starting on a continuation
+    // line breaks its rows, and stops its TABs, as from the line start.
+    let truncate = snapshot.wrap == LineWrap::Truncate;
+    let special = if truncate { '$' } else { '\\' };
+    let default_id = FaceId::new(face_base);
+    let last_x = snapshot.width as f32 - advance(frame, default_id, special, metrics[0].2);
+    let line_start = text[..snapshot.start_byte].rfind('\n').map_or(0, |at| at + 1);
     let mut x = 0.0;
     let mut y = -(snapshot.vscroll_px as f32);
     let mut row_height = metrics[0].1;
     let mut end_byte = snapshot.start_byte;
     let mut point_rect = None;
-    for (byte, ch) in text
-        .char_indices()
-        .filter(|(byte, _)| *byte >= snapshot.start_byte)
-    {
-        if y >= body_height { break; }
-        end_byte = byte + ch.len_utf8();
-        if byte == snapshot.point_byte { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
+    // The width of the rows of this line above this one, and the glyphs
+    // on this row; past the truncation glyph, the rest of the line is hidden.
+    let (mut continued, mut hpos, mut hidden) = (0.0f32, 0usize, false);
+    let mut drawing = line_start == snapshot.start_byte;
+    for (byte, ch) in text[line_start..].char_indices().map(|(at, ch)| (line_start + at, ch)) {
+        if !drawing && byte >= snapshot.start_byte {
+            drawing = true;
+            (x, y, row_height, hpos) = (0.0, -(snapshot.vscroll_px as f32), metrics[0].1, 0);
+        }
+        if drawing && y >= body_height { break; }
+        if drawing { end_byte = byte + ch.len_utf8(); }
+        let at_point = drawing && byte == snapshot.point_byte;
+        if at_point { point_rect = (!hidden).then_some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         if ch == '\n' {
             x = 0.0;
             y += row_height;
             row_height = metrics[0].1;
+            (continued, hpos, hidden) = (0.0, 0, false);
             continue;
         }
+        if hidden { continue; }
         let index = face_at(&snapshot.text, byte, 0);
         let id = FaceId::new(face_base + index as u32);
         let (ascent, height, cell, space) = metrics[index];
+        let shown = shown(ch);
+        let width = |frame: &FrameGlyphBuffer, x: f32| match &shown {
+            Shown::Tab => tab_advance(f64::from(x), f64::from(space), snapshot.tab_width) as f32,
+            Shown::Glyphs(glyphs) => glyphs.chars().map(|glyph| advance(frame, id, glyph, cell)).sum(),
+        };
+        let mut advance_px = width(frame, x + continued);
+        if !truncate && hpos > 0 && x + advance_px > last_x {
+            if drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
+            // A TAB that does not fit continues from the text area's edge.
+            continued += if matches!(shown, Shown::Tab) { last_x } else { x };
+            (x, y, row_height, hpos) = (0.0, y + row_height, metrics[0].1, 0);
+            advance_px = width(frame, continued);
+            if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
+        }
         row_height = row_height.max(height);
-        let visible = body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32;
-        let (advance, cursor) = match shown(ch) {
+        let visible = drawing && body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32;
+        if truncate && x + advance_px > last_x {
+            if visible { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
+            hidden = true;
+            if at_point { point_rect = Some((x, y, metrics[0].2, row_height, ascent)); }
+            continue;
+        }
+        let cursor = match &shown {
             Shown::Tab => {
-                let advance = tab_advance(f64::from(x), f64::from(space), snapshot.tab_width) as f32;
-                if visible { frame.add_stretch(ox + x, oy + y, advance, height, color(snapshot.faces[index].background), id, false); }
+                if visible { frame.add_stretch(ox + x, oy + y, advance_px, height, color(snapshot.faces[index].background), id, false); }
                 // GNU's cursor on a stretch is no wider than a column
                 // (`x-stretch-cursor' nil).
-                (advance, advance.min(metrics[0].2))
+                advance_px.min(metrics[0].2)
             }
             Shown::Glyphs(glyphs) => {
                 let mut at = x;
-                for glyph in glyphs.chars() {
-                    let advance = advance(frame, id, glyph, cell);
-                    if visible && at < snapshot.width as f32 {
-                        frame.add_char(glyph, ox + at, oy + y, advance, height, ascent, false);
-                        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing character face")? = id;
-                    }
-                    at += advance;
+                for c in glyphs.chars() {
+                    if visible && at < snapshot.width as f32 { glyph(frame, c, ox + at, oy + y, (ascent, height, cell, space), id)?; }
+                    at += advance(frame, id, c, cell);
                 }
-                (at - x, advance(frame, id, glyphs.chars().next().unwrap_or(ch), cell))
+                advance(frame, id, glyphs.chars().next().unwrap_or(ch), cell)
             }
         };
-        if byte == snapshot.point_byte { point_rect = Some((x, y, cursor, row_height, ascent)); }
-        x += advance;
+        if at_point { point_rect = Some((x, y, cursor, row_height, ascent)); }
+        x += advance_px;
+        hpos += 1;
     }
     if snapshot.point_byte == text.len() && end_byte == text.len() {
         point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0));
@@ -289,6 +324,16 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     Ok(end_byte)
 }
 
+/// Draw CH at X, Y in face ID, whose ascent, height and nominal advance
+/// METRICS gives.
+fn glyph(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, metrics: (f32, f32, f32, f32), id: FaceId) -> Result<(), String> {
+    let (ascent, height, cell, _) = metrics;
+    let width = advance(frame, id, ch, cell);
+    frame.add_char(ch, x, y, width, height, ascent, false);
+    *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing character face")? = id;
+    Ok(())
+}
+
 /// How a buffer character other than newline is drawn: a TAB as a
 /// stretch, another control character as GNU's escape (`^X`, or `\NNN`
 /// for one beyond ASCII), anything else as itself.
@@ -313,6 +358,8 @@ fn face_at(slice: &TextSlice, byte: usize, default: usize) -> usize {
 /// even when those faces are unused.
 fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
     let mut text = vec![String::new(); faces];
+    // The continuation and truncation glyphs, in the default face.
+    text[0].push_str("\\$");
     for (slice, default) in slices {
         for (byte, ch) in slice.utf8.char_indices() {
             let face = &mut text[face_at(slice, byte, *default)];

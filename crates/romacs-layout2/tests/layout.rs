@@ -10,7 +10,7 @@ fn scene() -> WindowSnapshot {
         buffer_version: 1,
         mode_line: None,
         mode_line_face: FaceHandle(0),
-        vscroll_px: 0, tab_width: 8,
+        vscroll_px: 0, tab_width: 8, wrap: Default::default(),
         text: TextSlice {
             utf8: "Ωμέγα Hello\nΔ".into(),
             face_runs: vec![FaceRun {
@@ -89,4 +89,24 @@ fn tabs_stretch_to_tab_stops_and_controls_show_escapes() {
     // Liberation Mono at 20px: 12px columns, 23px rows; stops every 48px.
     assert_eq!(shown, [('a', 0.0, 0.0), ('\t', 12.0, 36000.0), ('b', 48.0, 0.0), ('^', 60.0, 0.0), ('L', 72.0, 0.0),
         ('\\', 84.0, 0.0), ('2', 96.0, 0.0), ('0', 108.0, 0.0), ('5', 120.0, 0.0), ('\t', 0.0, 23.0 + 48000.0), ('c', 48.0, 23.0)]);
+}
+/// Without fringes a row ends where its next glyph would pass the window
+/// less the `\' (continued) or `$' (truncated) glyph, which shows there.
+#[test]
+fn rows_continue_and_truncate_as_gnu_without_fringes() {
+    let mut s = scene();
+    s.width = 120; // ten 12px columns
+    s.text = TextSlice { utf8: "abcdefghijkl\nxy".into(), face_runs: vec![] };
+    let shown = |s: &WindowSnapshot| -> Vec<(char, f32, f32)> {
+        romacs_layout2::layout(s, 1).unwrap().glyphs.iter().filter_map(|g| match g {
+            FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
+            _ => None,
+        }).collect()
+    };
+    let continued = shown(&s);
+    assert_eq!(&continued[8..12], &[('i', 96.0, 0.0), ('\\', 108.0, 0.0), ('j', 0.0, 23.0), ('k', 12.0, 23.0)]);
+    assert_eq!(continued.last(), Some(&('y', 12.0, 46.0)));
+    s.wrap = romacs_layout_input::LineWrap::Truncate;
+    let truncated = shown(&s);
+    assert_eq!(&truncated[8..], &[('i', 96.0, 0.0), ('$', 108.0, 0.0), ('x', 0.0, 23.0), ('y', 12.0, 23.0)]);
 }

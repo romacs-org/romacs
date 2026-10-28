@@ -45,7 +45,7 @@ fn unused_faces_do_not_multiply_unicode_bindings() {
     let snapshot = romacs_layout_input::WindowSnapshot {
         id: 1, width: 800, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: romacs_layout_input::TextSlice { utf8: "Καλημέρα Жизнь".into(), face_runs: vec![] },
-        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8,
+        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(),
         faces: vec![face; 24],
     };
     let mut engine = romacs_layout2::LayoutEngine::new().unwrap();

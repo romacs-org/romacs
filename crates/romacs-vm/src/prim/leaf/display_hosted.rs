@@ -1,7 +1,8 @@
 //! The display elements of a window a host lays out (VM2-WTPS1). The
 //! host paints a window's buffer characters one glyph each, in the faces
-//! its snapshot gives them, a TAB as a stretch to its tab stop, and breaks
-//! rows only at newlines. Where the iterator's elements are exactly those
+//! its snapshot gives them, a TAB as a stretch to its tab stop, and
+//! continues or truncates a row where GNU's iterator does, though never at
+//! a word boundary (`word-wrap'). Where the iterator's elements are exactly those
 //! characters, each becomes a `Shape::Pixel` glyph with the advance and
 //! height the host's own layout gives it, or a `Shape::PixelTab` from its
 //! face's space, so the motion measures in the host's pixels. Any other
@@ -10,7 +11,7 @@
 //! what GNU shows there.
 use super::*;
 use super::display_elements::Source;
-use super::display_motion::{Elem, Elements, Method, Shape, Slot, R};
+use super::display_motion::{Elem, Elements, Lines, Method, Shape, Slot, R};
 use crate::coordinates::{ByteOffset, CharOffset};
 use crate::data::Object;
 
@@ -121,4 +122,10 @@ impl Elements for Hosted<'_, '_> {
         }
     }
     fn prefix_elem(&self, _id: usize, _k: usize) -> Option<Elem> { None }
+}
+
+impl Lines for Hosted<'_, '_> {
+    fn reseat(&mut self, start: i64) -> R<()> { self.reset(start) }
+    fn line_start_before(&mut self, pos: i64) -> R<i64> { self.source.visible_line_start(pos) }
+    fn begv(&self) -> i64 { self.source.begv() }
 }

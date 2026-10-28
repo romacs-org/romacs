@@ -125,7 +125,15 @@ pub struct WindowSnapshot {
     pub faces: Vec<Face>,
     /// The buffer's `tab-width', GNU's SANE_TAB_WIDTH (1 to 1000, else 8).
     pub tab_width: u32,
+    /// How a line wider than the window shows.
+    pub wrap: LineWrap,
 }
+
+/// GNU's `it->line_wrap': `truncate-lines' (or a partial-width window
+/// under `truncate-partial-width-windows') truncates, `word-wrap'
+/// continues at word boundaries, else lines continue at the window edge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LineWrap { Truncate, #[default] Window, Word }
 
 /// The stretch a TAB at X takes on a window-system frame (GNU xdisp.c
 /// `gui_produce_glyphs`): to the next multiple of TAB_WIDTH spaces of the

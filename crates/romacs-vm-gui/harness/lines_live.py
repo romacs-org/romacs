@@ -8,14 +8,25 @@ multiples of `tab-width' from the line start, a control character shows as
 its escape.  The window's font is monospace, so a column is x over the
 frame's character width.
 
+motion: C-f, C-n and C-p run GNU's next-line and previous-line over a
+mixed buffer (long continued lines, short and empty lines, non-ASCII
+text).  The point after each command must equal pinned GNU's on a
+terminal frame (`emacs -Q -nw' over a pty, private HOME) whose window
+continues lines after as many columns as the native window does.
+
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY; DISPLAY is never set and no ROMACS_GUI_FONT is passed.
 labwc, wlr-randr, wtype and grim come from --tools or PATH.
 
-usage: lines_live.py --binary PATH --output DIR [--tools DIR]
+usage: lines_live.py --binary PATH --output DIR [--tools DIR] [--gnu EMACS]
 """
 import argparse
 import contextlib
+import fcntl
+import pty
+import select
+import struct
+import termios
 import hashlib
 import json
 import os
@@ -38,6 +49,14 @@ INIT = '''(defun lines-live-record (form)
         (line-number-at-pos (window-start)) (buffer-name)))))
 '''
 
+MIXED_FILE = Path(__file__).resolve().parent / 'fixtures/lines-mixed.txt'
+TALL_FILE = Path(__file__).resolve().parent / 'fixtures/lines-tall.txt'
+# (key name for wtype, byte for a terminal): C-f six times, then C-n down
+# the buffer and C-p back up.
+KEYS = [('f', b'\x06')] * 6 + [('n', b'\x0e')] * 16 + [('p', b'\x10')] * 16
+# Down past several windows of continued lines and back: the window must
+# scroll so the cursor stays on screen.
+TALL_KEYS = [('f', b'\x06')] * 6 + [('n', b'\x0e')] * 90 + [('p', b'\x10')] * 90
 
 @contextlib.contextmanager
 def session(binary, args, output, tools, init, files=()):
@@ -167,12 +186,135 @@ def check_tabs(args, report, check):
         check('the window shows the visited file', name == TAB_FILE.name, name)
 
 
+def gnu_points(emacs, file, columns, rows, keys):
+    """Pinned GNU -nw on FILE in a COLUMNS x ROWS terminal: the window's
+    continued-line width probe, then (COMMAND POINT) after each of KEYS."""
+    with tempfile.TemporaryDirectory(prefix='lines-gnu-') as temporary:
+        home = Path(temporary)
+        log = home / 'points.el'
+        shutil.copyfile(file, home / file.name)
+        record = f'(lambda (form) (write-region (concat (prin1-to-string form) "\\n") nil {json.dumps(str(log))} t 0))'
+        probe = '(with-temp-buffer (insert (make-string 1000 ?x)) (goto-char 1) (vertical-motion 1) (1- (point)))'
+        program = (f'(progn (funcall {record} (list (quote geometry) (window-body-width) {probe}))'
+                   " (add-hook 'post-command-hook (lambda () (when (memq this-command '(forward-char next-line previous-line))"
+                   f" (funcall {record} (list this-command (point)))))))")
+        env = {'PATH': '/usr/bin:/bin', 'HOME': str(home), 'TERM': 'xterm-256color', 'LANG': 'C.UTF-8',
+               'XDG_CONFIG_HOME': str(home / 'c'), 'XDG_CACHE_HOME': str(home / 'k'), 'XDG_DATA_HOME': str(home / 'd')}
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execve(emacs, [emacs, '-Q', '-nw', str(home / file.name), '--eval', program], env)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0))
+
+        def drain(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                if select.select([fd], [], [], 0.02)[0]:
+                    try:
+                        os.read(fd, 65536)
+                    except OSError:
+                        return
+        try:
+            drain(3)
+            for _, byte in keys:
+                os.write(fd, byte)
+                drain(0.2)
+            drain(1)
+        finally:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+        return log.read_text().splitlines() if log.exists() else []
+
+
+def command_signals(stderr_text):
+    """The condition each command the binary replied to signalled, or None."""
+    out = []
+    for line in stderr_text.split('\n'):
+        if line.startswith('{') and '"native_command"' in line:
+            try:
+                signal = json.loads(line).get('signal')
+            except json.JSONDecodeError:
+                continue
+            out.append(signal and f"{signal['condition']} {signal['data']}")
+    return out
+
+
+def command_points(stderr_text, text):
+    """(COMMAND POINT) after each command the binary replied to: the
+    command's reply, then the selected window's point in the next cursor
+    publication, as a character position of TEXT."""
+    out, command, selected = [], None, None
+    for line in stderr_text.split('\n'):
+        if not line.startswith('{'):
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if 'native_command' in record:
+            command = record['native_command']
+        elif record.get('diagnostic') == 'cursor-publication':
+            active = [c['window'] for c in record['cursors'] if c['active']]
+            selected = active[0] if active else selected
+            if command is not None:
+                byte = next(p['point_byte'] for p in record['points'] if p['id'] == selected)
+                out.append(f'({command} {len(text.encode()[:byte].decode()) + 1})' + ('' if active else ' hidden'))
+                command = None
+    return out
+
+
+def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion'):
+    output = args.output / name
+    output.mkdir(parents=True, exist_ok=True)
+    text = file.read_text()
+    log = output / 'binary.stderr'
+    with session(args.binary, [file.name], output, args.tools, INIT, files=[file]) as (process, env, work, state, display):
+        report[f'{name}_display'] = display
+        fio.wait(lambda: any(r.startswith('(geometry') for r in records(state)), args.timeout, 'geometry record', process)
+        _, cw, _, body, *_ = records(state)[0].strip('()').split(' ')
+        columns = int(body) // int(cw)
+        time.sleep(.5)
+        fio.shot(args.output / f'{name}-before.png', env, report)
+        for index, (key, _) in enumerate(keys):
+            subprocess.run(['wtype', '-M', 'ctrl', key, '-m', 'ctrl'], env=env, check=True, timeout=20)
+            try:
+                fio.wait(lambda: len(command_points(log.read_text(errors='replace'), text)) > index, 10, f'command {index + 1} ({key})', process)
+            except AssertionError:
+                break
+            if index in (6 + 3, 6 + 60):
+                time.sleep(.5)
+                fio.shot(args.output / f'{name}-{index + 1}.png', env, report)
+        time.sleep(.5)
+        fio.shot(args.output / f'{name}-after.png', env, report)
+        romacs = command_points(log.read_text(errors='replace'), text)
+        signals = command_signals(log.read_text(errors='replace'))
+        report[f'{name}_echo'] = fio.rows((output / 'binary.stderr').read_text(errors='replace'))[-2:]
+    gnu = gnu_points(args.gnu, file, columns, 40, keys)
+    report[name] = {'columns': columns, 'gnu_geometry': gnu[:1], 'gnu': gnu[1:], 'romacs': romacs}
+    # A monospace native row holds COLUMNS - 1 glyphs before its `\\'.
+    check(f'GNU -nw at {columns} columns continues lines after {columns - 1} glyphs, as the native window does',
+          bool(gnu) and gnu[0].endswith(f' {columns - 1})'), gnu[:1])
+    # GNU signals only where a motion runs out of buffer: point stays put.
+    edges = [i for i in range(1, len(gnu) - 1) if i > 6 and gnu[i + 1] == gnu[i]]
+    expected = [('end-of-buffer nil' if keys[i][0] == 'n' else 'beginning-of-buffer nil') if i in edges else None
+                for i in range(len(keys))]
+    report[name]['signals'] = signals
+    check(f'{file.name}: commands signal only at the ends of the buffer, as GNU does', signals == expected,
+          [{'command': i + 1, 'expected': e, 'signal': g} for i, (e, g) in enumerate(zip(expected, signals)) if e != g][:6])
+    check(f'{file.name}: the cursor shows after every command', not any(r.endswith(' hidden') for r in romacs),
+          [r for r in romacs if r.endswith(' hidden')][:6])
+    shown = [r.removesuffix(' hidden') for r in romacs]
+    check(f'{file.name}: {len(keys)} C-f/C-n/C-p commands move point as pinned GNU does', shown == gnu[1:] and len(shown) == len(keys),
+          [{'command': i + 1, 'gnu': g, 'romacs': r} for i, (g, r) in enumerate(zip(gnu[1:], shown + [None] * len(keys))) if g != r][:6])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--tools', help='directory with labwc, wlr-randr, wtype and grim')
     parser.add_argument('--timeout', type=float, default=120)
+    parser.add_argument('--gnu', default=os.environ.get('ROMACS_GNU_ORACLE'), help='pinned GNU emacs')
+    parser.add_argument('--only', choices=['tabs', 'motion'])
     args = parser.parse_args()
     args.binary = args.binary.resolve()
     args.output = args.output.resolve()
@@ -185,7 +327,11 @@ def main():
         if not ok:
             report['failures'].append(name)
     try:
-        check_tabs(args, report, check)
+        if args.only != 'motion':
+            check_tabs(args, report, check)
+        if args.only != 'tabs':
+            check_motion(args, report, check)
+            check_motion(args, report, check, TALL_FILE, TALL_KEYS, 'scroll')
         report['status'] = 'PASS' if not report['failures'] else 'FAIL'
     except Exception as error:  # noqa: BLE001
         report['error'] = repr(error)

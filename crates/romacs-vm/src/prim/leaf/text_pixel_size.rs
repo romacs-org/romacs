@@ -110,6 +110,99 @@ impl Leaf<'_> {
             box_width: area.columns - area.left_margin - area.right_margin, left_margin: area.left_margin, right_margin: area.right_margin }
     }
 
+    /// Fvertical_motion (indent.c:2207): move point LINES screen lines (or,
+    /// for (COLS . LINES), to column COLS of that line) as WINDOW (default
+    /// the selected one) would show the current buffer; the screen lines
+    /// moved. A window a host lays out moves over the host's layout. CUR-COL
+    /// is checked, then the motion scans from the start of point's line, as
+    /// GNU does without it.
+    pub(crate) fn vertical_motion(&mut self, lines: Value, window: Value, cur_col: Value) -> super::super::Out {
+        let number = |leaf: &Self, v: Value| -> std::result::Result<f64, Fault> {
+            v.integer_value().map(|n| n as f64).or_else(|| match leaf.vm.object_if(v) {
+                Some(Object::Float(f)) => Some(*f),
+                _ => None,
+            }).ok_or(Fault::Wrong("numberp", v))
+        };
+        let (cols, lines) = match self.pair(lines) {
+            Some((cols, lines)) => (Some((number(self, cols)?, cols)), lines),
+            None => (None, lines),
+        };
+        let lines = lines.integer_value().ok_or(Fault::Wrong("fixnump", lines))?;
+        let area = self.windows().text_area(window, "vertical-motion")?;
+        // Batch runs vmotion, which moves by lines only and reads no
+        // CUR-COL (indent.c:2283).
+        let noninteractive = self.intern("noninteractive");
+        let interactive = self.variable_value(noninteractive)?.is_none_or(|v| v == Value::NIL);
+        if interactive && cur_col != Value::NIL { number(self, cur_col)?; }
+        let cols = cols.filter(|_| interactive);
+        let buffer = self.current_buffer_value()?;
+        let (begv, zv, pt) = match self.vm.object_if(buffer) {
+            Some(Object::Buffer(b)) => {
+                let r = b.accessible();
+                let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
+                (pos(r.start)?, pos(r.end)?, pos(b.point)?)
+            }
+            _ => return Err(unsupported("in a unibyte buffer")),
+        };
+        // window_column_x: COLS canonical columns in pixels, rounded.
+        let x = match cols {
+            Some((cols, value)) => {
+                let x = cols * area.column as f64 + 0.5;
+                if !(f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&x) {
+                    let condition = self.intern("args-out-of-range");
+                    return Err(Fault::Signal(condition, self.vm.list_value(&[area.window, value])));
+                }
+                Some(x as i64)
+            }
+            None => None,
+        };
+        let cx = self.iterator_context(&area, zv)?;
+        let view = Self::view(&area, buffer, begv, zv);
+        let source = Source::new(self, view, begv)?;
+        let (at, vpos) = if area.hosted {
+            let mut hosted = Hosted::new(source);
+            let cx = hosted_context(&mut hosted, cx, &area)?;
+            motion::vertical_motion(&mut hosted, &cx, pt, lines, x)?
+        } else {
+            let mut source = source;
+            motion::vertical_motion(&mut source, &cx, pt, lines, x.map(|x| x / area.column))?
+        };
+        self.goto_char_position(at)?;
+        Value::integer(vpos).map_err(Fault::Error)
+    }
+
+    /// Fline_pixel_height (xdisp.c:1545): the height of the screen line
+    /// showing point in the selected window's buffer, the default
+    /// character's at the end of the buffer.
+    pub(crate) fn line_pixel_height(&mut self) -> super::super::Out {
+        let window = self.vm.selected_window_value().map_err(Fault::Error)?;
+        let area = self.windows().text_area(window, "line-pixel-height")?;
+        let buffer = area.buffer;
+        let height = self.with_buffer(buffer, |leaf| {
+            let (begv, zv, pt) = match leaf.vm.object_if(buffer) {
+                Some(Object::Buffer(b)) => {
+                    let r = b.accessible();
+                    let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
+                    (pos(r.start)?, pos(r.end)?, pos(b.point)?)
+                }
+                _ => return Err(unsupported("in a unibyte buffer")),
+            };
+            let cx = leaf.iterator_context(&area, zv)?;
+            let view = Self::view(&area, buffer, begv, zv);
+            let source = Source::new(leaf, view, begv)?;
+            if area.hosted {
+                let mut hosted = Hosted::new(source);
+                let cx = hosted_context(&mut hosted, cx, &area)?;
+                let height = row_height(&mut hosted, &cx, pt)?;
+                Ok(if height > 0 { height } else { hosted.default_advance(' ')?.1 })
+            } else {
+                let mut source = source;
+                Ok(row_height(&mut source, &cx, pt)?.max(1) * area.line)
+            }
+        })?;
+        Value::integer(height).map_err(Fault::Error)
+    }
+
     /// Fpos_visible_in_window_p (window.c:1998): t, nil, or with PARTIALLY
     /// (X Y), or (X Y RTOP RBOT ROWH VPOS) for a partly visible row.
     pub(crate) fn pos_visible_in_window_p(&mut self, pos: Value, window: Value, partially: Value) -> super::super::Out {
@@ -154,11 +247,9 @@ impl Leaf<'_> {
         if area.vscroll != 0 { return Err(unsupported("of a vertically scrolled displayed window")); }
         let buffer = area.buffer;
         self.with_buffer(buffer, |leaf| {
-            let mut hosted = leaf.hosted_from(&area, top)?;
-            let cx = hosted.1;
-            let src = &mut hosted.0;
+            let (mut hosted, cx, mut it) = leaf.hosted_from(&area, top)?;
+            let src = &mut hosted;
             let last_y = area.body_height;
-            let mut it = It::default();
             motion::move_to(src, &cx, &mut it, charpos, -1, last_y - 1, -1, Op { pos: true, y: true, ..Op::default() })?;
             if motion::charpos(src, &it)? < charpos {
                 // Stopped by the window's bottom: CHARPOS may still be in
@@ -177,11 +268,41 @@ impl Leaf<'_> {
         })
     }
 
+    /// redisplay_window's window start over the host's layout (VM2-RD1),
+    /// for WINDOW showing its buffer from START with POINT: None when POINT
+    /// shows on a whole row; else, when MINIMAL, the start that just shows
+    /// it on the first or last whole row, otherwise the start BACK screen
+    /// lines above POINT's.
+    pub(crate) fn hosted_window_start(&mut self, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, Fault> {
+        let caller = "redisplay";
+        let area = self.windows().text_area(window, caller)?;
+        let buffer = area.buffer;
+        self.with_buffer(buffer, |leaf| {
+            let shown = |leaf: &mut Self, top: i64| -> std::result::Result<bool, Fault> {
+                Ok(point >= top && leaf.hosted_pos_visible(window, point, top, caller)?.is_some_and(|v| v.rbot == 0))
+            };
+            if shown(leaf, start)? { return Ok(None); }
+            let above = |leaf: &mut Self, rows: i64| -> std::result::Result<i64, Fault> {
+                let (mut hosted, cx, _) = leaf.hosted_from(&area, start.min(point))?;
+                let it = motion::lines_up(&mut hosted, &cx, point, -rows)?;
+                motion::charpos(&mut hosted, &it)
+            };
+            if !minimal || point < start { return Ok(Some(above(leaf, if minimal { 0 } else { back })?)); }
+            // As many whole rows above POINT's as still show it.
+            let mut rows = area.body_height / area.line.max(1);
+            while rows > 0 {
+                let top = above(leaf, rows)?;
+                if shown(leaf, top)? { return Ok(Some(top)); }
+                rows -= 1;
+            }
+            Ok(Some(above(leaf, 0)?))
+        })
+    }
+
     /// buffer_posn_from_coords (dispnew.c:6260) at text-area pixel X, Y:
     /// the glyph there, from the window start TOP.
     fn hosted_posn(&mut self, area: &TextArea, top: i64, x: i64, y: i64) -> std::result::Result<Posn, Fault> {
-        let (mut hosted, cx) = self.hosted_from(area, top)?;
-        let mut it = It::default();
+        let (mut hosted, cx, mut it) = self.hosted_from(area, top)?;
         motion::move_to(&mut hosted, &cx, &mut it, -1, 0, y, -1, Op { x: true, y: true, ..Op::default() })?;
         motion::move_in_line(&mut hosted, &cx, &mut it, cx.zv, x, Op { x: true, ..Op::default() })?;
         let pos = motion::charpos(&mut hosted, &it)?;
@@ -258,10 +379,7 @@ impl Leaf<'_> {
         if var(self, "selective-display")? != Value::NIL { return Err(unsupported("with `selective-display'")); }
         if var(self, "display-line-numbers")? != Value::NIL { return Err(unsupported("with line numbers")); }
         if area.hscroll != 0 { return Err(unsupported("in a horizontally scrolled window")); }
-        let partial = var(self, "truncate-partial-width-windows")?;
-        let continued = (area.full_width || partial == Value::NIL || partial.integer_value().is_some_and(|n| n <= area.columns))
-            && var(self, "truncate-lines")? == Value::NIL;
-        let wrap = if !continued { Wrap::Truncate } else if var(self, "word-wrap")? == Value::NIL { Wrap::Window } else { Wrap::Word };
+        let wrap = self.vm.line_wrap(area.full_width, area.columns).map_err(Fault::Error)?;
         if wrap == Wrap::Word && var(self, "word-wrap-by-category")? != Value::NIL {
             return Err(unsupported("with `word-wrap-by-category'"));
         }
@@ -312,9 +430,10 @@ impl Leaf<'_> {
 }
 
 impl<'a> Leaf<'a> {
-    /// The host-measured elements of AREA's window from its start TOP, a
-    /// line start, in its current buffer, and their context.
-    fn hosted_from(&mut self, area: &TextArea, top: i64) -> std::result::Result<(Hosted<'_, 'a>, Ctx), Fault> {
+    /// The host-measured elements of AREA's window in its current buffer,
+    /// their context, and the iterator at its start TOP, which may begin a
+    /// continuation line (start_display).
+    fn hosted_from(&mut self, area: &TextArea, top: i64) -> std::result::Result<(Hosted<'_, 'a>, Ctx, It), Fault> {
         let buffer = self.vm.slots[self.vm.buffer_slot].value;
         let (begv, zv) = match self.vm.object_if(buffer) {
             Some(Object::Buffer(b)) => {
@@ -328,11 +447,18 @@ impl<'a> Leaf<'a> {
         let view = Self::view(area, buffer, begv, zv);
         let mut hosted = Hosted::new(Source::new(self, view, begv)?);
         let cx = hosted_context(&mut hosted, cx, area)?;
+        let mut it = It::default();
         if top > begv && !hosted.source().after_newline(top)? {
-            return Err(unsupported("of a displayed window that starts inside a line"));
+            let origin = hosted.source().visible_line_start(top)?;
+            hosted.reset(origin)?;
+            it = motion::screen_line_start(&mut hosted, &cx, top)?;
+            if motion::charpos(&mut hosted, &it)? != top {
+                return Err(unsupported("of a displayed window that starts inside a screen line"));
+            }
+        } else {
+            hosted.reset(top)?;
         }
-        hosted.reset(top)?;
-        Ok((hosted, cx))
+        Ok((hosted, cx, it))
     }
 
 }
@@ -348,12 +474,20 @@ struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height
 /// init_iterator's last visible x on a window-system frame without
 /// fringes, in the host's pixels: the text area less the truncation or
 /// continuation glyph's advance in the default face (xdisp.c:3510-3518).
-/// The host neither continues nor truncates a row.
+/// The host continues and truncates rows as GNU does, but wraps no words.
 fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> std::result::Result<Ctx, Fault> {
     let (advance, _) = hosted.default_advance(if cx.wrap == Wrap::Truncate { '$' } else { '\\' })?;
     cx.last_visible_x = area.body_width - advance;
-    cx.breaks = false;
+    cx.breaks = cx.wrap != Wrap::Word;
     Ok(cx)
+}
+
+/// line_bottom_y from the start of the screen line showing POS: its
+/// height, 0 for the empty line at the end of the buffer.
+fn row_height<E: motion::Lines>(src: &mut E, cx: &Ctx, pos: i64) -> std::result::Result<i64, Fault> {
+    let mut it = motion::lines_up(src, cx, pos, 0)?;
+    motion::move_in_line(src, cx, &mut it, -1, -1, Op::default())?;
+    Ok(it.max_h)
 }
 
 /// The start of the screen line window_text_pixel_size measures from,

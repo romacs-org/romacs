@@ -1667,6 +1667,14 @@ mod leaf {
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
 
+/// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
+pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {
+    Leaf::new(vm).hosted_window_start(window, start, point, minimal, back).map_err(|fault| match fault {
+        Fault::Error(text) => text,
+        _ => "the host's layout cannot choose this window start".into(),
+    })
+}
+
 /// Realize C-initialized coding variables before their first Lisp observation.
 /// Like the charset slot hook, this preserves allocation-free VM construction.
 pub(crate) fn initialize_coding_slot(vm: &mut Vm, name: &str) {

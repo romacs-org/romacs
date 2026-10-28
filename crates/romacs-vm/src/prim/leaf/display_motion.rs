@@ -12,8 +12,7 @@ use super::Fault;
 
 pub(super) type R<T> = std::result::Result<T, Fault>;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Wrap { Truncate, Window, Word }
+pub(super) use romacs_layout_input::LineWrap as Wrap;
 
 /// How the iterator delivers the element (`it->method`, and whether
 /// `it->object` is the buffer).
@@ -653,4 +652,105 @@ pub(super) fn text_size<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, m: &Meas
     if it.current_y > 0 { start_x = 0; }
     let y = it.current_y + doff + if m.ignore_line_at_end { 0 } else { it.max_h };
     Ok((x, start_x, y))
+}
+
+/// Elements the iterator can deliver again from another line start, as
+/// reseat does, for motion backwards.
+pub(super) trait Lines: Elements {
+    /// Deliver from START, a line start.
+    fn reseat(&mut self, start: i64) -> R<()>;
+    /// back_to_previous_visible_line_start: the start of the visible line
+    /// holding POS - 1.
+    fn line_start_before(&mut self, pos: i64) -> R<i64>;
+    fn begv(&self) -> i64;
+}
+
+/// move_it_by_lines with DVPOS > 0 from IT: the start of the screen line
+/// DVPOS below, or where the elements end.
+fn lines_down<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, dvpos: i64) -> R<()> {
+    let row = it.vpos + dvpos;
+    move_to(src, cx, it, -1, -1, -1, row, Op { vpos: true, ..Op::default() })?;
+    let (valid, display) = valid_after_move(src, it)?;
+    if !valid {
+        let at = charpos(src, it)? + i64::from(display);
+        move_to(src, cx, it, at, -1, -1, -1, POS)?;
+    }
+    Ok(())
+}
+
+/// move_it_by_lines with DVPOS < 0 from POS: back over visible lines until
+/// DVPOS screen lines lie between the line start reached and the screen
+/// line showing POS, or BEGV is reached; the elements then deliver from
+/// that line start and the iterator stands at the screen line's start,
+/// its vpos the (negative) count of screen lines moved.
+pub(super) fn lines_up<E: Lines>(src: &mut E, cx: &Ctx, pos: i64, dvpos: i64) -> R<It> {
+    let begv = src.begv();
+    let mut origin = src.line_start_before(pos)?;
+    src.reseat(origin)?;
+    let mut rows = screen_row(src, cx, pos)?;
+    while rows < -dvpos && origin > begv {
+        origin = src.line_start_before(origin)?;
+        src.reseat(origin)?;
+        rows = screen_row(src, cx, pos)?;
+    }
+    let moved = rows.min(-dvpos);
+    let mut it = row_start(src, cx, rows - moved)?;
+    it.vpos = -moved;
+    Ok(it)
+}
+
+/// Fvertical_motion (indent.c:2207) on a displayed window, from point PT:
+/// the position LINES screen lines down (up when negative), at x TO_X of
+/// that line when given, and the screen lines moved. The elements deliver
+/// from whatever line start the motion needed; a window that does not
+/// start at PT's line start makes no difference here.
+pub(super) fn vertical_motion<E: Lines>(src: &mut E, cx: &Ctx, pt: i64, lines: i64, to_x: Option<i64>) -> R<(i64, i64)> {
+    // reseat_at_previous_visible_line_start, then on to PT.
+    let origin = src.line_start_before(pt)?;
+    src.reseat(origin)?;
+    let mut it = It::default();
+    move_to(src, cx, &mut it, pt, -1, -1, -1, POS)?;
+    let mut overshot = false;
+    if charpos(src, &it)? > pt {
+        // Past PT, as on a truncated line whose PT lies beyond the right
+        // margin: back a line unless still on PT's own screen line.
+        if it.vpos > 0 || it.current_x >= cx.last_visible_x {
+            let at = charpos(src, &it)?;
+            it = lines_up(src, cx, at, -1)?;
+        }
+        overshot = true;
+    }
+    if lines <= 0 {
+        it.vpos = 0;
+        it.current_y = 0;
+        if lines < 0 && charpos(src, &it)? > src.begv() {
+            let at = charpos(src, &it)?;
+            it = lines_up(src, cx, at, lines)?;
+        } else if lines == 0 {
+            let at = charpos(src, &it)?;
+            it = lines_up(src, cx, at, 0)?;
+        }
+    } else if overshot {
+        it.vpos = 0;
+        it.current_y = 0;
+        lines_down(src, cx, &mut it, lines)?;
+    } else if pt < cx.zv {
+        if charpos(src, &it)? < pt {
+            (it.vpos, it.current_y) = (0, 0);
+            lines_down(src, cx, &mut it, 1)?;
+        }
+        while charpos(src, &it)? == pt {
+            (it.vpos, it.current_y) = (0, 0);
+            lines_down(src, cx, &mut it, 1)?;
+        }
+        if lines > 1 { lines_down(src, cx, &mut it, lines - 1)?; }
+    } else {
+        (it.vpos, it.current_y) = (0, 0);
+        lines_down(src, cx, &mut it, lines)?;
+        if charpos(src, &it)? == pt { it.vpos = 0; }
+    }
+    if let Some(x) = to_x {
+        move_in_line(src, cx, &mut it, cx.zv, x, Op { x: true, ..Op::default() })?;
+    }
+    Ok((charpos(src, &it)?, it.vpos))
 }

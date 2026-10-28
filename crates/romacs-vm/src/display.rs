@@ -405,6 +405,29 @@ impl Vm {
         self.slots[slot].value = Value::UNBOUND;
         outcome
     }
+    /// init_iterator's line wrap in the current buffer, for a window
+    /// COLUMNS wide that is or is not as wide as its frame.
+    pub(crate) fn line_wrap(&mut self, full_width: bool, columns: i64) -> Result<romacs_layout_input::LineWrap> {
+        use romacs_layout_input::LineWrap;
+        let mut var = |name: &str| { let slot = self.slot(name); self.variable_value(slot) };
+        let partial = var("truncate-partial-width-windows")?;
+        let continued = (full_width || partial == Value::NIL || partial.integer_value().is_some_and(|n| n <= columns))
+            && var("truncate-lines")? == Value::NIL;
+        Ok(if !continued { LineWrap::Truncate } else if var("word-wrap")? == Value::NIL { LineWrap::Window } else { LineWrap::Word })
+    }
+    /// WINDOW's line wrap for BUFFER.
+    fn window_line_wrap(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::LineWrap> {
+        let w = self.window(window)?;
+        let (x, width) = (w.x, w.width);
+        let root = self.window_root_peek(crate::window::ROOT);
+        let full_width = self.window(root).is_ok_and(|r| r.x == x && r.width == width);
+        let columns = i64::from(width / self.window_state.column.max(1));
+        let saved = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let wrap = self.line_wrap(full_width, columns);
+        self.slots[self.buffer_slot].value = saved;
+        wrap
+    }
     /// BUFFER's `tab-width' as GNU's SANE_TAB_WIDTH: 1 to 1000, else 8.
     fn buffer_tab_width(&mut self, buffer: Value) -> Result<u32> {
         let saved = self.slots[self.buffer_slot].value;
@@ -558,6 +581,7 @@ impl Vm {
             vscroll_px: self.window(window)?.vscroll_px,
             faces,
             tab_width: self.buffer_tab_width(buffer)?,
+            wrap: self.window_line_wrap(window, buffer)?,
         };
         // The owned last publication also covers mutation paths with specialised
         // fast dispatch (point moves, regexp, yank), without retaining GC handles.

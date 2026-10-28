@@ -50,7 +50,7 @@ mod tests {
 
     /// The host's layout of the frame, the selected window's cursor and
     /// that window's id and height.
-    struct Paint { glyphs: Vec<(char, f32, f32, f32, f32, GlyphRowRole)>, cursor: Option<(f32, f32, f32, f32)>, window_height: u32 }
+    struct Paint { glyphs: Vec<(char, f32, f32, f32, f32, GlyphRowRole)>, cursor: Option<(f32, f32, f32, f32)>, window_width: u32, window_height: u32 }
 
     impl Hosted {
         fn eval(&mut self, source: &str) -> String {
@@ -62,7 +62,7 @@ mod tests {
         fn paint(&mut self) -> Paint {
             let snapshot = self.vm.frame_snapshot(self.width, self.height).unwrap();
             let window = &snapshot.windows[0];
-            let (id, window_height) = (window.snapshot.id, window.snapshot.height);
+            let (id, window_width, window_height) = (window.snapshot.id, window.snapshot.width, window.snapshot.height);
             let color = romacs_display_protocol::Color::from_pixel(0xffffff);
             let (frame, ends) = self.engine.borrow_mut().layout_frame(&snapshot, 1, Some((id, color))).unwrap();
             self.vm.display_apply_layout(&ends).unwrap();
@@ -75,48 +75,72 @@ mod tests {
                 _ => None,
             }).collect();
             let cursor = frame.window_cursors.iter().find(|c| c.window_id.get() == id as i64).map(|c| (c.x, c.y, c.width, c.height));
-            Paint { glyphs, cursor, window_height }
+            Paint { glyphs, cursor, window_width, window_height }
         }
     }
 
     fn cons(x: f32, y: f32) -> String { format!("({} . {})", x as i64, y as i64) }
 
-    /// Evaluate INSERT, which inserts the text under test, add a sentinel
+    /// Evaluate INSERT, which inserts the text under test (without `\\'
+    /// or `$', the continuation and truncation glyphs), add a sentinel
     /// line, and compare the VM's answers with the host's layout.
     fn agree(h: &mut Hosted, insert: &str) {
         let text = h.eval(&format!("(progn (erase-buffer) {insert} (prog1 (buffer-string) (insert \"\\n#\") (goto-char 1) (set-window-start nil 1)))"));
         let text: String = h.vm.eval_source(&format!("(substring-no-properties {text})")).unwrap().display().unwrap();
         let text: String = serde_json::from_str(&text).unwrap();
+        assert!(!text.contains(['\\', '$']), "{text:?}");
         let end = text.chars().count() + 1;
         let paint = h.paint();
         let line = h.eval("(frame-char-height)").parse::<f32>().unwrap();
-        let mut painted = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text);
-        // Each position's cursor, and the painted glyph of each character.
+        let text_glyphs = || paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text);
+        // The text area less the continuation or truncation glyph, if painted.
+        let special = text_glyphs().find(|g| g.0 == '\\' || g.0 == '$').map(|g| paint.window_width as f32 - g.3);
+        let mut painted = text_glyphs().filter(|g| g.0 != '\\' && g.0 != '$').peekable();
+        // Each position's cursor, if the host shows it, and the painted
+        // glyph of each character.
         let mut at = vec![];
         for (index, ch) in text.chars().chain("\n#".chars()).enumerate() {
             let pos = index + 1;
             h.eval(&format!("(goto-char {pos})"));
-            let cursor = h.paint().cursor.unwrap_or_else(|| panic!("{text:?}: no cursor at {pos}"));
-            let glyph = if ch == '\n' { None } else { Some(painted.next().unwrap()) };
-            if let Some(g) = glyph { assert_eq!((g.0, g.1, g.2), (ch, cursor.0, cursor.1), "{text:?}: glyph {pos}"); }
+            let cursor = h.paint().cursor;
+            let glyph = if ch == '\n' || cursor.is_none() { None }
+                else { painted.next_if(|g| (g.1, g.2) == (cursor.unwrap().0, cursor.unwrap().1)) };
+            if let Some(g) = glyph { assert_eq!(g.0, ch, "{text:?}: glyph {pos}"); }
             at.push((pos, ch, cursor, glyph.map(|g| (g.3, g.4))));
         }
-        let (mut col, mut row) = (0, 0);
-        for &(pos, ch, (x, y, cursor_width, _), glyph) in &at {
-            let (w, ht) = glyph.unwrap_or((cursor_width, line));
-            let want = format!("(t ({pos} {} 0 nil {pos} ({col} . {row}) nil (0 . 0) {}))", cons(x, y), cons(w, ht));
+        assert!(painted.next().is_none(), "{text:?}: every painted glyph is a character's");
+        let mut rows: Vec<f32> = at.iter().filter_map(|a| a.2.map(|c| c.1)).collect();
+        rows.sort_by(f32::total_cmp);
+        rows.dedup();
+        for (index, &(pos, ch, cursor, glyph)) in at.iter().enumerate() {
             let posn = h.eval(&format!("(let ((p (posn-at-point {pos}))) (list (eq (car p) (selected-window)) (cdr p)))"));
+            let visible = h.eval(&format!("(pos-visible-in-window-p {pos} nil t)"));
+            // Past a truncation glyph the host shows nothing; GNU's
+            // iterator still places the position (not compared).
+            let Some((x, y, cursor_width, _)) = cursor else { continue };
+            assert_eq!(visible, format!("({} {})", x as i64, y as i64), "{text:?}: visible {pos}");
+            // A truncated row's last character is under its `$'.
+            if glyph.is_none() && ch != '\n' { continue; }
+            let (w, ht) = glyph.unwrap_or((cursor_width, line));
+            let row = rows.iter().position(|&r| r == y).unwrap();
+            let col = at[..index].iter().filter(|a| a.2.is_some_and(|c| c.1 == y)).count();
+            let want = format!("(t ({pos} {} 0 nil {pos} ({col} . {row}) nil (0 . 0) {}))", cons(x, y), cons(w, ht));
             assert_eq!(posn, want, "{text:?}: posn-at-point {pos} {ch:?}");
-            assert_eq!(h.eval(&format!("(pos-visible-in-window-p {pos} nil t)")), format!("({} {})", x as i64, y as i64), "{text:?}: visible {pos}");
-            if ch == '\n' { (col, row) = (0, row + 1) } else { col += 1 }
         }
-        // A line is as wide as its newline's x and as tall as the next row's y less its own.
-        let y_at = |pos: usize| at[pos - 1].2.1;
+        // A line is as wide as its newline's x, or the last visible x when
+        // continued or truncated, and as tall as the next line's y less its own.
+        let y_at = |pos: usize| at[pos - 1].2.unwrap().1;
         let (mut start, mut widest) = (1, 0.0f32);
-        for &(pos, _, (x, ..), _) in at.iter().filter(|a| a.1 == '\n') {
+        for &(pos, _, cursor, _) in at.iter().filter(|a| a.1 == '\n') {
+            let (x, y) = cursor.map_or((0.0, f32::NAN), |c| (c.0, c.1));
+            let truncated = at[start - 1..pos].iter().any(|a| a.2.is_none() || a.3.is_none() && a.1 != '\n');
+            let x = if truncated || y != y_at(start) { special.unwrap() } else { x };
             widest = widest.max(x);
+            // Measuring past a truncated line's edge counts the row after
+            // it too, as GNU's window_text_pixel_size does.
+            let height = (y_at(pos + 1) - y_at(start)) * if truncated { 2.0 } else { 1.0 };
             // An empty range measures nothing (GNU, and the batch cases).
-            if pos != start { assert_eq!(h.eval(&format!("(window-text-pixel-size nil {start} {pos})")), cons(x, y_at(pos + 1) - y_at(start)), "{text:?}: line from {start}"); }
+            if pos != start { assert_eq!(h.eval(&format!("(window-text-pixel-size nil {start} {pos})")), cons(x, height), "{text:?}: line from {start}"); }
             start = pos + 1;
         }
         let whole = cons(widest, y_at(end + 1));
@@ -143,7 +167,18 @@ mod tests {
             r#"(insert "\ta\tbc\n12345678\tz\n1234567\tq\n\t\t")"#,
             r#"(setq tab-width 3) (insert "ab\tc\t\td\nλ\t日本\tx")"#,
             r#"(insert (propertize "iii\tW\tx" 'face 'hosted-sans) "\n" (propertize "a\tb" 'face 'hosted-big) "\tc")"#,
-        ] { agree(&mut h, &format!("(kill-local-variable 'tab-width) {insert}")); }
+            // Lines wider than the window continue on the next row, from
+            // its left edge; TABs stop as from the line's start. The window
+            // is half the frame: 29 columns of text before the `\\'.
+            r#"(setq truncate-partial-width-windows nil) (insert (make-string 150 ?x) "\nshort\n" (make-string 28 ?y) "\n" (make-string 29 ?z) "\n" (make-string 30 ?w))"#,
+            r#"(insert "λόγος " (make-string 30 ?a) "\t" (make-string 20 ?b) "\tc\td")"#,
+            r#"(insert (propertize (make-string 50 ?i) 'face 'hosted-sans) (propertize "WWW" 'face 'hosted-big) (make-string 40 ?m))"#,
+            r#"(insert (make-string 57 ?q) "\t\t" (make-string 5 ?r))"#,
+            // Truncated lines show to their `$' and hide the rest, here as
+            // `truncate-partial-width-windows' asks of this window.
+            r#"(setq truncate-partial-width-windows 50) (insert (make-string 40 ?t) "\nnext\n" (make-string 25 ?u) "\t" (make-string 3 ?v))"#,
+            r#"(setq truncate-partial-width-windows nil truncate-lines t) (insert (make-string 33 ?t) "\nend")"#,
+        ] { agree(&mut h, &format!("(kill-local-variable 'tab-width) (kill-local-variable 'truncate-lines) {insert}")); }
         // Not a cell grid: proportional advances differ per glyph, and a
         // taller face makes its row taller than the frame's line.
         h.eval(r#"(progn (erase-buffer) (insert (propertize "iW" 'face 'hosted-sans) "\n" (propertize "B" 'face 'hosted-big)))"#);
@@ -163,8 +198,8 @@ mod tests {
         let mut h = hosted();
         let long = "(make-string (+ (window-body-width) 2) ?x)";
         for (refused, twin, what) in [
-            (format!("(insert {long})"), "(insert (make-string (- (window-body-width) 2) ?x))".to_owned(), "of a continued or truncated line"),
-            (format!("(setq truncate-lines t) (insert {long})"), "(setq truncate-lines t) (insert (make-string (- (window-body-width) 2) ?x))".to_owned(), "of a continued or truncated line"),
+            // The host continues lines at the window edge, never at a word.
+            (format!("(setq truncate-partial-width-windows nil word-wrap t) (insert {long})"), "(setq word-wrap t) (insert (make-string (- (window-body-width) 2) ?x))".to_owned(), "of a continued or truncated line"),
             ("(insert \"a\\fb\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(insert \"a\" (propertize \"b\" 'display \"D\") \"c\")".into(), "(insert \"abc\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(insert \"a\" (propertize \"b\" 'invisible t) \"c\")".into(), "(insert \"abc\")".into(), "of text the host does not lay out as GNU displays it"),
