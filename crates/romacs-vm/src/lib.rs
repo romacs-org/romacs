@@ -2594,7 +2594,22 @@ impl Vm {
             }
             let value = self.format_string(start, n)?;
             self.slots[echo].value = value;
-            eprintln!("{}", self.source_string(value)?);
+            // GNU writes the bytes it formatted: a unibyte string's as they
+            // are, a raw-byte character as its byte.
+            let view = self.str_view(value).ok_or("message: format made no string")?;
+            let mut line = Vec::with_capacity(view.bytes().len() + 1);
+            if view.is_multibyte() {
+                for code in view.chars() {
+                    match char::from_u32(code) {
+                        Some(c) => line.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+                        None => line.push(code as u8),
+                    }
+                }
+            } else {
+                line.extend_from_slice(view.bytes());
+            }
+            line.push(b'\n');
+            let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), &line);
             return Ok(value);
         }
         if p == Fset || (List as usize..=Memq as usize).contains(&(p as usize)) {

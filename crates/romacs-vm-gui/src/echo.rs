@@ -36,9 +36,13 @@ pub fn sync_current_message(vm: &mut Vm) -> Result<(), String> {
 fn current_message(vm: &mut Vm, clear_when_none: bool) -> Result<(), String> {
     // As GNU's echo area, a multibyte buffer, holds it: ASCII messages
     // (`format''s and `set_echo_area_message''s) are unibyte strings, which
-    // the VM prints as byte vectors.
-    let value = vm.eval_source("(let ((message (current-message)))
-                                  (and message (string-to-multibyte (substring-no-properties message))))")?;
+    // the VM prints as byte vectors; a raw byte shows as GNU's \ooo escape,
+    // so the text is always printable.
+    let value = vm.eval_source(r#"(let ((message (current-message)))
+                                    (and message
+                                         (string-to-multibyte
+                                          (mapconcat (lambda (c) (if (> c #x10ffff) (format "\\%o" (logand c 255)) (string c)))
+                                                     (string-to-multibyte (substring-no-properties message)) ""))))"#)?;
     if value.is_nil() { return if clear_when_none { clear(vm) } else { Ok(()) }; }
     let printed = value.display()?;
     let message: String = serde_json::from_str(&printed).unwrap_or(printed);
@@ -96,6 +100,17 @@ mod tests {
         crate::startup::initialize(&mut vm).unwrap();
         crate::eval_last_sexp::install(&mut vm).unwrap();
         (vm, Default::default(), crate::presentation::Presentation::new())
+    }
+
+    /// A message holding a raw byte, even one whose `message' signalled,
+    /// shows it as GNU's echo area does, `\351x', and the session goes on.
+    #[test]
+    fn raw_bytes_in_the_current_message_show_as_octal_escapes() {
+        let (mut vm, _, _) = workspace();
+        vm.set_echo_area_host(true);
+        vm.eval_source("(ignore-errors (message \"%s\" (unibyte-string 233 120)))").unwrap();
+        show_current_message(&mut vm).unwrap();
+        assert_eq!(text(&mut vm).unwrap(), "\\351x");
     }
 
     /// GNU 32.0.50 transcripts (`emacs -Q --batch`, error-message-string of
