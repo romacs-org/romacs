@@ -1093,6 +1093,7 @@ impl Vm {
         &mut self,
         input: Input<'_>,
     ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
+        let _unwind = self.unwind_mark();
         let roots = self.external_roots.len();
         let initial_byte = match &input { Input::String { byte, .. } => *byte, _ => 0 };
         let mut reader = Reader {

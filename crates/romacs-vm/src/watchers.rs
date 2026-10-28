@@ -39,6 +39,7 @@ impl Vm {
         // A watcher may collect only for a writer that rooted its own frame
         // (an engine write, `threaded::watched_write'); any other native
         // writer may keep Values in locals, so it holds collection.
+        let _unwind = self.unwind_mark();
         let held = usize::from(!self.rooted_write);
         self.gc_holds += held;
         // The list, the value and the place are rooted and read back after

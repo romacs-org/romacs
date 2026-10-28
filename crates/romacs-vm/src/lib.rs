@@ -1586,6 +1586,7 @@ impl Vm {
         outer: &NameMap<Name, Binding>,
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
+        let _unwind = self.unwind_mark();
         self.gc_holds += 1;
         let result = self.build_function(args, body, outer, local_specials);
         self.gc_holds -= 1;

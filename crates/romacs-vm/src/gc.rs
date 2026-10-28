@@ -14,11 +14,22 @@ pub struct HeapStats {
 /// Values a native frame keeps across a call that can run Lisp: a span of
 /// `external_roots`, pushed before the call and read back by index after it,
 /// so only the forwarded copy is used. Frames nest; release each in reverse
-/// order on every exit, the failing ones included.
+/// order on every exit, the failing ones included. A panic unwinding the
+/// owning frame drops the span.
 #[must_use = "a root frame is released on every exit"]
 pub(crate) struct RootFrame {
     base: usize,
     len: usize,
+    vm: *mut Vm,
+}
+
+impl Drop for RootFrame {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            // SAFETY: as for `UnwindMark`.
+            unsafe { (*self.vm).external_roots.truncate(self.base) };
+        }
+    }
 }
 
 /// Test mode: every Nth Lisp entry (`threaded::execute_args`) collects and
@@ -33,6 +44,51 @@ pub(crate) struct Stress {
     pads: usize,
     /// The collection about to run is a forced one.
     shift: bool,
+}
+
+/// The state nested Lisp runs push and pop on the VM: suspended engines and
+/// their register stacks, root frames, collection holds, the running-engine
+/// count, handler and backtrace marks. A panic unwinding a frame that took
+/// this mark restores it, so no entry outlives the engine or frame it
+/// describes (a suspended engine's code pointers would dangle) and the VM
+/// stays usable once the panic is caught. Dynamic bindings stay as the
+/// panic left them.
+#[must_use = "the mark restores on unwinding only while it lives"]
+pub(crate) struct UnwindMark {
+    vm: *mut Vm,
+    code: usize,
+    stacks: usize,
+    roots: usize,
+    engines: usize,
+    holds: usize,
+    rooted_write: bool,
+    stack_empty: bool,
+    handlers: usize,
+    backtrace: usize,
+    eval_depth: usize,
+}
+
+impl Drop for UnwindMark {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        // SAFETY: the mark lives in a frame of the borrow it was taken from,
+        // and an unwinding frame no longer uses that borrow.
+        let vm = unsafe { &mut *self.vm };
+        vm.suspended_code.truncate(self.code);
+        vm.suspended_stacks.truncate(self.stacks);
+        vm.external_roots.truncate(self.roots);
+        vm.running_engines = self.engines;
+        vm.gc_holds = self.holds;
+        vm.rooted_write = self.rooted_write;
+        if self.stack_empty {
+            vm.stack = Vec::new();
+        }
+        vm.signal_handlers.truncate(self.handlers);
+        vm.backtrace.leave(self.backtrace);
+        vm.eval_depth = self.eval_depth;
+    }
 }
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
@@ -146,10 +202,27 @@ pub fn assert_no_retention_growth(
 }
 
 impl Vm {
+    /// Mark the nested-run state for restoration should a panic unwind the
+    /// caller's frame ([`UnwindMark`]).
+    pub(crate) fn unwind_mark(&mut self) -> UnwindMark {
+        UnwindMark {
+            code: self.suspended_code.len(),
+            stacks: self.suspended_stacks.len(),
+            roots: self.external_roots.len(),
+            engines: self.running_engines,
+            holds: self.gc_holds,
+            rooted_write: self.rooted_write,
+            stack_empty: self.stack.is_empty(),
+            handlers: self.signal_handlers.len(),
+            backtrace: self.backtrace.frames.len(),
+            eval_depth: self.eval_depth,
+            vm: self,
+        }
+    }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.external_roots.len();
         self.external_roots.extend_from_slice(values);
-        RootFrame { base, len: values.len() }
+        RootFrame { base, len: values.len(), vm: self }
     }
     pub(crate) fn rooted(&self, frame: &RootFrame, i: usize) -> Value {
         assert!(i < frame.len, "root frame index");

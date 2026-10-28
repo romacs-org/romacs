@@ -1228,6 +1228,7 @@ impl Vm {
     /// pointers). FUNCTION and ARGS are rooted as quoted objects; the caller
     /// keeps nothing else across the call unless it is rooted.
     pub(crate) fn reader_call(&mut self, function: Value, args: &[Value]) -> Result<Value> {
+        let _unwind = self.unwind_mark();
         self.suspend_stack();
         self.propagated_escape = None;
         self.propagated_escape_hooked = false;
@@ -1280,6 +1281,7 @@ pub(super) fn execute(vm: &mut Vm, function: usize) -> Result<Value> {
     execute_args(vm, function, &[])
 }
 pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Value> {
+    let _unwind = vm.unwind_mark();
     // Native reentry (eval/load/macro expansion) shares the Lisp budget, but
     // receives another native stack segment before Rust can exhaust it.
     stacker::maybe_grow(256 * 1024, 2 * 1024 * 1024, || {
