@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "c51abc8917cba0686b20c121035fc7600a73730d5012a8f0c43560d5b7ea5def",
+  "input_hash": "4c67a7240b938a8211146da9cc15b30b300b2aaf803d10399f5d7429252ae30a",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -5916,7 +5916,7 @@
    "planned": false,
    "mechanism": "Variable watchers run with collection inhibited",
    "gnu": "`add-variable-watcher` (`src/data.c:1857`) accepts any function; `notify_variable_watchers` calls it before every `set`, `let`, `unlet`, `makunbound` and `defvaralias` of the variable, with WHERE the buffer of a buffer-local binding",
-   "romacs": "VM2 keeps GNU's `watchers` property and `get-variable-watchers`/`remove-variable-watcher`, and calls every watcher before `set`, `set-default` (as `set`), `let`, `unlet`, `makunbound`, `kill-local-variable` and `defvaralias`, with WHERE the current buffer when the variable is local if set there (`local-variable-if-set-p`), and the variable untrapped while they run. A native leaf subr runs in place; any other watcher is funcalled at the write point with collection inhibited until it returns, because the writer's registers and locals are not rooted there (`tests/variable_watchers.rs`). A watcher's signal aborts the write; its `throw` leaves `setq`, `let` and `set` but is refused with a VM2 error when a native primitive (`set-default`, `defvaralias`, `kill-local-variable`) made the write. A `let` of a default value does not notify; a code image of a world with watchers is refused",
+   "romacs": "VM2 keeps GNU's `watchers` property and `get-variable-watchers`/`remove-variable-watcher`, and calls every watcher before `set`, `set-default` and `defvar` (as `set`), `let`, `unlet`, `makunbound`, `kill-local-variable` and `defvaralias`, with WHERE the current buffer when the variable is local if set there (`local-variable-if-set-p`), and the variable untrapped while they run. It walks the live list, which `remove-variable-watcher` splices as `Fdelete` does. Bindings follow `specbind`/`do_one_unbind`: a `let` records the binding before its watchers run; restoring a localized or per-buffer default binding, or binding a per-buffer default, reports `set` with WHERE nil; restoring a global forwarded variable reports `set` then `unlet`, and its `set-default` reports twice; restoring a killed local, and `kill-local-variable` of a forwarded variable, report nothing. A native leaf subr runs in place; any other watcher is funcalled at the write point with collection inhibited until it returns, because the writer's registers and locals are not rooted there (`tests/variable_watchers.rs`). A watcher's signal aborts the write or restore and reaches its handlers once; its `throw` leaves `setq`, `let` and `set` but is refused with a VM2 error when a native primitive (`set-default`, `defvaralias`, `kill-local-variable`) made the write. A code image of a world with watchers is refused",
    "why": "**Package-observable**: memory a long-running Lisp watcher allocates is not reclaimed until it returns; a `throw` out of a watcher of a native write signals instead",
    "symbols": [
     "add-variable-watcher",

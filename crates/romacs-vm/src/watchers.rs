@@ -6,7 +6,7 @@ use crate::*;
 
 impl Vm {
     pub(crate) fn variable_trapped(&self, base: usize) -> bool {
-        self.trapped.contains(&base)
+        !self.trapped.is_empty() && self.trapped.contains(&base)
     }
     pub(crate) fn set_variable_trapped(&mut self, base: usize, trapped: bool) {
         if trapped { self.trapped.insert(base); } else { self.trapped.remove(&base); }
@@ -23,12 +23,7 @@ impl Vm {
         if !self.trapped.contains(&base) { return Ok(()); }
         let symbol = Value::reference(base + 1, 7);
         let property = self.intern("watchers");
-        let mut watchers = Vec::new();
         let mut tail = self.symbol_property(symbol, property)?;
-        while let Ok((watcher, rest)) = self.cons_pair(tail) {
-            watchers.push(watcher);
-            tail = rest;
-        }
         let place = match place {
             Some(place) => place,
             None if self.local_if_set(base)? => {
@@ -42,7 +37,9 @@ impl Vm {
         // GNU untraps the variable while its watchers run (no recursion).
         self.trapped.remove(&base);
         let mut result = Ok(());
-        for watcher in watchers {
+        // The live list, its next link read after each call: a watcher
+        // removed by an earlier one is not called.
+        while let Ok((watcher, _)) = self.cons_pair(tail) {
             let args = [symbol, newval, operation, place];
             result = if prim::native_watcher(self, watcher).is_some() {
                 prim::call_native_watcher(self, watcher, &args)
@@ -50,6 +47,7 @@ impl Vm {
                 self.call_lisp_watcher(watcher, &args)
             };
             if result.is_err() { break; }
+            tail = self.cons_pair(tail).map_or(Value::NIL, |(_, rest)| rest);
         }
         self.trapped.insert(base);
         result

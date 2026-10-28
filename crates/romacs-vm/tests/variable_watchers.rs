@@ -1,7 +1,13 @@
 //! data.c notify_variable_watchers with Lisp watch functions against pinned
 //! GNU: OPERATION set, let, unlet, makunbound and defvaralias, the WHERE
 //! buffer, watchers running before the write, a signalling or throwing
-//! watcher, watchers that run arbitrary Lisp, and aliases.
+//! watcher, watchers that run arbitrary Lisp, and aliases. Then specbind's
+//! order (the binding is recorded before its watchers run), an unlet
+//! watcher's signal aborting the restore, eval.c's dispatch of plain,
+//! localized and forwarded bindings (`set' for a default binding, two
+//! notifications for a global forwarded one), one handler-bind call per
+//! watcher signal on every write path, a watcher removed by the one before
+//! it, and defvar, defconst and the toplevel-value setters.
 use romacs_vm::Vm;
 
 /// One expression per line. LOG is a watcher recording its arguments, with
@@ -15,6 +21,19 @@ const CASES: &str = r###"
 (progn (defvar wv-h 0) (setq calls 0) (add-variable-watcher 'wv-h (lambda (s n o w) (setq calls (1+ calls)) (setq wv-h (* 10 n)) (funcall (lambda (x) (list x (eval '(let ((y x)) (* y 2)) t))) n))) (list (progn (setq wv-h 3) wv-h) calls (let ((wv-h 4)) wv-h) wv-h calls))
 (progn (defvar wv-mode t) (defvar wv-total nil) (setq disabled nil) (fset 'wv-disable (lambda () (setq wv-mode nil) (setq disabled t))) (let ((w (lambda (_s _v op _w) (when (and (eq op 'set) wv-mode (not disabled)) (wv-disable))))) (add-variable-watcher 'wv-total w) (setq wv-total 5) (remove-variable-watcher 'wv-total w) (setq wv-total 6) (list disabled wv-mode wv-total (get-variable-watchers 'wv-total))))
 (progn (defvar wv-i 1) (defvaralias 'wv-j 'wv-i) (setq log nil) (add-variable-watcher 'wv-j LOG) (setq wv-i 2) (setq wv-j 3) (list (nreverse log) (length (get-variable-watchers 'wv-i)) (equal (get-variable-watchers 'wv-i) (get-variable-watchers 'wv-j))))
+(progn (defvar wv-k 1) (add-variable-watcher 'wv-k (lambda (s n o w) (if (eq o 'let) (set s 99)))) (list (let ((wv-k 2)) wv-k) wv-k))
+(progn (defvar wv-l 1) (add-variable-watcher 'wv-l (lambda (s n o w) (if (eq o 'unlet) (error "No unlet")))) (list (condition-case e (let ((wv-l 2)) 'body) (error (list e wv-l))) wv-l))
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'fill-column 'wv-log) (with-temp-buffer (rename-buffer "wv-1") (let ((fill-column 33)) fill-column) (setq fill-column 44) (let ((fill-column 55)) (kill-local-variable 'fill-column)) (setq fill-column 66) (let ((fill-column 77)) fill-column) (kill-local-variable 'fill-column) (set-default 'fill-column 70)) (list (nreverse log) (default-value 'fill-column)))
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'inhibit-field-text-motion 'wv-log) (let ((inhibit-field-text-motion 1)) inhibit-field-text-motion) (set-default 'inhibit-field-text-motion 2) (setq inhibit-field-text-motion 3) (list (nreverse log) inhibit-field-text-motion))
+(progn (defvar wv-o 1) (make-variable-buffer-local 'wv-o) (defvar wv-p 1) (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'wv-o 'wv-log) (add-variable-watcher 'wv-p 'wv-log) (with-temp-buffer (rename-buffer "wv-2") (let ((wv-o 2)) wv-o) (setq wv-o 3) (let ((wv-o 4)) (kill-local-variable 'wv-o)) (let ((wv-p 5)) (make-local-variable 'wv-p) (setq wv-p 6)) (kill-local-variable 'wv-p) (make-local-variable 'wv-p) (let ((wv-p 7)) wv-p) (set-default 'wv-p 8)) (list (nreverse log) wv-o wv-p))
+(progn (setq hb nil) (defvar wv-m 1) (add-variable-watcher 'wv-m (lambda (_s n o _w) (if (memq o '(set let unlet defvaralias)) (error "No %s" o)))) (add-variable-watcher 'wv-x (lambda (&rest _) (error "No defvar"))) (fset 'wv-hb (lambda (f) (condition-case e (handler-bind-1 f '(error) (lambda (e) (setq hb (cons (car (cdr e)) hb)))) (error (car (cdr e)))))) (list (wv-hb (lambda () (set-default 'wv-m 2))) (wv-hb (lambda () (setq wv-m 3))) (wv-hb (lambda () (let ((wv-m 4)) wv-m))) (wv-hb (lambda () (defvaralias 'wv-m 'wv-q))) (wv-hb (lambda () (defvar wv-x 5))) (nreverse hb) wv-m))
+(progn (defvar wv-n 1) (setq log nil) (fset 'wv-b (lambda (&rest _) (setq log (cons 'b log)))) (fset 'wv-a (lambda (&rest _) (setq log (cons 'a log)) (remove-variable-watcher 'wv-n 'wv-b))) (add-variable-watcher 'wv-n 'wv-b) (add-variable-watcher 'wv-n 'wv-a) (setq wv-n 2) (setq wv-n 3) (list (nreverse log) (get-variable-watchers 'wv-n)))
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'wv-r 'wv-log) (add-variable-watcher 'wv-s 'wv-log) (defvar wv-r 5) (defvar wv-r 6) (defconst wv-s 7) (set-default 'wv-r 8) (list (nreverse log) wv-r wv-s))
+(progn (setq log nil) (defvar wv-t 1) (fset 'wv-log LOG) (add-variable-watcher 'wv-t 'wv-log) (let ((wv-t 2)) (set-default-toplevel-value 'wv-t 3) (list wv-t (default-toplevel-value 'wv-t))) (set-default-toplevel-value 'wv-t 4) (list (nreverse log) wv-t))
+(progn (setq log nil) (defvar wv-u 1) (make-variable-buffer-local 'wv-u) (fset 'wv-log LOG) (add-variable-watcher 'wv-u 'wv-log) (with-temp-buffer (rename-buffer "wv-3") (setq wv-u 2) (let ((wv-u 3)) (set-buffer-local-toplevel-value 'wv-u 4)) (set-buffer-local-toplevel-value 'wv-u 5)) (list (nreverse log) wv-u))
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'fill-column 'wv-log) (with-temp-buffer (rename-buffer "wv-4") (let ((fill-column 40)) (setq fill-column 41) fill-column)) (list (nreverse log) (condition-case e (makunbound 'fill-column) (error e)) (default-value 'fill-column)))
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'wv-v 'wv-log) (let ((wv-v 1)) wv-v) (list (nreverse log) (boundp 'wv-v)))
+(progn (setq log nil) (defvar wv-w 1) (fset 'wv-log LOG) (add-variable-watcher 'wv-w 'wv-log) (with-temp-buffer (rename-buffer "wv-5") (make-local-variable 'wv-w) (setq wv-w 2) (let ((wv-w 3)) (kill-local-variable 'wv-w) (make-local-variable 'wv-w) (setq wv-w 9))) (list (nreverse log) wv-w))
 "###;
 
 const LOG: &str = "(lambda (s n o w) (setq log (cons (list s n o (if (bufferp w) (buffer-name w) w) (if (boundp s) (symbol-value s) 'void)) log)))";
