@@ -417,6 +417,8 @@ fn evaluate(
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     if live { vm.set_terminal_host(Some(Box::new(terminal_service)))?; }
+    // The window shows an echo area: printing to `t' goes there, as on GNU's terminal.
+    if live { vm.set_echo_area_host(true); }
     if let Some(floor) = floor {
         vm.set_collection_floor(floor);
     }

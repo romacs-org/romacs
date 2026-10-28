@@ -58,6 +58,8 @@ impl Presentation {
         if let Ok(Some(romacs_vm::CommandOutcome { signal: Some(signal), .. })) = &outcome {
             let message = crate::echo::signal_message(vm, signal)?;
             crate::echo::show(vm, &message)?;
+        } else {
+            crate::echo::show_current_message(vm)?;
         }
         crate::eval_last_sexp::after_command(vm)?;
         outcome

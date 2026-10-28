@@ -21,6 +21,15 @@ pub fn show(vm: &mut Vm, message: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Show the message the command left (`message`, or printing to `t`), as
+/// GNU's echo area shows it once the command returns. Nothing when it left none.
+pub fn show_current_message(vm: &mut Vm) -> Result<(), String> {
+    let value = vm.eval_source("(let ((message (current-message))) (and message (substring-no-properties message)))")?;
+    if value.is_nil() { return Ok(()); }
+    let message: String = serde_json::from_str(&value.display()?).map_err(|error| error.to_string())?;
+    show(vm, &message)
+}
+
 /// Clear a message left by the previous command.
 pub fn clear(vm: &mut Vm) -> Result<(), String> {
     vm.eval_source(
