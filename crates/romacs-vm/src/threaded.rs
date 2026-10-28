@@ -938,9 +938,10 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                 if name == "excessive-lisp-nesting" {
                     original = Some(format!("Lisp nesting exceeds `max-lisp-eval-depth': {}", e.vm.display(data).unwrap_or_default()));
                 }
-                // GNU's printed error, (CONDITION . DATA): an eval caller's
-                // message names the real signal; void-* always do.
-                if matches!(name.as_str(), "void-function" | "void-variable") || (original.is_none() && e.propagate) {
+                // GNU's printed error, (CONDITION . DATA), whenever no
+                // message was recorded: a condition re-raised across a
+                // nested load (`require') keeps its data. void-* always do.
+                if matches!(name.as_str(), "void-function" | "void-variable") || original.is_none() {
                     let values = e.vm.display(data).unwrap_or_default();
                     original = Some(format!("({name}{})", values.strip_prefix('(').and_then(|s| s.strip_suffix(')')).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default()));
                 }

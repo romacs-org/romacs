@@ -51,6 +51,25 @@ fn nested_require_provide_and_error_recovery_are_real_file_effects() {
     assert_eq!(vm.eval_source("load-in-progress").unwrap(), Fixed::NIL);
     std::fs::remove_dir_all(dir).unwrap();
 }
+/// A condition that escapes a required file reaches the requiring file's
+/// top level with its data, as GNU prints `(CONDITION . DATA)'; the loader
+/// once reported only `unhandled signal CONDITION'.
+#[test]
+fn a_condition_crossing_require_keeps_its_data() {
+    let dir = scratch("crossing");
+    std::fs::write(dir.join("signals.el"), "(signal 'wrong-type-argument (list 'stringp 42)) (provide 'signals)").unwrap();
+    std::fs::write(dir.join("errs.el"), "(error \"Boom %d\" 7) (provide 'errs)").unwrap();
+    std::fs::write(dir.join("top-signal.el"), "(require 'signals)").unwrap();
+    std::fs::write(dir.join("top-error.el"), "(require 'errs)").unwrap();
+    let mut vm = Vm::new();
+    vm.set_load_path(std::slice::from_ref(&dir)).unwrap();
+    let error = vm.load_file(&dir.join("top-signal.el")).unwrap_err();
+    assert!(error.ends_with("(wrong-type-argument stringp 42)"), "{error}");
+    let error = vm.load_file(&dir.join("top-error.el")).unwrap_err();
+    assert!(error.ends_with("(error \"Boom 7\")"), "{error}");
+    assert_eq!(vm.eval_source("(signal 'args-out-of-range '(\"ab\" 5))").unwrap_err(), "(args-out-of-range \"ab\" 5)");
+    std::fs::remove_dir_all(dir).unwrap();
+}
 #[test]
 fn reentrant_load_rebases_live_frames_handlers_and_external_roots() {
     let dir = scratch("frames");
