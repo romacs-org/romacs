@@ -402,8 +402,9 @@ impl Vm {
 
     /// SHA-256 of VALUE's content: the structure and bytes of the conses,
     /// strings with their text properties, vectors, records, bool vectors,
-    /// char tables, syntax tables, hash tables, closures and cells it
-    /// reaches, each once; a later reach names the first by its order.
+    /// char tables, syntax tables, hash tables (with their test, weakness,
+    /// size and free list), closures and cells it reaches, each once; a
+    /// later reach names the first by its order.
     /// Every object leads with its kind and every variable-length field with
     /// its length, so no two contents share a byte stream. Nothing depends
     /// on an arena index, which a collection moves. An object whose
@@ -487,8 +488,10 @@ impl Vm {
                     }
                 }
                 (_, Some(Object::HashTable(table))) => {
-                    hasher.update([b'h']);
-                    hasher.update(table.count().to_le_bytes());
+                    hasher.update([b'h', table.test as u8, table.weakness as u8]);
+                    hasher.update([table.size(), table.count()].map(usize::to_le_bytes).concat());
+                    let free: Vec<u8> = table.free_slots().iter().flat_map(|slot| slot.to_le_bytes()).collect();
+                    framed(&mut hasher, &free);
                     for (_, key, value) in table.entries() {
                         stack.extend([value, key]);
                     }

@@ -125,6 +125,16 @@ impl HashTable {
     pub(super) fn size(&self) -> usize {
         self.size
     }
+    /// The free list as later inserts observe it, the slot the next one
+    /// takes last. A bottom run that continues the fresh slot order, the
+    /// last materialized slot down, is dropped: such a table takes the same
+    /// slots as one that never materialized them. With the count it fixes
+    /// where later entries iterate.
+    pub(super) fn free_slots(&self) -> &[u32] {
+        let len = self.keys.len();
+        let fresh = self.free.iter().enumerate().take_while(|&(k, &slot)| slot as usize + k + 1 == len).count();
+        &self.free[fresh..]
+    }
     pub(super) fn entry(&self, i: usize) -> Option<(Value, Value)> {
         let key = *self.keys.get(i)?;
         (key != UNUSED).then(|| (key, self.values[i]))

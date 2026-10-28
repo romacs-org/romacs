@@ -346,6 +346,62 @@ fn the_content_check_frames_what_it_digests() {
     assert_eq!(changed, expected, "{trace}");
 }
 
+/// Each replacement or mutation keeps a table's count and entries and
+/// changes one field Lisp observes: its test, weakness or size, or the free
+/// list, which fixes where later entries iterate. Freeing the last slot, or
+/// re-adding an identical empty table, changes nothing Lisp sees.
+#[test]
+fn the_content_check_sees_every_hash_table_field() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables nil)
+(defvar fence-test (vector (make-hash-table :test 'eq)))
+(defvar fence-weak (vector (make-hash-table :test 'eq)))
+(defvar fence-size (vector (make-hash-table :test 'eq)))
+(defvar fence-order (make-hash-table :test 'eq :size 10))
+(puthash 'a 1 fence-order)
+(puthash 'b 2 fence-order)
+(remhash 'a fence-order)
+(remhash 'b fence-order)
+(defvar fence-same (vector (make-hash-table :test 'eq)))
+(defvar fence-tail (make-hash-table :test 'eq :size 10))
+(puthash 'a 1 fence-tail)
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (setq seen (list fence-test fence-weak fence-size fence-order fence-same fence-tail)))
+  (romacs--startup-phase nil))
+";
+    let preload = "\
+(aset fence-test 0 (make-hash-table :test 'equal))
+(aset fence-weak 0 (make-hash-table :test 'eq :weakness 'key))
+(aset fence-size 0 (make-hash-table :test 'eq :size 10))
+(puthash 'a 1 fence-order)
+(puthash 'b 2 fence-order)
+(remhash 'a fence-order)
+(remhash 'b fence-order)
+(aset fence-same 0 (make-hash-table :test 'eq))
+(puthash 'b 2 fence-tail)
+(remhash 'b fence-tail)
+";
+    let (mut vm, trace) = run_with("hash-table-fields", bootstrap, preload, true);
+    assert_eq!(listed(&trace.unwrap()), []);
+    // Two later entries iterate in the other order than in a table freed
+    // as fence-order was before startup ended.
+    let probes = "\
+(let ((later (lambda (table) (let ((copy (copy-hash-table table))) (puthash 'c 3 copy) (puthash 'd 4 copy) (hash-table-keys copy))))
+      (before (make-hash-table :test 'eq :size 10)))
+  (puthash 'a 1 before) (puthash 'b 2 before) (remhash 'a before) (remhash 'b before)
+  (list (hash-table-test (aref fence-test 0)) (hash-table-weakness (aref fence-weak 0)) (hash-table-size (aref fence-size 0))
+        (funcall later fence-order) (funcall later before)))";
+    assert_eq!(vm.eval_source(probes).and_then(|v| v.display()).unwrap(), "(equal key 10 (d c) (c d))");
+    host::enter_build(PINNED);
+    vm.world_check_inputs();
+    let trace = host::leave_build().unwrap();
+    let changed: Vec<_> = listed(&trace).into_iter().map(|(kind, _, symbol, access, _)| (kind, symbol, access)).collect();
+    let expected = ["fence-test", "fence-weak", "fence-size", "fence-order"]
+        .map(|symbol| ("fence".to_owned(), symbol.to_owned(), "changed".to_owned()));
+    assert_eq!(changed, expected, "{trace}");
+}
+
 #[test]
 fn a_binding_across_startups_end_stays_fenced_in_backtraces() {
     let bootstrap = "\
