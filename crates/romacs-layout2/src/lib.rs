@@ -10,7 +10,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face};
+use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -31,6 +31,10 @@ impl LayoutEngine {
     }
     pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
         layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)
+    }
+    /// The host layout hook: INPUT's geometry as painting would lay it out.
+    pub fn measure(&mut self, input: &MeasureInput) -> Result<Measured, String> {
+        measure_inner(input, &mut self.resolver)
     }
     pub fn layout(&mut self, snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyphBuffer, String> {
         let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;
@@ -164,23 +168,139 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             return Err("invalid mode-line face or control character".into());
         }
     }
-    let policy = FontsetPolicy::new();
     let face_base = u32::try_from(frame.faces.len()).map_err(|e| e.to_string())?;
-    // Publish only characters actually painted with a face. Publishing the
-    // whole window for every color-only face multiplies Unicode bindings by
-    // the face-table size, even when those faces are unused.
-    let mut face_text = vec![String::new(); snapshot.faces.len()];
-    let mut distribute = |slice: &TextSlice, default: usize| {
-        for (byte, ch) in slice.utf8.char_indices() {
-            let index = slice.face_runs.iter().find(|run| run.bytes.contains(&byte))
-                .map_or(default, |run| run.face.0 as usize);
-            face_text[index].push(ch);
+    let mut slices = vec![(&snapshot.text, 0)];
+    if let Some(band) = &snapshot.mode_line { slices.push((band, snapshot.mode_line_face.0 as usize)); }
+    let face_text = face_text(snapshot.faces.len(), &slices);
+    let metrics = realize_faces(&snapshot.faces, &face_text, frame, resolver, face_base)?;
+    if face_base == 0 { frame.char_height = metrics[0].1; frame.char_width = metrics[0].2; }
+    let band_height = snapshot.mode_line.as_ref().map_or(0.0, |band| {
+        std::iter::once(snapshot.mode_line_face.0 as usize)
+            .chain(band.face_runs.iter().map(|run| run.face.0 as usize))
+            .map(|index| metrics[index].1)
+            .fold(0.0_f32, f32::max)
+    });
+    let body_height = (snapshot.height as f32 - band_height).max(0.0);
+    frame.set_draw_context(
+        DisplayWindowId::new(i64::try_from(snapshot.id).map_err(|e| e.to_string())?),
+        GlyphRowRole::Text,
+        Some(Rect::new(ox, oy, snapshot.width as f32, body_height)),
+    );
+    let mut x = 0.0;
+    let mut y = -(snapshot.vscroll_px as f32);
+    let mut row_height = metrics[0].1;
+    let mut end_byte = snapshot.start_byte;
+    let mut point_rect = None;
+    for (byte, ch) in text
+        .char_indices()
+        .filter(|(byte, _)| *byte >= snapshot.start_byte)
+    {
+        if y >= body_height { break; }
+        end_byte = byte + ch.len_utf8();
+        if byte == snapshot.point_byte { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
+        if ch == '\n' {
+            x = 0.0;
+            y += row_height;
+            row_height = metrics[0].1;
+            continue;
         }
-    };
-    distribute(&snapshot.text, 0);
-    if let Some(band) = &snapshot.mode_line { distribute(band, snapshot.mode_line_face.0 as usize); }
+        if ch.is_control() {
+            return Err("G1a does not support control characters other than newline".into());
+        }
+        let index = face_at(&snapshot.text, byte, 0);
+        let id = FaceId::new(face_base + index as u32);
+        let (ascent, height, cell) = metrics[index];
+        row_height = row_height.max(height);
+        let advance = advance(frame, id, ch, cell);
+        if body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32 {
+            frame.add_char(ch, ox + x, oy + y, advance, height, ascent, false);
+            *frame
+                .glyphs
+                .last_mut()
+                .and_then(|g| g.face_id_mut())
+                .ok_or("missing character face")? = id;
+        }
+        if byte == snapshot.point_byte { point_rect = Some((x, y, advance, row_height, ascent)); }
+        x += advance;
+    }
+    if snapshot.point_byte == text.len() && end_byte == text.len() {
+        point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0));
+    }
+    if let (Some((active, color)), Some((x, y, width, height, ascent))) = (cursor, point_rect) {
+        // No cursor may bleed into the mode line or another window.
+        if x >= 0.0 && x < snapshot.width as f32 && y >= 0.0 && y + height <= body_height {
+            frame.add_cursor(DisplayWindowId::new(snapshot.id as i64), ox + x, oy + y,
+                width.min(snapshot.width as f32 - x), height,
+                if active { romacs_display_protocol::CursorStyle::FilledBox } else { romacs_display_protocol::CursorStyle::Hollow }, color);
+            let published = frame.window_cursors.last_mut().unwrap();
+            published.active = active;
+            published.ascent = ascent;
+        }
+    }
+    if let Some(band) = &snapshot.mode_line {
+        let default = snapshot.mode_line_face.0 as usize;
+        let bounds = Rect::new(ox, oy + body_height, snapshot.width as f32, snapshot.height as f32 - body_height);
+        let background = color(snapshot.faces[default].background);
+        frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, background);
+        frame.set_draw_context(
+            DisplayWindowId::new(i64::try_from(snapshot.id).map_err(|e| e.to_string())?),
+            GlyphRowRole::ModeLine,
+            Some(bounds),
+        );
+        let offset = u32::try_from(snapshot.faces.len()).map_err(|e| e.to_string())?;
+        for index in 0..snapshot.faces.len() {
+            let source = FaceId::new(face_base + index as u32);
+            let target = FaceId::new(face_base.checked_add(offset).and_then(|v| v.checked_add(index as u32)).ok_or("too many faces")?);
+            let mut face = frame.faces[&source].clone();
+            face.id = target;
+            face.background = background;
+            frame.faces.insert(target, face);
+            if let Some(chars) = frame.char_fonts.get(&source).cloned() {
+                frame.char_fonts.insert(target, chars);
+            }
+        }
+        let mut x = 0.0;
+        for (byte, ch) in band.utf8.char_indices() {
+            let index = face_at(band, byte, default);
+            let id = FaceId::new(face_base + offset + index as u32);
+            let (ascent, height, cell) = metrics[index];
+            let advance = advance(frame, id, ch, cell);
+            if x < snapshot.width as f32 {
+                frame.add_char(ch, ox + x, bounds.y, advance, height, ascent, false);
+                *frame
+                    .glyphs
+                    .last_mut()
+                    .and_then(|g| g.face_id_mut())
+                    .ok_or("missing mode-line face")? = id;
+            }
+            x += advance;
+        }
+    }
+    Ok(end_byte)
+}
+
+/// The face table index painting SLICE's character at BYTE.
+fn face_at(slice: &TextSlice, byte: usize, default: usize) -> usize {
+    slice.face_runs.iter().find(|run| run.bytes.contains(&byte)).map_or(default, |run| run.face.0 as usize)
+}
+
+/// Each face's painted characters. Publishing the whole window for every
+/// color-only face multiplies Unicode bindings by the face-table size,
+/// even when those faces are unused.
+fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
+    let mut text = vec![String::new(); faces];
+    for (slice, default) in slices {
+        for (byte, ch) in slice.utf8.char_indices() { text[face_at(slice, byte, *default)].push(ch); }
+    }
+    text
+}
+
+/// Publish FACES into FRAME from FACE_BASE on and resolve the fonts their
+/// characters need: each face's ascent, row height and nominal advance.
+fn realize_faces(faces: &[Face], face_text: &[String], frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, face_base: u32) -> Result<Vec<(f32, f32, f32)>, String> {
+    let policy = FontsetPolicy::new();
     let mut metrics = Vec::new();
-    for (index, face) in snapshot.faces.iter().enumerate() {
+    for (index, face) in faces.iter().enumerate() {
         if face.family.is_empty() || !face.pixel_size.is_finite() || face.pixel_size <= 0.0 {
             return Err("invalid font request".into());
         }
@@ -234,125 +354,38 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         }
         metrics.push((ascent, height, cell));
     }
-    if face_base == 0 { frame.char_height = metrics[0].1; frame.char_width = metrics[0].2; }
-    let band_height = snapshot.mode_line.as_ref().map_or(0.0, |band| {
-        std::iter::once(snapshot.mode_line_face.0 as usize)
-            .chain(band.face_runs.iter().map(|run| run.face.0 as usize))
-            .map(|index| metrics[index].1)
-            .fold(0.0_f32, f32::max)
-    });
-    let body_height = (snapshot.height as f32 - band_height).max(0.0);
-    frame.set_draw_context(
-        DisplayWindowId::new(i64::try_from(snapshot.id).map_err(|e| e.to_string())?),
-        GlyphRowRole::Text,
-        Some(Rect::new(ox, oy, snapshot.width as f32, body_height)),
-    );
-    let mut x = 0.0;
-    let mut y = -(snapshot.vscroll_px as f32);
-    let mut row_height = metrics[0].1;
-    let mut end_byte = snapshot.start_byte;
-    let mut point_rect = None;
-    for (byte, ch) in text
-        .char_indices()
-        .filter(|(byte, _)| *byte >= snapshot.start_byte)
-    {
-        if y >= body_height { break; }
-        end_byte = byte + ch.len_utf8();
-        if byte == snapshot.point_byte { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
-        if ch == '\n' {
-            x = 0.0;
-            y += row_height;
-            row_height = metrics[0].1;
-            continue;
-        }
+    Ok(metrics)
+}
+
+/// The advance painting CH in face ID takes: its resolved glyph's, else
+/// the face's nominal CELL.
+fn advance(frame: &FrameGlyphBuffer, id: FaceId, ch: char, cell: f32) -> f32 {
+    frame.char_fonts.get(&id).and_then(|chars| chars.get(&ch)).map_or(cell, |glyph| glyph.advance_px)
+}
+
+/// Lay INPUT out as `append_window` paints its text, without presenting
+/// it: the advance and face row height of each character, from the same
+/// face realization and advances. Painting truncates and draws newline,
+/// so a control character other than newline is refused here as there.
+fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Measured, String> {
+    resolver.set_selection_state(input.font_selection);
+    resolver.set_alternative_state(input.font_alternatives.clone());
+    if input.faces.is_empty() { return Err("missing face".into()); }
+    validate_runs(&input.text, input.faces.len())?;
+    let mut frame = new_frame(1, 1, 1)?;
+    let face_text = face_text(input.faces.len(), &[(&input.text, 0)]);
+    let metrics = realize_faces(&input.faces, &face_text, &mut frame, resolver, 0)?;
+    let pixels = |value: f32| if value.fract() == 0.0 && value >= 0.0 && value <= u32::MAX as f32 { Ok(value as u32) }
+        else { Err(format!("fractional or negative advance {value}")) };
+    let face_heights = metrics.iter().map(|m| pixels(m.1)).collect::<Result<Vec<_>, _>>()?;
+    let mut glyphs = Vec::with_capacity(input.text.utf8.len());
+    for (byte, ch) in input.text.utf8.char_indices() {
+        if ch == '\n' { glyphs.push((0, face_heights[0])); continue; }
         if ch.is_control() {
             return Err("G1a does not support control characters other than newline".into());
         }
-        let index = snapshot
-            .text
-            .face_runs
-            .iter()
-            .find(|run| run.bytes.contains(&byte))
-            .map_or(0, |run| run.face.0 as usize);
-        let id = FaceId::new(face_base + index as u32);
-        let (ascent, height, cell) = metrics[index];
-        row_height = row_height.max(height);
-        let advance = frame
-            .char_fonts
-            .get(&id)
-            .and_then(|chars| chars.get(&ch))
-            .map_or(cell, |glyph| glyph.advance_px);
-        if body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32 {
-            frame.add_char(ch, ox + x, oy + y, advance, height, ascent, false);
-            *frame
-                .glyphs
-                .last_mut()
-                .and_then(|g| g.face_id_mut())
-                .ok_or("missing character face")? = id;
-        }
-        if byte == snapshot.point_byte { point_rect = Some((x, y, advance, row_height, ascent)); }
-        x += advance;
+        let index = face_at(&input.text, byte, 0);
+        glyphs.push((pixels(advance(&frame, FaceId::new(index as u32), ch, metrics[index].2))?, face_heights[index]));
     }
-    if snapshot.point_byte == text.len() && end_byte == text.len() {
-        point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0));
-    }
-    if let (Some((active, color)), Some((x, y, width, height, ascent))) = (cursor, point_rect) {
-        // No cursor may bleed into the mode line or another window.
-        if x >= 0.0 && x < snapshot.width as f32 && y >= 0.0 && y + height <= body_height {
-            frame.add_cursor(DisplayWindowId::new(snapshot.id as i64), ox + x, oy + y,
-                width.min(snapshot.width as f32 - x), height,
-                if active { romacs_display_protocol::CursorStyle::FilledBox } else { romacs_display_protocol::CursorStyle::Hollow }, color);
-            let published = frame.window_cursors.last_mut().unwrap();
-            published.active = active;
-            published.ascent = ascent;
-        }
-    }
-    if let Some(band) = &snapshot.mode_line {
-        let default = snapshot.mode_line_face.0 as usize;
-        let bounds = Rect::new(ox, oy + body_height, snapshot.width as f32, snapshot.height as f32 - body_height);
-        let background = color(snapshot.faces[default].background);
-        frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, background);
-        frame.set_draw_context(
-            DisplayWindowId::new(i64::try_from(snapshot.id).map_err(|e| e.to_string())?),
-            GlyphRowRole::ModeLine,
-            Some(bounds),
-        );
-        let offset = u32::try_from(snapshot.faces.len()).map_err(|e| e.to_string())?;
-        for index in 0..snapshot.faces.len() {
-            let source = FaceId::new(face_base + index as u32);
-            let target = FaceId::new(face_base.checked_add(offset).and_then(|v| v.checked_add(index as u32)).ok_or("too many faces")?);
-            let mut face = frame.faces[&source].clone();
-            face.id = target;
-            face.background = background;
-            frame.faces.insert(target, face);
-            if let Some(chars) = frame.char_fonts.get(&source).cloned() {
-                frame.char_fonts.insert(target, chars);
-            }
-        }
-        let mut x = 0.0;
-        for (byte, ch) in band.utf8.char_indices() {
-            let index = band
-                .face_runs
-                .iter()
-                .find(|run| run.bytes.contains(&byte))
-                .map_or(default, |run| run.face.0 as usize);
-            let id = FaceId::new(face_base + offset + index as u32);
-            let (ascent, height, cell) = metrics[index];
-            let advance = frame
-                .char_fonts
-                .get(&id)
-                .and_then(|chars| chars.get(&ch))
-                .map_or(cell, |glyph| glyph.advance_px);
-            if x < snapshot.width as f32 {
-                frame.add_char(ch, ox + x, bounds.y, advance, height, ascent, false);
-                *frame
-                    .glyphs
-                    .last_mut()
-                    .and_then(|g| g.face_id_mut())
-                    .ok_or("missing mode-line face")? = id;
-            }
-            x += advance;
-        }
-    }
-    Ok(end_byte)
+    Ok(Measured { glyphs, face_heights })
 }

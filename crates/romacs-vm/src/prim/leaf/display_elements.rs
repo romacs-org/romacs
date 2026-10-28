@@ -90,6 +90,9 @@ impl<'l, 'a> Source<'l, 'a> {
     }
 
     pub(super) fn begv(&self) -> i64 { self.view.begv }
+    pub(super) fn zv(&self) -> i64 { self.view.zv }
+    /// The leaf the elements come from, for a host layout to measure them.
+    pub(super) fn leaf(&mut self) -> &mut Leaf<'a> { self.leaf }
 
     /// Deliver from START again, a line start.
     pub(super) fn reset(&mut self, start: i64) -> R<()> {

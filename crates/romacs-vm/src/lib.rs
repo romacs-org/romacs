@@ -22,6 +22,7 @@ mod command;
 mod interpreted_closure;
 mod oclosure;
 mod host_input;
+mod layout_host;
 mod terminal_host;
 mod process_jobs;
 mod subprocess;
@@ -31,6 +32,7 @@ mod user_db;
 mod processors;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
+pub use layout_host::LayoutHost;
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
 // Maps keyed by slots and ids the VM allocates use FxHash. Maps keyed by
 // names, which Lisp, files and the network supply, use foldhash with a random
@@ -1098,6 +1100,8 @@ pub struct Vm {
     propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
+    /// The embedder's layout while one is attached (layout_host.rs).
+    layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     process_jobs: process_jobs::Jobs,
     /// GNU process.c chan_process and friends: subprocess descriptors.
     subprocesses: subprocess::Table,
@@ -1250,6 +1254,7 @@ impl Vm {
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
+            layout_host: None,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),

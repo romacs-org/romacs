@@ -2,7 +2,8 @@
 //! move_it_to, move_it_by_lines with 0) and window_text_pixel_size, on a
 //! terminal frame (term.c produce_glyphs): x counts columns, every glyph
 //! is one column, and every element produced makes its row one line
-//! tall. window_text_pixel_size iterates without bidi reordering; VM2
+//! tall. A host's layout supplies `Shape::Pixel` glyphs instead, measured
+//! in its pixels (VM2-WTPS1), where a row is as tall as its tallest. window_text_pixel_size iterates without bidi reordering; VM2
 //! has no line numbers, fringes or applied hscroll, so those branches are
 //! absent. The elements come from `Elements`, so nothing here reads the
 //! VM: the motion is a function of the element sequence and the window
@@ -23,6 +24,9 @@ pub(super) enum Method { Buffer, Vector { last: bool, buffer: bool }, String, St
 pub(super) enum Shape {
     /// A character glyph WIDTH columns wide; a newline is zero wide.
     Glyph { c: u32, width: i64 },
+    /// A character the host lays out as one glyph WIDTH pixels wide in a
+    /// row at least HEIGHT pixels tall; a newline is zero wide.
+    Pixel { c: u32, width: i64, height: i64 },
     Tab,
     Stretch { width: i64, zero_ok: bool },
     /// `:align-to', TARGET columns from the text area's left edge.
@@ -51,7 +55,7 @@ pub(super) struct Elem {
 }
 
 impl Elem {
-    fn end_of_line(&self) -> bool { matches!(self.shape, Shape::Glyph { c: 10, .. }) }
+    fn end_of_line(&self) -> bool { matches!(self.shape, Shape::Glyph { c: 10, .. } | Shape::Pixel { c: 10, .. }) }
     /// BUFFER_POS_REACHED_P's object and method test.
     fn reaches(&self) -> bool {
         matches!(self.method, Method::Buffer | Method::Vector { last: true, buffer: true })
@@ -100,6 +104,9 @@ pub(super) struct Ctx {
     pub tab_width: i64,
     pub zv: i64,
     pub zv_after_newline: bool,
+    /// Whether a row may be continued or truncated. A host that lays out
+    /// neither cannot show such a row, so meeting one is refused.
+    pub breaks: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -108,6 +115,11 @@ pub(super) enum Move { Undefined, PosMatchOrZv, NewlineOrCr, LineTruncated, Line
 #[derive(Clone, Copy, Default)]
 pub(super) struct Op { pub pos: bool, pub x: bool, pub y: bool, pub vpos: bool }
 const POS: Op = Op { pos: true, x: false, y: false, vpos: false };
+
+/// The refusal for a row a host would have to continue or truncate.
+fn unbroken() -> Fault {
+    Fault::Error("VM2 window-text-pixel-size of a continued or truncated line in a displayed window is unsupported".into())
+}
 
 fn wrap(cx: &Ctx, it: &It) -> Wrap {
     // handle_line_prefix truncates while the prefix is shown.
@@ -166,8 +178,10 @@ fn valid_after_move<E: Elements>(src: &mut E, it: &It) -> R<(bool, bool)> {
 /// produce_glyphs (term.c) and produce_stretch_glyph.
 fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
     let from_prefix = it.prefix.is_some();
+    let mut height = 1;
     let (width, glyphs) = match e.shape {
         Shape::Glyph { c: 10, .. } => (0, 0),
+        Shape::Pixel { c, width, height: h } => { height = h; if c == 10 { (0, 0) } else { (width, 1) } }
         Shape::Glyph { width, .. } | Shape::Glyphless { width } => (width, width),
         Shape::Tab => { let spaces = tab_spaces(cx, it); (spaces, spaces) }
         Shape::TabStretch { factor } => stretch(cx, it, e, (factor * tab_spaces(cx, it) as f64) as i64, false),
@@ -183,8 +197,8 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
         it.current_x += width;
         if it.continuation_lines_width != 0 && from_prefix { it.wrap_prefix_width = it.current_x; }
     }
-    it.h = 1;
-    it.max_h = 1;
+    it.h = height;
+    it.max_h = it.max_h.max(height);
 }
 
 /// The spaces a TAB at the iterator's x takes to the next tab stop.
@@ -277,6 +291,7 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
                         if atx_it.is_none() { let mut a = *it; (a.current_x, a.max_h) = (x, max_h); atx_it = Some(a); }
                     }
                 }
+                if !cx.breaks && new_x > cx.last_visible_x { return Err(unbroken()); }
                 let beyond = new_x > cx.last_visible_x && (subject == 0 || (i != 0 && x > cx.last_visible_x));
                 if line_wrap != Wrap::Truncate && beyond {
                     result = continue_line(src, cx, it, &e, ContinueAt { i, x, new_x, x0, hpos_before, max_h },
@@ -318,6 +333,9 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
             };
             break;
         }
+    }
+    if !cx.breaks && matches!(result, Move::LineContinued | Move::LineTruncated) {
+        return Err(unbroken());
     }
     let ww = wrap(cx, it) == Wrap::Word;
     match (wrap_it, atpos_it, atx_it) {

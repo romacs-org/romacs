@@ -1,10 +1,13 @@
 //! xdisp.c window-text-pixel-size and buffer-text-pixel-size on the
 //! initial terminal frame batch has: the display iterator over the
 //! window's buffer (display_elements.rs) and its motion
-//! (display_motion.rs), measured in the frame's characters.
+//! (display_motion.rs), measured in the frame's characters. A window a
+//! host lays out is measured by the same motion in the host's pixels
+//! (display_hosted.rs), as are pos-visible-in-window-p and posn-at-point.
 use super::*;
 use super::display_elements::{Source, View};
-use super::display_motion::{self as motion, Ctx, Measure, Wrap};
+use super::display_hosted::Hosted;
+use super::display_motion::{self as motion, Ctx, Elements, It, Measure, Op, Wrap};
 use crate::data::Object;
 use crate::window::TextArea;
 
@@ -71,16 +74,27 @@ impl Leaf<'_> {
         let max_y = if args.y_limit == Value::NIL { INT_MAX }
             else { args.y_limit.integer_value().filter(|n| (0..=INT_MAX).contains(n)).unwrap_or(0) };
         let cx = self.iterator_context(area, zv)?;
-        let view = View { window: area.window, buffer, begv, zv, column: area.column,
-            box_width: area.columns - area.left_margin - area.right_margin, left_margin: area.left_margin, right_margin: area.right_margin };
-        let (column, line) = (area.column, area.line);
+        let view = Self::view(area, buffer, begv, zv);
+        let (column, line) = if area.hosted { (1, 1) } else { (area.column, area.line) };
         let mut source = Source::new(self, view, begv)?;
-        let (it, start) = start_line(&mut source, &cx, start, vertical_offset, line)?;
-        let start_on_newline = source.char_after(start)? == Some(0x0a);
-        let measure = Measure { start, end, begv, start_on_newline, x_limit: max_x.map(|x| x / column), max_y: max_y / line,
-            ignore_line_at_end: args.ignore_line_at_end != Value::NIL };
-        let (x, start_x, y) = motion::text_size(&mut source, &cx, it, &measure)?;
-        drop(source);
+        let measure = |start, start_on_newline| Measure { start, end, begv, start_on_newline, x_limit: max_x.map(|x| x / column),
+            max_y: max_y / line, ignore_line_at_end: args.ignore_line_at_end != Value::NIL };
+        let (x, start_x, y, start) = if area.hosted {
+            if vertical_offset != 0 { return Err(unsupported("from a vertical offset in a displayed window")); }
+            let mut hosted = Hosted::new(source);
+            let cx = hosted_context(&mut hosted, cx, area)?;
+            let origin = hosted.source().visible_line_start(start)?;
+            hosted.reset(origin)?;
+            let it = motion::screen_line_start(&mut hosted, &cx, start)?;
+            let on_newline = hosted.source().char_after(start)? == Some(0x0a);
+            let (x, start_x, y) = motion::text_size(&mut hosted, &cx, it, &measure(start, on_newline))?;
+            (x, start_x, y, start)
+        } else {
+            let (it, start) = start_line(&mut source, &cx, start, vertical_offset, line)?;
+            let on_newline = source.char_after(start)? == Some(0x0a);
+            let (x, start_x, y) = motion::text_size(&mut source, &cx, it, &measure(start, on_newline))?;
+            (x, start_x, y, start)
+        };
         let x = max_x.map_or(x * column, |m| (x * column).min(m)) - start_x * column;
         let y = (y * line).min(max_y) + self.mode_line_heights(area, args.mode_lines)?;
         let (x, y) = (Value::integer(x).map_err(Fault::Error)?, Value::integer(y).map_err(Fault::Error)?);
@@ -89,6 +103,96 @@ impl Leaf<'_> {
         let tail = self.cons(start, Value::NIL);
         let tail = self.cons(y, tail);
         Ok(self.cons(x, tail))
+    }
+
+    fn view(area: &TextArea, buffer: Value, begv: i64, zv: i64) -> View {
+        View { window: area.window, buffer, begv, zv, column: area.column,
+            box_width: area.columns - area.left_margin - area.right_margin, left_margin: area.left_margin, right_margin: area.right_margin }
+    }
+
+    /// Fpos_visible_in_window_p (window.c:1998): t, nil, or with PARTIALLY
+    /// (X Y), or (X Y RTOP RBOT ROWH VPOS) for a partly visible row.
+    pub(crate) fn pos_visible_in_window_p(&mut self, pos: Value, window: Value, partially: Value) -> super::super::Out {
+        let caller = "pos-visible-in-window-p";
+        let Some((w, charpos, top)) = self.windows().pos_visible(pos, window, caller)? else { return Ok(Value::NIL) };
+        let Some(v) = self.hosted_pos_visible(w, charpos, top, caller)? else { return Ok(Value::NIL) };
+        let fully = v.rtop == 0 && v.rbot == 0;
+        if partially == Value::NIL { return Ok(if fully { Value::TRUE } else { Value::NIL }); }
+        let mut items = vec![v.x, v.y];
+        if !fully { items.extend([v.rtop, v.rbot, v.rowh, v.vpos]); }
+        let items = items.into_iter().map(|n| Value::integer(n).map_err(Fault::Error)).collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(self.vm.list_value(&items))
+    }
+
+    /// Fposn_at_point (keyboard.c:13054): pos-visible-in-window-p with
+    /// PARTIALLY t, then posn-at-x-y at the coordinates it reports. The
+    /// initial frame shows nothing, so the answer there is nil.
+    pub(crate) fn posn_at_point(&mut self, pos: Value, window: Value) -> super::super::Out {
+        let caller = "posn-at-point";
+        let window = if window == Value::NIL { self.vm.selected_window_value().map_err(Fault::Error)? } else { window };
+        let Some((w, charpos, top)) = self.windows().pos_visible(pos, window, caller)? else { return Ok(Value::NIL) };
+        let Some(v) = self.hosted_pos_visible(w, charpos, top, caller)? else { return Ok(Value::NIL) };
+        let area = self.windows().text_area(w, caller)?;
+        let buffer = area.buffer;
+        let p = self.with_buffer(buffer, |leaf| leaf.hosted_posn(&area, top, v.x, v.y))?;
+        let int = |n: i64| Value::integer(n).map_err(Fault::Error);
+        let (x, y, zero, pos) = (int(v.x)?, int(v.y)?, int(0)?, int(p.pos)?);
+        let xy = self.cons(x, y);
+        let col_row = { let (c, r) = (int(p.col)?, int(p.row)?); self.cons(c, r) };
+        let offset = { let (dx, dy) = (int(p.dx)?, int(p.dy)?); self.cons(dx, dy) };
+        let size = { let (wd, ht) = (int(p.width)?, int(p.height)?); self.cons(wd, ht) };
+        Ok(self.vm.list_value(&[w, pos, xy, zero, Value::NIL, pos, col_row, Value::NIL, offset, size]))
+    }
+
+    /// pos_visible_p (xdisp.c:1693) for CHARPOS in window W from its start
+    /// TOP, over the host's layout. The host draws a row's glyphs from its
+    /// top, so a glyph's Y is its row's, and a row is as tall as the host
+    /// makes it. W's text is GNU's for the host only where no row breaks.
+    fn hosted_pos_visible(&mut self, w: Value, charpos: i64, top: i64, caller: &str) -> std::result::Result<Option<Visible>, Fault> {
+        let area = self.windows().text_area(w, caller)?;
+        if charpos < 0 { return Err(unsupported("of the window end in a displayed window")); }
+        if area.vscroll != 0 { return Err(unsupported("of a vertically scrolled displayed window")); }
+        let buffer = area.buffer;
+        self.with_buffer(buffer, |leaf| {
+            let mut hosted = leaf.hosted_from(&area, top)?;
+            let cx = hosted.1;
+            let src = &mut hosted.0;
+            let last_y = area.body_height;
+            let mut it = It::default();
+            motion::move_to(src, &cx, &mut it, charpos, -1, last_y - 1, -1, Op { pos: true, y: true, ..Op::default() })?;
+            if motion::charpos(src, &it)? < charpos {
+                // Stopped by the window's bottom: CHARPOS may still be in
+                // the row the bottom cuts.
+                let row = it.vpos;
+                motion::move_to(src, &cx, &mut it, charpos, -1, -1, -1, Op { pos: true, ..Op::default() })?;
+                if it.vpos != row || motion::charpos(src, &it)? < charpos { return Ok(None); }
+            }
+            if it.current_y >= last_y { return Ok(None); }
+            let mut rest = it;
+            motion::move_in_line(src, &cx, &mut rest, -1, -1, Op::default())?;
+            let height = if rest.max_h > 0 { rest.max_h } else { src.default_height };
+            let bottom = it.current_y + height;
+            Ok(Some(Visible { x: it.current_x, y: it.current_y, rtop: 0, rbot: (bottom - last_y).max(0),
+                rowh: bottom.min(last_y) - it.current_y, vpos: it.vpos }))
+        })
+    }
+
+    /// buffer_posn_from_coords (dispnew.c:6260) at text-area pixel X, Y:
+    /// the glyph there, from the window start TOP.
+    fn hosted_posn(&mut self, area: &TextArea, top: i64, x: i64, y: i64) -> std::result::Result<Posn, Fault> {
+        let (mut hosted, cx) = self.hosted_from(area, top)?;
+        let mut it = It::default();
+        motion::move_to(&mut hosted, &cx, &mut it, -1, 0, y, -1, Op { x: true, y: true, ..Op::default() })?;
+        motion::move_in_line(&mut hosted, &cx, &mut it, cx.zv, x, Op { x: true, ..Op::default() })?;
+        let pos = motion::charpos(&mut hosted, &it)?;
+        // The glyph under X, else the space glyph GNU appends after a
+        // line's end and at ZV, in the default face.
+        let glyph = if it.loaded { hosted.slot(it.index)?.elem } else { None };
+        let (width, height) = match glyph.map(|e| e.shape) {
+            Some(motion::Shape::Pixel { c, .. }) if c != 0x0a => hosted.glyph(pos)?,
+            _ => hosted.default_advance(' ')?,
+        };
+        Ok(Posn { pos, col: it.hpos, row: it.vpos, dx: x - it.current_x, dy: y - it.current_y, width, height })
     }
 
     /// FROM: nil, t (the first non-blank line), a position, or
@@ -166,12 +270,14 @@ impl Leaf<'_> {
             Some(Object::Buffer(b)) => b.as_str()[..b.accessible().end.0].ends_with('\n'),
             _ => false,
         };
+        if area.hosted && self.display_table()?.is_some() { return Err(unsupported("with a display table in a displayed window")); }
         Ok(Ctx {
             last_visible_x: area.columns - area.left_margin - area.right_margin - glyph - border,
             wrap,
             tab_width: self.tab_width()? as i64,
             zv,
             zv_after_newline,
+            breaks: !area.hosted,
         })
     }
 
@@ -202,6 +308,51 @@ impl Leaf<'_> {
         let mode_line = self.intern("mode-line");
         Ok(if mode_lines == Value::TRUE || mode_lines == mode_line { area.mode_line } else { 0 })
     }
+}
+
+impl<'a> Leaf<'a> {
+    /// The host-measured elements of AREA's window from its start TOP, a
+    /// line start, in its current buffer, and their context.
+    fn hosted_from(&mut self, area: &TextArea, top: i64) -> std::result::Result<(Hosted<'_, 'a>, Ctx), Fault> {
+        let buffer = self.vm.slots[self.vm.buffer_slot].value;
+        let (begv, zv) = match self.vm.object_if(buffer) {
+            Some(Object::Buffer(b)) => {
+                let r = b.accessible();
+                let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
+                (pos(r.start)?, pos(r.end)?)
+            }
+            _ => return Err(unsupported("in a unibyte buffer")),
+        };
+        let cx = self.iterator_context(area, zv)?;
+        let view = Self::view(area, buffer, begv, zv);
+        let mut hosted = Hosted::new(Source::new(self, view, begv)?);
+        let cx = hosted_context(&mut hosted, cx, area)?;
+        if top > begv && !hosted.source().after_newline(top)? {
+            return Err(unsupported("of a displayed window that starts inside a line"));
+        }
+        hosted.reset(top)?;
+        Ok((hosted, cx))
+    }
+
+}
+
+/// pos_visible_p's answer: the glyph's text-area pixel position, the
+/// pixels of its row above and below the text area, its visible height,
+/// and the row.
+struct Visible { x: i64, y: i64, rtop: i64, rbot: i64, rowh: i64, vpos: i64 }
+
+/// buffer_posn_from_coords's answer.
+struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height: i64 }
+
+/// init_iterator's last visible x on a window-system frame without
+/// fringes, in the host's pixels: the text area less the truncation or
+/// continuation glyph's advance in the default face (xdisp.c:3510-3518).
+/// The host neither continues nor truncates a row.
+fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> std::result::Result<Ctx, Fault> {
+    let (advance, _) = hosted.default_advance(if cx.wrap == Wrap::Truncate { '$' } else { '\\' })?;
+    cx.last_visible_x = area.body_width - advance;
+    cx.breaks = false;
+    Ok(cx)
 }
 
 /// The start of the screen line window_text_pixel_size measures from,
