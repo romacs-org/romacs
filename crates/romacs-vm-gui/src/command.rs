@@ -107,6 +107,18 @@ mod tests {
         assert_eq!((out.command.as_deref(), printed(&mut vm, "last-command-event")), (Some("self-insert-command"), "10".into()));
     }
 
+    /// A command the active selection's deletion supersedes still consumes
+    /// the prefix argument (delsel.el makes it `ignore'). Pinned GNU, batch,
+    /// delete-selection-mode, "hello" with 2..4 selected, C-u C-d a: "halo".
+    #[test]
+    fn a_superseded_command_consumes_the_prefix_argument() {
+        let mut vm = logged();
+        vm.eval_source("(setq transient-mark-mode t delete-selection-mode t) (insert \"hello\") (set-mark 2) (goto-char 4)").unwrap();
+        vm.set_host_input(Some(Box::new(Keys([CommandEvent::Character(21), CommandEvent::Character(4), CommandEvent::Character(97)].into()))));
+        for _ in 0..3 { assert!(run(&mut vm).unwrap().signal.is_none()); }
+        assert_eq!(printed(&mut vm, "(list (buffer-string) prefix-arg mark-active)"), "(\"halo\" nil nil)");
+    }
+
     /// pre-command-hook runs before each command and post-command-hook
     /// after it, also after a command that signalled (command_loop_1
     /// runs it when it resumes).
