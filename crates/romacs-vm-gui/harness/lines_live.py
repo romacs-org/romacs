@@ -380,7 +380,9 @@ def check_return(args, report, check):
                 record = json.loads(line)
                 selected = next((c['window'] for c in record['cursors'] if c['active']), selected)
                 points.append((record['presentation'], next(p['point_byte'] for p in record['points'] if p['id'] == selected)))
-        before = [b for presentation, b in points if presentation < shown[0]['presentation']][-1]
+        # A reply names the last presentation submitted when its command
+        # ended: the paint of the state before that command.
+        before = [b for presentation, b in points if presentation <= shown[0]['presentation']][-1]
         after = [next(b for presentation, b in points if presentation > r['presentation']) for r in shown]
     report['keys'] = {'bindings': bindings, 'replies': shown, 'point_bytes': [before, *after], 'queued': queued}
     check('each inserted one newline at point', [after[0] - before, after[1] - after[0]] == [1, 1], [before, *after])
