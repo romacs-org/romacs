@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "df5649b2453f574400a2465f511376acb18e4ccff5ff035be5c476c3cb76e3f2",
+  "source_fingerprint": "ab3e0d4c154a4c99415267c2ae5934e7b7b8c83b294a58974e12834ba329518c",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1012,
-  "parsed_vm2_only": 1012
+  "parsed_total": 1013,
+  "parsed_vm2_only": 1013
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4952,6 +4952,11 @@
    "name": "value<",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/value_order.rs:6"
+  },
+  "variable-binding-locus": {
+   "name": "variable-binding-locus",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/buffer_locals.rs:35"
   },
   "vconcat": {
    "name": "vconcat",

@@ -57,3 +57,18 @@ fn syntax_table_p_matches_gnu() {
     let source = "(list (syntax-table-p (standard-syntax-table)) (syntax-table-p (make-char-table 'syntax-table)) (syntax-table-p (make-char-table 'foo)) (syntax-table-p 5))";
     assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(t t nil nil)");
 }
+
+/// data.c:2500 variable-binding-locus: the current buffer for a local
+/// binding (through an alias, and for a per-buffer C variable once set),
+/// the terminal for a KBOARD variable, else nil.
+#[test]
+fn variable_binding_locus_matches_gnu() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let source = "(progn (defvar vbl-x 1) (defvaralias 'vbl-y 'vbl-x) (set-buffer (get-buffer-create \"vbl\"))
+      (list (variable-binding-locus 'vbl-x) (progn (set (make-local-variable 'vbl-x) 2) (bufferp (variable-binding-locus 'vbl-x)))
+            (bufferp (variable-binding-locus 'vbl-y)) (variable-binding-locus 'fill-column)
+            (bufferp (progn (setq fill-column 3) (variable-binding-locus 'fill-column)))
+            (terminal-live-p (variable-binding-locus 'last-command)) (condition-case e (variable-binding-locus 5) (error e))))";
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(nil t t nil t t (wrong-type-argument symbolp 5))");
+}

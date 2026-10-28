@@ -260,6 +260,11 @@ mod leaf {
         pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
             self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
         }
+        /// Findirect_variable: the end of SYMBOL's variable alias chain.
+        pub(crate) fn indirect_variable_symbol(&self, symbol: Value) -> std::result::Result<Value, Fault> {
+            let slot = self.symbol_slot(symbol)?;
+            Ok(Value::reference(self.vm.indirect_variable(slot) + 1, 7))
+        }
         pub(crate) fn trapped_variable(&self, symbol: Value) -> std::result::Result<bool, Fault> {
             let slot = self.symbol_slot(symbol)?;
             Ok(self.vm.variable_trapped(self.vm.indirect_variable(slot)))
