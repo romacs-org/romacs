@@ -1058,6 +1058,8 @@ pub struct Vm {
     /// The slots insdel's bracket reads on every change, once resolved.
     change_slots: Option<insdel::ChangeSlots>,
     case_symbols_slot: usize,
+    /// print.c's print_number_index: the last print-circle label assigned.
+    print_number_index: usize,
     /// buffer-undo-list's per-buffer index, once looked up.
     undo_list_slot: u16,
     display_state: display::DisplayState,
@@ -1218,6 +1220,7 @@ impl Vm {
             kernel_stack: Vec::new(),
             change_slots: None,
             case_symbols_slot: usize::MAX,
+            print_number_index: 0,
             undo_list_slot: u16::MAX,
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
