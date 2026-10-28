@@ -1339,8 +1339,30 @@ pub(crate) struct PropertyPlan {
     /// Where GNU's interval walk starts changing text (the interval its
     /// retry check watches).
     pub first: ByteOffset,
-    properties: properties::Properties,
+    apply: PlanApply,
     undo: Vec<(i64, i64, Value, Value)>,
+}
+
+/// How a plan changes OBJECT's properties when installed: drop every
+/// interval (a nil plist over a whole string), or edit them in place, so a
+/// change costs its range rather than a copy of all the text's properties.
+enum PlanApply { Reset, Ops(Vec<PlanOp>) }
+
+enum PlanOp {
+    Put(std::ops::Range<ByteOffset>, String, Value),
+    Remove(std::ops::Range<ByteOffset>, String),
+    /// Every key the text has, removed over the range (set_properties).
+    Clear(std::ops::Range<ByteOffset>),
+}
+
+fn apply_plan_ops(properties: &mut properties::Properties, ops: Vec<PlanOp>) {
+    for op in ops {
+        match op {
+            PlanOp::Put(range, key, value) => properties.put(range, &key, value),
+            PlanOp::Remove(range, key) => properties.remove(range, &key),
+            PlanOp::Clear(range) => for key in properties.properties_keys() { properties.remove(range.clone(), &key) },
+        }
+    }
 }
 
 impl Vm {
@@ -1375,20 +1397,21 @@ impl Vm {
         };
         if !force && matches!(edit, PropertyEdit::Add(_)) && pairs.is_empty() { return Ok(None); }
         if !force && matches!(edit, PropertyEdit::Remove(_)) && names.is_empty() { return Ok(None); }
-        let Some((range, mut properties)) = self.text_property_region(start, end, object)? else {
+        let Some((range, has_intervals, runs)) = self.text_property_region(start, end, object)? else {
             return Ok(None);
         };
         if matches!(edit, PropertyEdit::Set(_)) && pairs.is_empty() {
             // A nil plist over a whole string drops its intervals; text
             // that never had any is left alone (nil).
             let whole = self.str_view(object).is_some_and(|s| range.start.0 == 0 && range.end.0 == s.bytes().len());
-            if !properties.has_intervals() && !force { return Ok(None); }
+            if !has_intervals && !force { return Ok(None); }
             if whole && !buffer_object(self, object) {
                 let first = range.start;
-                return Ok(Some(PropertyPlan { object, start: 0, end: 0, range, first, properties: properties::Properties::new(), undo: Vec::new() }));
+                return Ok(Some(PropertyPlan { object, start: 0, end: 0, range, first, apply: PlanApply::Reset, undo: Vec::new() }));
             }
         }
-        let old = properties.clone();
+        let get = |props: &[(String, Value)], key: &str| props.iter().find(|(k, _)| k == key).map(|(_, v)| *v);
+        let mut ops = Vec::new();
         let mut changed = matches!(edit, PropertyEdit::Set(_));
         // Undo entries (BEG END PROP OLD), interval by interval in order.
         let buffer = buffer_object(self, object);
@@ -1404,70 +1427,58 @@ impl Vm {
             PropertyEdit::Add(_) => {
                 let pairs = pairs.into_iter().map(|(k, v)| self.text_property_key(k).map(|key| (k, key, v)))
                     .collect::<std::result::Result<Vec<_>, _>>()?;
-                let mut at = range.start;
-                while at < range.end {
-                    let next = old.next_change(at, range.end);
+                for (run, props) in &runs {
                     for (symbol, key, value) in &pairs {
-                        let before = old.get_property(at, key);
+                        let before = get(props, key);
                         if before != Some(*value) {
                             changed = true;
-                            first.get_or_insert(at);
-                            if buffer { undo.push((char_at(self, at)?, char_at(self, next)?, *symbol, before.unwrap_or(Value::NIL))); }
+                            first.get_or_insert(run.start);
+                            if buffer { undo.push((char_at(self, run.start)?, char_at(self, run.end)?, *symbol, before.unwrap_or(Value::NIL))); }
                         }
                     }
-                    at = next;
                 }
-                for (_, key, value) in &pairs { properties.put(range.clone(), key, *value); }
+                for (_, key, value) in &pairs { ops.push(PlanOp::Put(range.clone(), key.to_string(), *value)); }
             }
             PropertyEdit::Face { face, append } => {
                 // add_properties with TEXT_PROPERTY_APPEND / _PREPEND.
                 let symbol = self.intern("face");
-                let mut at = range.start;
-                while at < range.end {
-                    let next = old.next_change(at, range.end);
-                    let before = old.get_property(at, "face");
+                for (run, props) in &runs {
+                    let before = get(props, "face");
                     if before != Some(*face) {
                         changed = true;
-                        first.get_or_insert(at);
-                        if buffer { undo.push((char_at(self, at)?, char_at(self, next)?, symbol, before.unwrap_or(Value::NIL))); }
+                        first.get_or_insert(run.start);
+                        if buffer { undo.push((char_at(self, run.start)?, char_at(self, run.end)?, symbol, before.unwrap_or(Value::NIL))); }
                         let combined = match before {
                             None => *face,
                             Some(old_face) => self.combined_face(old_face, *face, *append),
                         };
-                        properties.put(at..next, "face", combined);
+                        ops.push(PlanOp::Put(run.clone(), "face".into(), combined));
                     }
-                    at = next;
                 }
             }
             PropertyEdit::Remove(_) => {
                 let keys = names.iter().map(|&n| self.text_property_key(n).map(|key| (n, key)))
                     .collect::<std::result::Result<Vec<_>, _>>()?;
-                let mut at = range.start;
-                while at < range.end {
-                    let next = old.next_change(at, range.end);
+                for (run, props) in &runs {
                     for (symbol, key) in &keys {
-                        if let Some(before) = old.get_property(at, key) {
+                        if let Some(before) = get(props, key) {
                             changed = true;
-                            first.get_or_insert(at);
-                            if buffer { undo.push((char_at(self, at)?, char_at(self, next)?, *symbol, before)); }
+                            first.get_or_insert(run.start);
+                            if buffer { undo.push((char_at(self, run.start)?, char_at(self, run.end)?, *symbol, before)); }
                         }
                     }
-                    at = next;
                 }
-                for (_, key) in &keys { properties.remove(range.clone(), key); }
+                for (_, key) in &keys { ops.push(PlanOp::Remove(range.clone(), key.to_string())); }
             }
             PropertyEdit::Set(_) => {
                 let pairs = pairs.into_iter().map(|(k, v)| self.text_property_key(k).map(|key| (k, key, v)))
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 if buffer {
-                    let mut at = range.start;
-                    while at < range.end {
-                        let next = old.next_change(at, range.end);
-                        let (b, e) = (char_at(self, at)?, char_at(self, next)?);
-                        let present: Vec<(String, Value)> = old.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+                    for (run, present) in &runs {
+                        let (b, e) = (char_at(self, run.start)?, char_at(self, run.end)?);
                         // set_properties: each old property PROPERTIES gives
                         // another value, then each new one the text lacked.
-                        for (key, value) in &present {
+                        for (key, value) in present {
                             // property_value is Qunbound for a key PROPERTIES lacks.
                             let wanted = pairs.iter().find(|(_, k, _)| k == key).map(|(_, _, v)| *v);
                             if wanted != Some(*value) { let symbol = self.intern(key); undo.push((b, e, symbol, *value)); }
@@ -1475,18 +1486,17 @@ impl Vm {
                         for (symbol, key, _) in &pairs {
                             if !present.iter().any(|(k, _)| k == key) { undo.push((b, e, *symbol, Value::NIL)); }
                         }
-                        at = next;
                     }
                 }
-                for key in properties.properties_keys() { properties.remove(range.clone(), &key); }
+                ops.push(PlanOp::Clear(range.clone()));
                 // The newest key reads first; GNU keeps PROPERTIES' own order.
-                for (_, key, value) in pairs.iter().rev() { properties.put(range.clone(), key, *value); }
+                for (_, key, value) in pairs.iter().rev() { ops.push(PlanOp::Put(range.clone(), key.to_string(), *value)); }
             }
         }
         if !changed && !force { return Ok(None); }
         let (start, end) = if buffer { (char_at(self, range.start)?, char_at(self, range.end)?) } else { (0, 0) };
         let first = first.unwrap_or(range.start);
-        Ok(Some(PropertyPlan { object, start, end, range, first, properties, undo }))
+        Ok(Some(PropertyPlan { object, start, end, range, first, apply: PlanApply::Ops(ops), undo }))
     }
 
     /// modify_text_properties' tail for BUFFER, after its hooks: with HOOKS
@@ -1531,20 +1541,27 @@ impl Vm {
             self.slots[self.buffer_slot].value = current;
             result?;
         }
+        let install = |properties: &mut properties::Properties| match plan.apply {
+            PlanApply::Reset => *properties = properties::Properties::new(),
+            PlanApply::Ops(ops) => apply_plan_ops(properties, ops),
+        };
         match &mut self.objects[index] {
             Object::Buffer(buffer) => {
-                buffer.properties = plan.properties;
+                install(&mut buffer.properties);
                 self.display_state.version += 1;
             }
-            Object::String(string) | Object::RawString(string) => string.properties = plan.properties,
+            Object::String(string) | Object::RawString(string) => install(&mut string.properties),
             Object::Bytes(bytes) => {
                 let mut string = Box::new(data::LispString::from_bytes(bytes.clone(), false));
-                string.properties = plan.properties;
+                install(&mut string.properties);
                 self.objects[index] = if string.is_utf8() { Object::String(string) } else { Object::RawString(string) };
             }
             Object::ByteBuffer(buffer) => {
-                buffer.had_intervals |= plan.properties.has_intervals();
-                buffer.properties = plan.properties.to_map();
+                let mut properties = properties::Properties::from_map(&buffer.properties);
+                if buffer.had_intervals { properties.mark_intervals(); }
+                install(&mut properties);
+                buffer.had_intervals |= properties.has_intervals();
+                buffer.properties = properties.to_map();
                 self.display_state.version += 1;
             }
             _ => unreachable!(),
@@ -1603,13 +1620,16 @@ impl Vm {
     /// properties as a plist (symbols and values, traced once returned).
     pub(crate) fn property_run_at(&mut self, buffer: Value, at: ByteOffset) -> std::result::Result<(ByteOffset, Value), crate::prim::Fault> {
         use crate::prim::Fault;
-        let (properties, end) = match self.object(buffer).map_err(Fault::Error)? {
-            Object::Buffer(b) => (b.properties.clone(), ByteOffset(b.len_bytes())),
-            Object::ByteBuffer(b) => (properties::Properties::from_map(&b.properties), ByteOffset(b.bytes.len())),
+        let run = |properties: &properties::Properties, end: ByteOffset| {
+            let run_end = if at < end { properties.next_change(at, end) } else { end };
+            let pairs: Vec<(String, Value)> = properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+            (run_end, pairs)
+        };
+        let (run_end, pairs) = match self.object(buffer).map_err(Fault::Error)? {
+            Object::Buffer(b) => run(&b.properties, ByteOffset(b.len_bytes())),
+            Object::ByteBuffer(b) => run(&properties::Properties::from_map(&b.properties), ByteOffset(b.bytes.len())),
             _ => return Err(Fault::Error("buffer required".into())),
         };
-        let run_end = if at < end { properties.next_change(at, end) } else { end };
-        let pairs: Vec<(String, Value)> = properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
         let mut items = Vec::with_capacity(pairs.len() * 2);
         for (key, value) in pairs { items.push(self.intern(&key)); items.push(value); }
         Ok((run_end, self.list_value(&items)))
@@ -1728,7 +1748,7 @@ impl Vm {
         end: Value,
         object: Value,
     ) -> std::result::Result<
-        Option<(std::ops::Range<ByteOffset>, properties::Properties)>,
+        Option<(std::ops::Range<ByteOffset>, bool, Vec<(std::ops::Range<ByteOffset>, Vec<(String, Value)>)>)>,
         crate::prim::Fault,
     > {
         use crate::prim::Fault;
@@ -1750,7 +1770,7 @@ impl Vm {
         }
         let (a, z) = (a.min(z), a.max(z));
         let range_error = || Fault::Range(start, end);
-        let (range, properties) = if let Some(string) = string {
+        let (range, has_intervals, runs) = if let Some(string) = string {
             if a < 0 || z as u64 > string.len() as u64 {
                 return Err(range_error());
             }
@@ -1765,11 +1785,12 @@ impl Vm {
                     index
                 })
             };
-            let properties = match self.object_if(object) {
-                Some(Object::String(s) | Object::RawString(s)) => s.properties.clone(),
-                _ => properties::Properties::new(),
+            let range = offset(a as usize)..offset(z as usize);
+            let (has, runs) = match self.object_if(object) {
+                Some(Object::String(s) | Object::RawString(s)) => (s.properties.has_intervals(), s.properties.runs(range.clone())),
+                _ => (false, properties::Properties::new().runs(range.clone())),
             };
-            (offset(a as usize)..offset(z as usize), properties)
+            (range, has, runs)
         } else {
             if a < 1 {
                 return Err(range_error());
@@ -1785,7 +1806,7 @@ impl Vm {
                     if a < buffer.accessible().start || z > buffer.accessible().end {
                         return Err(range_error());
                     }
-                    (a..z, buffer.properties.clone())
+                    (a..z, buffer.properties.has_intervals(), buffer.properties.runs(a..z))
                 }
                 Object::ByteBuffer(buffer) => {
                     let range = ByteOffset(a as usize - 1)..ByteOffset(z as usize - 1);
@@ -1795,12 +1816,13 @@ impl Vm {
                     }
                     let mut properties = properties::Properties::from_map(&buffer.properties);
                     if buffer.had_intervals { properties.mark_intervals(); }
-                    (range, properties)
+                    let runs = properties.runs(range.clone());
+                    (range, properties.has_intervals(), runs)
                 }
                 _ => unreachable!(),
             }
         };
-        Ok(Some((range, properties)))
+        Ok(Some((range, has_intervals, runs)))
     }
 
     pub(crate) fn text_property_variable(

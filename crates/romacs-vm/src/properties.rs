@@ -468,6 +468,18 @@ impl Properties {
     pub fn properties_keys(&self) -> Vec<String> {
         self.layers.keys().cloned().collect()
     }
+    /// The runs of equal properties inside RANGE, in order, each with its
+    /// properties: a snapshot that costs RANGE's runs, not the whole text.
+    pub fn runs(&self, range: Range<ByteOffset>) -> Vec<(Range<ByteOffset>, Vec<(String, Value)>)> {
+        let mut runs = Vec::new();
+        let mut at = range.start;
+        while at < range.end {
+            let next = self.next_change(at, range.end);
+            runs.push((at..next, self.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect()));
+            at = next;
+        }
+        runs
+    }
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
