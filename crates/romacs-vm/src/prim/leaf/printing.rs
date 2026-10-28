@@ -109,6 +109,33 @@ impl Leaf<'_> {
         Ok(object)
     }
 
+    /// Whether printing TEXT to the buffer or marker STREAM runs Lisp.
+    /// print_finish's insert_1_both prepares a nonempty insertion as
+    /// `insert' does; its signal_after_change runs even for empty TEXT.
+    pub(crate) fn print_runs_lisp(&mut self, text: Value, stream: Value) -> std::result::Result<bool, Fault> {
+        let buffer = self.print_buffer(stream)?.unwrap();
+        let current = self.current_buffer()?;
+        self.vm.slots[self.vm.buffer_slot].value = buffer;
+        let runs = self.insertion_runs_lisp(text, stream);
+        self.vm.slots[self.vm.buffer_slot].value = current;
+        runs
+    }
+
+    fn insertion_runs_lisp(&mut self, text: Value, stream: Value) -> std::result::Result<bool, Fault> {
+        let (point, begv, zv) = self.vm.point_extent()?;
+        let at = if self.kind(stream) == Kind::Marker {
+            let at = self.vm.marker_position_value(stream).map_err(Fault::Error)?.as_integer().map_err(Fault::Error)?;
+            if at < begv || at > zv {
+                return Err(Fault::Error("Marker is outside the accessible part of the buffer".into()));
+            }
+            at
+        } else { point };
+        if self.string_view(text)?.bytes().is_empty() { return self.vm.after_change_runs(false, false); }
+        let prepared = self.vm.prepare_change(at, at)?;
+        let insert_hooks = prepared.behind != Value::NIL || prepared.in_front != Value::NIL;
+        Ok(prepared.before || self.vm.after_change_runs(false, insert_hooks)?)
+    }
+
     pub(crate) fn print_into_buffer(&mut self, text: Value, stream: Value) -> std::result::Result<(), Fault> {
         let buffer = self.print_buffer(stream)?.unwrap();
         let current = self.current_buffer()?;
@@ -158,17 +185,6 @@ impl Leaf<'_> {
         }
         self.fileio_check_insertion(inhibit)?;
         let hooks = self.intern("inhibit-modification-hooks");
-        if self.variable_value(hooks)?.unwrap_or(Value::NIL) == Value::NIL {
-            for name in ["before-change-functions", "after-change-functions", "first-change-hook"] {
-                let name = self.intern(name);
-                if self.variable_value(name)?.is_some_and(|value| value != Value::NIL) {
-                    return Err(Fault::Error("printing to buffers with change hooks is not supported".into()));
-                }
-            }
-            if self.fileio_has_insertion_hooks()? {
-                return Err(Fault::Error("printing to buffers with change hooks is not supported".into()));
-            }
-        }
         let multibyte = self.casing_multibyte()?;
         let bytes = if !multibyte && view.is_multibyte() {
             view.chars().map(|code| u8::try_from(code).map_err(|_| Fault::NotUnicode(text))).collect::<std::result::Result<Vec<_>, _>>()?
