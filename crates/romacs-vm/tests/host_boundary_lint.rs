@@ -12,7 +12,8 @@
 //! per line, where LINE or API may be `*`. An entry that matches nothing
 //! fails, so the list cannot rot. `ROMACS_HOST_LINT_BLESS=1` rewrites the
 //! list for the current tree: kept reasons follow their (path, API), and new
-//! matches are marked `pending`.
+//! matches are marked `pending`, which fails until it is migrated or given a
+//! reason.
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -514,7 +515,7 @@ fn parse_allow(text: &str) -> Vec<Entry> {
         let (site, api) = (words.next().unwrap(), words.next().unwrap_or_else(|| panic!("no API: {l}")));
         let reason = words.collect::<Vec<_>>().join(" ");
         let (path, line) = site.rsplit_once(':').unwrap_or_else(|| panic!("no line: {l}"));
-        assert!(!reason.is_empty(), "no reason: {l}");
+        assert!(!reason.is_empty() && reason != "pending", "no reason: {l}");
         assert!(api == "*" || APIS.iter().any(|a| a.name == api), "unknown API: {l}");
         Entry {
             path: path.to_owned(),

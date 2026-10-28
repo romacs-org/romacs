@@ -147,7 +147,7 @@ impl Table {
             let mut status = 0;
             let done = unsafe { libc::waitpid(*pid, &mut status, libc::WNOHANG) } != 0;
             if done && let Some(file) = file {
-                let _ = std::fs::remove_file(file);
+                let _ = crate::host::remove_file(file);
             }
             !done
         });
@@ -274,7 +274,7 @@ fn reap(orphan: &Orphan) -> bool {
         return false;
     }
     if let Some(file) = &orphan.file {
-        let _ = std::fs::remove_file(file);
+        let _ = crate::host::remove_file(file);
     }
     true
 }
@@ -424,7 +424,7 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
 pub(crate) fn accessible_directory(dir: &[u8]) -> io::Result<()> {
     let path = std::ffi::CString::new(dir).map_err(|_| io::Error::from_raw_os_error(libc::ENOENT))?;
     use std::os::unix::ffi::OsStrExt;
-    if !std::fs::metadata(std::ffi::OsStr::from_bytes(dir))?.is_dir() {
+    if !crate::host::metadata(std::ffi::OsStr::from_bytes(dir))?.file_type().is_dir() {
         return Err(io::Error::from_raw_os_error(libc::ENOTDIR));
     }
     if unsafe { libc::access(path.as_ptr(), libc::X_OK) } != 0 {

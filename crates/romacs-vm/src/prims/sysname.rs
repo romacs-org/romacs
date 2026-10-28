@@ -2,8 +2,6 @@
 use super::*;
 
 pub(crate) fn initial_value(vm: &mut Vm) -> Value {
-    // Linux exposes the same kernel nodename as GNU's gethostname, without an
-    // unsafe syscall at the primitive boundary. Do not consult HOSTNAME or DNS.
     let host = crate::host::system_name().unwrap_or_else(|_| "unknown".into());
     let host = host.strip_suffix('\n').unwrap_or(&host).replace([' ', '\t'], "-");
     vm.allocate_object(data::Object::String(Box::new(

@@ -38,13 +38,11 @@ impl Random {
     }
     /// init_random: a seed from the system's entropy, else the time and pid.
     pub(crate) fn from_entropy() -> Self {
-        use std::io::Read;
-        let mut bytes = [0u8; 4];
-        let seed = match std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)) {
-            Ok(()) => u32::from_ne_bytes(bytes),
+        let seed = match crate::host::random_seed() {
+            Ok(bytes) => u32::from_ne_bytes(bytes),
             Err(_) => {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-                (now.as_secs() as u32) ^ now.subsec_nanos() ^ std::process::id()
+                let now = crate::host::clock().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                (now.as_secs() as u32) ^ now.subsec_nanos() ^ crate::host::pid()
             }
         };
         Random::seeded(seed)

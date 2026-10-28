@@ -1,7 +1,7 @@
-//! The host boundary: every host query and effect the VM and its embedders
-//! make goes through this module, so a world builder can later record and
+//! The host boundary: the VM's and its embedders' host queries and file
+//! effects go through this module, so a world builder can later record and
 //! classify each one. `tests/host_boundary_lint.rs` keeps other sources from
-//! calling the host directly.
+//! calling the host APIs it names directly.
 //!
 //! Only `Mode::Off` exists, in which each function is a direct passthrough:
 //! it returns exactly what the host call returns.
@@ -114,6 +114,12 @@ pub fn absolute(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     std::path::absolute(path)
 }
 
+/// faccessat with the effective ids: whether MODE access to PATH is allowed.
+pub fn access(path: &CStr, mode: i32) -> io::Result<()> {
+    if unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), mode, libc::AT_EACCESS) } == 0 { Ok(()) }
+    else { Err(io::Error::last_os_error()) }
+}
+
 pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
     let mut usage = std::mem::MaybeUninit::<libc::statvfs>::uninit();
     if unsafe { libc::statvfs(path.as_ptr(), usage.as_mut_ptr()) } != 0 {
@@ -192,7 +198,8 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
 
 // Machine.
 
-/// The kernel nodename, which GNU's gethostname returns.
+/// The kernel nodename, which GNU's gethostname returns, read without an
+/// unsafe syscall. HOSTNAME and DNS are not consulted.
 pub fn system_name() -> io::Result<String> {
     std::fs::read_to_string("/proc/sys/kernel/hostname")
 }

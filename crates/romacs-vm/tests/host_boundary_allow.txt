@@ -1,123 +1,13 @@
 # Host boundary allowlist: PATH:LINE API REASON (host_boundary_lint.rs).
 # LINE or API may be *. Every entry must match a current site.
-crates/romacs-display-protocol/src/frame_time.rs:45 Instant::now pending
-crates/romacs-display-protocol/src/input_latency.rs:246 std::env::var_os pending
-crates/romacs-display-protocol/src/input_latency.rs:408 OpenOptions pending
-crates/romacs-display-protocol/src/input_latency.rs:408 std::fs pending
-crates/romacs-display-protocol/src/present_trace.rs:37 OpenOptions pending
-crates/romacs-display-protocol/src/present_trace.rs:37 std::fs pending
-crates/romacs-display-protocol/src/present_trace.rs:155 std::env::var_os pending
-crates/romacs-display-protocol/src/present_trace.rs:173 OpenOptions pending
-crates/romacs-display-protocol/src/present_trace.rs:219 libc::clock_gettime pending
-crates/romacs-regex-engine/src/dfa.rs:2103 std::env::var pending
-crates/romacs-regex-engine/src/dfa.rs:2122 std::env::var pending
-crates/romacs-regex-engine/src/dfa.rs:2125 std::env::var pending
-crates/romacs-regex-engine/src/dfa.rs:2167 std::env::var pending
-crates/romacs-regex-engine/src/engine.rs:8605 std::env::var pending
-crates/romacs-vm/src/bin/romacs-vm-census.rs:63 std::fs pending
-crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs pending
-crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs pending
-crates/romacs-vm/src/bin/romacs-vm-image.rs:42 std::fs pending
-crates/romacs-vm/src/image.rs:65 metadata pending
-crates/romacs-vm/src/image.rs:173 std::fs pending
-crates/romacs-vm/src/image.rs:185 File::open pending
-crates/romacs-vm/src/image.rs:186 metadata pending
-crates/romacs-vm/src/image.rs:367 std::fs pending
-crates/romacs-vm/src/image.rs:372 std::process::id pending
-crates/romacs-vm/src/image.rs:373 OpenOptions pending
-crates/romacs-vm/src/image.rs:373 std::fs pending
-crates/romacs-vm/src/image.rs:383 std::fs pending
-crates/romacs-vm/src/image.rs:386 std::fs pending
-crates/romacs-vm/src/image.rs:392 File::open pending
-crates/romacs-vm/src/image.rs:397 std::fs pending
-crates/romacs-vm/src/lib.rs:1342 slot:exec-path pending
-crates/romacs-vm/src/lib.rs:1342 slot:initial-environment pending
-crates/romacs-vm/src/lib.rs:1342 slot:process-environment pending
-crates/romacs-vm/src/prim/leaf/fileio.rs:90 Instant::now pending
-crates/romacs-vm/src/prim/leaf/fileio.rs:92 Instant::now pending
-crates/romacs-vm/src/prim/leaf/fileio.rs:100 Instant::now pending
-crates/romacs-vm/src/prim/leaf/filesave.rs:5 std::fs pending
-crates/romacs-vm/src/prim/leaf/filesave.rs:8 std::fs pending
-crates/romacs-vm/src/prim/leaf/filesave.rs:21 std::fs pending
-crates/romacs-vm/src/prim/leaf/process.rs:702 OpenOptions pending
-crates/romacs-vm/src/prim/leaf/process.rs:702 std::fs pending
-crates/romacs-vm/src/prim/leaf/process.rs:1069 File::open pending
-crates/romacs-vm/src/prim/leaf/process.rs:1075 OpenOptions pending
-crates/romacs-vm/src/prim/leaf/process.rs:1075 std::fs pending
-crates/romacs-vm/src/prim/leaf/process.rs:1077 OpenOptions pending
-crates/romacs-vm/src/prim/leaf/process.rs:1077 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:212 metadata pending
-crates/romacs-vm/src/prims/filesave.rs:212 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:212 symlink_metadata pending
-crates/romacs-vm/src/prims/filesave.rs:278 File::open pending
-crates/romacs-vm/src/prims/filesave.rs:289 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:289 symlink_metadata pending
-crates/romacs-vm/src/prims/filesave.rs:337 Path::is_file pending
-crates/romacs-vm/src/prims/filesave.rs:337 metadata pending
-crates/romacs-vm/src/prims/filesave.rs:337 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:349 Path::is_dir pending
-crates/romacs-vm/src/prims/filesave.rs:357 SystemTime::now pending
-crates/romacs-vm/src/prims/filesave.rs:376 OpenOptions pending
-crates/romacs-vm/src/prims/filesave.rs:376 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:377 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:378 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:378 symlink_metadata pending
-crates/romacs-vm/src/prims/filesave.rs:430 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:484 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:505 OpenOptions pending
-crates/romacs-vm/src/prims/filesave.rs:505 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:507 metadata pending
-crates/romacs-vm/src/prims/filesave.rs:508 Path::is_file pending
-crates/romacs-vm/src/prims/filesave.rs:509 Path::is_dir pending
-crates/romacs-vm/src/prims/filesave.rs:516 OpenOptions pending
-crates/romacs-vm/src/prims/filesave.rs:516 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:521 OpenOptions pending
-crates/romacs-vm/src/prims/filesave.rs:521 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:529 metadata pending
-crates/romacs-vm/src/prims/filesave.rs:552 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:554 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:595 std::fs pending
-crates/romacs-vm/src/prims/filesave.rs:624 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:70 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:70 symlink_metadata pending
-crates/romacs-vm/src/prims/savejourney.rs:74 Path::is_dir pending
-crates/romacs-vm/src/prims/savejourney.rs:76 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:103 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:243 metadata pending
-crates/romacs-vm/src/prims/savejourney.rs:243 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:244 Path::is_dir pending
-crates/romacs-vm/src/prims/savejourney.rs:245 Path::is_file pending
-crates/romacs-vm/src/prims/savejourney.rs:290 metadata pending
-crates/romacs-vm/src/prims/savejourney.rs:290 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:291 read_dir pending
-crates/romacs-vm/src/prims/savejourney.rs:291 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:306 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:306 symlink_metadata pending
-crates/romacs-vm/src/prims/savejourney.rs:308 Path::is_dir pending
-crates/romacs-vm/src/prims/savejourney.rs:308 Path::is_file pending
-crates/romacs-vm/src/prims/savejourney.rs:318 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:318 symlink_metadata pending
-crates/romacs-vm/src/prims/savejourney.rs:329 std::fs pending
-crates/romacs-vm/src/prims/savejourney.rs:329 symlink_metadata pending
-crates/romacs-vm/src/prims/savejourney.rs:331 metadata pending
-crates/romacs-vm/src/prims/savejourney.rs:331 std::fs pending
-crates/romacs-vm/src/process_jobs.rs:116 Instant::now pending
-crates/romacs-vm/src/process_jobs.rs:120 Instant::now pending
-crates/romacs-vm/src/process_jobs.rs:207 Instant::now pending
-crates/romacs-vm/src/random.rs:43 File::open pending
-crates/romacs-vm/src/random.rs:46 SystemTime::now pending
-crates/romacs-vm/src/random.rs:47 std::process::id pending
-crates/romacs-vm/src/source_cache.rs:56 read_dir pending
-crates/romacs-vm/src/source_cache.rs:56 std::fs pending
-crates/romacs-vm/src/source_cache.rs:63 std::fs pending
-crates/romacs-vm/src/source_cache.rs:116 std::fs pending
-crates/romacs-vm/src/source_cache/persistent.rs:72 std::process::id pending
-crates/romacs-vm/src/source_cache/persistent.rs:73 std::fs pending
-crates/romacs-vm/src/source_cache/persistent.rs:74 std::fs pending
-crates/romacs-vm/src/source_cache/persistent.rs:84 std::fs pending
-crates/romacs-vm/src/subprocess.rs:150 std::fs pending
-crates/romacs-vm/src/subprocess.rs:277 std::fs pending
-crates/romacs-vm/src/subprocess.rs:427 Path::is_dir pending
-crates/romacs-vm/src/subprocess.rs:427 metadata pending
-crates/romacs-vm/src/subprocess.rs:427 std::fs pending
-gnu-tests/runner/src/main.rs:310 std::fs pending
+crates/romacs-display-protocol/src/frame_time.rs:* * romacs-vm depends on this crate, so it cannot call host.rs; the display event clock, not reached by the batch VM
+crates/romacs-display-protocol/src/input_latency.rs:* * romacs-vm depends on this crate, so it cannot call host.rs; GUI input-latency trace behind ROMACS_INPUT_LATENCY_FILE, not reached by the batch VM
+crates/romacs-display-protocol/src/present_trace.rs:* * romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
+crates/romacs-regex-engine/src/dfa.rs:* std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/engine.rs:* std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_ANCHOR_ALT developer knob, read once, that selects a matcher strategy
+crates/romacs-vm/src/image.rs:* * the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/bin/romacs-vm-census.rs:* * bin adapter that builds no worlds
+crates/romacs-vm/src/bin/romacs-vm-image.rs:* * bin adapter that builds no worlds
+crates/romacs-vm/src/lib.rs:* slot:process-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:* slot:initial-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:* slot:exec-path declares the environment specials by name; reads no slot

@@ -53,14 +53,14 @@ impl Vm {
             Primitive::CacheClear => {
                 self.clear_source_cache();
                 if let Some(store) = &self.source_cache.store {
-                    for file in std::fs::read_dir(store).map_err(|e| e.to_string())? {
+                    for file in crate::host::read_dir(store).map_err(|e| e.to_string())? {
                         let file = file.map_err(|e| e.to_string())?;
                         if file
                             .file_name()
                             .to_str()
                             .is_some_and(|s| s.starts_with("source-") && s.len() == 71)
                         {
-                            std::fs::remove_file(file.path()).map_err(|e| e.to_string())?;
+                            crate::host::remove_file(file.path()).map_err(|e| e.to_string())?;
                         }
                     }
                 }
@@ -113,7 +113,7 @@ impl Vm {
         roots.extend(self.source_cache.prepared.iter().map(|p| p.function));
     }
     pub fn set_source_cache_store(&mut self, path: PathBuf) -> Result<()> {
-        std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        crate::host::create_dir_all(&path).map_err(|e| e.to_string())?;
         self.source_cache.store = Some(path);
         Ok(())
     }
