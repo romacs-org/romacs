@@ -8,6 +8,15 @@
 
 ;;; Code:
 
+;; Under --loadup GNU's Lisp has already defined most of the commands below
+;; (simple.el, register.el, delsel.el): they are GNU's there, and Romacs's
+;; versions stand in only where GNU's Lisp did not define the name.
+(defmacro romacs-editing--stand-in (name arglist &rest body)
+  "Define NAME with ARGLIST and BODY unless GNU's Lisp already defined it."
+  (declare (indent defun) (doc-string 3))
+  `(unless (and (fboundp 'symbol-file) (symbol-file ',name 'defun))
+     (defun ,name ,arglist ,@body)))
+
 (defvar values nil)
 (defvar read-expression-history nil)
 (defvar eval-expression-print-length 12)
@@ -49,7 +58,7 @@
 (setq transient-mark-mode t)
 (defvar delete-selection-mode t)
 
-(defun delete-selection-mode (&optional arg)
+(romacs-editing--stand-in delete-selection-mode (&optional arg)
   "Toggle replacement of active selections by ordinary typing and delete keys.
 With ARG, enable for positive values and disable otherwise."
   (interactive "P")
@@ -73,24 +82,24 @@ Plain deletion never adds text to the kill ring.  Programmatic edits are unchang
 (put 'delete-char 'delete-selection 'supersede)
 (put 'delete-backward-char 'delete-selection 'supersede)
 
-(defun region-active-p ()
+(romacs-editing--stand-in region-active-p ()
   "Return non-nil when this buffer has an active transient region."
   (and transient-mark-mode mark-active (not (null (mark t)))))
 
-(defun use-region-p ()
+(romacs-editing--stand-in use-region-p ()
   "Return non-nil for an active nonempty region, or an explicitly enabled empty one."
   (and (region-active-p)
        (or use-empty-active-region (/= (region-beginning) (region-end)))))
 
-(defun use-region-beginning ()
+(romacs-editing--stand-in use-region-beginning ()
   "Return the active usable region's beginning, or nil."
   (and (use-region-p) (region-beginning)))
 
-(defun use-region-end ()
+(romacs-editing--stand-in use-region-end ()
   "Return the active usable region's end, or nil."
   (and (use-region-p) (region-end)))
 
-(defun activate-mark (&optional no-tmm)
+(romacs-editing--stand-in activate-mark (&optional no-tmm)
   "Activate this buffer's ordinary mark and run its activation hook."
   (when (mark t)
     (unless (region-active-p)
@@ -100,7 +109,7 @@ Plain deletion never adds text to the kill ring.  Programmatic edits are unchang
         (setq transient-mark-mode 'lambda))
       (run-hooks 'activate-mark-hook))))
 
-(defun deactivate-mark (&optional force)
+(romacs-editing--stand-in deactivate-mark (&optional force)
   "Deactivate the ordinary mark without modifying text or clipboard ownership."
   (when (or force (region-active-p))
     (when (or (eq transient-mark-mode 'lambda) (eq (car-safe transient-mark-mode) 'only))
@@ -108,7 +117,7 @@ Plain deletion never adds text to the kill ring.  Programmatic edits are unchang
     (setq mark-active nil)
     (run-hooks 'deactivate-mark-hook)))
 
-(defun exchange-point-and-mark (&optional arg)
+(romacs-editing--stand-in exchange-point-and-mark (&optional arg)
   "Exchange point and mark, activating the region unless ARG is non-nil."
   (interactive "P")
   (let ((old (mark t)))
@@ -118,13 +127,13 @@ Plain deletion never adds text to the kill ring.  Programmatic edits are unchang
     (if arg (deactivate-mark t) (activate-mark)))
   nil)
 
-(defun keyboard-quit ()
+(romacs-editing--stand-in keyboard-quit ()
   "Cancel editor interaction and deactivate the current region."
   (interactive)
   (deactivate-mark t)
   (signal 'quit nil))
 
-(defun end-of-buffer (&optional arg)
+(romacs-editing--stand-in end-of-buffer (&optional arg)
   "Move to the accessible end, preserving Romacs's minimal reveal policy.
 A numeric ARG selects tenths from the end; a universal prefix suppresses mark pushing."
   (interactive "P")
@@ -200,7 +209,7 @@ A numeric ARG selects tenths from the end; a universal prefix suppresses mark pu
                      romacs-prompt--input-start (1+ (length prompt))))))
     result))
 
-(defun eval-expression (exp &optional insert-value no-truncate char-print-limit)
+(romacs-editing--stand-in eval-expression (exp &optional insert-value no-truncate char-print-limit)
   "Evaluate EXP lexically in the calling buffer and retain its value in `values'.
 Interactively read one expression with history; INSERT-VALUE inserts its printed value.
 This Romacs adapter does not enter GNU's debugger or add integer character annotations."
@@ -219,7 +228,7 @@ This Romacs adapter does not enter GNU's debugger or add integer character annot
 (make-variable-buffer-local 'romacs-yank-start)
 (make-variable-buffer-local 'romacs-yank-end)
 
-(defun kill-append (string before-p)
+(romacs-editing--stand-in kill-append (string before-p)
   "Append STRING to the latest kill, or prepend when BEFORE-P is non-nil."
   (kill-new (if before-p (concat string (car kill-ring))
               (concat (car kill-ring) string)) t))
@@ -230,7 +239,7 @@ This Romacs adapter does not enter GNU's debugger or add integer character annot
     (unless position (signal 'user-error '("The mark is not set now, so there is no region")))
     (list position (point))))
 
-(defun copy-region-as-kill (beg end &optional region)
+(romacs-editing--stand-in copy-region-as-kill (beg end &optional region)
   "Copy the ordinary region to the shared kill ring without changing text."
   (interactive (romacs-region-arguments))
   (let ((text (buffer-substring (min beg end) (max beg end))))
@@ -238,12 +247,12 @@ This Romacs adapter does not enter GNU's debugger or add integer character annot
   (deactivate-mark t)
   nil)
 
-(defun kill-ring-save (beg end &optional region)
+(romacs-editing--stand-in kill-ring-save (beg end &optional region)
   "Copy BEG through END to the shared kill ring."
   (interactive (romacs-region-arguments))
   (copy-region-as-kill beg end region))
 
-(defun kill-region (beg end &optional region)
+(romacs-editing--stand-in kill-region (beg end &optional region)
   "Kill BEG through END, concatenating consecutive kills in their direction.
 Read-only text is copied before deletion signals its ordinary read-only error."
   (interactive (romacs-region-arguments))
@@ -252,12 +261,12 @@ Read-only text is copied before deletion signals its ordinary read-only error."
   (delete-region beg end)
   nil)
 
-(defun append-next-kill (&optional arg)
+(romacs-editing--stand-in append-next-kill (&optional arg)
   "Make the next kill append to the current kill-ring entry."
   (interactive "P")
   (setq this-command 'kill-region))
 
-(defun kill-line (&optional arg)
+(romacs-editing--stand-in kill-line (&optional arg)
   "Kill to the line end, or ARG line beginnings, using the shared kill ring."
   (interactive "P")
   (let* ((beg (point))
@@ -268,7 +277,7 @@ Read-only text is copied before deletion signals its ordinary read-only error."
                (point))))
     (kill-region beg end)))
 
-(defun yank (&optional arg)
+(romacs-editing--stand-in yank (&optional arg)
   "Insert a shared kill-ring entry and remember its exact marker bounds."
   (interactive "*P")
   (let ((text (current-kill (if (or (null arg) (consp arg)) 0 (1- (prefix-numeric-value arg))))))
@@ -281,7 +290,7 @@ Read-only text is copied before deletion signals its ordinary read-only error."
     (deactivate-mark t))
   nil)
 
-(defun yank-pop (&optional arg)
+(romacs-editing--stand-in yank-pop (&optional arg)
   "Replace the previous yank with another kill-ring entry."
   (interactive "*p")
   (unless (and (eq last-command 'yank)
@@ -303,7 +312,7 @@ Read-only text is copied before deletion signals its ordinary read-only error."
     (deactivate-mark t))
   nil)
 
-(defun mark-whole-buffer ()
+(romacs-editing--stand-in mark-whole-buffer ()
   "Select the entire accessible buffer."
   (interactive)
   (push-mark (point) t)
@@ -313,14 +322,14 @@ Read-only text is copied before deletion signals its ordinary read-only error."
 (defvar register-alist nil)
 (defvar romacs-register-key nil)
 
-(defun set-register (register value)
+(romacs-editing--stand-in set-register (register value)
   "Store VALUE in character REGISTER."
   (unless (integerp register) (signal 'wrong-type-argument (list 'characterp register)))
   (let ((entry (assq register register-alist)))
     (if entry (setcdr entry value) (setq register-alist (cons (cons register value) register-alist))))
   value)
 
-(defun get-register (register)
+(romacs-editing--stand-in get-register (register)
   "Return the value in REGISTER, or nil."
   (cdr (assq register register-alist)))
 
@@ -341,28 +350,28 @@ Read-only text is copied before deletion signals its ordinary read-only error."
     (unless romacs-register-key (signal 'quit nil))
     romacs-register-key))
 
-(defun copy-to-register (register start end &optional delete-flag)
+(romacs-editing--stand-in copy-to-register (register start end &optional delete-flag)
   "Copy START through END to REGISTER, optionally deleting the source."
   (interactive (list (romacs-read-register "Copy to register: ") (region-beginning) (region-end) current-prefix-arg))
   (set-register register (buffer-substring (min start end) (max start end)))
   (when delete-flag (delete-region start end))
   (deactivate-mark t))
 
-(defun append-to-register (register start end &optional delete-flag)
+(romacs-editing--stand-in append-to-register (register start end &optional delete-flag)
   "Append the region to a text REGISTER, optionally deleting the source."
   (interactive (list (romacs-read-register "Append to register: ") (region-beginning) (region-end) current-prefix-arg))
   (set-register register (concat (or (get-register register) "") (buffer-substring (min start end) (max start end))))
   (when delete-flag (delete-region start end))
   (deactivate-mark t))
 
-(defun prepend-to-register (register start end &optional delete-flag)
+(romacs-editing--stand-in prepend-to-register (register start end &optional delete-flag)
   "Prepend the region to a text REGISTER, optionally deleting the source."
   (interactive (list (romacs-read-register "Prepend to register: ") (region-beginning) (region-end) current-prefix-arg))
   (set-register register (concat (buffer-substring (min start end) (max start end)) (or (get-register register) "")))
   (when delete-flag (delete-region start end))
   (deactivate-mark t))
 
-(defun insert-register (register &optional arg)
+(romacs-editing--stand-in insert-register (register &optional arg)
   "Insert a text or number REGISTER, leaving mark at its other boundary."
   (interactive (list (romacs-read-register "Insert register: ") current-prefix-arg))
   (let ((value (get-register register)))
@@ -374,13 +383,13 @@ Read-only text is copied before deletion signals its ordinary read-only error."
     (unless arg (exchange-point-and-mark t)))
   nil)
 
-(defun point-to-register (register &optional arg)
+(romacs-editing--stand-in point-to-register (register &optional arg)
   "Save the current buffer position as a moving marker in REGISTER."
   (interactive (list (romacs-read-register "Point to register: ") current-prefix-arg))
   (when arg (signal 'user-error '("Frame and window registers are not supported")))
   (set-register register (copy-marker (point))))
 
-(defun jump-to-register (register &optional arg)
+(romacs-editing--stand-in jump-to-register (register &optional arg)
   "Jump to the live buffer and position saved in REGISTER."
   (interactive (list (romacs-read-register "Jump to register: ") current-prefix-arg))
   (let* ((marker (get-register register))
