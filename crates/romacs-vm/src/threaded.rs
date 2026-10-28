@@ -1666,19 +1666,11 @@ fn closure_arity_error(e: &mut Engine<'_>, function: usize, argc: usize) -> Valu
 }
 /// GNU eval.c funcall_general: a function cell that resolves to nothing is
 /// `void-function'; any other non-function object (a string, a number, a
-/// vector, a cons that is not a lambda list) is `invalid-function'. A
-/// `(lambda ...)` list keeps `void-function': GNU would call it, VM2 does not
-/// (VM2-ALIAS1).
+/// vector, a cons that is not a lambda list) is `invalid-function'.
 #[cold]
-fn uncallable_condition(e: &mut Engine<'_>, target: Value) -> &'static str {
+fn uncallable_condition(_e: &mut Engine<'_>, target: Value) -> &'static str {
     if target == Value::UNBOUND || target == Value::NIL || target == Value::TRUE {
         return "void-function";
-    }
-    if target.tag() == 3 {
-        let lambda = Value::reference(e.vm.slot("lambda") + 1, 7);
-        if e.vm.cons_pair(target).is_ok_and(|(head, _)| head == lambda) {
-            return "void-function";
-        }
     }
     "invalid-function"
 }
@@ -1844,7 +1836,7 @@ unsafe fn resolve_head(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Va
                 None => Value::UNBOUND,
             };
         }
-        if !matches!(target.tag(), 4 | 6) {
+        if !matches!(target.tag(), 4 | 6) && !lambda_list(e, target) {
             let condition = uncallable_condition(e, target);
             return raise(e, condition, &[function]);
         }
@@ -2034,7 +2026,7 @@ unsafe fn direct_generic(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> 
             return raise(e, "void-function", &[Value::reference(i.b + 1, 7)]);
         }
         // An autoload cell is resolved from its symbol, which it must name.
-        if target.tag() == 7 || target.tag() == 3 && e.vm.autoload_object(target) {
+        if target.tag() == 7 || target.tag() == 3 && (e.vm.autoload_object(target) || lambda_list(e, target)) {
             return invoke_full(e, r, pc, Value::reference(i.b + 1, 7), i.d, i.e);
         }
         // GNU eval.c:3158-3160 names the called SYMBOL, not its cell's value.
@@ -2329,6 +2321,13 @@ unsafe fn invoke_full(
             enter_native(e, r, pc, target, start, argc);
             return match autoload_then(e, r, function, target) {
                 Some(r) => t2_invoke_full(e, r, pc, function, start, argc),
+                None => Value::UNBOUND,
+            };
+        }
+        if lambda_list(e, target) {
+            enter_native(e, r, pc, target, start, argc);
+            return match lambda_list_then(e, r, target) {
+                Some((r, closure)) => t2_invoke_full(e, r, pc, closure, start, argc),
                 None => Value::UNBOUND,
             };
         }
@@ -2764,6 +2763,13 @@ unsafe fn t2_dispatch(
             enter_native(e, r, pc, target, start, argc);
             return match autoload_then(e, r, function, target) {
                 Some(r) => t2_dispatch(e, r, pc, function, start, argc),
+                None => Value::UNBOUND,
+            };
+        }
+        if lambda_list(e, target) {
+            enter_native(e, r, pc, target, start, argc);
+            return match lambda_list_then(e, r, target) {
+                Some((r, closure)) => t2_dispatch(e, r, pc, closure, start, argc),
                 None => Value::UNBOUND,
             };
         }
@@ -3254,14 +3260,38 @@ unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Opti
         }
     }
 }
-/// eval.c `Fautoload_do_load (FUNDEF, FUNCTION, Qnil)` for a call site:
-/// `force_lazy`'s discipline (the suspended register stack leaves the
-/// collector's view, collection is inhibited, every frame pointer is rebased
-/// because the load can widen the registers). Returns the rebased caller
-/// registers, or None with the load's own condition pending.
+/// eval.c `Fautoload_do_load (FUNDEF, FUNCTION, Qnil)` for a call site.
+/// Returns the rebased caller registers, or None with the load's own
+/// condition pending.
 #[cold]
 #[inline(never)]
 unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fundef: Value) -> Option<*mut Value> {
+    unsafe { nested_then(e, r, |vm| vm.autoload_do_load(fundef, function, Value::NIL)).map(|(r, _)| r) }
+}
+/// eval.c funcall_lambda of a `(lambda ARGS . BODY)' list: GNU interprets
+/// it with dynamic binding (lexenv nil). VM2 evaluates the list in that
+/// dialect, as `(function LIST)', and calls the closure; the list itself
+/// stays the function. Returns the rebased caller registers and the
+/// closure, or None with the condition pending.
+#[cold]
+#[inline(never)]
+unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
+    unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
+}
+/// GNU `(lambda ...)' list functions: a list headed by `lambda' whose cdr
+/// is a cons (funcall_lambda signals `invalid-function' otherwise).
+fn lambda_list(e: &mut Engine<'_>, target: Value) -> bool {
+    target.tag() == 3 && {
+        let lambda = Value::reference(e.vm.slot("lambda") + 1, 7);
+        e.vm.cons_pair(target).is_ok_and(|(head, tail)| head == lambda && tail.tag() == 3)
+    }
+}
+/// Run RUN, which may load and compile Lisp, from a call site:
+/// `force_lazy`'s discipline (the suspended register stack leaves the
+/// collector's view, collection is inhibited, every frame pointer is rebased
+/// because the nested code can widen the registers). Returns the rebased
+/// caller registers and RUN's value, or None with its condition pending.
+unsafe fn nested_then(e: &mut Engine<'_>, r: *mut Value, run: impl FnOnce(&mut Vm) -> Result<Value>) -> Option<(*mut Value, Value)> {
     unsafe {
         let old_base = e.vm.stack.as_ptr();
         let current = r.offset_from(old_base) as usize;
@@ -3280,7 +3310,7 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
         e.vm.loader.propagate += 1;
-        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.autoload_do_load(fundef, function, Value::NIL));
+        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || run(e.vm));
         e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
@@ -3304,7 +3334,7 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         let r = base.add(current);
         e.regs = r;
         match result {
-            Ok(_) => Some(r),
+            Ok(value) => Some((r, value)),
             Err(error) => {
                 if let Some(escape) = e.vm.propagated_escape.take() {
                     e.escape = Some(escape);

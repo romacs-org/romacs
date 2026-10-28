@@ -105,11 +105,11 @@ impl Vm {
                 let mut is_macro = false;
                 if definition.tag() == 3 && self.resolve_keymap(definition).is_none() {
                     let (head, tail) = self.cons_pair(definition)?;
+                    // Ffset (data.c:928) stores any other list as given: a
+                    // `(lambda ...)' or `(autoload ...)' descriptor.
                     if head.tag() == 7 && self.symbol_names.get(head.index(7)?.saturating_sub(1)).is_some_and(|name| name == "macro") {
                         definition = tail;
                         is_macro = true;
-                    } else {
-                        return Err("list function descriptors are not yet supported".into());
                     }
                 }
                 self.autoload_note_defalias(slot);
