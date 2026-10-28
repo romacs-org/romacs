@@ -164,7 +164,6 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
     use std::io::{Read, Write};
     use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
-    use std::process::Stdio;
 
     fn nonblocking(fd: i32) -> std::io::Result<()> {
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -207,9 +206,9 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
     let child = crate::host::command(&request.argv[0])
         .args(&request.argv[1..])
         .current_dir(&request.directory)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .process_group(0)
         .spawn();
     let mut child = match child {

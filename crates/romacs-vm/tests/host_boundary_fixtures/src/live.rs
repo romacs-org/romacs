@@ -1,11 +1,11 @@
-use std::fs; // expect: std::fs
+use std::fs; // expect: std::fs use-host
 
 fn planted(p: &Path, dir: &Path, file: &File) {
     std::fs::write(p, b""); // expect: std::fs
     File::open(p); // expect: File::open
     std::fs::File::create(p); // expect: File::create
     std::os::unix::fs::symlink(a, b); // expect: std::fs
-    use std::os::unix::fs::{MetadataExt, symlink}; // expect: std::fs
+    use std::os::unix::fs::{MetadataExt, symlink}; // expect: std::fs use-host
     OpenOptions::new(); // expect: OpenOptions
     dir.read_dir(); // expect: read_dir
     file.metadata(); // expect: metadata
@@ -64,9 +64,9 @@ fn planted(p: &Path, dir: &Path, file: &File) {
 }
 
 // Ordinary spellings that name a forbidden item another way.
-use std::env::{var}; // expect: std::env::var
+use std::env::{var}; // expect: std::env::var use-host
 fn imported() { var("PATH"); }
-use std::time::Instant as Clock; // expect: use-alias
+use std::time::Instant as Clock; // expect: use-alias use-host
 fn aliased() { Clock::now(); }
 fn qualified(p: &Path) {
     Path::is_file(p); // expect: Path::is_file
@@ -80,18 +80,36 @@ fn qualified(p: &Path) {
         var_os("A");
 }
 use std::{
-    process::id, // expect: std::process::id
-    env as environment, // expect: use-alias
+    process::id, // expect: std::process::id use-host
+    env as environment, // expect: use-alias use-host
 };
-use std::process::id as pid; // expect: std::process::id use-alias
-use std::{self as s}; // expect: use-alias
+use std::process::id as pid; // expect: std::process::id use-alias use-host
+use std::{self as s}; // expect: use-alias use-host
 use libc::*; // expect: use-glob
 use crate::shim::libc::*; // expect: use-glob
 use libc::{getuid, c_int}; // expect: libc::getuid
-pub use std::fs::read as slurp; // expect: std::fs use-alias
+pub use std::fs::read as slurp; // expect: std::fs use-alias use-host
 extern crate libc as c; // expect: use-alias
 type P = std::path::Path; // expect: type-alias
 type Clock2 = Instant; // expect: type-alias
+type Clock3<const N: usize> = std::time::Instant; // expect: type-alias
+fn generic() { <Clock3<0>>::now(); }
+// A host module imported plainly has a local name a later `use` could
+// rename, so the plain import is the violation.
+use std::env; // expect: use-host
+use env as e;
+fn chained() { e::var_os("HOME"); }
+mod imports {
+    use std::env; // expect: use-host
+    use std::time; // expect: use-host
+    use std::os::unix::fs::{self as _, MetadataExt}; // expect: std::fs use-host
+    use std::fs::{File, OpenOptions}; // expect: std::fs OpenOptions use-host
+    use File as Handle; // expect: use-alias
+    use std::time::{Duration, Instant}; // expect: use-host
+    use std::process::Stdio; // expect: use-host
+    use std::path::Path;
+    use Path as Probe; // expect: use-alias
+}
 fn through_other_modules() {
     ghost::read_dir(p); // expect: read_dir
     ghost::libc::kill(p, 0); // expect: libc::process

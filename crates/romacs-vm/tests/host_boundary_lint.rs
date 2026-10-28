@@ -10,10 +10,14 @@
 //! does not separate a spelling, and `#[cfg(test)]` items are skipped, since
 //! test code builds no worlds. A forbidden item has one name outside host.rs:
 //! its path. So every `use` tree is flattened and each imported path is
-//! checked as a spelling, no `use` from std, core, alloc or libc may rename
-//! or glob (`use-alias`, `use-glob`), and no type alias may name a type whose
-//! associated functions are forbidden (`type-alias`). Type-qualified calls
-//! are matched in both `Type::f` and `<Type>::f` forms.
+//! checked as a spelling; no `use` may import a host-bearing std module, a
+//! non-pure item under one, or a module above one (`use-host`), so no host
+//! module has a local name a later `use` could rename; no `use` from std,
+//! core, alloc or libc may rename or glob, and no `use` from anywhere may
+//! rename a type whose associated functions are forbidden (`use-alias`,
+//! `use-glob`); and no type alias, generic or not, may name such a type
+//! (`type-alias`).
+//! Type-qualified calls are matched in both `Type::f` and `<Type>::f` forms.
 //!
 //! Every match needs an entry in `host_boundary_allow.txt`, one exact
 //! `PATH:LINE API REASON` per line. An entry that matches nothing fails, so
@@ -159,13 +163,22 @@ const APIS: &[Api] = &[
 ];
 
 /// The import forms that would give a forbidden item a second name.
+const USE_HOST: &str = "use-host";
 const USE_ALIAS: &str = "use-alias";
 const USE_GLOB: &str = "use-glob";
 const TYPE_ALIAS: &str = "type-alias";
-const FORMS: &[&str] = &[USE_ALIAS, USE_GLOB, TYPE_ALIAS];
+const FORMS: &[&str] = &[USE_HOST, USE_ALIAS, USE_GLOB, TYPE_ALIAS];
+/// The std paths that bear host APIs, which outside host.rs are only ever
+/// spelled in full.
+const HOST_PATHS: &[&[&str]] = &[
+    &["std", "env"], &["std", "fs"], &["std", "process"], &["std", "net"],
+    &["std", "time", "Instant"], &["std", "time", "SystemTime"], &["std", "path", "absolute"],
+    &["std", "os", "unix", "fs"], &["std", "os", "unix", "net"],
+];
 /// The crates whose items no import may rename or glob.
 const ROOTS: &[&str] = &["std", "core", "alloc", "libc"];
-/// Types with forbidden associated functions, which no type alias may name.
+/// Types with forbidden associated functions, which no type alias may name
+/// and no `use` may rename.
 const TYPES: &[&str] = &[
     "Path", "PathBuf", "File", "OpenOptions", "DirBuilder", "Instant", "SystemTime", "Command",
     "TcpStream", "TcpListener", "UdpSocket", "UnixStream", "UnixListener", "UnixDatagram",
@@ -657,16 +670,27 @@ fn use_tree(words: &[&str], toks: &[(usize, Tok)], mut i: usize, prefix: &mut Ve
     i
 }
 
-/// The lines of `type NAME = …;` aliases that name one of TYPES.
+/// The lines of `type NAME<…> = …;` aliases and associated types that name
+/// one of TYPES.
 fn type_aliases(code: &[u8], toks: &[(usize, Tok)]) -> Vec<usize> {
     let word = |t: Tok| match t {
         Tok::Ident(a, b) => std::str::from_utf8(&code[a..b]).unwrap(),
         _ => "",
     };
     let line = |at: usize| code[..at].iter().filter(|&&b| b == b'\n').count() + 1;
-    (0..toks.len()).filter(|&i| word(toks[i].1) == "type" && toks.get(i + 2).is_some_and(|t| t.1 == Tok::Punct(b'=')))
+    let named = |i: usize| toks.get(i + 1).is_some_and(|t| matches!(t.1, Tok::Ident(..)));
+    let raw = |i: usize| i > 0 && toks[i - 1].1 == Tok::Punct(b'#');
+    (0..toks.len()).filter(|&i| word(toks[i].1) == "type" && named(i) && !raw(i))
         .filter(|&i| toks[i..].iter().map(|t| t.1).take_while(|&t| t != Tok::Punct(b';')).any(|t| TYPES.contains(&word(t))))
         .map(|i| line(toks[i].0)).collect()
+}
+
+/// Whether PATH is one of HOST_PATHS, under one, or a module above one. A
+/// pure fs item or extension trait under one names no host API; renaming
+/// one of them that is in TYPES (`File`) is a `use-alias`.
+fn host_import(path: &[String]) -> bool {
+    let pure = |h: &[&str]| path.len() > h.len() && path.last().is_some_and(|n| PURE_FS.contains(&n.as_str()) || n.ends_with("Ext"));
+    !path.is_empty() && HOST_PATHS.iter().any(|h| h.iter().zip(path).all(|(a, b)| a == b) && !pure(h))
 }
 
 fn violations(rel: &str, v: &Views) -> Vec<Violation> {
@@ -680,8 +704,12 @@ fn violations(rel: &str, v: &Views) -> Vec<Violation> {
     for import in imports(&v.code, &toks) {
         let root = import.path.first().map(String::as_str).unwrap_or("");
         let reaches = ROOTS.contains(&root) || import.path.iter().any(|s| s == "libc");
+        let typed = import.path.last().is_some_and(|s| TYPES.contains(&s.as_str()));
+        if host_import(&import.path) {
+            out.push(Violation { path: rel.to_owned(), line: import.line, api: USE_HOST });
+        }
         let form = match import.bind {
-            Bind::Alias if reaches => Some(USE_ALIAS),
+            Bind::Alias if reaches || typed => Some(USE_ALIAS),
             Bind::Glob if reaches => Some(USE_GLOB),
             _ => None,
         };

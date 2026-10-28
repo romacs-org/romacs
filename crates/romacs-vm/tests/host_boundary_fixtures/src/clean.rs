@@ -23,12 +23,14 @@ fn near_misses(p: &Path, meta: &Metadata) {
     let _: std::fs::File = std::fs::File::from_raw_fd(fd);
     let _ = std::fs::Permissions::from_mode(0o644);
     fn types(_: &std::fs::Metadata, _: std::fs::FileType) {}
-    use std::os::unix::fs::MetadataExt;
-    use std::os::unix::{ffi::OsStrExt, fs::{OpenOptionsExt, PermissionsExt}};
+    use std::os::unix::{ffi::OsStrExt, io::AsRawFd};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::fs::{File, Metadata};
     use std::io::Write as _;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use std::path::{Path, PathBuf};
-    use std::process::Stdio;
+    use crate::process::Stdio;
+    use crate::env as environment;
     use crate::host::{self, Input};
     use super::*;
     meta.file_type().is_symlink();
@@ -41,6 +43,7 @@ fn near_misses(p: &Path, meta: &Metadata) {
     libc::waitpid(pid, s, 0);
     type Item = u8;
     type Out = std::result::Result<Value, Fault>;
+    type Pair<T: Copy, const N: usize> = [T; N];
 }
 
 #[cfg(test)]
