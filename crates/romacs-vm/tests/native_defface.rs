@@ -11,6 +11,17 @@ fn native_defface_needs_no_gnu_custom_files() {
     assert_eq!(answer(&mut vm, "(fboundp 'custom-declare-face)"), "nil");
 }
 
+/// cus-face.el's custom-declare-face: the spec and documentation a face was
+/// declared with, where GNU's own `defface` looks before declaring it again.
+#[test]
+fn native_defface_records_the_declared_spec_and_documentation() {
+    let mut vm = Vm::new();
+    answer(&mut vm, "(setq native-spec-count 0)");
+    answer(&mut vm, "(defface native-spec-face (progn (setq native-spec-count (1+ native-spec-count)) '((t (:foreground \"red\")))) \"Declared\")");
+    assert_eq!(answer(&mut vm, "(list native-spec-count (get 'native-spec-face 'face-defface-spec) (get 'native-spec-face 'face-documentation) (internal-get-lisp-face-attribute 'native-spec-face :foreground))"),
+               "(1 ((t (:foreground \"red\"))) \"Declared\" \"red\")");
+}
+
 #[test]
 fn native_defface_registers_separate_global_and_frame_attributes() {
     let mut vm = Vm::new();
