@@ -148,3 +148,29 @@ fn an_unrepresentable_replace_changes_nothing() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(got, "\"((error \\\"VM2 insert-file-contents of raw bytes into a multibyte buffer is unsupported\\\") \\\"abcXYZdef\\\" 10 t)\"");
 }
+
+// REPLACE's read-only checks are those of the ranges it changes: the
+// deleted middle (delete-region) and the insertion point after it, not
+// the original point. Point at 2 under read-only text changes nothing.
+const READ_ONLY_CASES: &str = r##"
+(progn (set-buffer (generate-new-buffer "ifc-ro")) (insert "abcXYZdef") (let ((inhibit-read-only t)) (put-text-property RO 'read-only t)) (goto-char 2) (list (condition-case e (cadr (insert-file-contents FILE nil nil nil t)) (error e)) (buffer-substring-no-properties 1 (point-max)) (point)))
+"##;
+
+#[test]
+fn insert_file_contents_replace_checks_the_ranges_it_changes() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-ro-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f1"), b"abc12def").unwrap();
+    std::fs::write(dir.join("same"), b"abcXYZdef").unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let failures: Vec<String> = [("1 3", "f1"), ("1 3", "same"), ("4 7", "f1"), ("3 4", "f1")].iter()
+        .map(|(ro, file)| READ_ONLY_CASES.trim().replace("RO", ro).replace("FILE", &lisp(&dir.join(file))))
+        .filter_map(|expression| {
+            let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
+            (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
+        })
+        .collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

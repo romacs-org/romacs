@@ -549,9 +549,25 @@ fn replace_deleted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let r = saved.to_vec();
     let (from, middle) = cx.pair(r[MIDDLE]).expect("replace middle register");
     if cx.string_chars(middle) == Some(0) { return insert_decoded(cx, r, None); }
-    // The middle goes where the old one was (SET_PT_BOTH (temp, ...)).
+    // The middle goes where the old one was (SET_PT_BOTH (temp, ...)); its
+    // insertion is checked there, after the deletion, as insert_from_buffer's
+    // prepare_to_modify_buffer checks it.
     cx.goto_char_position(from.integer_value().expect("replace position"))?;
+    let inhibit = var(cx, "inhibit-read-only")?;
+    if let Err(refusal) = cx.fileio_check_insertion(inhibit) {
+        restore_point(cx, &r)?;
+        return Err(refusal);
+    }
     prepare(cx, r, RESUME_REPLACE)
+}
+
+/// restore_point_unwind for a REPLACE: point back from its marker.
+fn restore_point(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<(), Fault> {
+    if let Some((marker, _)) = cx.pair(r[POINT]) {
+        if let Some(Some(point)) = cx.marker_position(marker) { cx.goto_char_position(point)?; }
+        cx.release_watch(marker)?;
+    }
+    Ok(())
 }
 
 /// The byte ranges of OLD and NEW that differ, as fileio.c:4758-4805
@@ -774,10 +790,7 @@ fn formatted(cx: &mut Leaf<'_>, inserted: Value, saved: &[Value]) -> Next {
 /// fileio.c:5308-5333: a visited missing file signals now; else
 /// (ORIG INSERTED).
 fn finish(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
-    if let Some((marker, _)) = cx.pair(r[POINT]) {
-        if let Some(Some(point)) = cx.marker_position(marker) { cx.goto_char_position(point)?; }
-        cx.release_watch(marker)?;
-    }
+    restore_point(cx, r)?;
     let errno = r[ERRNO].integer_value().unwrap_or(0) as i32;
     if errno != 0 {
         let error = std::io::Error::from_raw_os_error(errno);

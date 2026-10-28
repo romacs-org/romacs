@@ -299,7 +299,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
     if !meta.is_file() {
         return Err(refuse("insert-file-contents of a non-regular file"));
     }
-    let inhibit = var(cx, "inhibit-read-only")?; if !visiting && end_offset > beg_offset { cx.fileio_check_insertion(inhibit)?; }
+    let inhibit = var(cx, "inhibit-read-only")?; if !visiting && end_offset > beg_offset && replace == Value::NIL { cx.fileio_check_insertion(inhibit)?; } // REPLACE checks the ranges it changes.
     let mut bytes = vec![];
     {
         use std::io::{Read as _, Seek, SeekFrom};
