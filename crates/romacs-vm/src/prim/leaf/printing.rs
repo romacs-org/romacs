@@ -123,7 +123,8 @@ impl Leaf<'_> {
 
     fn insertion_runs_lisp(&mut self, text: Value, stream: Value) -> std::result::Result<bool, Fault> {
         let (point, begv, zv) = self.vm.point_extent()?;
-        let at = if self.kind(stream) == Kind::Marker {
+        let marker = self.kind(stream) == Kind::Marker;
+        let at = if marker {
             let at = self.vm.marker_position_value(stream).map_err(Fault::Error)?.as_integer().map_err(Fault::Error)?;
             if at < begv || at > zv {
                 return Err(Fault::Error("Marker is outside the accessible part of the buffer".into()));
@@ -131,7 +132,8 @@ impl Leaf<'_> {
             at
         } else { point };
         if self.string_view(text)?.bytes().is_empty() { return self.vm.after_change_runs(false, false); }
-        let prepared = self.vm.prepare_change(at, at)?;
+        // print_prepare moved point to a marker stream before any refusal.
+        let prepared = self.vm.prepare_change(at, at).inspect_err(|_| if marker { let _ = self.goto_char_position(at); })?;
         let insert_hooks = prepared.behind != Value::NIL || prepared.in_front != Value::NIL;
         Ok(prepared.before || self.vm.after_change_runs(false, insert_hooks)?)
     }

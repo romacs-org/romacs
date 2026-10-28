@@ -61,6 +61,4 @@ fn printing_errors_restore_current_buffer_and_keep_text_atomic() {
     let mut vm = Vm::new();
     let source = "(let ((outer (current-buffer)) (b (get-buffer-create \"print-error\"))) (unwind-protect (list (condition-case err (prin1 'object b '((unsupported . t))) (error (car err))) (eq outer (current-buffer)) (with-current-buffer b (buffer-string))) (kill-buffer b)))";
     assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(error t \"\")");
-    let source = "(with-temp-buffer (insert \"ab\") (let ((before-change-functions (list (lambda (&rest args) (error \"hook-must-run\"))))) (list (condition-case err (princ \"x\" (current-buffer)) (error (car err))) (buffer-string))))";
-    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(error \"ab\")");
 }

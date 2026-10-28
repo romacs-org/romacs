@@ -20,6 +20,8 @@ const CASES: &str = r##"
 (progn (setq after-change-functions nil) (list (princ "b" (current-buffer)) (buffer-string) (reverse log)))
 (let ((other (current-buffer))) (set-buffer (get-buffer-create "*other*")) (list (princ "o" other) (buffer-name) (with-current-buffer other (buffer-string)) (reverse log)))
 (progn (setq after-change-functions (list (lambda (&rest _) (error "boom")))) (list (condition-case e (princ "e" (current-buffer)) (error e)) (buffer-string) after-change-functions))
+(progn (setq before-change-functions (list (lambda (&rest _) (error "hook-must-run")))) (list (condition-case e (princ "x" (current-buffer)) (error e)) (buffer-string) (point)))
+(let ((m (copy-marker 3))) (setq buffer-read-only t) (list (condition-case e (princ "x" m) (error (car e))) (point) (buffer-string)))
 "##;
 
 fn oracle(expression: &str) -> String {
