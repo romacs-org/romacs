@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "2afeade5d94b2eb87c159a5e236a186f7dcefecb775f9599b1f6a7a5be73a584",
+  "input_hash": "b0745c0ed73c4f65c7e86bc8fe50793d6585d4e99afb10919449581f7b8f59e9",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,352 +12,352 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 261,
-  "symbols": 594,
+  "rows": 262,
+  "symbols": 595,
   "rows_without_symbols": 15
  },
  "by_symbol": {
   "#x400000": [
-   84
+   85
   ],
   "(max-char)": [
-   196
+   197
   ],
   "+": [
-   68
+   69
   ],
   "/proc/stat": [
    10
   ],
   "1+": [
-   211
+   212
   ],
   ":20": [
-   84
+   85
   ],
   "<=": [
-   68
+   69
   ],
   "=": [
-   68
+   69
   ],
   "[:class:]": [
-   260
+   261
   ],
   "abort-minibuffers": [
-   62
+   63
   ],
   "accept-process-output": [
-   167,
-   168
+   168,
+   169
   ],
   "add-name-to-file": [
    8
   ],
   "add-text-properties": [
-   210,
-   249
+   211,
+   250
   ],
   "add-variable-watcher": [
-   221,
-   222
+   222,
+   223
   ],
   "after-change-functions": [
-   161
+   162
   ],
   "after-insert-file-set-coding": [
-   250
+   251
   ],
   "after-load-alist": [
-   236
-  ],
-  "all-completions": [
-   245,
-   246
-  ],
-  "append": [
-   103
-  ],
-  "apply": [
-   104,
-   126,
-   217
-  ],
-  "aref": [
-   75,
-   84
-  ],
-  "arrayp": [
-   50
-  ],
-  "aset": [
-   75,
-   84,
-   90
-  ],
-  "autoload": [
-   225
-  ],
-  "autoload-do-load": [
-   225,
    237
   ],
+  "all-completions": [
+   246,
+   247
+  ],
+  "append": [
+   104
+  ],
+  "apply": [
+   105,
+   127,
+   218
+  ],
+  "aref": [
+   76,
+   85
+  ],
+  "arrayp": [
+   51
+  ],
+  "aset": [
+   76,
+   85,
+   91
+  ],
+  "autoload": [
+   226
+  ],
+  "autoload-do-load": [
+   226,
+   238
+  ],
   "b->last_window_start": [
-   174
+   175
   ],
   "backtrace--locals": [
-   248
+   249
   ],
   "backward-char": [
-   137
+   138
   ],
   "backward-prefix-chars": [
-   150
+   151
   ],
   "bare-symbol-p": [
-   50
+   51
   ],
   "base64-decode-region": [
-   165
+   166
   ],
   "before-change-functions": [
-   161
+   162
   ],
   "beginning-of-line": [
-   137
+   138
   ],
   "bool-vector": [
-   82,
-   208
+   83,
+   209
   ],
   "bool-vector-p": [
-   82
+   83
   ],
   "boundp": [
-   232
+   233
   ],
   "buffer-chars-modified-tick": [
-   96
+   97
   ],
   "buffer-file-coding-system": [
-   95,
-   250
+   96,
+   251
   ],
   "buffer-file-name": [
-   95
+   96
   ],
   "buffer-local-value": [
-   40
+   41
   ],
   "buffer-local-variables": [
-   40
+   41
   ],
   "buffer-modified-p": [
-   60,
-   96
+   61,
+   97
   ],
   "buffer-modified-tick": [
-   96
+   97
   ],
   "buffer-name": [
-   57,
-   58
+   58,
+   59
   ],
   "buffer-name buffer-modified-p": [
-   59
+   60
   ],
   "buffer-read-only": [
    1
   ],
   "buffer-text-pixel-size": [
-   188
+   189
   ],
   "buffer-undo-list": [
-   161
+   162
   ],
   "byte-code-function-p": [
-   38,
-   229
+   39,
+   230
   ],
   "byte-compile": [
-   48
+   49
   ],
   "call-interactively": [
-   71,
-   140
+   72,
+   141
   ],
   "call-process": [
-   167,
-   168
+   168,
+   169
   ],
   "call-process-region": [
-   167
+   168
   ],
   "capitalize": [
-   53
-  ],
-  "capitalize case-symbols-as-words": [
    54
   ],
+  "capitalize case-symbols-as-words": [
+   55
+  ],
   "car": [
-   219
+   220
   ],
   "ceiling": [
-   192
+   193
   ],
   "char-category-set": [
-   216
+   217
   ],
   "char-code-property-description": [
-   39
+   40
   ],
   "char-or-string-p": [
-   50
+   51
   ],
   "char-syntax": [
-   150
+   151
   ],
   "char-table-range": [
-   75
+   76
   ],
   "characterp": [
-   84
+   85
   ],
   "cl-print-object": [
-   248
+   249
   ],
   "cl-type-of": [
-   247
+   248
   ],
   "clear-composition-cache": [
-   159
+   160
   ],
   "closurep": [
-   103
+   104
   ],
   "coding-system-for-read": [
-   95
+   96
   ],
   "coding-system-for-write": [
-   95
+   96
   ],
   "color-defined-p": [
-   169
+   170
   ],
   "color-values": [
-   169
+   170
   ],
   "combine-after-change-calls": [
-   161
+   162
   ],
   "command-error-default-function": [
-   140
+   141
   ],
   "command-execute": [
-   63
+   64
   ],
   "command-history": [
-   71
+   72
   ],
   "command-line-args": [
-   87
+   88
   ],
   "command-remapping": [
-   100
+   101
   ],
   "compare-strings": [
-   246
+   247
   ],
   "compiled-function-p": [
-   229
+   230
   ],
   "composition-function-table": [
-   159
+   160
   ],
   "concat": [
    19,
-   197,
    198,
    199,
-   235
+   200,
+   236
   ],
   "condition-case": [
-   230,
-   237
+   231,
+   238
   ],
   "copy-case-table": [
-   53
+   54
   ],
   "copy-file": [
    8
   ],
   "copy-sequence": [
-   75,
-   101,
-   235
+   76,
+   102,
+   236
   ],
   "copy-syntax-table": [
-   149
+   150
   ],
   "crates/romacs-vm/evidence/file-name-handler/": [
-   47
+   48
   ],
   "ctl-x-map": [
-   135
+   136
   ],
   "current-case-table": [
-   53
+   54
   ],
   "current-column": [
    3
   ],
   "current-global-map": [
-   97
+   98
   ],
   "current-idle-time": [
-   167
+   168
   ],
   "current-indentation": [
    3
   ],
   "current-load-list": [
-   236
+   237
   ],
   "current-prefix-arg": [
-   71
+   72
   ],
   "current-time": [
-   92
+   93
   ],
   "current-time-list": [
-   92
+   93
   ],
   "current-time-string": [
-   83
+   84
   ],
   "current-time-zone": [
-   83
+   84
   ],
   "current-window-configuration": [
-   175
+   176
   ],
   "custom-set": [
-   131
+   132
   ],
   "custom-set-faces": [
-   112
+   113
   ],
   "custom-type": [
-   131
+   132
   ],
   "custom-variable-p": [
-   131
+   132
   ],
   "daemon-initialized": [
-   172
+   173
   ],
   "daemonp": [
-   172
+   173
   ],
   "debug-on-error": [
    20
@@ -366,94 +366,94 @@
    12
   ],
   "decode-time": [
-   83
+   84
   ],
   "defalias": [
-   98,
    99,
-   225,
-   227
+   100,
+   226,
+   228
   ],
   "default-boundp": [
-   231
-  ],
-  "default-directory": [
-   94
-  ],
-  "default-file-name-coding-system": [
-   250
-  ],
-  "default-value": [
-   231,
    232
   ],
+  "default-directory": [
+   95
+  ],
+  "default-file-name-coding-system": [
+   251
+  ],
+  "default-value": [
+   232,
+   233
+  ],
   "defcustom": [
-   131
+   132
   ],
   "defface": [
-   111,
-   114,
+   112,
    115,
-   120,
+   116,
    121,
-   145,
-   252,
-   256
+   122,
+   146,
+   253,
+   257
   ],
   "define-category": [
-   216
+   217
   ],
   "define-charset-internal": [
-   157,
-   213
-  ],
-  "define-coding-system": [
-   250
-  ],
-  "define-coding-system-alias": [
+   158,
    214
   ],
+  "define-coding-system": [
+   251
+  ],
+  "define-coding-system-alias": [
+   215
+  ],
   "define-error": [
-   226
+   227
   ],
   "define-hash-table-test": [
-   127
+   128
   ],
   "defined-colors": [
-   169
+   170
   ],
   "defmacro": [
-   104
+   105
   ],
   "defun": [
-   133,
-   227
+   134,
+   228
   ],
   "defvar": [
    15,
-   132,
    133,
-   134
+   134,
+   135
   ],
   "defvaralias": [
-   221,
-   224
+   222,
+   225
   ],
   "delete": [
-   235
+   236
   ],
   "delete-backward-char": [
-   137
+   138
   ],
   "delete-char": [
-   137
+   138
   ],
   "delete-other-windows-internal": [
-   177,
-   179
+   178,
+   180
   ],
   "ding": [
-   138
+   139
   ],
   "dired": [
    0
@@ -462,54 +462,54 @@
    0
   ],
   "discard-input": [
-   63
+   64
   ],
   "display-color-cells": [
-   169
+   170
   ],
   "display-color-p": [
-   121,
-   169
+   122,
+   170
   ],
   "display-graphic-p": [
-   121,
-   169
+   122,
+   170
   ],
   "display-grayscale-p": [
-   169
+   170
   ],
   "display-mm-height": [
-   169
+   170
   ],
   "display-mm-width": [
-   169
+   170
   ],
   "display-monitor-attributes-list": [
-   169
+   170
   ],
   "display-pixel-height": [
-   169
+   170
   ],
   "display-pixel-width": [
-   169
+   170
   ],
   "display-planes": [
-   169
+   170
   ],
   "display-visual-class": [
-   169
+   170
   ],
   "display-warning": [
-   224
+   225
   ],
   "do-after-load-evaluation": [
-   236
+   237
   ],
   "documentation-property": [
-   99
+   100
   ],
   "downcase_char_code_emacs_compat": [
-   259
+   260
   ],
   "elt": [
    22,
@@ -517,27 +517,27 @@
    24
   ],
   "emacs-lisp-mode": [
-   153
+   154
   ],
   "emacs_downcase_compat": [
-   259
+   260
   ],
   "enable-recursive-minibuffers": [
-   233
+   234
   ],
   "encode-coding-string": [
    12
   ],
   "end-of-line": [
-   137
+   138
   ],
   "eq": [
-   56,
-   101
+   57,
+   102
   ],
   "equal": [
-   128,
-   170
+   129,
+   171
   ],
   "erase-buffer": [
    1
@@ -546,344 +546,347 @@
    11
   ],
   "error-message-string": [
-   139,
    140,
-   218
+   141,
+   219
   ],
   "ert--run-test-internal": [
-   248
+   249
   ],
   "esc-map": [
-   135
+   136
   ],
   "eval": [
-   219,
    220,
-   228
+   221,
+   229
   ],
   "eval-after-load": [
-   236
+   237
   ],
   "eval-buffer": [
-   107
+   108
   ],
   "eval-last-sexp": [
-   139
+   140
   ],
   "eval-when-compile": [
-   220
+   221
   ],
   "excessive-lisp-nesting": [
-   89
+   90
   ],
   "execute-extended-command": [
    0
   ],
   "execute-kbd-macro": [
-   63
-  ],
-  "executing-kbd-macro": [
-   62,
    64
   ],
+  "executing-kbd-macro": [
+   63,
+   65
+  ],
   "exit-minibuffer": [
-   62
+   63
   ],
   "expand-file-name": [
-   94
+   95
   ],
   "face-attribute": [
-   110,
    111,
-   114,
-   117,
+   112,
+   115,
    118,
    119,
    120,
-   252,
+   121,
    253,
-   256
+   254,
+   257
   ],
   "face-family": [
+   117,
+   256
+  ],
+  "face-font": [
    116,
    255
   ],
-  "face-font": [
-   115,
-   254
-  ],
   "face-remapping-alist": [
-   110,
-   119,
+   111,
    120,
-   258
+   121,
+   259
   ],
   "featurep": [
-   87
+   88
   ],
   "features": [
-   87,
-   225,
-   238
+   88,
+   226,
+   239
   ],
   "file-accessible-directory-p": [
    31
   ],
   "file-coding-system-alist": [
-   95
+   96
   ],
   "file-directory-p": [
-   94
+   95
   ],
   "file-name-all-completions": [
    8
   ],
   "file-name-handler-alist": [
-   95
+   96
   ],
   "find-auto-coding": [
-   250
+   251
   ],
   "find-composition": [
-   190
+   191
   ],
   "find-composition-internal": [
-   190
+   191
   ],
   "find-file": [
    0,
-   96
+   97
   ],
   "find-file-name-handler": [
-   47,
-   244
+   48,
+   245
   ],
   "find-file-noselect": [
    0
   ],
   "fit-window-to-buffer": [
-   188
+   189
   ],
   "float-output-format": [
-   156
+   157
   ],
   "float-time": [
-   83
+   84
   ],
   "floatp": [
-   50
+   51
   ],
   "floor": [
-   192
+   193
   ],
   "force-mode-line-update": [
-   153
+   154
   ],
   "format": [
-   68,
-   73,
-   91,
-   93,
-   102,
-   106,
-   243
+   69,
+   74,
+   92,
+   94,
+   103,
+   107,
+   244
   ],
   "format-message": [
-   73,
-   102,
-   243
+   74,
+   103,
+   244
   ],
   "format-time-string": [
-   83
+   84
   ],
   "forward-char": [
-   137
+   138
   ],
   "forward-comment": [
-   150
+   151
   ],
   "frame-char-height": [
-   180
+   181
   ],
   "frame-char-width": [
-   180
+   181
   ],
   "frame-list": [
-   181
+   182
   ],
   "frame-live-p": [
-   180
-  ],
-  "frame-native-height": [
-   180
-  ],
-  "frame-native-width": [
-   180
-  ],
-  "frame-parameter": [
-   223
-  ],
-  "frame-parameters": [
-   223
-  ],
-  "frame-pixel-height": [
-   145
-  ],
-  "frame-pixel-width": [
-   145
-  ],
-  "frame-set-background-mode": [
-   169
-  ],
-  "frame-terminal": [
-   181,
-   191
-  ],
-  "frame-visible-p": [
-   185
-  ],
-  "framep": [
    181
   ],
+  "frame-native-height": [
+   181
+  ],
+  "frame-native-width": [
+   181
+  ],
+  "frame-parameter": [
+   224
+  ],
+  "frame-parameters": [
+   224
+  ],
+  "frame-pixel-height": [
+   146
+  ],
+  "frame-pixel-width": [
+   146
+  ],
+  "frame-set-background-mode": [
+   170
+  ],
+  "frame-terminal": [
+   182,
+   192
+  ],
+  "frame-visible-p": [
+   186
+  ],
+  "framep": [
+   182
+  ],
   "fset": [
-   98
-  ],
-  "funcall": [
-   72,
-   104,
-   126,
-   133,
-   217,
-   219
-  ],
-  "funcall-interactively": [
-   71
-  ],
-  "function-documentation": [
    99
   ],
+  "funcall": [
+   73,
+   105,
+   127,
+   134,
+   218,
+   220
+  ],
+  "funcall-interactively": [
+   72
+  ],
+  "function-documentation": [
+   100
+  ],
   "function-history": [
-   225
+   226
   ],
   "function-key-map": [
-   135
+   136
   ],
   "garbage-collect": [
    32,
    33,
+   35
+  ],
+  "gc-cons-threshold gc-cons-percentage garbage-collect": [
    34
   ],
   "generate-new-buffer": [
-   173
+   174
   ],
   "get": [
-   84,
-   226
+   85,
+   227
   ],
   "get-buffer": [
-   173
+   174
   ],
   "get-buffer-window": [
-   181
+   182
   ],
   "get-char-code-property": [
-   39
+   40
   ],
   "get-file-buffer": [
-   96
+   97
   ],
   "get-load-suffixes": [
-   74,
-   232,
-   234
+   75,
+   233,
+   235
   ],
   "get-text-property": [
-   198,
-   199
+   199,
+   200
   ],
   "get-variable-watchers": [
-   222
+   223
   ],
   "global-map": [
-   135
+   136
   ],
   "graphic": [
-   113
+   114
   ],
   "gtk": [
-   113
+   114
   ],
   "handler-bind": [
-   89
+   90
   ],
   "hash-table-keys": [
-   129
+   130
   ],
   "header-line-format": [
-   178
+   179
   ],
   "iconify-frame": [
-   185
+   186
   ],
   "identity": [
-   51
+   52
   ],
   "indent-to": [
    3
   ],
   "indirect-function": [
-   98
+   99
   ],
   "indirect-variable": [
-   221
+   222
   ],
   "inhibit-file-name-handlers": [
-   244
+   245
   ],
   "inhibit-file-name-operation": [
-   244
+   245
   ],
   "inhibit-mouse-event-check": [
-   71
+   72
   ],
   "inhibit-read-only": [
    1
   ],
   "input-pending-p": [
-   63
+   64
   ],
   "insert-file-contents": [
-   95
+   96
   ],
   "integer-or-marker-p": [
-   50
+   51
   ],
   "interactive": [
-   136
+   137
   ],
   "interactive-form": [
-   71
+   72
   ],
   "intern": [
-   200,
-   239,
+   201,
    240,
+   241,
+   242,
+   243
+  ],
+  "intern-soft": [
    241,
    242
   ],
-  "intern-soft": [
-   240,
-   241
-  ],
   "internal-delete-indirect-variable": [
-   221
+   222
   ],
   "internal-interpreter-environment": [
-   134
+   135
   ],
   "internal-macroexpand-for-load": [
-   227,
-   228
+   228,
+   229
   ],
   "internal-set-alternative-font-family-alist": [
    16,
@@ -896,97 +899,97 @@
    16
   ],
   "internal-show-cursor": [
-   223
+   224
   ],
   "interpreted-function-p": [
-   229
-  ],
-  "invalid-function": [
-   104
-  ],
-  "kbd": [
-   141
-  ],
-  "key-binding": [
-   100,
-   136,
-   141
-  ],
-  "key-description": [
-   81,
-   140
-  ],
-  "key-translation-map": [
-   135
-  ],
-  "kill-all-local-variables": [
-   41,
-   152
-  ],
-  "kill-buffer": [
-   96,
-   152
-  ],
-  "kill-local-variable": [
-   41,
-   152
-  ],
-  "lambda": [
-   132,
-   133,
-   217,
-   227,
    230
   ],
-  "last-coding-system-used": [
-   95,
-   250
+  "invalid-function": [
+   105
   ],
-  "last-command": [
-   71
+  "kbd": [
+   142
   ],
-  "last-command-event": [
-   136,
+  "key-binding": [
+   101,
+   137,
+   142
+  ],
+  "key-description": [
+   82,
    141
   ],
+  "key-translation-map": [
+   136
+  ],
+  "kill-all-local-variables": [
+   42,
+   153
+  ],
+  "kill-buffer": [
+   97,
+   153
+  ],
+  "kill-local-variable": [
+   42,
+   153
+  ],
+  "lambda": [
+   133,
+   134,
+   218,
+   228,
+   231
+  ],
+  "last-coding-system-used": [
+   96,
+   251
+  ],
+  "last-command": [
+   72
+  ],
+  "last-command-event": [
+   137,
+   142
+  ],
   "last-nonminibuffer-frame": [
-   181
+   182
   ],
   "latin-extra-code-table": [
-   250
+   251
   ],
   "length": [
-   103
+   104
   ],
   "let": [
-   132,
-   134,
-   232
+   133,
+   135,
+   233
   ],
   "lexical-binding": [
-   86
+   87
   ],
   "libxml-available-p": [
-   162
+   163
   ],
   "libxml-parse-html-region": [
-   162
+   163
   ],
   "libxml-parse-xml-region": [
-   162
+   163
   ],
   "lisp-eval-depth-reserve": [
-   89
+   90
   ],
   "list-system-processes": [
-   167
+   168
   ],
   "load": [
-   107,
-   134,
-   228,
-   237,
-   238
+   108,
+   135,
+   229,
+   238,
+   239
   ],
   "load eval-buffer eval-region": [
    26
@@ -995,700 +998,700 @@
    25
   ],
   "load-file-rep-suffixes": [
-   232,
-   234
+   233,
+   235
   ],
   "load-history": [
-   221,
-   225,
-   236
+   222,
+   226,
+   237
   ],
   "load-path": [
-   87,
-   88
+   88,
+   89
   ],
   "load-suffixes": [
-   232
+   233
   ],
   "local-variable-p": [
-   40
+   41
   ],
   "locate-file-internal": [
-   94,
-   244
+   95,
+   245
   ],
   "locate-library": [
-   88,
-   171
+   89,
+   172
   ],
   "looking-at": [
-   149,
-   151
+   150,
+   152
   ],
   "looking-back": [
-   151
+   152
   ],
   "lower-frame": [
-   185
+   186
   ],
   "macroexp--pending-eager-loads": [
-   228
+   229
   ],
   "macroexpand": [
-   220,
-   227
+   221,
+   228
   ],
   "major-mode": [
-   153
+   154
   ],
   "make-bool-vector": [
    19,
-   51,
-   56,
-   81,
+   52,
+   57,
    82,
-   208
+   83,
+   209
   ],
   "make-char-table": [
-   75,
-   208
+   76,
+   209
   ],
   "make-frame-invisible": [
-   185
+   186
   ],
   "make-frame-visible": [
-   185
+   186
   ],
   "make-hash-table": [
-   127
+   128
   ],
   "make-interpreted-closure": [
-   247
+   248
   ],
   "make-local-variable": [
-   152,
-   233
+   153,
+   234
   ],
   "make-marker": [
-   77,
-   125
+   78,
+   126
   ],
   "make-network-process": [
-   167
-  ],
-  "make-overlay": [
-   125
-  ],
-  "make-pipe-process": [
-   167
-  ],
-  "make-process": [
-   167,
    168
   ],
+  "make-overlay": [
+   126
+  ],
+  "make-pipe-process": [
+   168
+  ],
+  "make-process": [
+   168,
+   169
+  ],
   "make-serial-process": [
-   167
+   168
   ],
   "make-string": [
-   101,
-   235
+   102,
+   236
   ],
   "make-symbol": [
-   85,
-   239
+   86,
+   240
   ],
   "make-symbolic-link": [
    8
   ],
   "make-variable-buffer-local": [
-   152,
-   231,
-   233
+   153,
+   232,
+   234
   ],
   "make-vector": [
-   208,
    209,
-   211
+   210,
+   212
   ],
   "makunbound": [
-   232
+   233
   ],
   "map-char-table": [
-   75
+   76
   ],
   "map-keymap": [
-   75
+   76
   ],
   "mapatoms": [
-   240
+   241
   ],
   "mapbacktrace": [
-   248
+   249
   ],
   "mapc": [
-   51,
-   52
+   52,
+   53
   ],
   "mapcar": [
-   103,
-   105
+   104,
+   106
   ],
   "mapconcat": [
    19
   ],
   "maphash": [
-   126
+   127
   ],
   "markerp": [
-   50
+   51
   ],
   "match-beginning": [
-   146
+   147
   ],
   "match-data": [
-   146,
    147,
-   148
+   148,
+   149
   ],
   "match-data--translate": [
-   146
+   147
   ],
   "match-end": [
-   146
+   147
   ],
   "match-string": [
-   70
+   71
   ],
   "matching-paren": [
-   150
+   151
   ],
   "max-lisp-eval-depth": [
-   89
+   90
   ],
   "memory-signal-data": [
-   209
+   210
   ],
   "menu-bar-lines": [
-   153
+   154
   ],
   "menu-bar-mode": [
-   153
+   154
   ],
   "merge_face_ref": [
-   109
+   110
   ],
   "message": [
-   106,
-   138
+   107,
+   139
   ],
   "min": [
-   68
+   69
   ],
   "minibuffer-history": [
-   62
+   63
   ],
   "minibuffer-local-map": [
-   232
+   233
   ],
   "minibuffer-prompt-properties": [
-   62
+   63
   ],
   "minibuffer-quit-recursive-edit": [
-   62
+   63
   ],
   "minibuffer-selected-window": [
-   182
+   183
   ],
   "mode-line-format": [
-   130,
-   142,
-   144,
-   178
+   131,
+   143,
+   145,
+   179
   ],
   "mode-line-in-non-selected-windows": [
-   142
+   143
   ],
   "mode-line-inactive": [
-   142
+   143
   ],
   "modify-category-entry": [
-   216
+   217
   ],
   "modify-frame-parameters": [
-   223
+   224
   ],
   "modify-syntax-entry": [
-   149
+   150
   ],
   "move-to-column": [
    3
   ],
   "multibyte-string-p": [
-   197
+   198
   ],
   "native-comp-function-p": [
-   48
+   49
   ],
   "natnump": [
-   50
+   51
   ],
   "next-overlay-change": [
-   122
+   123
   ],
   "next-property-change": [
-   249
+   250
   ],
   "next-single-char-property-change": [
-   249
+   250
   ],
   "normal-top-level-add-to-load-path": [
-   88
+   89
   ],
   "not-unicode-string": [
-   200,
    201,
    202,
-   203
+   203,
+   204
   ],
   "nreverse": [
    15
   ],
   "number-or-marker-p": [
-   50
+   51
   ],
   "obarray-make": [
-   242
+   243
   ],
   "obarrayp": [
-   240
+   241
   ],
   "oclosure-type": [
-   247
+   248
   ],
   "optimize-char-table": [
-   158
+   159
   ],
   "overlays-at": [
-   122
+   123
   ],
   "overlays-in": [
-   122,
    123,
-   124
-  ],
-  "overriding-plist-environment": [
-   226
-  ],
-  "overwrite-mode": [
-   161
-  ],
-  "parse-partial-sexp": [
-   150
-  ],
-  "permanent-local": [
-   152
-  ],
-  "permanent-local-hook": [
-   152
-  ],
-  "pgtk": [
-   113
-  ],
-  "point-marker": [
+   124,
    125
   ],
+  "overriding-plist-environment": [
+   227
+  ],
+  "overwrite-mode": [
+   162
+  ],
+  "parse-partial-sexp": [
+   151
+  ],
+  "permanent-local": [
+   153
+  ],
+  "permanent-local-hook": [
+   153
+  ],
+  "pgtk": [
+   114
+  ],
+  "point-marker": [
+   126
+  ],
   "point-max": [
-   124
+   125
   ],
   "pos-visible-in-window-p": [
-   187
+   188
   ],
   "position-symbol": [
-   49
+   50
   ],
   "posn-at-point": [
-   187
+   188
   ],
   "prefix-numeric-value": [
-   71
+   72
   ],
   "previous-overlay-change": [
-   122
+   123
   ],
   "prin1": [
-   154,
    155,
    156,
-   191,
-   239
+   157,
+   192,
+   240
   ],
   "prin1-to-string": [
-   52,
-   68,
-   106,
-   154,
-   156,
-   191,
-   207,
-   239
+   53,
+   69,
+   107,
+   155,
+   157,
+   192,
+   208,
+   240
   ],
   "princ": [
-   154,
    155,
    156,
-   207
+   157,
+   208
   ],
   "print": [
-   154,
    155,
-   156
+   156,
+   157
   ],
   "print-charset-text-property": [
-   156
+   157
   ],
   "print-circle": [
-   154
+   155
   ],
   "print-continuous-numbering": [
-   156
+   157
   ],
   "print-escape-newlines": [
-   154
+   155
   ],
   "print-gensym": [
-   156
+   157
   ],
   "print-integers-as-characters": [
-   156
+   157
   ],
   "print-length": [
-   154
+   155
   ],
   "print-level": [
-   154
+   155
   ],
   "print-number-table": [
-   156
+   157
   ],
   "print-symbols-bare": [
-   156
+   157
   ],
   "print-unreadable-function": [
-   156
+   157
   ],
   "process-attributes": [
-   167
+   168
   ],
   "propertize": [
-   199,
-   210
+   200,
+   211
   ],
   "provide": [
-   225,
-   236,
-   238
+   226,
+   237,
+   239
   ],
   "purify-flag": [
-   247
+   248
   ],
   "push macroexp-let2 gv-letplace": [
    27
   ],
   "put": [
-   226
+   227
   ],
   "put-text-property": [
-   199
+   200
   ],
   "quit-flag": [
-   64
+   65
   ],
   "raise-frame": [
-   185
+   186
   ],
   "re-search-backward": [
-   149,
-   151
+   150,
+   152
   ],
   "re-search-forward": [
-   149,
-   151
+   150,
+   152
   ],
   "read": [
-   76,
    77,
    78,
    79,
    80,
-   107,
-   198
+   81,
+   108,
+   199
   ],
   "read-char": [
-   63
-  ],
-  "read-char-exclusive": [
-   63
-  ],
-  "read-event": [
-   63
-  ],
-  "read-from-minibuffer": [
-   62,
    64
   ],
+  "read-char-exclusive": [
+   64
+  ],
+  "read-event": [
+   64
+  ],
+  "read-from-minibuffer": [
+   63,
+   65
+  ],
   "read-from-string": [
-   61,
-   65,
+   62,
    66,
    67,
    68,
    69,
-   76,
-   78,
+   70,
+   77,
    79,
    80,
-   107,
-   198,
-   242
+   81,
+   108,
+   199,
+   243
   ],
   "read-key-sequence": [
-   63
-  ],
-  "read-key-sequence-vector": [
-   63
-  ],
-  "read-positioning-symbols": [
-   49
-  ],
-  "read-string": [
-   62,
    64
   ],
+  "read-key-sequence-vector": [
+   64
+  ],
+  "read-positioning-symbols": [
+   50
+  ],
+  "read-string": [
+   63,
+   65
+  ],
   "real-this-command": [
-   71
+   72
   ],
   "recent-keys": [
-   63
+   64
   ],
   "recenter": [
-   184
+   185
   ],
   "record": [
-   208
+   209
   ],
   "recordp": [
    29
   ],
   "recursive-edit": [
-   63
+   64
   ],
   "redisplay": [
-   138,
-   186
+   139,
+   187
   ],
   "remove-variable-watcher": [
-   222
+   223
   ],
   "replace-match": [
-   42,
    43,
    44,
-   45
+   45,
+   46
   ],
   "replace-region-contents": [
-   166
-  ],
-  "replace_range": [
-   42
-  ],
-  "require": [
-   87,
-   225,
-   236,
-   237,
-   238
-  ],
-  "reset": [
-   118,
-   251
-  ],
-  "reverse": [
-   56,
-   208
-  ],
-  "romacs--host-input": [
-   64
-  ],
-  "romacs--oclosure-type": [
-   247
-  ],
-  "romacs--read-host-event": [
-   64
-  ],
-  "romacs--replace-range": [
-   42
-  ],
-  "romacs-display": [
-   169
-  ],
-  "romacs-gui-install-command": [
-   97
-  ],
-  "romacs-unsafe-coding": [
-   250
-  ],
-  "round": [
-   192
-  ],
-  "run-hook-with-args": [
-   72
-  ],
-  "run-hooks": [
-   72
-  ],
-  "run-with-idle-timer": [
    167
   ],
+  "replace_range": [
+   43
+  ],
+  "require": [
+   88,
+   226,
+   237,
+   238,
+   239
+  ],
+  "reset": [
+   119,
+   252
+  ],
+  "reverse": [
+   57,
+   209
+  ],
+  "romacs--host-input": [
+   65
+  ],
+  "romacs--oclosure-type": [
+   248
+  ],
+  "romacs--read-host-event": [
+   65
+  ],
+  "romacs--replace-range": [
+   43
+  ],
+  "romacs-display": [
+   170
+  ],
+  "romacs-gui-install-command": [
+   98
+  ],
+  "romacs-unsafe-coding": [
+   251
+  ],
+  "round": [
+   193
+  ],
+  "run-hook-with-args": [
+   73
+  ],
+  "run-hooks": [
+   73
+  ],
+  "run-with-idle-timer": [
+   168
+  ],
   "save-buffer": [
-   96
+   97
   ],
   "save-window-excursion": [
-   175
+   176
   ],
   "scan-lists": [
-   150
+   151
   ],
   "scan-sexps": [
-   150
+   151
   ],
   "scroll-conservatively": [
-   143
+   144
   ],
   "scroll-down-aggressively": [
-   160
-  ],
-  "scroll-margin": [
-   143
-  ],
-  "scroll-step": [
-   143
-  ],
-  "scroll-up-aggressively": [
-   160
-  ],
-  "secure-hash": [
-   212
-  ],
-  "secure-hash-algorithms": [
-   212
-  ],
-  "select-safe-coding-system": [
-   250
-  ],
-  "select-safe-coding-system-function": [
-   95
-  ],
-  "select-safe-coding-system-interactively": [
-   250
-  ],
-  "selected-frame": [
-   145,
-   181,
-   191
-  ],
-  "selected-window": [
-   145
-  ],
-  "self-insert-command": [
-   137,
-   138,
    161
   ],
+  "scroll-margin": [
+   144
+  ],
+  "scroll-step": [
+   144
+  ],
+  "scroll-up-aggressively": [
+   161
+  ],
+  "secure-hash": [
+   213
+  ],
+  "secure-hash-algorithms": [
+   213
+  ],
+  "select-safe-coding-system": [
+   251
+  ],
+  "select-safe-coding-system-function": [
+   96
+  ],
+  "select-safe-coding-system-interactively": [
+   251
+  ],
+  "selected-frame": [
+   146,
+   182,
+   192
+  ],
+  "selected-window": [
+   146
+  ],
+  "self-insert-command": [
+   138,
+   139,
+   162
+  ],
   "sequencep": [
-   50
+   51
   ],
   "set": [
-   84,
-   232
+   85,
+   233
   ],
   "set-auto-coding": [
    11,
-   250
+   251
   ],
   "set-buffer-redisplay": [
-   222
+   223
   ],
   "set-case-table": [
-   53
+   54
   ],
   "set-char-table-range": [
-   75
+   76
   ],
   "set-charset-priority": [
-   213
+   214
   ],
   "set-coding-system-priority": [
-   214,
-   250
+   215,
+   251
   ],
   "set-default": [
-   232
+   233
   ],
   "set-face-attribute": [
-   114,
    115,
    116,
-   253,
+   117,
    254,
    255,
-   257
+   256,
+   258
   ],
   "set-file-times": [
    8
   ],
   "set-match-data": [
-   70
+   71
   ],
   "set-process-thread": [
-   167
+   168
   ],
   "set-standard-case-table current-case-table": [
-   36
+   37
   ],
   "set-syntax-table": [
-   149
+   150
   ],
   "set-visited-file-modtime": [
-   92,
-   95
+   93,
+   96
   ],
   "set-window-buffer": [
-   145,
-   174
+   146,
+   175
   ],
   "set-window-configuration": [
-   175
-  ],
-  "set-window-hscroll": [
-   183,
-   189
-  ],
-  "set-window-new-total": [
    176
   ],
+  "set-window-hscroll": [
+   184,
+   190
+  ],
+  "set-window-new-total": [
+   177
+  ],
   "set-window-next-buffers": [
-   175
+   176
   ],
   "set-window-prev-buffers": [
-   175
+   176
   ],
   "set-window-start": [
-   143,
-   193
+   144,
+   194
   ],
   "set-window-vscroll": [
-   130,
-   142
+   131,
+   143
   ],
   "setcar": [
    15
@@ -1697,356 +1700,356 @@
    15
   ],
   "setf": [
-   230
+   231
   ],
   "setplist": [
-   226
+   227
   ],
   "setq": [
-   232
+   233
   ],
   "signal": [
-   237
+   238
   ],
   "signal-hook-function": [
-   89
+   90
   ],
   "skip-chars-backward": [
-   260
+   261
   ],
   "skip-chars-forward": [
-   260
+   261
   ],
   "sleep-for": [
-   167
+   168
   ],
   "sort": [
    18
   ],
   "source_string": [
-   201,
-   202
+   202,
+   203
   ],
   "special-event-map": [
-   135
+   136
   ],
   "special-variable-p": [
-   86,
-   232
+   87,
+   233
   ],
   "split-window-internal": [
-   195
+   196
   ],
   "standard-case-table": [
-   37
+   38
   ],
   "standard-input": [
-   76
+   77
   ],
   "standard-output": [
-   155
+   156
   ],
   "standard-syntax-table": [
-   149
+   150
   ],
   "standard-value": [
-   131
+   132
   ],
   "store-substring": [
-   90
+   91
   ],
   "string-glyph-split": [
-   190
+   191
   ],
   "string-match": [
-   149,
-   151
+   150,
+   152
   ],
   "string-match-p": [
-   151
+   152
   ],
   "string-replace": [
-   102
+   103
   ],
   "string-to-number": [
-   73
+   74
   ],
   "string-trim": [
-   102
+   103
   ],
   "subr-x": [
-   129
+   130
   ],
   "subrp": [
-   48,
-   105
+   49,
+   106
   ],
   "subst-char-in-region": [
-   161
+   162
   ],
   "substring": [
-   101,
-   235
+   102,
+   236
   ],
   "supports": [
-   113
+   114
   ],
   "switch-to-buffer": [
-   153
+   154
   ],
   "symbol-function": [
-   98,
-   105
+   99,
+   106
   ],
   "symbol-name": [
-   241
+   242
   ],
   "symbol-plist": [
    15,
-   226
+   227
   ],
   "symbol-value": [
    21,
-   232
+   233
   ],
   "symbol-with-pos-p": [
-   49
+   50
   ],
   "symbols-with-pos-enabled": [
-   49
+   50
   ],
   "syntax-class-to-char": [
-   150
+   151
   ],
   "syntax-table": [
-   149
+   150
   ],
   "tab-width": [
    3
   ],
   "terminal-list": [
-   181
+   182
   ],
   "terminal-live-p": [
-   181,
-   215
+   182,
+   216
   ],
   "terminal-parameter": [
-   215
+   216
   ],
   "terpri": [
-   155
+   156
   ],
   "test-completion": [
-   245,
-   246
+   246,
+   247
   ],
   "text-properties-at": [
-   79,
-   199,
-   210
+   80,
+   200,
+   211
   ],
   "text-quoting-style": [
-   243
+   244
   ],
   "theme-face": [
-   112
+   113
   ],
   "this-command": [
-   71
+   72
   ],
   "this-command-keys": [
-   63,
-   136,
-   141
+   64,
+   137,
+   142
   ],
   "this-original-command": [
-   71
+   72
   ],
   "transient": [
-   108
+   109
   ],
   "translate-region": [
-   164
+   165
   ],
   "translate-region-internal": [
-   161,
-   164
+   162,
+   165
   ],
   "treesit-available-p": [
-   163
+   164
   ],
   "truncate": [
-   192
+   193
   ],
   "truncate-lines": [
-   153
+   154
   ],
   "try-completion": [
-   245,
-   246
+   246,
+   247
   ],
   "tty-color-alist": [
-   169
+   170
   ],
   "tty-top-frame": [
-   181
+   182
   ],
   "undefined": [
-   63,
-   138
+   64,
+   139
   ],
   "undo-limit": [
-   233
+   234
   ],
   "unibyte-string": [
-   197
+   198
   ],
   "unicode-property-table-internal": [
-   39
+   40
   ],
   "unify-charset": [
-   213
+   214
   ],
   "unintern": [
-   240,
-   241
+   241,
+   242
   ],
   "unread-command-events": [
-   62,
-   64
+   63,
+   65
   ],
   "upcase-initials": [
-   53
+   54
   ],
   "upcase-initials-region": [
-   42,
-   55
+   43,
+   56
   ],
   "upcase-region": [
-   42,
-   55
+   43,
+   56
   ],
   "usize": [
-   84
+   85
   ],
   "value<": [
    18
   ],
   "vconcat": [
-   208
+   209
   ],
   "vector": [
-   101
+   102
   ],
   "vector-or-char-table-p": [
-   50
+   51
   ],
   "verify-visited-file-modtime": [
-   95
+   96
   ],
   "visible-frame-list": [
-   185
+   186
   ],
   "visited-file-modtime": [
-   92,
-   95
+   93,
+   96
   ],
   "window-bottom-divider-width": [
-   178
-  ],
-  "window-buffer": [
-   145
-  ],
-  "window-combination-limit": [
-   181
-  ],
-  "window-configuration-frame": [
-   175
-  ],
-  "window-configuration-p": [
-   175
-  ],
-  "window-end": [
-   194
-  ],
-  "window-header-line-height": [
-   178
-  ],
-  "window-hscroll": [
-   183,
-   189
-  ],
-  "window-list": [
-   181
-  ],
-  "window-mode-line-height": [
-   178
-  ],
-  "window-next-buffers": [
-   175
-  ],
-  "window-persistent-parameters": [
-   232
-  ],
-  "window-point": [
-   145,
-   174
-  ],
-  "window-prev-buffers": [
-   175
-  ],
-  "window-resize-apply-total": [
-   176
-  ],
-  "window-right-divider-width": [
-   178
-  ],
-  "window-scroll-bar-height": [
-   178
-  ],
-  "window-scroll-bar-width": [
-   178
-  ],
-  "window-start": [
-   143,
-   145,
-   174,
    179
   ],
-  "window-tab-line-height": [
-   178
+  "window-buffer": [
+   146
   ],
-  "window-text-pixel-size": [
-   188
+  "window-combination-limit": [
+   182
   ],
-  "window-total-height": [
+  "window-configuration-frame": [
    176
   ],
+  "window-configuration-p": [
+   176
+  ],
+  "window-end": [
+   195
+  ],
+  "window-header-line-height": [
+   179
+  ],
+  "window-hscroll": [
+   184,
+   190
+  ],
+  "window-list": [
+   182
+  ],
+  "window-mode-line-height": [
+   179
+  ],
+  "window-next-buffers": [
+   176
+  ],
+  "window-persistent-parameters": [
+   233
+  ],
+  "window-point": [
+   146,
+   175
+  ],
+  "window-prev-buffers": [
+   176
+  ],
+  "window-resize-apply-total": [
+   177
+  ],
+  "window-right-divider-width": [
+   179
+  ],
+  "window-scroll-bar-height": [
+   179
+  ],
+  "window-scroll-bar-width": [
+   179
+  ],
+  "window-start": [
+   144,
+   146,
+   175,
+   180
+  ],
+  "window-tab-line-height": [
+   179
+  ],
+  "window-text-pixel-size": [
+   189
+  ],
+  "window-total-height": [
+   177
+  ],
   "window-vscroll": [
-   130,
-   142
+   131,
+   143
   ],
   "with-eval-after-load": [
-   236
+   237
   ],
   "with-output-to-string": [
-   207
+   208
   ],
   "with-temp-buffer": [
-   173
+   174
   ],
   "write-char": [
-   155
+   156
   ],
   "write-region": [
-   95
+   96
   ],
   "wrong-number-of-arguments": [
-   105
+   106
   ],
   "wrong-type-argument": [
-   218
+   219
   ]
  },
  "rows": [
@@ -2562,6 +2565,21 @@
    "why": "Numeric results and pseudovector population differ; this is heap accounting, not a GNU heap-size emulator. No startup objects are allocated.",
    "symbols": [
     "garbage-collect"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-GC-PACING",
+   "source": "DIVERGENCES.md",
+   "section": "VM2 explicit garbage collection",
+   "observable": false,
+   "planned": false,
+   "mechanism": "Collection pacing units and default",
+   "gnu": "`consing_threshold` (`alloc.c:5740-5809`) collects once the bytes allocated since the last GC exceed max(`gc-cons-threshold`, 80000) or, for a float `gc-cons-percentage` (default 0.1), that fraction of the live heap's bytes plus half the bytes allocated since.",
+   "romacs": "The same rule, read live from both variables, in Romacs units: allocation counts heap objects at 16 bytes each (a GNU cons), and the live heap is what a collection traverses, the objects the last collection retained plus the compiled code units (IR ops and lowered instructions) it traced. `gc-cons-percentage` starts at 1.5: collect after about six traced heaps of allocation. As in GNU's formula, 2 or more never collects by percentage. An embedder's `Vm::set_collection_floor` replaces both variables (as GNU's memory-full state replaces them) with the floor rule tests and `--gc-floor` use.",
+   "why": "A Romacs collection moves objects and walks compiled code, so GNU's 0.1 costs far more here: on the census file it did 65 collections, +30% instructions over the uninhibited base. 1.5 keeps the `--loadup` bootstrap, the census file and a long nested load within about 1% of it in instructions and level with it in wall time, the long load at a third of its peak memory. Packages that raise either variable (most-positive-fixnum around a load) behave as in GNU; one that sets GNU's 0.1 collects more often than the default. Tests: `crates/romacs-vm/tests/garbage_collect.rs`.",
+   "symbols": [
+    "gc-cons-threshold gc-cons-percentage garbage-collect"
    ],
    "symbols_derived": false
   },

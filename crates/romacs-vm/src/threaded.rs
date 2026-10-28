@@ -658,6 +658,10 @@ pub(super) struct SuspendedCode {
     entries: *mut Vec<EntryCache>,
 }
 impl SuspendedCode {
+    /// SAFETY: as for `visit_values`.
+    pub(super) unsafe fn code_len(&self) -> usize {
+        unsafe { (*self.code).iter().map(Vec::len).sum() }
+    }
     /// SAFETY: the engine owning both vectors stays suspended, neither moved
     /// nor touched, until this reference is popped.
     pub(super) unsafe fn visit_values(&self, visit: &mut impl FnMut(&mut Value)) {
@@ -1764,7 +1768,7 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
-    if e.vm.heap_objects() >= e.vm.gc_threshold && e.vm.may_collect(1) {
+    if e.vm.collection_due() && e.vm.may_collect(1) {
         poll_collect(e);
     }
     unsafe { next(e, r, pc) }

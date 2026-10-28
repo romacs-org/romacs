@@ -194,7 +194,7 @@ impl Vm {
         let outermost = self.suspended_stacks.is_empty();
         if self.may_collect(0)
             && self.stack.is_empty()
-            && (self.heap_objects() >= self.gc_threshold
+            && (self.collection_due()
                 || (outermost && self.request_code.since_collection >= 1024))
         {
             match &mut outcome {

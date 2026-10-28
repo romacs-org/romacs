@@ -35,6 +35,11 @@ pub(crate) struct Stress {
     shift: bool,
 }
 
+/// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
+const CONS_BYTES: i64 = 16;
+/// GNU's floor under `gc-cons-threshold' (alloc.c:5747, GC_DEFAULT_THRESHOLD / 10).
+const MIN_CONS_THRESHOLD: i64 = 80_000;
+
 impl Stress {
     pub(crate) fn from_env() -> Self {
         let every = std::env::var("ROMACS_GC_STRESS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
@@ -197,6 +202,30 @@ impl Vm {
     /// [`Stress`]: collect at every Nth Lisp entry; 0 turns it off.
     pub fn set_gc_stress(&mut self, every: u32) {
         self.gc_stress = Stress { every, ..Stress::default() };
+    }
+    /// GNU `maybe_garbage_collect' (alloc.c:5740-5809): collect once the
+    /// allocation since the last collection reaches `gc-cons-threshold'
+    /// (at least 80000 bytes) or, when `gc-cons-percentage' is a float, that
+    /// fraction of the live heap plus half the allocation since. Allocation
+    /// is counted in objects charged CONS_BYTES each; the live heap is what
+    /// a collection traverses, retained objects and compiled code units.
+    /// Both variables are read live, so binding them takes effect at once.
+    pub(crate) fn collection_due(&self) -> bool {
+        // An embedder's floor overrides, as GNU's memory-full state does.
+        if let Some(floor) = self.gc_floor {
+            return self.heap_objects() >= self.gc_retained.saturating_mul(2).max(floor);
+        }
+        let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64;
+        let threshold = self.forwarded.gc_cons_threshold().max(MIN_CONS_THRESHOLD) as f64 / CONS_BYTES as f64;
+        let percentage = match self.forwarded.gc_cons_percentage() {
+            Ok(value) => match self.object_if(value) {
+                Some(data::Object::Float(f)) => Some(*f),
+                _ => None,
+            },
+            Err(initial) => Some(initial),
+        };
+        let proportional = percentage.map_or(0.0, |p| p * ((self.gc_retained + self.gc_code) as f64 + allocated / 2.0));
+        allocated >= threshold.max(proportional)
     }
     /// A forced stress collection is due at this Lisp entry.
     pub(crate) fn stress_due(&mut self) -> bool {
@@ -696,6 +725,11 @@ impl Vm {
             }
         }
         self.retire_code(&code_marks);
+        // The code this collection traced, for the next one's pacing.
+        self.gc_code = code_marks.iter().zip(&self.functions).filter(|&(&live, _)| live).map(|(_, f)| f.code.len()).sum::<usize>()
+            + self.execution.code_len()
+            // SAFETY: as in the mark phase.
+            + self.suspended_code.iter().map(|code| unsafe { code.code_len() }).sum::<usize>();
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
         if !active {
@@ -705,7 +739,6 @@ impl Vm {
         if pads == 0 && marked == before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
             self.gc_retained = before;
             self.gc_stats.collections += 1;
-            self.gc_threshold = before.saturating_mul(2).max(self.gc_floor);
             return;
         }
         // Stress fillers go only where live objects would move past them.
@@ -917,7 +950,6 @@ impl Vm {
         self.gc_retained = self.heap_objects();
         self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
-        self.gc_threshold = self.gc_retained.saturating_mul(2).max(self.gc_floor);
     }
 }
 

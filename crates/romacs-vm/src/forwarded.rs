@@ -178,8 +178,6 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "frame-resize-pixelwise", gnu: "frame.c:7625", kind: Kind::Bool(false) },
     CVariable { name: "frame-size-history", gnu: "frame.c:7695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "garbage-collection-messages", gnu: "alloc.c:7495", kind: Kind::Bool(false) },
-    CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
-    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
     CVariable { name: "global-mode-string", gnu: "xdisp.c:38701", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "glyph-table", gnu: "dispnew.c:7549", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "glyphless-char-display", gnu: "xdisp.c:39349", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: Some("glyphless-char-display"), extras: &[Init::Symbol("empty-box")], init: Init::Nil, ranges: &[] })) },
@@ -450,6 +448,11 @@ pub(crate) struct CVariable {
 /// only those the bootstrap chain, the census or the variable harness
 /// actually reached (ruling R216: no speculative ports).
 pub(crate) static C_VARIABLES: &[CVariable] = &[
+    // The collector's pacing reads both (`Vm::collection_due`). GNU starts
+    // gc-cons-percentage at 0.1; a Romacs collection also traverses compiled
+    // code, so its default heap fraction is larger (DIVERGENCES VM2-GC-PACING).
+    CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(1.5)) },
+    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
     // cl-generic's dispatcher compiler checks whether GNU is being dumped.
     CVariable { name: "purify-flag", gnu: "alloc.c:7487", kind: Kind::Lisp(Init::Nil) },
     // GNU warning text expands command keys while compiling obsolete method calls.
@@ -634,6 +637,9 @@ pub(crate) struct Forwarded {
     bools: Vec<bool>,
     ints: Vec<i64>,
     eval_limit_index: usize,
+    /// `gc-cons-threshold' and `gc-cons-percentage', read by the collector's
+    /// pacing (`Vm::collection_due').
+    gc_cons: (usize, usize),
     /// Per-buffer defaults (`buffer_defaults`).
     defaults: Vec<Value>,
     /// Table index behind each Obj / Buffer payload, for lazy initial values.
@@ -651,6 +657,7 @@ impl Default for Forwarded {
             bools: vec![],
             ints: vec![],
             eval_limit_index: 0,
+            gc_cons: (0, 0),
             defaults: vec![],
             object_vars: vec![],
             buffer_vars: vec![],
@@ -681,6 +688,8 @@ impl Default for Forwarded {
         }
         let Some(Fwd::Int(i)) = store.lookup("max-lisp-eval-depth") else { unreachable!() };
         store.eval_limit_index = i as usize;
+        let (Some(Fwd::Int(threshold)), Some(Fwd::Obj(percentage))) = (store.lookup("gc-cons-threshold"), store.lookup("gc-cons-percentage")) else { unreachable!() };
+        store.gc_cons = (threshold as usize, percentage as usize);
         store
     }
 }
@@ -688,6 +697,19 @@ impl Default for Forwarded {
 impl Forwarded {
     #[inline(always)]
     pub(super) fn eval_limit(&self) -> i64 { self.ints[self.eval_limit_index] }
+    pub(super) fn gc_cons_threshold(&self) -> i64 { self.ints[self.gc_cons.0] }
+    /// `gc-cons-percentage': its value, or its initial float before Lisp
+    /// first reads it (initial values are materialized lazily).
+    pub(super) fn gc_cons_percentage(&self) -> std::result::Result<Value, f64> {
+        let value = self.objects[self.gc_cons.1];
+        if value != Value::UNBOUND {
+            return Ok(value);
+        }
+        match C_VARIABLES[self.object_vars[self.gc_cons.1]].kind {
+            Kind::Lisp(Init::Float(initial)) => Err(initial),
+            _ => unreachable!("gc-cons-percentage starts as a float"),
+        }
+    }
     /// Direct C-global integer access, without constructing a Lisp Value.
     pub(super) fn integer(&self, name: &str) -> i64 {
         let Some(Fwd::Int(i)) = self.lookup(name) else { panic!("not a forwarded integer: {name}") };

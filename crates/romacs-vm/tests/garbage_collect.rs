@@ -81,3 +81,39 @@ fn garbage_collect_obeys_existing_inhibition() {
     // The same watcher collects from a compiled `setq', whose engine suspends.
     assert_ne!(eval(&mut vm, "(progn (setq gi-v 2) gi-r)"), "nil", "GC_WATCHED_SETQ");
 }
+
+fn churn(vm: &mut Vm, conses: u32) -> u64 {
+    let before = vm.heap_stats().collections;
+    vm.eval_source(&format!("(let ((i 0)) (while (< i {conses}) (cons i nil) (setq i (1+ i))))")).unwrap();
+    vm.heap_stats().collections - before
+}
+
+/// GNU's pacing variables (alloc.c:5740-5809) decide when allocation
+/// collects, read live: a binding of either takes effect at once.
+#[test]
+fn gc_cons_threshold_and_percentage_pace_collection() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    assert_eq!(eval(&mut vm, "(list gc-cons-threshold (floatp gc-cons-percentage))"), "(800000 t)");
+    // 160000 bytes is 10000 objects; nil drops the proportional term.
+    vm.eval_source("(setq gc-cons-threshold 160000 gc-cons-percentage nil)").unwrap();
+    let plain = churn(&mut vm, 200_000);
+    assert!(plain >= 10, "a 10000-object threshold collects: {plain}");
+    let before = vm.heap_stats().collections;
+    let restored = eval(&mut vm, "(progn (let ((gc-cons-threshold most-positive-fixnum)) (let ((i 0)) (while (< i 200000) (cons i nil) (setq i (1+ i))))) gc-cons-threshold)");
+    assert_eq!(restored, "160000", "the binding is undone");
+    // Only the request boundary after the binding ends may collect, where
+    // the same churn collected ten times above.
+    assert!(vm.heap_stats().collections <= before + 1, "a raised threshold defers collection");
+    // A proportional term above the threshold paces instead: 1.9 of the
+    // traced heap plus half the allocation since waits 38 heaps.
+    vm.eval_source("(setq gc-cons-percentage 1.9 gr-live (make-list 20000 nil))").unwrap();
+    let proportional = churn(&mut vm, 200_000);
+    assert!(proportional * 3 <= plain, "1.9 of the traced heap defers collection: {proportional} vs {plain}");
+    // Non-integer thresholds are refused, as GNU's DEFVAR_INT is.
+    assert_eq!(eval(&mut vm, "(condition-case e (setq gc-cons-threshold 1.5) (error (car e)))"), "wrong-type-argument");
+    // An embedder's floor replaces both variables.
+    vm.set_collection_floor(1);
+    assert!(churn(&mut vm, 200_000) >= 2, "a floor of 1 collects as the heap doubles");
+}

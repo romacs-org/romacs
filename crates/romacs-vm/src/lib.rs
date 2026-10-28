@@ -1147,8 +1147,12 @@ pub struct Vm {
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
     gc_retained: usize,
-    gc_threshold: usize,
-    gc_floor: usize,
+    /// Compiled code units (IR ops, lowered instructions) the last
+    /// collection traced: with `gc_retained', what a collection traverses.
+    gc_code: usize,
+    /// An embedder's pacing floor (`set_collection_floor'), which replaces
+    /// the Lisp pacing variables while set.
+    gc_floor: Option<usize>,
     /// Open frames that keep heap Values in untraced Rust storage across a
     /// call that can run Lisp: compiler builders and watcher notifications
     /// from native writers (`gc.rs`, `Vm::may_collect`).
@@ -1222,11 +1226,13 @@ impl Default for Vm {
     }
 }
 impl Vm {
-    /// Soft object-count pacing floor, checked only at strand wait points.
-    /// Live heaps grow geometrically; this is not a hard memory limit.
+    /// Embedder pacing in place of `gc-cons-threshold' and
+    /// `gc-cons-percentage': collect once the heap holds at least OBJECTS and
+    /// twice what the last collection retained. Hosts and tests use it to
+    /// force or defer collection. Checked only at strand wait points; not a
+    /// hard memory limit.
     pub fn set_collection_floor(&mut self, objects: usize) {
-        self.gc_floor = objects.max(1);
-        self.gc_threshold = self.gc_retained.saturating_mul(2).max(self.gc_floor);
+        self.gc_floor = Some(objects.max(1));
     }
     pub fn heap_objects(&self) -> usize {
         self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
@@ -1302,8 +1308,8 @@ impl Vm {
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_retained: 0,
-            gc_threshold: 16384,
-            gc_floor: 16384,
+            gc_code: 0,
+            gc_floor: None,
             gc_holds: 0,
             running_engines: 0,
             rooted_write: false,
