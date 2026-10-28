@@ -135,6 +135,12 @@ impl HashTable {
         let fresh = self.free.iter().enumerate().take_while(|&(k, &slot)| slot as usize + k + 1 == len).count();
         &self.free[fresh..]
     }
+    /// The hash slot I's lookups compare, which a key mutated since its
+    /// insertion no longer has; None when it read a heap index, which a
+    /// collection moves.
+    pub(super) fn content_hash(&self, i: usize) -> Option<u64> {
+        (!self.moving[i]).then(|| self.hashes[i])
+    }
     pub(super) fn entry(&self, i: usize) -> Option<(Value, Value)> {
         let key = *self.keys.get(i)?;
         (key != UNUSED).then(|| (key, self.values[i]))

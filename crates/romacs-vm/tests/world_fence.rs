@@ -402,6 +402,56 @@ fn the_content_check_sees_every_hash_table_field() {
     assert_eq!(changed, expected, "{trace}");
 }
 
+/// A key mutated after its insertion keeps the hash it was stored under:
+/// an equal table holding "b" under the hash of "a" misses a lookup of "b"
+/// that a fresh table of the same size and entry finds. Replacing one with
+/// the other refuses; the table left alone does not.
+#[test]
+fn the_content_check_sees_a_mutated_keys_stored_hash() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables nil)
+(defun fence-mutated () (let ((key (copy-sequence \"a\")) (table (make-hash-table :test 'equal))) (puthash key 1 table) (aset key 0 ?b) table))
+(defvar fence-lookup (vector (fence-mutated)))
+(defvar fence-kept (vector (fence-mutated)))
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (setq seen (list fence-lookup fence-kept)))
+  (romacs--startup-phase nil))
+";
+    let preload = "(aset fence-lookup 0 (let ((table (make-hash-table :test 'equal))) (puthash (copy-sequence \"b\") 1 table) table))\n";
+    let (mut vm, trace) = run_with("stored-hash", bootstrap, preload, true);
+    assert_eq!(listed(&trace.unwrap()), []);
+    let probes = "(mapcar (lambda (box) (gethash (copy-sequence \"b\") (aref box 0) 'missing)) (list fence-lookup fence-kept))";
+    assert_eq!(vm.eval_source(probes).and_then(|v| v.display()).unwrap(), "(1 missing)");
+    host::enter_build(PINNED);
+    vm.world_check_inputs();
+    let trace = host::leave_build().unwrap();
+    let changed: Vec<_> = listed(&trace).into_iter().map(|(kind, _, symbol, access, _)| (kind, symbol, access)).collect();
+    assert_eq!(changed, [("fence".to_owned(), "fence-lookup".to_owned(), "changed".to_owned())], "{trace}");
+}
+
+/// A stored hash that read a heap index digests as only that fact: an eq
+/// table keyed by a cons and a vector digests alike in two fresh VMs
+/// whose keys sit at other arena indices.
+#[test]
+fn identity_hashes_digest_alike_across_vms() {
+    let bootstrap = |pad: &str| format!("\
+(defvar custom-delayed-init-variables nil)
+(defvar fence-pad {pad})
+(defvar fence-heap (let ((table (make-hash-table :test 'eq))) (puthash (list 'a) 1 table) (puthash (vector 'b) 2 table) table))
+(unwind-protect
+    (progn (romacs--startup-phase t) (setq seen fence-heap))
+  (romacs--startup-phase nil))
+");
+    let digest = |name, pad| {
+        let (_, trace) = run_with(name, &bootstrap(pad), "", true);
+        let trace = trace.unwrap();
+        let input = trace["records"].as_array().unwrap().iter().find(|r| r["kind"] == "input" && r["symbol"] == "fence-heap").cloned();
+        input.unwrap_or_else(|| panic!("{trace}"))["digest"].clone()
+    };
+    assert_eq!(digest("identity-bare", "nil"), digest("identity-padded", "(list (list 1) (vector 2))"));
+}
+
 #[test]
 fn a_binding_across_startups_end_stays_fenced_in_backtraces() {
     let bootstrap = "\
