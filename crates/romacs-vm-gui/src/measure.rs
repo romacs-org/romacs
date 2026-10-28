@@ -165,6 +165,11 @@ mod tests {
             ("(insert (propertize \"abc\" 'face '(hosted-big bold)))".into(), "(insert (propertize \"abc\" 'face 'hosted-big))".into(), "of a face the host does not paint"),
             ("(insert (propertize \"abc\" 'font-lock-face 'hosted-big))".into(), "(insert (propertize \"abc\" 'face 'hosted-big))".into(), "of a face the host does not paint"),
             ("(setq line-prefix \"> \") (insert \"abc\")".into(), "(insert \"abc\")".into(), "of a line or wrap prefix"),
+            // Hidden text at the end, or all of it, skips characters the
+            // host still paints.
+            ("(insert \"a\" (propertize \"b\" 'invisible t))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
+            ("(insert \"a\" (propertize \"b\" 'display \"\"))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
+            ("(insert (propertize \"ab\" 'invisible t))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
         ] {
             for (form, refuse) in [(refused.as_str(), true), (twin.as_str(), false)] {
                 // Hosted since setup's paint; the painter itself refuses a tab.

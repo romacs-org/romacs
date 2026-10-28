@@ -85,15 +85,25 @@ impl<'l, 'a> Hosted<'l, 'a> {
             || self.source.char_after(e.charpos)? != Some(c) {
             return Ok(false);
         }
-        Ok(if index == 0 { e.charpos == self.origin }
-            else { self.source.slot(index - 1)?.elem.is_some_and(|p| p.charpos + 1 == e.charpos) })
+        Ok(self.follows(index, e.charpos)?)
+    }
+    /// POS is the position after the element before INDEX, or ORIGIN:
+    /// no text between them was skipped, invisible or replaced.
+    fn follows(&mut self, index: usize, pos: i64) -> R<bool> {
+        Ok(if index == 0 { pos == self.origin }
+            else { self.source.slot(index - 1)?.elem.is_some_and(|p| p.charpos + 1 == pos) })
     }
 }
 
 impl Elements for Hosted<'_, '_> {
     fn slot(&mut self, index: usize) -> R<Slot> {
         let slot = self.source.slot(index)?;
-        let Some(e) = slot.elem else { return Ok(slot) };
+        let Some(e) = slot.elem else {
+            // The end must follow the last element too: hidden text before
+            // ZV is text the host still paints.
+            if !self.follows(index, self.source.zv())? { return Err(unsupported("of text the host does not lay out as GNU displays it")); }
+            return Ok(slot);
+        };
         if !self.plain(index, &e)? { return Err(unsupported("of text the host does not lay out as GNU displays it")); }
         let Shape::Glyph { c, .. } = e.shape else { unreachable!() };
         let (width, height) = self.glyph(e.charpos)?;
