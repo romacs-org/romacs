@@ -42,12 +42,12 @@ impl Leaf<'_> {
         let buffer = self.decode_buffer(buffer)?;
         let Some(slot) = slot else { return Ok(symbol) };
         let value = if let Some(fwd) = self.vm.forwarding(slot) {
+            // A fenced variable's forwarding is the one the fence keeps, so
+            // its fence is checked here, for BUFFER.
+            self.vm.fence_access(slot, crate::world::Access::Read, buffer);
             match fwd {
-                Fwd::Buffer(i) => {
-                    // A fenced per-buffer variable reads through its own forwarding.
-                    self.vm.fence_access(slot, crate::world::Access::Read, buffer);
-                    self.vm.forwarded_buffer_value(buffer.index(0).unwrap() - 1, i)
-                }
+                Fwd::Buffer(i) => self.vm.forwarded_buffer_value(buffer.index(0).unwrap() - 1, i),
+                Fwd::Fence(_) => self.vm.slots[slot].value,
                 _ => self.vm.forwarded_value(fwd).map_err(Fault::Error)?,
             }
         } else if let Some(table) = self.vm.local_table(slot).map_err(Fault::Error)? {

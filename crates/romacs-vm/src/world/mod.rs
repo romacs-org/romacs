@@ -78,12 +78,13 @@ pub(crate) struct Fence {
     digests: Vec<String>,
 }
 
-/// A fenced variable: its root, the redirect the fence keeps, and the depth
-/// of the binding stack when it was fenced, above which a `let` is newer.
+/// A fenced variable: its root, the redirect the fence keeps, and the
+/// dynamic entries that bound it when it was fenced and are still bound. A
+/// `let` of any other entry is newer than the fence.
 struct Cell {
     root: Root,
     redirect: Option<VariableRedirect>,
-    depth: usize,
+    older: Vec<usize>,
 }
 
 impl Vm {
@@ -182,8 +183,8 @@ impl Vm {
         match redirect {
             Some(VariableRedirect::Forwarded(Fwd::Fence(_))) => {}
             Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_)) => {
-                let depth = self.dynamic.len();
-                self.fence_mut().cells.insert(slot, Cell { root, redirect, depth });
+                let older = (0..self.dynamic.len()).filter(|&at| self.dynamic[at].0 == slot).collect();
+                self.fence_mut().cells.insert(slot, Cell { root, redirect, older });
                 self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Fence(slot as u32)));
             }
             _ if root == Root::Observed => {}
@@ -268,8 +269,8 @@ impl Vm {
         }
         let per_buffer = matches!(cell.redirect, Some(VariableRedirect::Forwarded(Fwd::Buffer(_))));
         let saved = matches!(access, Access::SavedRead | Access::SavedWrite);
-        let shadowed = !saved && self.dynamic.iter().skip(cell.depth)
-            .any(|&(bound, _, owner, let_default)| bound == slot && (!per_buffer || let_default || owner == buffer));
+        let shadowed = !saved && self.dynamic.iter().enumerate().any(|(at, &(bound, _, owner, let_default))|
+            bound == slot && !cell.older.contains(&at) && (!per_buffer || let_default || owner == buffer));
         if !shadowed {
             host::refuse("fence", json!({"root": cell.root as u8, "access": access_name(access),
                                          "symbol": self.symbol_names[slot]}));
@@ -280,10 +281,28 @@ impl Vm {
     /// `default-toplevel-value` and its kin. The oldest entry newer than the
     /// fence saved the root's value.
     pub(crate) fn fence_saved(&mut self, slot: usize, at: usize, access: Access) {
-        if self.fence_cell(slot).is_some_and(|cell| at >= cell.depth) {
+        if self.fence_cell(slot).is_some_and(|cell| !cell.older.contains(&at)) {
             self.fence_access(slot, access, Value::NIL);
         }
     }
+    /// The fenced variable at SLOT lost its innermost binding, the dynamic
+    /// entry past the stack's end.
+    pub(crate) fn fence_unbound(&mut self, slot: usize) {
+        let at = self.dynamic.len();
+        if let Some(cell) = self.fence.as_mut().and_then(|fence| fence.cells.get_mut(&slot)) {
+            cell.older.retain(|&older| older != at);
+        }
+    }
+
+    /// A backtrace's read of the binding of SLOT in dynamic entry AT,
+    /// OWNER's, whether it is current or a newer `let` saved it. A binding
+    /// older than the fence holds the root's value.
+    pub(crate) fn fence_binding(&mut self, slot: usize, at: usize, owner: Value) {
+        if self.fence_cell(slot).is_some_and(|cell| cell.older.contains(&at)) {
+            self.fence_access(slot, Access::SavedRead, owner);
+        }
+    }
+
 
     fn observe(&mut self, input: Input) {
         let fence = self.fence_mut();

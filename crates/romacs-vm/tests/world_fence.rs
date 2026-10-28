@@ -11,9 +11,10 @@ use std::time::UNIX_EPOCH;
 const PINNED: Pinned = Pinned { clock: UNIX_EPOCH, pid: 4242, seed: [1, 2, 3, 4] };
 
 /// A fake loadup whose startup sets two delayed variables from its inputs:
-/// a variable, a property, a plist and a function.
+/// a variable, a property, a plist and a function. A built-in variable is
+/// delayed too, and one is read through `buffer-local-value'.
 const BOOTSTRAP: &str = "\
-(defvar custom-delayed-init-variables '(fence-a fence-b))
+(defvar custom-delayed-init-variables '(fence-a fence-b transient-mark-mode))
 (defvar fence-a nil)
 (defvar fence-b nil)
 (defvar fence-input \"/in/\")
@@ -23,7 +24,8 @@ const BOOTSTRAP: &str = "\
 (unwind-protect
     (progn (romacs--startup-phase t)
            (setq fence-a (concat (fence-locate) (car (get 'fence-a 'standard-value))) fence-b (symbol-plist 'fence-plist))
-           (setq startup-saw (list (length process-environment) default-directory (random 3)))
+           (setq startup-saw (list (length process-environment) default-directory (random 3)
+                                   (buffer-local-value 'mark-even-if-inactive (current-buffer))))
            (setq custom-delayed-init-variables t))
   (romacs--startup-phase nil))
 ";
@@ -43,8 +45,12 @@ fn write(path: &Path, text: &str) -> PathBuf {
 /// Load the fake loadup, then PRELOAD (one case per line), with build mode
 /// on when BUILDING: the VM and the trace.
 fn run(name: &str, preload: &str, building: bool) -> (Vm, Option<Json>) {
+    run_with(name, BOOTSTRAP, preload, building)
+}
+
+fn run_with(name: &str, bootstrap: &str, preload: &str, building: bool) -> (Vm, Option<Json>) {
     let dir = scratch(name);
-    let bootstrap = write(&dir.join("rlisp/romacs-loadup-bootstrap.el"), BOOTSTRAP);
+    let bootstrap = write(&dir.join("rlisp/romacs-loadup-bootstrap.el"), bootstrap);
     let preload = write(&dir.join("preload.el"), preload);
     if building {
         host::enter_build(PINNED);
@@ -95,6 +101,7 @@ fn reads_of_fenced_values_refuse_compiled_and_interpreted() {
         ("(funcall (eval '(lambda () fence-a) nil))", 3, "read", "fence-a"),
         ("(eval 'fence-a nil)", 3, "read", "fence-a"),
         ("(buffer-local-value 'fence-a (current-buffer))", 3, "read", "fence-a"),
+        ("(buffer-local-value 'transient-mark-mode (current-buffer))", 3, "read", "transient-mark-mode"),
         ("(defvar x2 (length process-environment))", 1, "read", "process-environment"),
         ("(let ((n 0)) (dolist (e initial-environment) (setq n (1+ n))))", 1, "read", "initial-environment"),
         ("(expand-file-name \"foo\")", 2, "read", "default-directory"),
@@ -142,7 +149,7 @@ fn lets_buffers_and_startup_pass() {
     let trace = trace.unwrap();
     assert!(trace["refusals"].as_array().unwrap().is_empty(), "{trace}");
     let shown = vm.eval_source("(list p1 p2 p3 p4 p5 (stringp p6) (length startup-saw))").and_then(|v| v.display()).unwrap();
-    assert_eq!(shown, "((\"/l/\" \"/l/\") 2 \"/x\" \"/y\" \"fence-new\" t 3)");
+    assert_eq!(shown, "((\"/l/\" \"/l/\") 2 \"/x\" \"/y\" \"fence-new\" t 4)");
 }
 
 #[test]
@@ -170,7 +177,7 @@ fn writes_to_startup_inputs_refuse_whatever_they_store() {
     assert_eq!(refused, expected, "{trace}");
     let inputs: Vec<_> = trace["records"].as_array().unwrap().iter().filter(|r| r["kind"] == "input")
         .map(|r| format!("{} {} {}", r["input"].as_str().unwrap(), r["symbol"].as_str().unwrap(), r["property"].as_str().unwrap_or(""))).collect();
-    for input in ["variable fence-input ", "property fence-a standard-value", "plist fence-plist ", "function fence-locate "] {
+    for input in ["variable fence-input ", "property fence-a standard-value", "plist fence-plist ", "function fence-locate ", "variable mark-even-if-inactive "] {
         assert!(inputs.iter().any(|i| i == input), "{input}: {inputs:?}");
     }
 }
@@ -215,4 +222,46 @@ fn fenced_variables_behave_as_without_the_fence() {
     let off = off.eval_source(show).and_then(|v| v.display()).unwrap();
     let on = on.eval_source(show).and_then(|v| v.display()).unwrap();
     assert_eq!(on, off);
+}
+
+/// The refusals as (kind, line, symbol, access, object).
+fn listed(trace: &Json) -> Vec<(String, u64, String, String, String)> {
+    let text = |r: &Json, key: &str| r[key].as_str().unwrap_or("").to_owned();
+    trace["refusals"].as_array().unwrap().iter()
+        .map(|r| (text(r, "kind"), r["site"]["line"].as_u64().unwrap_or(0), text(r, "symbol"), text(r, "access"), text(r, "object")))
+        .collect()
+}
+
+#[test]
+fn a_binding_across_startups_end_stays_fenced_in_backtraces() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables '(fence-a transient-mark-mode))
+(defvar fence-a nil)
+(defvar fence-seen nil)
+(defun fence-locals () (setq fence-seen (cons (backtrace--locals 2) fence-seen)))
+(defun fence-run ()
+  (let ((transient-mark-mode 'outer) (fence-a \"/outer/\"))
+    (unwind-protect
+        (progn (romacs--startup-phase t) (setq custom-delayed-init-variables t))
+      (romacs--startup-phase nil))
+    (let ((fence-a 'inner)) (fence-locals))))
+(fence-run)
+";
+    let preload = "\
+(defun fence-new () (let ((fence-a 'new)) (fence-locals)))
+(fence-new)
+";
+    let (mut vm, trace) = run_with("backtrace", bootstrap, preload, true);
+    let trace = trace.unwrap();
+    // The current binding of the built-in variable and the value the inner
+    // `let' saved are both the root's; the newer `let's are their own.
+    assert_eq!(listed(&trace), [
+        ("fence".into(), 11, "transient-mark-mode".into(), "saved".into(), String::new()),
+        ("fence".into(), 11, "fence-a".into(), "saved".into(), String::new()),
+    ], "{trace}");
+    let (mut off, _) = run_with("backtrace-off", bootstrap, preload, false);
+    let shown = "(format \"%S\" fence-seen)";
+    let seen = vm.eval_source(shown).and_then(|v| v.display()).unwrap();
+    assert_eq!(seen, "\"(((fence-a . new)) ((transient-mark-mode . outer) (fence-a . \\\"/outer/\\\") (fence-a . inner)))\"");
+    assert_eq!(seen, off.eval_source(shown).and_then(|v| v.display()).unwrap());
 }

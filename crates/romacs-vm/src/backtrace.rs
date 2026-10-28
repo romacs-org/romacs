@@ -189,17 +189,18 @@ impl Vm {
             return Ok(self.slots[local.index(7)? - 1].value);
         }
         let fwd = self.localized_boolean(slot).or_else(|| self.forwarding_ref(slot));
-        for &(next, old, next_owner, next_default) in &self.dynamic[at + 1..] {
-            if next != slot {
-                continue;
-            }
-            if matches!(fwd, Some(forwarded::Fwd::Buffer(_)))
-                && (default != next_default || (!default && owner != next_owner))
-            {
-                continue;
-            }
-            return Ok(old);
+        let saved = self.dynamic[at + 1..].iter().find(|&&(next, _, next_owner, next_default)| next == slot
+            && !(matches!(fwd, Some(forwarded::Fwd::Buffer(_))) && (default != next_default || (!default && owner != next_owner))));
+        let saved = saved.map(|&(_, old, _, _)| old);
+        self.fence_binding(slot, at, owner);
+        match saved {
+            Some(old) => Ok(old),
+            None => self.unfenced(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
         }
+    }
+    /// The current value of the binding of SLOT that OWNER and DEFAULT name.
+    fn backtrace_live_value(&mut self, slot: usize, owner: Value, default: bool) -> Result<Value> {
+        let fwd = self.localized_boolean(slot).or_else(|| self.forwarding_ref(slot));
         match fwd {
             Some(forwarded::Fwd::Buffer(i)) if !default => {
                 let buffer = owner

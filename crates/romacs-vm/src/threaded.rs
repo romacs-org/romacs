@@ -726,6 +726,7 @@ fn checked_unbind(e: &mut Engine<'_>, n: usize) -> Option<Escape> {
         {
             e.vm.dynamic.pop();
             e.vm.backtrace.unbind(e.vm.dynamic.len());
+            e.vm.fence_unbound(slot);
             let predicate = Value::reference(e.vm.slot("integerp") + 1, 7);
             let condition = Value::reference(e.vm.slot("wrong-type-argument") + 1, 7);
             let data = e.vm.list_value(&[predicate, value]);

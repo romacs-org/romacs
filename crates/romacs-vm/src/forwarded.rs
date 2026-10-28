@@ -1252,10 +1252,13 @@ impl Vm {
     /// from the same storage, so it is restored without re-checking.
     pub(super) fn unbind_forwarded(&mut self, fwd: Fwd, old: Value, owner: Value, let_default: bool) {
         match fwd {
-            Fwd::Fence(slot) => self.unfenced(slot as usize, |vm| match vm.native_forwarding(slot as usize) {
-                Some(fwd) => vm.unbind_forwarded(fwd, old, owner, let_default),
-                None => vm.slots[slot as usize].value = old,
-            }),
+            Fwd::Fence(slot) => {
+                self.fence_unbound(slot as usize);
+                self.unfenced(slot as usize, |vm| match vm.native_forwarding(slot as usize) {
+                    Some(fwd) => vm.unbind_forwarded(fwd, old, owner, let_default),
+                    None => vm.slots[slot as usize].value = old,
+                })
+            }
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = old,
             Fwd::Bool(i) => self.forwarded.bools[i as usize] = old != Value::NIL,
             Fwd::Int(i) => {
