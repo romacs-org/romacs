@@ -175,6 +175,8 @@ impl Leaf<'_> {
 #[derive(Clone, Copy)]
 pub(crate) enum RegionCase {
     Up,
+    Down,
+    Capitalize,
     InitialsUp,
 }
 
@@ -194,10 +196,12 @@ impl Leaf<'_> {
         };
         let cased = match case {
             RegionCase::Up => self.case_mappings(&codes, multibyte, false, true)?,
-            RegionCase::InitialsUp => {
+            RegionCase::Down => self.case_mappings(&codes, multibyte, true, true)?,
+            RegionCase::Capitalize | RegionCase::InitialsUp => {
                 let chars: Vec<u32> = codes.iter().map(|&c| byte_code(c, !multibyte)).collect();
                 let prefixes = self.casing_prefix_flags(&chars)?;
-                crate::prim::prims::capitalize::capitalized_chars(self, &chars, Some(&prefixes), true)?
+                let initials = matches!(case, RegionCase::InitialsUp);
+                crate::prim::prims::capitalize::capitalized_chars(self, &chars, Some(&prefixes), initials)?
             }
         };
         Ok((multibyte, codes, cased))
@@ -246,7 +250,7 @@ impl Leaf<'_> {
                     }
                 }
                 data::Object::ByteBuffer(b) => {
-                    let byte = Self::byte_case_result(out[0], code, false);
+                    let byte = Self::byte_case_result(out[0], code, matches!(case, RegionCase::Down));
                     if u32::from(byte) == code { continue; }
                     b.bytes[at as usize] = byte;
                     last = at + 2;

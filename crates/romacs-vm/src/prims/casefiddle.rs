@@ -10,18 +10,22 @@ fn downcase(cx, value: Value) { cx.case_convert(value, true) }}
 fn flag(b: bool) -> Value { if b { Value::TRUE } else { Value::NIL } }
 fn fixnum(n: i64) -> Value { Value::integer(n).expect("buffer position") }
 
+/// The region commands and the case each applies, by register code.
+const REGION_CASES: [(&str, RegionCase); 4] = [("upcase-region", RegionCase::Up), ("downcase-region", RegionCase::Down),
+    ("capitalize-region", RegionCase::Capitalize), ("upcase-initials-region", RegionCase::InitialsUp)];
+
 fn region_case(code: Value) -> RegionCase {
-    if code == Value::NIL { RegionCase::Up } else { RegionCase::InitialsUp }
+    REGION_CASES[code.integer_value().expect("region case code") as usize].1
 }
 
 // casify_pnc_region and casify_region (casefiddle.c:529): validate_region,
 // modify_text's bracket over the region, each character cased in place,
 // and one after-change over what changed. Registers between the steps:
 //   [START, END, CASE, INHIBITED]
-// CASE is nil for upcase and t for upcase-initials.
+// CASE is the fixnum index of the command in REGION_CASES.
 fn casify_region(cx: &mut Leaf<'_>, case: Value, beg: Value, end: Value, noncontiguous: Value) -> Next {
     if noncontiguous != Value::NIL {
-        let function = cx.intern(if case == Value::NIL { "upcase-region" } else { "upcase-initials-region" });
+        let function = cx.intern(REGION_CASES[case.integer_value().expect("region case code") as usize].0);
         if super::insdel::half_missing(cx)? {
             return super::insdel::install_half(cx, casify_restart, vec![case, beg, end, noncontiguous]);
         }
@@ -64,12 +68,22 @@ fn casified(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
 
 defsubr! { name = "upcase-region", gnu = "casefiddle.c:609", effect = Global,
 fn upcase_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
-    casify_region(cx, Value::NIL, beg, end, region_noncontiguous_p)
+    casify_region(cx, fixnum(0), beg, end, region_noncontiguous_p)
+}}
+
+defsubr! { name = "downcase-region", gnu = "casefiddle.c:621", effect = Global,
+fn downcase_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
+    casify_region(cx, fixnum(1), beg, end, region_noncontiguous_p)
+}}
+
+defsubr! { name = "capitalize-region", gnu = "casefiddle.c:632", effect = Global,
+fn capitalize_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
+    casify_region(cx, fixnum(2), beg, end, region_noncontiguous_p)
 }}
 
 defsubr! { name = "upcase-initials-region", gnu = "casefiddle.c:646", effect = Global,
 fn upcase_initials_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
-    casify_region(cx, Value::TRUE, beg, end, region_noncontiguous_p)
+    casify_region(cx, fixnum(3), beg, end, region_noncontiguous_p)
 }}
 
 #[cfg(test)]
