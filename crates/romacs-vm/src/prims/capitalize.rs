@@ -55,14 +55,14 @@ pub(crate) fn capitalized_chars(cx: &mut Leaf<'_>, chars: &[u32], prefixes: Opti
     let mut inword = false;
     let mut cased = Vec::with_capacity(chars.len());
     for (i, &code) in chars.iter().enumerate() {
-        // case_character: a special casing of several characters first,
-        // then the case table (in a word) or the titlecase (at its start).
+        // case_character: a special casing of several characters first, then the case
+        // table in a word (a changed final capital sigma is ς), else the titlecase.
         let special = |full: &'static [u32]| (full.len() > 1).then(|| full.to_vec());
         let row = mapping(code);
         let out = if inword && initials { vec![code] }
-            else if !initials && inword && code == 0x3a3 && !words.get(i + 1).copied().unwrap_or(false) { vec![0x3c2] }
             else if inword {
-                row.and_then(|r| special(r.3)).map_or_else(|| cx.case_mapping_character(code, true).map(|c| vec![c]), Ok)?
+                let down = row.and_then(|r| special(r.3)).map_or_else(|| cx.case_mapping_character(code, true).map(|c| vec![c]), Ok)?;
+                if code == 0x3a3 && down != [code] && !words.get(i + 1).copied().unwrap_or(false) { vec![0x3c2] } else { down }
             } else {
                 row.and_then(|r| special(r.2)).map_or_else(|| word_start(cx, code).map(|c| vec![c]), Ok)?
             };
