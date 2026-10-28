@@ -123,11 +123,22 @@ fn fixnum(n: i64) -> Value { Value::integer(n).expect("buffer position") }
 fn position(v: Value) -> i64 { v.integer_value().expect("saved buffer position") }
 
 /// Insert TEXT, the coded region BEG..END, at BEG, then delete the old text.
-fn replace_region(cx: &mut Leaf<'_>, from: i64, to: i64, text: Value, length: i64) -> Next {
+/// With SIGNALS, an empty TEXT still gets its after-change, which `insert'
+/// skips: the decoder signals its insertion itself (fns.c:4391).
+fn replace_region(cx: &mut Leaf<'_>, from: i64, to: i64, text: Value, length: i64, signals: bool) -> Next {
     let saved = vec![fixnum(from), fixnum(to), fixnum(cx.point_char()?), fixnum(length)];
     cx.goto_char_position(from)?;
+    if length == 0 && signals && cx.after_change_runs(false, false)? {
+        if super::insdel::half_missing(cx)? { return super::insdel::install_half(cx, signal_empty, saved); }
+        return signal_empty(cx, Value::NIL, &saved);
+    }
     let insert = crate::prim::subr_named("insert").expect("insert subr");
     Ok(Step::Call { f: insert, args: vec![text], then: inserted, saved })
+}
+
+fn signal_empty(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let args = vec![cx.current_buffer()?, saved[0], saved[0], fixnum(0)];
+    Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: inserted, saved: saved.to_vec() })
 }
 
 fn inserted(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
@@ -151,7 +162,7 @@ fn encode_region(cx: &mut Leaf<'_>, beg: Value, end: Value, line_break: bool, pa
     let encoded = encode(&octets(cx, text)?, line_break, pad, url);
     let length = encoded.len() as i64;
     let text = cx.make_string(encoded, false);
-    replace_region(cx, from, to, text, length)
+    replace_region(cx, from, to, text, length, false)
 }
 
 defsubr! { name = "base64-encode-region", gnu = "fns.c:4081", effect = Global,
@@ -180,5 +191,5 @@ fn base64_decode_region(cx, beg: Value, end: Value; optional base64url: Value, i
     }
     let length = decoded.len() as i64;
     let text = cx.make_string(decoded, false);
-    replace_region(cx, from, to, text, length)
+    replace_region(cx, from, to, text, length, true)
 }}
