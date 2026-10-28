@@ -102,6 +102,9 @@
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)
 (load "emacs-lisp/nadvice.el" nil t t)
+;; VM2 code is compiled when defined: `byte-compile' of a function value
+;; returns it (VM2-BYTECOMP1).
+(require 'romacs-bytecomp)
 (load "minibuffer.el" nil t t)
 (load "frame.el" nil t t)
 (load "startup.el" nil t t)

@@ -8,10 +8,10 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "db8c92d806721fdebd8242fc960e5a150cce112b31b175c4cad3152da76dcaf7",
+    "input_hash": "62a49abc6fec392d83d4422fc5f816ab9b5941e79ae68f57b683a3beadc6a975",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4393
+    "vm2_universe": 4394
   },
   "schema": 2,
   "vm2": {

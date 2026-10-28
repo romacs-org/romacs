@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "1fdfc3b6074decf6f74e6a9012980a3daa1b49f3a8a13e1a17c2a7489d2e2c8e",
+  "input_hash": "4bfaf9ede745f57396c343a9ca64b23d2d486233882889db1adfb37f67e1a4b8",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 266,
-  "symbols": 610,
+  "symbols": 608,
   "rows_without_symbols": 15
  },
  "by_symbol": {
@@ -24,7 +24,7 @@
    200
   ],
   "+": [
-   68
+   69
   ],
   "/proc/stat": [
    10
@@ -36,16 +36,16 @@
    84
   ],
   "<=": [
-   68
+   69
   ],
   "=": [
-   68
+   69
   ],
   "[:class:]": [
    265
   ],
   "abort-minibuffers": [
-   62
+   63
   ],
   "accept-process-output": [
    170,
@@ -91,7 +91,7 @@
    84
   ],
   "arrayp": [
-   50
+   51
   ],
   "aset": [
    75,
@@ -118,7 +118,7 @@
    153
   ],
   "bare-symbol-p": [
-   50
+   51
   ],
   "base64-decode-region": [
    168
@@ -153,24 +153,24 @@
    98
   ],
   "buffer-local-value": [
-   40
+   41
   ],
   "buffer-local-variables": [
-   40
+   41
   ],
   "buffer-modified-p": [
-   60,
+   61,
    99
   ],
   "buffer-modified-tick": [
    99
   ],
   "buffer-name": [
-   57,
-   58
+   58,
+   59
   ],
   "buffer-name buffer-modified-p": [
-   59
+   60
   ],
   "buffer-read-only": [
    1
@@ -183,13 +183,15 @@
   ],
   "byte-code-function-p": [
    38,
+   39,
    233
   ],
   "byte-compile": [
-   48
+   39,
+   49
   ],
   "call-interactively": [
-   71,
+   72,
    143
   ],
   "call-process": [
@@ -200,10 +202,10 @@
    170
   ],
   "capitalize": [
-   53
+   54
   ],
   "capitalize case-symbols-as-words": [
-   54
+   55
   ],
   "car": [
    223
@@ -215,10 +217,10 @@
    220
   ],
   "char-code-property-description": [
-   39
+   40
   ],
   "char-or-string-p": [
-   50
+   51
   ],
   "char-syntax": [
    153
@@ -263,10 +265,10 @@
    143
   ],
   "command-execute": [
-   63
+   64
   ],
   "command-history": [
-   71
+   72
   ],
   "command-line-args": [
    87
@@ -298,7 +300,7 @@
    95
   ],
   "copy-case-table": [
-   53
+   54
   ],
   "copy-file": [
    8
@@ -312,13 +314,13 @@
    152
   ],
   "crates/romacs-vm/evidence/file-name-handler/": [
-   47
+   48
   ],
   "ctl-x-map": [
    138
   ],
   "current-case-table": [
-   53
+   54
   ],
   "current-column": [
    3
@@ -336,7 +338,7 @@
    240
   ],
   "current-prefix-arg": [
-   71
+   72
   ],
   "current-time": [
    92
@@ -474,7 +476,7 @@
    0
   ],
   "discard-input": [
-   63
+   64
   ],
   "display-color-cells": [
    172
@@ -547,7 +549,7 @@
    140
   ],
   "eq": [
-   56,
+   57,
    104
   ],
   "equal": [
@@ -601,14 +603,14 @@
    0
   ],
   "execute-kbd-macro": [
-   63
-  ],
-  "executing-kbd-macro": [
-   62,
    64
   ],
+  "executing-kbd-macro": [
+   63,
+   65
+  ],
   "exit-minibuffer": [
-   62
+   63
   ],
   "expand-file-name": [
    94
@@ -679,7 +681,7 @@
    99
   ],
   "find-file-name-handler": [
-   47,
+   48,
    248
   ],
   "find-file-noselect": [
@@ -695,7 +697,7 @@
    83
   ],
   "floatp": [
-   50
+   51
   ],
   "floor": [
    196
@@ -707,7 +709,7 @@
    156
   ],
   "format": [
-   68,
+   69,
    73,
    91,
    93,
@@ -776,7 +778,7 @@
    101
   ],
   "funcall": [
-   72,
+   101,
    107,
    129,
    136,
@@ -784,7 +786,7 @@
    223
   ],
   "funcall-interactively": [
-   71
+   72
   ],
   "function-documentation": [
    102
@@ -814,7 +816,7 @@
    184
   ],
   "get-char-code-property": [
-   39
+   40
   ],
   "get-file-buffer": [
    99
@@ -856,7 +858,7 @@
    188
   ],
   "identity": [
-   51
+   52
   ],
   "indent-to": [
    3
@@ -874,25 +876,25 @@
    248
   ],
   "inhibit-mouse-event-check": [
-   71
+   72
   ],
   "inhibit-read-only": [
    1
   ],
   "input-pending-p": [
-   63
+   64
   ],
   "insert-file-contents": [
    98
   ],
   "integer-or-marker-p": [
-   50
+   51
   ],
   "interactive": [
    139
   ],
   "interactive-form": [
-   71
+   72
   ],
   "intern": [
    204,
@@ -929,6 +931,7 @@
    227
   ],
   "interpreted-function-p": [
+   39,
    233
   ],
   "invalid-function": [
@@ -953,7 +956,7 @@
    138
   ],
   "kill-all-local-variables": [
-   41,
+   42,
    155
   ],
   "kill-buffer": [
@@ -961,7 +964,7 @@
    155
   ],
   "kill-local-variable": [
-   41,
+   42,
    155
   ],
   "lambda": [
@@ -976,7 +979,7 @@
    255
   ],
   "last-command": [
-   71
+   72
   ],
   "last-command-event": [
    139,
@@ -1047,7 +1050,7 @@
    236
   ],
   "local-variable-p": [
-   40
+   41
   ],
   "locate-file-internal": [
    94,
@@ -1079,8 +1082,8 @@
   ],
   "make-bool-vector": [
    19,
-   51,
-   56,
+   52,
+   57,
    81,
    82,
    212
@@ -1162,8 +1165,8 @@
    253
   ],
   "mapc": [
-   51,
-   52
+   52,
+   53
   ],
   "mapcar": [
    106,
@@ -1176,7 +1179,7 @@
    129
   ],
   "markerp": [
-   50
+   51
   ],
   "match-beginning": [
    149
@@ -1193,7 +1196,7 @@
    149
   ],
   "match-string": [
-   70
+   71
   ],
   "matching-paren": [
    153
@@ -1221,19 +1224,19 @@
    141
   ],
   "min": [
-   68
+   69
   ],
   "minibuffer-history": [
-   62
+   63
   ],
   "minibuffer-local-map": [
    236
   ],
   "minibuffer-prompt-properties": [
-   62
+   63
   ],
   "minibuffer-quit-recursive-edit": [
-   62
+   63
   ],
   "minibuffer-selected-window": [
    185
@@ -1266,10 +1269,10 @@
    201
   ],
   "native-comp-function-p": [
-   48
+   49
   ],
   "natnump": [
-   50
+   51
   ],
   "next-overlay-change": [
    125
@@ -1293,7 +1296,7 @@
    15
   ],
   "number-or-marker-p": [
-   50
+   51
   ],
   "obarray-make": [
    246
@@ -1343,13 +1346,13 @@
    191
   ],
   "position-symbol": [
-   49
+   50
   ],
   "posn-at-point": [
    191
   ],
   "prefix-numeric-value": [
-   71
+   72
   ],
   "previous-overlay-change": [
    125
@@ -1362,8 +1365,8 @@
    243
   ],
   "prin1-to-string": [
-   52,
-   68,
+   53,
+   69,
    109,
    157,
    159,
@@ -1440,7 +1443,7 @@
    203
   ],
   "quit-flag": [
-   64
+   65
   ],
   "raise-frame": [
    188
@@ -1463,25 +1466,25 @@
    202
   ],
   "read-char": [
-   63
-  ],
-  "read-char-exclusive": [
-   63
-  ],
-  "read-event": [
-   63
-  ],
-  "read-from-minibuffer": [
-   62,
    64
   ],
+  "read-char-exclusive": [
+   64
+  ],
+  "read-event": [
+   64
+  ],
+  "read-from-minibuffer": [
+   63,
+   65
+  ],
   "read-from-string": [
-   61,
-   65,
+   62,
    66,
    67,
    68,
    69,
+   70,
    76,
    78,
    79,
@@ -1491,23 +1494,23 @@
    246
   ],
   "read-key-sequence": [
-   63
-  ],
-  "read-key-sequence-vector": [
-   63
-  ],
-  "read-positioning-symbols": [
-   49
-  ],
-  "read-string": [
-   62,
    64
   ],
+  "read-key-sequence-vector": [
+   64
+  ],
+  "read-positioning-symbols": [
+   50
+  ],
+  "read-string": [
+   63,
+   65
+  ],
   "real-this-command": [
-   71
+   72
   ],
   "recent-keys": [
-   63
+   64
   ],
   "recenter": [
    187
@@ -1519,7 +1522,7 @@
    29
   ],
   "recursive-edit": [
-   63
+   64
   ],
   "redisplay": [
    141,
@@ -1532,16 +1535,16 @@
    226
   ],
   "replace-match": [
-   42,
    43,
    44,
-   45
+   45,
+   46
   ],
   "replace-region-contents": [
    169
   ],
   "replace_range": [
-   42
+   43
   ],
   "require": [
    87,
@@ -1558,20 +1561,20 @@
    249
   ],
   "reverse": [
-   56,
+   57,
    212
   ],
   "romacs--host-input": [
-   64
+   65
   ],
   "romacs--oclosure-type": [
    252
   ],
   "romacs--read-host-event": [
-   64
+   65
   ],
   "romacs--replace-range": [
-   42
+   43
   ],
   "romacs-display": [
    172
@@ -1584,12 +1587,6 @@
   ],
   "round": [
    196
-  ],
-  "run-hook-with-args": [
-   72
-  ],
-  "run-hooks": [
-   72
   ],
   "run-with-idle-timer": [
    170
@@ -1650,7 +1647,7 @@
    164
   ],
   "sequencep": [
-   50
+   51
   ],
   "set": [
    84,
@@ -1664,7 +1661,7 @@
    226
   ],
   "set-case-table": [
-   53
+   54
   ],
   "set-char-table-range": [
    75
@@ -1692,7 +1689,7 @@
    8
   ],
   "set-match-data": [
-   70
+   71
   ],
   "set-process-thread": [
    170
@@ -1823,7 +1820,7 @@
    132
   ],
   "subrp": [
-   48,
+   49,
    108
   ],
   "subst-char-in-region": [
@@ -1855,10 +1852,10 @@
    236
   ],
   "symbol-with-pos-p": [
-   49
+   50
   ],
   "symbols-with-pos-enabled": [
-   49
+   50
   ],
   "syntax-class-to-char": [
    153
@@ -1898,15 +1895,15 @@
    115
   ],
   "this-command": [
-   71
+   72
   ],
   "this-command-keys": [
-   63,
+   64,
    139,
    144
   ],
   "this-original-command": [
-   71
+   72
   ],
   "transient": [
    111
@@ -1938,7 +1935,7 @@
    184
   ],
   "undefined": [
-   63,
+   64,
    141
   ],
   "undo-limit": [
@@ -1948,7 +1945,7 @@
    201
   ],
   "unicode-property-table-internal": [
-   39
+   40
   ],
   "unify-charset": [
    217
@@ -1958,22 +1955,22 @@
    245
   ],
   "unread-command-events": [
-   62,
-   64
+   63,
+   65
   ],
   "upcase": [
    251
   ],
   "upcase-initials": [
-   53
+   54
   ],
   "upcase-initials-region": [
-   42,
-   55
+   43,
+   56
   ],
   "upcase-region": [
-   42,
-   55
+   43,
+   56
   ],
   "usize": [
    84
@@ -1988,7 +1985,7 @@
    104
   ],
   "vector-or-char-table-p": [
-   50
+   51
   ],
   "verify-visited-file-modtime": [
    98
@@ -2687,6 +2684,23 @@
    "symbols_derived": false
   },
   {
+   "id": "VM2-BYTECOMP1",
+   "source": "DIVERGENCES.md",
+   "section": "VM2 GNU bytecode representation",
+   "observable": false,
+   "planned": false,
+   "mechanism": "`byte-compile` of a function value",
+   "gnu": "`byte-compile` (`lisp/emacs-lisp/bytecomp.el:2959`) recovers an interpreted function's source through `byte-compile--reify-function` (`(aref fun 0..2)`), compiles it to byte-code and, for a symbol, `fset`s the result; a compiled function is returned with the message `Function %s is already compiled`. bytecomp.el itself byte-compiles seven of its functions when it is loaded from source",
+   "romacs": "Under the loadup bootstrap (`rlisp/romacs-bytecomp.el`, `:around` advice added before bytecomp.el loads) a VM2 closure, or a symbol whose definition is one, is returned unchanged and silently: VM2 compiled it when it was defined, and its closures are opaque (VM2-CLOSEQ1). A `(lambda ...)` list is evaluated in the dialect GNU would compile it in (a symbol's list definition dynamically, an argument in the caller's `lexical-binding`) and a symbol is `fset` to the closure. Other arguments and file compilation (`byte-compile-file`) reach GNU's code unchanged (`tests/bytecomp_function_value.rs`)",
+   "why": "**Package-observable:** the value is a VM2 closure, not byte-code: `byte-code-function-p` stays nil (VM2-BYTECODE1), so code that byte-compiles only when that predicate is nil (cc-defs.el:2517, cc-mode.el:490) calls `byte-compile` each time it is evaluated. `(advice-member-p #'romacs-bytecomp--function-value 'byte-compile)` is non-nil",
+   "symbols": [
+    "byte-compile",
+    "byte-code-function-p",
+    "interpreted-function-p"
+   ],
+   "symbols_derived": false
+  },
+  {
    "id": "VM2-UNIDATA1",
    "source": "DIVERGENCES.md",
    "section": "VM2 GNU bytecode representation",
@@ -3239,7 +3253,7 @@
    "planned": false,
    "mechanism": "`call-interactively`, `funcall-interactively`, `interactive-form`: the supported spec subset and what VM2 lacks around them",
    "gnu": "GNU `Fcall_interactively` (`callint.c:256-801`) asks `interactive-form` through its symbol (`callint.c:305`), evaluates a non-string spec with `Feval` in the closure's lexical environment (`callint.c:316-319`), records on `command-history` through `add-to-history` (`callint.c:325-330`, `780-783`), handles the prefix characters `+ * - @ ^` (`callint.c:364-405`) and every code letter `a b B c C d D e f F G i k K m M n N p P r R s S U v x X z Z` (`callint.c:449-762`), formatting each prompt with `format-message` (`callint.c:457`). `Finteractive_form` (`data.c:1139-1210`) reads the `interactive-form` property along the alias chain, a subr's DEFUN intspec, `CLOSURE_INTERACTIVE`, autoloads (via `autoload-do-load`) and `(lambda ...)` lists. `funcall-interactively` (`callint.c:239-254`) is `Ffuncall` in a frame that `called-interactively-p` (subr.el) finds by walking the backtrace.",
-   "romacs": "Recorded live against GNU 32.0.50 through primh (`tools/primh/callint-specs/*.json`, `evidence/{call-interactively,funcall-interactively,interactive-form,prefix-numeric-value}.json`, inputs in `tools/primh/logs/callint/make_spec.py`). **Supported and matching GNU row-for-row:** prefix characters `* - ^ @` (`^` calls `handle-shift-selection` when it is fbound; `@` with a window event signals unsupported), `+` error, codes `d e i m p P r R U Z`(no prefix) `N`(with prefix), the reading codes `D f F G` (`read-file-name` through its symbol with callint.c's arguments) and `s` (the `read-string` subr, not its symbol), their prompts through `format-message` (`tests/callint_reading.rs`), invalid-letter error text, `this-command`/`this-original-command`/`real-this-command`/`last-command` save and restore, `current-prefix-arg` (never `prefix-arg`), KEYS vector and `inhibit-mouse-event-check`, RECORD-FLAG history items including `interactive-args`, `history-length` (variable and property), the list-spec path in the closure's own lexical environment, the `interactive-form` property chain, and the GNU intspecs of the VM2 subrs that GNU defines as commands. **Divergent:** (1) the other minibuffer/keyboard-reading codes (`a b B c C k K M n S v x X z`, `N` without and `Z` with a prefix) signals `(error \"call-interactively: the input-reading code `X' is not supported in VM2 yet\")` where GNU reads input (`call-interactively/0466`, `/0471` pinned `CONDITION`; GNU batch gives `end-of-file`); (2) a `%` in a prompt signals the same kind of unsupported error where GNU formats it (`/0497`, GNU `Not enough arguments for format string`); (3) VM2 has no mark, so `m`, `r` and an active-region `R` always take GNU's no-mark error, and `set-mark` is void (`/0475`); (4) `buffer-read-only`, `inhibit-read-only` are ordinary global specials, not GNU's per-buffer slot, and buffer edits do not enforce them — only `*` reads them; (5) `add-to-history` (subr.el) is void in a bare VM2, so the KEEP-ALL body is run natively, and a non-nil `history-delete-duplicates` signals unsupported; (6) `called-interactively-p`, `command-execute`, `advice-add`, `identity` are void (subr.el/simple.el/nadvice.el not loadable), so those rows are pinned `MISSING`; (7) a closure's spec lives in a private key-weak `eq` table keyed by the closure (VM2 closures have no `CLOSURE_INTERACTIVE` slot), so `(interactive SPEC)` registered by `function`/`lambda`/`defun` is found, but a closure GNU would build from `make-interpreted-closure` with an explicit IFORM is not; `(interactive SPEC . MODES)` drops MODES as `interactive-form` does; (8) quoted `(lambda ...)` lists: `interactive-form` reads them as GNU does, but calling one fails (`/0439`, `/0440`, `funcall-interactively/0507`; VM2-RUNHOOKS1's engine gap) and `defalias` to one signals `(error \"defalias: a list function descriptor such as (lambda ...) is not supported in VM2 yet\")` (`interactive-form/0110`; formerly a dataless `(error)`); (9) `funcall-interactively` leaves no frame, so `called-interactively-p` cannot be implemented on it. (10) GNU binds `command-debug-status` to nil around a string-spec command (`callint.c:797-800`); the primitive step protocol (`Step::Done`/`Step::Call`, `src/prim.rs`) has no scoped, unwind-safe binding (the engine's specbind machinery is not exposed to primitives, and a set-and-restore would leak on a non-local exit), so the caller's value shows through (`call-interactively/0540`: GNU nil, VM2 9). Engine-owned substrate work, not infeasible. (11) GNU evaluates ANY non-string spec in the target closure's lexical environment (`callint.c:318-323`); a compiled VM2 closure keeps positional captures with unused bindings pruned, so there is no named environment to evaluate an arbitrary form in; only the closure's own registered spec runs in it (through its thunk) and any other spec (an `interactive-form` property, a redefined `interactive-form`, advice) is evaluated as `(eval SPEC nil)` (`/0541`: GNU 8, VM2 `void-variable x`). Every pinned row of these five evidence files is also locked to its exact reviewed VM2 outcome (`tests/primh_cmdloop_pins.rs`), so a pinned answer that changes within its class fails. Printer-only rows (circular lists, closures, `'X`, killed buffers) are pinned `PRINTER`/`DATA`/`VALUE` under VM2-EV2.",
+   "romacs": "Recorded live against GNU 32.0.50 through primh (`tools/primh/callint-specs/*.json`, `evidence/{call-interactively,funcall-interactively,interactive-form,prefix-numeric-value}.json`, inputs in `tools/primh/logs/callint/make_spec.py`). **Supported and matching GNU row-for-row:** prefix characters `* - ^ @` (`^` calls `handle-shift-selection` when it is fbound; `@` with a window event signals unsupported), `+` error, codes `d e i m p P r R U Z`(no prefix) `N`(with prefix), the reading codes `D f F G` (`read-file-name` through its symbol with callint.c's arguments) and `s` (the `read-string` subr, not its symbol), their prompts through `format-message` (`tests/callint_reading.rs`), invalid-letter error text, `this-command`/`this-original-command`/`real-this-command`/`last-command` save and restore, `current-prefix-arg` (never `prefix-arg`), KEYS vector and `inhibit-mouse-event-check`, RECORD-FLAG history items including `interactive-args`, `history-length` (variable and property), the list-spec path in the closure's own lexical environment, the `interactive-form` property chain, and the GNU intspecs of the VM2 subrs that GNU defines as commands. **Divergent:** (1) the other minibuffer/keyboard-reading codes (`a b B c C k K M n S v x X z`, `N` without and `Z` with a prefix) signals `(error \"call-interactively: the input-reading code `X' is not supported in VM2 yet\")` where GNU reads input (`call-interactively/0466`, `/0471` pinned `CONDITION`; GNU batch gives `end-of-file`); (2) a `%` in a prompt signals the same kind of unsupported error where GNU formats it (`/0497`, GNU `Not enough arguments for format string`); (3) VM2 has no mark, so `m`, `r` and an active-region `R` always take GNU's no-mark error, and `set-mark` is void (`/0475`); (4) `buffer-read-only`, `inhibit-read-only` are ordinary global specials, not GNU's per-buffer slot, and buffer edits do not enforce them — only `*` reads them; (5) `add-to-history` (subr.el) is void in a bare VM2, so the KEEP-ALL body is run natively, and a non-nil `history-delete-duplicates` signals unsupported; (6) `called-interactively-p`, `command-execute`, `advice-add`, `identity` are void (subr.el/simple.el/nadvice.el not loadable), so those rows are pinned `MISSING`; (7) a closure's spec lives in a private key-weak `eq` table keyed by the closure (VM2 closures have no `CLOSURE_INTERACTIVE` slot), so `(interactive SPEC)` registered by `function`/`lambda`/`defun` is found, but a closure GNU would build from `make-interpreted-closure` with an explicit IFORM is not; `(interactive SPEC . MODES)` drops MODES as `interactive-form` does; (8) quoted `(lambda ...)` lists are read, stored and called as GNU does (`/0439`, `funcall-interactively/0507`, `interactive-form/0110`; VM2-ALIAS1); (9) `funcall-interactively` leaves no frame, so `called-interactively-p` cannot be implemented on it. (10) GNU binds `command-debug-status` to nil around a string-spec command (`callint.c:797-800`); the primitive step protocol (`Step::Done`/`Step::Call`, `src/prim.rs`) has no scoped, unwind-safe binding (the engine's specbind machinery is not exposed to primitives, and a set-and-restore would leak on a non-local exit), so the caller's value shows through (`call-interactively/0540`: GNU nil, VM2 9). Engine-owned substrate work, not infeasible. (11) GNU evaluates ANY non-string spec in the target closure's lexical environment (`callint.c:318-323`); a compiled VM2 closure keeps positional captures with unused bindings pruned, so there is no named environment to evaluate an arbitrary form in; only the closure's own registered spec runs in it (through its thunk) and any other spec (an `interactive-form` property, a redefined `interactive-form`, advice) is evaluated as `(eval SPEC nil)` (`/0541`: GNU 8, VM2 `void-variable x`). Every pinned row of these five evidence files is also locked to its exact reviewed VM2 outcome (`tests/primh_cmdloop_pins.rs`), so a pinned answer that changes within its class fails. Printer-only rows (circular lists, closures, `'X`, killed buffers) are pinned `PRINTER`/`DATA`/`VALUE` under VM2-EV2.",
    "why": "**Package-observable**. A command whose spec reads from the minibuffer, prompts with `%`, uses the mark, or is quoted-lambda old-style signals a VM2-specific error naming the code instead of reading input — loud, never a silent default. Read-only buffers are not enforced by edits. The reading codes need the minibuffer and the mark needs the marker lane; both are separate surfaces",
    "symbols": [
     "call-interactively",
@@ -3253,23 +3267,6 @@
     "last-command",
     "current-prefix-arg",
     "inhibit-mouse-event-check"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-RUNHOOKS1",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`run-hooks` and `run-hook-with-args` with a quoted `(lambda ...)` list as a hook function",
-   "gnu": "GNU `run_hook_with_args` (`eval.c:2998-3062`) passes each function to `Ffuncall`, and `funcall_lambda` calls a list headed by `lambda` as an interpreted function. Recorded live (`tools/primh/logs/run-hooks/record.log`, `evidence/run-hooks.json`): a hook whose value is `'(lambda () (rh-c))` runs it (`run-hooks/0041`: `(nil (c))`); the same inside a hook list (`/0048`, `/0049`), as the global value reached through a local `t` (`/0072`), and inside a global list (`/0080`) all run; the malformed `'(lambda)` signals `(invalid-function (lambda))` (`/0042`).",
-   "romacs": "`run-hooks` itself makes GNU's choices: a lambda-headed value (FUNCTIONP) is called whole, a lambda-headed global value is called whole, and a list of such lists is walked element by element (the mutants `lambda-list-elementwise`, `global-lambda-walked` are killed by exactly these rows). But VM2's engine `funcall` cannot call a list function at all (`(funcall '(lambda () 1))` is `(void-function (lambda nil 1))`, independently of `run-hooks`), so each such hook function signals `(void-function (lambda ...))` and the rest of the hook does not run; `'(lambda)` gives `void-function` where GNU gives `invalid-function`. The six rows are pinned `VALUE`; every other row of the 131 matches GNU with a fresh VM per row (`fresh-offline.json`: 122 PASS, 3 PRINTER pins for the circular-list printer gap VM2-EV2).",
-   "why": "**Package-observable** for old-style code that adds a quoted lambda to a hook (`(add-hook 'h '(lambda () ...))`): the hook signals instead of running it. Closures, symbols and byte-code functions are unaffected. Belongs in the engine's list-function call path (and VM2-ALIAS1's list descriptors), not in `run-hooks`",
-   "symbols": [
-    "run-hooks",
-    "run-hook-with-args",
-    "funcall"
    ],
    "symbols_derived": false
   },
@@ -3770,15 +3767,16 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`fset`/`defalias` list function descriptors",
-   "gnu": "`fset` publishes a list definition without rejecting conses (`src/data.c:903-916,928-930`); ordinary `defalias` delegates to it (`:993-998,1015-1017`), accepting autoload and raw lambda descriptors at assignment",
-   "romacs": "VM2 `defalias` and `fset` accept `(macro . EXPANDER)` by storing EXPANDER in its internal function cell and marking the slot as a macro; it does not retain the cons wrapper; `symbol-function` and `indirect-function` reconstruct a fresh `(macro . EXPANDER)` so copying a definition preserves expansion, but repeated reads are not `eq` as GNU's stored descriptor is. Other cons definitions still fail unless they resolve to a keymap, with `list function descriptors are not yet supported` (`crates/romacs-vm/src/bootstrap.rs`). `fset` recognizes macro descriptors through its separate versioned leaf assignment path, without sharing the defalias restriction on other conses. Quoted lambda and autoload descriptors remain unsupported by defalias",
-   "why": "**Package-observable assignment restriction:** generated autoload registrations and code installing raw lambda/list definitions fail during setup, not just when invoked. Symbol aliases and actual VM2 closure values are separate from quoted list descriptors; CMD1's interactive-metadata restriction does not cover this refusal",
+   "mechanism": "`fset`/`defalias` macro descriptors",
+   "gnu": "`fset` publishes a list definition without rejecting conses (`src/data.c:903-916,928-930`); ordinary `defalias` delegates to it (`:993-998,1015-1017`), so `(symbol-function S)` is the stored descriptor itself, `eq` on every read",
+   "romacs": "VM2 `defalias` and `fset` store any other list as given: a `(lambda ...)` list is called as GNU's funcall_lambda calls it, with dynamic binding (`tests/list_functions.rs`), and `(autoload ...)` descriptors load on call. `(macro . EXPANDER)` stores EXPANDER in the function cell and marks the slot as a macro; it does not retain the cons wrapper, so `symbol-function` and `indirect-function` reconstruct a fresh `(macro . EXPANDER)`: copying a definition preserves expansion, but repeated reads are not `eq`. A list function is evaluated to a closure on each call (no cache keyed on a mutable cons)",
+   "why": "**Package-observable, rarely:** only code comparing two reads of a macro's `symbol-function` with `eq` sees the difference. Calling a list function costs one compilation per call, which old-style code that stores lists pays",
    "symbols": [
     "fset",
     "defalias",
     "symbol-function",
-    "indirect-function"
+    "indirect-function",
+    "funcall"
    ],
    "symbols_derived": false
   },
