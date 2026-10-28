@@ -146,7 +146,7 @@ impl Vm {
                 if !options.set(&key, v) { return Err("unsupported printing override".into()); }
             }
         }
-        if buffer_output { options.nonascii = true; }
+        if buffer_output { (options.nonascii, options.buffer) = (true, true); }
         // print.c print: the number table and its index survive between
         // calls only while print-continuous-numbering and the table are set.
         let continuous = self.slot("print-continuous-numbering");
@@ -390,7 +390,8 @@ impl Vm {
             let mut hex = false;
             for (i, &code) in codes.iter().enumerate() {
                 use std::fmt::Write;
-                if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && quoted) {
+                // princ into a buffer escapes a unibyte string's raw bytes too.
+                if code > lstring::MAX_5_BYTE_CHAR || (!view.is_multibyte() && code >= 128 && (quoted || options.buffer)) {
                     if !view.is_multibyte() && code >= 128 && !options.nonascii {
                         return Err("printing raw-byte strings to callbacks is not supported".into());
                     }
@@ -581,9 +582,11 @@ struct PrintOptions {
     graph: std::cell::RefCell<PrintGraph>,
     length: Option<usize>, level: Option<i64>, quoted: bool, newlines: bool,
     nonascii: bool, multibyte: bool, controls: bool, circle: bool, gensym: bool,
+    /// Output goes to a multibyte buffer, as print_string's does.
+    buffer: bool,
 }
 impl Default for PrintOptions {
-    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false } }
+    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false } }
 }
 impl PrintOptions {
     fn set(&mut self, key: &str, value: Value) -> bool {
