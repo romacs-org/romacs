@@ -98,3 +98,33 @@ fn insert_file_contents_replace_matches_gnu() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// Undo records of a read (insert_from_gap's record_insert): REPLACE records
+// the deleted old middle and the inserted new one, so one undo restores the
+// buffer; a plain read records its insertion; a visit records it when the
+// undo list was not empty (and empties a list that was).
+const UNDO_CASES: &str = r##"
+(progn (set-buffer (generate-new-buffer "ifc-undo")) (buffer-enable-undo) (setq buffer-undo-list nil) (insert "abcXYZdef") (undo-boundary) (insert-file-contents F1 nil nil nil t) (list (buffer-string) buffer-undo-list (progn (primitive-undo 1 buffer-undo-list) (buffer-string))))
+(progn (set-buffer (generate-new-buffer "ifc-undo")) (buffer-enable-undo) (setq buffer-undo-list nil) (insert "ab") (undo-boundary) (goto-char 2) (insert-file-contents F2) (list (buffer-string) buffer-undo-list (progn (primitive-undo 1 buffer-undo-list) (buffer-string))))
+(progn (set-buffer (generate-new-buffer "ifc-undo")) (buffer-enable-undo) (setq buffer-undo-list (list 'foo)) (insert-file-contents F2 t) (setq buffer-file-name nil) buffer-undo-list)
+(progn (set-buffer (generate-new-buffer "ifc-undo")) (buffer-enable-undo) (setq buffer-undo-list nil) (insert-file-contents F2 t) (setq buffer-file-name nil) buffer-undo-list)
+"##;
+
+#[test]
+fn insert_file_contents_records_undo_as_gnu() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-undo-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f1"), b"abc12def").unwrap();
+    std::fs::write(dir.join("f2"), b"XY").unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let failures: Vec<String> = UNDO_CASES.lines().filter(|line| !line.is_empty())
+        .map(|line| line.replace("F1", &lisp(&dir.join("f1"))).replace("F2", &lisp(&dir.join("f2"))))
+        .filter_map(|expression| {
+            let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
+            (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
+        })
+        .collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
