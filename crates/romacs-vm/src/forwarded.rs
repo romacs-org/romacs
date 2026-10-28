@@ -726,7 +726,7 @@ pub(crate) enum VisitedModtime {
 
 pub(crate) fn file_identity(path: &str) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
-    let metadata = std::fs::metadata(path).ok()?;
+    let metadata = crate::host::metadata(path).ok()?;
     Some((metadata.dev(), metadata.ino()))
 }
 
@@ -1079,7 +1079,7 @@ impl Vm {
             let identity = self.eval_buffer_name(value).ok().flatten()
                 .and_then(|path| file_identity(&path));
             let truename = self.eval_buffer_name(value).ok().flatten().map(|path| {
-                std::fs::canonicalize(&path).ok().and_then(|p| p.to_str().map(str::to_owned)).unwrap_or(path)
+                crate::host::canonicalize(&path).ok().and_then(|p| p.to_str().map(str::to_owned)).unwrap_or(path)
             });
             let locals = self.per_buffer_mut(buffer).expect("live buffer");
             locals.2 = identity;

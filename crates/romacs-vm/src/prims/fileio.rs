@@ -30,7 +30,7 @@ fn metadata_modtime(meta: &std::fs::Metadata) -> VisitedModtime {
 }
 
 fn stat_modtime(path: &str) -> VisitedModtime {
-    match std::fs::metadata(path) {
+    match crate::host::metadata(path) {
         Ok(meta) => metadata_modtime(&meta),
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => VisitedModtime::Missing,
         Err(_) => VisitedModtime::Unknown,
@@ -134,7 +134,7 @@ fn set_visited_file_modtime(cx; optional time: Value) {
         let name = cx.string(&filename);
         let (path, name) = expanded_name(cx, name)?;
         refuse_handler(cx, name, "set-visited-file-modtime")?;
-        let meta = match std::fs::metadata(path) {
+        let meta = match crate::host::metadata(path) {
             Ok(meta) => meta,
             Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => return Ok(Value::NIL),
             Err(e) => return Err(file_errno(cx, "Getting attributes", name, &e)),
@@ -305,12 +305,12 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
             return insert_coding::start(cx, read(None, modtime, error.raw_os_error().unwrap_or(libc::EIO), None));
         }
     };
-    let meta = file.metadata().map_err(|e| file_errno(cx, "Input file status", orig, &e))?;
-    if meta.is_dir() {
+    let meta = crate::host::file_metadata(&file).map_err(|e| file_errno(cx, "Input file status", orig, &e))?;
+    if meta.file_type().is_dir() {
         let error = std::io::Error::from_raw_os_error(21); // EISDIR, fileio.c:4234
         return Err(file_errno(cx, "Read error", orig, &error));
     }
-    if !meta.is_file() {
+    if !meta.file_type().is_file() {
         return Err(refuse("insert-file-contents of a non-regular file"));
     }
     if replace != Value::NIL {
@@ -358,7 +358,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
 /// that are read.
 fn open_for_reading(path: &str) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt as _;
-    std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path)
+    crate::host::open(path, crate::host::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK))
 }
 
 // File name handler selection, shared by every primitive here: VM2 calls
@@ -456,14 +456,14 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
     }
     let (path, name) = expanded_name(cx, filename)?;
     let excl = symbol_is(cx, mustbenew, &["excl"]);
-    if mustbenew != Value::NIL && !excl && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+    if mustbenew != Value::NIL && !excl && crate::host::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_dir()) {
         // barf_or_query_if_file_exists checks directory before confirmation.
         let message = cx.string("File is a directory");
         let tail = cx.cons(name, Value::NIL);
         let data = cx.cons(message, tail);
         return Err(Fault::Signal(cx.intern("file-error"), data));
     }
-    if mustbenew != Value::NIL && !excl && std::fs::symlink_metadata(&path).is_ok() {
+    if mustbenew != Value::NIL && !excl && crate::host::symlink_metadata(&path).is_ok() {
         // barf_or_query_if_file_exists (fileio.c:5547) asks the user.
         return Err(refuse("write-region MUSTBENEW confirmation"));
     }
@@ -563,7 +563,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     let bytes = cx.string_view(encoded)?.bytes().to_vec();
     cx.variable_set(lcsu, coding)?;
     let excl = symbol_is(cx, mustbenew, &["excl"]);
-    let mut options = std::fs::OpenOptions::new();
+    let mut options = crate::host::OpenOptions::new();
     options.write(true);
     // NUMBERP (append): an offset to seek to (fileio.c:5638).
     let offset = if append.integer_value().is_some() || cx.kind(append) == Kind::Float {
@@ -584,7 +584,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.custom_flags(libc::O_NONBLOCK);
     }
-    let mut file = options.open(&path).map_err(|e| file_errno(cx, "Opening output file", name, &e))?;
+    let mut file = crate::host::open(&path, &options).map_err(|e| file_errno(cx, "Opening output file", name, &e))?;
     {
         use std::io::{Seek, SeekFrom};
         if let Some(offset) = offset {
@@ -605,7 +605,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
         }
     }
     let written_modtime = if visiting {
-        Some(metadata_modtime(&file.metadata().map_err(|e| file_errno(cx, "Output file status", name, &e))?))
+        Some(metadata_modtime(&crate::host::file_metadata(&file).map_err(|e| file_errno(cx, "Output file status", name, &e))?))
     } else { None };
     cx.fileio_close_output(file).map_err(|e| file_errno(cx, "Write error", name, &e))?;
     if visiting {
@@ -691,9 +691,9 @@ fn locate_absolute(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next 
             refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
         }
         let found = match access_mode {
-            None => std::path::Path::new(&candidate).is_file() && open_for_reading(&candidate).is_ok(),
+            None => crate::host::probe(crate::host::Probe::IsFile, &candidate) && open_for_reading(&candidate).is_ok(),
             Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(&candidate, mode).is_ok())
-                && !std::path::Path::new(&candidate).is_dir(),
+                && !crate::host::probe(crate::host::Probe::IsDir, &candidate),
         };
         if found {
             return Ok(Step::Done(candidate_value));

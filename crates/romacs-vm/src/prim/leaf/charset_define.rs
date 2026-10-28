@@ -34,7 +34,7 @@ impl Leaf<'_> {
                     let mut suffixed = filename.clone();
                     suffixed.push(suffix);
                     let path = directory.join(suffixed);
-                    match std::fs::read(path) {
+                    match crate::host::read_file(path) {
                         Ok(bytes) => return Ok(crate::charset::map::read_entries(&bytes, min, max)),
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
                         Err(error) => return Err(Fault::Error(format!("Loading charset map: {error}"))),

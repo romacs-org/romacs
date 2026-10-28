@@ -51,7 +51,7 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
     utf8_file_names(cx, "directory-files")?;
     // Open even when COUNT is zero: GNU validates the directory first.
     let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
-    let entries = std::fs::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", directory_file, e))?;
+    let entries = crate::host::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", directory_file, e))?;
     // Rust omits dot entries. Their enumeration order is not specified by GNU;
     // count is applied before sorting, and NOSORT returns reverse enumeration.
     let names = [std::ffi::OsString::from("."), std::ffi::OsString::from("..")]
@@ -102,10 +102,10 @@ fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
     let prefix = cx.string_bytes(file)?;
     let prefix_chars = cx.string_view(file)?.chars;
     let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
-    let entries = std::fs::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", &path, e))?;
+    let entries = crate::host::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", &path, e))?;
     // Rust omits the dot entries, which GNU sees first on Linux file systems.
     let dots = [".", ".."].map(|name| Ok((std::ffi::OsString::from(name), Some(true))));
-    let entries = entries.map(|entry| entry.map(|e| (e.file_name(), e.file_type().ok().filter(|t| !t.is_symlink()).map(|t| t.is_dir()))));
+    let entries = entries.map(|entry| entry.map(|e| (e.file_name(), e.file_type().ok().filter(|t| !t.is_symlink()).as_ref().map(std::fs::FileType::is_dir))));
     let mut result = Value::NIL;
     for entry in dots.into_iter().chain(entries) {
         let (name, directoryp) = entry.map_err(|e| directory_error(cx, "Reading directory", &path, e))?;

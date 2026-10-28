@@ -31,10 +31,10 @@ fn list_fields(nanos: i128) -> std::result::Result<[i64; 4], Fault> {
 
 defsubr! { name = "current-time", gnu = "timefns.c:1817", effect = Global,
 fn current_time(cx) {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
     // duration_since's error carries the magnitude before the epoch. Preserve
     // every nanosecond, including negative subsecond readings; never use f64.
-    let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+    let nanos = match crate::host::clock().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_nanos() as i128,
         Err(error) => -(error.duration().as_nanos() as i128),
     };
@@ -59,7 +59,7 @@ fn time_integer(cx: &Leaf<'_>, v: Value) -> std::result::Result<i128, Fault> {
 }
 fn stamp(cx: &Leaf<'_>, value: Value, seconds_only: bool) -> std::result::Result<Stamp, Fault> {
     if value == Value::NIL {
-        let n = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        let n = match crate::host::clock().duration_since(std::time::UNIX_EPOCH) {
             Ok(d) => d.as_nanos() as i128, Err(e) => -(e.duration().as_nanos() as i128),
         };
         return Ok(Stamp { ticks: n, hz: 1_000_000_000 });
@@ -138,7 +138,7 @@ fn exact_stamp(cx: &Leaf<'_>, value: Value) -> std::result::Result<ExactStamp, F
         identity: FrequencyIdentity::Lisp(Value::integer(hz).unwrap()),
     };
     if value == Value::NIL {
-        let nanos = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        let nanos = match crate::host::clock().duration_since(std::time::UNIX_EPOCH) {
             Ok(d) => BigInt::from(d.as_nanos()),
             Err(e) => -BigInt::from(e.duration().as_nanos()),
         };
@@ -449,7 +449,7 @@ fn zone_rule(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<ZoneRule, F
         Some(r) if r.starts_with('/') => std::path::PathBuf::from(r),
         Some(r) => std::path::PathBuf::from(ZONEINFO).join(r),
     };
-    match std::fs::read(&path) {
+    match crate::host::zone_file(&path) {
         Ok(bytes) if bytes.starts_with(b"TZif") => {
             let file = crate::tzfile::TzFile::parse(&bytes)
                 .ok_or_else(|| Fault::Error("VM2 unsupported TZif rule or timestamp".into()))?;
@@ -461,7 +461,7 @@ fn zone_rule(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<ZoneRule, F
             let Some(rule) = rule else { return Ok(utc()) };
             let posix = crate::posix_tz::PosixTz::parse(rule);
             if posix.ruleless && let Some((std, dst)) = posix.zones()
-                && let Some(rules) = std::fs::read(std::path::Path::new(ZONEINFO).join("posixrules")).ok()
+                && let Some(rules) = crate::host::zone_file(std::path::Path::new(ZONEINFO).join("posixrules")).ok()
                     .and_then(|bytes| crate::tzfile::TzFile::parse(&bytes)) {
                 let retained = cx.tz_rule_dstoff();
                 cx.set_tz_rule_dstoff(rules.rule_dstoff(retained));
