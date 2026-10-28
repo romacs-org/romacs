@@ -86,53 +86,177 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
 // reverse enumeration order. "./" and "../" are entries too.
 defsubr! { name = "file-name-all-completions", gnu = "dired.c:486", effect = Global,
 fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
+    let (path, _) = match completion_directory(cx, "file-name-all-completions", file, directory, None)? {
+        Ok(found) => found,
+        Err(handled) => return Ok(handled),
+    };
+    let mut result = Value::NIL;
+    for candidate in completion_candidates(cx, file, &path)? {
+        if !candidate.regexps { continue; }
+        let name = if candidate.directoryp { format!("{}/", candidate.name) } else { candidate.name };
+        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+        result = cx.cons(value, result);
+    }
+    Ok(Step::Done(result))
+}}
+
+// Ffile_name_completion: the longest common prefix of the completions of FILE
+// in DIRECTORY, t for a sole exact match, nil for none. The scan is here;
+// file_name_completion's loop over the matches, which calls PREDICATE with
+// `default-directory' bound to DIRECTORY, is Lisp (rlisp/vm/dired.el).
+defsubr! { name = "file-name-completion", gnu = "dired.c:451", effect = Global,
+fn file_name_completion(cx, file: Value, directory: Value; optional predicate: Value) -> Step {
+    let (path, directory) = match completion_directory(cx, "file-name-completion", file, directory, Some(predicate))? {
+        Ok(found) => found,
+        Err(handled) => return Ok(handled),
+    };
+    let fold = super::fileio::var(cx, "completion-ignore-case")? != Value::NIL;
+    let mut ignored = vec![];
+    let mut tail = super::fileio::var(cx, "completion-ignored-extensions")?;
+    while let Some((element, rest)) = cx.pair(tail) {
+        if cx.string_view(element).is_ok() { ignored.push(element); }
+        tail = rest;
+    }
+    let file_bytes = cx.string_bytes(file)?.len();
+    let mut entries = vec![];
+    for candidate in completion_candidates(cx, file, &path)? {
+        let excludable = excludable(cx, &candidate, file_bytes, &ignored, fold)?;
+        let name = cx.make_string(candidate.name.as_bytes().to_vec(), !candidate.name.is_ascii());
+        let flag = |b: bool| if b { Value::TRUE } else { Value::NIL };
+        entries.push(cx.vector(&[name, flag(excludable), flag(candidate.regexps), flag(candidate.directoryp)]));
+    }
+    let mut list = Value::NIL;
+    for entry in entries.into_iter().rev() { list = cx.cons(entry, list); }
+    let args = vec![file, directory, list, predicate];
+    let helper = cx.intern(COMPLETION_LOOP);
+    if cx.symbol_function(helper)? != Value::NIL {
+        return Ok(Step::Call { f: helper, args, then: completed_by_handler, saved: vec![] });
+    }
+    let source = cx.string(LISP_HALF);
+    let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
+    let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+    Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: completion_loop, saved: args })
+}}
+
+const LISP_HALF: &str = include_str!("../../../../rlisp/vm/dired.el");
+const COMPLETION_LOOP: &str = "romacs--file-name-completion";
+
+fn completion_loop(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: cx.intern(COMPLETION_LOOP), args: saved.to_vec(), then: completed_by_handler, saved: vec![] })
+}
+
+/// DIRECTORY expanded, as its path and a string, after FILE's and its
+/// checks; or, as Err, the call to a file-name handler for OPERATION.
+fn completion_directory(cx: &mut Leaf<'_>, operation: &str, file: Value, directory: Value, predicate: Option<Value>)
+    -> std::result::Result<std::result::Result<(String, Value), Step>, Fault> {
     if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
     let path = super::fileio::expand_file_name(cx, directory)?;
     let directory = cx.string(&path);
-    let operation = cx.intern("file-name-all-completions");
+    let symbol = cx.intern(operation);
     for name in [directory, file] {
         cx.string_view(name)?;
-        let handler = super::fileio::find_file_name_handler(cx, name, operation)?;
+        let handler = super::fileio::find_file_name_handler(cx, name, symbol)?;
         if handler != Value::NIL {
-            return Ok(Step::Call { f: handler, args: vec![operation, file, directory], then: completed_by_handler, saved: vec![] });
+            let args = [symbol, file, directory].into_iter().chain(predicate).collect();
+            return Ok(Err(Step::Call { f: handler, args, then: completed_by_handler, saved: vec![] }));
         }
     }
-    utf8_file_names(cx, "file-name-all-completions")?;
+    utf8_file_names(cx, operation)?;
+    Ok(Ok((path, directory)))
+}
+
+/// A directory entry that begins with the file being completed.
+struct Candidate {
+    name: String,
+    directoryp: bool,
+    /// It matches every `completion-regexp-list' regexp.
+    regexps: bool,
+}
+
+/// dired.c file_name_completion's scan of PATH: the entries that begin
+/// with FILE (ignoring case under `completion-ignore-case'), in
+/// enumeration order, "." and ".." first.
+fn completion_candidates(cx: &mut Leaf<'_>, file: Value, path: &str) -> std::result::Result<Vec<Candidate>, Fault> {
     let fold = super::fileio::var(cx, "completion-ignore-case")? != Value::NIL;
     let prefix = cx.string_bytes(file)?;
     let prefix_chars = cx.string_view(file)?.chars;
     let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
-    let entries = std::fs::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", &path, e))?;
+    let entries = std::fs::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", path, e))?;
     // Rust omits the dot entries, which GNU sees first on Linux file systems.
     let dots = [".", ".."].map(|name| Ok((std::ffi::OsString::from(name), Some(true))));
     let entries = entries.map(|entry| entry.map(|e| (e.file_name(), e.file_type().ok().filter(|t| !t.is_symlink()).map(|t| t.is_dir()))));
-    let mut result = Value::NIL;
+    let regexps = super::fileio::var(cx, "completion-regexp-list")? != Value::NIL;
+    // Compiled at the first entry that reaches them, as GNU checks them.
+    let mut matcher = None;
+    let mut out = vec![];
     for entry in dots.into_iter().chain(entries) {
-        let (name, directoryp) = entry.map_err(|e| directory_error(cx, "Reading directory", &path, e))?;
+        let (name, directoryp) = entry.map_err(|e| directory_error(cx, "Reading directory", path, e))?;
         let name = std::os::unix::ffi::OsStringExt::into_vec(name);
         if name.len() < prefix.len() || (!fold && !name.starts_with(&prefix)) { continue; }
         let name = String::from_utf8(name).map_err(|_| refusal("non-UTF-8 directory entry"))?;
-        let mut value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
         if fold && super::string_compare::prefix(cx, value, file, prefix_chars, true)?.0 != std::cmp::Ordering::Equal {
             continue;
         }
         // A symbolic link, or an entry of unknown type, is a directory when
         // NAME/ resolves.
         let directoryp = directoryp.unwrap_or_else(|| cx.filesave_access(&format!("{directory_file}/{name}/"), libc::F_OK).is_ok());
-        let mut regexps = super::fileio::var(cx, "completion-regexp-list")?;
-        let mut matched = true;
-        while let Some((regexp, rest)) = cx.pair(regexps) {
-            if !cx.file_completion_regexp_match(regexp, value, fold)? { matched = false; break; }
-            regexps = rest;
-        }
-        if !matched { continue; }
-        if directoryp {
-            value = cx.make_string(format!("{name}/").into_bytes(), !name.is_ascii());
-        }
-        result = cx.cons(value, result);
+        let matched = !regexps || {
+            if matcher.is_none() {
+                let (mut tail, mut patterns) = (super::fileio::var(cx, "completion-regexp-list")?, vec![]);
+                while let Some((pattern, rest)) = cx.pair(tail) { patterns.push(pattern); tail = rest; }
+                matcher = Some(cx.completion_matcher(&patterns, fold, true)?);
+            }
+            let compiled = matcher.as_mut().unwrap();
+            match compiled {
+                Some(compiled) => cx.completion_matches(compiled, value)?,
+                None => regexps_match(cx, value, fold)?,
+            }
+        };
+        out.push(Candidate { name, directoryp, regexps: matched });
     }
-    Ok(Step::Done(result))
-}}
+    Ok(out)
+}
+
+/// Whether VALUE matches every `completion-regexp-list' regexp, each
+/// compiled for it alone.
+fn regexps_match(cx: &mut Leaf<'_>, value: Value, fold: bool) -> std::result::Result<bool, Fault> {
+    let mut regexps = super::fileio::var(cx, "completion-regexp-list")?;
+    while let Some((regexp, rest)) = cx.pair(regexps) {
+        if !cx.file_completion_regexp_match(regexp, value, fold)? { return Ok(false); }
+        regexps = rest;
+    }
+    Ok(true)
+}
+
+/// Whether file_name_completion may leave CANDIDATE out when anything
+/// else matches: "." and "..", and a longer name than FILE's FILE_BYTES
+/// that ends in one of the IGNORED extensions (a directory's ending in "/").
+fn excludable(cx: &mut Leaf<'_>, candidate: &Candidate, file_bytes: usize, ignored: &[Value], fold: bool)
+    -> std::result::Result<bool, Fault> {
+    if candidate.directoryp && matches!(candidate.name.as_str(), "." | "..") { return Ok(true); }
+    if candidate.name.len() <= file_bytes { return Ok(false); }
+    let name: Vec<u32> = candidate.name.chars().map(u32::from).collect();
+    for &extension in ignored {
+        let bytes = cx.string_bytes(extension)?;
+        let mut codes = super::string_compare::codes(&cx.string_view(extension)?);
+        if candidate.directoryp {
+            // Only an extension ending in a slash names directories.
+            if bytes.len() < 2 || bytes[bytes.len() - 1] != b'/' { continue; }
+            codes.pop();
+        }
+        let length = bytes.len() - usize::from(candidate.directoryp);
+        if candidate.name.len() < length { continue; }
+        let tail = if fold {
+            let Some(skip) = name.len().checked_sub(codes.len()) else { continue };
+            super::string_compare::compare(cx, &name[skip..], &codes, true)?.0 == std::cmp::Ordering::Equal
+        } else {
+            candidate.name.as_bytes()[candidate.name.len() - length..] == bytes[..length]
+        };
+        if tail { return Ok(true); }
+    }
+    Ok(false)
+}
 
 fn completed_by_handler(_: &mut Leaf<'_>, result: Value, _: &[Value]) -> Next {
     Ok(Step::Done(result))

@@ -161,7 +161,11 @@ impl Vm {
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
         if initial {
             let name = if symbol == Value::NIL { "nil".to_owned() } else if symbol == Value::TRUE { "t".to_owned() } else { self.symbol_names[symbol.payload() as usize - 1].clone() };
-            if self.names.get(&name).is_some_and(|&slot| Value::reference(slot + 1, 7) == symbol) { self.names.remove(&name); return true; }
+            if let Some(&slot) = self.names.get(&name).filter(|&&slot| Value::reference(slot + 1, 7) == symbol) {
+                self.names.remove(&name);
+                self.set_initial_obarray(slot, false);
+                return true;
+            }
             return false;
         }
         if let Object::Obarray(t) = &mut self.objects[table.payload() as usize - 1] { t.remove(symbol) } else { false }
@@ -173,8 +177,7 @@ impl Vm {
             if bucket_index == 0 { return Some((1, Value::NIL)); }
             if bucket_index == 1 { return Some((2, Value::TRUE)); }
             for slot in bucket_index - 2..self.slots.len() {
-                let name = &self.symbol_names[slot];
-                if !matches!(name.as_str(), "nil" | "t") && self.names.get(name) == Some(&slot) {
+                if self.in_initial_obarray(slot) && !matches!(self.symbol_names[slot].as_str(), "nil" | "t") {
                     return Some((slot + 3, Value::reference(slot + 1, 7)));
                 }
             }

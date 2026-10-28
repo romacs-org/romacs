@@ -4,7 +4,9 @@
 
 ;;; Commentary:
 
-;; File visiting for Romacs.
+;; File visiting for Romacs, in both regimes.  The workspace reads file
+;; names with romacs-workspace-completion.el; --loadup with GNU's
+;; `read-file-name'.
 
 ;;; Code:
 (unless (boundp 'default-directory) (setq default-directory (expand-file-name "./")))
@@ -12,13 +14,7 @@
 (defvar find-file-hook nil)
 (defvar find-file-not-found-functions nil)
 (defvar auto-mode-alist '(("\\.el\\'" . emacs-lisp-mode)))
-(defvar read-file-name-function 'romacs-read-file-name)
 (defvar romacs-find-file-mode-function 'romacs-find-file-set-auto-mode)
-(defvar romacs-prompt--input-start nil)
-(defvar romacs-find-file--directory nil)
-(defvar romacs-prompt--history-position nil)
-(defvar romacs-prompt--history-input nil)
-(defvar romacs-prompt--history-variable 'file-name-history)
 
 (defun romacs-find-file--check-syntax (filename)
   "Reject unsupported filename syntax before any filesystem access."
@@ -131,121 +127,10 @@ expansion are unsupported.  Modes and hooks are independent Lisp policy."
 
 (defun find-file (filename &optional wildcards)
   "Edit local UTF-8 FILENAME in the selected window.
-Romacs implementation of the GNU-conventional API.  RET visits, TAB completes
-local paths, M-p/M-n recall filename history, and C-g cancels the prompt.
-Local directories open the read-only Dired browser.  Remote handlers,
-wildcards and file-local evaluation are unsupported."
+Romacs implementation of the GNU-conventional API, reading FILENAME with
+`read-file-name'.  Local directories open the read-only Dired browser.
+Remote handlers, wildcards and file-local evaluation are unsupported."
   (interactive (list (read-file-name "Find file: ") nil))
   (let ((buffer (find-file-noselect filename nil nil wildcards)))
     (romacs-select-buffer buffer)))
-
-(defun romacs-prompt--replace-input (text)
-  "Replace the active minibuffer input with TEXT, retaining its prompt."
-  (delete-region romacs-prompt--input-start (point-max))
-  (goto-char (point-max))
-  (insert text))
-
-(defun romacs-find-file-complete ()
-  "Complete a local path using native directory enumeration.
-Append a slash to directory candidates, extend the common prefix, and show
-up to twelve ambiguous candidates.  Refuse directories above 4096 entries
-rather than present a misleading truncated completion."
-  (interactive)
-  (let* ((input (buffer-substring-no-properties romacs-prompt--input-start (point-max)))
-         (default-directory romacs-find-file--directory)
-         (full (romacs-find-file-local-name input))
-         (full (if (and (> (length input) 0) (equal (substring input -1) "/")
-                        (not (equal (substring full -1) "/"))) (concat full "/") full))
-         (directory (file-name-directory full))
-         (prefix (file-name-nondirectory full))
-         (entries (directory-files directory nil nil nil 4097))
-         (candidates nil) (common nil) (count 0) (labels ""))
-    (when (> (length entries) 4096)
-      (signal 'file-error (list "Completion directory exceeds 4096 entries" directory)))
-    (while entries
-      (let ((entry (car entries)))
-        (when (and (not (member entry '("." "..")))
-                   (<= (length prefix) (length entry))
-                   (equal prefix (substring entry 0 (length prefix))))
-          (when (file-directory-p (concat directory entry)) (setq entry (concat entry "/")))
-          (setq candidates (cons entry candidates))))
-      (setq entries (cdr entries)))
-    (setq candidates (nreverse candidates))
-    (let ((remaining candidates))
-      (while remaining
-        (let ((entry (car remaining)))
-          (if (null common) (setq common entry)
-            (let ((i 0) (limit (min (length common) (length entry))))
-              (while (and (< i limit) (= (aref common i) (aref entry i))) (setq i (1+ i)))
-              (setq common (substring common 0 i))))
-          (when (< count 12) (setq labels (concat labels (if (= count 0) "" "  ") entry)))
-          (setq count (1+ count)))
-        (setq remaining (cdr remaining))))
-    (cond ((null common) (message "No matching local files"))
-          ((> (length common) (length prefix))
-           (romacs-prompt--replace-input (concat (or (file-name-directory input) "") common)))
-          ((= count 1) (message "Complete"))
-          (t (message "%s%s" labels (if (> count 12) "  …" ""))))))
-
-(defun romacs-prompt-previous-history ()
-  "Recall an older entry from the active filename or buffer history variable."
-  (interactive)
-  (when (null romacs-prompt--history-position)
-    (setq romacs-prompt--history-input
-          (buffer-substring-no-properties romacs-prompt--input-start (point-max))))
-  (let* ((next (if romacs-prompt--history-position (1+ romacs-prompt--history-position) 0))
-         (entry (nth next (symbol-value romacs-prompt--history-variable))))
-    (if entry
-        (progn (setq romacs-prompt--history-position next) (romacs-prompt--replace-input entry))
-      (message "No older history entry"))))
-
-(defun romacs-prompt-next-history ()
-  "Recall a newer history entry, or restore the input preceding recall."
-  (interactive)
-  (when romacs-prompt--history-position
-    (if (= romacs-prompt--history-position 0)
-        (progn (setq romacs-prompt--history-position nil)
-               (romacs-prompt--replace-input romacs-prompt--history-input))
-      (setq romacs-prompt--history-position (1- romacs-prompt--history-position))
-      (romacs-prompt--replace-input (nth romacs-prompt--history-position (symbol-value romacs-prompt--history-variable))))))
-
-(defun romacs-read-file-name (prompt &optional directory default-filename mustmatch initial predicate)
-  "Read a local filename through the existing minibuffer and HostInput loop.
-Use editable DIRECTORY (default `default-directory'), path completion and
-filename history.  Non-nil MUSTMATCH requires an existing regular file."
-  (let* ((directory (romacs-find-file-local-name (or directory default-directory "./")))
-         (directory (if (equal (substring directory -1) "/") directory (concat directory "/")))
-         (romacs-find-file--directory directory)
-         (romacs-prompt--input-start (1+ (length prompt)))
-         (romacs-prompt--history-position nil)
-         (romacs-prompt--history-input nil)
-         (romacs-prompt--history-variable 'file-name-history)
-         (map (make-sparse-keymap))
-         (default-directory directory)
-         result)
-    (set-keymap-parent map minibuffer-local-map)
-    (define-key map [9] 'romacs-find-file-complete)
-    (define-key map [13] 'exit-minibuffer)
-    (define-key map [10] 'exit-minibuffer)
-    (define-key map [7] 'abort-minibuffers)
-    (define-key map [27 112] 'romacs-prompt-previous-history)
-    (define-key map [27 110] 'romacs-prompt-next-history)
-    (setq result (read-from-minibuffer prompt (or initial directory) map nil 'file-name-history))
-    (when (and (= (length result) 0) default-filename) (setq result default-filename))
-    (setq result (romacs-find-file-local-name result))
-    (when mustmatch
-      (let ((attributes (file-attributes result 'integer)))
-        (when (and attributes (stringp (car attributes)))
-          (signal 'file-error (list "MUSTMATCH symlink validation is unsupported" result)))
-        (unless (and attributes (= (aref (nth 8 attributes) 0) 45))
-          (signal 'file-missing (list "Regular file does not exist" result)))))
-    (when (and predicate (not (funcall predicate result)))
-      (signal 'file-error (list "Filename rejected by predicate" result)))
-    (unless (equal result (car file-name-history))
-      (if (fboundp 'add-to-history) (add-to-history 'file-name-history result)
-        (setq file-name-history (cons result (delete result file-name-history)))))
-    result))
-
-(defun read-file-name (prompt &optional directory default-filename mustmatch initial predicate)
-  "Read a filename with the customizable `read-file-name-function'."
-  (funcall read-file-name-function prompt directory default-filename mustmatch initial predicate))
+;;; romacs-find-file.el ends here

@@ -59,6 +59,16 @@ defsubr! { name = "lognot", gnu = "data.c:3684", effect = Reads,
     }
 }
 
+defsubr! { name = "logcount", gnu = "data.c:3530", effect = Pure,
+    fn logcount(cx, value: Value) {
+        let n = cx.bigint_value(value).ok_or(Fault::Wrong("integerp", value))?;
+        // A negative VALUE counts its zero bits: the ones of its complement.
+        let nonnegative = if n.sign() == num_bigint::Sign::Minus { !n } else { n };
+        let ones = nonnegative.magnitude().count_ones();
+        Value::integer(ones as i64).map_err(|e| Fault::Error(e.into()))
+    }
+}
+
 /// GNU integer-width's default (bignum.c): results wider than this overflow.
 pub(super) const INTEGER_WIDTH: u64 = 65536;
 

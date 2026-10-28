@@ -69,6 +69,7 @@ mod data;
 mod bool_vector;
 mod lstring;
 mod display;
+mod overlay_order;
 mod window;
 mod frame;
 mod hash;
@@ -1078,6 +1079,7 @@ pub struct Vm {
     #[cfg(test)]
     speculative_misses: usize,
     regexp: regexp::MatchState,
+    regexp_cache: regexp::PatternCache,
     execution_fatal: bool,
     loader: loader::Loader,
     source_cache: source_cache::SourceCache,
@@ -1105,6 +1107,9 @@ pub struct Vm {
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     idle_since: Option<std::time::Instant>,
+    /// Counts keymap stores and parent changes, GNU's two flushes of the
+    /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
+    keymap_generation: u64,
     process_jobs: process_jobs::Jobs,
     /// GNU process.c chan_process and friends: subprocess descriptors.
     subprocesses: subprocess::Table,
@@ -1150,6 +1155,9 @@ pub struct Vm {
     gc_threshold: usize,
     gc_floor: usize,
     names: NameMap<String, usize>,
+    /// By slot, whether `names' maps the slot's name to it: membership of
+    /// the initial obarray, answered without hashing the name.
+    initial_obarray: Vec<bool>,
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
@@ -1243,6 +1251,7 @@ impl Vm {
             #[cfg(test)]
             speculative_misses: 0,
             regexp: regexp::MatchState::default(),
+            regexp_cache: regexp::PatternCache::default(),
             execution_fatal: false,
             loader: loader::Loader::default(),
             source_cache: source_cache::SourceCache::default(),
@@ -1259,6 +1268,7 @@ impl Vm {
             host_input: None,
             layout_host: None,
             idle_since: None,
+            keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
@@ -1290,6 +1300,7 @@ impl Vm {
             gc_threshold: 16384,
             gc_floor: 16384,
             names: NameMap::default(),
+            initial_obarray: Vec::new(),
             symbol_names: vec![],
             obarray_symbol_names: HashMap::default(),
             permanent_symbol_names: HashMap::default(),
@@ -1468,12 +1479,22 @@ impl Vm {
         self.world_version = world;
         Ok(())
     }
+    /// Record whether `names' maps SLOT's name to SLOT.
+    fn set_initial_obarray(&mut self, slot: usize, interned: bool) {
+        if self.initial_obarray.len() <= slot { self.initial_obarray.resize(slot + 1, false); }
+        self.initial_obarray[slot] = interned;
+    }
+    /// Whether SLOT's symbol is interned in the initial obarray.
+    fn in_initial_obarray(&self, slot: usize) -> bool {
+        self.initial_obarray.get(slot).copied().unwrap_or(false)
+    }
     fn slot(&mut self, name: &str) -> usize {
         if let Some(&i) = self.names.get(name) {
             return i;
         }
         let i = self.slots.len();
         self.names.insert(name.to_owned(), i);
+        self.set_initial_obarray(i, true);
         self.symbol_names.push(name.to_owned());
         self.slots.push(Slot::new());
         self.initialize_variable_redirect(name, i);

@@ -863,7 +863,7 @@ impl Reader<'_, '_> {
                 c @ 48..=57 => self.numbered_dispatch(c, depth),
                 // ## -- the interned symbol whose name is empty.
                 35 => Ok(self.vm.intern("")),
-                // #:X uninterned, #_X without shorthand (VM2 has none): a
+                // #:X uninterned, #_X without shorthand: a
                 // symbol whatever the token looks like; nothing after it is
                 // the empty name.
                 dispatch @ (58 | 95) => {
@@ -1030,13 +1030,39 @@ impl Reader<'_, '_> {
                         }
                     }
                 }
-                Ok(self.vm.intern(&token))
+                let longhand = self.vm.shorthand_longhand(&token)?;
+                Ok(self.vm.intern(longhand.as_deref().unwrap_or(&token)))
             }
         }
     }
 }
 
 impl Vm {
+    /// lread.c oblookup_considering_shorthand: the name TOKEN reads as under
+    /// `read-symbol-shorthands', the first (SHORTHAND . LONGHAND) pair of
+    /// strings whose SHORTHAND prefixes it, or None. A name made only of
+    /// `^*+-/<=>_|' (symbol_char_span) is exempt, as is `#_' syntax.
+    fn shorthand_longhand(&mut self, token: &str) -> Result<Option<String>> {
+        let Some(&slot) = self.names.get("read-symbol-shorthands") else { return Ok(None) };
+        let shorthands = self.variable_value(slot)?;
+        if matches!(shorthands, Value::NIL | Value::UNBOUND) || token.bytes().all(|b| b"^*+-/<=>_|".contains(&b)) {
+            return Ok(None);
+        }
+        let mut tail = shorthands;
+        for _ in 0..=self.list_limit() {
+            let Ok((pair, next)) = self.cons_pair(tail) else { break };
+            if let Ok((short, long)) = self.cons_pair(pair)
+                && let (Some(short), Some(long)) = (self.str_view(short), self.str_view(long))
+                && let Some(rest) = token.as_bytes().strip_prefix(short.bytes.as_ref())
+            {
+                let mut name = long.bytes.to_vec();
+                name.extend_from_slice(rest);
+                return Ok(Some(String::from_utf8_lossy(&name).into_owned()));
+            }
+            tail = next;
+        }
+        Ok(None)
+    }
     /// A fresh symbol outside the obarray, as `make-symbol' makes.
     pub(crate) fn uninterned_symbol(&mut self, name: &str) -> Value {
         let value = self.generated_symbol(crate::expand::generated_id());

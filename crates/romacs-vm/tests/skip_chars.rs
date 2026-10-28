@@ -82,7 +82,8 @@ fn match_data_is_not_overwritten() {
     check(r#"(progn (insert "aaa") (goto-char 1) (string-match "x" "xx") (setq skip-match (match-data)) (list (skip-chars-forward "a") (equal skip-match (match-data))))"#, "(3 t)");
 }
 
+/// Pinned GNU 32.0.50 answers (3 4); skip_chars_classes.rs compares more.
 #[test]
-fn named_character_classes_refuse_before_motion() {
-    check(r#"(progn (insert "aaa") (goto-char 1) (list (condition-case e (skip-chars-forward "a[:alpha:]") (error (car (cdr e)))) (point)))"#, "(\"skip-chars: ISO C character classes are not implemented\" 1)");
+fn named_character_classes_combine_with_characters() {
+    check(r#"(progn (insert "aaa") (goto-char 1) (list (condition-case e (skip-chars-forward "a[:alpha:]") (error (car (cdr e)))) (point)))"#, "(3 4)");
 }

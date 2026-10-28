@@ -231,6 +231,30 @@ shortens ends the walk early."
         (setq result advertised))
     result))
 
+(defvar romacs--where-cache nil
+  "keymap.c where_is_cache: each definition's key sequences in the keymaps
+`romacs--where-cache-maps', ignoring menus and following indirection, while
+`romacs--keymap-generation' stays `romacs--where-cache-generation'.")
+(defvar romacs--where-cache-maps t)
+(defvar romacs--where-cache-generation nil)
+
+(defun romacs--where-cached (maps)
+  "The reverse map of MAPS, rebuilt when they or any keymap changed."
+  (if (not (and romacs--where-cache (equal maps romacs--where-cache-maps)
+                (eql romacs--where-cache-generation (romacs--keymap-generation))))
+      (let ((table (make-hash-table :test 'eql))
+            (rows (romacs--where-bindings maps)))
+        (while rows
+          (let ((row (car rows)))
+            (if (not (romacs--where-mouse-prefix-p (car row)))
+                (let ((binding (romacs--where-definition (cdr row))))
+                  (puthash binding (cons (car row) (gethash binding table)) table))))
+          (setq rows (cdr rows)))
+        (maphash (lambda (binding sequences) (puthash binding (nreverse sequences) table)) table)
+        (setq romacs--where-cache table romacs--where-cache-maps maps
+              romacs--where-cache-generation (romacs--keymap-generation))))
+  romacs--where-cache)
+
 (defun where-is-internal (definition &optional keymap firstonly noindirect no-remap)
   "Return keys invoking DEFINITION in KEYMAP, respecting shadows and remapping."
   (let* ((maps (cond ((and (consp keymap) (keymapp (car keymap))) keymap)
@@ -243,9 +267,15 @@ shortens ends the walk early."
         (romacs--where-find definition maps firstonly noindirect no-remap modifier))))
 
 (defun romacs--where-find (definition maps firstonly noindirect no-remap modifier)
-  (let* ((rows (romacs--where-bindings maps))
-         (nomenus (and firstonly (not (eq firstonly 'non-ascii))))
-         (pending (romacs--where-candidates definition rows noindirect nomenus))
+  (let* ((nomenus (and firstonly (not (eq firstonly 'non-ascii))))
+         ;; keymap.c where_is_internal: the cache serves menu-less lookups
+         ;; through indirection; any other lookup enumerates the maps.
+         (cache (and nomenus (not noindirect) (romacs--where-cached maps)))
+         (rows (if (not cache) (romacs--where-bindings maps)))
+         (candidates (lambda (definition)
+                       (if cache (gethash definition cache)
+                         (romacs--where-candidates definition rows noindirect nomenus))))
+         (pending (funcall candidates definition))
          (remapped nil) (second nil) (found nil) (answer nil))
     (while (and (or pending (not second)) (not answer))
       (if (not pending) (setq pending remapped second t))
@@ -258,11 +288,11 @@ shortens ends the walk early."
             (if (equal value definition)
                 (if (and (not no-remap) (not second) (= (length sequence) 2)
                          (eq (aref sequence 0) 'remap) (symbolp (aref sequence 1)))
-                    (setq remapped (append (romacs--where-candidates
-                                            (aref sequence 1) rows noindirect nomenus)
-                                           remapped))
+                    (setq remapped (append (funcall candidates (aref sequence 1)) remapped))
+                  ;; The cache shares SEQUENCE: change a copy.
                   (if (stringp (aref sequence (1- (length sequence))))
-                      (aset sequence (1- (length sequence)) "(any string)"))
+                      (progn (setq sequence (copy-sequence sequence))
+                             (aset sequence (1- (length sequence)) "(any string)")))
                   (if (not (or (member sequence found)
                                (and (= (length sequence) 1)
                                     (symbolp (aref sequence 0))

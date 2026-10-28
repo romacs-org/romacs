@@ -4412,6 +4412,18 @@ fn posix_class_bits_read_syntax(bits: u32) -> bool {
     bits & (CHARSET_CLASS_BIT_SPACE | CHARSET_CLASS_BIT_WORD | CHARSET_CLASS_BIT_PUNCT) != 0
 }
 
+/// GNU `re_wctype`: the class bit of an ISO C class NAME, for a host that
+/// tests characters against classes outside a pattern (`skip-chars-forward`).
+pub fn char_class_bit(name: &str) -> Option<u32> {
+    posix_class_bit(name).ok()
+}
+
+/// GNU `re_iswctype` over a set of class bits: the predicate a pattern's
+/// bracket expression uses, reading SYNTAX's table, not its text properties.
+pub fn char_in_classes(code: u32, bits: u32, syntax: &dyn SyntaxLookup) -> bool {
+    posix_class_matches(code, bits, None, syntax, PosixClassCaseMode::Sensitive)
+}
+
 fn posix_class_matches(
     code: u32,
     bits: u32,
