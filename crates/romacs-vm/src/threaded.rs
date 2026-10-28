@@ -1665,19 +1665,13 @@ fn closure_arity_error(e: &mut Engine<'_>, function: usize, argc: usize) -> Valu
 }
 /// GNU eval.c funcall_general: a function cell that resolves to nothing is
 /// `void-function'; any other non-function object (a string, a number, a
-/// vector, a cons that is not a lambda list) is `invalid-function'. A
-/// `(lambda ...)` list keeps `void-function': GNU would call it, VM2 does not
-/// (VM2-ALIAS1).
+/// vector, a malformed `(lambda)') is `invalid-function'.  A well-formed
+/// `(lambda ...)' list is called (lambda_list_then) where the engine reaches
+/// a value; a function cell cannot hold one (VM2-ALIAS1).
 #[cold]
-fn uncallable_condition(e: &mut Engine<'_>, target: Value) -> &'static str {
+fn uncallable_condition(_: &mut Engine<'_>, target: Value) -> &'static str {
     if target == Value::UNBOUND || target == Value::NIL || target == Value::TRUE {
         return "void-function";
-    }
-    if target.tag() == 3 {
-        let lambda = Value::reference(e.vm.slot("lambda") + 1, 7);
-        if e.vm.cons_pair(target).is_ok_and(|(head, _)| head == lambda) {
-            return "void-function";
-        }
     }
     "invalid-function"
 }
@@ -2331,6 +2325,13 @@ unsafe fn invoke_full(
                 None => Value::UNBOUND,
             };
         }
+        if lambda_list(e, target) {
+            enter_native(e, r, pc, target, start, argc);
+            return match lambda_list_then(e, r, target) {
+                Some((r, closure)) => t2_invoke_full(e, r, pc, closure, start, argc),
+                None => Value::UNBOUND,
+            };
+        }
         if target.tag() != 4 {
             return {
                 let condition = uncallable_condition(e, target);
@@ -2771,6 +2772,13 @@ unsafe fn t2_dispatch(
         }
         if prim::generated(target).is_some() {
             return enter_generated(e, r, pc, target, start, argc);
+        }
+        if lambda_list(e, target) {
+            enter_native(e, r, pc, target, start, argc);
+            return match lambda_list_then(e, r, target) {
+                Some((r, closure)) => t2_dispatch(e, r, pc, closure, start, argc),
+                None => Value::UNBOUND,
+            };
         }
         if target.tag() != 6 {
             return {
@@ -3275,6 +3283,25 @@ unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Opti
 #[cold]
 #[inline(never)]
 unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fundef: Value) -> Option<*mut Value> {
+    unsafe { nested_then(e, r, |vm| vm.autoload_do_load(fundef, function, Value::NIL)) }.map(|(r, _)| r)
+}
+/// eval.c funcall_lambda on a list headed by `lambda': call it as a
+/// dynamically scoped interpreted function.  The closure is made in a nested
+/// execution, as an autoload's file is loaded; the rebased registers and the
+/// closure come back.  A malformed list keeps `invalid-function'.
+#[cold]
+#[inline(never)]
+unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
+    unsafe { nested_then(e, r, |vm| vm.lambda_list_closure(list)) }
+}
+fn lambda_list(e: &mut Engine<'_>, target: Value) -> bool {
+    let lambda = Value::reference(e.vm.slot("lambda") + 1, 7);
+    target.tag() == 3 && e.vm.cons_pair(target).is_ok_and(|(head, rest)| head == lambda && rest.tag() == 3)
+}
+/// Run RUN, which may compile and execute Lisp, while this engine's frames
+/// are suspended: the register stack leaves the collector's view, collection
+/// is inhibited, and every frame pointer is rebased afterwards.
+unsafe fn nested_then(e: &mut Engine<'_>, r: *mut Value, run: impl FnOnce(&mut Vm) -> Result<Value>) -> Option<(*mut Value, Value)> {
     unsafe {
         let old_base = e.vm.stack.as_ptr();
         let current = r.offset_from(old_base) as usize;
@@ -3293,7 +3320,7 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
         e.vm.loader.propagate += 1;
-        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.autoload_do_load(fundef, function, Value::NIL));
+        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || run(e.vm));
         e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
@@ -3317,7 +3344,7 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         let r = base.add(current);
         e.regs = r;
         match result {
-            Ok(_) => Some(r),
+            Ok(value) => Some((r, value)),
             Err(error) => {
                 if let Some(escape) = e.vm.propagated_escape.take() {
                     e.escape = Some(escape);

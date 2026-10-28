@@ -275,23 +275,26 @@ fn run_hooks_walk_state_is_forwarded_by_collections_inside_hooks() {
     assert_eq!(eval(&mut vm, same), Ok("(t t 2)".into()));
 }
 
-// DIVERGENCES.md VM2-RUNHOOKS1: VM2's `funcall' cannot call a `(lambda ...)'
-// list, so the corpus rows that reach one are pinned and cannot say WHICH
-// object `run-hooks' handed to `funcall'. These do: GNU run_hook_with_args
-// calls a FUNCTIONP value whole, calls a lambda-headed global value whole,
-// and walks any other list, calling each element (here a lambda list) whole.
+// GNU run_hook_with_args calls a FUNCTIONP value whole, calls a
+// lambda-headed global value whole, and walks any other list, calling each
+// element (here a lambda list) whole.  Walking a lambda list instead would
+// call the symbol `lambda' and signal; each lambda records that it ran.
+// Answers are pinned GNU 32.0.50's.
 #[test]
 fn run_hooks_calls_lambda_lists_whole() {
     let mut vm = Vm::new();
+    vm.eval_source("(defvar rh-ran nil)").unwrap();
     for (source, expected) in [
-        ("(progn (set 'rh-h '(lambda () 1)) (condition-case e (run-hooks 'rh-h) (error e)))",
-         "(void-function (lambda nil 1))"),
-        ("(progn (set 'rh-g '(lambda () 2))
+        ("(progn (setq rh-ran nil) (set 'rh-h '(lambda () (setq rh-ran (cons 1 rh-ran))))
+                 (list (condition-case e (run-hooks 'rh-h) (error e)) rh-ran))",
+         "(nil (1))"),
+        ("(progn (setq rh-ran nil) (set 'rh-g '(lambda () (setq rh-ran (cons 2 rh-ran))))
                  (with-temp-buffer (make-local-variable 'rh-g) (set 'rh-g (list t))
-                   (condition-case e (run-hooks 'rh-g) (error e))))",
-         "(void-function (lambda nil 2))"),
-        ("(progn (set 'rh-l (list '(lambda () 3))) (condition-case e (run-hooks 'rh-l) (error e)))",
-         "(void-function (lambda nil 3))"),
+                   (list (condition-case e (run-hooks 'rh-g) (error e)) rh-ran)))",
+         "(nil (2))"),
+        ("(progn (setq rh-ran nil) (set 'rh-l (list '(lambda () (setq rh-ran (cons 3 rh-ran)))))
+                 (list (condition-case e (run-hooks 'rh-l) (error e)) rh-ran))",
+         "(nil (3))"),
     ] {
         assert_eq!(eval(&mut vm, source), Ok(expected.into()), "{source}");
     }
