@@ -129,6 +129,13 @@ mod tests {
             (run-at-time 0 nil (lambda () (push 'a probe)
               (run-at-time 0.01 nil (lambda () (push (list 'b (< (- (float-time) start) 0.1)) probe)))))");
         assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.2) (reverse probe))"), "(nil (a (b t)))");
+        // A timer that queues input wakes the read, which takes the event.
+        // Pinned GNU 45b0f7699df, batch, stdin open: (97 t nil).
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil start (float-time))
+            (run-at-time 0.01 nil (lambda () (push ?a unread-command-events)))");
+        assert_eq!(printed(&mut vm, "(list (read-event nil nil 1) (< (- (float-time) start) 0.5) unread-command-events)"),
+                   "(97 t nil)");
     }
 
     enum Step { Pause(Duration), Key(char) }

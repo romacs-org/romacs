@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Lisp timers in a native --loadup session, in a private headless compositor.
 
-A private init.el installs two probes that append to a state file: an
-ordinary timer due 2s after init, and a repeating 1s idle timer that records
-`current-idle-time' and messages.  The session then sits idle (the idle probe
+A private init.el installs probes that append to a state file: an ordinary
+timer due 2s after init, a repeating 1s idle timer that records
+`current-idle-time' and messages, and at 3s gnosis-feed's dwell probe (a timed
+read that a timer's queued input must wake).  The session then sits idle (the idle probe
 must fire once, at >= 1s of idleness, the ordinary one once), and its CPU time
 over an idle window is read from /proc.  Real keys then run
 M-x gnosis-dashboard, whose statistics arrive by `run-with-timer' and whose
@@ -35,6 +36,7 @@ INIT = '''(setq gnosis-dir {gnosis})
   (write-region (concat (prin1-to-string form) "\\n") nil {state} 'append 'silent))
 (timers-live-record '(init))
 (run-with-timer 2 nil (lambda () (timers-live-record (list 'ordinary (and (current-idle-time) t)))))
+(run-with-timer 3 nil (lambda () (require 'gnosis-feed) (timers-live-record (list 'dwell (gnosis-feed--dwell-supported-p)))))
 (run-with-idle-timer 1 t
   (lambda ()
     (setq timers-live-idle (1+ timers-live-idle))
@@ -175,6 +177,9 @@ def main():
                 check('idle probe fired once with >= 1s idleness', len(idle_lines) == 1
                       and float(idle_lines[0].split()[2].rstrip(')')) >= 1.0, first)
                 check('ordinary timer fired once, while idle', first.count('(ordinary t)') == 1, first)
+                fio.wait(lambda: any(r.startswith('(dwell') for r in records()), 15, 'dwell probe', process)
+                check("a timer's queued input wakes a read (gnosis-feed--dwell-supported-p)",
+                      '(dwell t)' in records(), records())
                 check('echo area shows the idle probe', any('Idle probe 1' in row for row in rows()), rows()[-2:])
                 report['idle_cpu_started'] = idle_cpu(process.pid, args.cpu_window)
                 check('no more idle probes without input', len([r for r in records() if r.startswith('(idle')]) == 1,

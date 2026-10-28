@@ -69,7 +69,8 @@ commands and autoloads)."
 
 (defun romacs--read-host-char (seconds)
   "keyboard.c kbd_buffer_get_event's wait for the host keyboard: the next
-host event, running timers as they fall due, or nil once SECONDS pass.
+host event, running timers as they fall due, or nil once SECONDS pass or a
+timer queues input in `unread-command-events' (which read_char reads next).
 Without SECONDS Emacs is idle meanwhile, so idle timers run too (read_char's
 timer_start_idle and timer_stop_idle).  A VM without the process prelude
 runs no timers."
@@ -85,7 +86,7 @@ runs no timers."
             (while (and timers (/= run romacs--timers-run))
               (setq run romacs--timers-run delay (romacs--timer-check)))
             (setq left (and end (- end (float-time))))
-            (if (and left (<= left 0))
+            (if (or unread-command-events (and left (<= left 0)))
                 (setq waiting nil)
               (setq c (romacs--read-host-event
                        (if (and delay left) (min delay left) (or delay left)))
@@ -100,7 +101,9 @@ macro unless that is at its end, else from the host keyboard, waiting at
 most SECONDS when given (then nil).  With none of those and no host,
 SECONDS gives nil and its absence `end-of-file', as batch GNU's minibuffer
 reports it, raised from the innermost recursive edit when there is one."
-  (let ((reread nil) (recorded nil) c)
+  (let ((reread nil) (recorded nil) c (again t))
+   (while again
+    (setq again nil)
     (cond
      (unread-command-events
       (setq c (car unread-command-events)
@@ -122,15 +125,18 @@ reports it, raised from the innermost recursive edit when there is one."
       (setq executing-kbd-macro-index (1+ executing-kbd-macro-index)))
      ((romacs--host-input-p)
       (setq c (romacs--read-host-char seconds))
-      (unless (or (null c) executing-kbd-macro)
-        (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))))
+      (cond (c (unless executing-kbd-macro
+                 (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))))
+            ;; A timer queued input while the host waited: read it as GNU's
+            ;; wait returns on requeued_command_events_pending_p.
+            (unread-command-events (setq again t))))
      (seconds)
      ;; Batch GNU blocks for the terminal here. With no input left, VM2
      ;; leaves the innermost recursive edit or minibuffer instead, so a
      ;; command loop that reports errors cannot spin on this one.
      ((> (recursion-depth) 0)
       (throw 'exit (lambda () (signal 'end-of-file '("Error reading from stdin")))))
-     (t (signal 'end-of-file '("Error reading from stdin"))))
+     (t (signal 'end-of-file '("Error reading from stdin")))))
     (when c
       ;; record_char: recent-keys leaves out keyboard-macro input.
       (unless (or recorded executing-kbd-macro
