@@ -67,13 +67,35 @@ commands and autoloads)."
   "keyboard.c add_command_key."
   (setq romacs--command-keys (vconcat romacs--command-keys (list key))))
 
+(defun romacs--read-host-char (seconds)
+  "keyboard.c kbd_buffer_get_event's wait for the host keyboard: the next
+host event, running timers as they fall due, or nil once SECONDS pass.
+Without SECONDS Emacs is idle meanwhile, so idle timers run too (read_char's
+timer_start_idle and timer_stop_idle).  A VM without the process prelude
+runs no timers."
+  (let ((end (and seconds (+ (float-time) seconds)))
+        (timers (fboundp 'romacs--timer-check))
+        (c nil) (waiting t))
+    (and timers (null end) (romacs--timer-start-idle))
+    (unwind-protect
+        (while waiting
+          (let* ((delay (and timers (romacs--timer-check)))
+                 (left (and end (- end (float-time)))))
+            (if (and left (<= left 0))
+                (setq waiting nil)
+              (setq c (romacs--read-host-event
+                       (if (and delay left) (min delay left) (or delay left)))
+                    waiting (null c)))))
+      (and timers (null end) (romacs--timer-stop-idle)))
+    c))
+
 (defun romacs--read-char (&optional seconds)
   "keyboard.c read_char: the next event, recorded as input.
 It comes from `unread-command-events', else from the executing keyboard
-macro unless that is at its end, else from the host keyboard. With
-SECONDS and none of those, nil (VM2 does not wait on the host); with
-none at all, `end-of-file' as batch GNU's minibuffer reports it, raised
-from the innermost recursive edit when there is one."
+macro unless that is at its end, else from the host keyboard, waiting at
+most SECONDS when given (then nil).  With none of those and no host,
+SECONDS gives nil and its absence `end-of-file', as batch GNU's minibuffer
+reports it, raised from the innermost recursive edit when there is one."
   (let ((reread nil) (recorded nil) c)
     (cond
      (unread-command-events
@@ -94,9 +116,9 @@ from the innermost recursive edit when there is one."
       (when (and (stringp executing-kbd-macro) (/= 0 (logand c #x80)) (<= c #xff))
         (setq c (logior #x8000000 (logand c #x7f))))
       (setq executing-kbd-macro-index (1+ executing-kbd-macro-index)))
-     ((and (null seconds) (romacs--host-input-p))
-      (setq c (romacs--read-host-event))
-      (unless executing-kbd-macro
+     ((romacs--host-input-p)
+      (setq c (romacs--read-host-char seconds))
+      (unless (or (null c) executing-kbd-macro)
         (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))))
      (seconds)
      ;; Batch GNU blocks for the terminal here. With no input left, VM2

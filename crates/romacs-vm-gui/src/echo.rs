@@ -24,12 +24,22 @@ pub fn show(vm: &mut Vm, message: &str) -> Result<(), String> {
 /// Show the message the command left (`message`, or printing to `t`), as
 /// GNU's echo area shows it once the command returns. Nothing when it left none.
 pub fn show_current_message(vm: &mut Vm) -> Result<(), String> {
+    current_message(vm, false)
+}
+
+/// The echo area after timers changed the message: shown, or cleared by
+/// `(message nil)`.
+pub fn sync_current_message(vm: &mut Vm) -> Result<(), String> {
+    current_message(vm, true)
+}
+
+fn current_message(vm: &mut Vm, clear_when_none: bool) -> Result<(), String> {
     // As GNU's echo area, a multibyte buffer, holds it: ASCII messages
     // (`format''s and `set_echo_area_message''s) are unibyte strings, which
     // the VM prints as byte vectors.
     let value = vm.eval_source("(let ((message (current-message)))
                                   (and message (string-to-multibyte (substring-no-properties message))))")?;
-    if value.is_nil() { return Ok(()); }
+    if value.is_nil() { return if clear_when_none { clear(vm) } else { Ok(()) }; }
     let printed = value.display()?;
     let message: String = serde_json::from_str(&printed).unwrap_or(printed);
     show(vm, &message)

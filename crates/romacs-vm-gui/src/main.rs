@@ -23,6 +23,7 @@ mod terminal_service;
 mod terminal_wait;
 mod batch;
 mod user_init;
+mod timers;
 
 const SCENE: &str = include_str!("../scene.el");
 
@@ -416,6 +417,8 @@ fn evaluate(
     let mut vm = Vm::new();
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
+    // A completed background command wakes the same wait as a terminal.
+    if live { vm.set_background_wake(terminal_service.waker()); }
     if live { vm.set_terminal_host(Some(Box::new(terminal_service)))?; }
     // The window shows an echo area: printing to `t' goes there, as on GNU's terminal.
     if live { vm.set_echo_area_host(true); }
@@ -524,6 +527,8 @@ fn evaluate(
             let received = if tracing() {
                 romacs_display_runtime::paint_host::take_key_enqueue_time(&event)
             } else { None };
+            // read_char's timer_stop_idle: Emacs is idle until a key arrives.
+            if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
             let event = command::unwrap_event(event);
             let command_start = Instant::now();
             let gc_before = vm.heap_stats().collections;
@@ -674,8 +679,19 @@ fn evaluate(
                         "units":"ns","snapshot_ns":snapshot_ns}));
                 }
             }
-            if pending.is_empty() {
-                match terminal_wait::wait(sender.input(), &terminal_ready, Some(live_presentation.wait())) {
+            if pending.is_empty() && sender.input().is_empty() {
+                // read_char: with no key to read, idle and run ripe timers;
+                // after any ran, redisplay and check again before blocking.
+                let idle = timers::idle(&mut vm).unwrap_or_else(|error| {
+                    let _ = echo::show(&mut vm, &format!("Timer: {error}"));
+                    timers::Idle { ran: true, message: false, delay: None }
+                });
+                if idle.ran {
+                    if idle.message { echo::sync_current_message(&mut vm)?; }
+                    live_presentation.changed();
+                    continue;
+                }
+                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay)) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(()),
                     terminal_wait::Wake::Terminal | terminal_wait::Wake::Timeout => {},

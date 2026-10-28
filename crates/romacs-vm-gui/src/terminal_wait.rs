@@ -22,8 +22,12 @@ impl Mailbox {
     pub(crate) fn mark(&self, owner: u64) {
         let mut owners = self.owners.lock().unwrap();
         owners.insert(owner);
-        let _ = self.signal.try_send(());
+        self.wake();
     }
+
+    /// Wake the wait for native work that is not a terminal's (a completed
+    /// background command); the wait's caller polls that work itself.
+    pub(crate) fn wake(&self) { let _ = self.signal.try_send(()); }
 
     pub(crate) fn take(&self) -> Vec<u64> {
         let mut owners = self.owners.lock().unwrap();

@@ -329,6 +329,12 @@ impl Service {
     /// Wait for native changes without polling a terminal or its history.
     pub fn ready(&self) -> crossbeam_channel::Receiver<()> { self.mailbox.ready() }
 
+    /// Wake the same wait from another thread, for native work that is not a terminal's.
+    pub fn waker(&self) -> std::sync::Arc<dyn Fn() + Send + Sync> {
+        let mailbox = self.mailbox.clone();
+        std::sync::Arc::new(move || mailbox.wake())
+    }
+
     fn session(&mut self, id: u64) -> Result<&mut Session, String> {
         self.sessions
             .get_mut(&id)

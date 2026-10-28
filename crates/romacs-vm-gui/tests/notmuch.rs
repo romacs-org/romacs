@@ -84,7 +84,7 @@ struct Confirm(std::collections::VecDeque<romacs_vm::HostEvent>);
 impl romacs_vm::HostInput for Confirm {
     fn input_pending(&mut self) -> bool { false }
     fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64,usize)>,String> { Ok(vec![]) }
-    fn next_event(&mut self) -> Result<romacs_vm::HostEvent,String> { self.0.pop_front().ok_or_else(|| "confirmation exhausted".into()) }
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent,String> { self.0.pop_front().ok_or_else(|| "confirmation exhausted".into()) }
 }
 #[test]
 fn compose_submits_exact_bytes_once_and_saves_failed_drafts() {
