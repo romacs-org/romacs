@@ -94,6 +94,36 @@ impl Vm {
         self.string_match_no_data(pattern, string, None)
     }
 
+    /// GNU fast_looking_at over the current buffer's accessible text, for
+    /// each of PATTERNS: case-sensitive, current syntax, no match data. BODY
+    /// gets that text, point's byte in it, and a matcher from a pattern's
+    /// index and a byte of the text to the length of its match there.
+    pub(crate) fn with_buffer_looking_at<T>(&mut self, patterns: &[Value],
+        body: impl FnOnce(&str, usize, &mut dyn FnMut(usize, usize) -> Option<usize>) -> T) -> std::result::Result<T, prim::Fault> {
+        let run = |vm: &mut Self| -> SearchResult<T> {
+            let index = vm.buffer_index()?;
+            let Object::Buffer(b) = &vm.objects[index] else { return Err(Fault::Internal("multibyte buffer required".into())) };
+            let accessible = b.accessible();
+            let text = b.as_str()[accessible.start.0..accessible.end.0].to_owned();
+            let point = b.point.0.clamp(accessible.start.0, accessible.end.0) - accessible.start.0;
+            let patterns = patterns.iter().map(|&p| vm.regexp_input(p)).collect::<SearchResult<Vec<_>>>()?;
+            let syntax = vm.regexp_syntax(None)?;
+            let syntax = syntax::VmSyntax::new(vm, syntax);
+            let compiled = patterns.iter().map(|p| Self::regexp_compile(p, true, false, &syntax)).collect::<SearchResult<Vec<_>>>()?;
+            let mut looks = |pattern: usize, at: usize| {
+                let found = regex::re_match(&compiled[pattern], text.as_bytes(), at, text.len(), &syntax, point);
+                // An overflow is GNU's error; here it is no match.
+                (!regex::take_matcher_overflow()).then_some(found).flatten().map(|(end, _)| end - at)
+            };
+            Ok(body(&text, point, &mut looks))
+        };
+        run(self).map_err(|fault| match fault {
+            Fault::Wrong(predicate, value) => prim::Fault::Wrong(predicate, value),
+            Fault::Internal(text) | Fault::Text(_, text) => prim::Fault::Error(text),
+            Fault::Signal(name, _) => prim::Fault::Error(name.into()),
+        })
+    }
+
     pub(crate) fn string_match_no_data(&mut self, pattern: Value, string: Value, translation: Option<regex::CaseTranslation>) -> std::result::Result<Option<usize>, prim::Fault> {
         let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
             let pattern = vm.regexp_input(pattern)?;

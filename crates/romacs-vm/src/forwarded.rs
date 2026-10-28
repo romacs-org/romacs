@@ -567,6 +567,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // char-width and string-width read it (indent.c buffer_display_table).
     CVariable { name: "buffer-display-table", gnu: "buffer.c:5502", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "bidi-paragraph-direction", gnu: "buffer.c:5383", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "bidi-display-reordering", gnu: "buffer.c:5332", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "bidi-paragraph-start-re", gnu: "buffer.c:5340", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "bidi-paragraph-separate-re", gnu: "buffer.c:5362", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "word-wrap", gnu: "buffer.c:5408", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "selective-display-ellipses", gnu: "buffer.c:5487", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     CVariable { name: "indicate-empty-lines", gnu: "buffer.c:5612", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },

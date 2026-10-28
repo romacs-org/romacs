@@ -22,6 +22,7 @@ mod command;
 mod interpreted_closure;
 mod oclosure;
 mod host_input;
+mod bidi;
 mod layout_host;
 mod terminal_host;
 mod process_jobs;

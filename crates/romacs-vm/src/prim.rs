@@ -1662,6 +1662,7 @@ mod leaf {
     mod display_elements;
     mod display_hosted;
     mod text_pixel_size;
+    mod bidi;
     pub(crate) use text_pixel_size::TextSizeArgs;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
