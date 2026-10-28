@@ -11,6 +11,19 @@ impl Leaf<'_> {
         }
     }
 
+    /// GNU keeps an overlay's plist newest-first (`overlay-put' prepends a
+    /// new property); VM2 keeps insertion order, so the copy is reversed.
+    pub fn overlay_plist(&mut self, overlay: Value) -> std::result::Result<Value, Fault> {
+        let properties = match self.vm.object(overlay) {
+            Ok(Object::Overlay(o)) => o.properties.clone(),
+            _ => return Err(Fault::Wrong("overlayp", overlay)),
+        };
+        Ok(properties.into_iter().fold(Value::NIL, |tail, (key, value)| {
+            let tail = self.cons(value, tail);
+            self.cons(key, tail)
+        }))
+    }
+
     pub fn delete_all_overlays(&mut self, buffer: Value) -> std::result::Result<Value, Fault> {
         let buffer = self.decode_buffer(buffer)?;
         let overlays = match self
