@@ -608,7 +608,9 @@ fn arg_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
             // symbol with DEFAULT, MUSTMATCH, INITIAL and PREDICATE; and
             // Fread_string, called directly, not through its symbol.
             b'D' | b'f' | b'F' | b'G' | b's' => {
-                let template = cx.string(&String::from_utf8_lossy(prompt));
+                // make_string (callint.c:456): the prompt's bytes, multibyte
+                // only if they form multibyte text.
+                let template = cx.make_string(prompt.to_vec(), crate::environment::multibyte(prompt));
                 let message = cx.format_message(template, &[])?;
                 let (f, args) = if spec[pos] == b's' {
                     let f = crate::prim::subr_named("read-string").expect("read-string subr");

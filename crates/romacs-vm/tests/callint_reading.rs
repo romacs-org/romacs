@@ -1,7 +1,8 @@
 //! call-interactively's reading codes `s', `D', `f', `F' and `G' against
 //! pinned GNU (callint.c:509-525, 681): the prompt after format-message,
 //! the arguments read-string and read-file-name receive, and
-//! command-history.
+//! command-history, and a prompt sliced from the spec's bytes as
+//! make_string makes it, unibyte unless they form multibyte text.
 use romacs_vm::Vm;
 
 /// One expression per line. Each replaces the readers to log their calls.
@@ -12,6 +13,7 @@ const CASES: &str = r###"
 (progn (setq calls nil) (fset 'read-file-name (lambda (&rest a) (setq calls (cons a calls)) nil)) (fset 'cmd (lambda (p f) (interactive "p\nG") (list p f))) (setq command-history nil) (list (call-interactively 'cmd) (nreverse calls) command-history))
 (progn (setq calls nil) (fset 'read-file-name (lambda (&rest a) (setq calls (cons a calls)) "/d/")) (fset 'cmd (lambda (d f g) (interactive "DDir: \nfFile: \nFNew: ") (list d f g))) (setq command-history nil) (let ((default-directory "/tmp/")) (list (call-interactively 'cmd) (nreverse calls) command-history)))
 (progn (fset 'read-file-name (lambda (&rest _) (signal 'quit nil))) (fset 'cmd (lambda (f) (interactive "GFile: ") f)) (setq command-history nil) (list (condition-case e (call-interactively 'cmd) (quit (list 'quit e))) command-history))
+(progn (setq calls nil) (fset 'read-file-name (lambda (p &rest _) (setq calls (cons (list (multibyte-string-p p) (append p nil)) calls)) "/x")) (dolist (spec (list (unibyte-string 71 255) (string-to-multibyte (unibyte-string 71 255)) (unibyte-string 71 195 169) "G\u00e9: ")) (fset 'cmd (eval (list 'lambda '(f) (list 'interactive spec) 'f) t)) (call-interactively 'cmd)) (nreverse calls))
 "###;
 
 #[test]
