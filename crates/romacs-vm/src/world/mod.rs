@@ -403,18 +403,27 @@ impl Vm {
     /// SHA-256 of VALUE's content: the structure and bytes of the conses,
     /// strings with their text properties, vectors, records, bool vectors,
     /// char tables, syntax tables, hash tables, closures and cells it
-    /// reaches, each once. Nothing depends on an arena index, which a
-    /// collection moves. An object whose observable state this cannot read,
-    /// such as a buffer, a marker or a process, is an error naming its kind.
+    /// reaches, each once; a later reach names the first by its order.
+    /// Every object leads with its kind and every variable-length field with
+    /// its length, so no two contents share a byte stream. Nothing depends
+    /// on an arena index, which a collection moves. An object whose
+    /// observable state this cannot read, such as a buffer, a marker or a
+    /// process, is an error naming its kind.
     fn content_digest(&self, value: Value) -> Result<String, &'static str> {
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
-        let mut seen = rustc_hash::FxHashSet::default();
+        let mut seen = rustc_hash::FxHashMap::default();
         let mut stack = vec![value];
         while let Some(v) = stack.pop() {
             hasher.update(v.tag().to_le_bytes());
-            if matches!(v.tag(), 0 | 3 | 4 | 5) && !seen.insert(v.0) {
-                continue;
+            if matches!(v.tag(), 0 | 3 | 4 | 5) {
+                let order = seen.len();
+                let first = *seen.entry(v.0).or_insert(order);
+                hasher.update([u8::from(first != order)]);
+                if first != order {
+                    hasher.update(first.to_le_bytes());
+                    continue;
+                }
             }
             match (v.tag(), self.object_if(v)) {
                 (3, _) => {
@@ -431,39 +440,64 @@ impl Vm {
                 (5, _) => stack.push(self.read_capture_cell(v.payload() as usize)),
                 (7, _) if v != Value::UNBOUND => {
                     let slot = v.payload() as usize - 1;
-                    hasher.update(self.symbol_names[slot].as_bytes());
-                    if self.names.get(&self.symbol_names[slot]) != Some(&slot) {
+                    let name = &self.symbol_names[slot];
+                    framed(&mut hasher, name.as_bytes());
+                    let interned = self.names.get(name) == Some(&slot);
+                    hasher.update([u8::from(interned)]);
+                    if !interned {
                         hasher.update(v.0.to_le_bytes());
                     }
                 }
                 (_, Some(Object::String(text) | Object::RawString(text))) => {
-                    hasher.update([u8::from(text.is_multibyte())]);
-                    hasher.update(text.bytes().len().to_le_bytes());
-                    hasher.update(text.bytes());
+                    hasher.update([b's', u8::from(text.is_multibyte())]);
+                    framed(&mut hasher, text.bytes());
                     stack.extend(property_runs(&text.properties, text.bytes().len(), &mut hasher));
                 }
-                (_, Some(Object::Bytes(bytes))) => hasher.update(bytes),
-                (_, Some(Object::Float(f))) => hasher.update(f.to_bits().to_le_bytes()),
-                (_, Some(Object::Bignum(n))) => hasher.update(n.to_signed_bytes_le()),
-                (_, Some(Object::Vector(items) | Object::Record(items))) => {
+                (_, Some(Object::Bytes(bytes))) => {
+                    hasher.update([b'y']);
+                    framed(&mut hasher, bytes);
+                }
+                (_, Some(Object::Float(f))) => {
+                    hasher.update([b'f']);
+                    hasher.update(f.to_bits().to_le_bytes());
+                }
+                (_, Some(Object::Bignum(n))) => {
+                    hasher.update([b'n']);
+                    framed(&mut hasher, &n.to_signed_bytes_le());
+                }
+                (_, Some(object @ (Object::Vector(items) | Object::Record(items)))) => {
+                    hasher.update([if matches!(object, Object::Record(_)) { b'r' } else { b'v' }]);
                     hasher.update(items.len().to_le_bytes());
                     stack.extend(items.iter().rev());
                 }
-                (_, Some(Object::BoolVector(bits))) => hasher.update(bits.printed()),
-                (_, Some(Object::CharTable(table))) => stack.extend(char_table_content(table, &mut hasher)?),
+                (_, Some(Object::BoolVector(bits))) => {
+                    hasher.update([b'b']);
+                    framed(&mut hasher, bits.printed().as_bytes());
+                }
+                (_, Some(Object::CharTable(table))) => {
+                    hasher.update([b'c']);
+                    stack.extend(char_table_content(table, &mut hasher)?);
+                }
                 (_, Some(Object::SyntaxTable(entries))) => {
+                    hasher.update([b't']);
+                    hasher.update(entries.len().to_le_bytes());
                     for (&at, &class) in entries {
                         hasher.update(at.to_le_bytes());
                         hasher.update([class as u8]);
                     }
                 }
                 (_, Some(Object::HashTable(table))) => {
+                    hasher.update([b'h']);
+                    hasher.update(table.count().to_le_bytes());
                     for (_, key, value) in table.entries() {
                         stack.extend([value, key]);
                     }
                 }
                 (_, Some(object)) => return Err(object_kind(object)),
-                _ => hasher.update(v.0.to_le_bytes()),
+                _ => {
+                    hasher.update([b'_']);
+                    hasher.update(v.0.to_le_bytes());
+                }
             }
         }
         Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
@@ -477,33 +511,47 @@ impl Vm {
     }
 }
 
-/// TEXT's property runs as Lisp sees them, each run's bounds and keys into
-/// HASHER: the property values, for the caller to digest.
+/// BYTES into HASHER, after their length.
+fn framed(hasher: &mut sha2::Sha256, bytes: &[u8]) {
+    use sha2::Digest;
+    hasher.update(bytes.len().to_le_bytes());
+    hasher.update(bytes);
+}
+
+/// TEXT's property runs as Lisp sees them, their count and each run's
+/// bounds and keys into HASHER: the property values, for the caller to
+/// digest.
 fn property_runs(properties: &crate::properties::Properties, len: usize, hasher: &mut sha2::Sha256) -> Vec<Value> {
     use crate::coordinates::ByteOffset;
     use sha2::Digest;
-    let mut values = Vec::new();
+    let mut runs = Vec::new();
     let mut at = 0;
     while at < len && !properties.is_empty() {
         let end = properties.next_change(ByteOffset(at), ByteOffset(len)).0;
-        hasher.update([at, end].map(usize::to_le_bytes).concat());
-        for (key, value) in properties.properties_at(ByteOffset(at)) {
-            hasher.update(key.as_bytes());
-            hasher.update([0]);
+        runs.push((at, end, properties.properties_at(ByteOffset(at))));
+        at = end;
+    }
+    hasher.update(runs.len().to_le_bytes());
+    let mut values = Vec::new();
+    for (at, end, properties) in runs {
+        hasher.update([at, end, properties.len()].map(usize::to_le_bytes).concat());
+        for (key, value) in properties {
+            framed(hasher, key.as_bytes());
             values.push(value);
         }
-        at = end;
     }
     values.reverse();
     values
 }
 
-/// TABLE's mapping, as `aref` reads it, ASCII slot included: each run of
-/// characters that share a value, and the purpose, default, parent and
-/// extras, into HASHER; the values, for the caller to digest.
+/// TABLE's mapping, as `aref` reads it, ASCII slot included: the count of
+/// extras and each run of characters that share a value, into HASHER; the
+/// purpose, default, parent, extras and run values, for the caller to
+/// digest.
 fn char_table_content(table: &crate::char_table::CharTable, hasher: &mut sha2::Sha256) -> Result<Vec<Value>, &'static str> {
     use sha2::Digest;
     let mut values = vec![table.purpose, table.default, table.parent];
+    hasher.update(table.extras.len().to_le_bytes());
     values.extend(&table.extras);
     let span = |at| table.span(at).map_err(|_| "char-table");
     let (mut from, (mut value, _, mut to)) = (0, span(0)?);

@@ -308,6 +308,44 @@ fn the_content_check_sees_every_char_table_field() {
     assert_eq!(changed, expected, "{trace}");
 }
 
+/// Each mutation keeps the bytes a digest without framing would see. With
+/// T a symbol's tag and I the interned mark after a name, names ("a" "Tb")
+/// become ("aT" "b"), and ("a" "bITc") become ("aITb" "c"); a second reach
+/// of one cons moves to another; a vector becomes a record of its items.
+#[test]
+fn the_content_check_frames_what_it_digests() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables nil)
+(defvar fence-tag (concat (string 7) (make-string 7 0)))
+(defvar fence-mark (concat (string 1) fence-tag))
+(defvar fence-names (vector 'a (intern (concat fence-tag \"b\"))))
+(defvar fence-marked (vector 'a (intern (concat \"b\" fence-mark \"c\"))))
+(defvar fence-shared (let ((x (list 1)) (y (list 2))) (list x y x)))
+(defvar fence-kind (list (vector 'a 'b)))
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (setq seen (list fence-names fence-marked fence-shared fence-kind)))
+  (romacs--startup-phase nil))
+";
+    let preload = "\
+(aset fence-names 0 (intern (concat \"a\" fence-tag)))
+(aset fence-names 1 'b)
+(aset fence-marked 0 (intern (concat \"a\" fence-mark \"b\")))
+(aset fence-marked 1 'c)
+(setcar (cdr (cdr fence-shared)) (car (cdr fence-shared)))
+(setcar fence-kind (record 'a 'b))
+";
+    let (mut vm, trace) = run_with("framing", bootstrap, preload, true);
+    assert_eq!(listed(&trace.unwrap()), []);
+    host::enter_build(PINNED);
+    vm.world_check_inputs();
+    let trace = host::leave_build().unwrap();
+    let changed: Vec<_> = listed(&trace).into_iter().map(|(kind, _, symbol, access, _)| (kind, symbol, access)).collect();
+    let expected = ["fence-names", "fence-marked", "fence-shared", "fence-kind"]
+        .map(|symbol| ("fence".to_owned(), symbol.to_owned(), "changed".to_owned()));
+    assert_eq!(changed, expected, "{trace}");
+}
+
 #[test]
 fn a_binding_across_startups_end_stays_fenced_in_backtraces() {
     let bootstrap = "\
