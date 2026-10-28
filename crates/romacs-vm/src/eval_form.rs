@@ -18,7 +18,8 @@
 //! `eq'; list, string and vector structure is copied, so nested quoted
 //! structure is not `eq' to the original. A bare symbol in the alist is
 //! locally special, as in GNU: the form's `let' bindings of it, and those of
-//! the closures it makes, are dynamic.
+//! the closures it makes, are dynamic, while an alist binding of the same
+//! name stays lexical.
 use super::*;
 
 impl Vm {
@@ -56,7 +57,7 @@ impl Vm {
             }
         }
         let mut bindings = Vec::new();
-        let mut specials = NameSet::default();
+        let mut specials = Vec::new();
         if lexical.tag() == 3 {
             let mut seen = HashSet::default();
             let mut tail = lexical;
@@ -79,7 +80,7 @@ impl Vm {
                     }
                 } else if entry.tag() == 7 && entry != Value::TRUE {
                     // A bare symbol declares its name locally special.
-                    specials.insert(self.display(entry)?);
+                    specials.push(entry);
                 }
                 tail = next;
             }
@@ -103,6 +104,16 @@ impl Vm {
             }
         }
         let mut form = self.expansion_form(datum, 0)?;
+        // The declarations scope the form's own bindings, inside the
+        // supplied ones: those stay lexical, as GNU's alist entries do.
+        if !specials.is_empty() {
+            let mut body = vec![Form::Sym("let".into()), Form::List(vec![])];
+            for name in specials {
+                body.push(Form::List(vec![Form::Sym("defvar".into()), self.source_form(name, 0)?]));
+            }
+            body.push(form);
+            form = Form::List(body);
+        }
         if !bindings.is_empty() {
             let quote = |f| Form::List(vec![Form::Sym("quote".into()), f]);
             let bindings = bindings
@@ -114,13 +125,7 @@ impl Vm {
             form = Form::List(vec![Form::Sym("let".into()), Form::List(bindings), form]);
         }
         let saved = std::mem::replace(&mut self.dynamic_scope, lexical == Value::NIL);
-        // The environment's local specials seed the compilation as a file's
-        // `(defvar NAME)' declarations do, in place of the caller's.
-        let saved_specials = std::mem::replace(&mut self.file_specials, specials);
-        self.seed_file_specials = true;
         let compiled = self.compile(&form);
-        self.seed_file_specials = false;
-        self.file_specials = saved_specials;
         self.dynamic_scope = saved;
         let function = compiled?;
         self.propagate_next = true;

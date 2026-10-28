@@ -44,3 +44,25 @@ fn file_declarations_reach_expansion_time_eval_as_in_gnu() {
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(mine, format!("{gnu:?}"));
 }
+
+/// A LEXICAL environment that both binds and declares a name: the supplied
+/// binding stays lexical, so references read it, while the declaration
+/// makes the form's own `let' of the name dynamic (src/eval.c eval_sub
+/// looks the lexical binding up first).
+#[test]
+fn eval_keeps_supplied_bindings_lexical_beside_declarations() {
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let expression = "(list (eval '(list x (let ((x 2)) x)) '((x . 1) x))
+      (eval '(let ((z 3)) (list z (funcall (lambda () z)) (symbol-value 'z))) '((z . 1) z))
+      (eval '(let ((w 4)) (list w (symbol-value 'w))) '(w (w . 1))))";
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {expression}))")])
+        .stdin(std::process::Stdio::null())
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let gnu = String::from_utf8(output.stdout).unwrap();
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let mine = vm.eval_source(&format!("(prin1-to-string {expression})")).unwrap().display().unwrap();
+    assert_eq!(mine, format!("{gnu:?}"));
+}
