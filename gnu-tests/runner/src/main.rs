@@ -26,6 +26,11 @@ use std::path::PathBuf;
 
 mod world;
 
+/// Every allocation in the world arena, so a world image can be this
+/// process's heap (`romacs_vm::world::arena`).
+#[global_allocator]
+static ALLOCATOR: romacs_vm::world::arena::Arena = romacs_vm::world::arena::Arena;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HarnessKind {
     Mini,
@@ -54,6 +59,9 @@ struct Args {
     /// `--world-trace-child DIR`: set in the confined child that
     /// `--world-trace` runs, with the directory of its pinned table.
     world_child: Option<PathBuf>,
+    /// `--world-store DIR`: boot from the world of the loadup chain in DIR,
+    /// building it beside a source boot when it is missing or stale.
+    world_store: Option<PathBuf>,
 }
 
 fn usage() -> ! {
@@ -61,7 +69,7 @@ fn usage() -> ! {
         "usage: romacs-gnu-ert --harness FILE --plan PLAN.json [--load-path DIR]... \
          [--preload FILE]... [--skip-test NAME]... [--probe EXPR]... \
          [--harness-kind mini|real] [--ert-adapter none|romacs-batch] [--reporter FILE] [--audit FILE] \
-         [--world-trace OUT.json]"
+         [--world-trace OUT.json] [--world-store DIR]"
     );
     std::process::exit(2)
 }
@@ -70,7 +78,7 @@ fn parse() -> Args {
     let mut it = std::env::args().skip(1);
     let (mut load_path, mut preload, mut skip, mut probe) = (vec![], vec![], vec![], vec![]);
     let (mut harness, mut plan, mut reporter, mut audit) = (None, None, None, None);
-    let (mut world_trace, mut world_child) = (None, None);
+    let (mut world_trace, mut world_child, mut world_store) = (None, None, None);
     let mut kind = HarnessKind::Mini;
     let mut measurement_regime = false;
     let mut ert_bootstrap = false;
@@ -101,6 +109,7 @@ fn parse() -> Args {
             "--probe" => probe.push(value),
             "--world-trace" => world_trace = Some(PathBuf::from(value)),
             "--world-trace-child" => world_child = Some(PathBuf::from(value)),
+            "--world-store" => world_store = Some(PathBuf::from(value)),
             _ => usage(),
         }
     }
@@ -114,6 +123,7 @@ fn parse() -> Args {
         || (kind == HarnessKind::Real && audit.is_some())
         || (world_trace.is_some() && kind != HarnessKind::Real)
         || (world_child.is_some() && world_trace.is_none())
+        || (world_store.is_some() && (kind != HarnessKind::Real || world_trace.is_some()))
     {
         usage();
     }
@@ -133,6 +143,7 @@ fn parse() -> Args {
         audit,
         world_trace,
         world_child,
+        world_store,
     }
 }
 
@@ -314,6 +325,55 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
     }
 }
 
+/// The VM the chain starts in: made, in batch mode on GNU's batch frame,
+/// with the load path and the prelude. A failure exits with status 3.
+fn fresh_vm(args: &Args) -> Vm {
+    let mut vm = Vm::new();
+    vm.world_begin();
+    if let Err((_, error)) = eval(&mut vm, "(setq noninteractive t)") {
+        emit(json!({"event": "setup", "ok": false, "phase": "batch-mode", "error": error}));
+        std::process::exit(3);
+    }
+    // GNU batch runs on its initial terminal frame: 80 columns by 25 lines
+    // of 1x1 characters (DIVERGENCES.md VM2-WIN5).
+    if let Err(error) = vm.set_frame_geometry(80, 25, 1, 1) {
+        emit(json!({"event": "setup", "ok": false, "phase": "batch-geometry", "error": error.to_string()}));
+        std::process::exit(3);
+    }
+    if let Err(e) = vm.set_load_path(&args.load_path) {
+        emit(json!({"event": "setup", "ok": false, "phase": "load-path", "error": e}));
+        std::process::exit(3);
+    }
+    match catch_unwind(AssertUnwindSafe(|| vm.install_lisp_prelude().map(|_| ()))) {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            emit(json!({"event": "setup", "ok": false, "phase": "prelude", "error": e}));
+            std::process::exit(3);
+        }
+        Err(_) => panic_exit("prelude", "panic", None),
+    }
+    vm
+}
+
+/// Load the preloads FROM..TO, each entry onto CHAIN; false once one failed
+/// and stopped the chain.
+fn load_chain(vm: &mut Vm, args: &Args, from: usize, to: usize, chain: &mut Vec<Json>) -> bool {
+    for link in &args.preload[from..to] {
+        let result = match catch_unwind(AssertUnwindSafe(|| vm.load_file(link).map(|_| ()))) {
+            Ok(r) => r.map(|_| ()),
+            Err(_) => panic_exit("chain", &link.display().to_string(), None),
+        };
+        let failed = result.is_err();
+        let retained = result.as_ref().is_err_and(|error| retained_bindings_failure(args.measurement_regime, link, error));
+        chain.push(json!({"file": link, "loaded": !failed, "retained_failed_prefix": retained,
+                          "error": result.err()}));
+        if failed && !retained {
+            return false; // the chain as far as it reaches, exactly as the warm census
+        }
+    }
+    true
+}
+
 fn main() {
     let args = parse();
     let world_out = args.world_trace.clone().zip(args.world_child.clone());
@@ -340,44 +400,8 @@ fn main() {
         let recipe = args.load_path.iter().chain(&args.preload).chain([&args.harness, &args.plan]).chain(&args.reporter);
         world::begin(recipe.cloned().collect(), out, dir);
     }
-    let mut vm = Vm::new();
-    vm.world_begin();
-    if let Err((_, error)) = eval(&mut vm, "(setq noninteractive t)") {
-        emit(json!({"event": "setup", "ok": false, "phase": "batch-mode", "error": error}));
-        std::process::exit(3);
-    }
-    // GNU batch runs on its initial terminal frame: 80 columns by 25 lines
-    // of 1x1 characters (DIVERGENCES.md VM2-WIN5).
-    if let Err(error) = vm.set_frame_geometry(80, 25, 1, 1) {
-        emit(json!({"event": "setup", "ok": false, "phase": "batch-geometry", "error": error.to_string()}));
-        std::process::exit(3);
-    }
-    if let Err(e) = vm.set_load_path(&args.load_path) {
-        emit(json!({"event": "setup", "ok": false, "phase": "load-path", "error": e}));
-        std::process::exit(3);
-    }
-    match catch_unwind(AssertUnwindSafe(|| vm.install_lisp_prelude().map(|_| ()))) {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => {
-            emit(json!({"event": "setup", "ok": false, "phase": "prelude", "error": e}));
-            std::process::exit(3);
-        }
-        Err(_) => panic_exit("prelude", "panic", None),
-    }
-    let mut chain = vec![];
-    for link in &args.preload {
-        let result = match catch_unwind(AssertUnwindSafe(|| vm.load_file(link).map(|_| ()))) {
-            Ok(r) => r.map(|_| ()),
-            Err(_) => panic_exit("chain", &link.display().to_string(), None),
-        };
-        let failed = result.is_err();
-        let retained = result.as_ref().is_err_and(|error| retained_bindings_failure(args.measurement_regime, link, error));
-        chain.push(json!({"file": link, "loaded": !failed, "retained_failed_prefix": retained,
-                          "error": result.err()}));
-        if failed && !retained {
-            break; // the chain as far as it reaches, exactly as the warm census
-        }
-    }
+    let (mut vm, mut chain, from) = world::boot(&args);
+    load_chain(&mut vm, &args, from, args.preload.len(), &mut chain);
     emit(json!({"event": "chain", "entries": chain, "regime": if args.measurement_regime { "MEASUREMENT REGIME: retained failed bindings prefix" } else if args.ert_bootstrap { "gnu-ert" } else { "standard" }}));
     if (args.kind == HarnessKind::Real || args.ert_bootstrap) && chain.iter().any(|entry| entry["loaded"] == false && entry["retained_failed_prefix"] != true) {
         std::process::exit(3);

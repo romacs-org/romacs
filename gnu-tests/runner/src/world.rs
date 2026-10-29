@@ -5,6 +5,7 @@
 //! rather than stopping at the first, writes the trace to OUT and exits 1 if
 //! there was any.
 use romacs_vm::host::{self, Pinned};
+use romacs_vm::world::store::{self, Launch, World};
 use romacs_vm::{Vm, world::sandbox};
 use serde_json::json;
 use std::ffi::OsString;
@@ -19,16 +20,7 @@ const SEED: [u8; 4] = [0; 4];
 /// the pinned table under DIR supplies (§5 step 1). Keyed names keep their
 /// values.
 pub fn pinned_env(invoking: &[(OsString, OsString)], dir: &Path) -> Vec<(OsString, OsString)> {
-    let p = dir.join("p");
-    let pinned = [
-        ("PWD", p.join("cwd")), ("TMPDIR", p.join("tmp")), ("TMP", p.join("tmp")),
-        ("TEMP", p.join("tmp")), ("PATH", p.join("bin")), ("TERM", PathBuf::from("dumb")),
-    ];
-    invoking.iter()
-        .filter(|(name, _)| !host::P_ENV.iter().any(|p| name == p))
-        .cloned()
-        .chain(pinned.map(|(name, value)| (OsString::from(name), value.into_os_string())))
-        .collect()
+    store::pinned_env(invoking, &dir.join("p"))
 }
 
 /// The directory of OUT's pinned table: `OUT.d/p/{cwd,tmp,bin}`, empty and
@@ -40,7 +32,7 @@ fn pinned_dir(out: &Path) -> PathBuf {
 }
 
 /// The flags whose value names a file or directory.
-const PATH_FLAGS: [&str; 7] = ["--load-path", "--preload", "--harness", "--plan", "--reporter", "--audit", "--world-trace"];
+const PATH_FLAGS: [&str; 8] = ["--load-path", "--preload", "--harness", "--plan", "--reporter", "--audit", "--world-trace", "--world-store"];
 
 /// ARGS, flag and value pairs as `parse` reads them, with each relative
 /// path value resolved against CWD: the child runs elsewhere.
@@ -105,9 +97,112 @@ pub fn finish(vm: &mut Vm, out: &Path) -> ! {
     std::process::exit(if written.is_err() { 3 } else if refusals > 0 { 1 } else { 0 })
 }
 
+/// How many leading preloads a world holds: the loadup bootstrap and every
+/// preload after it from the same Romacs tree, up to the first that is not
+/// (a suite's setup file). None without the bootstrap first.
+pub fn world_preloads(preload: &[PathBuf]) -> usize {
+    let Some(root) = preload.first()
+        .filter(|p| p.file_name().is_some_and(|n| n == "romacs-loadup-bootstrap.el"))
+        .and_then(|p| p.parent()?.parent())
+    else { return 0 };
+    preload.iter().take_while(|p| p.starts_with(root)).count()
+}
+
+/// The recipe of the runner's world (§7): every embedder step before the
+/// world's end, in order.
+fn recipe(args: &crate::Args) -> Vec<String> {
+    let mut lines = vec!["consumer romacs-gnu-ert".to_owned(), "noninteractive t".into(), "geometry 80 25 1 1".into()];
+    lines.extend(args.load_path.iter().map(|p| format!("load-path {}", p.display())));
+    lines.push("prelude".into());
+    lines.extend(args.preload[..world_preloads(&args.preload)].iter().map(|p| format!("preload {}", p.display())));
+    lines
+}
+
+/// The VM to load the rest of the chain into, the chain entries already
+/// loaded and how many preloads they cover: a restored world's, or a fresh
+/// VM's. A builder runs the world's preloads, publishes and exits here.
+pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
+    let count = world_preloads(&args.preload);
+    let world = match &args.world_store {
+        Some(store) if count > 0 => World::new(store.clone(), recipe(args)),
+        Some(_) => {
+            crate::emit(json!({"event": "world", "mode": "source", "reason": "no loadup bootstrap preload"}));
+            return (crate::fresh_vm(args), vec![], 0);
+        }
+        None => return (crate::fresh_vm(args), vec![], 0),
+    };
+    let world = match world {
+        Ok(world) => world,
+        Err(e) => {
+            crate::emit(json!({"event": "world", "mode": "source", "reason": e.to_string()}));
+            return (crate::fresh_vm(args), vec![], 0);
+        }
+    };
+    let started = host::monotonic();
+    let builder_args = || {
+        let cwd = host::current_dir().unwrap_or_default();
+        absolute_args(&std::env::args_os().skip(1).collect::<Vec<_>>(), &cwd)
+    };
+    match world.launch(builder_args) {
+        Launch::Restored { vm, manifest } => {
+            let mut vm = *vm;
+            vm.world_reinit();
+            if let Err(e) = crate::eval(&mut vm, "(romacs-world-restart)") {
+                crate::emit(json!({"event": "setup", "ok": false, "phase": "world-restart", "error": e.1}));
+                std::process::exit(3);
+            }
+            let chain = manifest["events"]["chain"].as_array().cloned().unwrap_or_default();
+            crate::emit(json!({"event": "world", "mode": "restored", "key": manifest["key"],
+                               "restart_ms": started.elapsed().as_secs_f64() * 1e3}));
+            (vm, chain, count)
+        }
+        Launch::Build => build(&world, args, count),
+        Launch::Chain { reason } => {
+            crate::emit(json!({"event": "world", "mode": "source", "reason": reason}));
+            (crate::fresh_vm(args), vec![], 0)
+        }
+    }
+}
+
+/// The builder: run the world's preloads in build mode, confined, then
+/// publish the world and exit, 0 when it was published.
+fn build(world: &World, args: &crate::Args, count: usize) -> ! {
+    let roots = world.build_roots(args.load_path.iter().chain(&args.preload[..count]).cloned().collect());
+    if let Err(e) = world.begin_build(&roots) {
+        crate::emit(json!({"event": "world-build", "ok": false, "error": e.to_string()}));
+        std::process::exit(3);
+    }
+    let mut vm = crate::fresh_vm(args);
+    let mut chain = vec![];
+    if !crate::load_chain(&mut vm, args, 0, count, &mut chain) || chain.iter().any(|e| e["loaded"] != true) {
+        let _ = host::leave_build();
+        crate::emit(json!({"event": "world-build", "ok": false, "chain": chain}));
+        std::process::exit(3);
+    }
+    match world.finish_build(vm, json!({"chain": chain})) {
+        Ok(len) => {
+            crate::emit(json!({"event": "world-build", "ok": true, "image_bytes": len}));
+            std::process::exit(0)
+        }
+        Err(error) => {
+            crate::emit(json!({"event": "world-build", "ok": false, "error": error}));
+            std::process::exit(1)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_world_holds_the_bootstrap_and_its_tree() {
+        let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
+        let tree = paths(&["/r/rlisp/romacs-loadup-bootstrap.el", "/r/gnu-lisp/help-fns.el", "/r/rlisp/romacs-cl-print.el", "/case/setup.el", "/r/rlisp/x.el"]);
+        assert_eq!(world_preloads(&tree), 3);
+        assert_eq!(world_preloads(&paths(&["/r/rlisp/romacs-gnu-ert-bootstrap.el"])), 0);
+        assert_eq!(world_preloads(&[]), 0);
+    }
 
     #[test]
     fn pinned_env_replaces_per_process_names_and_keeps_keyed_ones() {
