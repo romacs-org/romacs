@@ -33,7 +33,10 @@
 //! after any later one. `reset` forgets both.
 //!
 //! A restored process holds `KEY.use` shared for its life and stamps it
-//! with the time: what `prune` keeps beside the current world.
+//! with the time: what `prune` keeps beside the current world. One lock
+//! orders them all: `store.lock`, never deleted, held shared by whoever
+//! opens and locks a world's lock or use file or maps an image, and
+//! exclusive by `prune` and `reset` while they unlink.
 use super::{arena, image};
 use crate::{Vm, host};
 use serde_json::{Value as Json, json};
@@ -338,6 +341,9 @@ impl World {
             },
         };
         let (image, manifest) = usable;
+        // Mapped and marked in use under the store's lock: `prune` then
+        // finds this world held, or does not find it at all.
+        let _store = self.store_lock(libc::LOCK_SH);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
                 Some((vm, carry)) => {
@@ -438,8 +444,20 @@ impl World {
     /// The world's lock, if no builder holds it.
     fn try_lock(&self) -> std::io::Result<Option<std::fs::File>> {
         use std::os::fd::AsRawFd;
+        let _store = self.store_lock(libc::LOCK_SH)?;
         let file = host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?;
+        pause_for_test();
         Ok((unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0).then_some(file))
+    }
+
+    /// The store-wide lock, `STORE/store.lock`, taken as KIND and held
+    /// while the file lives. Never deleted, so every process locks the same
+    /// one. Every process holds it shared while it opens and locks a
+    /// world's own lock or use file, or maps an image; `prune` and `reset`
+    /// hold it exclusive while they unlink: no process is then between
+    /// opening such a file and locking it.
+    fn store_lock(&self, kind: i32) -> std::io::Result<std::fs::File> {
+        lock_store(&self.store, kind)
     }
 
     /// Wait up to TIMEOUT for the builder holding the lock to end: whether
@@ -504,6 +522,7 @@ impl World {
     /// the world is in use, and was just now (`prune`).
     fn mark_use(&self) {
         use std::os::fd::AsRawFd;
+        let Ok(_store) = self.store_lock(libc::LOCK_SH) else { return };
         if let Ok(file) = host::open_output(self.file(".use"), host::OpenOptions::new().write(true).create(true)) {
             let _ = file.set_modified(host::clock());
             if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0 {
@@ -542,7 +561,10 @@ impl World {
         host::unset_env(LOCK_ENV);
         let lock = match handed {
             Some(fd) => unsafe { std::fs::File::from_raw_fd(fd) },
-            None => host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?,
+            None => {
+                let _store = self.store_lock(libc::LOCK_SH)?;
+                host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?
+            }
         };
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(std::io::Error::other("another builder holds the lock"));
@@ -735,6 +757,7 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         return Ok(0);
     }
     checked_store(store, home)?;
+    let _store = lock_store(store, libc::LOCK_EX)?;
     let mut removed = 0;
     for entry in host::read_dir(store)? {
         let name = entry?.file_name();
@@ -743,8 +766,11 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         let refused = || host::read_to_string(&path).ok()
             .and_then(|text| serde_json::from_str::<Json>(&text).ok())
             .is_some_and(|m| m["refusals"].as_array().is_some_and(|r| !r.is_empty()));
+        // A world's lock or use file goes only when no process holds it.
+        let held = |suffix: &str| ["lock", "use"].contains(&suffix) && host::open_output(&path, host::OpenOptions::new().write(true))
+            .is_ok_and(|file| { use std::os::fd::AsRawFd; (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }) != 0 });
         match world_file(name) {
-            Some((_, suffix)) if regular(&path) && (everything || suffix == "failed" || (suffix == "json" && refused())) => {
+            Some((_, suffix)) if regular(&path) && !held(suffix) && (everything || suffix == "failed" || (suffix == "json" && refused())) => {
                 host::remove_file(&path)?;
                 removed += 1;
             }
@@ -787,6 +813,9 @@ impl World {
         use std::os::fd::AsRawFd;
         use std::os::unix::fs::MetadataExt;
         checked_store(&self.store, home)?;
+        // No process is between opening a world's lock or use file and
+        // locking it while this is held: each lock below is as it is.
+        let _store = self.store_lock(libc::LOCK_EX)?;
         let mut files: std::collections::BTreeMap<String, Vec<(String, std::fs::Metadata)>> = Default::default();
         for entry in host::read_dir(&self.store)? {
             let entry = entry?;
@@ -839,6 +868,28 @@ impl World {
             }
         }
         Ok(deleted)
+    }
+}
+
+/// STORE's store-wide lock (`World::store_lock`), taken as KIND.
+fn lock_store(store: &Path, kind: i32) -> std::io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    let file = host::open_output(store.join(STORE_LOCK), host::OpenOptions::new().write(true).create(true))?;
+    if unsafe { libc::flock(file.as_raw_fd(), kind) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(file)
+}
+
+/// A test's hook between opening a world's lock and locking it: with
+/// ROMACS_WORLD_TEST_PAUSE_LOCK=DIR, say so in DIR/paused and wait for
+/// DIR/resume.
+fn pause_for_test() {
+    let Some(dir) = host::getenv("ROMACS_WORLD_TEST_PAUSE_LOCK").map(PathBuf::from) else { return };
+    let _ = host::write(dir.join("paused"), b"");
+    let deadline = host::monotonic() + std::time::Duration::from_secs(60);
+    while !host::probe(host::Probe::Exists, dir.join("resume")) && host::monotonic() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 

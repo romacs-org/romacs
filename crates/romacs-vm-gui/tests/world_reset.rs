@@ -45,7 +45,7 @@ fn world_reset_forgets_failures_and_refusals_and_keeps_worlds() {
     assert!(said.contains(r#""event":"reset""#) && said.contains(r#""removed":2"#), "{said}");
     let kept = "a".repeat(64);
     assert_eq!(names(&store), [".romacs-world-store".into(), format!("{kept}.json"), format!("{kept}.lock"), format!("{kept}.log"),
-                               format!("{kept}.rwi"), "ids".into(), "notes.txt".into()]);
+                               format!("{kept}.rwi"), "ids".into(), "notes.txt".into(), "store.lock".into()]);
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -53,9 +53,9 @@ fn world_reset_forgets_failures_and_refusals_and_keeps_worlds() {
 fn world_reset_all_removes_the_stores_own_files_only() {
     let (home, store) = store("all");
     reset(&home, "--world-reset=all");
-    // The worlds and caches go; the marker, the empty cache directory and
-    // a file no store owns stay.
-    assert_eq!(names(&store), [".romacs-world-store", "ids", "notes.txt"]);
+    // The worlds and caches go; the marker, the store's lock, the empty
+    // cache directory and a file no store owns stay.
+    assert_eq!(names(&store), [".romacs-world-store", "ids", "notes.txt", "store.lock"]);
     assert_eq!(std::fs::read_dir(store.join("ids")).unwrap().count(), 0);
     let _ = std::fs::remove_dir_all(&home);
 }

@@ -23,6 +23,7 @@ const INTERRUPTED: &str = "an_interrupted_build_leaves_nothing_in_the_way";
 const FAILED: &str = "a_failed_build_is_retried_after_a_backoff";
 const PUBLISH: &str = "a_build_that_fails_to_publish_records_its_failure";
 const REFUSED: &str = "a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset";
+const PAUSED: &str = "pruning_waits_for_a_launcher_between_opening_and_locking";
 const CONCURRENT: &str = "concurrent_first_launches_share_one_builder_and_say_they_wait";
 const PAGES: &str = "capture_reads_no_heap_byte_so_a_page_zeroed_by_a_store_is_data";
 
@@ -383,12 +384,12 @@ fn a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset() {
     std::fs::write(scratch.join("input/flag"), "ok").unwrap();
     assert_eq!(outcome(&mut child_of(REFUSED, "launch", &store)), restored());
     // Every world and cache goes with `all`, and only the store's own
-    // files: the marker, the store's directories and a stranger stay.
+    // files: the marker, the store's lock and directories, and a stranger stay.
     std::fs::write(store.join("unrelated"), "kept").unwrap();
     assert!(romacs_vm::world::store::reset(&store, true).unwrap() > 0);
     let mut left: Vec<String> = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     left.sort();
-    assert_eq!(left, [".romacs-world-store", "ids", "p", "unrelated"]);
+    assert_eq!(left, [".romacs-world-store", "ids", "p", "store.lock", "unrelated"]);
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
@@ -420,5 +421,55 @@ fn concurrent_first_launches_share_one_builder_and_say_they_wait() {
     let later = child_of(CONCURRENT, "launch", &store).output().unwrap();
     let text = String::from_utf8_lossy(&later.stdout);
     assert!(text.contains(&format!("WORLD-IMAGE {}", restored())) && !text.contains("WAITING-FOR-BUILD"), "{text}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn pruning_waits_for_a_launcher_between_opening_and_locking() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(PAUSED);
+    let store = scratch.join("store");
+    std::fs::create_dir_all(scratch.join("input")).unwrap();
+    // A world, built and restored once, then left a week unused, and its
+    // image gone: the next launch takes its lock to build it again.
+    assert_eq!(outcome(&mut child_of(PAUSED, "launch", &store)), restored());
+    let key: String = world(&store).key.iter().map(|b| format!("{b:02x}")).collect();
+    std::fs::remove_file(store.join(format!("{key}.rwi"))).unwrap();
+    let week_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(8 * 86400);
+    for (name, _) in files(&store) {
+        if name.starts_with(&key) {
+            let path = store.join(&name);
+            let mode = std::fs::metadata(&path).unwrap().permissions();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(week_ago).unwrap();
+            std::fs::set_permissions(&path, mode).unwrap();
+        }
+    }
+    // That launch pauses between opening the world's lock and locking it.
+    let pause = scratch.join("pause");
+    std::fs::create_dir_all(&pause).unwrap();
+    let launcher = child_of(PAUSED, "launch", &store).env("ROMACS_WORLD_TEST_PAUSE_LOCK", &pause)
+        .stdout(std::process::Stdio::piped()).spawn().unwrap();
+    let started = std::time::Instant::now();
+    while !pause.join("paused").exists() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(30), "the launcher never paused");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // Another recipe's launch prunes the store meanwhile: the paused world
+    // is old and not its own, so it would go, lock file and all.
+    let other = World::new(store.clone(), vec!["consumer another".into()]).unwrap();
+    let pruner = std::thread::spawn(move || other.prune().unwrap());
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(!pruner.is_finished(), "pruning waits for the store lock the launcher holds");
+    std::fs::write(pause.join("resume"), "").unwrap();
+    let output = launcher.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains(&format!("WORLD-IMAGE {}", restored())), "{text}");
+    // Once the launcher held the world's lock, pruning found it held.
+    let pruned = pruner.join().unwrap();
+    assert!(!pruned.contains(&key), "{pruned:?}");
+    assert!(store.join(format!("{key}.lock")).exists() && store.join("store.lock").exists());
     let _ = std::fs::remove_dir_all(&scratch);
 }
