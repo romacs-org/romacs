@@ -16,16 +16,21 @@
 ;; coding priorities and the match data.
 ;;
 ;; Values print with `print-circle', so sharing and cycles are part of
-;; the text, and with every length and level limit off.
+;; the text, and with every length and level limit off.  A timer's due
+;; time is the clock's, not the state's: it prints as
+;; `world-digest--time', and the rest of the timer, its function,
+;; arguments, repeat and idle delay, as it is.  The last line counts the
+;; ones before it, so a digest cut short is no digest.
 
 ;;; Code:
 
-(defvar world-digest-file (getenv "WORLD_DIGEST_OUT")
+(defvar world-digest-file (getenv-internal "WORLD_DIGEST_OUT")
   "The file `world-digest' writes.")
 
-(defvar world-digest-show (split-string (or (getenv "WORLD_DIGEST_SHOW") ""))
+(defvar world-digest-show nil
   "Names of roots whose printed text `world-digest' also writes in full,
-to `world-digest-file' with \".show\" appended, to see why they differ.")
+to `world-digest-file' with \".show\" appended, to see why they differ;
+from $WORLD_DIGEST_SHOW when nil.")
 
 (defvar world-digest--shown nil)
 
@@ -43,12 +48,40 @@ to `world-digest-file' with \".show\" appended, to see why they differ.")
 digested as that error, alike in both VMs when they fail alike."
   `(condition-case err ,form (error (list 'world-digest--error err))))
 
+(defun world-digest--timer-p (value)
+  "Whether VALUE is a timer as timer.el makes it: a vector of triggered,
+high, low and micro seconds, repeat, function, arguments, idle delay,
+picoseconds and integral multiple."
+  (and (vectorp value) (= (length value) 10) (memq (aref value 0) '(nil t))
+       (aref value 5)
+       (let ((ok t))
+         (dolist (slot '(1 2 3 8) ok)
+           (unless (or (null (aref value slot)) (integerp (aref value slot)))
+             (setq ok nil))))))
+
+(defun world-digest--timeless (value)
+  "VALUE with the due time of each timer it is, or lists, replaced."
+  (cond ((world-digest--timer-p value)
+         (let ((copy (copy-sequence value)))
+           (dolist (slot '(1 2 3 8) copy)
+             (aset copy slot 'world-digest--time))))
+        ((and (consp value) (proper-list-p value) (world-digest--any-timer-p value))
+         (mapcar #'world-digest--timeless value))
+        (t value)))
+
+(defun world-digest--any-timer-p (list)
+  "Whether LIST, a proper list, has a timer among its elements."
+  (catch 'found
+    (dolist (element list)
+      (when (world-digest--timer-p element)
+        (throw 'found t)))))
+
 (defvar world-digest--lines nil
   "The lines so far, last first.")
 
 (defun world-digest--line (root name value)
   "Add ROOT, NAME and the digest of VALUE's text as a line."
-  (let ((text (world-digest--text value)))
+  (let ((text (world-digest--text (world-digest--timeless value))))
     (when (member name world-digest-show)
       (push (format "%s %s %s\n" root name text) world-digest--shown))
     (push (concat root "\t" name "\t" (secure-hash 'sha1 (encode-coding-string text 'utf-8-emacs)) "\n")
@@ -93,6 +126,8 @@ symbols were made, but this file's own."
 No buffer is made until every root is read."
   (let ((symbols (world-digest--symbols)))
     (setq world-digest--lines nil world-digest--shown nil)
+    (unless world-digest-show
+      (setq world-digest-show (split-string (or (getenv-internal "WORLD_DIGEST_SHOW") ""))))
     (dolist (symbol symbols)
       (let ((name (symbol-name symbol)))
         (world-digest--line "value" name
@@ -121,13 +156,15 @@ No buffer is made until every root is read."
     (let ((lines (nreverse world-digest--lines)) (shown (nreverse world-digest--shown)))
       (setq world-digest--lines nil world-digest--shown nil)
       (with-temp-file world-digest-file
-        (dolist (line lines) (insert line)))
+        (dolist (line lines) (insert line))
+        (insert (format "end\tlines\t%d\n" (length lines))))
       (when shown
         (with-temp-file (concat world-digest-file ".show")
           (dolist (line shown) (insert line)))))
     (length symbols)))
 
-(message "WORLD-DIGEST symbols=%d file=%s" (world-digest) world-digest-file)
+(when world-digest-file
+  (message "WORLD-DIGEST symbols=%d file=%s" (world-digest) world-digest-file))
 
 (provide 'world-digest)
 ;;; world-digest.el ends here

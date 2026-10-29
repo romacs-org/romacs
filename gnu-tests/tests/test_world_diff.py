@@ -21,6 +21,35 @@ class Compare(unittest.TestCase):
         a = {('value', 'x'): '1'}
         self.assertEqual(world_diff.compare(a, dict(a), {}), ([], [], []))
 
+    def test_an_allowed_root_gone_from_one_side_differs(self):
+        a = {('value', 'clock'): '1', ('value', 'x'): '2'}
+        b = {('value', 'x'): '2'}
+        allow = {('value', 'clock'): 'the clock'}
+        bad, ok, unused = world_diff.compare(a, b, allow)
+        self.assertEqual((bad, ok), ([('value', 'clock')], []))
+        bad, ok, unused = world_diff.compare(b, a, allow)
+        self.assertEqual((bad, ok), ([('value', 'clock')], []))
+
+
+class Parse(unittest.TestCase):
+    def test_a_complete_digest_parses(self):
+        lines = ['value\tx\tab', 'buffer\ta\tb\tcd', 'end\tlines\t2']
+        self.assertEqual(world_diff.parse(lines), {('value', 'x'): 'ab', ('buffer', 'a\tb'): 'cd'})
+
+    def test_an_empty_or_cut_digest_is_refused(self):
+        for lines in ([], ['end\tlines\t0'], ['value\tx\tab'], ['value\tx\tab', 'value\ty\tcd', 'end\tlines\t1'],
+                      ['value\tx\tab', 'value\tx\tab', 'end\tlines\t2']):
+            with self.assertRaises(world_diff.Incomplete, msg=lines):
+                world_diff.parse(lines)
+
+    def test_two_empty_inputs_do_not_pass(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as d:
+            a, b = os.path.join(d, 'a'), os.path.join(d, 'b')
+            for path in (a, b):
+                open(path, 'w').close()
+            self.assertEqual(world_diff.main([a, b]), 2)
+
 
 if __name__ == '__main__':
     unittest.main()
