@@ -57,6 +57,25 @@ macro_rules! snapshot_struct {
     };
 }
 
+/// `snapshot_fields!(Name { field, ... } at_rest { field, ... })`: the
+/// listing of `snapshot_struct!`, checked the same way, without making
+/// Name SnapshotSafe. For a value that enters an image only through a
+/// door that validates it, as a world's primary VM does through
+/// romacs-vm's `world::image::capture`: SnapshotSafe would let one in
+/// unvalidated, inside another value.
+#[macro_export]
+macro_rules! snapshot_fields {
+    ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? } $(at_rest { $($(#[$rm:meta])* $rest:ident),* $(,)? })?) => {
+        const _: () = {
+            #[allow(dead_code, unused_variables)]
+            fn fields(value: &$name) {
+                let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = value;
+                $($(#[$m])* $crate::require($field);)*
+            }
+        };
+    };
+}
+
 /// `snapshot_tuple!(Name(a, b))`: a tuple struct, every field listed.
 #[macro_export]
 macro_rules! snapshot_tuple {

@@ -1323,7 +1323,11 @@ pub struct Vm {
 // (function pointers), the suspended engines (pointers into it), the
 // compiled patterns (their SIMD searchers hold function pointers) and the
 // idle clock reading (process-relative).
-romacs_snapshot::snapshot_struct!(Vm {
+//
+// Its fields are listed, not the VM itself made SnapshotSafe: a VM enters
+// an image only as the primary, which `world::image::capture` validates,
+// never inside a carry, where nothing would.
+romacs_snapshot::snapshot_fields!(Vm {
     charsets,
     standard_case_tables,
     command_point,
