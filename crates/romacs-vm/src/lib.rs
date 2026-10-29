@@ -40,8 +40,32 @@ pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, Termina
 // seed per map, so a precomputed set of colliding names cannot make their
 // lookups quadratic.
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-type NameMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
-type NameSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
+type NameMap<K, V> = std::collections::HashMap<K, V, NameState>;
+type NameSet<K> = std::collections::HashSet<K, NameState>;
+
+/// foldhash seeded by values the map itself holds: its own random seed and a
+/// shared one this process leaked to the heap. A map in a world image
+/// (`world::arena`) then hashes alike in every process that maps it, where
+/// foldhash's own `RandomState` reads a seed each process draws anew.
+#[derive(Clone)]
+pub(crate) struct NameState(foldhash::fast::SeedableRandomState);
+
+impl Default for NameState {
+    fn default() -> Self {
+        use std::hash::BuildHasher;
+        static SHARED: std::sync::OnceLock<&'static foldhash::SharedSeed> = std::sync::OnceLock::new();
+        let random = || std::collections::hash_map::RandomState::new().hash_one(0u8);
+        let shared = *SHARED.get_or_init(|| Box::leak(Box::new(foldhash::SharedSeed::from_u64(random()))));
+        NameState(foldhash::fast::SeedableRandomState::with_seed(random(), shared))
+    }
+}
+
+impl std::hash::BuildHasher for NameState {
+    type Hasher = foldhash::fast::FoldHasher<'static>;
+    fn build_hasher(&self) -> Self::Hasher {
+        self.0.build_hasher()
+    }
+}
 use std::sync::Arc;
 mod code_image;
 mod sqlite;
