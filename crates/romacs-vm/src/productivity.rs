@@ -278,11 +278,22 @@ impl Vm {
         if let Some(crate::data::Object::HashTable(t)) = self.object_if(value) {
             return self.print_table(t, None, |vm, v| vm.format_print(v, quoted, depth + 1));
         }
+        // print.c PVEC_BUFFER: princ prints the bare name.
+        if let Ok(state) = self.buffer_state(value) {
+            return Ok(match &state.name {
+                Some(name) if quoted => format!("#<buffer {name}>"),
+                Some(name) => name.clone(),
+                None => "#<killed buffer>".into(),
+            }.into_bytes());
+        }
         if let Some(crate::data::Object::Process(process)) = self.object_if(value) {
             // print.c PVEC_PROCESS: princ prints the bare name.
             let name = self.process_name_text(process);
             return Ok(if quoted { format!("#<process {name}>") } else { name }.into_bytes());
         }
-        self.display(value).map(String::into_bytes)
+        let text = self.display(value)?;
+        // A symbol's printed name is its key (symkey.rs): give its characters.
+        if value.tag() == 7 && let Some(internal) = crate::symkey::to_internal(&text) { return Ok(internal); }
+        Ok(text.into_bytes())
     }
 }

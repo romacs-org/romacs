@@ -10,10 +10,3 @@ fn caught(src: &str) -> String {
     serde_json::from_str::<String>(&s).unwrap_or(s)
 }
 
-// GNU stores a `(lambda ...)' list as the function (data.c Fdefalias); VM2
-// has no list function descriptors yet (VM2-CALLINT1 (8), VM2-RUNHOOKS1).
-#[test]
-fn defalias_to_a_lambda_list_names_what_is_unsupported() {
-    let got = caught("(defalias 'cl-j '(lambda (x) (interactive \"P\") x))");
-    assert!(got.starts_with("(error \"") && got.contains("list function descriptor") && got.contains("VM2"), "{got}");
-}

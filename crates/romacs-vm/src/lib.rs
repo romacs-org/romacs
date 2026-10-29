@@ -69,6 +69,8 @@ pub mod coordinates;
 mod data;
 mod bool_vector;
 mod lstring;
+mod let_forms;
+mod symkey;
 mod display;
 mod overlay_order;
 mod window;
@@ -2047,7 +2049,10 @@ impl Vm {
                         b.code[protect] = Op::Protect(dest, cleanup, b.code.len());
                         Ok(dest)
                     }
-                    "condition-case" if rest.len() >= 2 => self.condition_case(b, rest),
+                    "condition-case" if rest.len() >= 2 => match let_forms::malformed_condition_case(&rest[0], &rest[2..]) {
+                        Some(form) => self.expr(b, &form),
+                        None => self.condition_case(b, rest),
+                    },
                     "quote" if rest.len() == 1 => {
                         let value = self.literal(&rest[0])?;
                         let r = b.reg();
@@ -2073,6 +2078,13 @@ impl Vm {
                     },
                     "defvar-local" | "defcustom" | "defgroup" | "defvar-keymap" => self.variable_definition(b, head, rest),
                     "defvar" | "defconst" if !rest.is_empty() && rest.len() <= 3 => {
+                        // eval_sub's minimum arity, then Fdefconst's CHECK_SYMBOL.
+                        if head == "defconst" && rest.len() < 2 {
+                            return self.expr(b, &let_forms::signal("wrong-number-of-arguments", vec![Form::Sym("defconst".into()), Form::Int(1)]));
+                        }
+                        if let Some(form) = let_forms::malformed_definition(&rest[0]) {
+                            return self.expr(b, &form);
+                        }
                         let name = rest[0].sym()?;
                         if matches!(name, "nil" | "t") {
                             return Err("cannot declare a constant".into());
@@ -2109,11 +2121,6 @@ impl Vm {
                                 ]);
                                 self.expr(b, &lowered)?;
                             }
-                        } else if head == "defconst" {
-                            let quote = |f: Form| Form::List(vec![Form::Sym("quote".into()), f]);
-                            let data = Form::List(vec![Form::Sym("defconst".into()), Form::Int(1)]);
-                            let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("wrong-number-of-arguments".into())), quote(data)]);
-                            return self.expr(b, &signal);
                         } else {
                             b.local_specials.insert(name.into());
                         }
@@ -2144,7 +2151,10 @@ impl Vm {
                         Ok(r)
                     }
                     "interactive" => self.expr(b, &Form::Sym("nil".into())),
-                    "setq" if rest.len().is_multiple_of(2) => {
+                    "setq" => {
+                        if let Some(form) = let_forms::malformed_setq(rest) {
+                            return self.expr(b, &form);
+                        }
                         let mut r = b.reg();
                         b.emit(Op::Const(r, Value::NIL));
                         for pair in rest.chunks_exact(2) {
@@ -2194,6 +2204,9 @@ impl Vm {
                         Ok(r)
                     }
                     "let" | "let*" if !rest.is_empty() => {
+                        if let Some(form) = let_forms::malformed_let(head == "let*", &rest[0]) {
+                            return self.expr(b, &form);
+                        }
                         let saved = b.env.clone();
                         let saved_specials = b.local_specials.clone();
                         let mut pending = vec![];
@@ -2246,25 +2259,14 @@ impl Vm {
                         // eval_sub: a special form given too few arguments
                         // (or, for quote and function, too many).
                         if prim::prims::special_forms::special_form_min(head).is_some() {
-                            let quote = |f: Form| Form::List(vec![Form::Sym("quote".into()), f]);
                             // Fdefvar and Fdefconst refuse a fourth argument themselves.
                             if matches!(head, "defvar" | "defconst") && rest.len() > 3 {
-                                if !matches!(rest[0], Form::Sym(_) | Form::Generated(_)) {
-                                    let data = Form::List(vec![Form::Sym("symbolp".into()), rest[0].clone()]);
-                                    let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("wrong-type-argument".into())), quote(data)]);
-                                    return self.expr(b, &signal);
-                                }
-                                let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("error".into())),
-                                    quote(Form::List(vec![Form::String("Too many arguments".into())]))]);
+                                let signal = let_forms::malformed_definition(&rest[0])
+                                    .unwrap_or_else(|| let_forms::signal("error", vec![Form::String("Too many arguments".into())]));
                                 return self.expr(b, &signal);
                             }
-                            let data = Form::List(vec![Form::Sym(head.into()), Form::Int(rest.len() as i64)]);
-                            let signal = Form::List(vec![
-                                Form::Sym("signal".into()),
-                                quote(Form::Sym("wrong-number-of-arguments".into())),
-                                quote(data),
-                            ]);
-                            return self.expr(b, &signal);
+                            let data = vec![Form::Sym(head.into()), Form::Int(rest.len() as i64)];
+                            return self.expr(b, &let_forms::signal("wrong-number-of-arguments", data));
                         }
                         if matches!(head, "lambda" | "defun") {
                             return Err(format!("invalid or unsupported {head}"));
@@ -2325,8 +2327,9 @@ impl Vm {
         let mut success = None;
         for clause in &rest[2..] {
             let clause = clause.list()?;
+            // internal_lisp_condition_case ignores a nil handler.
             if clause.is_empty() {
-                return Err("empty condition handler".into());
+                continue;
             }
             if matches!(&clause[0], Form::Sym(name) if name == ":success") {
                 success.get_or_insert(clause);
@@ -2777,7 +2780,7 @@ impl Vm {
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Sqlite(h) => Ok(h.describe()),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
-                data::Object::Marker(_) => Ok("#<marker>".into()),
+                data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),
                 data::Object::ByteBuffer(_) => Ok("#<byte-buffer>".into()),
                 data::Object::SyntaxTable(_) => Ok("#<syntax-table>".into()),

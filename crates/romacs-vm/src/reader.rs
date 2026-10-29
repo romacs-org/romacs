@@ -233,19 +233,17 @@ impl Reader<'_, '_> {
     /// A symbol token from FIRST up to a delimiter, backslash escapes
     /// taken literally; true when any character was escaped.
     fn symbol_token(&mut self, first: u32) -> Result<(String, bool)> {
+        // Raw-byte and non-Unicode characters keep their codes (symkey.rs).
         let mut token = String::new();
         let mut escaped = first == 92;
-        token.push(
-            char::from_u32(if escaped { self.next()? } else { first })
-                .ok_or("non-Unicode symbol name is not supported")?,
-        );
+        crate::symkey::push_char(&mut token, if escaped { self.next()? } else { first });
         while self.peek().is_some_and(|c| !Self::delimiter(c)) {
             let c = self.next()?;
             if c == 92 {
                 escaped = true;
-                token.push(char::from_u32(self.next()?).ok_or("non-Unicode symbol name is not supported")?);
+                crate::symkey::push_char(&mut token, self.next()?);
             } else {
-                token.push(char::from_u32(c).ok_or("non-Unicode symbol name is not supported")?);
+                crate::symkey::push_char(&mut token, c);
             }
         }
         self.unread_lookahead()?;
