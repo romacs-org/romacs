@@ -3286,6 +3286,23 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
     unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
 }
+/// specbind of SLOT to VALUE from compiled code or a call site: a protected
+/// variable (most-positive-fixnum, enable-multibyte-characters, ...) is
+/// setting-constant, else the binding is made; on failure a watcher's own
+/// signal or a forwarded store fault is left pending.
+fn bind_special(e: &mut Engine<'_>, slot: usize, value: Value) -> Result<()> {
+    if e.vm.protected_variable_slot(slot) {
+        raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
+        return Err("setting constant".into());
+    }
+    e.vm.bind_variable(slot, value).inspect_err(|error| {
+        if let Some(escape) = e.vm.propagated_escape.take() {
+            e.escape = Some(escape);
+        } else if let Some((condition, data)) = e.vm.forwarded_condition(error, value) {
+            e.escape = Some(Escape::Signal(condition, data));
+        }
+    })
+}
 /// A lambda list's failed walk: the bindings made before it failed,
 /// then the condition and its data.
 type LambdaListFailure = (Vec<(Value, Value)>, &'static str, Vec<Value>);
@@ -3345,15 +3362,9 @@ fn lambda_list_raise(e: &mut Engine<'_>, (bindings, condition, data): LambdaList
     let base = roots + data.len();
     for k in 0..bindings.len() {
         let (param, arg) = (e.vm.external_roots[base + 2 * k], e.vm.external_roots[base + 2 * k + 1]);
-        if let Err(error) = e.vm.bind_variable(param.index_if(7).map_or(0, |i| i - 1), arg) {
+        if let Err(error) = bind_special(e, param.index_if(7).map_or(0, |i| i - 1), arg) {
             e.vm.external_roots.truncate(roots);
-            if let Some(escape) = e.vm.propagated_escape.take() {
-                e.escape = Some(escape);
-            } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, arg) {
-                e.escape = Some(Escape::Signal(condition, data));
-            } else {
-                e.error = Some(error);
-            }
+            if e.escape.is_none() { e.error = Some(error) }
             return Value::UNBOUND;
         }
     }
@@ -3815,7 +3826,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                     }
                     *r.add(reg) = v;
                 }
-                Op::SetGlobal(slot, _) | Op::Bind(slot, _)
+                Op::SetGlobal(slot, _)
                     if e.vm.protected_variable_slot(slot) =>
                 {
                     raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
@@ -3833,19 +3844,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         return Err(error);
                     }
                 }
-                Op::Bind(slot, reg) => {
-                    let value = *r.add(reg);
-                    if let Err(error) = e.vm.bind_variable(slot, value) {
-                        if let Some(escape) = e.vm.propagated_escape.take() {
-                            e.escape = Some(escape);
-                            return Err(error);
-                        }
-                        if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
-                            e.escape = Some(Escape::Signal(condition, data));
-                        }
-                        return Err(error);
-                    }
-                }
+                Op::Bind(slot, reg) => bind_special(e, slot, *r.add(reg))?,
                 Op::Unbind(n) => {
                     if n > e.vm.dynamic.len() - e.dynamic {
                         return Err("invalid image dynamic binding depth".into());

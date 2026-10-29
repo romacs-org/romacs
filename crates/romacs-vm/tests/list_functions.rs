@@ -60,8 +60,8 @@ fn watched(rows: &[(&str, &str)]) {
 
 /// funcall_lambda checks, takes the argument and binds one parameter at a
 /// time, so a bad parameter signals after the earlier ones are bound (their
-/// watchers see the let and the unlet), and binding nil, t or a keyword is
-/// setting-constant.
+/// watchers see the let and the unlet), and binding nil, t, a keyword or a
+/// protected variable is setting-constant.
 #[test]
 fn a_lambda_list_binds_each_parameter_before_checking_the_next() {
     watched(&[
@@ -77,6 +77,9 @@ fn a_lambda_list_binds_each_parameter_before_checking_the_next() {
         ("(funcall '(lambda (:k) 1) 2)", "((setting-constant :k) nil)"),
         ("(funcall '(lambda (t) 1) 2)", "((setting-constant t) nil)"),
         ("(funcall '(lambda (ww-x &optional y nil) 1) 2)", "((setting-constant nil) ((let 2) (unlet 0)))"),
+        ("(funcall '(lambda (most-positive-fixnum 5) 1) 2)", "((setting-constant most-positive-fixnum) nil)"),
+        ("(funcall '(lambda (enable-multibyte-characters 5) 1) 2)", "((setting-constant enable-multibyte-characters) nil)"),
+        ("(funcall '(lambda (ww-x most-positive-fixnum) 1) 2 3 4)", "((setting-constant most-positive-fixnum) ((let 2) (unlet 0)))"),
     ]);
 }
 

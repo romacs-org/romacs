@@ -112,6 +112,9 @@ fn a_malformed_let_makes_and_unwinds_the_bindings_before_it() {
         ("(let ((ww-x (progn (setq ww-log (cons 'init ww-log)) 1)) (nil (setq ww-log (cons 'init2 ww-log)))) 3)", "((setting-constant nil) (init init2 (let 1) (unlet 0)))"),
         ("(let* ((ww-x 1) (nil 2)) 3)", "((setting-constant nil) ((let 1) (unlet 0)))"),
         ("(let ((:k 1)) :k)", "((setting-constant :k) nil)"),
+        ("(let ((most-positive-fixnum 1) (nil 2)) 3)", "((setting-constant most-positive-fixnum) nil)"),
+        ("(let ((enable-multibyte-characters 1) (2 3)) 4)", "((setting-constant enable-multibyte-characters) nil)"),
+        ("(let* ((most-positive-fixnum 1) (nil 2)) 3)", "((setting-constant most-positive-fixnum) nil)"),
     ]);
 }
 
