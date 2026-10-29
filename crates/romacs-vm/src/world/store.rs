@@ -889,7 +889,12 @@ fn lock_store(store: &Path, kind: i32) -> std::io::Result<std::fs::File> {
 
 /// A test's hook between opening a world's lock and locking it: with
 /// ROMACS_WORLD_TEST_PAUSE_LOCK=DIR, say so in DIR/paused and wait for
-/// DIR/resume.
+/// DIR/resume. Only under the `world-test-hooks` feature, which only test
+/// targets enable; a shipped binary has no such hook.
+#[cfg(not(feature = "world-test-hooks"))]
+fn pause_for_test() {}
+
+#[cfg(feature = "world-test-hooks")]
 fn pause_for_test() {
     let Some(dir) = host::getenv("ROMACS_WORLD_TEST_PAUSE_LOCK").map(PathBuf::from) else { return };
     let _ = host::write(dir.join("paused"), b"");
