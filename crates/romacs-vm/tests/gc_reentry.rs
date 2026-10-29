@@ -8,7 +8,7 @@
 //! (GNU's inhibited collection returns nil): a watcher of `setq', `let' and
 //! its unwinding (global, buffer-local and forwarded bindings, a signalling
 //! watcher and one setting the toplevel value), repeated macro expansion,
-//! a nested load, a shorthand file's load, a prompt entered through `eval',
+//! a nested load, a shorthand file's load, `(lambda ...)' list bindings, a prompt entered through `eval',
 //! and redisplay's fontification and mode-line `:eval' beside
 //! `format-mode-line'.
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
@@ -187,6 +187,30 @@ fn a_shorthand_load_collects_across_moving_collections() {
     );
     assert_eq!(report, "(t ((x \"ss\") t) nil)");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A `(lambda ...)' list function binds its parameters dynamically: a
+/// collecting watcher sees each binding, on a successful call and on a walk
+/// that fails part way (setting-constant), whose bindings the handler then
+/// unwinds; a forwarded variable's watcher collects before the binding's
+/// store fault, whose data is the value bound.
+#[test]
+fn lambda_list_bindings_collect_across_moving_collections() {
+    let cases = [
+        ("(progn (defvar gr-la 0) (defvar gr-lb 0) (add-variable-watcher 'gr-la W) (add-variable-watcher 'gr-lb W) (list (funcall '(lambda (gr-la &optional gr-lb) (list gr-la gr-lb)) (list 'a (copy-sequence \"aa\")) (list 'b (copy-sequence \"bb\"))) (nreverse log)))",
+         r#"(((a "aa") (b "bb")) ((let "(a \"aa\")") (let "(b \"bb\")") (unlet "0") (unlet "0")))"#),
+        ("(progn (defvar gr-lc 0) (defvar gr-ld 0) (add-variable-watcher 'gr-lc W) (add-variable-watcher 'gr-ld W) (list (condition-case e (funcall '(lambda (gr-lc gr-ld t) 'body) (list 'c (copy-sequence \"cc\")) (list 'd (copy-sequence \"dd\")) 3) (error e)) gr-lc (nreverse log)))",
+         r#"((setting-constant t) 0 ((let "(c \"cc\")") (let "(d \"dd\")") (unlet "0") (unlet "0")))"#),
+        ("(progn (add-variable-watcher 'gc-cons-threshold W) (list (condition-case e (let ((gc-cons-threshold (copy-sequence \"bad\"))) 'body) (error e)) (integerp gc-cons-threshold) (nreverse log)))",
+         r#"((wrong-type-argument integerp "bad") t ((let "\"bad\"") (set "800000") (unlet "800000")))"#),
+    ];
+    for (source, expected) in cases {
+        let source = source.replace("W", W);
+        let (plain, stressed, gcs) = run(&source, |_| {});
+        assert_eq!(stressed, plain, "{source}");
+        assert_eq!(plain, expected, "{source}");
+        assert!(gcs.starts_with("(t") && !gcs.contains("nil"), "every callback collected: {gcs}");
+    }
 }
 
 /// Refreshing a prepared call whose macro guard went stale runs Lisp to
