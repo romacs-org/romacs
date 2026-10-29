@@ -140,19 +140,23 @@ fn percent99(n: usize, d: usize) -> usize {
     (((d as f64 - 1.0 + 100.0 * n as f64) / d as f64) as usize).min(99)
 }
 
-fn split(form: &Form) -> Option<(Form, Form)> {
+/// FORM's car and cdr, taken apart rather than copied.
+fn split(form: Form) -> Option<(Form, Form)> {
     match form {
-        Form::List(items) if !items.is_empty() => Some((
-            items[0].clone(),
-            if items.len() == 1 { Form::Sym("nil".into()) } else { Form::List(items[1..].to_vec()) },
-        )),
-        Form::Dotted(items, tail) if !items.is_empty() => Some((
-            items[0].clone(),
-            if items.len() == 1 { (**tail).clone() } else { Form::Dotted(items[1..].to_vec(), tail.clone()) },
-        )),
+        Form::List(mut items) if !items.is_empty() => {
+            let car = items.remove(0);
+            Some((car, if items.is_empty() { Form::Sym("nil".into()) } else { Form::List(items) }))
+        }
+        Form::Dotted(mut items, tail) if !items.is_empty() => {
+            let car = items.remove(0);
+            Some((car, if items.is_empty() { *tail } else { Form::Dotted(items, tail) }))
+        }
         _ => None,
     }
 }
+
+/// How `display_mode_element' treats a list by its car.
+enum Head { Eval, Propertize, Symbol, Limit(i64), Each, Other }
 
 fn is_nil(form: &Form) -> bool {
     matches!(form, Form::Sym(s) if s == "nil")
@@ -296,6 +300,22 @@ impl Vm {
         n
     }
 
+    /// The treatment of the list FORM, a cons, by its car.
+    fn ml_head(&self, form: &Form) -> Result<Head> {
+        let (Form::List(items) | Form::Dotted(items, _)) = form else { return Ok(Head::Other) };
+        let car = &items[0];
+        let string_car = self.ml_string(car)?.is_some();
+        Ok(match car {
+            Form::Sym(s) if s == ":eval" => Head::Eval,
+            Form::Sym(s) if s == ":propertize" => Head::Propertize,
+            Form::Sym(_) | Form::Generated(_) => Head::Symbol,
+            Form::Int(lim) => Head::Limit(*lim),
+            Form::String(_) | Form::Bytes(_) | Form::List(_) | Form::Dotted(..) | Form::Object(_)
+                if string_car || !matches!(car, Form::Object(_)) => Head::Each,
+            _ => Head::Other,
+        })
+    }
+
     /// Expand a whole mode-line format for the window whose buffer is current.
     pub(super) fn mode_line_band(&mut self, format: &Form, state: &SpecState) -> Result<Band> {
         self.mode_line_expand(format, state, Target::Display)
@@ -390,7 +410,8 @@ impl Vm {
                 }
                 break;
             }
-            match elt.clone() {
+            // ELT is taken, not copied: each arm moves its parts on.
+            match std::mem::replace(&mut elt, Form::Sym(String::new())) {
                 symbol @ (Form::Sym(_) | Form::Generated(_)) => {
                     if !risky && !self.ml_risky_marked(&symbol) {
                         risky = true;
@@ -405,17 +426,17 @@ impl Vm {
                     elt = value;
                 }
                 form @ (Form::List(_) | Form::Dotted(..)) if is_cons(&form) => {
-                    let (car, cdr) = split(&form).expect("cons");
-                    let string_car = self.ml_string(&car)?.is_some();
-                    match car {
-                        Form::Sym(s) if s == ":eval" => {
+                    let head = self.ml_head(&form)?;
+                    let (car, cdr) = split(form).expect("cons");
+                    match head {
+                        Head::Eval => {
                             if risky {
                                 break;
                             }
-                            if let Some((expression, _)) = split(&cdr) {
+                            if let Some((expression, _)) = split(cdr) {
                                 // GNU `dsafe_eval`: an error displays as nil.
                                 self.ml_elt_restarted();
-                                let spec = match self.eval_form_raw(&expression) {
+                                let spec = match self.eval_form_cached(&expression) {
                                     Ok(value) => self.mode_line_form(value),
                                     Err(error) => {
                                         self.display_state.diagnostics.push(format!(":eval: {error}"));
@@ -427,18 +448,18 @@ impl Vm {
                             }
                             break;
                         }
-                        Form::Sym(s) if s == ":propertize" => {
+                        Head::Propertize => {
                             if risky {
                                 break;
                             }
-                            if let Some((inner, plist)) = split(&cdr) {
+                            if let Some((inner, plist)) = split(cdr) {
                                 n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, face_of(&plist), risky)?;
                             }
                             break;
                         }
-                        symbol @ (Form::Sym(_) | Form::Generated(_)) => {
-                            let truthy = self.ml_form_symbol_value(&symbol)?.is_some_and(|v| !is_nil(&v));
-                            let Some((then, rest)) = split(&cdr) else {
+                        Head::Symbol => {
+                            let truthy = self.ml_form_symbol_value(&car)?.is_some_and(|v| !is_nil(&v));
+                            let Some((then, rest)) = split(cdr) else {
                                 elt = Form::String("*invalid*".into());
                                 continue;
                             };
@@ -449,13 +470,13 @@ impl Vm {
                             if is_nil(&rest) {
                                 break;
                             }
-                            let Some((otherwise, _)) = split(&rest) else {
+                            let Some((otherwise, _)) = split(rest) else {
                                 elt = Form::String("*invalid*".into());
                                 continue;
                             };
                             elt = otherwise;
                         }
-                        Form::Int(lim) => {
+                        Head::Limit(lim) => {
                             // `int lim = XFIXNUM (car)` (`xdisp.c:28879`): the low 32 bits.
                             let lim = i64::from(lim as i32).clamp(-MAX_FIELD, MAX_FIELD);
                             elt = cdr;
@@ -466,12 +487,13 @@ impl Vm {
                                 field_width = field_width.max(lim);
                             }
                         }
-                        Form::String(_) | Form::Bytes(_) | Form::List(_) | Form::Dotted(..) | Form::Object(_)
-                            if string_car || !matches!(car, Form::Object(_)) => {
-                            let items = match &form {
-                                Form::List(items) | Form::Dotted(items, _) => items.clone(),
-                                _ => unreachable!(),
-                            };
+                        Head::Each => {
+                            // The elements of the list (a dotted tail is not one).
+                            let mut items = vec![car];
+                            match cdr {
+                                Form::List(rest) | Form::Dotted(rest, _) => items.extend(rest),
+                                _ => {}
+                            }
                             let count = items.len();
                             for (index, item) in items.into_iter().enumerate() {
                                 if 0 < precision && precision <= n {
@@ -482,7 +504,7 @@ impl Vm {
                             }
                             break;
                         }
-                        _ => break,
+                        Head::Other => break,
                     }
                 }
                 _ => {
