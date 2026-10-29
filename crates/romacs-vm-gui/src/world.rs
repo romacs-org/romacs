@@ -40,8 +40,9 @@ pub fn launch_font() -> Result<Option<(String, u32)>, String> {
 pub const INTERPROGRAM: &str = "(defvar interprogram-cut-function 'romacs-clipboard-select-text) (defvar interprogram-paste-function 'romacs-clipboard-selection-value)";
 
 /// The world of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR, in
-/// STORE.
+/// STORE, resolved against this process's directory.
 pub fn open(store: PathBuf, width: u32, height: u32, floor: Option<usize>) -> Result<World, String> {
+    let store = std::path::absolute(store).map_err(|e| e.to_string())?;
     let font = launch_font()?.map_or("font default".to_owned(), |(source, _)| format!("font {source}"));
     let dir = startup::lisp_root(&startup::lisp_dir())?;
     let recipe = vec![
@@ -55,7 +56,7 @@ pub fn open(store: PathBuf, width: u32, height: u32, floor: Option<usize>) -> Re
 /// from source (a builder runs beside it then, unless WAIT built the world
 /// first). A builder process builds and exits here.
 pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, wait: bool) -> Option<(Box<Vm>, Carry)> {
-    match world.launch::<Carry>(|| std::env::args_os().skip(1).collect(), wait) {
+    match world.launch::<Carry>(|| builder_args(world, width, height, floor), wait) {
         Launch::Restored { vm, carry, manifest } => {
             eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"]}));
             Some((vm, carry))
@@ -70,6 +71,18 @@ pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, wait
             None
         }
     }
+}
+
+/// A builder's arguments for WORLD's launch: what its recipe takes from the
+/// command line, the store absolute, since the builder runs in the store's
+/// pinned directory. Nothing else of this launch reaches it.
+fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec!["--loadup".into(), "--world-store".into(), world.store.clone().into(),
+                                                 "--geometry".into(), format!("{width}x{height}").into()];
+    if let Some(floor) = floor {
+        args.extend(["--gc-floor".into(), floor.to_string().into()]);
+    }
+    args
 }
 
 /// The read roots of a GUI build beside the store's own: the Lisp trees and
@@ -119,4 +132,29 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result
         eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
         Ok(())
     })?.join().map_err(|_| "world builder panicked".to_owned())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_builder_gets_the_recipe_and_an_absolute_store_whatever_the_launch_was_given() {
+        let scratch = std::env::temp_dir().join(format!("romacs-gui-world-{}", std::process::id()));
+        std::fs::create_dir_all(&scratch).unwrap();
+        // A relative name of the scratch store, from this process's
+        // directory, without changing that directory under other tests.
+        let cwd = std::env::current_dir().unwrap();
+        let mut relative: PathBuf = cwd.components().skip(1).map(|_| "..").collect();
+        relative.push(scratch.join("store").strip_prefix("/").unwrap());
+        assert!(relative.is_relative());
+        let world = open(relative, 800, 600, Some(5000)).unwrap();
+        assert!(world.store.is_absolute(), "{}", world.store.display());
+        assert_eq!(std::fs::canonicalize(&world.store).unwrap(), std::fs::canonicalize(scratch.join("store")).unwrap());
+        let args = builder_args(&world, 800, 600, Some(5000));
+        let store = world.store.clone().into_os_string();
+        assert_eq!(args, ["--loadup", "--world-store", store.to_str().unwrap(), "--geometry", "800x600", "--gc-floor", "5000"]
+            .map(std::ffi::OsString::from));
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
 }
