@@ -805,10 +805,14 @@ impl Vm {
             }
             snapshot.point_byte = point_byte;
         }
+        // Face and font changes, `force-window-update' and new faces advance
+        // the display version and drop the records this reuse rests on.
+        let version = self.display_state.version;
         let band = self.redisplay_and_build_mode_line(root, slot, height, false)?;
         // The band's Lisp may have changed what the window shows, or
         // collected and moved the window: only ROOT's traced copy is current.
-        if self.gc_stats.collections != key.collections {
+        if self.gc_stats.collections != key.collections || self.display_state.version != version
+            || !self.display_state.previous.contains_key(&id) {
             return Ok(None);
         }
         let window = self.slots[root].value;
@@ -816,7 +820,7 @@ impl Vm {
             return Ok(None);
         }
         let face = self.mode_line_face_name(window)?;
-        let shown = self.display_state.shown.get_mut(&id).expect("checked above");
+        let Some(shown) = self.display_state.shown.get_mut(&id) else { return Ok(None) };
         snapshot.mode_line = band.map(|band| band_slice(&shown.names, band));
         snapshot.mode_line_face = FaceHandle(shown.names.iter().position(|n| *n == face).ok_or("mode-line face required")? as u32);
         shown.point = point;

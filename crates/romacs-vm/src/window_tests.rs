@@ -784,3 +784,27 @@ fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
     assert!(vm.heap_stats().collections > before, "the mode line collected");
     assert!(again.windows.iter().any(|w| w.snapshot.text.utf8 == "a\nb\nc\n"));
 }
+
+/// Lisp a reused window's mode line runs can change faces: a face setter
+/// drops every window's last publication and a new face drops the reuse
+/// records. Either makes that redisplay a full one, which publishes the
+/// changed faces, instead of the reused snapshot's old ones or a panic.
+#[test]
+fn face_changes_in_a_reused_windows_mode_line_redisplay_it_fully() {
+    for (change, color) in [("(internal-set-lisp-face-attribute 'reuse-face :foreground \"#ff0000\" nil)", [255, 0, 0]),
+                            ("(defface reuse-new '((t (:foreground \"#00ff00\"))) \"n\")", [0, 255, 0])] {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+        run(&mut vm, &format!(r##"(progn (defface reuse-face '((t (:foreground "#0000ff"))) "r")
+                                       (set-buffer (get-buffer-create "faces")) (insert (propertize "abc" 'face 'reuse-face) "\nd\ne\n")
+                                       (set-window-buffer nil (current-buffer)) (setq change nil)
+                                       (setq mode-line-format '((:eval (progn (when change (setq change nil) {change}) "m")))))"##));
+        let first = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+        vm.display_apply_layout(&[(first.id, first.text.utf8.len())]).unwrap();
+        vm.frame_snapshot(800, 576).unwrap();
+        run(&mut vm, "(setq change t)");
+        let changed = vm.frame_snapshot(800, 576).expect(change).windows[0].snapshot.clone();
+        assert!(changed.faces.iter().any(|face| face.foreground == color), "{change} did not reach the published faces");
+    }
+}
