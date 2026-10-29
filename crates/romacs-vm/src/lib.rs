@@ -22,6 +22,7 @@ mod command;
 mod interpreted_closure;
 mod oclosure;
 mod host_input;
+mod bidi;
 mod layout_host;
 mod terminal_host;
 mod process_jobs;
@@ -93,6 +94,7 @@ pub mod coordinates;
 mod data;
 mod bool_vector;
 mod lstring;
+mod symkey;
 mod display;
 mod overlay_order;
 mod window;
@@ -522,6 +524,7 @@ enum Primitive {
     // Engine control like `load': waits for a host key, redisplaying in a
     // nested engine first (host_input.rs).
     ReadHostEvent,
+    FormatModeLine,
     Macroexpand,
     ClosureMetadata,
     ClosureDocument,
@@ -784,6 +787,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     // Table index must equal the enum discriminant: append only.
     ("autoload-do-load", Primitive::AutoloadDoLoad),
     ("romacs--read-host-event", Primitive::ReadHostEvent),
+    ("format-mode-line", Primitive::FormatModeLine),
     ("macroexpand", Primitive::Macroexpand),
     ("#:vm2-closure-metadata", Primitive::ClosureMetadata),
     ("#:vm2-closure-document", Primitive::ClosureDocument),
@@ -2672,7 +2676,7 @@ impl Vm {
         if matches!(p, CacheStats | CacheClear | CacheEntries) {
             return self.cache_primitive(p, n);
         }
-        if matches!(p, Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent) {
+        if matches!(p, Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
             let args = self.stack[start..start + n].to_vec();
             let result = self.loader_primitive(p, &args);
             // Only the reentrant engine path can re-raise an eval escape.
@@ -2816,7 +2820,7 @@ impl Vm {
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Sqlite(h) => Ok(h.describe()),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
-                data::Object::Marker(_) => Ok("#<marker>".into()),
+                data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),
                 data::Object::ByteBuffer(_) => Ok("#<byte-buffer>".into()),
                 data::Object::SyntaxTable(_) => Ok("#<syntax-table>".into()),

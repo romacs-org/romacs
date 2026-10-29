@@ -70,7 +70,7 @@ impl Vm {
         self.autoload_object(fundef)
             && self.autoload_type(fundef).is_ok_and(|kind| kind == Value::TRUE || self.symbol_named(kind, "macro"))
     }
-    fn signal_error(&mut self, condition: &str, data: &[Value], text: String) -> String {
+    pub(crate) fn signal_error(&mut self, condition: &str, data: &[Value], text: String) -> String {
         let condition = self.intern(condition);
         let data = self.list_value(data);
         self.propagated_escape = Some(threaded::Escape::Signal(condition, data));

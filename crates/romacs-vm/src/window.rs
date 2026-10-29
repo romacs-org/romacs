@@ -5,7 +5,7 @@ mod redisplay;
 #[path = "window_config.rs"]
 mod config;
 pub(crate) use config::WindowConfiguration;
-const ROOT: &str = "#:vm2-root-window";
+pub(crate) const ROOT: &str = "#:vm2-root-window";
 const MINI: &str = "#:vm2-minibuffer-window";
 const SELECTED: &str = "#:vm2-selected-window";
 #[derive(Clone)]
@@ -200,7 +200,7 @@ impl Vm {
     }
     /// The root/selected/minibuffer window, read without interning: the
     /// slot exists once `ensure_windows` has run.
-    fn window_root_peek(&self, name: &str) -> Value {
+    pub(crate) fn window_root_peek(&self, name: &str) -> Value {
         let Ok(f) = self.frame(self.frame_value_peek()) else { return Value::UNBOUND; };
         match name { ROOT => f.root, SELECTED => f.selected, MINI => f.minibuffer, _ => unreachable!() }
     }
@@ -393,7 +393,7 @@ impl Vm {
     }
     /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time
     /// even when V is already selected (`record_and_return`).
-    fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
+    pub(crate) fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
         if record {
             self.window_state.select_count += 1;
             let count = self.window_state.select_count;
@@ -1411,6 +1411,36 @@ impl<'a> Windows<'a> {
         self.vm.window_mut(w).map_err(internal)?.dedicated = flag;
         Ok(flag)
     }
+    /// GNU window.c:4492 force-window-update: nil repaints every window, a
+    /// live window itself, a buffer (or its name) every window showing it;
+    /// t when something was marked, nil for anything else (no error).
+    pub(crate) fn force_window_update(&mut self, object: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        if object == Value::NIL {
+            self.vm.display_state.free_realized_faces();
+            return Ok(Value::TRUE);
+        }
+        if let Some(Object::Window(w)) = self.vm.object_if(object) && w.live() {
+            let id = w.id;
+            self.vm.display_state.repaint_window(id);
+            return Ok(Value::TRUE);
+        }
+        let buffer = match self.vm.str_view(object).and_then(|v| v.as_str()).map(str::to_owned) {
+            Some(name) => self.vm.named_buffer(&name).unwrap_or(Value::NIL),
+            None => object,
+        };
+        if !matches!(self.vm.object_if(buffer), Some(Object::Buffer(b)) if b.state.live) { return Ok(Value::NIL); }
+        let selected = self.vm.window_root(SELECTED);
+        let (_, windows) = self.candidates(selected, Value::TRUE, Value::TRUE)?;
+        let ids: Vec<u64> = windows.into_iter().filter_map(|w| self.get(w).ok().filter(|w| w.live() && w.buffer == buffer).map(|w| w.id)).collect();
+        for &id in &ids { self.vm.display_state.repaint_window(id); }
+        Ok(if ids.is_empty() { Value::NIL } else { Value::TRUE })
+    }
+    /// GNU dispnew.c:3252 redraw-display: clear and redisplay every frame.
+    pub(crate) fn redraw_display(&mut self) -> Out {
+        self.vm.display_state.free_realized_faces();
+        Ok(Value::NIL)
+    }
     /// Decorations VM2 does not draw: header/tab lines, scroll bars and
     /// dividers are 0 pixels (window.c:1224-1269 on a live window).
     pub(crate) fn live_zero(&mut self, window: Value) -> Out {
@@ -1536,6 +1566,23 @@ impl<'a> Windows<'a> {
             vscroll: i64::from(x.vscroll_px),
         })
     }
+    /// window.c:1017/1029: WINDOW's left column or top line, its pixel
+    /// edge in the frame's characters.
+    pub(crate) fn window_char_edge(&mut self, window: Value, top: bool) -> Out {
+        let w = self.valid(window)?;
+        let x = self.get(w)?;
+        let (column, line) = (self.vm.window_state.column.max(1), self.vm.window_state.line.max(1));
+        Value::integer(i64::from(if top { x.y / line } else { x.x / column })).map_err(internal)
+    }
+    /// window.c Fwindow_scroll_bars: VM2 windows take the frame's scroll
+    /// bars, and VM2 frames draw none, so every live window answers GNU's
+    /// (WIDTH COLS VERTICAL-TYPE HEIGHT LINES HORIZONTAL-TYPE PERSISTENT)
+    /// for that: (nil 0 t nil 0 t nil).
+    pub(crate) fn window_scroll_bars(&mut self, window: Value) -> Out {
+        self.live(window)?;
+        let zero = Value::integer(0).map_err(internal)?;
+        Ok(self.vm.list_value(&[Value::NIL, zero, Value::TRUE, Value::NIL, zero, Value::TRUE, Value::NIL]))
+    }
     pub(crate) fn window_pixel_edge(&mut self, window: Value, top: bool) -> Out {
         let w = self.valid(window)?;
         let x = self.get(w)?;
@@ -1589,8 +1636,9 @@ impl<'a> Windows<'a> {
         let unit = if horizontal { self.vm.window_state.column } else { self.vm.window_state.line };
         Self::int(i64::from(unit))
     }
-    /// frame.c:4531/4538: VM2 frames have no dividers.
-    pub(crate) fn frame_divider_width(&mut self, frame: Value) -> Out {
+    /// frame.c:4524/4531/4538: VM2 frames draw no window dividers and no
+    /// internal border.
+    pub(crate) fn frame_absent_width(&mut self, frame: Value) -> Out {
         self.any_frame(frame)?;
         Ok(Value::integer(0).unwrap())
     }
@@ -1684,6 +1732,20 @@ impl<'a> Windows<'a> {
             Some(Object::Terminal(t)) => Ok((terminal, t.terminal_coding, t.keyboard_coding)),
             _ => Err(Fault::Wrong("terminal-live-p", object)),
         }
+    }
+    /// decode_live_terminal, then its parameter alist.
+    pub(crate) fn terminal_params(&mut self, object: Value) -> std::result::Result<(Value, Value), Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        let terminal = self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        match self.vm.object_if(terminal) {
+            Some(Object::Terminal(t)) => Ok((terminal, t.params)),
+            _ => Err(Fault::Wrong("terminal-live-p", object)),
+        }
+    }
+    pub(crate) fn set_terminal_params(&mut self, terminal: Value, params: Value) -> std::result::Result<(), Fault> {
+        let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
+        if let Some(Object::Terminal(t)) = self.vm.objects.get_mut(index) { t.params = params; }
+        Ok(())
     }
     pub(crate) fn set_terminal_coding(&mut self, terminal: Value, keyboard: bool, coding: Value) -> std::result::Result<(), Fault> {
         let index = terminal.index(0).map_err(internal)?.saturating_sub(1);

@@ -130,8 +130,8 @@ impl Vm {
     pub(super) fn obarray_lookup_value(&self, table: Value, bytes: &[u8], chars: usize) -> Option<Value> {
         let Object::Obarray(table) = self.object_if(table)? else { return None };
         if table.initial {
-            let name = std::str::from_utf8(bytes).ok()?;
-            match name { "nil" => Some(Value::NIL), "t" => Some(Value::TRUE), _ => self.names.get(name).map(|&s| Value::reference(s + 1, 7)) }
+            let name = symbol_key(bytes, chars)?;
+            match name.as_str() { "nil" => Some(Value::NIL), "t" => Some(Value::TRUE), _ => self.names.get(&name).map(|&s| Value::reference(s + 1, 7)) }
         } else { table.lookup(bytes, chars) }
     }
     pub(super) fn obarray_intern(&mut self, table: Value, name: Value) -> std::result::Result<Value, prim::Fault> {
@@ -139,7 +139,8 @@ impl Vm {
         let (bytes, chars) = (view.bytes.to_vec(), view.chars);
         if let Some(found) = self.obarray_lookup_value(table, &bytes, chars) { return Ok(found); }
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
-        let text = std::str::from_utf8(&bytes).map_err(|_| prim::Fault::NotUnicode(name))?;
+        let text = symbol_key(&bytes, chars).ok_or(prim::Fault::NotUnicode(name))?;
+        let text = text.as_str();
         let symbol = if initial { self.intern(text) } else {
             let id = expand::generated_id();
             let slot = if let Some(slot) = self.obarray_free_slots.pop() { slot } else {
@@ -191,4 +192,11 @@ impl Vm {
         }
         None
     }
+}
+
+/// The symbol-table key of a name's BYTES (CHARS characters): multibyte
+/// internal text through symkey.rs; a unibyte name must be ASCII.
+pub(super) fn symbol_key(bytes: &[u8], chars: usize) -> Option<String> {
+    if let Ok(text) = std::str::from_utf8(bytes) && !text.contains(crate::symkey::ESC) { return Some(text.to_owned()); }
+    (chars < bytes.len() || bytes.is_ascii()).then(|| crate::symkey::from_internal(bytes))
 }

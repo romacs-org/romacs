@@ -245,10 +245,7 @@ pub(super) fn refuse_handler(cx: &mut Leaf<'_>, filename: Value, operation: &str
 /// after reading otherwise; insert_coding.rs follows both orders, so this
 /// reads first in either case and records where its
 /// `set-auto-coding-function' tail sample would start.
-///
-/// REPLACE stays refused: none of the daily-driver consumers pass it, and
-/// GNU's replacement keeps unchanged head and tail text and their markers,
-/// which needs its own transcription.
+/// REPLACE of a non-empty accessible region is insert_coding.rs's.
 defsubr! { name = "insert-file-contents", gnu = "fileio.c:4057", effect = Global,
 fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, end: Value,
                         replace: Value) -> Step {
@@ -302,10 +299,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
     if !meta.file_type().is_file() {
         return Err(refuse("insert-file-contents of a non-regular file"));
     }
-    if replace != Value::NIL {
-        return Err(refuse("insert-file-contents REPLACE"));
-    }
-    let inhibit = var(cx, "inhibit-read-only")?; if !visiting && end_offset > beg_offset { cx.fileio_check_insertion(inhibit)?; }
+    let inhibit = var(cx, "inhibit-read-only")?; if !visiting && end_offset > beg_offset && replace == Value::NIL { cx.fileio_check_insertion(inhibit)?; } // REPLACE checks the ranges it changes.
     // BEG..END through the boundary, which sees the bytes consumed; a seek
     // or read error discards what was read.
     let bytes = {

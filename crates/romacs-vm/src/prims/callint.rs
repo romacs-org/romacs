@@ -223,7 +223,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "goto-char" => "(goto-char--read-natnum-interactive \"Go to char: \")", "replace-region-contents" => "(list (if (use-region-p) (region-beginning) (point-min)) (if (use-region-p) (region-end) (point-max)) (get-buffer (read-buffer-to-switch \"Source buffer: \")))",
         "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region" | "base64-decode-region" => "r",
         "upcase-region" | "downcase-region" | "capitalize-region" | "upcase-initials-region" => "(list (region-beginning) (region-end) (region-noncontiguous-p))",
-        "widen" | "garbage-collect" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
+        "widen" | "garbage-collect" | "redraw-display" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
         "erase-buffer" => "*",
         "search-forward" => "MSearch: ",
         "re-search-forward" => "sRE search: ",

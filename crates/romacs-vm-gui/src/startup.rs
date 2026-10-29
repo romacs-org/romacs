@@ -497,7 +497,7 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
     policy(vm, root, "romacs-editing.el", include_str!("../../../rlisp/romacs-editing.el"))?;
     for (source, names) in [
         (include_str!("../../../gnu-lisp/subr.el"), &[
-            "plusp", "add-to-history", "ignore", "string=",
+            "plusp", "add-to-history", "ignore", "string=", "undefined",
         ][..]),
         (include_str!("../../../gnu-lisp/files.el"), &[
             "files--ensure-directory", "make-directory",

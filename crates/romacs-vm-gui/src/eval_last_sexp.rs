@@ -135,7 +135,9 @@ mod tests {
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         vm.set_collection_floor(1);
         install(&mut vm).unwrap();
-        vm.eval_source("(switch-to-buffer \"*eval-test*\")")
+        // Commands run in the selected window's buffer (command_loop_1),
+        // which a bare VM's `switch-to-buffer' does not set.
+        vm.eval_source("(switch-to-buffer \"*eval-test*\") (set-window-buffer nil (current-buffer))")
             .unwrap();
         vm
     }

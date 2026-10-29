@@ -17,5 +17,5 @@
   "(eq (terminal-list) (terminal-list))",
   "(equal (funcall #'terminal-list) (terminal-list))"
  ],
- "rust": "src/prims/frame.rs:14"
+ "rust": "src/prims/frame.rs:66"
 }

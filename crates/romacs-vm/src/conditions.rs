@@ -378,6 +378,6 @@ impl Vm {
             message.push_str(&print(self, item, !princ)?);
             tail = rest;
         }
-        Ok(self.allocate_object(data::Object::String(Box::new(data::LispString::new(&message)))))
+        Ok(self.printed_value(&message))
     }
 }

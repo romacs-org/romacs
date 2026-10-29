@@ -9,6 +9,58 @@ defsubr! { name = "frame-terminal", gnu = "terminal.c:424", effect = Reads,
 fn frame_terminal(cx; optional frame: Value) { cx.windows().frame_terminal(frame) }}
 defsubr! { name = "terminal-live-p", gnu = "terminal.c:443", effect = Reads,
 fn terminal_live_p(cx, object: Value) { Ok(cx.windows().terminal_live_p(object)) }}
+// terminal.c:536-585: the parameter alist of a live terminal.
+fn assq(cx: &Leaf<'_>, key: Value, mut alist: Value) -> Value {
+    while let Some((entry, rest)) = cx.pair(alist) {
+        if cx.pair(entry).is_some_and(|(k, _)| k == key) { return entry; }
+        alist = rest;
+    }
+    Value::NIL
+}
+defsubr! { name = "terminal-parameters", gnu = "terminal.c:553", effect = Reads,
+fn terminal_parameters(cx; optional terminal: Value) {
+    let (_, params) = cx.windows().terminal_params(terminal)?;
+    // Fcopy_alist: fresh spine and fresh (PARM . VALUE) cells.
+    let mut entries = Vec::new();
+    let mut tail = params;
+    while let Some((entry, rest)) = cx.pair(tail) {
+        entries.push(match cx.pair(entry) { Some((k, v)) => cx.cons(k, v), None => entry });
+        tail = rest;
+    }
+    Ok(entries.into_iter().rev().fold(Value::NIL, |tail, entry| cx.cons(entry, tail)))
+}}
+defsubr! { name = "terminal-parameter", gnu = "terminal.c:565", effect = Reads,
+fn terminal_parameter(cx, terminal: Value, parameter: Value) {
+    if cx.kind(parameter) != crate::prim::leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", parameter)); }
+    let (_, params) = cx.windows().terminal_params(terminal)?;
+    let entry = assq(cx, parameter, params);
+    Ok(cx.pair(entry).map_or(Value::NIL, |(_, value)| value))
+}}
+defsubr! { name = "set-terminal-parameter", gnu = "terminal.c:575", effect = Global,
+fn set_terminal_parameter(cx, terminal: Value, parameter: Value, value: Value) {
+    let (terminal, params) = cx.windows().terminal_params(terminal)?;
+    let entry = assq(cx, parameter, params);
+    if let Some((_, old)) = cx.pair(entry) {
+        cx.setcdr(entry, value)?;
+        return Ok(old);
+    }
+    let entry = cx.cons(parameter, value);
+    let params = cx.cons(entry, params);
+    cx.windows().set_terminal_params(terminal, params)?;
+    Ok(Value::NIL)
+}}
+// term.c:2284-2311: VM2's terminals are never text terminals
+// (decode_tty_terminal is NULL for them), so no tty colours.
+defsubr! { name = "tty-display-color-p", gnu = "term.c:2284", effect = Reads,
+fn tty_display_color_p(cx; optional terminal: Value) {
+    cx.windows().terminal_params(terminal)?;
+    Ok(Value::NIL)
+}}
+defsubr! { name = "tty-display-color-cells", gnu = "term.c:2299", effect = Reads,
+fn tty_display_color_cells(cx; optional terminal: Value) {
+    cx.windows().terminal_params(terminal)?;
+    Ok(Value::integer(0).unwrap())
+}}
 defsubr! { name = "last-nonminibuffer-frame", gnu = "frame.c:2467", effect = Reads,
 fn last_nonminibuffer_frame(cx) { cx.windows().last_nonminibuffer_frame() }}
 defsubr! { name = "terminal-list", gnu = "terminal.c:501", effect = Reads,

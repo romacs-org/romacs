@@ -550,12 +550,6 @@ impl Vm {
             || (p == Primitive::Defalias && error == "defalias cyclic function indirection")
         {
             ("cyclic-function-indirection", vec![x])
-        } else if p == Primitive::Defalias && error == "list function descriptors are not yet supported" {
-            // GNU stores a `(lambda ...)' list as the function; VM2 cannot call
-            // one yet. Say so in the condition rather than an anonymous error.
-            let message = "defalias: a list function descriptor such as (lambda ...) is not supported in VM2 yet";
-            let message = self.make_lisp_string(message.as_bytes().to_vec(), true);
-            ("error", vec![message])
         } else if p == Primitive::Fset && error == "fset setting constant" {
             ("setting-constant", vec![x])
         } else if p == Primitive::Fset && error == "fset symbol required" {

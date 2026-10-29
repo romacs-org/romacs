@@ -237,7 +237,7 @@ fn reviewed_readonly_and_ordering_boundaries() {
     let source = format!("(with-temp-buffer (insert \"ab\") (put-text-property 1 3 'read-only t) (goto-char 2) (condition-case e (progn (insert-file-contents {} nil 0 0) 'ok) (error e)))", lisp(&f));
     assert_eq!(eval(&mut vm, &source), "ok", "FILEIO4 zero-length requested range");
     let source = format!("(with-temp-buffer (insert \"ab\") (condition-case e (insert-file-contents {} t nil nil t) (error e)))", lisp(&f));
-    assert_eq!(eval(&mut vm, &source), "(error \"VM2 insert-file-contents REPLACE is unsupported\")", "FILEIO5 visiting REPLACE");
+    assert_eq!(eval(&mut vm, &source), format!("({} 1)", lisp(&f)), "FILEIO5 visiting REPLACE (pinned GNU)");
     let source = format!("(condition-case e (write-region \"x\" nil {} nil nil nil t) (error e))", lisp(&link));
     assert_eq!(eval(&mut vm, &source), "(error \"VM2 write-region MUSTBENEW confirmation is unsupported\")", "FILEIO5 symlink directory confirmation");
 }
@@ -440,16 +440,18 @@ fn unsupported_reads_refuse_and_leave_the_buffer_alone() {
     std::fs::write(&bom, b"\xef\xbb\xbfx").unwrap();
     let mut vm = Vm::new();
     let (crlf, latin, nul, bom) = (lisp(&crlf), lisp(&latin), lisp(&nul), lisp(&bom));
-    // Bootstrap regime: the bare registry defines no coding category, so
-    // detection finds nothing in 8-bit text and the undecided raw decoder
-    // would insert raw bytes, which VM2 buffer text cannot hold.
-    let raw = "insert-file-contents of raw bytes into a multibyte buffer";
+    // Bootstrap regime: the bare registry gives no coding category a
+    // system, so detect_coding rejects every category in 8-bit text and
+    // decides raw-text, which GNU's C does not define before mule-conf.el
+    // either (syms_of_coding defines no-conversion and undecided only):
+    // setup_coding_system signals before the buffer changes.
+    for form in [format!("(insert-file-contents {latin})"), format!("(insert-file-contents {bom})"),
+                 // Anchor the nonmatching basename: random TMPDIR components may contain x.
+                 format!("(let ((file-name-handler-alist '((\"/handler-only\\\\'\" . ignore)))) (insert-file-contents {latin}))")] {
+        let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e {form} (error e)) (buffer-string) (point) last-coding-system-used))");
+        assert_eq!(eval(&mut vm, &source), "((coding-system-error raw-text) \"keep\" 3 nil)", "{form}");
+    }
     for (form, message) in [
-        (format!("(insert-file-contents {latin})"), raw),
-        (format!("(insert-file-contents {bom})"), raw),
-        (format!("(insert-file-contents {crlf} nil nil nil t)"), "insert-file-contents REPLACE"),
-        // Anchor the nonmatching basename: random TMPDIR components may contain x.
-        (format!("(let ((file-name-handler-alist '((\"/handler-only\\\\'\" . ignore)))) (insert-file-contents {latin}))"), raw),
         // The matching control must still refuse before touching the buffer or file.
         (format!("(let ((file-name-handler-alist '((\"/crlf\\\\'\" . ignore)))) (insert-file-contents {crlf}))"), "expand-file-name matching file name handler"),
         (format!("(let ((selective-display t)) (write-region nil nil {crlf}))"), "write-region with selective-display t"),
@@ -459,6 +461,9 @@ fn unsupported_reads_refuse_and_leave_the_buffer_alone() {
         let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e {form} (error e)) (buffer-string) (point) last-coding-system-used))");
         assert_eq!(eval(&mut vm, &source), format!("((error \"VM2 {message} is unsupported\") \"keep\" 3 nil)"), "{form}");
     }
+    // REPLACE of the whole text, point spread over the new text (pinned GNU).
+    let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (insert-file-contents {crlf} nil nil nil t) (buffer-string) (point) last-coding-system-used))");
+    assert_eq!(eval(&mut vm, &source), format!("(({crlf} 4) \"a\\nb\\n\" 3 undecided-dos)"));
     // Refused writes did not touch the file.
     assert_eq!(std::fs::read(d.join("crlf")).unwrap(), b"a\r\nb\r\n");
     // 7-bit text decodes in the bare regime as in GNU: EOL detection, and a

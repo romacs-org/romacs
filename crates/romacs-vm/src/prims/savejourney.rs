@@ -134,6 +134,37 @@ fn file_name_nondirectory(cx, filename: Value) -> Step {
     Ok(Step::Done(cx.make_string(bytes, multibyte)))
 }}
 
+defsubr! { name = "file-name-concat", gnu = "fileio.c:846", effect = Pure,
+fn file_name_concat(cx, directory: Value; rest components) {
+    // nil and "" are skipped; each part but the last gets a slash unless it
+    // ends in one. Multibyte when any part is non-ASCII multibyte, a
+    // unibyte non-ASCII part then converted as string-to-multibyte does.
+    let mut parts = Vec::new();
+    for &arg in std::iter::once(&directory).chain(components) {
+        if arg == Value::NIL { continue; }
+        let view = cx.string_view(arg).map_err(|_| Fault::Wrong("stringp", arg))?;
+        if view.len() == 0 { continue; }
+        parts.push((view.bytes().to_vec(), view.is_multibyte()));
+    }
+    let multibyte = parts.iter().any(|(bytes, multibyte)| *multibyte && !bytes.is_ascii());
+    let mut out = Vec::new();
+    let last = parts.len().saturating_sub(1);
+    for (i, (bytes, part_multibyte)) in parts.into_iter().enumerate() {
+        if multibyte && !part_multibyte {
+            for b in bytes {
+                let mut raw = [0; 5];
+                let code = if b < 0x80 { u32::from(b) } else { crate::lstring::BYTE8_OFFSET + u32::from(b) };
+                let n = crate::lstring::char_string(code, &mut raw);
+                out.extend_from_slice(&raw[..n]);
+            }
+        } else {
+            out.extend_from_slice(&bytes);
+        }
+        if i < last && out.last() != Some(&b'/') { out.push(b'/'); }
+    }
+    Ok(cx.make_string(out, multibyte))
+}}
+
 defsubr! { name = "file-name-as-directory", gnu = "fileio.c:634", effect = Global,
 fn file_name_as_directory(cx, file: Value) -> Step {
     cx.string_bytes(file)?;
