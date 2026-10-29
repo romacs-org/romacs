@@ -382,10 +382,13 @@ fn a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset() {
     // Another input: built and booted from.
     std::fs::write(scratch.join("input/flag"), "ok").unwrap();
     assert_eq!(outcome(&mut child_of(REFUSED, "launch", &store)), restored());
-    // The whole store goes with `all`, and only the store's own files.
+    // Every world and cache goes with `all`, and only the store's own
+    // files: the marker, the store's directories and a stranger stay.
     std::fs::write(store.join("unrelated"), "kept").unwrap();
     assert!(romacs_vm::world::store::reset(&store, true).unwrap() > 0);
-    assert_eq!(std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().file_name()).collect::<Vec<_>>(), ["unrelated"]);
+    let mut left: Vec<String> = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    left.sort();
+    assert_eq!(left, [".romacs-world-store", "ids", "p", "unrelated"]);
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

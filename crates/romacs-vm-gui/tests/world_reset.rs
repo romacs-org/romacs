@@ -8,6 +8,10 @@ fn store(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let _ = std::fs::remove_dir_all(&home);
     let store = home.join("cache/romacs/worlds");
     std::fs::create_dir_all(store.join("ids")).unwrap();
+    // As Romacs makes a store: private, and marked.
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(store.join(".romacs-world-store"), "romacs-world-store 1\n").unwrap();
     let (kept, refused) = ("a".repeat(64), "b".repeat(64));
     for suffix in ["rwi", "lock", "log"] {
         std::fs::write(store.join(format!("{kept}.{suffix}")), "x").unwrap();
@@ -15,7 +19,7 @@ fn store(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     std::fs::write(store.join(format!("{kept}.json")), r#"{"refusals": []}"#).unwrap();
     std::fs::write(store.join(format!("{kept}.failed")), r#"{"attempts": 2, "at": 0}"#).unwrap();
     std::fs::write(store.join(format!("{refused}.json")), r#"{"refusals": [{"kind": "capture"}]}"#).unwrap();
-    std::fs::write(store.join("ids/1-2-3"), "00").unwrap();
+    std::fs::write(store.join("ids/1-2-3-4.5-6.7"), "00").unwrap();
     std::fs::write(store.join("notes.txt"), "mine").unwrap();
     (home, store)
 }
@@ -40,7 +44,7 @@ fn world_reset_forgets_failures_and_refusals_and_keeps_worlds() {
     let said = reset(&home, "--world-reset");
     assert!(said.contains(r#""event":"reset""#) && said.contains(r#""removed":2"#), "{said}");
     let kept = "a".repeat(64);
-    assert_eq!(names(&store), [format!("{kept}.json"), format!("{kept}.lock"), format!("{kept}.log"),
+    assert_eq!(names(&store), [".romacs-world-store".into(), format!("{kept}.json"), format!("{kept}.lock"), format!("{kept}.log"),
                                format!("{kept}.rwi"), "ids".into(), "notes.txt".into()]);
     let _ = std::fs::remove_dir_all(&home);
 }
@@ -49,7 +53,22 @@ fn world_reset_forgets_failures_and_refusals_and_keeps_worlds() {
 fn world_reset_all_removes_the_stores_own_files_only() {
     let (home, store) = store("all");
     reset(&home, "--world-reset=all");
-    assert_eq!(names(&store), ["notes.txt"]);
+    // The worlds and caches go; the marker, the empty cache directory and
+    // a file no store owns stay.
+    assert_eq!(names(&store), [".romacs-world-store", "ids", "notes.txt"]);
+    assert_eq!(std::fs::read_dir(store.join("ids")).unwrap().count(), 0);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn world_reset_refuses_a_directory_romacs_did_not_mark() {
+    let (home, store) = store("unmarked");
+    std::fs::remove_file(store.join(".romacs-world-store")).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+        .arg("--world-reset=all").env("HOME", &home).env("XDG_CACHE_HOME", home.join("cache")).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(".romacs-world-store"), "{output:?}");
+    assert!(names(&store).len() > 3, "nothing removed");
     let _ = std::fs::remove_dir_all(&home);
 }
 

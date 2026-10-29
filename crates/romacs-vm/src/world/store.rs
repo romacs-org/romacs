@@ -170,20 +170,96 @@ fn libraries_digest() -> Result<[u8; 32], String> {
     Ok(sha256(entries.join("\n").as_bytes()))
 }
 
-/// The store directory: made private when new, and refused unless this
-/// user owns it and no one else may enter (§9.2).
+/// The file that makes a directory a world store: Romacs wrote it there,
+/// with the store's format. `reset` and `prune` touch no directory without
+/// it.
+const MARKER: &str = ".romacs-world-store";
+/// The store-wide lock (`store_lock`), never deleted.
+const STORE_LOCK: &str = "store.lock";
+const MARKER_TEXT: &str = "romacs-world-store 1\n";
+
+/// The store directory: made private and marked when new, and refused
+/// unless this user owns it, no one else may enter (§9.2), it is no
+/// symlink, and it is not $HOME or `/`. A store an earlier Romacs made has
+/// no marker; it is adopted when everything in it is a store's.
 fn private_store(store: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    if !host::probe(host::Probe::IsDir, store) {
+    if host::symlink_metadata(store).is_err() {
         host::create_dir_all(store)?;
         let path = std::ffi::CString::new(store.as_os_str().as_encoded_bytes()).map_err(std::io::Error::other)?;
         host::chmod(&path, 0o700, false)?;
     }
-    let meta = host::metadata(store)?;
-    if meta.uid() != host::euid() || meta.permissions().mode() & 0o077 != 0 {
-        return Err(std::io::Error::other(format!("world store {} is not private", store.display())));
+    owned_store(store, host::getenv("HOME").map(PathBuf::from).as_deref())?;
+    if !marked(store) {
+        if let Some(name) = foreign_entry(store)? {
+            return Err(std::io::Error::other(format!("{} is no world store: it holds {name}", store.display())));
+        }
+        host::write(store.join(MARKER), MARKER_TEXT)?;
     }
     Ok(())
+}
+
+/// Refuse STORE unless it is a directory, no symlink, that this user owns
+/// and no one else may enter, and neither HOME nor `/`.
+fn owned_store(store: &Path, home: Option<&Path>) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let refuse = |why: &str| Err(std::io::Error::other(format!("world store {}: {why}", store.display())));
+    let meta = host::symlink_metadata(store)?;
+    if !meta.file_type().is_dir() {
+        return refuse("not a directory");
+    }
+    if meta.uid() != host::euid() || meta.permissions().mode() & 0o777 != 0o700 {
+        return refuse("not private to this user (0700)");
+    }
+    let canonical = host::canonicalize(store)?;
+    if canonical == Path::new("/") || home.and_then(|h| host::canonicalize(h).ok()).is_some_and(|h| h == canonical) {
+        return refuse("the home or root directory");
+    }
+    Ok(())
+}
+
+/// Whether STORE holds Romacs's marker, a regular file with its format.
+fn marked(store: &Path) -> bool {
+    host::symlink_metadata(store.join(MARKER)).is_ok_and(|m| m.file_type().is_file())
+        && host::read_to_string(store.join(MARKER)).is_ok_and(|t| t == MARKER_TEXT)
+}
+
+/// The first entry of STORE no store has, if any.
+fn foreign_entry(store: &Path) -> std::io::Result<Option<String>> {
+    for entry in host::read_dir(store)? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if world_file(&name).is_none() && !["ids", "p", MARKER, STORE_LOCK].contains(&name.as_str()) {
+            return Ok(Some(name));
+        }
+    }
+    Ok(None)
+}
+
+/// STORE, checked as `reset` and `prune` need it: owned, private, no
+/// symlink, not HOME or `/` (`owned_store`), and marked as a store.
+fn checked_store(store: &Path, home: Option<&Path>) -> std::io::Result<()> {
+    owned_store(store, home)?;
+    if !marked(store) {
+        return Err(std::io::Error::other(format!("{} has no {MARKER}: not touched", store.display())));
+    }
+    Ok(())
+}
+
+/// Whether PATH is a regular file, its own and not a symlink's target.
+fn regular(path: &Path) -> bool {
+    host::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
+}
+
+/// Whether PATH is a directory, not a symlink to one.
+fn real_dir(path: &Path) -> bool {
+    host::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir())
+}
+
+/// Whether NAME is a digest-cache entry's: `identity_name`'s shape.
+fn identity_entry(name: &str) -> bool {
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    let fields: Vec<&str> = name.split('-').collect();
+    fields.len() == 5 && fields[..3].iter().all(|f| digits(f))
+        && fields[3..].iter().all(|f| f.split_once('.').is_some_and(|(a, b)| digits(a) && digits(b)))
 }
 
 impl World {
@@ -646,23 +722,29 @@ fn world_file(name: &str) -> Option<(&str, &str)> {
 
 /// Forget STORE's failure records: every world's transient failures and
 /// refused manifests, so its next launch builds again. With EVERYTHING,
-/// remove the store's own files and directories, and the store once it is
-/// empty: no file it does not know is touched. How many it removed.
+/// every world and the digest cache and pinned table too, leaving the
+/// marker and the store lock. Only a marked store is touched
+/// (`checked_store`), and in it only regular files and real directories
+/// with a store's names: no symlink is followed. How many it removed.
 pub fn reset(store: &Path, everything: bool) -> std::io::Result<usize> {
-    let mut removed = 0;
-    if !host::probe(host::Probe::IsDir, store) {
+    reset_in(store, everything, host::getenv("HOME").map(PathBuf::from).as_deref())
+}
+
+fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Result<usize> {
+    if host::symlink_metadata(store).is_err() {
         return Ok(0);
     }
+    checked_store(store, home)?;
+    let mut removed = 0;
     for entry in host::read_dir(store)? {
-        let entry = entry?;
-        let name = entry.file_name();
+        let name = entry?.file_name();
         let Some(name) = name.to_str() else { continue };
-        let refused = |path: &Path| host::read_to_string(path).ok()
+        let path = store.join(name);
+        let refused = || host::read_to_string(&path).ok()
             .and_then(|text| serde_json::from_str::<Json>(&text).ok())
             .is_some_and(|m| m["refusals"].as_array().is_some_and(|r| !r.is_empty()));
-        let path = store.join(name);
         match world_file(name) {
-            Some((_, suffix)) if everything || suffix == "failed" || (suffix == "json" && refused(&path)) => {
+            Some((_, suffix)) if regular(&path) && (everything || suffix == "failed" || (suffix == "json" && refused())) => {
                 host::remove_file(&path)?;
                 removed += 1;
             }
@@ -670,19 +752,23 @@ pub fn reset(store: &Path, everything: bool) -> std::io::Result<usize> {
         }
     }
     if everything {
-        for dir in ["ids", "p"] {
-            let dir = store.join(dir);
-            if host::probe(host::Probe::IsDir, &dir) {
-                for entry in host::read_dir(&dir)? {
-                    let path = entry?.path();
-                    if host::probe(host::Probe::IsDir, &path) { host::remove_dir(&path)?; } else { host::remove_file(&path)?; }
+        let ids = store.join("ids");
+        if real_dir(&ids) {
+            for entry in host::read_dir(&ids)? {
+                let name = entry?.file_name().to_string_lossy().into_owned();
+                if identity_entry(&name) && regular(&ids.join(&name)) {
+                    host::remove_file(ids.join(&name))?;
                     removed += 1;
                 }
-                host::remove_dir(&dir)?;
             }
         }
-        if host::read_dir(store)?.next().is_none() {
-            host::remove_dir(store)?;
+        let p = store.join("p");
+        if real_dir(&p) {
+            for name in ["cwd", "tmp", "bin"] {
+                if real_dir(&p.join(name)) && host::remove_dir(p.join(name)).is_ok() {
+                    removed += 1;
+                }
+            }
         }
     }
     Ok(removed)
@@ -694,13 +780,20 @@ impl World {
     /// for files no kept world or executable is, once they are a week old.
     /// The worlds deleted.
     pub fn prune(&self) -> std::io::Result<Vec<String>> {
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref())
+    }
+
+    fn prune_in(&self, home: Option<&Path>) -> std::io::Result<Vec<String>> {
         use std::os::fd::AsRawFd;
         use std::os::unix::fs::MetadataExt;
+        checked_store(&self.store, home)?;
         let mut files: std::collections::BTreeMap<String, Vec<(String, std::fs::Metadata)>> = Default::default();
         for entry in host::read_dir(&self.store)? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if let Some((key, _)) = world_file(&name) && let Ok(meta) = host::symlink_metadata(entry.path()) {
+            if let Some((key, _)) = world_file(&name) && let Ok(meta) = host::symlink_metadata(entry.path())
+                && meta.file_type().is_file()
+            {
                 files.entry(key.to_owned()).or_default().push((name, meta));
             }
         }
@@ -735,11 +828,12 @@ impl World {
         for key in files.keys().filter(|k| !deleted.contains(k)) {
             referenced.extend(host::metadata(self.store.join(format!("{key}.rwi"))).ok().map(|m| identity_name(&m)));
         }
-        if let Ok(entries) = host::read_dir(self.store.join("ids")) {
+        if real_dir(&self.store.join("ids")) && let Ok(entries) = host::read_dir(self.store.join("ids")) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let old = host::symlink_metadata(entry.path()).is_ok_and(|m| now_seconds().saturating_sub(m.mtime().max(0) as u64) > UNUSED);
-                if old && !referenced.contains(&name) {
+                let old = host::symlink_metadata(entry.path())
+                    .is_ok_and(|m| m.file_type().is_file() && now_seconds().saturating_sub(m.mtime().max(0) as u64) > UNUSED);
+                if old && identity_entry(&name) && !referenced.contains(&name) {
                     host::remove_file(entry.path())?;
                 }
             }
@@ -843,6 +937,77 @@ mod tests {
             .map(|(_, _, offset, size)| (offset as u64, &file[offset..offset + size])))
     }
 
+    /// A fresh store for test NAME, as `private_store` makes one.
+    fn marked_store(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romacs-store-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        private_store(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn reset_and_prune_touch_only_a_marked_private_store_and_follow_no_symlink() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let world = |store: &Path| World { store: store.to_owned(), key: [0xaa; 32], recipe: vec![] };
+        let key = "b".repeat(64);
+        // Without the marker: refused, every file left.
+        let plain = std::env::temp_dir().join(format!("romacs-store-{}-plain", std::process::id()));
+        let _ = std::fs::remove_dir_all(&plain);
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(plain.join(format!("{key}.failed")), "{}").unwrap();
+        assert!(reset_in(&plain, true, None).is_err());
+        assert!(world(&plain).prune_in(None).is_err());
+        assert!(plain.join(format!("{key}.failed")).exists());
+        // Marked, but open to others: refused.
+        let open = marked_store("open");
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(reset_in(&open, true, None).is_err());
+        // The home directory, or the root, even marked: refused.
+        let home = marked_store("home");
+        assert!(reset_in(&home, true, Some(&home)).is_err());
+        assert!(world(&home).prune_in(Some(&home)).is_err());
+        assert!(reset_in(Path::new("/"), true, None).is_err());
+        // Symlinks: never followed, their targets intact.
+        let outside = std::env::temp_dir().join(format!("romacs-store-{}-outside", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(outside.join("cwd")).unwrap();
+        std::fs::write(outside.join("1-2-3-4.5-6.7"), "00").unwrap();
+        std::fs::write(outside.join("precious"), "mine").unwrap();
+        let store = marked_store("links");
+        symlink(&outside, store.join("ids")).unwrap();
+        symlink(&outside, store.join("p")).unwrap();
+        symlink(outside.join("precious"), store.join(format!("{key}.rwi"))).unwrap();
+        std::fs::write(store.join(format!("{key}.json")), "{}").unwrap();
+        assert_eq!(reset_in(&store, true, None).unwrap(), 1, "only the regular world file");
+        assert!(outside.join("1-2-3-4.5-6.7").exists() && outside.join("cwd").exists());
+        assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "mine");
+        assert!(!store.join(format!("{key}.json")).exists() && store.join(MARKER).exists());
+        world(&store).prune_in(None).unwrap();
+        assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "mine");
+        for dir in [plain, open, home, outside, store] {
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_store_an_earlier_romacs_made_is_adopted_and_a_foreign_directory_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("romacs-store-{}-adopt", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("ids")).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(dir.join(format!("{}.json", "c".repeat(64))), "{}").unwrap();
+        private_store(&dir).unwrap();
+        assert!(marked(&dir));
+        std::fs::remove_file(dir.join(MARKER)).unwrap();
+        std::fs::write(dir.join("notes.txt"), "mine").unwrap();
+        assert!(private_store(&dir).is_err(), "a directory with other files is no store");
+        assert!(!marked(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn stored(key: &str, days_ago: u64, mib: u64, busy: bool) -> Stored {
         Stored { key: key.repeat(64 / key.len()), used: 100 * 86400 - days_ago * 86400, bytes: mib << 20, busy }
     }
@@ -868,8 +1033,7 @@ mod tests {
     #[test]
     fn pruning_deletes_an_old_worlds_files_and_spares_one_in_use() {
         use std::os::fd::AsRawFd;
-        let dir = std::env::temp_dir().join(format!("romacs-prune-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = marked_store("prune");
         std::fs::create_dir_all(dir.join("ids")).unwrap();
         let current = World { store: dir.clone(), key: [0xaa; 32], recipe: vec![] };
         let (old, held) = ("b".repeat(64), "c".repeat(64));
