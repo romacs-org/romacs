@@ -9,7 +9,7 @@
   "window.c"
  ],
  "gnu_def": "window.c:1224",
- "rust": "src/prims/window.rs:69",
+ "rust": "src/prims/window.rs:79",
  "args": [
   "none"
  ],

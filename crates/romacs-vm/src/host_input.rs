@@ -6,11 +6,11 @@
 //! suspended on the native stack. VM2 has the same shape. The Lisp half of
 //! `read-from-minibuffer' (prims/minibuf.el) calls `romacs--read-host-event'
 //! for each key; that primitive is engine control like `eval' and `load'
-//! (threaded.rs `reentrant_load'): the suspended register stack leaves the
-//! collector's view and collection is inhibited, so a redisplay that runs Lisp
-//! (a mode-line `:eval') executes in its own engine without moving anything a
-//! suspended frame holds. Nothing here holds a `Value' across the wait: the
-//! host sees only plain frame data and answers with plain events.
+//! (threaded.rs `reentrant_load'): the waiting engines are suspended, their
+//! registers and code traced, so a redisplay that runs Lisp (a mode-line
+//! `:eval') executes in its own engine and may collect. Nothing here holds a
+//! `Value' across the wait: the host sees only plain frame data and answers
+//! with plain events.
 //!
 //! A VM with no host attached keeps batch GNU's behaviour: the primitive
 //! returns nil (end of input) and `read-from-minibuffer' still signals

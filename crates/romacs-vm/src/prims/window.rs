@@ -61,6 +61,16 @@ fn window_new_normal(cx; optional window: Value) {
     cx.windows().window_new_normal(window)
 }}
 
+defsubr! { name = "force-window-update", gnu = "window.c:4492", effect = Global,
+fn force_window_update(cx; optional object: Value) {
+    cx.windows().force_window_update(object)
+}}
+
+defsubr! { name = "redraw-display", gnu = "dispnew.c:3252", effect = Global,
+fn redraw_display(cx) {
+    cx.windows().redraw_display()
+}}
+
 defsubr! { name = "window-mode-line-height", gnu = "window.c:1215", effect = Reads,
 fn window_mode_line_height(cx; optional window: Value) {
     cx.windows().window_mode_line_height(window)

@@ -275,23 +275,24 @@ fn run_hooks_walk_state_is_forwarded_by_collections_inside_hooks() {
     assert_eq!(eval(&mut vm, same), Ok("(t t 2)".into()));
 }
 
-// DIVERGENCES.md VM2-RUNHOOKS1: VM2's `funcall' cannot call a `(lambda ...)'
-// list, so the corpus rows that reach one are pinned and cannot say WHICH
-// object `run-hooks' handed to `funcall'. These do: GNU run_hook_with_args
-// calls a FUNCTIONP value whole, calls a lambda-headed global value whole,
-// and walks any other list, calling each element (here a lambda list) whole.
+// GNU run_hook_with_args calls a FUNCTIONP value whole, calls a
+// lambda-headed global value whole, and walks any other list, calling each
+// element (here a lambda list) whole. Each call is logged, so these say
+// WHICH object `run-hooks' handed to `funcall'.
 #[test]
 fn run_hooks_calls_lambda_lists_whole() {
     let mut vm = Vm::new();
     for (source, expected) in [
-        ("(progn (set 'rh-h '(lambda () 1)) (condition-case e (run-hooks 'rh-h) (error e)))",
-         "(void-function (lambda nil 1))"),
-        ("(progn (set 'rh-g '(lambda () 2))
+        ("(progn (set 'rh-log nil) (set 'rh-h '(lambda () (set 'rh-log (cons 1 rh-log))))
+                 (list (run-hooks 'rh-h) rh-log))",
+         "(nil (1))"),
+        ("(progn (set 'rh-log nil) (set 'rh-g '(lambda () (set 'rh-log (cons 2 rh-log))))
                  (with-temp-buffer (make-local-variable 'rh-g) (set 'rh-g (list t))
-                   (condition-case e (run-hooks 'rh-g) (error e))))",
-         "(void-function (lambda nil 2))"),
-        ("(progn (set 'rh-l (list '(lambda () 3))) (condition-case e (run-hooks 'rh-l) (error e)))",
-         "(void-function (lambda nil 3))"),
+                   (list (run-hooks 'rh-g) rh-log)))",
+         "(nil (2))"),
+        ("(progn (set 'rh-log nil) (set 'rh-l (list '(lambda () (set 'rh-log (cons 3 rh-log)))))
+                 (list (run-hooks 'rh-l) rh-log))",
+         "(nil (3))"),
     ] {
         assert_eq!(eval(&mut vm, source), Ok(expected.into()), "{source}");
     }

@@ -24,6 +24,23 @@ impl Leaf<'_> {
         }))
     }
 
+    /// The current buffer's overlays in GNU's interval-tree order
+    /// (buffer.c:4045): by start, and among equal starts newest first.
+    pub fn current_overlays(&mut self) -> std::result::Result<Vec<Value>, Fault> {
+        let buffer = self.current_buffer()?;
+        let mut overlays = match self.vm.object(buffer).map_err(|e| Fault::Error(e.to_string()))? {
+            Object::Buffer(b) => b.intervals.query_with_end(0, b.anchors.extent(), false, true, &b.anchors).0,
+            _ => return Ok(Vec::new()),
+        };
+        let mut keyed = Vec::with_capacity(overlays.len());
+        for overlay in overlays.drain(..) {
+            let (start, _) = self.vm.overlay_range(overlay).map_err(Fault::Error)?.unwrap_or((0, 0));
+            keyed.push((start, std::cmp::Reverse(overlay.0), overlay));
+        }
+        keyed.sort_unstable_by_key(|&(start, newest, _)| (start, newest));
+        Ok(keyed.into_iter().map(|(_, _, overlay)| overlay).collect())
+    }
+
     pub fn delete_all_overlays(&mut self, buffer: Value) -> std::result::Result<Value, Fault> {
         let buffer = self.decode_buffer(buffer)?;
         let overlays = match self

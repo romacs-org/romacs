@@ -29,5 +29,5 @@
   "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-combination-limit p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p))))))",
   "(let ((window-combination-limit t)) (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (eq (window-combination-limit p) t)))"
  ],
- "rust": "src/prims/frame.rs:26"
+ "rust": "src/prims/frame.rs:78"
 }

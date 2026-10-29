@@ -57,18 +57,75 @@ fn garbage_collect_forwards_live_call_state() {
     assert_eq!(result.unwrap().display().unwrap(), "((11 22) [33 44])");
 }
 
+/// GNU's inhibited `garbage-collect' returns nil (alloc.c:6044). Romacs
+/// inhibits where a native frame holds untraced Values (DIVERGENCES
+/// VM2-GC-INHIBITED): a watcher a primitive's write runs, and macro
+/// expansion inside an open compiler builder. A pacing floor does not
+/// inhibit an explicit collection.
 #[test]
 fn garbage_collect_obeys_existing_inhibition() {
     let mut vm = Vm::new();
+    // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+    vm.set_gc_stress(0);
     vm.set_collection_floor(usize::MAX);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    assert_ne!(eval(&mut vm, "(garbage-collect)"), "nil", "GC_PACING_IS_NOT_INHIBITION");
+    eval(&mut vm, "(defvar gi-v nil)");
+    eval(&mut vm, "(add-variable-watcher 'gi-v (lambda (&rest _) (setq gi-r (garbage-collect))))");
+    eval(&mut vm, "(defmacro gi-m () (list 'quote (garbage-collect)))");
     let before = vm.heap_stats().collections;
-    assert_eq!(
-        vm.eval_source("(garbage-collect)")
-            .unwrap()
-            .display()
-            .unwrap(),
-        "nil",
-        "GC_INHIBITED_RESULT"
-    );
+    assert_eq!(eval(&mut vm, "(progn (set 'gi-v 1) gi-r)"), "nil", "GC_INHIBITED_RESULT");
+    eval(&mut vm, "(defun gi-f () (gi-m))");
+    assert_eq!(eval(&mut vm, "(gi-f)"), "nil", "GC_INHIBITED_RESULT");
     assert_eq!(vm.heap_stats().collections, before, "GC_INHIBITED_COUNT");
+    // The same watcher collects from a compiled `setq', whose engine suspends.
+    assert_ne!(eval(&mut vm, "(progn (setq gi-v 2) gi-r)"), "nil", "GC_WATCHED_SETQ");
+}
+
+fn churn(vm: &mut Vm, conses: u32) -> u64 {
+    let before = vm.heap_stats().collections;
+    vm.eval_source(&format!("(let ((i 0)) (while (< i {conses}) (cons i nil) (setq i (1+ i))))")).unwrap();
+    vm.heap_stats().collections - before
+}
+
+/// GNU's pacing variables (alloc.c:5740-5809) decide when allocation
+/// collects, read live: a binding of either takes effect at once.
+#[test]
+fn gc_cons_threshold_and_percentage_pace_collection() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    assert_eq!(eval(&mut vm, "(list gc-cons-threshold gc-cons-percentage)"), "(800000 0.1)", "GNU's defaults");
+    // 160000 bytes is 10000 objects; nil drops the proportional term.
+    vm.eval_source("(setq gc-cons-threshold 160000 gc-cons-percentage nil)").unwrap();
+    let plain = churn(&mut vm, 200_000);
+    assert!(plain >= 10, "a 10000-object threshold collects: {plain}");
+    let before = vm.heap_stats().collections;
+    let restored = eval(&mut vm, "(progn (let ((gc-cons-threshold most-positive-fixnum)) (let ((i 0)) (while (< i 200000) (cons i nil) (setq i (1+ i))))) gc-cons-threshold)");
+    assert_eq!(restored, "160000", "the binding is undone");
+    // Only the request boundary after the binding ends may collect, where
+    // the same churn collected ten times above.
+    assert!(vm.heap_stats().collections <= before + 1, "a raised threshold defers collection");
+    // A proportional term above the threshold paces instead: 0.12, scaled
+    // to 1.8, waits 18 traced heaps.
+    vm.eval_source("(setq gc-cons-percentage 0.12 gr-live (make-list 20000 nil))").unwrap();
+    let proportional = churn(&mut vm, 200_000);
+    assert!(proportional * 3 <= plain, "a raised percentage defers collection: {proportional} vs {plain}");
+    // Larger settings (gcmh-style 0.2 to 1.0, or absurd ones) are held at
+    // that ceiling: they defer collection, and it still happens.
+    let mut deferred = vec![];
+    for p in ["0.2", "1.0", "1e9"] {
+        vm.eval_source(&format!("(setq gc-cons-percentage {p})")).unwrap();
+        deferred.push(churn(&mut vm, 2_000_000));
+    }
+    vm.eval_source("(setq gc-cons-percentage 0.1)").unwrap();
+    let default = churn(&mut vm, 2_000_000);
+    assert!(deferred.iter().all(|&n| n >= 1 && n * 2 <= default), "clamped deferral: {deferred:?} vs default {default}");
+    // The same ceiling, give or take where each churn starts in a cycle.
+    assert!(deferred.iter().max().unwrap() - deferred.iter().min().unwrap() <= 1, "the ceiling holds: {deferred:?}");
+    // Non-integer thresholds are refused, as GNU's DEFVAR_INT is.
+    assert_eq!(eval(&mut vm, "(condition-case e (setq gc-cons-threshold 1.5) (error (car e)))"), "wrong-type-argument");
+    // An embedder's floor replaces both variables.
+    vm.set_collection_floor(1);
+    assert!(churn(&mut vm, 200_000) >= 2, "a floor of 1 collects as the heap doubles");
 }

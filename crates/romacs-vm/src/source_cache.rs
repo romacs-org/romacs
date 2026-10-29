@@ -340,12 +340,9 @@ impl Vm {
         let slot = self.macro_alias_end(head);
         if !self.macros.contains(&slot) && self.autoload_macro(self.slots[slot].function) {
             let fundef = self.slots[slot].function;
-            let threshold = self.gc_threshold;
-            self.gc_threshold = usize::MAX;
             let symbol = Value::reference(slot + 1, 7);
             let macro_only = self.intern("macro");
             let loaded = self.autoload_do_load(fundef, symbol, macro_only);
-            self.gc_threshold = threshold;
             if let Err(error) = loaded {
                 // Compilation fails here with the load's condition as text;
                 // its structured escape belongs to no engine and must not
@@ -375,10 +372,10 @@ impl Vm {
         self.expanded_macros.push((slot, self.slots[slot].version));
         let function = self.slots[slot].function;
         self.expanding.push(slot);
-        // Builder constants are not installed GC roots yet. No macro execution
-        // may collect while an outer compiler builder contains unrooted Values.
-        let threshold = self.gc_threshold;
-        self.gc_threshold = usize::MAX;
+        // Inside a compilation, the open builder holds collection while it
+        // keeps unrooted constants. At a load's top level nothing does: ITEMS
+        // are forms, whose objects are rooted, and the expander roots
+        // FUNCTION and the arguments.
         let result = (|| {
             let arguments = items[1..].iter().map(|form| self.literal(form)).collect::<Result<Vec<_>>>()?;
             // R215: in GNU's non-eager regime an expansion runs when the form
@@ -401,11 +398,9 @@ impl Vm {
                 }),
                 value => value,
             }?;
-            // Collection is inhibited until the outer compilation has moved
-            // any object of the expansion into a traced constant.
+            // Converting the expansion runs no Lisp; its objects are rooted.
             self.expansion_form(value, 0)
         })();
-        self.gc_threshold = threshold;
         self.expanding.pop();
         if let Ok(form) = &result {
             collect_symbols(form, &mut self.expanded_symbols);

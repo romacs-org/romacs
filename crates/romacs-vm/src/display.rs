@@ -55,6 +55,11 @@ impl DisplayState {
             self.version = self.version.wrapping_add(1);
         }
     }
+    /// Republish window ID in full next time (force-window-update).
+    pub(super) fn repaint_window(&mut self, id: u64) {
+        self.previous.remove(&id);
+        self.version = self.version.wrapping_add(1);
+    }
     /// Forget a deleted window's last publication. Ids are monotonic and never
     /// reused, so without this the map grows for the life of the VM.
     pub(super) fn forget_window(&mut self, id: u64) {
