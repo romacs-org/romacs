@@ -6,6 +6,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 // A process-wide identity never reuses an ID, including across VMs.
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
+/// The next generated identity, which a world image records.
+pub(crate) fn next_generated() -> u64 {
+    NEXT_TEMP.load(Ordering::Relaxed)
+}
+
+/// Never hand out an identity below NEXT again: a restored world holds them.
+pub(crate) fn raise_generated(next: u64) {
+    NEXT_TEMP.fetch_max(next, Ordering::Relaxed);
+}
+
 fn s(name: &str) -> Form {
     Form::Sym(name.into())
 }

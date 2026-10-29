@@ -16,6 +16,12 @@ enum Phase {
     Parent(Value),
     Emitted(Value),
 }
+romacs_snapshot::snapshot_enum!(Phase {
+    Phase::Read => (),
+    Phase::Child => (),
+    Phase::Parent(f0) => (f0),
+    Phase::Emitted(f0) => (f0),
+});
 #[derive(Clone)]
 struct Frame {
     node: CharTableNodeHandle,
@@ -26,6 +32,7 @@ struct Frame {
     phase: Phase,
     decoder: bool,
 }
+romacs_snapshot::snapshot_struct!(Frame { node, top, from, to, index, phase, decoder });
 impl Frame {
     fn new(node: CharTableNodeHandle, top: Value, from: usize, to: i64) -> Self {
         let n = node.lock().unwrap();
@@ -53,6 +60,7 @@ struct Chartab {
     range: Option<Value>,
     final_decoder: bool,
 }
+romacs_snapshot::snapshot_struct!(Chartab { table, frames, val, from, to, final_emitted, range, final_decoder });
 impl Chartab {
     fn new(cx: &mut Leaf<'_>, table: Value) -> std::result::Result<Self, Fault> {
         cx.map_table_validate(table)?;
@@ -305,6 +313,15 @@ enum MapFrame {
         table: Chartab,
     },
 }
+romacs_snapshot::snapshot_enum!(MapFrame {
+    MapFrame::Resolve { object, required } => (object, required),
+    MapFrame::Outer(f0) => (f0),
+    MapFrame::Embedded(f0) => (f0),
+    MapFrame::Tail(f0) => (f0),
+    MapFrame::Advance(f0) => (f0),
+    MapFrame::Vector { tail, vector, index, len } => (tail, vector, index, len),
+    MapFrame::Table { tail, table } => (tail, table),
+});
 pub(super) enum Advance {
     Binding(Value, Value),
     Load(Value, Value),
@@ -316,6 +333,7 @@ pub(super) struct Cursor {
     internal: bool,
     result: Value,
 }
+romacs_snapshot::snapshot_struct!(Cursor { stack, internal, result });
 impl Cursor {
     pub(super) fn new(map: Value, internal: bool) -> Self {
         Self {

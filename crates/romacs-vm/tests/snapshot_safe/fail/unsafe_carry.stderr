@@ -1,0 +1,11 @@
+error[E0277]: the trait bound `fn(): SnapshotSafe` is not satisfied
+ --> tests/snapshot_safe/fail/unsafe_carry.rs:3:48
+  |
+3 |     let _ = romacs_vm::world::image::capture::<fn()>;
+  |                                                ^^^^ the trait `SnapshotSafe` is not implemented for `fn()`
+  |
+note: required by a bound in `capture`
+ --> src/world/image.rs
+  |
+  | pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, Strin...
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `capture`

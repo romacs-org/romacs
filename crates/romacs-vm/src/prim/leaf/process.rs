@@ -479,7 +479,7 @@ impl Leaf<'_> {
             Ok(Some(error)) | Err(error) => error.raw_os_error().unwrap_or(libc::ECONNREFUSED),
         };
         while errno != 0 && let Some(next) = channel.connecting.as_mut().filter(|rest| !rest.is_empty()).map(|rest| rest.remove(0)) {
-            match sp::connect_nonblocking(next).and_then(|fd| Ok((sp::dup(&fd)?, fd))) {
+            match crate::host::connect_nonblocking(next).and_then(|fd| Ok((sp::dup(&fd)?, fd))) {
                 Ok((outfd, infd)) => {
                     channel.infd = Some(infd);
                     channel.outfd = Some(outfd);
@@ -699,7 +699,7 @@ impl Leaf<'_> {
             return Ok(());
         }
         let network = self.process_type_is(proc, "network");
-        let null = std::fs::OpenOptions::new().write(true).open("/dev/null")
+        let null = crate::host::open_output("/dev/null", crate::host::OpenOptions::new().write(true))
             .map_err(|e| self.file_errno("Opening null device", &e))?;
         if let Some(channel) = self.channel_mut(proc) {
             if let Some(fd) = &channel.outfd
@@ -744,9 +744,9 @@ impl Leaf<'_> {
         let (pty_in, pty_out) = { let p = self.process(proc)?; (p.pty_in, p.pty_out) };
         let mut pty = None;
         if pty_in || pty_out {
-            match sp::allocate_pty() {
+            match crate::host::allocate_pty() {
                 Ok((master, name)) => {
-                    let tty = sp::open_tty(&name).map_err(|e| self.file_errno("Opening pty", &e))?;
+                    let tty = crate::host::open_tty(&name).map_err(|e| self.file_errno("Opening pty", &e))?;
                     pty = Some((master, tty, name));
                 }
                 // allocate_pty failing leaves pipes for both directions.
@@ -761,7 +761,7 @@ impl Leaf<'_> {
             forkin = tty.as_raw_fd();
             channel.outfd = Some(sp::dup(master).map_err(|e| self.file_errno("Creating pipe", &e))?);
         } else {
-            let (read, write) = sp::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
+            let (read, write) = crate::host::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
             forkin = read.as_raw_fd();
             child_ends.push(read);
             channel.outfd = Some(write);
@@ -770,7 +770,7 @@ impl Leaf<'_> {
             forkout = tty.as_raw_fd();
             channel.infd = Some(sp::dup(master).map_err(|e| self.file_errno("Creating pipe", &e))?);
         } else {
-            let (read, write) = sp::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
+            let (read, write) = crate::host::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
             forkout = write.as_raw_fd();
             child_ends.push(write);
             channel.infd = Some(read);
@@ -796,7 +796,7 @@ impl Leaf<'_> {
         let spawn = sp::Spawn { argv, env, dir, stdin: forkin, stdout: forkout, stderr: forkerr, controlling_tty: pty_in };
         let pid = sp::spawn(&spawn).map_err(|e| self.file_errno("Doing vfork", &e))?;
         drop(child_ends);
-        channel.pidfd = sp::pidfd_open(pid);
+        channel.pidfd = crate::host::pidfd_open(pid);
         channel.pid = pid;
         let filter = self.process(proc)?.get(Slot::Filter);
         let command = self.process(proc)?.get(Slot::Command);
@@ -819,8 +819,8 @@ impl Leaf<'_> {
     /// create_pty: a pty-only process (make-process without :command).
     pub(crate) fn process_pty_only(&mut self, proc: Value) -> Out {
         let (pty_in, pty_out) = { let p = self.process(proc)?; (p.pty_in, p.pty_out) };
-        if (pty_in || pty_out) && let Ok((master, name)) = sp::allocate_pty() {
-            let tty = sp::open_tty(&name).map_err(|e| self.file_errno("Opening pty", &e))?;
+        if (pty_in || pty_out) && let Ok((master, name)) = crate::host::allocate_pty() {
+            let tty = crate::host::open_tty(&name).map_err(|e| self.file_errno("Opening pty", &e))?;
             sp::set_nonblocking(master.as_raw_fd()).map_err(|e| self.file_errno("Opening pty", &e))?;
             let mut channel = Channel::default();
             channel.outfd = Some(sp::dup(&master).map_err(|e| self.file_errno("Opening pty", &e))?);
@@ -841,8 +841,8 @@ impl Leaf<'_> {
     }
     /// make-pipe-process's two pipes.
     pub(crate) fn process_pipe(&mut self, proc: Value) -> Out {
-        let (stdin_read, outfd) = sp::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
-        let (infd, stdout_write) = sp::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
+        let (stdin_read, outfd) = crate::host::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
+        let (infd, stdout_write) = crate::host::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
         for fd in [&infd, &outfd] {
             sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Creating pipe", &e))?;
         }
@@ -899,7 +899,7 @@ impl Leaf<'_> {
             continued = Value::TRUE;
         }
         if self.process(proc)?.alive {
-            let _ = sp::kill(-gid, signo);
+            let _ = crate::host::kill(-gid, signo);
         }
         Ok(continued)
     }
@@ -918,7 +918,7 @@ impl Leaf<'_> {
         if alive {
             let p = self.process_mut(proc);
             p.alive = false;
-            let _ = sp::kill(-pid, libc::SIGKILL);
+            let _ = crate::host::kill(-pid, libc::SIGKILL);
             self.vm.subprocesses.deleted.push((pid, None));
         }
         if !self.process_infd(proc) {
@@ -949,9 +949,8 @@ impl Leaf<'_> {
     /// listen (SERVER) or connect to HOST:SERVICE in FAMILY. Returns
     /// (LOCAL REMOTE PORT); signals GNU's file-error with CONTACT.
     pub(crate) fn process_network(&mut self, proc: Value, server: bool, nowait: bool, host: String, port: u16, family: Option<bool>, contact: Value) -> Out {
-        use std::net::ToSocketAddrs;
-        let addrs: Vec<std::net::SocketAddr> = match (host.as_str(), port).to_socket_addrs() {
-            Ok(addrs) => addrs.filter(|a| family.is_none_or(|v6| a.is_ipv6() == v6)).collect(),
+        let addrs: Vec<std::net::SocketAddr> = match crate::host::resolve(&host, port) {
+            Ok(addrs) => addrs.into_iter().filter(|a| family.is_none_or(|v6| a.is_ipv6() == v6)).collect(),
             Err(_) => Vec::new(),
         };
         if addrs.is_empty() {
@@ -966,13 +965,13 @@ impl Leaf<'_> {
         let mut addrs = addrs.into_iter();
         for addr in addrs.by_ref() {
             let result = if server {
-                std::net::TcpListener::bind(addr).and_then(|l| Ok((l.local_addr()?, None, OwnedFd::from(l))))
+                crate::host::listen(addr).and_then(|l| Ok((l.local_addr()?, None, OwnedFd::from(l))))
             } else if nowait {
                 // GNU's remote is the address tried; the peer is not known yet.
-                sp::connect_nonblocking(addr).map(std::net::TcpStream::from)
+                crate::host::connect_nonblocking(addr).map(std::net::TcpStream::from)
                     .and_then(|s| Ok((s.local_addr()?, Some(addr), OwnedFd::from(s))))
             } else {
-                std::net::TcpStream::connect(addr).and_then(|s| Ok((s.local_addr()?, Some(s.peer_addr()?), OwnedFd::from(s))))
+                crate::host::connect(addr).and_then(|s| Ok((s.local_addr()?, Some(s.peer_addr()?), OwnedFd::from(s))))
             };
             match result {
                 Ok((local, remote, fd)) => { socket = Some((fd, local, remote)); break; }
@@ -1066,15 +1065,15 @@ impl Leaf<'_> {
                                    output: CallOutput, error: CallOutput, wait: bool) -> Out {
         use std::os::unix::ffi::OsStrExt;
         let path = |b: &[u8]| std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b));
-        let input = std::fs::File::open(path(infile)).map_err(|e| {
+        let input = crate::host::open_child_input(path(infile)).map_err(|e| {
             let name = self.make_string(infile.to_vec(), false);
             self.file_errno_value("Opening process input file", &e, name)
         })?;
         let open_out = |cx: &mut Self, spec: &CallOutput, what: &str| -> Result<Option<OwnedFd>> {
             Ok(match spec {
-                CallOutput::Discard => Some(std::fs::OpenOptions::new().write(true).open("/dev/null")
+                CallOutput::Discard => Some(crate::host::open_output("/dev/null", crate::host::OpenOptions::new().write(true))
                     .map_err(|e| cx.file_errno("Opening null device", &e))?.into()),
-                CallOutput::File(name) => Some(std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(path(name))
+                CallOutput::File(name) => Some(crate::host::open_output(path(name), crate::host::OpenOptions::new().write(true).create(true).truncate(true))
                     .map_err(|e| { let file = cx.make_string(name.clone(), false); cx.file_errno_value(what, &e, file) })?.into()),
                 CallOutput::Pipe | CallOutput::Same => None,
             })
@@ -1083,7 +1082,7 @@ impl Leaf<'_> {
         let out_fd = match open_out(self, &output, "Opening process output file")? {
             Some(fd) => fd,
             None => {
-                let (read, write) = sp::pipe().map_err(|e| self.file_errno("Creating process pipe", &e))?;
+                let (read, write) = crate::host::pipe().map_err(|e| self.file_errno("Creating process pipe", &e))?;
                 reader = Some(read);
                 write
             }

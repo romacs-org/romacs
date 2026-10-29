@@ -89,6 +89,10 @@ pub enum Height {
     Absolute(i64),
     Relative(f64),
 }
+romacs_snapshot::snapshot_enum!(Height {
+    Height::Absolute(f0) => (f0),
+    Height::Relative(f0) => (f0),
+});
 
 impl Height {
     /// GNU `merge_face_heights` (xfaces.c): absolute wins; a scale applied to
@@ -121,6 +125,14 @@ pub enum Value {
     /// A structured underline or box plist, or a stipple bitmap spec.
     Structured(BoundedDatum),
 }
+romacs_snapshot::snapshot_enum!(Value {
+    Value::Str(f0) => (f0),
+    Value::Symbol(f0) => (f0),
+    Value::Height(f0) => (f0),
+    Value::Bool(f0) => (f0),
+    Value::Int(f0) => (f0),
+    Value::Structured(f0) => (f0),
+});
 
 impl Value {
     pub fn to_datum(&self) -> Datum {
@@ -153,6 +165,11 @@ pub enum Slot {
     Reset,
     Set(Value),
 }
+romacs_snapshot::snapshot_enum!(Slot {
+    Slot::Unspecified => (),
+    Slot::Reset => (),
+    Slot::Set(f0) => (f0),
+});
 
 impl Slot {
     fn is_relative(&self) -> bool {
@@ -189,6 +206,7 @@ impl Slot {
 pub struct Attrs {
     slots: [Slot; ATTRIBUTE_COUNT],
 }
+romacs_snapshot::snapshot_struct!(Attrs { slots });
 
 impl Attrs {
     pub fn get(&self, attr: Attribute) -> &Slot {

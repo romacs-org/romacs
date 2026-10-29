@@ -428,7 +428,7 @@ fn replace_runs(cx, beg: Value, end: Value, source: Value, too_expensive: Value,
     let deadline = if max_secs == Value::NIL { None } else {
         let secs = cx.float_value(max_secs)?;
         // A limit past what a time_t holds is no limit.
-        (secs < 9.2e18).then(|| std::time::Instant::now() + std::time::Duration::from_secs_f64(secs.max(0.0)))
+        (secs < 9.2e18).then(|| crate::host::monotonic() + std::time::Duration::from_secs_f64(secs.max(0.0)))
     };
     let expensive = position(too_expensive)? as isize;
     let Some((deletions, insertions)) = super::compareseq::compare(&a, &b, expensive, deadline) else {

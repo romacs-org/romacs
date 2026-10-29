@@ -10,6 +10,7 @@ pub struct HeapStats {
     pub live_bytes: usize,
     pub capacity_bytes: usize,
 }
+romacs_snapshot::snapshot_struct!(HeapStats { collections, allocations, reclaimed, live_objects, live_bytes, capacity_bytes });
 
 /// Values a native frame keeps across a call that can run Lisp: a span of
 /// `external_roots`, pushed before the call and read back by index after it,
@@ -45,6 +46,7 @@ pub(crate) struct Stress {
     /// The collection about to run is a forced one.
     shift: bool,
 }
+romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift });
 
 /// The state nested Lisp runs push and pop on the VM: suspended engines and
 /// their register stacks, root frames, collection holds, the running-engine
@@ -115,6 +117,12 @@ impl Stress {
     pub(crate) fn from_env() -> Self {
         let every = std::env::var("ROMACS_GC_STRESS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
         Self { every, ..Self::default() }
+    }
+    /// This process's test mode, from its environment, for a VM a world
+    /// carried here: the fillers the last collection left stay counted.
+    pub(crate) fn rearm(&mut self) {
+        let fresh = Self::from_env();
+        (self.every, self.entries) = (fresh.every, fresh.entries);
     }
     /// Count one Lisp entry; true when this one must collect.
     pub(crate) fn due(&mut self) -> bool {

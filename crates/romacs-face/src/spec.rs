@@ -21,6 +21,10 @@ pub enum Background {
     Light,
     Dark,
 }
+romacs_snapshot::snapshot_enum!(Background {
+    Background::Light => (),
+    Background::Dark => (),
+});
 
 impl Background {
     /// The mode GNU's `frame--current-background-mode` derives from an
@@ -68,6 +72,7 @@ pub struct FaceDef {
     /// `:extend` into a theme spec that leaves it unspecified.
     pub(crate) extend_mentioned: bool,
 }
+romacs_snapshot::snapshot_struct!(FaceDef { attrs, inherit, extend_mentioned });
 
 impl FaceDef {
     pub fn attrs(&self) -> &Attrs {
@@ -214,6 +219,7 @@ pub struct Collapsed {
     light: Option<Arc<FaceDef>>,
     dark: Option<Arc<FaceDef>>,
 }
+romacs_snapshot::snapshot_struct!(Collapsed { light, dark });
 
 impl Collapsed {
     /// The definition for `mode`, or `None` when no branch matched (GNU's

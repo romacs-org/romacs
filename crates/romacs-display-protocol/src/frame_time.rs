@@ -31,7 +31,7 @@
 //! `EventTime::now()` and no `EventTime::elapsed()` — `elapsed()` is exactly
 //! the hidden clock read this module exists to remove.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Read the platform clock and mint an observation.
 ///
@@ -42,17 +42,17 @@ use std::time::{Duration, Instant};
 /// [`FrameSample`].
 #[must_use]
 pub fn observe_platform_now() -> EventTime {
-    EventTime(Instant::now())
+    EventTime(std::time::Instant::now())
 }
 
 /// A moment that has already been observed to occur.
 ///
 /// Deliberately supports no arithmetic operators and no comparison against a
-/// bare [`Instant`]: the only ways to relate two points in time are the named
-/// methods here and on [`FrameSample`], which makes every cross-domain
-/// comparison in the codebase greppable.
+/// bare [`Instant`](std::time::Instant): the only ways to relate two points in
+/// time are the named methods here and on [`FrameSample`], which makes every
+/// cross-domain comparison in the codebase greppable.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct EventTime(Instant);
+pub struct EventTime(std::time::Instant);
 
 impl EventTime {
     /// Duration from `earlier` to `self`, saturating at zero.
@@ -81,7 +81,7 @@ impl EventTime {
         self.0.checked_add(after).map(EventTime)
     }
 
-    /// Unwrap to a raw [`Instant`].
+    /// Unwrap to a raw [`Instant`](std::time::Instant).
     ///
     /// ADAPTER BOUNDARY ONLY. This exists for the handful of places that must
     /// hand a point in time to a foreign API — winit's `ControlFlow::WaitUntil`
@@ -89,17 +89,18 @@ impl EventTime {
     /// hole this module closes; use [`EventTime::saturating_since`] or a
     /// [`FrameSample`] method instead.
     #[must_use]
-    pub fn into_instant(self) -> Instant {
+    pub fn into_instant(self) -> std::time::Instant {
         self.0
     }
 
-    /// Wrap a raw [`Instant`] that some other clock already observed.
+    /// Wrap a raw [`Instant`](std::time::Instant) that some other clock
+    /// already observed.
     ///
     /// ADAPTER BOUNDARY ONLY, for foreign APIs that hand back an `Instant`
     /// (a platform presentation timestamp, a condvar deadline). Never call this
     /// with `Instant::now()` — that is [`observe_platform_now`], which says so.
     #[must_use]
-    pub fn from_observed_instant(instant: Instant) -> Self {
+    pub fn from_observed_instant(instant: std::time::Instant) -> Self {
         EventTime(instant)
     }
 }

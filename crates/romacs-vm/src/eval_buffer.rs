@@ -190,11 +190,11 @@ impl Vm {
                 vec![PathBuf::from(format!("{}.el", base.display())), base]
             };
             for candidate in candidates {
-                if candidate.is_file() {
+                if crate::host::probe(crate::host::Probe::IsFile, &candidate) {
                     let absolute = if candidate.is_absolute() {
                         candidate
                     } else {
-                        std::env::current_dir()
+                        crate::host::current_dir()
                             .map_err(|e| e.to_string())?
                             .join(candidate)
                     };

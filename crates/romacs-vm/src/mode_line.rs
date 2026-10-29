@@ -418,7 +418,7 @@ impl Vm {
                                 let spec = match self.eval_form_raw(&expression) {
                                     Ok(value) => self.mode_line_form(value),
                                     Err(error) => {
-                                        self.display_state.diagnostics.push(format!(":eval: {error}"));
+                                        self.display_state.diagnostics.get_mut().push(format!(":eval: {error}"));
                                         Form::Sym("nil".into())
                                     }
                                 };

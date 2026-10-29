@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "28fc7b8240a34eb782926117963d260068ee6bcf67192f4a0e405f04c81a8886",
+  "input_hash": "15f3dcf75dd638321e2e52632b9e944e4762e8573a3bb982190a0e46f0d687ae",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,9 +12,9 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 273,
-  "symbols": 630,
-  "rows_without_symbols": 15
+  "rows": 275,
+  "symbols": 631,
+  "rows_without_symbols": 16
  },
  "by_symbol": {
   "#x400000": [
@@ -42,7 +42,7 @@
    70
   ],
   "[:class:]": [
-   272
+   274
   ],
   "abort-minibuffers": [
    64
@@ -435,8 +435,8 @@
    126,
    127,
    151,
-   264,
-   268
+   266,
+   270
   ],
   "define-category": [
    227
@@ -553,18 +553,21 @@
    258
   ],
   "downcase_char_code_emacs_compat": [
-   271
+   273
   ],
   "elt": [
    22,
    23,
    24
   ],
+  "emacs-build-time": [
+   263
+  ],
   "emacs-lisp-mode": [
    159
   ],
   "emacs_downcase_compat": [
-   271
+   273
   ],
   "enable-recursive-minibuffers": [
    244
@@ -651,23 +654,23 @@
    124,
    125,
    126,
-   264,
-   265,
-   268
+   266,
+   267,
+   270
   ],
   "face-family": [
    122,
-   267
+   269
   ],
   "face-font": [
    121,
-   266
+   268
   ],
   "face-remapping-alist": [
    116,
    125,
    126,
-   270
+   272
   ],
   "featurep": [
    88,
@@ -1618,7 +1621,7 @@
   ],
   "reset": [
    124,
-   263
+   265
   ],
   "resize-mini-windows": [
    256
@@ -1744,10 +1747,10 @@
    120,
    121,
    122,
-   265,
-   266,
    267,
-   269
+   268,
+   269,
+   271
   ],
   "set-file-times": [
    8
@@ -1818,10 +1821,10 @@
    90
   ],
   "skip-chars-backward": [
-   272
+   274
   ],
   "skip-chars-forward": [
-   272
+   274
   ],
   "sleep-for": [
    174
@@ -6698,6 +6701,34 @@
     "select-safe-coding-system-interactively",
     "romacs-unsafe-coding"
    ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-WORLD1",
+   "source": "DIVERGENCES.md",
+   "section": "World snapshots",
+   "observable": false,
+   "planned": false,
+   "mechanism": "`emacs-build-time` in a VM restored from a world",
+   "gnu": "A dumped GNU reports the time its dump was made: `version.el:79-84` runs in loadup, and pdumper restores its value without evaluating it again.",
+   "romacs": "A VM booted from source reports its own clock at `version.el`; one restored from a world reports the time the world was built, as a dumped GNU does.",
+   "why": "**Package-observable** only through that one value: every other value a restored VM holds is a function of the binary, the recipe and its keyed host facts, or is rebuilt (`romacs-world-restart`). gnu-tests/tools/world-diff-allow.txt lists it.",
+   "symbols": [
+    "emacs-build-time"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-WORLD2",
+   "source": "DIVERGENCES.md",
+   "section": "World snapshots",
+   "observable": false,
+   "planned": false,
+   "mechanism": "Where a process booted from a world keeps its heap",
+   "gnu": "GNU restores its dump at any address: pdumper relocates every pointer.",
+   "romacs": "A world image is the heap of the process that built it, mapped back at its own addresses (`world::arena`): the arena's address is random per world, not per process. Everything else a world process maps keeps address randomization, the executable too. The image addresses only read-only data of the builder's executable (literals, constant tables, vtables); a restored process maps a read-only copy of those segments where the builder had them and leaves the rest of that range inaccessible, so an image holds no code address that could be followed.",
+   "why": "Not package-observable. Someone who can read the world store learns where a world process keeps its heap; `ROMACS_WORLD=off` boots from source, with a heap at a per-process random address. The store defends against accidental change, not against a writer with the user's own permissions: a world is refused and rebuilt after a truncated or partly written image, an interrupted build, an upgraded binary or library (keyed by content and by each library's build-id and mapped constant bytes), and corruption that changes a file's identity or times. It deliberately does not detect a same-user writer, who can already edit the user's init file, the store's images and the binaries themselves (one can, say, record an old digest under a damaged image's metadata); bit rot that leaves size and times unchanged, since the image and executable digests are cached by file identity; or writes to a mapped image or library after it was checked.",
+   "symbols": [],
    "symbols_derived": false
   },
   {

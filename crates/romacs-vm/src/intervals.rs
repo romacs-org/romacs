@@ -11,6 +11,7 @@ struct Links {
     right: Option<usize>,
     parent: Option<usize>,
 }
+romacs_snapshot::snapshot_struct!(Links { left, right, parent });
 #[derive(Clone)]
 struct Node {
     value: Value,
@@ -20,6 +21,7 @@ struct Node {
     group: usize,
     links: [Links; 2],
 }
+romacs_snapshot::snapshot_struct!(Node { value, start, end, bounds, group, links });
 impl Node {
     fn endpoint(&self, order: usize) -> Anchor {
         if order == 0 { self.start } else { self.end }
@@ -32,6 +34,7 @@ pub(crate) struct IntervalIndex {
     free: Vec<usize>,
     roots: [[Option<usize>; 4]; 2],
 }
+romacs_snapshot::snapshot_struct!(IntervalIndex { nodes, slots, free, roots });
 fn priority(i: usize) -> u64 {
     let mut x = (i as u64).wrapping_add(1).wrapping_mul(0x9e3779b97f4a7c15);
     x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);

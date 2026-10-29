@@ -1,0 +1,12 @@
+error: pattern requires `..` due to inaccessible fields
+ --> tests/snapshot_safe/fail/unlisted_field.rs:4:1
+  |
+4 | snapshot_struct!(Grown { old });
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `snapshot_struct` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: ignore the inaccessible and unused fields
+ --> $WORKSPACE/crates/romacs-snapshot/src/lib.rs
+  |
+  |                 let $name { $($(#[$m])* $field, ..)* $($($(#[$rm])* $rest,)*)? } = value;
+  |                                                 ++

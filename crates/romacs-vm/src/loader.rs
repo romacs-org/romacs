@@ -10,6 +10,7 @@ pub(super) struct Loader {
     completed_files: usize,
     completed_forms: usize,
 }
+romacs_snapshot::snapshot_struct!(Loader { propagate, active, steps, completed_files, completed_forms });
 impl Vm {
     pub(super) fn source_string_if(&self, v: Value) -> Option<&str> {
         if v.tag() != 0 {
@@ -137,7 +138,7 @@ impl Vm {
                 vec![PathBuf::from(format!("{}.el", base.display())), base]
             };
             for p in candidates {
-                if p.is_file() {
+                if crate::host::probe(crate::host::Probe::IsFile, &p) {
                     return Ok(Some(p));
                 }
             }
@@ -326,7 +327,7 @@ impl Vm {
         // `load-file-name', its `load-history' entry and the after-load
         // argument. The canonical path detects recursion and reads.
         let named = expanded_path(path)?;
-        let path = std::fs::canonicalize(&named)
+        let path = crate::host::canonicalize(&named)
             .map_err(|e| format!("file missing: {}: {e}", path.display()))?;
         if self.loader.active.len() >= 128 {
             return Err(format!("recursive source load: {}", path.display()));
@@ -345,7 +346,7 @@ impl Vm {
             return Err(format!("Recursive load: {}", path.display()));
         }
         let bytes =
-            std::fs::read(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;
+            crate::host::read_file(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;
         let source = match decode_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))? {
             Some(source) => source,
             None => self.detected_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))?,
@@ -430,7 +431,15 @@ impl Vm {
                 counted = at + begin;
                 let step = self.loader.steps.len();
                 self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":line,"source":form_source,"status":"entered"}));
+                let site = crate::host::enter_site(|| crate::host::Site {
+                    file: path.to_string_lossy().into_owned(), line,
+                    head: form_source.trim_start().lines().next().unwrap_or("").chars().take(80).collect(),
+                });
                 let evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
+                if evaluated.is_ok() && crate::host::mode() == crate::host::Mode::Build {
+                    self.world_form_done();
+                }
+                drop(site);
                 match evaluated {
                     Ok(v) => {
                         self.set_rooted(&last, 0, v);
@@ -537,7 +546,7 @@ impl Vm {
 /// An absolute file name with `.' and `..' resolved lexically, as
 /// expand-file-name would leave openp's result.
 fn expanded_path(path: &Path) -> Result<String> {
-    let absolute = std::path::absolute(path).map_err(|e| format!("file missing: {}: {e}", path.display()))?;
+    let absolute = crate::host::absolute(path).map_err(|e| format!("file missing: {}: {e}", path.display()))?;
     let mut parts: Vec<std::path::Component> = vec![];
     for part in absolute.components() {
         match part {

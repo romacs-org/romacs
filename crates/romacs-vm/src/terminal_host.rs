@@ -3,6 +3,12 @@ use crate::{Value, Vm};
 /// Terminal defaults follow the editor theme; explicit ANSI colours remain literal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TerminalColor { Foreground, Background, DimForeground, Rgb([u8; 3]) }
+romacs_snapshot::snapshot_enum!(TerminalColor {
+    TerminalColor::Foreground => (),
+    TerminalColor::Background => (),
+    TerminalColor::DimForeground => (),
+    TerminalColor::Rgb(f0) => (f0),
+});
 
 /// An immutable cell colour projected without creating global Lisp faces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -12,6 +18,7 @@ pub struct TerminalStyle {
     pub inverse: bool,
     pub hidden: bool,
 }
+romacs_snapshot::snapshot_struct!(TerminalStyle { foreground, background, inverse, hidden });
 
 impl Default for TerminalStyle {
     fn default() -> Self {
@@ -37,6 +44,7 @@ impl TerminalStyle {
 /// A half-open UTF-8 byte range in the terminal's logical text projection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TerminalStyleRun { pub bytes: std::ops::Range<usize>, pub style: TerminalStyle }
+romacs_snapshot::snapshot_struct!(TerminalStyleRun { bytes, style });
 
 /// An owned terminal publication; no evaluator values cross the PTY boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,6 +100,7 @@ pub(crate) struct TerminalBinding {
     pub(crate) styles: std::sync::Arc<[TerminalStyleRun]>,
     pub(crate) default_colors: [Option<[u8; 3]>; 2],
 }
+romacs_snapshot::snapshot_struct!(TerminalBinding { buffer, session, revision, follow, columns, rows, styles, default_colors });
 
 impl Vm {
     /// Attach the terminal service before creating terminal buffers.
@@ -100,9 +109,17 @@ impl Vm {
             return Err("Terminal sessions must be closed before replacing their host".into());
         }
         if host.is_some() {
-            self.eval_source_raw("(put 'romacs-terminal-not-running 'error-conditions '(romacs-terminal-not-running error)) (put 'romacs-terminal-not-running 'error-message \"Terminal is not running\")")?;
+            self.declare_terminal_errors()?;
         }
         self.terminal_host = host;
+        Ok(())
+    }
+
+    /// The error a terminal command signals without a running terminal,
+    /// which attaching the terminal service declares. A world builder, which
+    /// attaches none, declares it where a live launch attaches one.
+    pub fn declare_terminal_errors(&mut self) -> Result<(), String> {
+        self.eval_source_raw("(put 'romacs-terminal-not-running 'error-conditions '(romacs-terminal-not-running error)) (put 'romacs-terminal-not-running 'error-message \"Terminal is not running\")")?;
         Ok(())
     }
 

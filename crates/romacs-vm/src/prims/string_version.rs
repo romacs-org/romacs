@@ -66,7 +66,7 @@ fn version_compare(a: &[u8], b: &[u8]) -> i32 {
 /// gnulib filenvercmp: empty first, then ".", "..", other dot names, then
 /// a version comparison of the suffix-less names, then of the whole names.
 fn file_version_order(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
-    use std::cmp::Ordering::*;
+    use std::cmp::Ordering::{Equal, Greater, Less};
     match (a, b) {
         ([], []) => return Equal,
         ([], _) => return Less,

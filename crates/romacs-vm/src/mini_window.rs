@@ -18,6 +18,7 @@ pub(crate) struct Segment {
     pub len: usize,
     pub string: bool,
 }
+romacs_snapshot::snapshot_struct!(Segment { display, buffer, len, string });
 
 /// A buffer's text with its overlay strings spliced in.
 #[derive(Default)]
