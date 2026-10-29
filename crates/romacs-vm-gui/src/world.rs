@@ -158,13 +158,16 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result
         let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
         let dir = startup::lisp_root(&startup::lisp_dir())?;
         world.begin_build(&world.build_roots(build_roots(&dir))).map_err(|e| e.to_string())?;
-        build_world(&world, width, height, floor, &dir, engine).map_err(|e| world.abandon_build(e))
+        let len = world.build(|| build_world(width, height, floor, &dir, engine))?;
+        eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
+        Ok(())
     })?.join().map_err(|_| "world builder panicked".to_owned())?
 }
 
-/// The build's steps once it records: up to the chain's end, then publish.
-fn build_world(world: &World, width: u32, height: u32, floor: Option<usize>, dir: &std::path::Path,
-               engine: std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>) -> Result<(), String> {
+/// The build's steps once it records: up to the chain's end. The world's
+/// VM, its carry and no events, for `World::build` to publish.
+fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::Path,
+               engine: std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>) -> Result<(Vm, Carry, serde_json::Value), String> {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.set_layout_host(Some(Box::new(crate::measure::Host { engine: engine.clone() })));
@@ -189,9 +192,7 @@ fn build_world(world: &World, width: u32, height: u32, floor: Option<usize>, dir
     for path in user_font_configuration(|name| std::env::var_os(name)) {
         let _ = romacs_vm::host::metadata(&path);
     }
-    let len = world.finish_build(vm, Carry { loadup }, json!({}))?;
-    eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
-    Ok(())
+    Ok((vm, Carry { loadup }, json!({})))
 }
 
 #[cfg(test)]

@@ -497,13 +497,22 @@ impl World {
         host::rename(&temporary, self.file(suffix))
     }
 
-    /// A build that failed after `begin_build`, with ERROR, outside the
-    /// fence and the capture: a transient failure, retried after a while
-    /// (`retry_in`). ERROR, as the failure to report.
-    pub fn abandon_build(&self, error: String) -> String {
-        let _ = host::leave_build();
-        let _ = self.record_transient(&error);
-        error
+    /// A builder's work once `begin_build` returned: STEPS, in build mode,
+    /// give the VM, what the embedder carries beside it and the events to
+    /// keep, and `finish_build` publishes them. The one owner of what a
+    /// failure leaves: a step's failure is transient, retried after a while
+    /// (`retry_in`), and `finish_build` records its own. The image's
+    /// length, or the failure to report.
+    pub fn build<T: super::safe::SnapshotSafe + 'static>(&self, steps: impl FnOnce() -> Result<(Vm, T, Json), String>)
+        -> Result<usize, String> {
+        match steps() {
+            Ok((vm, carry, events)) => self.finish_build(vm, carry, events),
+            Err(error) => {
+                let _ = host::leave_build();
+                let _ = self.record_transient(&error);
+                Err(error)
+            }
+        }
     }
 
     /// Record a build's refusal on its inputs, REFUSALS with the records of
@@ -543,7 +552,7 @@ impl World {
     /// printed, in its manifest. A build with any refusal publishes its
     /// manifest only, so launches boot from source until its records
     /// change. The image's length.
-    pub fn finish_build<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
+    fn finish_build<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
         vm.world_check_inputs();
         // Kept to the end: whatever fails from here on is recorded with it.
         let trace = host::leave_build().ok_or("no world build was recording")?;

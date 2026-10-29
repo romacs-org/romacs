@@ -105,26 +105,28 @@ fn launch(store: &Path) {
             // An input beside the store: the word "fail" in it fails the build.
             let input = store.parent().unwrap().join("input");
             world.begin_build(&world.build_roots(vec![input.clone()])).unwrap();
-            let flag = romacs_vm::host::read_to_string(input.join("flag")).unwrap_or_default();
-            if flag.trim() == "fail" {
-                let error = world.abandon_build("the input says fail".into());
-                println!("WORLD-IMAGE {}", json!({"mode": "failed", "error": error}));
-                std::process::exit(1);
-            }
-            if flag.trim() == "slow" {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
-            let mut vm = Vm::new();
-            if flag.trim() == "sqlite" {
-                // A resource of this process: the capture refuses it.
-                vm.eval_source("(defvar world-image-db (sqlite-open))").unwrap();
-            }
-            vm.world_begin();
-            // A hash table, a string literal's copy and a closure.
-            vm.eval_source("(defalias 'world-image-probe (let ((table (make-hash-table :test 'equal))) \
-                            (puthash \"key\" 'built table) (lambda () (list (gethash \"key\" table) (hash-table-count table)))))")
-                .unwrap();
-            let len = match world.finish_build(vm, 42u64, json!({})) {
+            // As the GUI and the runner build: steps given to World::build.
+            let built = world.build(|| {
+                let flag = romacs_vm::host::read_to_string(input.join("flag")).unwrap_or_default();
+                if flag.trim() == "fail" {
+                    return Err("the input says fail".into());
+                }
+                if flag.trim() == "slow" {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+                let mut vm = Vm::new();
+                if flag.trim() == "sqlite" {
+                    // A resource of this process: the capture refuses it.
+                    vm.eval_source("(defvar world-image-db (sqlite-open))").unwrap();
+                }
+                vm.world_begin();
+                // A hash table, a string literal's copy and a closure.
+                vm.eval_source("(defalias 'world-image-probe (let ((table (make-hash-table :test 'equal))) \
+                                (puthash \"key\" 'built table) (lambda () (list (gethash \"key\" table) (hash-table-count table)))))")
+                    .unwrap();
+                Ok((vm, 42u64, json!({})))
+            });
+            let len = match built {
                 Ok(len) => len,
                 Err(error) => {
                     println!("WORLD-IMAGE {}", json!({"mode": "failed", "error": error}));

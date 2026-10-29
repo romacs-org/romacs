@@ -172,14 +172,15 @@ fn build(world: &World, args: &crate::Args, count: usize) -> ! {
         crate::emit(json!({"event": "world-build", "ok": false, "error": e.to_string()}));
         std::process::exit(3);
     }
-    let mut vm = crate::fresh_vm(args);
-    let mut chain = vec![];
-    if !crate::load_chain(&mut vm, args, 0, count, &mut chain) || chain.iter().any(|e| e["loaded"] != true) {
-        world.abandon_build(json!(chain).to_string());
-        crate::emit(json!({"event": "world-build", "ok": false, "chain": chain}));
-        std::process::exit(3);
-    }
-    match world.finish_build(vm, (), json!({"chain": chain})) {
+    let built = world.build(|| {
+        let mut vm = crate::fresh_vm(args);
+        let mut chain = vec![];
+        if !crate::load_chain(&mut vm, args, 0, count, &mut chain) || chain.iter().any(|e| e["loaded"] != true) {
+            return Err(json!({"chain": chain}).to_string());
+        }
+        Ok((vm, (), json!({"chain": chain})))
+    });
+    match built {
         Ok(len) => {
             crate::emit(json!({"event": "world-build", "ok": true, "image_bytes": len}));
             std::process::exit(0)
