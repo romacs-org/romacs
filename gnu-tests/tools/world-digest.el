@@ -20,7 +20,9 @@
 ;; timer's due time is the clock's, not the state's: it prints as
 ;; `world-digest--time', and the rest of the timer, its function,
 ;; arguments and repeat, as it is.  An idle timer's time fields hold its
-;; delay, not a clock reading, and print as they are.  The last line counts the
+;; delay, not a clock reading, and print as they are.  It collects first:
+;; what a weak table still holds of keys nothing else reaches follows when
+;; the last collection ran, not the state; what is reachable is compared.  The last line counts the
 ;; ones before it, so a digest cut short is no digest.
 
 ;;; Code:
@@ -126,6 +128,7 @@ symbols were made, but this file's own."
 (defun world-digest ()
   "Write the digest of every root to `world-digest-file'.
 No buffer is made until every root is read."
+  (garbage-collect)
   (let ((symbols (world-digest--symbols)))
     (setq world-digest--lines nil world-digest--shown nil)
     (unless world-digest-show
