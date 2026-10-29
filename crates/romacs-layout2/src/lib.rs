@@ -290,12 +290,14 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 advance_px.min(metrics[0].2)
             }
             Shown::Glyphs(glyphs) => {
-                let mut at = x;
+                let (mut at, mut first) = (x, None);
                 for c in glyphs.chars() {
-                    if visible && at < snapshot.width as f32 { glyph(frame, c, ox + at, oy + y, (ascent, height, cell, space), id)?; }
-                    at += advance(frame, id, c, cell);
+                    let width = advance(frame, id, c, cell);
+                    if visible && at < snapshot.width as f32 { glyph_of(frame, c, ox + at, oy + y, width, (ascent, height), id)?; }
+                    first.get_or_insert(width);
+                    at += width;
                 }
-                advance(frame, id, glyphs.chars().next().unwrap_or(ch), cell)
+                first.unwrap_or(cell)
             }
         };
         if at_point { point_rect = Some((x, y, cursor, row_height, ascent)); }
@@ -369,6 +371,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
 fn glyph(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, metrics: (f32, f32, f32, f32), id: FaceId) -> Result<(), String> {
     let (ascent, height, cell, _) = metrics;
     let width = advance(frame, id, ch, cell);
+    glyph_of(frame, ch, x, y, width, (ascent, height), id)
+}
+
+/// Draw CH, WIDTH wide, at X, Y in face ID of ASCENT and HEIGHT.
+fn glyph_of(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, width: f32, (ascent, height): (f32, f32), id: FaceId) -> Result<(), String> {
     frame.add_char(ch, x, y, width, height, ascent, false);
     *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing character face")? = id;
     Ok(())
@@ -377,20 +384,37 @@ fn glyph(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, metrics: (f32, 
 /// How a buffer character other than newline is drawn: a TAB as a
 /// stretch, another control character as GNU's escape (`^X`, or `\NNN`
 /// for one beyond ASCII), anything else as itself.
-enum Shown { Tab, Glyphs(String) }
+enum Shown { Tab, Glyphs(Glyphs) }
+
+/// At most four glyphs, the longest escape (`\NNN`), held without
+/// allocating.
+#[derive(Clone, Copy)]
+struct Glyphs { chars: [char; 4], len: usize }
+impl Glyphs {
+    fn of(chars: &[char]) -> Self {
+        let mut held = ['\0'; 4];
+        held[..chars.len()].copy_from_slice(chars);
+        Glyphs { chars: held, len: chars.len() }
+    }
+    fn chars(&self) -> impl Iterator<Item = char> + '_ { self.chars[..self.len].iter().copied() }
+}
 
 fn shown(ch: char) -> Shown {
+    let digit = |shift: u32| char::from_digit((ch as u32 >> shift) & 7, 8).unwrap_or('0');
     match ch {
         '\t' => Shown::Tab,
-        '\u{0}'..='\u{1f}' | '\u{7f}' => Shown::Glyphs(format!("^{}", char::from((ch as u8) ^ 0x40))),
-        _ if ch.is_control() => Shown::Glyphs(format!("\\{:03o}", ch as u32)),
-        _ => Shown::Glyphs(ch.to_string()),
+        '\u{0}'..='\u{1f}' | '\u{7f}' => Shown::Glyphs(Glyphs::of(&['^', char::from((ch as u8) ^ 0x40)])),
+        // GNU's three octal digits: the code's low nine bits.
+        _ if ch.is_control() => Shown::Glyphs(Glyphs::of(&['\\', digit(6), digit(3), digit(0)])),
+        _ => Shown::Glyphs(Glyphs::of(&[ch])),
     }
 }
 
 /// The face table index painting SLICE's character at BYTE.
 fn face_at(slice: &TextSlice, byte: usize, default: usize) -> usize {
-    slice.face_runs.iter().find(|run| run.bytes.contains(&byte)).map_or(default, |run| run.face.0 as usize)
+    // Runs are ordered and disjoint (`validate_runs`).
+    let at = slice.face_runs.partition_point(|run| run.bytes.end <= byte);
+    slice.face_runs.get(at).filter(|run| run.bytes.contains(&byte)).map_or(default, |run| run.face.0 as usize)
 }
 
 /// Each face's painted characters. Publishing the whole window for every
@@ -405,7 +429,7 @@ fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
             let face = &mut text[face_at(slice, byte, *default)];
             match shown(ch) {
                 Shown::Tab => face.push(' '),
-                Shown::Glyphs(glyphs) => face.push_str(&glyphs),
+                Shown::Glyphs(glyphs) => face.extend(glyphs.chars()),
             }
         }
     }
