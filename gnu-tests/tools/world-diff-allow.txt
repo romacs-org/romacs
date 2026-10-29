@@ -1,0 +1,5 @@
+# Roots two processes booted from source in one environment also give
+# differently: ROOT TAB NAME TAB REASON (world_diff.py --allow).
+value	after-init-time	startup's clock reading, taken anew by every process
+value	emacs-build-time	a source boot's clock at version.el; a world's build time, as a dumped GNU reports its dump time (DIVERGENCES VM2-WORLD1)
+value	cl--random-state	seeded from the clock when cl-extra loads, in every process (romacs--world-reseed)

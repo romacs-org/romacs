@@ -1,0 +1,115 @@
+;;; world-digest.el --- What a VM's Lisp observes, digested root by root  -*- lexical-binding: t -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+;; The differential checker of the world snapshots (DESIGN-M1 §10, E2):
+;; loaded at the same point in a VM booted from source and in one restored
+;; from a world, it writes one line per Lisp-visible root to the file
+;; `world-digest-file' (or $WORLD_DIGEST_OUT), ROOT TAB NAME TAB SHA-1 of
+;; the root's printed value.  gnu-tests/tools/world_diff.py compares two
+;; such files.  It reads through Lisp only, independently of how a world
+;; is encoded: every interned symbol's default value, function and plist,
+;; the features, load history and load path, every buffer's text,
+;; properties, point, narrowing, locals, overlays and modification state,
+;; every frame's parameters and window tree, the faces, the charset and
+;; coding priorities, the match data and the obarray's membership.
+;;
+;; Values print with `print-circle', so sharing and cycles are part of
+;; the text, and with every length and level limit off.
+
+;;; Code:
+
+(defvar world-digest-file (getenv "WORLD_DIGEST_OUT")
+  "The file `world-digest' writes.")
+
+(defvar world-digest-show (split-string (or (getenv "WORLD_DIGEST_SHOW") ""))
+  "Names of roots whose printed text `world-digest' also writes in full,
+to `world-digest-file' with \".show\" appended, to see why they differ.")
+
+(defvar world-digest--shown nil)
+
+(defun world-digest--text (value)
+  "VALUE as `prin1' prints it with sharing shown and no limits."
+  (let ((print-circle t) (print-length nil) (print-level nil)
+        (print-escape-newlines t) (print-escape-control-characters t)
+        (print-quoted t) (print-gensym t))
+    (condition-case err
+        (prin1-to-string value)
+      (error (format "#<unprintable %S>" err)))))
+
+(defvar world-digest--lines nil
+  "The lines so far, last first.")
+
+(defun world-digest--line (root name value)
+  "Add ROOT, NAME and the digest of VALUE's text as a line."
+  (let ((text (world-digest--text value)))
+    (when (member name world-digest-show)
+      (push (format "%s %s %s\n" root name text) world-digest--shown))
+    (push (concat root "\t" name "\t" (secure-hash 'sha1 (encode-coding-string text 'utf-8-emacs)) "\n")
+          world-digest--lines)))
+
+(defun world-digest--symbols ()
+  "Every interned symbol, by name, but this file's own."
+  (let (symbols)
+    (mapatoms (lambda (symbol)
+                (unless (string-prefix-p "world-digest" (symbol-name symbol))
+                  (push symbol symbols))))
+    (sort symbols (lambda (a b) (string< (symbol-name a) (symbol-name b))))))
+
+(defun world-digest--buffer (buffer)
+  "What Lisp observes of BUFFER, as one list."
+  (with-current-buffer buffer
+    (save-restriction
+      (let ((narrowing (list (point-min) (point-max))))
+        (widen)
+        (list (buffer-name) narrowing (point) (mark t)
+              (buffer-substring (point-min) (point-max))
+              (buffer-modified-p) (buffer-modified-tick) (buffer-chars-modified-tick)
+              enable-multibyte-characters major-mode
+              (sort (mapcar (lambda (local) (if (consp local) local (list local)))
+                            (buffer-local-variables))
+                    (lambda (a b) (string< (symbol-name (car a)) (symbol-name (car b)))))
+              (mapcar (lambda (o) (list (overlay-start o) (overlay-end o) (overlay-properties o)))
+                      (overlays-in (point-min) (point-max)))
+              (syntax-table) (current-local-map) (current-case-table))))))
+
+(defun world-digest ()
+  "Write the digest of every root to `world-digest-file'.
+No buffer is made until every root is read."
+  (let ((symbols (world-digest--symbols)))
+    (setq world-digest--lines nil world-digest--shown nil)
+    (dolist (symbol symbols)
+      (let ((name (symbol-name symbol)))
+        (world-digest--line "value" name
+                            (if (default-boundp symbol) (default-value symbol) 'world-digest--void))
+        (world-digest--line "function" name
+                            (if (fboundp symbol) (symbol-function symbol) 'world-digest--void))
+        (world-digest--line "plist" name (symbol-plist symbol))
+        (world-digest--line "special" name (special-variable-p symbol))))
+    (world-digest--line "obarray" "names" (mapcar #'symbol-name symbols))
+    (world-digest--line "features" "features" features)
+    (world-digest--line "load-history" "load-history" load-history)
+    (world-digest--line "load-path" "load-path" load-path)
+    (dolist (buffer (buffer-list))
+      (world-digest--line "buffer" (buffer-name buffer) (world-digest--buffer buffer)))
+    (dolist (frame (frame-list))
+      (world-digest--line "frame" (format "%S" (frame-parameter frame 'name))
+                          (list (frame-parameters frame) (window-tree frame))))
+    (dolist (face (face-list))
+      (world-digest--line "face" (symbol-name face) (face-all-attributes face (selected-frame))))
+    (world-digest--line "charset" "priority" (charset-priority-list))
+    (world-digest--line "coding" "priority" (coding-system-priority-list))
+    (world-digest--line "match-data" "match-data" (match-data))
+    (let ((lines (nreverse world-digest--lines)) (shown (nreverse world-digest--shown)))
+      (setq world-digest--lines nil world-digest--shown nil)
+      (with-temp-file world-digest-file
+        (dolist (line lines) (insert line)))
+      (when shown
+        (with-temp-file (concat world-digest-file ".show")
+          (dolist (line shown) (insert line)))))
+    (length symbols)))
+
+(message "WORLD-DIGEST symbols=%d file=%s" (world-digest) world-digest-file)
+
+(provide 'world-digest)
+;;; world-digest.el ends here
