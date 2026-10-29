@@ -92,7 +92,7 @@ timer) ends the wait, so the deadline is computed again (host_input.rs)."
     (while lists
       (let ((timers (car lists)))
         (while timers
-          (setq times (cons (and (fboundp 'romacs--timer-time) (romacs--timer-time (car timers))) times)
+          (setq times (cons (romacs--timer-time (car timers)) times)
                 timers (cdr timers))))
       (setq times (cons 'idle times) lists (cdr lists)))
     (cons (romacs--unread-p) times)))

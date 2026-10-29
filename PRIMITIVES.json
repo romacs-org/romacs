@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "9985403868fc09a1908189dfa7e3a1fb4f50f8d5929bb20b791b8bffbdc98288",
+  "source_fingerprint": "e95c3d3a0373a3cbc41ef65aa1f39fb08a494b8c581d47df25d4a9a1afdc9dec",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1011,
-  "parsed_vm2_only": 1011
+  "parsed_total": 1013,
+  "parsed_vm2_only": 1013
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2054,7 +2054,7 @@
   "input-pending-p": {
    "name": "input-pending-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:330"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:405"
   },
   "insert": {
    "name": "insert",
@@ -3836,7 +3836,7 @@
   "romacs--set-idle": {
    "name": "romacs--set-idle",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:322"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:397"
   },
   "romacs--set-local-toplevel-cell": {
    "name": "romacs--set-local-toplevel-cell",
@@ -3877,6 +3877,16 @@
    "name": "romacs--term-send",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/terminal.rs:8"
+  },
+  "romacs--timer-next": {
+   "name": "romacs--timer-next",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:371"
+  },
+  "romacs--timer-time": {
+   "name": "romacs--timer-time",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:362"
   },
   "romacs--validate-region": {
    "name": "romacs--validate-region",

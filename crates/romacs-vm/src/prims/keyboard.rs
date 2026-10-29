@@ -319,6 +319,81 @@ fn current_idle_time(cx) {
     }
 }}
 
+/// keyboard.c decode_timer: when TIMER, a timer.el vector, fires, in
+/// nanoseconds since the epoch; None for anything else, or one triggered.
+fn decode_timer(cx: &Leaf<'_>, timer: Value) -> Option<i128> {
+    let fields = cx.vector_values(timer).ok().filter(|v| v.len() == 10)?;
+    if fields[0] != Value::NIL {
+        return None;
+    }
+    // list4_to_timespec: (HIGH LOW USEC PSEC) in picoseconds, floored to ns.
+    let [high, low, usec, psec] = [fields[1], fields[2], fields[3], fields[8]].map(|v| v.integer_value().map(i128::from));
+    let ps = ((high? * 65536 + low?) * 1_000_000 + usec?) * 1_000_000 + psec?;
+    Some(ps.div_euclid(1000))
+}
+
+/// The nanoseconds since the epoch, as `current-time' reads them.
+fn now_nanos() -> i128 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_nanos() as i128,
+        Err(error) => -(error.duration().as_nanos() as i128),
+    }
+}
+
+/// The valid timer of TIMERS that fires first (the first of equals), and
+/// when. timer.el keeps the lists ordered, so it is GNU's first valid timer;
+/// but the copy timer_check walks keeps a repeating timer that just ran at
+/// its old place with its new time, where GNU's head-only walk lets it hide
+/// the ripe timers behind it until the next wait round.
+fn earliest(cx: &Leaf<'_>, mut timers: Value) -> Option<(Value, i128)> {
+    let mut first: Option<(Value, i128)> = None;
+    while let Some((timer, rest)) = cx.pair(timers) {
+        if let Some(time) = decode_timer(cx, timer)
+            && first.is_none_or(|(_, earliest)| time < earliest)
+        {
+            first = Some((timer, time));
+        }
+        timers = rest;
+    }
+    first
+}
+
+defsubr! { name = "romacs--timer-time", gnu = "keyboard.c:4735", effect = Reads,
+fn timer_time(cx, timer: Value) {
+    // decode_timer, as seconds: when TIMER fires, or nil.
+    Ok(match decode_timer(cx, timer) {
+        Some(nanos) => cx.float(nanos as f64 / 1e9),
+        None => Value::NIL,
+    })
+}}
+
+defsubr! { name = "romacs--timer-next", gnu = "keyboard.c:4763", effect = Reads,
+fn timer_next(cx, timers: Value, idle_timers: Value) {
+    // timer_check_2's choice between the earliest of the ordinary TIMERS
+    // and of the IDLE-TIMERS: the timer to run, a ripe one, else the
+    // seconds until the next becomes ripe, or nil if none is valid. Running it is the Lisp caller's (subprocess.el
+    // `romacs--timer-check-2'). An idle timer's time counts from the start
+    // of idleness, zero when Emacs is not idle.
+    let now = now_nanos();
+    let idleness = cx.idle_since().map_or(0, |since| since.elapsed().as_nanos() as i128);
+    // (TIMER, ripe, distance from its clock) of each list's earliest timer.
+    let head = |list, clock: i128| earliest(cx, list).map(|(timer, time)| (timer, time <= clock, (clock - time).abs()));
+    let chosen = match (head(timers, now), head(idle_timers, idleness)) {
+        (None, None) => return Ok(Value::NIL),
+        (Some(timer), None) | (None, Some(timer)) => timer,
+        (Some(ordinary), Some(idle)) => {
+            let ordinary_first = idle.1 < ordinary.1
+                || (idle.1 == ordinary.1 && if ordinary.1 { idle.2 < ordinary.2 } else { ordinary.2 < idle.2 });
+            if ordinary_first { ordinary } else { idle }
+        }
+    };
+    Ok(match chosen {
+        (timer, true, _) => timer,
+        (_, false, distance) => cx.float(distance as f64 / 1e9),
+    })
+}}
+
 defsubr! { name = "romacs--set-idle", gnu = "keyboard.c:4695", effect = Global,
 fn set_idle(cx, idle: Value) {
     // The state timer_start_idle (IDLE non-nil) and timer_stop_idle set;
@@ -334,3 +409,39 @@ fn input_pending_p(cx; optional check_timers: Value) {
     let unread = cx.intern("unread-command-events");
     Ok(if cx.variable_value(unread)?.unwrap_or(Value::NIL) != Value::NIL { Value::TRUE } else { Value::NIL })
 }}
+
+#[cfg(test)]
+mod tests {
+    use crate::Vm;
+
+    fn printed(vm: &mut Vm, source: &str) -> String {
+        let value = vm.eval_source_raw(source).unwrap();
+        vm.display(value).unwrap()
+    }
+
+    /// timer_check_2's choice: invalid and triggered timers are skipped, a
+    /// ripe one is returned to run, an ordinary timer and an idle one are
+    /// compared by ripeness and distance, and otherwise the seconds until
+    /// the next one fires.
+    #[test]
+    fn timer_next_chooses_as_timer_check_2() {
+        let mut vm = Vm::new();
+        // A timer.el vector TRIGGERED-P HIGH LOW USEC REPEAT FUNCTION ARGS IDLE PSECS, firing at SECONDS (relative to NOW).
+        vm.eval_source_raw("(defun at (seconds name &optional now) (let* ((s (+ (or now (float-time)) seconds)) (whole (floor s))) (vector nil (/ whole 65536) (% whole 65536) (floor (* 1e6 (- s whole))) nil name nil nil 0 nil)))").unwrap();
+        assert_eq!(printed(&mut vm, "(list (romacs--timer-next nil nil) (romacs--timer-next '(junk [1 2]) nil))"), "(nil nil)");
+        assert_eq!(printed(&mut vm, "(aref (romacs--timer-next (list 'junk (at -5 'past) (at 5 'later)) nil) 5)"), "past");
+        assert_eq!(printed(&mut vm, "(let ((ripe (at -5 'triggered))) (aset ripe 0 t) (aref (romacs--timer-next (list ripe (at -1 'next)) nil) 5))"), "next");
+        assert_eq!(printed(&mut vm, "(let ((wait (romacs--timer-next (list (at 30 'later)) nil))) (and (floatp wait) (< 29 wait 30.01)))"), "t");
+        // A repeating timer that ran is re-armed in place in timer_check's
+        // copy of the list; it must not hide the ripe timer behind it.
+        assert_eq!(printed(&mut vm, "(aref (romacs--timer-next (list (at 0.4 'rearmed) (at -0.1 'ripe)) nil) 5)"), "ripe");
+        // Not idle: idle timers count from zero idleness, so one due at
+        // 0 s of idleness is ripe and one due at 10 s is not.
+        assert_eq!(printed(&mut vm, "(aref (romacs--timer-next (list (at 60 'ordinary)) (list (vector nil 0 0 0 nil 'idle nil t 0 nil))) 5)"), "idle");
+        assert_eq!(printed(&mut vm, "(let ((wait (romacs--timer-next (list (at 60 'ordinary)) (list (vector nil 0 10 0 nil 'idle nil t 0 nil))))) (and (floatp wait) (< 9.9 wait 10.01)))"), "t");
+        // Both ripe: the one ripe longest runs first.
+        assert_eq!(printed(&mut vm, "(aref (romacs--timer-next (list (at -1 'ordinary)) (list (vector nil 0 0 0 nil 'idle nil t 0 nil))) 5)"), "ordinary");
+        assert_eq!(printed(&mut vm, "(romacs--timer-time (at 0 'x 1000.5))"), "1000.5");
+        assert_eq!(printed(&mut vm, "(romacs--timer-time [t 0 1 0 nil x nil nil 0 nil])"), "nil");
+    }
+}
