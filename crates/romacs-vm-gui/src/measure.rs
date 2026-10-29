@@ -337,7 +337,7 @@ mod tests {
         };
         h.eval("(setq mode-line-format '(\"%b\"))");
         cursor_in_text(&mut h, "mode line enabled");
-        assert_ne!(h.eval("(window-start)"), "1", "the band took point's row: the window scrolls");
+        assert_eq!(h.eval("(window-start)"), "8", "the band took point's row: the window scrolls as GNU does");
         h.eval("(setq mode-line-format nil)");
         cursor_in_text(&mut h, "mode line removed");
         h.eval("(setq header-line-format \"header\")");
