@@ -2427,3 +2427,58 @@ pub(crate) fn line_end_after(text: &[u8], low: usize, high: usize, point: usize,
     }
     pos
 }
+
+#[cfg(test)]
+mod line_scan_tests {
+    use super::{line_beginning, line_end_after};
+
+    /// The character-vector walks the byte scans replaced, in characters.
+    fn bol_chars(chars: &[char], low: usize, high: usize, point: usize, lines: i64) -> usize {
+        let mut pos = point;
+        while pos > low && chars[pos - 1] != '\n' { pos -= 1; }
+        if lines >= 0 {
+            for _ in 0..lines {
+                while pos < high && chars[pos] != '\n' { pos += 1; }
+                if pos == high { break; }
+                pos += 1;
+            }
+        } else {
+            for _ in lines..0 {
+                if pos == low { break; }
+                pos -= 1;
+                while pos > low && chars[pos - 1] != '\n' { pos -= 1; }
+            }
+        }
+        pos
+    }
+    fn eol_chars(chars: &[char], low: usize, high: usize, point: usize, count: i64) -> usize {
+        let mut pos = point;
+        if count > 0 {
+            for _ in 0..count {
+                match (pos..high).find(|&at| chars[at] == '\n') { Some(at) => pos = at + 1, None => return high }
+            }
+            return pos - 1;
+        }
+        for _ in count..0 {
+            match (low..pos).rev().find(|&at| chars[at] == '\n') { Some(at) => pos = at, None => return low }
+        }
+        pos
+    }
+
+    #[test]
+    fn byte_scans_agree_with_character_walks() {
+        let text = "λx\n\nnaïve 日本\nend\n\nlast é";
+        let chars: Vec<char> = text.chars().collect();
+        let byte = |c: usize| text.char_indices().nth(c).map_or(text.len(), |(b, _)| b);
+        let char_of = |b: usize| text[..b].chars().count();
+        for (low, high) in [(0, chars.len()), (2, chars.len() - 3), (5, 5)] {
+            for point in low..=high {
+                for count in -4..=4 {
+                    let (bl, bh, bp) = (byte(low), byte(high), byte(point));
+                    assert_eq!(char_of(line_beginning(text.as_bytes(), bl, bh, bp, count)), bol_chars(&chars, low, high, point, count), "bol {low}..{high} at {point} by {count}");
+                    assert_eq!(char_of(line_end_after(text.as_bytes(), bl, bh, bp, count)), eol_chars(&chars, low, high, point, count), "eol {low}..{high} at {point} by {count}");
+                }
+            }
+        }
+    }
+}
