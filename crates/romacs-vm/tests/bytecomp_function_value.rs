@@ -50,3 +50,21 @@ fn byte_compile_of_a_malformed_lambda_list_returns_gnus_diagnostic() {
         assert_eq!(query(&mut vm, form), expected, "{form}");
     }
 }
+
+/// bytecomp expands a lambda list's macros once, in its front end; the
+/// function evaluates that expansion rather than expanding again, as an
+/// argument, a closure inside it, or a symbol's definition. Pinned GNU
+/// 32.0.50 answers.
+#[test]
+fn byte_compile_of_a_lambda_list_expands_its_macros_once() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    query(&mut vm, "(progn (defvar bfv-count 0) (defmacro bfv-count-m () (setq bfv-count (1+ bfv-count)) 1))");
+    for (form, expected) in [
+        ("(let ((lexical-binding t)) (setq bfv-count 0) (list (funcall (byte-compile '(lambda () (bfv-count-m)))) bfv-count))", "(1 1)"),
+        ("(let ((lexical-binding t)) (setq bfv-count 0) (list (funcall (funcall (byte-compile '(lambda (x) (lambda () (+ (bfv-count-m) x)))) 5)) bfv-count))", "(6 1)"),
+        ("(progn (setq bfv-count 0) (defalias 'bfv-s '(lambda () (bfv-count-m))) (byte-compile 'bfv-s) (list (bfv-s) (bfv-s) bfv-count))", "(1 1 1)"),
+    ] {
+        assert_eq!(query(&mut vm, form), expected, "{form}");
+    }
+}
