@@ -176,7 +176,12 @@ impl Vm {
             out.extend_from_slice(&piece);
             landing[at + 1..spec_end].fill(out.len());
             if spec.conversion == 's' && self.string_properties(value).is_some_and(|p| !p.is_empty()) {
-                fields.push((field_start + leading..out.len(), value));
+                // styled_format (editfns.c:3786-3797): with a propertied
+                // format string the field's left padding takes the
+                // argument's properties too; without one it does not.
+                let fmt_props = self.string_properties(format_value).is_some_and(|p| !p.is_empty());
+                let start = if fmt_props { field_start } else { field_start + leading };
+                fields.push((start..out.len(), value));
             }
         }
         landing[codes.len()] = out.len();

@@ -21,6 +21,14 @@ const EXPRESSIONS: &[&str] = &[
     r#"(format "%2$s %1$s" (propertize "one" 'face 'bold) "two")"#,
     r#"(format-message "`%s' %s" (propertize "q" 'face 'bold) "z")"#,
     r#"(format "%s" (propertize "" 'face 'bold))"#,
+    // A propertied format string: the padded field takes the argument's
+    // properties on both sides (styled_format's fmt_props).
+    r#"(format (propertize "%5s|" 'face 'italic) (propertize "ab" 'face 'bold))"#,
+    r#"(format (propertize "%-5s|" 'face 'italic) (propertize "ab" 'face 'bold))"#,
+    r#"(format (propertize "<%.1s>" 'face 'italic) (propertize "ab" 'face 'bold))"#,
+    r#"(format (propertize "<%4.1s>" 'face 'italic) (propertize "ab" 'face 'bold))"#,
+    r#"(format (propertize "%5S|" 'face 'italic) (propertize "ab" 'face 'bold))"#,
+    r#"(format (concat "x" (propertize "%6s" 'face 'italic)) (concat (propertize "a" 'face 'bold) "b"))"#,
 ];
 
 #[test]
