@@ -448,10 +448,9 @@ pub(crate) struct CVariable {
 /// only those the bootstrap chain, the census or the variable harness
 /// actually reached (ruling R216: no speculative ports).
 pub(crate) static C_VARIABLES: &[CVariable] = &[
-    // The collector's pacing reads both (`Vm::collection_due`). GNU starts
-    // gc-cons-percentage at 0.1; a Romacs collection also traverses compiled
-    // code, so its default heap fraction is larger (DIVERGENCES VM2-GC-PACING).
-    CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(1.5)) },
+    // The collector's pacing reads both (`Vm::collection_due`), scaling the
+    // percentage internally (DIVERGENCES VM2-GC-PACING).
+    CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
     CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
     // cl-generic's dispatcher compiler checks whether GNU is being dumped.
     CVariable { name: "purify-flag", gnu: "alloc.c:7487", kind: Kind::Lisp(Init::Nil) },

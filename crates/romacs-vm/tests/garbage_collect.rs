@@ -95,7 +95,7 @@ fn gc_cons_threshold_and_percentage_pace_collection() {
     let mut vm = Vm::new();
     vm.set_gc_stress(0);
     let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
-    assert_eq!(eval(&mut vm, "(list gc-cons-threshold (floatp gc-cons-percentage))"), "(800000 t)");
+    assert_eq!(eval(&mut vm, "(list gc-cons-threshold gc-cons-percentage)"), "(800000 0.1)", "GNU's defaults");
     // 160000 bytes is 10000 objects; nil drops the proportional term.
     vm.eval_source("(setq gc-cons-threshold 160000 gc-cons-percentage nil)").unwrap();
     let plain = churn(&mut vm, 200_000);
@@ -106,11 +106,23 @@ fn gc_cons_threshold_and_percentage_pace_collection() {
     // Only the request boundary after the binding ends may collect, where
     // the same churn collected ten times above.
     assert!(vm.heap_stats().collections <= before + 1, "a raised threshold defers collection");
-    // A proportional term above the threshold paces instead: 1.9 of the
-    // traced heap plus half the allocation since waits 38 heaps.
-    vm.eval_source("(setq gc-cons-percentage 1.9 gr-live (make-list 20000 nil))").unwrap();
+    // A proportional term above the threshold paces instead: 0.12, scaled
+    // to 1.8, waits 18 traced heaps.
+    vm.eval_source("(setq gc-cons-percentage 0.12 gr-live (make-list 20000 nil))").unwrap();
     let proportional = churn(&mut vm, 200_000);
-    assert!(proportional * 3 <= plain, "1.9 of the traced heap defers collection: {proportional} vs {plain}");
+    assert!(proportional * 3 <= plain, "a raised percentage defers collection: {proportional} vs {plain}");
+    // Larger settings (gcmh-style 0.2 to 1.0, or absurd ones) are held at
+    // that ceiling: they defer collection, and it still happens.
+    let mut deferred = vec![];
+    for p in ["0.2", "1.0", "1e9"] {
+        vm.eval_source(&format!("(setq gc-cons-percentage {p})")).unwrap();
+        deferred.push(churn(&mut vm, 2_000_000));
+    }
+    vm.eval_source("(setq gc-cons-percentage 0.1)").unwrap();
+    let default = churn(&mut vm, 2_000_000);
+    assert!(deferred.iter().all(|&n| n >= 1 && n * 2 <= default), "clamped deferral: {deferred:?} vs default {default}");
+    // The same ceiling, give or take where each churn starts in a cycle.
+    assert!(deferred.iter().max().unwrap() - deferred.iter().min().unwrap() <= 1, "the ceiling holds: {deferred:?}");
     // Non-integer thresholds are refused, as GNU's DEFVAR_INT is.
     assert_eq!(eval(&mut vm, "(condition-case e (setq gc-cons-threshold 1.5) (error (car e)))"), "wrong-type-argument");
     // An embedder's floor replaces both variables.

@@ -95,6 +95,21 @@ impl Drop for UnwindMark {
 const CONS_BYTES: i64 = 16;
 /// GNU's floor under `gc-cons-threshold' (alloc.c:5747, GC_DEFAULT_THRESHOLD / 10).
 const MIN_CONS_THRESHOLD: i64 = 80_000;
+/// A Romacs collection moves objects and walks compiled code, so it costs
+/// more per traced unit than GNU's: `gc-cons-percentage' is scaled by this
+/// before use, making GNU's 0.1 collect after about six traced heaps.
+const PERCENTAGE_SCALE: f64 = 15.0;
+/// The scaled percentage's ceiling. GNU's formula never collects at 2 (it
+/// counts half the allocation since as live); 1.8 holds a large setting at
+/// 18 traced heaps, three times the default's deferral.
+const MAX_SCALED_PERCENTAGE: f64 = 1.8;
+
+/// `gc-cons-percentage' P as the collector uses it: P times
+/// PERCENTAGE_SCALE, at most MAX_SCALED_PERCENTAGE; a negative or NaN P
+/// leaves only the threshold, as GNU's does.
+pub(crate) fn scaled_percentage(p: f64) -> f64 {
+    if p.is_nan() { 0.0 } else { (p * PERCENTAGE_SCALE).clamp(0.0, MAX_SCALED_PERCENTAGE) }
+}
 
 impl Stress {
     pub(crate) fn from_env() -> Self {
@@ -279,10 +294,11 @@ impl Vm {
     /// GNU `maybe_garbage_collect' (alloc.c:5740-5809): collect once the
     /// allocation since the last collection reaches `gc-cons-threshold'
     /// (at least 80000 bytes) or, when `gc-cons-percentage' is a float, that
-    /// fraction of the live heap plus half the allocation since. Allocation
-    /// is counted in objects charged CONS_BYTES each; the live heap is what
-    /// a collection traverses, retained objects and compiled code units.
-    /// Both variables are read live, so binding them takes effect at once.
+    /// fraction (scaled, PERCENTAGE_SCALE, and clamped, MAX_SCALED_PERCENTAGE)
+    /// of the live heap plus half the allocation since. Allocation is counted
+    /// in objects charged CONS_BYTES each; the live heap is what a collection
+    /// traverses, retained objects and compiled code units. Both variables
+    /// are read live, so binding them takes effect at once.
     pub(crate) fn collection_due(&self) -> bool {
         // An embedder's floor overrides, as GNU's memory-full state does.
         if let Some(floor) = self.gc_floor {
@@ -297,7 +313,9 @@ impl Vm {
             },
             Err(initial) => Some(initial),
         };
-        let proportional = percentage.map_or(0.0, |p| p * ((self.gc_retained + self.gc_code) as f64 + allocated / 2.0));
+        let proportional = percentage.map_or(0.0, |p| {
+            scaled_percentage(p) * ((self.gc_retained + self.gc_code) as f64 + allocated / 2.0)
+        });
         allocated >= threshold.max(proportional)
     }
     /// A forced stress collection is due at this Lisp entry.
@@ -1029,6 +1047,18 @@ impl Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gc_cons_percentage_is_scaled_and_clamped_without_a_cliff() {
+        assert_eq!(scaled_percentage(0.1), 1.5, "GNU's default is six traced heaps");
+        assert_eq!(scaled_percentage(0.05), 0.75);
+        for large in [0.2, 0.6, 1.0, 2.0, 1e300, f64::INFINITY] {
+            assert_eq!(scaled_percentage(large), MAX_SCALED_PERCENTAGE, "{large}");
+        }
+        assert!(MAX_SCALED_PERCENTAGE < 2.0, "below GNU's never-collect point");
+        assert_eq!(scaled_percentage(-0.5), 0.0);
+        assert_eq!(scaled_percentage(f64::NAN), 0.0);
+    }
 
     #[test]
     fn shared_native_nodes_count_once_and_forward_once() {

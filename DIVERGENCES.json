@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "b0745c0ed73c4f65c7e86bc8fe50793d6585d4e99afb10919449581f7b8f59e9",
+  "input_hash": "728362380178a205b647906b163cdd782c8314542370f2229ca62c006d86b26e",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -2574,10 +2574,10 @@
    "section": "VM2 explicit garbage collection",
    "observable": false,
    "planned": false,
-   "mechanism": "Collection pacing units and default",
-   "gnu": "`consing_threshold` (`alloc.c:5740-5809`) collects once the bytes allocated since the last GC exceed max(`gc-cons-threshold`, 80000) or, for a float `gc-cons-percentage` (default 0.1), that fraction of the live heap's bytes plus half the bytes allocated since.",
-   "romacs": "The same rule, read live from both variables, in Romacs units: allocation counts heap objects at 16 bytes each (a GNU cons), and the live heap is what a collection traverses, the objects the last collection retained plus the compiled code units (IR ops and lowered instructions) it traced. `gc-cons-percentage` starts at 1.5: collect after about six traced heaps of allocation. As in GNU's formula, 2 or more never collects by percentage. An embedder's `Vm::set_collection_floor` replaces both variables (as GNU's memory-full state replaces them) with the floor rule tests and `--gc-floor` use.",
-   "why": "A Romacs collection moves objects and walks compiled code, so GNU's 0.1 costs far more here: on the census file it did 65 collections, +30% instructions over the uninhibited base. 1.5 keeps the `--loadup` bootstrap, the census file and a long nested load within about 1% of it in instructions and level with it in wall time, the long load at a third of its peak memory. Packages that raise either variable (most-positive-fixnum around a load) behave as in GNU; one that sets GNU's 0.1 collects more often than the default. Tests: `crates/romacs-vm/tests/garbage_collect.rs`.",
+   "mechanism": "Collection pacing units and scale",
+   "gnu": "`consing_threshold` (`alloc.c:5740-5809`) collects once the bytes allocated since the last GC exceed max(`gc-cons-threshold`, 80000) or, for a float `gc-cons-percentage` (default 0.1), that fraction of the live heap's bytes plus half the bytes allocated since; a percentage of 2 or more never collects.",
+   "romacs": "The same rule, read live from both variables, with GNU's defaults (800000, 0.1), in Romacs units: allocation counts heap objects at 16 bytes each (a GNU cons), and the live heap is what a collection traverses, the objects the last collection retained plus the compiled code units (IR ops and lowered instructions) it traced. The percentage is scaled by 15 (`PERCENTAGE_SCALE`), so GNU's 0.1 collects after about six traced heaps, and the scaled value is clamped to 1.8 (`MAX_SCALED_PERCENTAGE`): any setting from about 0.12 up, gcmh-style 0.2 to 1.0 included, defers to 18 traced heaps, and none reaches GNU's never-collect point. Negative and NaN settings leave the threshold alone. An embedder's `Vm::set_collection_floor` replaces both variables (as GNU's memory-full state replaces them) with the floor rule tests and `--gc-floor` use.",
+   "why": "A Romacs collection moves objects and walks compiled code, so it costs more per traced unit than GNU's: unscaled, 0.1 did 65 collections on the census file, +30% instructions over the uninhibited base. Scaled, a config written for GNU gets proportional behaviour: restoring 0.1 after startup is the default, and raising either variable defers collection. Against the f28b253 base on the owner's machine: the `--loadup` bootstrap −1.5% instructions (29 collections, peak RSS 232 MB vs 270 MB); the census file +0.8% (7 collections, 736–742 MB vs 798–802 MB); a long nested load (15M allocating iterations in a `require`d file) +1.0% (13 collections, 741–750 MB vs 2084 MB), level in wall time (mean −0.18 s over 15 interleaved pairs); GUI per key (`perkey_live`, `--loadup`, 200 lines) self-insert 41.0M vs 42.8M instructions and C-f 44.1M vs 47.9M; a 10-minute idle-and-typing GUI session peaks at 473 MB vs 511 MB. Tests: `crates/romacs-vm/tests/garbage_collect.rs`, `gc::tests`.",
    "symbols": [
     "gc-cons-threshold gc-cons-percentage garbage-collect"
    ],
