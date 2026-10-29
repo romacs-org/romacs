@@ -9,10 +9,11 @@
 ;; the root's printed value.  gnu-tests/tools/world_diff.py compares two
 ;; such files.  It reads through Lisp only, independently of how a world
 ;; is encoded: every interned symbol's default value, function and plist,
-;; the features, load history and load path, every buffer's text,
+;; the obarray's members in the order symbols were made, the features,
+;; load history and load path, every buffer's text,
 ;; properties, point, narrowing, locals, overlays and modification state,
 ;; every frame's parameters and window tree, the faces, the charset and
-;; coding priorities, the match data and the obarray's membership.
+;; coding priorities and the match data.
 ;;
 ;; Values print with `print-circle', so sharing and cycles are part of
 ;; the text, and with every length and level limit off.
@@ -37,6 +38,11 @@ to `world-digest-file' with \".show\" appended, to see why they differ.")
         (prin1-to-string value)
       (error (format "#<unprintable %S>" err)))))
 
+(defmacro world-digest--safely (form)
+  "FORM's value, or the error it signals: a root Lisp cannot read is
+digested as that error, alike in both VMs when they fail alike."
+  `(condition-case err ,form (error (list 'world-digest--error err))))
+
 (defvar world-digest--lines nil
   "The lines so far, last first.")
 
@@ -47,6 +53,15 @@ to `world-digest-file' with \".show\" appended, to see why they differ.")
       (push (format "%s %s %s\n" root name text) world-digest--shown))
     (push (concat root "\t" name "\t" (secure-hash 'sha1 (encode-coding-string text 'utf-8-emacs)) "\n")
           world-digest--lines)))
+
+(defun world-digest--interned ()
+  "Every interned symbol's name in `mapatoms' order, which is the order
+symbols were made, but this file's own."
+  (let (names)
+    (mapatoms (lambda (symbol)
+                (unless (string-prefix-p "world-digest" (symbol-name symbol))
+                  (push (symbol-name symbol) names))))
+    (nreverse names)))
 
 (defun world-digest--symbols ()
   "Every interned symbol, by name, but this file's own."
@@ -87,18 +102,21 @@ No buffer is made until every root is read."
         (world-digest--line "plist" name (symbol-plist symbol))
         (world-digest--line "special" name (special-variable-p symbol))))
     (world-digest--line "obarray" "names" (mapcar #'symbol-name symbols))
+    (world-digest--line "obarray" "order" (world-digest--interned))
     (world-digest--line "features" "features" features)
     (world-digest--line "load-history" "load-history" load-history)
     (world-digest--line "load-path" "load-path" load-path)
     (dolist (buffer (buffer-list))
-      (world-digest--line "buffer" (buffer-name buffer) (world-digest--buffer buffer)))
+      (world-digest--line "buffer" (buffer-name buffer) (world-digest--safely (world-digest--buffer buffer))))
     (dolist (frame (frame-list))
       (world-digest--line "frame" (format "%S" (frame-parameter frame 'name))
-                          (list (frame-parameters frame) (window-tree frame))))
+                          (list (world-digest--safely (frame-parameters frame))
+                                (world-digest--safely (window-tree frame)))))
     (dolist (face (face-list))
-      (world-digest--line "face" (symbol-name face) (face-all-attributes face (selected-frame))))
-    (world-digest--line "charset" "priority" (charset-priority-list))
-    (world-digest--line "coding" "priority" (coding-system-priority-list))
+      (world-digest--line "face" (symbol-name face)
+                          (world-digest--safely (face-all-attributes face (selected-frame)))))
+    (world-digest--line "charset" "priority" (world-digest--safely (charset-priority-list)))
+    (world-digest--line "coding" "priority" (world-digest--safely (coding-system-priority-list)))
     (world-digest--line "match-data" "match-data" (match-data))
     (let ((lines (nreverse world-digest--lines)) (shown (nreverse world-digest--shown)))
       (setq world-digest--lines nil world-digest--shown nil)
