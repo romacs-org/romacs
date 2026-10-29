@@ -170,11 +170,14 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             return Err("invalid mode-line face or control character".into());
         }
     }
-    let face_base = u32::try_from(frame.faces.len()).map_err(|e| e.to_string())?;
+    // Above every face id an earlier window took, its band's copies included.
+    let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
     let mut slices = vec![(&snapshot.text, 0)];
     if let Some(band) = &snapshot.mode_line { slices.push((band, snapshot.mode_line_face.0 as usize)); }
     let face_text = face_text(snapshot.faces.len(), &slices);
-    let metrics = realize_faces(&snapshot.faces, &face_text, frame, resolver, face_base)?;
+    // The band's own face sets its height even where no character uses it.
+    let band_face = snapshot.mode_line.as_ref().map(|_| snapshot.mode_line_face.0 as usize);
+    let metrics = realize_faces(&snapshot.faces, &face_text, |index| Some(index) == band_face, frame, resolver, face_base)?;
     if face_base == 0 { frame.char_height = metrics[0].1; frame.char_width = metrics[0].2; }
     let band_height = snapshot.mode_line.as_ref().map_or(0.0, |band| {
         std::iter::once(snapshot.mode_line_face.0 as usize)
@@ -329,7 +332,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         for index in 0..snapshot.faces.len() {
             let source = FaceId::new(face_base + index as u32);
             let target = FaceId::new(face_base.checked_add(offset).and_then(|v| v.checked_add(index as u32)).ok_or("too many faces")?);
-            let mut face = frame.faces[&source].clone();
+            let Some(face) = frame.faces.get(&source) else { continue };
+            let mut face = face.clone();
             face.id = target;
             face.background = background;
             frame.faces.insert(target, face);
@@ -405,15 +409,21 @@ fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
     text
 }
 
-/// Publish FACES into FRAME from FACE_BASE on and resolve the fonts their
-/// characters need: each face's ascent, row height, nominal advance and
-/// space width.
-fn realize_faces(faces: &[Face], face_text: &[String], frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, face_base: u32) -> Result<Vec<(f32, f32, f32, f32)>, String> {
+/// Publish the FACES something paints into FRAME from FACE_BASE on and
+/// resolve the fonts their characters need: each face's ascent, row
+/// height, nominal advance and space width. A face no character uses is
+/// not published, except the default and those KEEP accepts; its metrics
+/// are unused.
+fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> bool, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, face_base: u32) -> Result<Vec<(f32, f32, f32, f32)>, String> {
     let policy = FontsetPolicy::new();
     let mut metrics = Vec::new();
     for (index, face) in faces.iter().enumerate() {
         if face.family.is_empty() || !face.pixel_size.is_finite() || face.pixel_size <= 0.0 {
             return Err("invalid font request".into());
+        }
+        if index != 0 && !keep(index) && face_text[index].is_empty() {
+            metrics.push((0.0, 0.0, 0.0, 0.0));
+            continue;
         }
         let id = FaceId::new(face_base.checked_add(u32::try_from(index).map_err(|e| e.to_string())?).ok_or("too many faces")?);
         frame.set_face_with_font(
@@ -487,7 +497,8 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
     validate_runs(&input.text, input.faces.len())?;
     let mut frame = new_frame(1, 1, 1)?;
     let face_text = face_text(input.faces.len(), &[(&input.text, 0)]);
-    let metrics = realize_faces(&input.faces, &face_text, &mut frame, resolver, 0)?;
+    // Every face's row height is part of the answer.
+    let metrics = realize_faces(&input.faces, &face_text, |_| true, &mut frame, resolver, 0)?;
     let pixels = |value: f32| if value.fract() == 0.0 && value >= 0.0 && value <= u32::MAX as f32 { Ok(value as u32) }
         else { Err(format!("fractional or negative advance {value}")) };
     let face_heights = metrics.iter().map(|m| pixels(m.1)).collect::<Result<Vec<_>, _>>()?;
