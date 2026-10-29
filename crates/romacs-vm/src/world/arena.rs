@@ -35,7 +35,9 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 /// the executable, its heap, the libraries and the stack.
 const WINDOW: (usize, usize) = (0x1000_0000_0000, 0x5000_0000_0000);
 const ALIGN: usize = 1 << 30;
-/// The reserved range. Pages are committed only as they are touched.
+/// The most an arena reserves. Pages are committed only as they are
+/// touched; under an address-space limit an arena reserves a quarter of it,
+/// as a process may hold two (`adopt`).
 const RESERVE: usize = 1 << 37;
 const PAGE: usize = 4096;
 const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA2");
@@ -53,6 +55,8 @@ struct Header {
     magic: u64,
     /// Where the arena starts.
     base: usize,
+    /// How much address space it holds from there.
+    reserve: usize,
     /// The first page never handed out as a run.
     top: usize,
     /// Every address at or above this one is untouched, so zero.
@@ -219,7 +223,7 @@ unsafe fn take_pages(h: &mut Header, pages: usize, align: usize) -> usize {
     }
     let at = h.top.next_multiple_of(align.max(PAGE));
     let end = at + pages * PAGE;
-    if end > base() + RESERVE {
+    if end > h.base + h.reserve {
         return 0;
     }
     if at > h.top {
@@ -272,7 +276,7 @@ fn owner(at: *mut u8) -> Option<*mut Header> {
     // An adoption publishes FORMER before BASE: a block of the first arena
     // finds its header whichever of the two this reads.
     [BASE.load(Ordering::Acquire), FORMER.load(Ordering::Acquire)].into_iter()
-        .find(|&base| base != 0 && (base..base + RESERVE).contains(&at))
+        .find(|&base| base != 0 && (base..base + unsafe { (*(base as *const Header)).reserve }).contains(&at))
         .map(|base| base as *mut Header)
 }
 
@@ -295,6 +299,7 @@ fn state() -> u8 {
 unsafe fn start() -> u8 {
     unsafe { LIBRARIES = libraries_digest() };
     SCRUB.store(!unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null(), Ordering::Relaxed);
+    let Some(reserve) = (unsafe { reserve() }) else { return SYSTEM };
     let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
     for _ in 0..8 {
         let mut random = 0usize;
@@ -302,22 +307,35 @@ unsafe fn start() -> u8 {
         if read != size_of::<usize>() as isize {
             break;
         }
-        let base = WINDOW.0 + random % ((WINDOW.1 - WINDOW.0 - RESERVE) / ALIGN) * ALIGN;
-        let at = unsafe { libc::mmap(base as *mut libc::c_void, RESERVE, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
+        let base = WINDOW.0 + random % ((WINDOW.1 - WINDOW.0 - reserve) / ALIGN) * ALIGN;
+        let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
         if at == base as *mut libc::c_void {
             BASE.store(base, Ordering::Relaxed);
             let h = unsafe { &mut *header() };
             h.magic = MAGIC;
             h.base = base;
+            h.reserve = reserve;
             h.top = base + size_of::<Header>().next_multiple_of(PAGE);
             h.zero = h.top;
             return ARENA;
         }
         if at != libc::MAP_FAILED {
-            unsafe { libc::munmap(at, RESERVE) };
+            unsafe { libc::munmap(at, reserve) };
         }
     }
     SYSTEM
+}
+
+/// How much address space an arena of this process reserves: RESERVE, or
+/// a GiB-aligned quarter of the address-space limit, when that is at least
+/// a GiB.
+unsafe fn reserve() -> Option<usize> {
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    if unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) } != 0 || limit.rlim_cur == libc::RLIM_INFINITY {
+        return Some(RESERVE);
+    }
+    let quarter = (limit.rlim_cur as usize / 4).min(RESERVE) / ALIGN * ALIGN;
+    (quarter >= ALIGN).then_some(quarter)
 }
 
 /// Allocate from the image in FILE from now on: map it where it was made,
@@ -344,11 +362,15 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     let image = unsafe { std::ptr::read_unaligned(bytes.as_ptr().cast::<Header>()) };
     let (base, len) = (image.base, image.image.len);
     // A truncated or extended file is no image: mapped, it would fault.
-    if image.magic != MAGIC || len == 0 || len % PAGE != 0 || len >= RESERVE || stat.st_size as usize != len
-        || base % ALIGN != 0 || !(WINDOW.0..=WINDOW.1 - RESERVE).contains(&base) || !(base..=base + len).contains(&image.top)
+    if image.magic != MAGIC || len == 0 || len % PAGE != 0 || stat.st_size as usize != len
+        || base % ALIGN != 0 || base < WINDOW.0 || base.saturating_add(len) > WINDOW.1 || !(base..=base + len).contains(&image.top)
     {
         return Restore::Format;
     }
+    let reserve = match unsafe { reserve() } {
+        Some(reserve) if len < reserve && base + reserve <= WINDOW.1 => reserve,
+        _ => return Restore::Map,
+    };
     let file = libc::MAP_PRIVATE | libc::MAP_FIXED_NOREPLACE;
     let at = unsafe { libc::mmap(base as *mut libc::c_void, len, libc::PROT_READ | libc::PROT_WRITE, file, fd, 0) };
     if at != base as *mut libc::c_void {
@@ -358,18 +380,20 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
         return Restore::Map;
     }
     let anon = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
-    let rest = unsafe { libc::mmap((base + len) as *mut libc::c_void, RESERVE - len, libc::PROT_READ | libc::PROT_WRITE, anon, -1, 0) };
+    let rest = unsafe { libc::mmap((base + len) as *mut libc::c_void, reserve - len, libc::PROT_READ | libc::PROT_WRITE, anon, -1, 0) };
     if rest != (base + len) as *mut libc::c_void {
         if rest != libc::MAP_FAILED {
-            unsafe { libc::munmap(rest, RESERVE - len) };
+            unsafe { libc::munmap(rest, reserve - len) };
         }
         unsafe { libc::munmap(base as *mut libc::c_void, len) };
         return Restore::Map;
     }
     if !unsafe { shadow_executable(image.image.executable) } {
-        unsafe { libc::munmap(base as *mut libc::c_void, RESERVE) };
+        unsafe { libc::munmap(base as *mut libc::c_void, reserve) };
         return Restore::Executable;
     }
+    // This process's reservation, not the builder's.
+    unsafe { (*(base as *mut Header)).reserve = reserve };
     // The kernel reads the file ahead while the process starts.
     unsafe { libc::madvise(base as *mut libc::c_void, len, libc::MADV_WILLNEED) };
     lock();
@@ -715,7 +739,7 @@ unsafe impl GlobalAlloc for Arena {
                         unsafe { give_pages(h, start + new * PAGE, old - new) };
                     }
                     true
-                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= owner as usize + RESERVE {
+                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= h.base + h.reserve {
                     h.top += (new - old) * PAGE;
                     h.zero = h.zero.max(h.top);
                     true
