@@ -1248,15 +1248,60 @@ pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
     File::open(path)
 }
 
-/// A world store's marker file, opened without following a symlink: with
-/// CREATE, made where none is (O_CREAT|O_EXCL), readable and writable by
-/// its owner only; else opened to read.
-pub fn open_store_marker(path: impl AsRef<Path>, create: bool) -> io::Result<File> {
+/// How `open_store_file` opens a world store's file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreOpen {
+    /// To read it.
+    Read,
+    /// To write it: made if missing (CREATE, readable and writable by its
+    /// owner only), emptied with TRUNCATE.
+    Write { create: bool, truncate: bool },
+    /// To make it where none is (O_CREAT|O_EXCL), and write it.
+    New,
+}
+
+/// A world store's file at PATH, opened as HOW: never through a symlink,
+/// never blocking on what is no file (a FIFO opens at once, and is then
+/// refused), and only when it is a regular file; truncated only then. The
+/// store's own, never a fact of a build.
+pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<File> {
+    use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
     let mut options = OpenOptions::new();
-    options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
-    if create { options.write(true).create_new(true); } else { options.read(true); }
-    options.open(path)
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).mode(0o600);
+    match how {
+        StoreOpen::Read => { options.read(true); }
+        StoreOpen::Write { create, .. } => { options.write(true).create(create); }
+        StoreOpen::New => { options.write(true).create_new(true); }
+    }
+    let file = options.open(path.as_ref())?;
+    if !file.metadata()?.file_type().is_file() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{} is not a regular file", path.as_ref().display())));
+    }
+    let fd = file.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if let StoreOpen::Write { truncate: true, .. } = how {
+        file.set_len(0)?;
+    }
+    Ok(file)
+}
+
+/// A world store's regular file at PATH, read whole (`open_store_file`).
+pub fn read_store_file(path: impl AsRef<Path>) -> io::Result<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    open_store_file(path, StoreOpen::Read)?.read_to_string(&mut text)?;
+    Ok(text)
+}
+
+/// Write BYTES as the world store's regular file at PATH, made or
+/// emptied first (`open_store_file`).
+pub fn write_store_file(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
+    use std::io::Write;
+    open_store_file(path, StoreOpen::Write { create: true, truncate: true })?.write_all(bytes.as_ref())
 }
 
 /// Remove NAME from this process's environment, before any other thread

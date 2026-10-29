@@ -105,7 +105,7 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
     use std::io::Read;
     let meta = host::file_metadata(file)?;
     let cached = store.join("ids").join(identity_name(&meta));
-    if let Ok(text) = host::read_to_string(&cached)
+    if let Ok(text) = host::read_store_file(&cached)
         && let Some(digest) = (0..32).map(|i| u8::from_str_radix(text.get(2 * i..2 * i + 2)?, 16).ok()).collect::<Option<Vec<u8>>>()
     {
         return Ok(digest.try_into().expect("32 bytes"));
@@ -120,7 +120,7 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
         }
     }
     let digest: [u8; 32] = digest.finalize().into();
-    let _ = host::create_dir_all(store.join("ids")).and_then(|()| host::write(&cached, hex(&digest)));
+    let _ = host::create_dir_all(store.join("ids")).and_then(|()| host::write_store_file(&cached, hex(&digest)));
     Ok(digest)
 }
 
@@ -209,7 +209,7 @@ fn private_store(store: &Path) -> std::io::Result<()> {
 /// Mark STORE as a world store: a new marker, never through a symlink.
 fn write_marker(store: &Path) -> std::io::Result<()> {
     use std::io::Write;
-    host::open_store_marker(store.join(MARKER), true)?.write_all(MARKER_TEXT.as_bytes())
+    host::open_store_file(store.join(MARKER), host::StoreOpen::New)?.write_all(MARKER_TEXT.as_bytes())
 }
 
 /// Why STORE's marker is no valid one, or None when it is: opened without
@@ -217,7 +217,7 @@ fn write_marker(store: &Path) -> std::io::Result<()> {
 fn marker_error(store: &Path) -> Option<String> {
     use std::io::Read;
     use std::os::unix::fs::MetadataExt;
-    let mut file = match host::open_store_marker(store.join(MARKER), false) {
+    let mut file = match host::open_store_file(store.join(MARKER), host::StoreOpen::Read) {
         Ok(file) => file,
         Err(e) => return Some(format!("its {MARKER} cannot be opened as a file of its own: {e}")),
     };
@@ -301,7 +301,7 @@ impl World {
     /// The manifest, when its records still hold: every keyed fact the build
     /// read, asked again, gives the same answer.
     fn valid_manifest(&self) -> Result<Json, Json> {
-        let text = host::read_to_string(self.file(".json")).map_err(|e| json!({"missing": e.to_string()}))?;
+        let text = host::read_store_file(self.file(".json")).map_err(|e| json!({"missing": e.to_string()}))?;
         let manifest: Json = serde_json::from_str(&text).map_err(|e| json!({"manifest": e.to_string()}))?;
         let case = crate::prim::prims::savejourney::filesystem_case_insensitive;
         for record in manifest["records"].as_array().map(Vec::as_slice).unwrap_or_default() {
@@ -321,7 +321,7 @@ impl World {
     /// The image MANIFEST names, opened, when its content is the one it
     /// binds.
     fn checked_image(&self, manifest: &Json) -> Result<std::fs::File, Json> {
-        let image = host::open_world_file(self.file(".rwi")).map_err(|e| json!({"missing": e.to_string()}))?;
+        let image = host::open_store_file(self.file(".rwi"), host::StoreOpen::Read).map_err(|e| json!({"missing": e.to_string()}))?;
         let digest = file_digest(&self.store, &image).map_err(|e| json!({"image": e.to_string()}))?;
         match manifest["image"].as_str() {
             Some(bound) if bound == hex(&digest) => Ok(image),
@@ -459,7 +459,7 @@ impl World {
     fn try_lock(&self) -> std::io::Result<Option<std::fs::File>> {
         use std::os::fd::AsRawFd;
         let _store = self.store_lock(libc::LOCK_SH)?;
-        let file = host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?;
+        let file = host::open_store_file(self.file(".lock"), host::StoreOpen::Write { create: true, truncate: false })?;
         pause_for_test();
         Ok((unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0).then_some(file))
     }
@@ -493,7 +493,7 @@ impl World {
         use std::os::fd::AsRawFd;
         use std::os::unix::process::CommandExt;
         let pinned = self.pinned_dir()?;
-        let log = host::open_output(self.file(".log"), host::OpenOptions::new().write(true).create(true).truncate(true))?;
+        let log = host::open_store_file(self.file(".log"), host::StoreOpen::Write { create: true, truncate: true })?;
         let mut env = pinned_env(&host::env_snapshot(), &pinned);
         env.push((BUILD_ENV.into(), self.store.clone().into_os_string()));
         let fd = lock.as_raw_fd();
@@ -512,7 +512,7 @@ impl World {
     /// The transient failures recorded since the last success: how many,
     /// and when the last one was (seconds since the epoch).
     fn failures(&self) -> Option<(u64, u64)> {
-        let text = host::read_to_string(self.file(".failed")).ok()?;
+        let text = host::read_store_file(self.file(".failed")).ok()?;
         let record: Json = serde_json::from_str(&text).ok()?;
         Some((record["attempts"].as_u64()?, record["at"].as_u64()?))
     }
@@ -537,7 +537,7 @@ impl World {
     fn mark_use(&self) {
         use std::os::fd::AsRawFd;
         let Ok(_store) = self.store_lock(libc::LOCK_SH) else { return };
-        if let Ok(file) = host::open_output(self.file(".use"), host::OpenOptions::new().write(true).create(true)) {
+        if let Ok(file) = host::open_store_file(self.file(".use"), host::StoreOpen::Write { create: true, truncate: false }) {
             let _ = file.set_modified(host::clock());
             if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0 {
                 std::mem::forget(file);
@@ -580,7 +580,7 @@ impl World {
             Some(fd) => unsafe { std::fs::File::from_raw_fd(fd) },
             None => {
                 store = Some(self.store_lock(libc::LOCK_SH)?);
-                let lock = host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?;
+                let lock = host::open_store_file(self.file(".lock"), host::StoreOpen::Write { create: true, truncate: false })?;
                 pause_for_test();
                 lock
             }
@@ -709,7 +709,7 @@ impl World {
         read_only(&temporary).map_err(|e| e.to_string())?;
         host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string())?;
         // Hashed from the file as published, which also caches it.
-        let image = host::open_world_file(self.file(".rwi")).map_err(|e| e.to_string())?;
+        let image = host::open_store_file(self.file(".rwi"), host::StoreOpen::Read).map_err(|e| e.to_string())?;
         let digest = file_digest(&self.store, &image).map_err(|e| e.to_string())?;
         manifest["image"] = json!(hex(&digest));
         self.publish(".json", &serde_json::to_vec(&manifest).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
@@ -783,11 +783,11 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         let name = entry?.file_name();
         let Some(name) = name.to_str() else { continue };
         let path = store.join(name);
-        let refused = || host::read_to_string(&path).ok()
+        let refused = || host::read_store_file(&path).ok()
             .and_then(|text| serde_json::from_str::<Json>(&text).ok())
             .is_some_and(|m| m["refusals"].as_array().is_some_and(|r| !r.is_empty()));
         // A world's lock or use file goes only when no process holds it.
-        let held = |suffix: &str| ["lock", "use"].contains(&suffix) && host::open_output(&path, host::OpenOptions::new().write(true))
+        let held = |suffix: &str| ["lock", "use"].contains(&suffix) && host::open_store_file(&path, host::StoreOpen::Write { create: false, truncate: false })
             .is_ok_and(|file| { use std::os::fd::AsRawFd; (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }) != 0 });
         match world_file(name) {
             Some((_, suffix)) if regular(&path) && !held(suffix) && (everything || suffix == "failed" || (suffix == "json" && refused())) => {
@@ -847,7 +847,7 @@ impl World {
             }
         }
         let held = |path: PathBuf| -> bool {
-            host::open_output(&path, host::OpenOptions::new().write(true))
+            host::open_store_file(&path, host::StoreOpen::Write { create: false, truncate: false })
                 .is_ok_and(|file| (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }) != 0)
         };
         let worlds: Vec<Stored> = files.iter().map(|(key, files)| Stored {
@@ -861,7 +861,7 @@ impl World {
         for key in prune_plan(&worlds, &current, now_seconds()) {
             // Taken now, these say no builder or restored process came since.
             let locks: Vec<std::fs::File> = ["lock", "use"].iter()
-                .filter_map(|s| host::open_output(self.store.join(format!("{key}.{s}")), host::OpenOptions::new().write(true)).ok())
+                .filter_map(|s| host::open_store_file(self.store.join(format!("{key}.{s}")), host::StoreOpen::Write { create: false, truncate: false }).ok())
                 .collect();
             if locks.iter().any(|f| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0) {
                 continue;
@@ -894,7 +894,7 @@ impl World {
 /// STORE's store-wide lock (`World::store_lock`), taken as KIND.
 fn lock_store(store: &Path, kind: i32) -> std::io::Result<std::fs::File> {
     use std::os::fd::AsRawFd;
-    let file = host::open_output(store.join(STORE_LOCK), host::OpenOptions::new().write(true).create(true))?;
+    let file = host::open_store_file(store.join(STORE_LOCK), host::StoreOpen::Write { create: true, truncate: false })?;
     if unsafe { libc::flock(file.as_raw_fd(), kind) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -911,7 +911,7 @@ fn pause_for_test() {}
 #[cfg(feature = "world-test-hooks")]
 fn pause_for_test() {
     let Some(dir) = host::getenv("ROMACS_WORLD_TEST_PAUSE_LOCK").map(PathBuf::from) else { return };
-    let _ = host::write(dir.join("paused"), b"");
+    let _ = host::write_store_file(dir.join("paused"), b"");
     let deadline = host::monotonic() + std::time::Duration::from_secs(60);
     while !host::probe(host::Probe::Exists, dir.join("resume")) && host::monotonic() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1122,6 +1122,65 @@ mod tests {
             let _ = std::fs::remove_dir_all(d);
         }
         let _ = std::fs::remove_file(target);
+    }
+
+    fn fifo(path: &Path) {
+        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0, "{}", path.display());
+    }
+
+    /// Run F on a thread of its own: its result, unless it blocks.
+    fn bounded<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || { let _ = send.send(f()); });
+        receive.recv_timeout(std::time::Duration::from_secs(5)).unwrap_or_else(|_| panic!("{what} blocked"))
+    }
+
+    #[test]
+    fn a_fifo_in_place_of_a_store_file_is_refused_without_blocking() {
+        // As the marker: launch, reset and prune refuse the store at once.
+        let marked = marked_store("fifo-marker");
+        std::fs::remove_file(marked.join(MARKER)).unwrap();
+        fifo(&marked.join(MARKER));
+        let store = marked.clone();
+        assert!(bounded("validating the store", move || private_store(&store)).is_err());
+        let store = marked.clone();
+        assert!(bounded("reset", move || reset_in(&store, true, None)).is_err());
+        // As a world's files and the store lock: each open refuses it.
+        let dir = marked_store("fifo-files");
+        let world = World { store: dir.clone(), key: [0xdd; 32], recipe: vec![] };
+        for suffix in ["json", "lock", "use", "failed", "rwi", "log"] {
+            fifo(&world.file(&format!(".{suffix}")));
+        }
+        std::fs::create_dir_all(dir.join("ids")).unwrap();
+        fifo(&dir.join("ids/1-2-3-4.5-6.7"));
+        let w = world.clone();
+        assert!(bounded("the manifest", move || w.valid_manifest()).is_err());
+        let w = world.clone();
+        assert!(bounded("the image", move || w.usable()).is_err());
+        let w = world.clone();
+        assert!(bounded("the world's lock", move || w.try_lock()).is_err());
+        let w = world.clone();
+        bounded("the use file", move || w.mark_use());
+        let w = world.clone();
+        assert!(bounded("the failure record", move || w.failures()).is_none());
+        let w = world.clone();
+        assert!(bounded("the builder's log", move || w.start_builder(vec![], tempfile_lock(&w))).is_err());
+        let w = world.clone();
+        bounded("pruning", move || w.prune_in(None)).unwrap();
+        let store = dir.clone();
+        bounded("reset", move || reset_in(&store, true, None)).unwrap();
+        std::fs::remove_file(dir.join(STORE_LOCK)).unwrap();
+        fifo(&dir.join(STORE_LOCK));
+        let store = dir.clone();
+        assert!(bounded("the store lock", move || lock_store(&store, libc::LOCK_SH)).is_err());
+        let _ = std::fs::remove_dir_all(marked);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A lock file to hand `start_builder`, which never gets to use it.
+    fn tempfile_lock(world: &World) -> std::fs::File {
+        std::fs::File::create(world.store.join("handed.lock")).unwrap()
     }
 
     fn stored(key: &str, days_ago: u64, mib: u64, busy: bool) -> Stored {
