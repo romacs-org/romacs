@@ -450,3 +450,8 @@ defsubr! { name = "window-end", gnu = "window.c:1782", effect = Reads,
 fn window_end(cx; optional window: Value, update: Value) {
     cx.window_end(window, update)
 }}
+
+defsubr! { name = "previous-window", gnu = "window.c:2980", effect = Reads,
+fn previous_window(cx; optional window: Value, minibuf: Value, all_frames: Value) {
+    cx.windows().next_window(window, minibuf, all_frames, false)
+}}
