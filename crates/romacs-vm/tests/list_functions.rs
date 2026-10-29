@@ -79,3 +79,27 @@ fn a_lambda_list_binds_each_parameter_before_checking_the_next() {
         ("(funcall '(lambda (ww-x &optional y nil) 1) 2)", "((setting-constant nil) ((let 2) (unlet 0)))"),
     ]);
 }
+
+/// The failed walk binds the caller's own argument objects and signals with
+/// the function object itself: a watcher that mutates its new value
+/// changes the caller's argument, and the error datum is `eq' to the
+/// function, also across a collection a watcher runs. Pinned GNU 32.0.50
+/// answers.
+#[test]
+fn a_lambda_list_binds_and_signals_with_the_callers_objects() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source("(progn (defvar ww-y nil) (add-variable-watcher 'ww-y (lambda (_s n o _w) (when (eq o 'let) (if (consp n) (setcar n 'changed) (aset n 0 'changed))))) (defvar ww-z nil) (add-variable-watcher 'ww-z (lambda (_s n o _w) (when (eq o 'let) (garbage-collect) (setcar n (list 'collected))))))").unwrap();
+    for (form, expected) in [
+        ("(let ((arg (list 1 2))) (list (condition-case e (funcall '(lambda (ww-y 5) 1) arg) (error (car e))) arg))", "(invalid-function (changed 2))"),
+        ("(let ((arg (vector 1 2))) (list (condition-case e (funcall '(lambda (ww-y nil) 1) arg 3) (error (car e))) arg))", "(setting-constant [changed 2])"),
+        ("(let ((arg (list 1 2))) (list (condition-case e (funcall '(lambda (&rest ww-y) (car ww-y)) arg) (error (car e))) arg))", "(changed (1 2))"),
+        ("(let* ((fn (list 'lambda '(x 5) 1)) (err (condition-case e (funcall fn 1) (error e)))) (list (car err) (eq (car (cdr err)) fn)))", "(invalid-function t)"),
+        ("(let* ((fn (list 'lambda '(x) 1)) (err (condition-case e (funcall fn) (error e)))) (list (car err) (eq (car (cdr err)) fn)))", "(wrong-number-of-arguments t)"),
+        ("(let* ((fn (list 'lambda '(x) 1)) (err (condition-case e (apply fn '(1 2)) (error e)))) (list (car err) (eq (car (cdr err)) fn)))", "(wrong-number-of-arguments t)"),
+        ("(let* ((arg (list 1 2)) (fn (list 'lambda '(&rest ww-z &optional) 1)) (err (condition-case e (funcall fn arg) (error e)))) (list (car err) (eq (car (cdr err)) fn) arg))", "(invalid-function t (1 2))"),
+    ] {
+        let source = format!("(eval '{form} t)");
+        assert_eq!(vm.eval_source(&source).map(|v| v.display().unwrap()), Ok(expected.to_string()), "{form}");
+    }
+}

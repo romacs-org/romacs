@@ -2328,8 +2328,8 @@ unsafe fn invoke_full(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
-            if let Some(replay) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
-                return nested_then(e, r, |vm| vm.eval_primitive(&[replay, Value::NIL])).map_or(Value::UNBOUND, |(_, value)| value);
+            if let Some(failure) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
+                return lambda_list_raise(e, failure);
             }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_invoke_full(e, r, pc, closure, start, argc),
@@ -2773,8 +2773,8 @@ unsafe fn t2_dispatch(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
-            if let Some(replay) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
-                return nested_then(e, r, |vm| vm.eval_primitive(&[replay, Value::NIL])).map_or(Value::UNBOUND, |(_, value)| value);
+            if let Some(failure) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
+                return lambda_list_raise(e, failure);
             }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_dispatch(e, r, pc, closure, start, argc),
@@ -3286,16 +3286,17 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
     unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
 }
+/// A lambda list's failed walk: the bindings made before it failed,
+/// then the condition and its data.
+type LambdaListFailure = (Vec<(Value, Value)>, &'static str, Vec<Value>);
 /// eval.c funcall_lambda's argument walk for a `(lambda ARGS . BODY)'
 /// list called with ARGS. One parameter at a time it is checked, takes its
 /// argument and is bound (dynamically: a list function has no lexenv). A
 /// parameter that is not a symbol or a misplaced &optional or &rest is
 /// invalid-function, binding nil, t or a keyword is setting-constant, and
 /// a missing or excess argument is wrong-number-of-arguments, with the list
-/// itself as the function datum. When the walk signals, returns the form
-/// that replays it: the bindings made before the failure around GNU's
-/// signal, so their variable watchers see the let and the unlet.
-fn lambda_list_failure(vm: &mut Vm, list: Value, args: Vec<Value>) -> Option<Value> {
+/// itself as the function datum. Returns the walk's failure, if any.
+fn lambda_list_failure(vm: &mut Vm, list: Value, args: Vec<Value>) -> Option<LambdaListFailure> {
     let symbol = |vm: &mut Vm, name: &str| Value::reference(vm.slot(name) + 1, 7);
     let (and_rest, and_optional) = (symbol(vm, "&rest"), symbol(vm, "&optional"));
     let constant = |vm: &Vm, param: Value| param == Value::NIL || param == Value::TRUE || {
@@ -3331,17 +3332,33 @@ fn lambda_list_failure(vm: &mut Vm, list: Value, args: Vec<Value>) -> Option<Val
         params = more;
     };
     let (condition, data) = failure?;
-    let quote = symbol(vm, "quote");
-    let quoted = |vm: &mut Vm, value: Value| vm.list_value(&[quote, value]);
-    let bindings: Vec<Value> = bindings.into_iter().map(|(param, arg)| { let arg = quoted(vm, arg); vm.list_value(&[param, arg]) }).collect();
-    let data: Vec<Value> = data.into_iter().map(|datum| quoted(vm, datum)).collect();
-    let (list_fn, signal, condition) = (symbol(vm, "list"), symbol(vm, "signal"), symbol(vm, condition));
-    let data = vm.list_value(&[vec![list_fn], data].concat());
-    let condition = quoted(vm, condition);
-    let raise = vm.list_value(&[signal, condition, data]);
-    let bindings = vm.list_value(&bindings);
-    let r#let = symbol(vm, "let");
-    Some(vm.list_value(&[r#let, bindings, raise]))
+    Some((bindings, condition, data))
+}
+/// Make a failed walk's bindings, with the caller's own argument objects,
+/// then signal its condition; the handler's unwinding undoes the bindings,
+/// so their variable watchers see the let and the unlet. The values stay
+/// rooted (and are reread) while watchers run Lisp.
+fn lambda_list_raise(e: &mut Engine<'_>, (bindings, condition, data): LambdaListFailure) -> Value {
+    let roots = e.vm.external_roots.len();
+    e.vm.external_roots.extend(&data);
+    e.vm.external_roots.extend(bindings.iter().flat_map(|&(param, arg)| [param, arg]));
+    let base = roots + data.len();
+    for k in 0..bindings.len() {
+        let (param, arg) = (e.vm.external_roots[base + 2 * k], e.vm.external_roots[base + 2 * k + 1]);
+        if let Err(error) = e.vm.bind_variable(param.index_if(7).map_or(0, |i| i - 1), arg) {
+            e.vm.external_roots.truncate(roots);
+            if let Some(escape) = e.vm.propagated_escape.take() {
+                e.escape = Some(escape);
+            } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, arg) {
+                e.escape = Some(Escape::Signal(condition, data));
+            } else {
+                e.error = Some(error);
+            }
+            return Value::UNBOUND;
+        }
+    }
+    let data: Vec<Value> = e.vm.external_roots.drain(roots..).take(data.len()).collect();
+    raise(e, condition, &data)
 }
 /// GNU `(lambda ...)' list functions: a list headed by `lambda' whose cdr
 /// is a cons (funcall_lambda signals `invalid-function' otherwise).
