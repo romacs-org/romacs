@@ -13,7 +13,10 @@ pub fn translate(event: InputEvent) -> Option<CommandEvent> {
         FrontendKey::Character(c) => Some(c as i64),
         FrontendKey::Keysym(k) => match k {
             0xff08 if modifiers & ROMACS_CTRL_MASK != 0 => None,
-            0xff08 => Some(127), 0xff09 => Some(9), 0xff0d => Some(10), 0xff1b => Some(27),
+            // Return is the function key `return', as GNU's X and pgtk
+            // frames deliver it; `local-function-key-map' makes an unbound
+            // one RET (simple.el).
+            0xff08 => Some(127), 0xff09 => Some(9), 0xff1b => Some(27),
             0..=0x7f | 0xa0..=0xff => Some(k as i64),
             0x01000000..=0x0110ffff => char::from_u32(k & 0xffffff).map(|c| c as i64),
             _ => None,
@@ -32,7 +35,7 @@ pub fn translate(event: InputEvent) -> Option<CommandEvent> {
     }
     let FrontendKey::Keysym(k) = key else { return None; };
     let name = match k {
-        0xff08 => "backspace".into(),
+        0xff08 => "backspace".into(), 0xff0d => "return".into(),
         0xff50 => "home".into(), 0xff51 => "left".into(), 0xff52 => "up".into(),
         0xff53 => "right".into(), 0xff54 => "down".into(), 0xff55 => "prior".into(),
         0xff56 => "next".into(), 0xff57 => "end".into(), 0xffff => "delete".into(),
@@ -68,7 +71,9 @@ mod tests {
         assert_eq!(translate(key(FrontendKey::Character('x'), ROMACS_META_MASK, true)), Some(CommandEvent::Character((1 << 27) | 120)));
         assert_eq!(translate(key(FrontendKey::Keysym(0xff51), ROMACS_CTRL_MASK, true)), Some(CommandEvent::Named("C-left".into())));
         assert_eq!(translate(key(FrontendKey::Keysym(0xff08), 0, true)), Some(CommandEvent::Character(127)));
-        assert_eq!(translate(key(FrontendKey::Keysym(0xff0d), 0, true)), Some(CommandEvent::Character(10)));
+        assert_eq!(translate(key(FrontendKey::Keysym(0xff0d), 0, true)), Some(CommandEvent::Named("return".into())));
+        assert_eq!(translate(key(FrontendKey::Keysym(0xff0d), ROMACS_CTRL_MASK, true)), Some(CommandEvent::Named("C-return".into())));
+        assert_eq!(translate(key(FrontendKey::Character('j'), ROMACS_CTRL_MASK, true)), Some(CommandEvent::Character(10)));
         assert_eq!(translate(key(FrontendKey::Keysym(0xffe1), 0, true)), None);
         assert_eq!(translate(key(FrontendKey::Character('x'), 0, false)), None);
     }

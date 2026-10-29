@@ -67,6 +67,36 @@ commands and autoloads)."
   "keyboard.c add_command_key."
   (setq romacs--command-keys (vconcat romacs--command-keys (list key))))
 
+(defvar romacs--reading-command-keys nil
+  "Non-nil while the command loop reads a command's key sequence, between
+commands: completed background commands may run their callbacks then.")
+
+(defun romacs--dispatch-background ()
+  "Run completed background commands' callbacks while the command loop
+waits for a command's keys outside any minibuffer read (rlisp/vm/process.el
+runs them between commands, never inside a recursive minibuffer read).
+Non-nil when any ran."
+  (when (and romacs--reading-command-keys (= (minibuffer-depth) 0)
+             (fboundp 'romacs-process-dispatch-ready) (romacs--process-pending-p))
+    (romacs-process-dispatch-ready)
+    t))
+
+(defun romacs--wait-state ()
+  "What a host wait's deadline depends on besides the clock: whether input
+is requeued, and when each ordinary and idle timer fires.  A redisplay
+inside the wait that changes it (a mode-line `:eval' that schedules a
+timer) ends the wait, so the deadline is computed again (host_input.rs)."
+  (let ((times nil)
+        (lists (list (and (boundp 'timer-list) timer-list)
+                     (and (boundp 'timer-idle-list) timer-idle-list))))
+    (while lists
+      (let ((timers (car lists)))
+        (while timers
+          (setq times (cons (and (fboundp 'romacs--timer-time) (romacs--timer-time (car timers))) times)
+                timers (cdr timers))))
+      (setq times (cons 'idle times) lists (cdr lists)))
+    (cons (romacs--unread-p) times)))
+
 (defun romacs--read-host-char (seconds)
   "keyboard.c kbd_buffer_get_event's wait for the host keyboard: the next
 host event, running timers as they fall due, or nil once SECONDS pass or a
@@ -76,35 +106,63 @@ timer_start_idle and timer_stop_idle).  A VM without the process prelude
 runs no timers."
   (let ((end (and seconds (+ (float-time) seconds)))
         (timers (fboundp 'romacs--timer-check))
-        (c nil) (waiting t))
+        (c nil) (waiting t) (shown nil))
     (and timers (null end) (romacs--timer-start-idle))
     (unwind-protect
         (while waiting
-          (let ((delay nil) (run -1) left)
-            ;; Check again while timers run: one may have added another
-            ;; (wait_reading_process_output's timer_check loop).
-            (while (and timers (/= run romacs--timers-run))
-              (setq run romacs--timers-run delay (romacs--timer-check)))
+          ;; Each round, as wait_reading_process_output's: completed
+          ;; background commands' callbacks (before every block, not only
+          ;; after a completion's wake, which a minibuffer read may have
+          ;; used), then one timer_check pass, which runs each ripe timer at
+          ;; most once.  Requeued input and the time limit come next, then
+          ;; the deadline, from the timers as they are now: one that a
+          ;; callback or timer added and is ripe already gives 0 and another
+          ;; round, so a timer that keeps rescheduling itself never starves
+          ;; the keyboard or the limit.  The host redisplays only when that
+          ;; changed something or it has not yet, and a redisplay that
+          ;; schedules a timer or requeues input ends the wait
+          ;; (`romacs--wait-state').
+          (let ((dispatched (romacs--dispatch-background)) left)
+            (and timers (romacs--timer-check))
             (setq left (and end (- end (float-time))))
-            (if (or unread-command-events (and left (<= left 0)))
+            (if (or (romacs--unread-p) (and left (<= left 0)))
                 (setq waiting nil)
-              (setq c (romacs--read-host-event
-                       (if (and delay left) (min delay left) (or delay left)))
-                    waiting (null c)))))
+              ;; A VM without the process prelude runs no timers.
+              (let ((ran (if timers romacs--timers-run 0))
+                    (delay (and timers (romacs--timer-delay))))
+                (setq c (romacs--read-host-event
+                         (if (and delay left) (min delay left) (or delay left))
+                         (and shown (not dispatched) (= shown ran)))
+                      shown ran
+                      waiting (null c))))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 
+(defun romacs--unread-p ()
+  "Whether read_char has a requeued event: in any of its unread queues."
+  (or unread-post-input-method-events unread-command-events unread-input-method-events))
+
+(defun romacs--unwrap-menu-event (c)
+  "read_char's undoing of read_char_x_menu_prompt: (EVENT) is EVENT."
+  (if (and (consp c) (or (symbolp (car c)) (integerp (car c))) (null (cdr c))) (car c) c))
+
 (defun romacs--read-char (&optional seconds)
   "keyboard.c read_char: the next event, recorded as input.
-It comes from `unread-command-events', else from the executing keyboard
-macro unless that is at its end, else from the host keyboard, waiting at
-most SECONDS when given (then nil).  With none of those and no host,
+It comes from `unread-post-input-method-events', `unread-command-events'
+or `unread-input-method-events', in that order, else from the executing
+keyboard macro unless that is at its end, else from the host keyboard,
+waiting at most SECONDS when given (then nil).  No input method runs:
+`input-method-function' is never called (DIVERGENCES.md VM2-KBD1).  With none of those and no host,
 SECONDS gives nil and its absence `end-of-file', as batch GNU's minibuffer
 reports it, raised from the innermost recursive edit when there is one."
   (let ((reread nil) (recorded nil) c (again t))
    (while again
     (setq again nil)
     (cond
+     (unread-post-input-method-events
+      (setq c (romacs--unwrap-menu-event (car unread-post-input-method-events))
+            unread-post-input-method-events (cdr unread-post-input-method-events)
+            reread t))
      (unread-command-events
       (setq c (car unread-command-events)
             unread-command-events (cdr unread-command-events))
@@ -117,6 +175,10 @@ reports it, raised from the innermost recursive edit when there is one."
       (when (and (consp c) (eq (cdr c) 'disabled)
                  (or (symbolp (car c)) (integerp (car c))))
         (setq c (car c))))
+     (unread-input-method-events
+      (setq c (romacs--unwrap-menu-event (car unread-input-method-events))
+            unread-input-method-events (cdr unread-input-method-events)
+            reread t))
      ((and executing-kbd-macro (not (romacs--at-end-of-macro-p)))
       (setq c (aref executing-kbd-macro executing-kbd-macro-index))
       ;; A string's 0x80 bit is the meta modifier.
@@ -129,7 +191,7 @@ reports it, raised from the innermost recursive edit when there is one."
                  (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))))
             ;; A timer queued input while the host waited: read it as GNU's
             ;; wait returns on requeued_command_events_pending_p.
-            (unread-command-events (setq again t))))
+            ((romacs--unread-p) (setq again t))))
      (seconds)
      ;; Batch GNU blocks for the terminal here. With no input left, VM2
      ;; leaves the innermost recursive edit or minibuffer instead, so a
@@ -420,52 +482,82 @@ for it, else run `activate-mark-hook' after a change of buffer or text."
                 (/= (buffer-modified-tick) previous-tick))
         (run-hooks 'activate-mark-hook)))))
 
-(defun romacs--command-loop-1 ()
-  "keyboard.c command_loop_1: read and execute commands.
-Return nil at the end of an executing keyboard macro."
+(defun romacs--command-loop-resume ()
+  "The start of keyboard.c command_loop_1, which also resumes the loop after
+a command signalled out of it: `post-command-hook' runs for that command."
   (setq prefix-arg nil last-prefix-arg nil deactivate-mark nil
         romacs--command-keys [] romacs--single-command-key-start 0)
-  ;; After a command that signalled out of the loop.
   (romacs--safe-run-hooks 'post-command-hook)
   (setq last-command this-command real-last-command real-this-command)
   (unless (consp last-command-event)
-    (setq last-repeatable-command real-this-command))
-  (let ((reading t) keys cmd previous-buffer previous-tick)
-    (while reading
-      (set-buffer (window-buffer (selected-window)))
-      (setq deactivate-mark nil this-command nil real-this-command nil
-            this-original-command nil this-command-keys-shift-translated nil)
-      (setq keys (romacs--read-key-sequence nil))
-      (set-buffer (window-buffer (selected-window)))
-      (setq num-input-keys (1+ num-input-keys))
-      (if (null keys)
-          (setq reading nil)
-        (setq last-command-event (aref keys (1- (length keys)))
-              cmd romacs--key-sequence-command
-              previous-buffer (current-buffer)
-              previous-tick (buffer-modified-tick)
-              deactivate-mark nil
-              this-original-command cmd)
-        (when romacs--key-sequence-remapped
-          (setq cmd romacs--key-sequence-remapped))
-        (romacs--record-input cmd t)
-        (setq this-command cmd real-this-command cmd)
-        (romacs--safe-run-hooks 'pre-command-hook)
-        (if (null this-command)
-            (undefined)
-          (when (fboundp 'undo-auto--add-boundary) (undo-auto--add-boundary))
-          ;; The display's delete-selection policy (romacs-editing.el).
-          (unless (and (fboundp 'romacs-delete-selection-before-command)
-                       (romacs-delete-selection-before-command this-command))
-            (command-execute this-command)))
-        (setq last-prefix-arg current-prefix-arg)
-        (romacs--safe-run-hooks 'post-command-hook)
-        (setq last-command this-command real-last-command real-this-command)
-        (unless (consp last-command-event)
-          (setq last-repeatable-command real-this-command))
-        (setq romacs--command-keys [] romacs--single-command-key-start 0)
-        (romacs--after-command-mark previous-buffer previous-tick))))
+    (setq last-repeatable-command real-this-command)))
+
+(defun romacs--command-loop-step ()
+  "One pass of keyboard.c command_loop_1's loop: read a key sequence and
+run its command between `pre-command-hook' and `post-command-hook'.
+Return the keys read, nil at the end of an executing keyboard macro."
+  (set-buffer (window-buffer (selected-window)))
+  (setq deactivate-mark nil this-command nil real-this-command nil
+        this-original-command nil this-command-keys-shift-translated nil)
+  (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil)))
+        cmd previous-buffer previous-tick)
+    (set-buffer (window-buffer (selected-window)))
+    (setq num-input-keys (1+ num-input-keys))
+    (when keys
+      (setq last-command-event (aref keys (1- (length keys)))
+            cmd romacs--key-sequence-command
+            previous-buffer (current-buffer)
+            previous-tick (buffer-modified-tick)
+            deactivate-mark nil
+            this-original-command cmd)
+      (when romacs--key-sequence-remapped
+        (setq cmd romacs--key-sequence-remapped))
+      (romacs--record-input cmd t)
+      (setq this-command cmd real-this-command cmd)
+      (romacs--safe-run-hooks 'pre-command-hook)
+      (if (null this-command)
+          (undefined)
+        (when (fboundp 'undo-auto--add-boundary) (undo-auto--add-boundary))
+        ;; point_before_last_command_or_undo, before the command's edits.
+        (romacs--note-command-point)
+        ;; The display's delete-selection policy (romacs-editing.el). A
+        ;; command the deletion supersedes runs as `ignore', as delsel.el's
+        ;; pre-command-hook makes it, so it still consumes the prefix argument.
+        (when (and (fboundp 'romacs-delete-selection-before-command)
+                   (romacs-delete-selection-before-command this-command))
+          (setq this-command 'ignore))
+        (command-execute this-command))
+      (setq last-prefix-arg current-prefix-arg)
+      (romacs--safe-run-hooks 'post-command-hook)
+      (setq last-command this-command real-last-command real-this-command)
+      (unless (consp last-command-event)
+        (setq last-repeatable-command real-this-command))
+      (setq romacs--command-keys [] romacs--single-command-key-start 0)
+      (romacs--after-command-mark previous-buffer previous-tick))
+    keys))
+
+(defun romacs--command-loop-1 ()
+  "keyboard.c command_loop_1: read and execute commands.
+Return nil at the end of an executing keyboard macro."
+  (romacs--command-loop-resume)
+  (while (romacs--command-loop-step))
   nil)
+
+(defun romacs--host-command ()
+  "keyboard.c command_loop_2 one command at a time, for a host whose own
+loop calls this whenever input waits (the GUI): read one key sequence,
+from the unread queues, a keyboard macro, then the host, and run its
+command as command_loop_1 does.  Value: (COMMAND . ERROR), COMMAND
+`this-command' and ERROR nil or the (CONDITION . DATA) it signalled,
+which the host reports as cmd_error would.  The loop then resumes, so
+`post-command-hook' runs for that command too."
+  (condition-case data
+      (progn (romacs--command-loop-step) (cons this-command nil))
+    (t (prog1 (cons this-command data)
+         (unless (memq 'minibuffer-quit (get (car data) 'error-conditions))
+           (setq executing-kbd-macro nil romacs--executing-macro nil))
+         (setq quit-flag nil inhibit-quit nil)
+         (romacs--command-loop-resume)))))
 
 (defun romacs--cmd-error (data)
   "keyboard.c cmd_error: report DATA through `command-error-function' and

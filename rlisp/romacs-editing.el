@@ -421,3 +421,18 @@ Read-only text is copied before deletion signals its ordinary read-only error."
 (global-set-key [0] 'set-mark-command)
 (global-set-key [24 24] 'exchange-point-and-mark)
 (global-set-key [7] 'keyboard-quit)
+;; The host delivers Return as the function key `return', as GNU's X and
+;; pgtk frames do. simple.el translates it to RET in `function-key-map' and
+;; binds RET to `newline'; without simple.el this workspace does both
+;; itself, its RET inserting a newline as `newline' does. The global
+;; bindings above have installed the C keymaps.
+(unless (lookup-key function-key-map [return])
+  (put 'return 'ascii-character ?\C-m)
+  (define-key function-key-map [return] [?\C-m]))
+(defun romacs-newline (n)
+  "Insert N newlines: RET in a workspace without simple.el's `newline'."
+  (interactive "*p")
+  ;; As `newline' does, so that the command's event stays RET.
+  (let ((last-command-event ?\n))
+    (self-insert-command n)))
+(unless (fboundp 'newline) (global-set-key [13] 'romacs-newline))
