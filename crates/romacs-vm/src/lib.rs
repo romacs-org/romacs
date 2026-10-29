@@ -873,6 +873,12 @@ struct Function {
     /// holds an interpreted closure's body before macroexp.el is loaded.
     /// `code` is empty while this is present; every frame entry forces it.
     lazy: Option<Arc<LazyBody>>,
+    /// Whether it was compiled under dynamic binding, recorded where its
+    /// closure site sees no lexical binding: GNU's interpreted closure
+    /// keeps its whole visible environment, so there `(aref CLOSURE 2)'
+    /// is the dialect's alone, nil or (t). Code images and older cache
+    /// entries do not record it.
+    dynamic: Option<bool>,
 }
 /// The unexpanded body of a function defined in GNU's non-eager load regime
 /// (src/lread.c:2183: `internal-macroexpand-for-load' not yet fbound).
@@ -1748,6 +1754,7 @@ impl Vm {
         if keep_captures {
             used.fill(true);
         }
+        let visible = names.len();
         let retained = used.iter().filter(|&&keep| keep).count();
         let removed = names.len() - retained;
         if removed != 0 {
@@ -1788,6 +1795,7 @@ impl Vm {
             rest,
             sites: b.sites,
             lazy: None,
+            dynamic: (visible == 0).then_some(self.dynamic_scope),
         });
         Ok((id, names))
     }
@@ -1867,6 +1875,7 @@ impl Vm {
             required,
             rest,
             sites: vec![],
+            dynamic: names.is_empty().then_some(self.dynamic_scope),
             lazy: Some(Arc::new(lazy)),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
