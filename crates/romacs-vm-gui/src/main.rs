@@ -420,21 +420,24 @@ fn run() -> Result<(), String> {
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
-    // A live --loadup launch boots from its world, decided before any window.
-    let restored = match world_store {
-        Some(store) if live && launch == startup::Launch::Loadup => {
-            let world = world::open(store, width, height, floor)?;
-            world::launch(&world, width, height, floor, world_wait).map(SendWorld)
-        }
+    // A live --loadup launch boots from its world. Its builder builds here,
+    // before any window; a launch maps the world on the evaluator's thread
+    // while this one brings up the window and the GPU.
+    let world = match world_store {
+        Some(store) if live && launch == startup::Launch::Loadup => Some(world::open(store, width, height, floor)?),
         _ => None,
     };
+    if let Some(world) = world.as_ref().filter(|_| romacs_vm::world::store::building()) {
+        world::launch(world, width, height, floor, world_wait);
+    }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (host, sender) =
         PaintHost::wayland(std::path::Path::new(&socket), width, height, if live { "romacs — VM" } else { "VM G1a" }.into())?;
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let worker = spawn_evaluator(move || {
         let sender = std::sync::Arc::new(sender);
-        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, restored.map(|w| w.0));
+        let restored = world.and_then(|world| world::launch(&world, width, height, floor, world_wait));
+        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, restored);
         if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
         let _ = result_tx.send(result);
         drop(sender);
@@ -639,12 +642,6 @@ fn paint_prompt(
     }
     Ok((count, ends))
 }
-#[allow(clippy::too_many_arguments)] // host options, as for paint()
-/// A restored VM handed to the evaluator thread, which owns it from then on:
-/// nothing else holds any of its parts.
-struct SendWorld((Box<Vm>, world::Carry));
-unsafe impl Send for SendWorld {}
-
 #[allow(clippy::too_many_arguments)]
 fn evaluate(
     sender: &std::sync::Arc<PaintSender>,

@@ -2,9 +2,11 @@
 //! images. Every heap allocation comes from one fixed range of address
 //! space, and the allocator's own state lives at the start of that range,
 //! so a world image is the range's used prefix written to a file, and
-//! restore maps that file back at the same address, copy-on-write, at the
-//! process's first allocation. Nothing is decoded and nothing is relocated:
-//! every pointer in the image is valid again where it was.
+//! restore maps that file back at the same address, copy-on-write
+//! (`adopt`). Nothing is decoded and nothing is relocated: every pointer
+//! in the image is valid again where it was. The process allocates from
+//! the image from then on; what it allocated before stays in its first
+//! arena, which keeps serving those blocks' frees.
 //!
 //! The range's address is random, chosen by each process that starts a
 //! fresh arena, so each world has its own. Everything else a world process
@@ -90,16 +92,18 @@ static LOCK: AtomicBool = AtomicBool::new(false);
 /// reaches an image.
 static SCRUB: AtomicBool = AtomicBool::new(false);
 static RESTORE: AtomicU8 = AtomicU8::new(Restore::None as u8);
-/// Where the arena starts, once it has.
+/// Where the arena allocations come from starts, once it has.
 static BASE: AtomicUsize = AtomicUsize::new(0);
+/// Where the process's first arena starts, once an image replaced it.
+static FORMER: AtomicUsize = AtomicUsize::new(0);
 /// The digest of the libraries mapped as the arena started (`libraries`).
 static mut LIBRARIES: [u8; 32] = [0; 32];
 
-/// What became of the image named by `ROMACS_WORLD_IMAGE`.
+/// What became of the image this process adopted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Restore {
-    /// None was named.
+    /// None was adopted.
     None = 0,
     /// It is mapped: the arena is the image.
     Mapped,
@@ -262,9 +266,14 @@ unsafe fn give_small(h: &mut Header, at: usize, class: usize) {
     h.free[class] = at;
 }
 
-fn in_arena(at: *mut u8) -> bool {
-    let base = base();
-    base != 0 && (base..base + RESERVE).contains(&(at as usize))
+/// The header of the arena AT is in, or None for the system allocator's.
+fn owner(at: *mut u8) -> Option<*mut Header> {
+    let at = at as usize;
+    // An adoption publishes FORMER before BASE: a block of the first arena
+    // finds its header whichever of the two this reads.
+    [BASE.load(Ordering::Acquire), FORMER.load(Ordering::Acquire)].into_iter()
+        .find(|&base| base != 0 && (base..base + RESERVE).contains(&at))
+        .map(|base| base as *mut Header)
 }
 
 fn state() -> u8 {
@@ -282,26 +291,10 @@ fn state() -> u8 {
     }
 }
 
-/// Map the image on the descriptor `ROMACS_WORLD_IMAGE` names, or reserve
-/// a fresh range at a random address in the window.
+/// Reserve a fresh range at a random address in the window.
 unsafe fn start() -> u8 {
     unsafe { LIBRARIES = libraries_digest() };
     SCRUB.store(!unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null(), Ordering::Relaxed);
-    let wanted = unsafe { libc::getenv(c"ROMACS_WORLD_IMAGE".as_ptr()) };
-    if !wanted.is_null() {
-        let outcome = match unsafe { descriptor(wanted) } {
-            Some(fd) => {
-                let outcome = unsafe { map_image_fd(fd) };
-                unsafe { libc::close(fd) };
-                outcome
-            }
-            None => Restore::Unreadable,
-        };
-        RESTORE.store(outcome as u8, Ordering::Release);
-        if outcome == Restore::Mapped {
-            return ARENA;
-        }
-    }
     let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
     for _ in 0..8 {
         let mut random = 0usize;
@@ -327,18 +320,21 @@ unsafe fn start() -> u8 {
     SYSTEM
 }
 
-/// The descriptor a decimal string names, read without allocating.
-unsafe fn descriptor(text: *const libc::c_char) -> Option<i32> {
-    let bytes = unsafe { std::ffi::CStr::from_ptr(text) }.to_bytes();
-    if bytes.is_empty() || bytes.len() > 9 || !bytes.iter().all(u8::is_ascii_digit) {
-        return None;
+/// Allocate from the image in FILE from now on: map it where it was made,
+/// with what it addresses of the executable (`shadow_executable`), when it
+/// is a whole image of this format and its range is free. Once per
+/// process; the first arena keeps the blocks allocated before.
+pub fn adopt(file: &std::fs::File) -> Restore {
+    use std::os::fd::AsRawFd;
+    if state() != ARENA || FORMER.load(Ordering::Acquire) != 0 {
+        return Restore::Map;
     }
-    Some(bytes.iter().fold(0i32, |n, &b| n * 10 + (b - b'0') as i32))
+    let outcome = unsafe { map_image_fd(file.as_raw_fd()) };
+    RESTORE.store(outcome as u8, Ordering::Release);
+    outcome
 }
 
 unsafe fn map_image_fd(fd: i32) -> Restore {
-    // Inherited: no child of this process gets it.
-    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
     let mut bytes = [0u8; size_of::<Header>()];
     let read = unsafe { libc::pread(fd, bytes.as_mut_ptr().cast(), bytes.len(), 0) };
     let mut stat: libc::stat = unsafe { std::mem::zeroed() };
@@ -374,9 +370,12 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
         unsafe { libc::munmap(base as *mut libc::c_void, RESERVE) };
         return Restore::Executable;
     }
-    BASE.store(base, Ordering::Relaxed);
     // The kernel reads the file ahead while the process starts.
     unsafe { libc::madvise(base as *mut libc::c_void, len, libc::MADV_WILLNEED) };
+    lock();
+    FORMER.store(BASE.load(Ordering::Relaxed), Ordering::Release);
+    BASE.store(base, Ordering::Release);
+    unlock();
     Restore::Mapped
 }
 
@@ -542,9 +541,8 @@ pub fn libraries() -> [u8; 32] {
     unsafe { LIBRARIES }
 }
 
-/// How the image this process asked for fared.
+/// How the image this process adopted fared.
 pub fn restore_outcome() -> Restore {
-    state();
     match RESTORE.load(Ordering::Acquire) {
         1 => Restore::Mapped,
         2 => Restore::Unreadable,
@@ -682,14 +680,14 @@ unsafe impl GlobalAlloc for Arena {
     }
 
     unsafe fn dealloc(&self, at: *mut u8, layout: Layout) {
-        if !in_arena(at) {
+        let Some(owner) = owner(at) else {
             return unsafe { System.dealloc(at, layout) };
-        }
+        };
         if SCRUB.load(Ordering::Relaxed) {
             unsafe { std::ptr::write_bytes(at, 0, layout.size()) };
         }
         lock();
-        let h = unsafe { &mut *header() };
+        let h = unsafe { &mut *owner };
         match class_of(layout.size(), layout.align()) {
             Some(class) => unsafe { give_small(h, at as usize, class) },
             None => unsafe { give_pages(h, at as usize, pages(layout.size())) },
@@ -698,9 +696,9 @@ unsafe impl GlobalAlloc for Arena {
     }
 
     unsafe fn realloc(&self, at: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if !in_arena(at) {
+        let Some(owner) = owner(at) else {
             return unsafe { System.realloc(at, layout, new_size) };
-        }
+        };
         let align = layout.align();
         if SCRUB.load(Ordering::Relaxed) && new_size < layout.size() {
             unsafe { std::ptr::write_bytes(at.add(new_size), 0, layout.size() - new_size) };
@@ -710,14 +708,14 @@ unsafe impl GlobalAlloc for Arena {
             (None, None) if align <= PAGE => {
                 let (old, new) = (pages(layout.size()), pages(new_size));
                 lock();
-                let h = unsafe { &mut *header() };
+                let h = unsafe { &mut *owner };
                 let start = at as usize;
                 let grown = if new <= old {
                     if new < old {
                         unsafe { give_pages(h, start + new * PAGE, old - new) };
                     }
                     true
-                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= base() + RESERVE {
+                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= owner as usize + RESERVE {
                     h.top += (new - old) * PAGE;
                     h.zero = h.zero.max(h.top);
                     true

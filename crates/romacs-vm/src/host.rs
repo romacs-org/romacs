@@ -1248,36 +1248,6 @@ pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
     File::open(path)
 }
 
-/// Run this executable again in place, with this process's arguments and
-/// environment, in order, and NAME=FD last, FD open across the exec: the
-/// restored process maps the image on FD, the file the launcher checked,
-/// and its environment lists come out as the launcher's. Returns only the
-/// error when the exec fails.
-pub fn exec_self(name: &str, fd: &File) -> io::Error {
-    use std::os::fd::AsRawFd;
-    let value = OsString::from(fd.as_raw_fd().to_string());
-    use std::ffi::CString;
-    let cstring = |bytes: &[u8]| CString::new(bytes).map_err(io::Error::other);
-    let prepared = (|| -> io::Result<(Vec<CString>, Vec<CString>)> {
-        let args = std::env::args_os().map(|a| cstring(a.as_bytes())).collect::<io::Result<Vec<_>>>()?;
-        let mut env = std::env::vars_os()
-            .map(|(n, v)| cstring(&[n.as_bytes(), b"=", v.as_bytes()].concat())).collect::<io::Result<Vec<_>>>()?;
-        env.push(cstring(&[name.as_bytes(), b"=", value.as_bytes()].concat())?);
-        Ok((args, env))
-    })();
-    let (args, env) = match prepared { Ok(prepared) => prepared, Err(e) => return e };
-    let pointers = |list: &[CString]| list.iter().map(|c| c.as_ptr()).chain([std::ptr::null()]).collect::<Vec<_>>();
-    let (argv, envp) = (pointers(&args), pointers(&env));
-    let fd = fd.as_raw_fd();
-    if unsafe { libc::fcntl(fd, libc::F_SETFD, 0) } != 0 {
-        return io::Error::last_os_error();
-    }
-    unsafe { libc::execve(c"/proc/self/exe".as_ptr(), argv.as_ptr(), envp.as_ptr()) };
-    let error = io::Error::last_os_error();
-    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
-    error
-}
-
 /// Remove NAME from this process's environment, before any other thread
 /// starts: world processes take their own markers out of it.
 pub fn unset_env(name: &str) {

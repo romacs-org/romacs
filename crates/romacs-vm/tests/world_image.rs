@@ -1,9 +1,9 @@
 //! A world image through the whole launch protocol, in processes of this
-//! test binary: a launcher builds its world, runs itself again on the
-//! image and takes the VM back, with the executable and every library
-//! where the kernel chose and the arena where its world chose. A damaged
-//! image is refused and rebuilt; the restoring process refuses a file
-//! that is no whole image before mapping any of it.
+//! test binary: a launcher builds its world, maps the image and takes the
+//! VM back, with the executable and every library where the kernel chose
+//! and the arena where its world chose. A damaged image is refused and
+//! rebuilt; the arena refuses a file that is no whole image before mapping
+//! any of it.
 use romacs_vm::Vm;
 use romacs_vm::world::arena::{self, Arena};
 use romacs_vm::world::store::{Launch, World};
@@ -89,22 +89,15 @@ fn launch(store: &Path) {
     }
 }
 
-/// The restoring process's side, on the descriptor a parent left open.
+/// Adopt the file the parent named: what the arena made of it.
 fn probe() {
-    println!("WORLD-IMAGE {}", json!({"restore": format!("{:?}", arena::restore_outcome())}));
+    let file = std::fs::File::open(std::env::var_os("ROMACS_WORLD_IMAGE_TEST_FILE").unwrap()).unwrap();
+    println!("WORLD-IMAGE {}", json!({"restore": format!("{:?}", arena::adopt(&file))}));
 }
 
-/// Map FILE as an image in a child, on an inherited descriptor: what the
-/// child's arena made of it.
+/// Adopt FILE as an image in a child: what its arena made of it.
 fn probe_file(store: &Path, file: &Path) -> String {
-    use std::os::fd::AsRawFd;
-    use std::os::unix::process::CommandExt;
-    let file = std::fs::File::open(file).unwrap();
-    let fd = file.as_raw_fd();
-    let mut command = child("probe", store);
-    command.env("ROMACS_WORLD_IMAGE", fd.to_string());
-    unsafe { command.pre_exec(move || { libc::fcntl(fd, libc::F_SETFD, 0); Ok(()) }) };
-    outcome(&mut command)
+    outcome(child("probe", store).env("ROMACS_WORLD_IMAGE_TEST_FILE", file))
 }
 
 #[test]

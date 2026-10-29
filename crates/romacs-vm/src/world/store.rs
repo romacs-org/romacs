@@ -8,13 +8,12 @@
 //! (`arena::libraries`) and the embedder's recipe. The records bind every
 //! host fact the build read; a launch asks the host each of them again and
 //! boots from source on any difference. The manifest binds the image's
-//! content by its SHA-256, which a launch checks against the file it hands
-//! on, hashed once and then known by its identity.
+//! content by its SHA-256, which a launch checks against the file it maps,
+//! hashed once and then known by its identity.
 //!
-//! A launch is one of three processes:
-//! - the launcher, with its world valid, runs itself again, handing on the
-//!   image's open descriptor; it never returns;
-//! - that process maps the image at its first allocation and takes the VM
+//! A launch is one of two processes:
+//! - the launcher, with its world valid, maps the image and allocates from
+//!   it from then on (`arena::adopt`), and takes the VM
 //!   (`Launch::Restored`);
 //! - with no valid world, the launcher boots from source and starts a
 //!   builder beside itself, in the pinned environment, unless one runs
@@ -27,10 +26,14 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub const FORMAT: &str = "romacs-world 2";
-/// Set in the process that maps an image: the image's descriptor.
-const IMAGE_ENV: &str = "ROMACS_WORLD_IMAGE";
 /// Set in a builder: the store it publishes to.
 const BUILD_ENV: &str = "ROMACS_WORLD_BUILD";
+
+/// Whether this process is a world's builder: one `launch` makes
+/// `Launch::Build`, before any window.
+pub fn building() -> bool {
+    host::getenv(BUILD_ENV).is_some()
+}
 
 /// One recipe's world in a store.
 #[derive(Clone)]
@@ -162,18 +165,7 @@ impl World {
     /// them: every path absolute. With WAIT a missing or stale world is
     /// built first, and the launch then boots from it.
     pub fn launch<T: 'static>(&self, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool) -> Launch<T> {
-        if host::getenv(IMAGE_ENV).is_some() {
-            host::unset_env(IMAGE_ENV);
-            return match image::restore::<T>(&self.key) {
-                Some((vm, carry)) => {
-                    let manifest = host::read_to_string(self.file(".json")).ok()
-                        .and_then(|text| serde_json::from_str(&text).ok()).unwrap_or(Json::Null);
-                    Launch::Restored { vm: Box::new(vm), carry, manifest }
-                }
-                None => Launch::Chain { reason: json!({"image": format!("{:?}", arena::restore_outcome())}) },
-            };
-        }
-        if host::getenv(BUILD_ENV).is_some() {
+        if building() {
             host::unset_env(BUILD_ENV);
             return Launch::Build;
         }
@@ -197,11 +189,14 @@ impl World {
                 return Launch::Chain { reason: json!({"world": reason}) };
             }
         }
-        match valid.and_then(|manifest| self.checked_image(&manifest)) {
-            Ok(image) => {
-                let error = host::exec_self(IMAGE_ENV, &image);
-                Launch::Chain { reason: json!({"exec": error.to_string()}) }
-            }
+        match valid.and_then(|manifest| Ok((self.checked_image(&manifest)?, manifest))) {
+            Ok((image, manifest)) => match arena::adopt(&image) {
+                arena::Restore::Mapped => match image::restore::<T>(&self.key) {
+                    Some((vm, carry)) => Launch::Restored { vm: Box::new(vm), carry, manifest },
+                    None => Launch::Chain { reason: json!({"image": "made for another key"}) },
+                },
+                refused => Launch::Chain { reason: json!({"image": format!("{refused:?}")}) },
+            },
             Err(reason) => {
                 let started = self.start_builder(args()).map(|child| {
                     let pid = child.id();
