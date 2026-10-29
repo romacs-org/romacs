@@ -16,8 +16,10 @@
 //! compiler source. Objects with no source spelling (closures, buffers, ...)
 //! are carried as themselves (`Form::Object`), so they evaluate and stay
 //! `eq'; list, string and vector structure is copied, so nested quoted
-//! structure is not `eq' to the original; bare symbols in an alist, which
-//! GNU treats as locally special, are ignored.
+//! structure is not `eq' to the original. A bare symbol in the alist is
+//! locally special, as in GNU: the form's `let' bindings of it, and those of
+//! the closures it makes, are dynamic, while an alist binding of the same
+//! name stays lexical.
 use super::*;
 
 impl Vm {
@@ -55,6 +57,7 @@ impl Vm {
             }
         }
         let mut bindings = Vec::new();
+        let mut specials = Vec::new();
         if lexical.tag() == 3 {
             let mut seen = HashSet::default();
             let mut tail = lexical;
@@ -75,6 +78,9 @@ impl Vm {
                     if name.tag() == 7 && name != Value::NIL && name != Value::TRUE && seen.insert(name.0) {
                         bindings.push((name, value));
                     }
+                } else if entry.tag() == 7 && entry != Value::TRUE {
+                    // A bare symbol declares its name locally special.
+                    specials.push(entry);
                 }
                 tail = next;
             }
@@ -98,6 +104,16 @@ impl Vm {
             }
         }
         let mut form = self.expansion_form(datum, 0)?;
+        // The declarations scope the form's own bindings, inside the
+        // supplied ones: those stay lexical, as GNU's alist entries do.
+        if !specials.is_empty() {
+            let mut body = vec![Form::Sym("let".into()), Form::List(vec![])];
+            for name in specials {
+                body.push(Form::List(vec![Form::Sym("defvar".into()), self.source_form(name, 0)?]));
+            }
+            body.push(form);
+            form = Form::List(body);
+        }
         if !bindings.is_empty() {
             let quote = |f| Form::List(vec![Form::Sym("quote".into()), f]);
             let bindings = bindings

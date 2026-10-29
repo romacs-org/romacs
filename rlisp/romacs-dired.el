@@ -16,7 +16,6 @@
     (define-key map [110] 'dired-next-line)
     (define-key map [112] 'dired-previous-line)
     (define-key map [13] 'dired-find-file)
-    (define-key map [10] 'dired-find-file)
     (define-key map [94] 'dired-up-directory)
     (define-key map [103] 'dired-revert)
     (define-key map [113] 'dired-quit-window)

@@ -22,6 +22,7 @@ autoload.rs load_source_named load_file_raw 1 clean  # FILE is read before the l
 autoload.rs load_with_autoload_queue load_source_named 1 rooted  # the queue and saved match data are bindings, read back from their slots
 autoload.rs load_with_autoload_queue unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 command.rs command_event eval_form_raw 6 clean  # events become forms and the binding a name before each call
+display.rs fontify_range eval_form_raw 1 clean  # the call is a form of fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
 eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
 eval_form.rs eval_primitive compile 1 held  # an open compiler builder holds collection
 eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environment are converted to forms first
@@ -34,6 +35,7 @@ handle.rs eval_source eval_source_raw 1 boundary  # embedder API: the result is 
 handle.rs execute execute_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
 handle.rs invoke_prepared invoke_prepared_raw 1 boundary  # embedder API: arguments come from Rooted handles
 handle.rs load_file load_file_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
+host_input.rs host_wait_state eval_form_raw 1 clean  # a constant form; its value is printed before anything else allocates
 insdel.rs mark_deactivated set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 lib.rs execute_raw execute_rooted 1 clean  # no roots
 lib.rs execute_rooted execute 1 rooted  # ROOTS are a frame, written back after
@@ -56,6 +58,9 @@ loader.rs eval_load_toplevel compile_request 1 held  # an open compiler builder 
 loader.rs eval_load_toplevel eval_load_toplevel 3 clean  # FORM's objects are rooted; only the last child's value is returned
 loader.rs eval_load_toplevel execute_raw 1 clean  # FORM's objects are rooted
 loader.rs eval_load_toplevel expand_macro 1 clean  # FORM's objects are rooted; the expansion is a new form
+loader.rs eval_load_toplevel set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
+loader.rs file_shorthands eval_source_raw 1 rooted  # TEXT is a form object and FUNCTION its variable, both read back after
+loader.rs file_shorthands reader_call 1 clean  # nothing is used after the call but its value
 loader.rs load_file_raw eval_load_toplevel 2 rooted  # the last form's value is a frame; the after-load call roots it as a form object
 loader.rs load_file_raw unbind_after 2 held  # native unbinding: watchers hold collection (rooted_write unset)
 loader.rs load_file_raw unwind 1 held  # native unbinding: watchers hold collection (rooted_write unset)
@@ -72,7 +77,6 @@ macroexpand.rs macroexpand_primitive macroexpand_value 1 clean  # ARGS are not u
 macroexpand.rs macroexpand_steps autoload_do_load 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
 macroexpand.rs macroexpand_steps call_macro_expander 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
 mode_line.rs decode_mode_spec eval_form_raw 1 clean  # a constant form; the window and buffer are #: slots (display.rs)
-mode_line.rs ml_risky_marked eval_form_raw 1 clean  # SYMBOL is a form
 mode_line.rs mode_line_element eval_form_raw 1 rooted  # elements are forms with rooted objects; the window and buffer are #: slots (display.rs)
 prim.rs attach_variable_history set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs default_cell_set notify 2 held  # a leaf or T2 continuation: its engine is not suspended

@@ -22,6 +22,7 @@ mod command;
 mod interpreted_closure;
 mod oclosure;
 mod host_input;
+mod bidi;
 mod layout_host;
 mod terminal_host;
 mod process_jobs;
@@ -69,6 +70,7 @@ mod data;
 mod bool_vector;
 mod lstring;
 mod display;
+mod overlay_order;
 mod window;
 mod frame;
 mod hash;
@@ -496,6 +498,7 @@ enum Primitive {
     // Engine control like `load': waits for a host key, redisplaying in a
     // nested engine first (host_input.rs).
     ReadHostEvent,
+    FormatModeLine,
     Macroexpand,
     ClosureMetadata,
     ClosureDocument,
@@ -758,6 +761,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     // Table index must equal the enum discriminant: append only.
     ("autoload-do-load", Primitive::AutoloadDoLoad),
     ("romacs--read-host-event", Primitive::ReadHostEvent),
+    ("format-mode-line", Primitive::FormatModeLine),
     ("macroexpand", Primitive::Macroexpand),
     ("#:vm2-closure-metadata", Primitive::ClosureMetadata),
     ("#:vm2-closure-document", Primitive::ClosureDocument),
@@ -1078,6 +1082,7 @@ pub struct Vm {
     #[cfg(test)]
     speculative_misses: usize,
     regexp: regexp::MatchState,
+    regexp_cache: regexp::PatternCache,
     execution_fatal: bool,
     loader: loader::Loader,
     source_cache: source_cache::SourceCache,
@@ -1105,6 +1110,9 @@ pub struct Vm {
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     idle_since: Option<std::time::Instant>,
+    /// Counts keymap stores and parent changes, GNU's two flushes of the
+    /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
+    keymap_generation: u64,
     process_jobs: process_jobs::Jobs,
     /// GNU process.c chan_process and friends: subprocess descriptors.
     subprocesses: subprocess::Table,
@@ -1166,6 +1174,9 @@ pub struct Vm {
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
     names: NameMap<String, usize>,
+    /// By slot, whether `names' maps the slot's name to it: membership of
+    /// the initial obarray, answered without hashing the name.
+    initial_obarray: Vec<bool>,
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
@@ -1264,6 +1275,7 @@ impl Vm {
             #[cfg(test)]
             speculative_misses: 0,
             regexp: regexp::MatchState::default(),
+            regexp_cache: regexp::PatternCache::default(),
             execution_fatal: false,
             loader: loader::Loader::default(),
             source_cache: source_cache::SourceCache::default(),
@@ -1280,6 +1292,7 @@ impl Vm {
             host_input: None,
             layout_host: None,
             idle_since: None,
+            keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
@@ -1315,6 +1328,7 @@ impl Vm {
             rooted_write: false,
             gc_stress: gc::Stress::from_env(),
             names: NameMap::default(),
+            initial_obarray: Vec::new(),
             symbol_names: vec![],
             obarray_symbol_names: HashMap::default(),
             permanent_symbol_names: HashMap::default(),
@@ -1494,12 +1508,22 @@ impl Vm {
         self.world_version = world;
         Ok(())
     }
+    /// Record whether `names' maps SLOT's name to SLOT.
+    fn set_initial_obarray(&mut self, slot: usize, interned: bool) {
+        if self.initial_obarray.len() <= slot { self.initial_obarray.resize(slot + 1, false); }
+        self.initial_obarray[slot] = interned;
+    }
+    /// Whether SLOT's symbol is interned in the initial obarray.
+    fn in_initial_obarray(&self, slot: usize) -> bool {
+        self.initial_obarray.get(slot).copied().unwrap_or(false)
+    }
     fn slot(&mut self, name: &str) -> usize {
         if let Some(&i) = self.names.get(name) {
             return i;
         }
         let i = self.slots.len();
         self.names.insert(name.to_owned(), i);
+        self.set_initial_obarray(i, true);
         self.symbol_names.push(name.to_owned());
         self.slots.push(Slot::new());
         self.initialize_variable_redirect(name, i);
@@ -2678,7 +2702,7 @@ impl Vm {
         if matches!(p, CacheStats | CacheClear | CacheEntries) {
             return self.cache_primitive(p, n);
         }
-        if matches!(p, Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent) {
+        if matches!(p, Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
             let args = self.stack[start..start + n].to_vec();
             let result = self.loader_primitive(p, &args);
             // Only the reentrant engine path can re-raise an eval escape.

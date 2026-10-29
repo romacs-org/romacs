@@ -2309,6 +2309,7 @@ unsafe fn resolve_entry(
                     | Primitive::Macroexpand
                     | Primitive::AutoloadDoLoad
                     | Primitive::ReadHostEvent
+                    | Primitive::FormatModeLine
                     | Primitive::MakeInterpretedClosure
             ) {
                 let call = primitive_target(p);
@@ -2389,6 +2390,7 @@ unsafe fn invoke_full(
                 || target == Value::reference(Primitive::Macroexpand as usize, 6)
                 || target == Value::reference(Primitive::AutoloadDoLoad as usize, 6)
                 || target == Value::reference(Primitive::ReadHostEvent as usize, 6)
+                || target == Value::reference(Primitive::FormatModeLine as usize, 6)
             {
                 return primitive(e, r, pc, target, start, argc);
             }
@@ -2864,7 +2866,7 @@ unsafe fn t2_dispatch(
                 t2_dispatch(e, r, pc, target, offset - base, count)
             }
             // These use neither the site caches nor the caller's width.
-            Primitive::Throw | Primitive::Signal | Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::MakeInterpretedClosure => {
+            Primitive::Throw | Primitive::Signal | Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::FormatModeLine | Primitive::MakeInterpretedClosure => {
                 t2_invoke_full(e, r, pc, target, start, argc)
             }
             _ => {
@@ -3058,7 +3060,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::traversal_primitive
         }
         Message => Vm::primitive,
-        Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent => |vm, p, start, n| {
+        Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |vm, p, start, n| {
             let args = vm.stack[start..start + n].to_vec();
             vm.loader_primitive(p, &args)
         },
@@ -3200,7 +3202,7 @@ unsafe fn primitive(
         enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
-        if matches!(p, Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::MakeInterpretedClosure) {
+        if matches!(p, Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::FormatModeLine | Primitive::MakeInterpretedClosure) {
             return reentrant_load(e, r, pc, p, base + start, argc);
         }
         let mut signal = None;

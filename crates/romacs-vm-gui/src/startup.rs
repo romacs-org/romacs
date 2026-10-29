@@ -9,7 +9,8 @@ use romacs_vm::Vm;
 pub enum Launch {
     /// `--loadup`: the batch package runner's GNU-loadup chain
     /// ([`drive_loadup`]), the bundled packages' autoloads, the interactive
-    /// session (rlisp/romacs-gui-loadup.el), then a romacs stand-in for each
+    /// session (rlisp/romacs-gui-loadup.el), Romacs's completion defaults
+    /// (rlisp/romacs-completion-defaults.el), then a romacs stand-in for each
     /// journey key whose GNU command the chain did not define, then the Rum
     /// workspace. Not the default: see main.rs.
     Loadup,
@@ -353,8 +354,9 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
     policy(vm, root, "romacs-find-file.el", include_str!("../../../rlisp/romacs-find-file.el"))?;
     policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
-    policy(vm, root, "romacs-extended-command.el", include_str!("../../../rlisp/romacs-extended-command.el"))?;
     initialize_editing_from_sources(vm, root)?;
+    // No GNU minibuffer.el here: the workspace's own readers.
+    policy(vm, root, "romacs-workspace-completion.el", include_str!("../../../rlisp/romacs-workspace-completion.el"))?;
     initialize_coding(vm, root)?;
     policy(vm, root, "romacs-dired.el", include_str!("../../../rlisp/romacs-dired.el"))?;
     policy(vm, root, "romacs-term.el", include_str!("../../../rlisp/romacs-term.el"))?;
@@ -413,9 +415,13 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
         if let Some(autoloads) = bundled_autoloads(dir)? {
             vm.load_file(&autoloads).map_err(|e| format!("{}: {e}", autoloads.display()))?;
         }
-        // What an interactive session on this display adds to the batch chain.
-        let session = loadup_bootstrap(dir).with_file_name("romacs-gui-loadup.el");
-        vm.load_file(&session).map_err(|e| format!("{}: {e}", session.display()))?;
+        // What an interactive session on this display adds to the batch
+        // chain, then Romacs's defaults for GNU's minibuffer completion,
+        // which the user's init may override.
+        for name in ["romacs-gui-loadup.el", "romacs-completion-defaults.el"] {
+            let file = loadup_bootstrap(dir).with_file_name(name);
+            vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        }
     }
     let gnu_mode_line = vm.eval_source("(default-boundp 'mode-line-format)")? != romacs_vm::Fixed::NIL;
     if launch == Launch::GnuOnly {
@@ -434,7 +440,6 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-find-file.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-extended-command.el"))?;
     initialize_editing(vm)?;
     vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
@@ -457,7 +462,7 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
     policy(vm, root, "romacs-editing.el", include_str!("../../../rlisp/romacs-editing.el"))?;
     for (source, names) in [
         (include_str!("../../../gnu-lisp/subr.el"), &[
-            "plusp", "add-to-history", "ignore", "string=",
+            "plusp", "add-to-history", "ignore", "string=", "undefined",
         ][..]),
         (include_str!("../../../gnu-lisp/files.el"), &[
             "files--ensure-directory", "make-directory",
@@ -1538,6 +1543,8 @@ mod tests {
         for (file, text) in files { std::fs::write(gnu.join(file), text).unwrap(); }
         std::fs::write(loadup_bootstrap(&gnu), bootstrap).unwrap();
         std::fs::write(root.join("rlisp/romacs-gui-loadup.el"), "(setq noninteractive nil)\n").unwrap();
+        // A scratch chain has no minibuffer.el or icomplete.el to configure.
+        std::fs::write(root.join("rlisp/romacs-completion-defaults.el"), "(provide 'romacs-completion-defaults)\n").unwrap();
         gnu
     }
 
@@ -1955,5 +1962,49 @@ mod tests {
         assert_eq!(session.pixel_size, launch.pixel_size, "{launch:?} at launch, {session:?} in the session");
         assert!(session.pixel_size >= 10.0, "{session:?}");
         assert_eq!(settings, "(t t t t)", "{values}");
+    }
+
+    /// `--loadup` visiting a Lisp file: its first redisplay runs jit-lock
+    /// through `fontification-functions` over the rows the window shows, so
+    /// the snapshot carries font-lock's faces with no `font-lock-ensure`;
+    /// text beyond the window stays unfontified, and an unchanged redisplay
+    /// calls nothing.
+    #[test]
+    fn loadup_redisplay_fontifies_a_visited_lisp_file_through_jit_lock() {
+        let (before, first, second, state, keyword) = on_evaluator(|| {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            private_home(&mut vm, "jit-lock");
+            initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let lines: Vec<&str> = include_str!("../../../gnu-lisp/subr.el").lines().take(2000).collect();
+            let dir = scratch_lisp("jit-lock-visit", &[("sample.el", &(lines.join("\n") + "\n"))]);
+            visit_files(&mut vm, &[dir.join("sample.el")]).unwrap();
+            vm.eval_source("(progn (setq romacs-jit-log nil)
+                (advice-add 'jit-lock-function :before (lambda (pos) (setq romacs-jit-log (cons pos romacs-jit-log)))))").unwrap();
+            let shown = "(with-current-buffer \"sample.el\" (list major-mode font-lock-mode (and (memq 'jit-lock-function fontification-functions) t) (next-single-property-change 1 'face)))";
+            let before = printed(&mut vm, shown);
+            let frame = vm.frame_snapshot(1200, 800).unwrap();
+            let first = printed(&mut vm, "(reverse romacs-jit-log)");
+            vm.frame_snapshot(1200, 800).unwrap();
+            let second = printed(&mut vm, "(reverse romacs-jit-log)");
+            let state = printed(&mut vm, "(with-current-buffer \"sample.el\"
+                (let* ((window (get-buffer-window)) (start (window-start window))
+                       (shown (save-excursion (goto-char start) (forward-line 40) (point))))
+                  (list (= start 1) (get-text-property 1 'fontified)
+                        (< (next-single-property-change 1 'fontified nil (point-max)) (+ shown jit-lock-chunk-size))
+                        (get-text-property (1- (point-max)) 'fontified)
+                        (seq-every-p (lambda (pos) (< pos shown)) romacs-jit-log)
+                        (save-excursion (goto-char 1) (search-forward \"(defmacro\") (get-text-property (- (point) 8) 'face)))))");
+            let window = frame.windows.iter().map(|w| &w.snapshot).find(|w| w.text.utf8.starts_with(";;; subr.el")).unwrap();
+            let at = window.text.utf8.find("(defmacro").unwrap() + 1;
+            let run = window.text.face_runs.iter().find(|run| run.bytes.contains(&at)).unwrap();
+            let keyword = window.faces[run.face.0 as usize].foreground != window.faces[0].foreground;
+            (before, first, second, state, keyword)
+        });
+        assert_eq!(before, "(emacs-lisp-mode t t nil)");
+        assert_ne!(first, "nil", "redisplay ran no fontification");
+        assert_eq!(second, first, "an unchanged redisplay fontified again");
+        assert_eq!(state, "(t t t nil t font-lock-keyword-face)");
+        assert!(keyword, "the snapshot shows `(defmacro' in the default face");
     }
 }

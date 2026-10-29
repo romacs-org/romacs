@@ -173,5 +173,25 @@
     "name": "unbound_emulation_alist",
     "source": "(let ((g (make-sparse-keymap))) (use-global-map g) (setq emulation-mode-map-alists '(wi-undefined)) (where-is-internal 'wi-target))",
     "expected": "nil"
+  },
+  {
+    "name": "firstonly_cache_follows_define_key",
+    "source": "(let ((g (make-sparse-keymap)) (m (make-sparse-keymap))) (use-global-map g) (define-key m [97] 'wi-target) (list (where-is-internal 'wi-target (list m) t) (where-is-internal 'wi-target (list m) t) (progn (define-key m [97] nil) (define-key m [98] 'wi-target) (where-is-internal 'wi-target (list m) t)) (progn (define-key m [98] 'wi-other) (where-is-internal 'wi-target (list m) t)) (where-is-internal 'wi-other (list m) t)))",
+    "expected": "([97] [97] [98] nil [98])"
+  },
+  {
+    "name": "firstonly_cache_follows_keymap_parent",
+    "source": "(let ((g (make-sparse-keymap)) (m (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (list (where-is-internal 'wi-target (list m) t) (progn (set-keymap-parent m p) (where-is-internal 'wi-target (list m) t)) (progn (set-keymap-parent m nil) (where-is-internal 'wi-target (list m) t))))",
+    "expected": "(nil [99] nil)"
+  },
+  {
+    "name": "firstonly_cache_follows_keymaps",
+    "source": "(let ((g (make-sparse-keymap)) (m (make-sparse-keymap)) (n (make-sparse-keymap))) (use-global-map g) (define-key m [97] 'wi-target) (define-key n [98] 'wi-target) (list (where-is-internal 'wi-target (list m) t) (where-is-internal 'wi-target (list n) t) (where-is-internal 'wi-target (list m) t) (where-is-internal 'wi-target (list m n))))",
+    "expected": "([97] [98] [97] ([97] [98]))"
+  },
+  {
+    "name": "firstonly_cache_shared_sequences_unchanged",
+    "source": "(let ((g (make-sparse-keymap)) (m (make-sparse-keymap))) (use-global-map g) (define-key m [97] 'wi-target) (let ((first (where-is-internal 'wi-target (list m) t))) (aset first 0 98) (list first (where-is-internal 'wi-target (list m) t) (where-is-internal 'wi-target (list m)))))",
+    "expected": "([98] nil ([97]))"
   }
 ]

@@ -88,30 +88,169 @@ impl From<String> for Fault {
 }
 type SearchResult<T> = std::result::Result<T, Fault>;
 
+/// What a cached pattern folds case with: nothing, the standard table,
+/// or the completion translation over a buffer's case-canon table.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Translation { None, Standard, Completion(Value) }
+
+/// search.c's searchbufs: the most recently used compiled patterns, so a
+/// pattern searched again is not compiled again (compile_pattern). A
+/// pattern whose compilation read the syntax table is kept for that table.
+#[derive(Default)]
+pub(crate) struct PatternCache(Vec<CachedPattern>);
+
+struct CachedPattern {
+    source: Vec<u8>,
+    multibyte: bool,
+    translation: Translation,
+    /// The syntax table the compiled fastmap read (GNU `used_syntax').
+    syntax: Option<Value>,
+    compiled: std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>,
+}
+
+/// search.c REGEXP_CACHE_SIZE.
+const PATTERN_CACHE_SIZE: usize = 20;
+
+/// Patterns to test many strings, each taken from the pattern cache once:
+/// no Lisp runs between the tests, so the patterns, the current buffer's
+/// syntax table and the case translation hold throughout.
+pub(crate) struct StringMatcher {
+    sources: Vec<Value>,
+    patterns: Vec<Option<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>>>,
+    key: Translation,
+    translation: Option<regex::CaseTranslation>,
+    syntax: syntax::SyntaxSource,
+}
+
 impl Vm {
-    /// GNU fast_string_match: case-sensitive, current syntax, no match-data writes.
-    pub(crate) fn file_name_match(&mut self, pattern: Value, string: Value) -> std::result::Result<Option<usize>, prim::Fault> {
-        self.string_match_no_data(pattern, string, None)
+    /// PATTERNS (strings) to compile once each with TRANSLATION and test
+    /// strings with [`Self::string_matcher_matches`]. None while
+    /// `parse-sexp-lookup-properties' makes each string's own `syntax-table'
+    /// properties part of its match: those strings take
+    /// [`Self::string_match_no_data`].
+    pub(crate) fn string_matcher(&mut self, patterns: &[Value], key: Translation, translation: Option<regex::CaseTranslation>)
+        -> std::result::Result<Option<StringMatcher>, prim::Fault> {
+        if self.slots[self.names["parse-sexp-lookup-properties"]].value != Value::NIL { return Ok(None); }
+        let syntax = self.regexp_syntax(None).map_err(|fault| self.regexp_fault(fault))?;
+        Ok(Some(StringMatcher { sources: patterns.to_vec(), patterns: vec![None; patterns.len()], key, translation, syntax }))
     }
 
-    pub(crate) fn string_match_no_data(&mut self, pattern: Value, string: Value, translation: Option<regex::CaseTranslation>) -> std::result::Result<Option<usize>, prim::Fault> {
+    /// Whether STRING matches every pattern of MATCHER, in order.
+    pub(crate) fn string_matcher_matches(&mut self, matcher: &mut StringMatcher, string: Value) -> std::result::Result<bool, prim::Fault> {
+        for i in 0..matcher.sources.len() {
+            if matcher.patterns[i].is_none() {
+                let compiled = self.regexp_input(matcher.sources[i])
+                    .and_then(|source| self.regexp_pattern(&source, matcher.key, matcher.translation.clone(), &matcher.syntax))
+                    .map_err(|fault| self.regexp_fault(fault))?;
+                matcher.patterns[i] = Some(compiled);
+            }
+            let pattern = matcher.patterns[i].clone().unwrap();
+            let mut pattern = pattern.borrow_mut();
+            // Some(found), or None when the matcher overflowed.
+            let found = {
+                let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
+                let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
+                let syntax = syntax::VmSyntax::new(self, matcher.syntax.clone());
+                pattern.set_target_multibyte(multibyte);
+                let found = regex::re_search(&pattern, bytes, 0, bytes.len() as isize, &syntax, usize::MAX);
+                (!regex::take_matcher_overflow()).then_some(found.is_some())
+            };
+            match found {
+                None => return Err(self.regexp_fault(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()))),
+                Some(false) => return Ok(false),
+                Some(true) => {}
+            }
+        }
+        Ok(true)
+    }
+
+    /// PATTERN compiled with the TRANSLATION KEY names (built as
+    /// TRANSLATION) for the syntax table SOURCE reads: the cached one, or
+    /// a new one cached in place of the least recently used.
+    fn regexp_pattern(&mut self, pattern: &Input, key: Translation, translation: Option<regex::CaseTranslation>,
+                      source: &syntax::SyntaxSource) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+        let table = source.table();
+        let cache = &mut self.regexp_cache.0;
+        if let Some(i) = cache.iter().position(|e| e.source == pattern.bytes && e.multibyte == pattern.multibyte
+            && e.translation == key && e.syntax.is_none_or(|t| t == table)) {
+            let entry = cache.remove(i);
+            let compiled = entry.compiled.clone();
+            cache.insert(0, entry);
+            return Ok(compiled);
+        }
+        let mut compiled = regex::regex_compile_lisp_with_translation(
+            &EmacsStr::new(&pattern.bytes, pattern.multibyte), false, translation,
+        ).map_err(|e| Fault::Text("invalid-regexp", e.to_string()))?;
+        compiled.rebind_syntax_table(&syntax::VmSyntax::new(self, source.clone()));
+        let syntax = compiled.used_syntax().then_some(table);
+        let compiled = std::rc::Rc::new(std::cell::RefCell::new(compiled));
+        let cache = &mut self.regexp_cache.0;
+        cache.insert(0, CachedPattern { source: pattern.bytes.clone(), multibyte: pattern.multibyte,
+                                        translation: key, syntax, compiled: compiled.clone() });
+        cache.truncate(PATTERN_CACHE_SIZE);
+        Ok(compiled)
+    }
+
+    /// syntax.c's clear_regexp_cache after `modify-syntax-entry'. A
+    /// collection, which moves the tables, drops the patterns kept for one.
+    pub(crate) fn clear_regexp_cache(&mut self, only_tables: bool) {
+        self.regexp_cache.0.retain(|e| only_tables && e.syntax.is_none() && !matches!(e.translation, Translation::Completion(_)));
+    }
+
+    /// GNU fast_looking_at over the current buffer's accessible text, for
+    /// each of PATTERNS: case-sensitive, current syntax, no match data. BODY
+    /// gets that text, point's byte in it, and a matcher from a pattern's
+    /// index and a byte of the text to the length of its match there.
+    pub(crate) fn with_buffer_looking_at<T>(&mut self, patterns: &[Value],
+        body: impl FnOnce(&str, usize, &mut dyn FnMut(usize, usize) -> Option<usize>) -> T) -> std::result::Result<T, prim::Fault> {
+        let run = |vm: &mut Self| -> SearchResult<T> {
+            let index = vm.buffer_index()?;
+            let Object::Buffer(b) = &vm.objects[index] else { return Err(Fault::Internal("multibyte buffer required".into())) };
+            let accessible = b.accessible();
+            let text = b.as_str()[accessible.start.0..accessible.end.0].to_owned();
+            let point = b.point.0.clamp(accessible.start.0, accessible.end.0) - accessible.start.0;
+            let patterns = patterns.iter().map(|&p| vm.regexp_input(p)).collect::<SearchResult<Vec<_>>>()?;
+            let source = vm.regexp_syntax(None)?;
+            let compiled = patterns.iter().map(|p| vm.regexp_compiled(p, true, false, &source)).collect::<SearchResult<Vec<_>>>()?;
+            let syntax = syntax::VmSyntax::new(vm, source);
+            let mut looks = |pattern: usize, at: usize| {
+                let found = regex::re_match(&compiled[pattern].borrow(), text.as_bytes(), at, text.len(), &syntax, point);
+                // An overflow is GNU's error; here it is no match.
+                (!regex::take_matcher_overflow()).then_some(found).flatten().map(|(end, _)| end - at)
+            };
+            Ok(body(&text, point, &mut looks))
+        };
+        run(self).map_err(|fault| self.regexp_fault(fault))
+    }
+
+    /// GNU fast_string_match: case-sensitive, current syntax, no match-data writes.
+    pub(crate) fn file_name_match(&mut self, pattern: Value, string: Value) -> std::result::Result<Option<usize>, prim::Fault> {
+        self.string_match_no_data(pattern, string, Translation::None, None)
+    }
+
+    /// PATTERN against STRING with the translation KEY names (built as
+    /// TRANSLATION), without touching the match data.
+    pub(crate) fn string_match_no_data(&mut self, pattern: Value, string: Value, key: Translation,
+                                       translation: Option<regex::CaseTranslation>) -> std::result::Result<Option<usize>, prim::Fault> {
         let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
             let pattern = vm.regexp_input(pattern)?;
             let input = vm.regexp_input(string)?;
-            let syntax = vm.regexp_syntax(Some(string))?;
-            let syntax = syntax::VmSyntax::new(vm, syntax);
-            let mut compiled = regex::regex_compile_lisp_with_translation(
-                &EmacsStr::new(&pattern.bytes, pattern.multibyte), false, translation,
-            ).map_err(|e| Fault::Text("invalid-regexp", e.to_string()))?;
+            let source = vm.regexp_syntax(Some(string))?;
+            let compiled = vm.regexp_pattern(&pattern, key, translation, &source)?;
+            let mut compiled = compiled.borrow_mut();
+            let syntax = syntax::VmSyntax::new(vm, source);
             compiled.set_target_multibyte(input.multibyte);
-            compiled.rebind_syntax_table(&syntax);
             let found = regex::re_search(&compiled, &input.bytes, 0, input.bytes.len() as isize, &syntax, usize::MAX);
             if regex::take_matcher_overflow() {
                 return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
             }
             Ok(found.map(|(at, _)| at))
         };
-        run(self).map_err(|fault| match fault {
+        run(self).map_err(|fault| self.regexp_fault(fault))
+    }
+
+    fn regexp_fault(&mut self, fault: Fault) -> prim::Fault {
+        match fault {
             Fault::Wrong(predicate, value) => prim::Fault::Wrong(predicate, value),
             Fault::Internal(text) => prim::Fault::Error(text),
             Fault::Text(name, text) => {
@@ -125,7 +264,7 @@ impl Vm {
                 let data = self.list_value(&values);
                 prim::Fault::Signal(condition, data)
             }
-        })
+        }
     }
 
     /// search.c update_search_regs: OLDSTART..OLDEND became OLDSTART..NEWEND.
@@ -232,21 +371,22 @@ impl Vm {
     fn regexp_case_fold(&mut self) -> SearchResult<bool> {
         Ok(self.variable_value(self.names["case-fold-search"])? != Value::NIL)
     }
-    fn regexp_compile(
+    /// PATTERN for a search of MULTIBYTE text, case-folded with the
+    /// standard table when FOLDED, from the pattern cache.
+    fn regexp_compiled(
+        &mut self,
         pattern: &Input,
         multibyte: bool,
         folded: bool,
-        syntax: &syntax::VmSyntax,
-    ) -> SearchResult<regex::CompiledPattern> {
-        let translation = folded.then(regex::CaseTranslation::standard);
-        let mut compiled = regex::regex_compile_lisp_with_translation(
-            &EmacsStr::new(&pattern.bytes, pattern.multibyte),
-            false,
-            translation,
-        )
-        .map_err(|e| Fault::Text("invalid-regexp", e.to_string()))?;
-        compiled.set_target_multibyte(multibyte);
-        compiled.rebind_syntax_table(syntax);
+        source: &syntax::SyntaxSource,
+    ) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+        let (key, translation) = if folded {
+            (Translation::Standard, Some(regex::CaseTranslation::standard()))
+        } else {
+            (Translation::None, None)
+        };
+        let compiled = self.regexp_pattern(pattern, key, translation, source)?;
+        compiled.borrow_mut().set_target_multibyte(multibyte);
         Ok(compiled)
     }
     fn regexp_save(
@@ -525,9 +665,10 @@ impl Vm {
                 return Err(Fault::Signal("args-out-of-range", vec![args[1], args[2]]));
             }
             let folded = self.regexp_case_fold()?;
-            let syntax = self.regexp_syntax(Some(args[1]))?;
-            let syntax = syntax::VmSyntax::new(self, syntax);
-            let compiled = Self::regexp_compile(&pattern, input.multibyte, folded, &syntax)?;
+            let source = self.regexp_syntax(Some(args[1]))?;
+            let compiled = self.regexp_compiled(&pattern, input.multibyte, folded, &source)?;
+            let compiled = compiled.borrow();
+            let syntax = syntax::VmSyntax::new(self, source);
             let byte = input.byte(pos as usize);
             let found = regex::re_search(
                 &compiled,
@@ -631,9 +772,10 @@ impl Vm {
             return Ok(Value::integer(original_char as i64)?);
         }
         let folded = self.regexp_case_fold()?;
-        let syntax = self.regexp_syntax(None)?;
-        let syntax = syntax::VmSyntax::new(self, syntax);
-        let compiled = Self::regexp_compile(&pattern, input.multibyte, folded, &syntax)?;
+        let source = self.regexp_syntax(None)?;
+        let compiled = self.regexp_compiled(&pattern, input.multibyte, folded, &source)?;
+        let compiled = compiled.borrow();
+        let syntax = syntax::VmSyntax::new(self, source);
         // Match data is saved once, from the last success, after the engine.
         let (mut matched, mut overflow) = (None, false);
         let limit = input.byte(bound - base_char);

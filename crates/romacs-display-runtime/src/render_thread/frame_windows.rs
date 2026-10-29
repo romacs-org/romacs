@@ -2770,6 +2770,17 @@ impl GuiFrameWindowManager {
         });
     }
 
+    pub(super) fn restart_top_level_cursor_blinks(
+        &mut self,
+        now: romacs_display_protocol::frame_time::EventTime,
+    ) -> bool {
+        let mut dirty = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            dirty |= window_state.render.restart_cursor_blink(now);
+        });
+        dirty
+    }
+
     pub(super) fn force_top_level_cursor_blink_on(&mut self) -> bool {
         let mut dirty = false;
         self.for_each_top_level_window_mut(|window_state| {

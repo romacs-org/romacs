@@ -535,6 +535,8 @@ impl Vm {
     /// `roots`; compaction rewrites them. Never share private Values across VMs.
     /// Runtime register, global, binding and inline-cache roots are added here.
     pub(super) fn collect_marked(&mut self, roots: &mut [Value]) {
+        // Patterns kept for a table name it by a Value this may move.
+        self.clear_regexp_cache(true);
         let before = self.heap_objects();
         self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
         let mut marks = [

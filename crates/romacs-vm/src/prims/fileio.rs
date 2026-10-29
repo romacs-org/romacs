@@ -725,3 +725,11 @@ fn refuse_locate_handler(cx: &mut Leaf<'_>, filename: Value, operation: &str) ->
     }
     Ok(())
 }
+
+// Romacs has no toolkit file dialog, so it answers as a GNU built without
+// one (no GTK, Motif, NS, NTGUI or Haiku) does.
+defsubr! { name = "next-read-file-uses-dialog-p", gnu = "fileio.c:6556", effect = Pure,
+fn next_read_file_uses_dialog_p(cx) {
+    let _ = cx;
+    Ok(Value::NIL)
+}}

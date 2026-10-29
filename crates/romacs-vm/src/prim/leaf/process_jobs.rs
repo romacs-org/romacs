@@ -27,6 +27,11 @@ impl Leaf<'_> {
         Ok(self.cons(status, tail))
     }
 
+    /// Whether a background command has completed, without taking it.
+    pub(crate) fn process_pending_p(&mut self) -> Out {
+        Ok(if self.vm.background_processes_ready() { Value::TRUE } else { Value::NIL })
+    }
+
     pub(crate) fn process_ready(&mut self) -> Out {
         let ids = self.vm.process_jobs.ready();
         let mut list = Value::NIL;

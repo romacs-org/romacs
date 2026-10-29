@@ -6,6 +6,15 @@ impl Leaf<'_> {
         self.vm.undo_boundary().map_err(Fault::Error)
     }
 
+    /// keyboard.c command_loop_1's point_before_last_command_or_undo:
+    /// the current buffer and its point before a command, which
+    /// record_point puts in the undo list when the command's first change
+    /// is elsewhere.
+    pub(crate) fn note_command_point(&mut self) -> super::super::Out {
+        self.vm.note_command_point().map_err(Fault::Error)?;
+        Ok(Value::NIL)
+    }
+
     /// Fbuffer_enable_undo: Fget_buffer's BUFFER, nil meaning the current
     /// one; a t undo list becomes nil.
     pub(crate) fn buffer_enable_undo(&mut self, buffer: Value) -> super::super::Out {

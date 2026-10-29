@@ -470,6 +470,13 @@ mod leaf {
             self.vm
                 .allocate_object(data::Object::String(Box::new(data::LispString::new(text))))
         }
+        /// keymap.c's flush of where_is_cache (`Vm::note_keymap_change').
+        pub(crate) fn note_keymap_change(&mut self) {
+            self.vm.note_keymap_change();
+        }
+        pub(crate) fn keymap_generation(&self) -> u64 {
+            self.vm.keymap_generation()
+        }
         pub fn string_view(
             &self,
             v: Value,
@@ -1666,9 +1673,24 @@ mod leaf {
     mod display_elements;
     mod display_hosted;
     mod text_pixel_size;
+    mod bidi;
     pub(crate) use text_pixel_size::TextSizeArgs;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
+
+/// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
+pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {
+    Leaf::new(vm).hosted_window_start(window, start, point, minimal, back).map_err(|fault| match fault {
+        Fault::Error(text) => text,
+        _ => "the host's layout cannot choose this window start".into(),
+    })
+}
+
+/// Where the screen lines a window shows end over the host's layout
+/// (Leaf::hosted_rows_end).
+pub(crate) fn hosted_rows_end(vm: &mut Vm, window: Value, start: i64, rows: i64) -> std::result::Result<i64, Fault> {
+    Leaf::new(vm).hosted_rows_end(window, start, rows)
+}
 
 /// Realize C-initialized coding variables before their first Lisp observation.
 /// Like the charset slot hook, this preserves allocation-free VM construction.

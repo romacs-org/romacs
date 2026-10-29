@@ -73,14 +73,15 @@ impl Vm {
         self.declare_special_raw(HOST_INPUT_VARIABLE, attached);
     }
 
-    /// `romacs--read-host-event' &optional SECONDS: redisplay unless input
-    /// is pending, then wait for one event, or nil once SECONDS pass. Lisp
-    /// runs timers between reads (rlisp/vm/keyboard.el). Runs only under
-    /// `reentrant_load''s discipline.
+    /// `romacs--read-host-event' &optional SECONDS NODISPLAY: redisplay
+    /// unless NODISPLAY or input is pending, then wait for one event, or nil
+    /// once SECONDS pass. Lisp runs timers between reads
+    /// (rlisp/vm/keyboard.el). Runs only under `reentrant_load''s discipline.
     pub(crate) fn read_host_event(&mut self, args: &[Value]) -> Result<Value> {
-        if args.len() > 1 {
+        if args.len() > 2 {
             return Err("wrong primitive arity".into());
         }
+        let display = args.get(1).is_none_or(|&v| v == Value::NIL);
         let deadline = match args.first() {
             None => None,
             Some(&v) if v == Value::NIL => None,
@@ -101,7 +102,7 @@ impl Vm {
         let Some(mut host) = self.host_input.take() else {
             return Ok(Value::NIL);
         };
-        let outcome = self.read_host_event_with(host.as_mut(), deadline);
+        let outcome = self.read_host_event_with(host.as_mut(), deadline, display);
         self.host_input = Some(host);
         match outcome? {
             HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c),
@@ -116,14 +117,39 @@ impl Vm {
         }
     }
 
+    /// What a host wait's deadline depends on besides the clock, as
+    /// rlisp/vm/keyboard.el's `romacs--wait-state' prints it: empty before
+    /// the Lisp half is installed.
+    fn host_wait_state(&mut self) -> Result<String> {
+        let probe = crate::Form::List(vec![
+            crate::Form::Sym("and".into()),
+            crate::Form::List(vec![crate::Form::Sym("fboundp".into()),
+                crate::Form::List(vec![crate::Form::Sym("quote".into()), crate::Form::Sym("romacs--wait-state".into())])]),
+            crate::Form::List(vec![crate::Form::Sym("romacs--wait-state".into())]),
+        ]);
+        let state = self.eval_form_raw(&probe)?;
+        self.display(state)
+    }
+
     /// keyboard.c timer_stop_idle: the host read a key for a command.
     pub fn timer_stop_idle(&mut self) { self.idle_since = None; }
 
-    fn read_host_event_with(&mut self, host: &mut dyn HostInput, deadline: Option<std::time::Instant>) -> Result<HostEvent> {
-        let mut redraw = true;
+    fn redisplay_inhibited(&mut self) -> Result<bool> {
+        let slot = self.slot("inhibit-redisplay");
+        Ok(self.variable_value(slot)? != Value::NIL)
+    }
+
+    fn read_host_event_with(&mut self, host: &mut dyn HostInput, deadline: Option<std::time::Instant>, display: bool) -> Result<HostEvent> {
+        let mut redraw = display;
         loop {
             redraw |= self.poll_terminal_output()?;
-            if redraw && !host.input_pending() {
+            // GNU redisplay_internal does nothing while `inhibit-redisplay'
+            // is non-nil, as it is around Lisp that redisplay itself calls.
+            if redraw && !host.input_pending() && !self.redisplay_inhibited()? {
+                // DEADLINE was computed from the timers and the unread
+                // queues; a redisplay's Lisp (a mode-line :eval) may change
+                // them, and then the wait ends for Lisp to compute it again.
+                let before = self.host_wait_state()?;
                 let (width, height) = (self.window_state.width, self.window_state.height);
                 let frame = self.frame_snapshot(width, height)?;
                 let selected = self.selected_window_value()?;
@@ -131,6 +157,7 @@ impl Vm {
                 let ends = host.redisplay(HostFrame { frame, selected })?;
                 self.display_apply_layout(&ends)?;
                 redraw = false;
+                if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
             }
             let timeout = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
             match host.next_event(timeout)? {
@@ -139,6 +166,10 @@ impl Vm {
                     self.set_frame_geometry(width, height, line, column)?;
                     redraw = true;
                 }
+                // A completed background command ends the wait as a
+                // timeout does: Lisp may run its callback between commands
+                // (rlisp/vm/keyboard.el `romacs--read-host-char').
+                HostEvent::Background if self.background_processes_ready() => return Ok(HostEvent::Timeout),
                 HostEvent::Background => {}
                 event => return Ok(event),
             }

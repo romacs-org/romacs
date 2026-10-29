@@ -151,7 +151,7 @@ impl Leaf<'_> {
             let Some((key, val)) = self.pair(element) else { continue };
             // fast_string_match: no match data, no case folding.
             let hit = if string(self, target) {
-                string(self, key) && self.vm.string_match_no_data(key, target, None)?.is_some()
+                string(self, key) && self.vm.string_match_no_data(key, target, crate::regexp::Translation::None, None)?.is_some()
             } else {
                 target.integer_value().is_some() && key == target
             };

@@ -231,6 +231,30 @@ shortens ends the walk early."
         (setq result advertised))
     result))
 
+(defvar romacs--where-cache nil
+  "keymap.c where_is_cache: each definition's key sequences in the keymaps
+`romacs--where-cache-maps', ignoring menus and following indirection, while
+`romacs--keymap-generation' stays `romacs--where-cache-generation'.")
+(defvar romacs--where-cache-maps t)
+(defvar romacs--where-cache-generation nil)
+
+(defun romacs--where-cached (maps)
+  "The reverse map of MAPS, rebuilt when they or any keymap changed."
+  (if (not (and romacs--where-cache (equal maps romacs--where-cache-maps)
+                (eql romacs--where-cache-generation (romacs--keymap-generation))))
+      (let ((table (make-hash-table :test 'eql))
+            (rows (romacs--where-bindings maps)))
+        (while rows
+          (let ((row (car rows)))
+            (if (not (romacs--where-mouse-prefix-p (car row)))
+                (let ((binding (romacs--where-definition (cdr row))))
+                  (puthash binding (cons (car row) (gethash binding table)) table))))
+          (setq rows (cdr rows)))
+        (maphash (lambda (binding sequences) (puthash binding (nreverse sequences) table)) table)
+        (setq romacs--where-cache table romacs--where-cache-maps maps
+              romacs--where-cache-generation (romacs--keymap-generation))))
+  romacs--where-cache)
+
 (defun where-is-internal (definition &optional keymap firstonly noindirect no-remap)
   "Return keys invoking DEFINITION in KEYMAP, respecting shadows and remapping."
   (let* ((maps (cond ((and (consp keymap) (keymapp (car keymap))) keymap)
@@ -243,9 +267,15 @@ shortens ends the walk early."
         (romacs--where-find definition maps firstonly noindirect no-remap modifier))))
 
 (defun romacs--where-find (definition maps firstonly noindirect no-remap modifier)
-  (let* ((rows (romacs--where-bindings maps))
-         (nomenus (and firstonly (not (eq firstonly 'non-ascii))))
-         (pending (romacs--where-candidates definition rows noindirect nomenus))
+  (let* ((nomenus (and firstonly (not (eq firstonly 'non-ascii))))
+         ;; keymap.c where_is_internal: the cache serves menu-less lookups
+         ;; through indirection; any other lookup enumerates the maps.
+         (cache (and nomenus (not noindirect) (romacs--where-cached maps)))
+         (rows (if (not cache) (romacs--where-bindings maps)))
+         (candidates (lambda (definition)
+                       (if cache (gethash definition cache)
+                         (romacs--where-candidates definition rows noindirect nomenus))))
+         (pending (funcall candidates definition))
          (remapped nil) (second nil) (found nil) (answer nil))
     (while (and (or pending (not second)) (not answer))
       (if (not pending) (setq pending remapped second t))
@@ -258,11 +288,11 @@ shortens ends the walk early."
             (if (equal value definition)
                 (if (and (not no-remap) (not second) (= (length sequence) 2)
                          (eq (aref sequence 0) 'remap) (symbolp (aref sequence 1)))
-                    (setq remapped (append (romacs--where-candidates
-                                            (aref sequence 1) rows noindirect nomenus)
-                                           remapped))
+                    (setq remapped (append (funcall candidates (aref sequence 1)) remapped))
+                  ;; The cache shares SEQUENCE: change a copy.
                   (if (stringp (aref sequence (1- (length sequence))))
-                      (aset sequence (1- (length sequence)) "(any string)"))
+                      (progn (setq sequence (copy-sequence sequence))
+                             (aset sequence (1- (length sequence)) "(any string)")))
                   (if (not (or (member sequence found)
                                (and (= (length sequence) 1)
                                     (symbolp (aref sequence 0))
@@ -643,10 +673,53 @@ guesswork fails."
 ;; *Messages* only (add_to_log), and the call returns nil.  syntax.c calls
 ;; `internal--syntax-propertize' this way in the middle of a scan.
 (defun romacs--safe-call (function &rest args)
+  (romacs--muted-call "Error muted by safe_call" function args))
+
+(defun romacs--muted-call (log function args)
+  "Apply FUNCTION to ARGS with redisplay inhibited; a signal returns nil.
+The signal is logged, after LOG, to *Messages* only, as GNU's add_to_log."
   (let ((inhibit-redisplay t))
     (condition-case err (apply function args)
       (t (let ((inhibit-message t))
-           (message "%s" (format "Error muted by safe_call: %S signaled %S" (cons function args) err)))
+           (message "%s" (format "%s: %S signaled %S" log (cons function args) err)))
          nil))))
+
+;; GNU handle_fontified_prop (xdisp.c): where the text redisplay shows has a
+;; nil `fontified' char property, call `fontification-functions' with that
+;; position, each through dsafe_call1 and with the variable itself bound to
+;; nil.  A buffer-local `t' runs the global functions; a global `t' is
+;; ignored.  Redisplay then reads the property again: a function that left
+;; it nil is not called again in that stretch, so none can loop.
+(defun romacs--redisplay-fontify (start end)
+  "Run `fontification-functions' over the unfontified text from START to END.
+Redisplay calls this in the buffer of a window showing START to END."
+  (let ((buffer (current-buffer)) (pos start))
+    (while (and pos (< pos end) fontification-functions (not memory-full))
+      (if (get-char-property pos 'fontified)
+          (setq pos (next-single-char-property-change pos 'fontified nil end))
+        (romacs--run-fontification-functions pos)
+        (if (not (buffer-live-p buffer))
+            (setq pos nil)
+          ;; GNU's fig leaf: back to the displayed buffer, whose text the
+          ;; functions may have shortened.
+          (set-buffer buffer)
+          (setq end (min end (point-max)))
+          (unless (get-char-property pos 'fontified)
+            (setq pos (next-single-char-property-change pos 'fontified nil end))))))))
+
+(defun romacs--run-fontification-functions (pos)
+  (let ((functions fontification-functions)
+        (fontification-functions nil))
+    (if (or (not (consp functions)) (eq (car functions) 'lambda))
+        (romacs--muted-call "Error during redisplay" functions (list pos))
+      (while (consp functions)
+        (if (not (eq (car functions) t))
+            (romacs--muted-call "Error during redisplay" (car functions) (list pos))
+          (let ((globals (default-value 'fontification-functions)))
+            (while (consp globals)
+              (unless (eq (car globals) t)
+                (romacs--muted-call "Error during redisplay" (car globals) (list pos)))
+              (setq globals (cdr globals)))))
+        (setq functions (cdr functions))))))
 
 ;;; prelude.el ends here

@@ -5,6 +5,9 @@ use crate::{coordinates::ByteOffset, data::Object, *};
 mod tests;
 #[path = "mode_line.rs"]
 mod mode_line;
+#[path = "mini_window.rs"]
+mod mini_window;
+pub(crate) use mini_window::buffer_of;
 use romacs_face::{
     Attribute, AttrsBuilder, Background, Base, BoundedDatum, Deffaces, LispGraph, NodeView,
     Slot as FaceSlot, Theme, Value as FaceValue,
@@ -24,6 +27,9 @@ pub(super) struct DisplayState {
     /// an unpruned map would grow for the life of the VM once windows start
     /// churning.
     previous: std::collections::BTreeMap<u64, WindowSnapshot>,
+    /// Per window id, how its last publication's display text maps to
+    /// buffer text, when overlay strings were spliced in.
+    segments: std::collections::BTreeMap<u64, Vec<mini_window::Segment>>,
     pub version: u64,
     /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
     pub(super) hosted: bool,
@@ -53,6 +59,11 @@ impl DisplayState {
     /// reused, so without this the map grows for the life of the VM.
     pub(super) fn forget_window(&mut self, id: u64) {
         self.previous.remove(&id);
+        self.segments.remove(&id);
+    }
+    /// How window ID's last publication maps display bytes to buffer bytes.
+    pub(super) fn segments(&self, id: u64) -> Option<&[mini_window::Segment]> {
+        self.segments.get(&id).map(Vec::as_slice)
     }
     pub fn new() -> Self {
         let mut attrs = AttrsBuilder::default();
@@ -87,6 +98,7 @@ impl DisplayState {
             font_selection_order: romacs_layout_input::FontSelectionState::default(),
             font_alternatives: romacs_layout_input::FontAlternativeState::default(),
             previous: std::collections::BTreeMap::new(),
+            segments: std::collections::BTreeMap::new(),
             theme: Theme::build(
                 Arc::new(defs),
                 None,
@@ -405,6 +417,38 @@ impl Vm {
         self.slots[slot].value = Value::UNBOUND;
         outcome
     }
+    /// init_iterator's line wrap in the current buffer, for a window
+    /// COLUMNS wide that is or is not as wide as its frame.
+    pub(crate) fn line_wrap(&mut self, full_width: bool, columns: i64) -> Result<romacs_layout_input::LineWrap> {
+        use romacs_layout_input::LineWrap;
+        let mut var = |name: &str| { let slot = self.slot(name); self.variable_value(slot) };
+        let partial = var("truncate-partial-width-windows")?;
+        let continued = (full_width || partial == Value::NIL || partial.integer_value().is_some_and(|n| n <= columns))
+            && var("truncate-lines")? == Value::NIL;
+        Ok(if !continued { LineWrap::Truncate } else if var("word-wrap")? == Value::NIL { LineWrap::Window } else { LineWrap::Word })
+    }
+    /// WINDOW's line wrap for BUFFER.
+    fn window_line_wrap(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::LineWrap> {
+        let w = self.window(window)?;
+        let (x, width) = (w.x, w.width);
+        let root = self.window_root_peek(crate::window::ROOT);
+        let full_width = self.window(root).is_ok_and(|r| r.x == x && r.width == width);
+        let columns = i64::from(width / self.window_state.column.max(1));
+        let saved = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let wrap = self.line_wrap(full_width, columns);
+        self.slots[self.buffer_slot].value = saved;
+        wrap
+    }
+    /// BUFFER's `tab-width' as GNU's SANE_TAB_WIDTH: 1 to 1000, else 8.
+    fn buffer_tab_width(&mut self, buffer: Value) -> Result<u32> {
+        let saved = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let slot = self.slot("tab-width");
+        let width = self.variable_value(slot);
+        self.slots[self.buffer_slot].value = saved;
+        Ok(width?.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as u32)
+    }
     fn snapshot_region(&mut self, window: Value, buffer: Value, point: i64) -> Result<Option<std::ops::Range<usize>>> {
         if window != self.selected_window_value()? { return Ok(None); }
         let saved = self.slots[self.buffer_slot].value;
@@ -442,7 +486,7 @@ impl Vm {
         if !w.live() {
             return Err("window deleted during snapshot".into());
         }
-        let (id, buffer, start) = (w.id, w.buffer, w.start);
+        let (id, buffer, start, mini) = (w.id, w.buffer, w.start, w.mini);
         self.slots[slot].value = buffer;
         let start = self
             .marker_position_value(start)?
@@ -467,18 +511,28 @@ impl Vm {
             if let Some(color) = binding.default_colors[1] { faces[0].background = color; }
         }
         let default = faces[0].clone();
+        let mut merged = std::collections::HashMap::new();
         let styles = terminal.map_or(&[][..], |binding| binding.styles.as_ref());
         let mut style_index = 0;
         let mut terminal_faces = std::collections::HashMap::new();
         let mut region_faces = std::collections::HashMap::new();
         let region_background = names.iter().position(|name| name == "region").map(|i| faces[i].background);
+        // A control character other than TAB and newline shows as an escape.
+        let escape = names.iter().position(|name| name == "escape-glyph").map(|i| FaceHandle(i as u32));
         let mut face_runs: Vec<FaceRun> = vec![];
+        // Resolve `face` once per run of one value, not per character.
+        let mut named = (0, FaceHandle(0));
         for (at, ch) in utf8.char_indices() {
-            let value = b
-                .properties
-                .get_property(ByteOffset(at), "face")
-                .unwrap_or(Value::NIL);
-            let mut face = self.painted_face(&names, value)?.0;
+            if at >= named.0 {
+                let value = b
+                    .properties
+                    .get_property(ByteOffset(at), "face")
+                    .unwrap_or(Value::NIL);
+                let end = b.properties.next_single_change(ByteOffset(at), "face", ByteOffset(utf8.len())).0;
+                named = (end, self.face_handle(&names, &mut faces, &mut merged, value));
+            }
+            let mut face = named.1;
+            if ch.is_control() && ch != '\n' && ch != '\t' && let Some(escape) = escape { face = escape; }
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
@@ -520,6 +574,25 @@ impl Vm {
         // the snapshot and so are compared per window below.
         self.display_state.width = width;
         self.display_state.height = height;
+        // The mini-window shows its overlay strings (icomplete's candidates).
+        let (utf8, face_runs, start_byte, point_byte) = if mini {
+            let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
+            if spliced.has_strings() {
+                let mut strings = vec![];
+                for (bytes, value) in &spliced.string_faces {
+                    strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&names, &mut faces, &mut merged, *value) });
+                }
+                let runs = mini_window::display_face_runs(&face_runs, &spliced.segments, strings);
+                let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
+                self.display_state.segments.insert(id, spliced.segments);
+                (spliced.text, runs, start, point)
+            } else {
+                self.display_state.segments.remove(&id);
+                (utf8, face_runs, start_byte, point_byte)
+            }
+        } else {
+            (utf8, face_runs, start_byte, point_byte)
+        };
         let mut snapshot = WindowSnapshot {
             id,
             width,
@@ -545,6 +618,8 @@ impl Vm {
             ),
             vscroll_px: self.window(window)?.vscroll_px,
             faces,
+            tab_width: self.buffer_tab_width(buffer)?,
+            wrap: self.window_line_wrap(window, buffer)?,
         };
         // The owned last publication also covers mutation paths with specialised
         // fast dispatch (point moves, regexp, yank), without retaining GC handles.
@@ -565,6 +640,32 @@ impl Vm {
         self.display_state.previous.insert(id, snapshot.clone());
         Ok(snapshot)
     }
+    /// The row of FACES for a `face' property VALUE: a face symbol's own
+    /// row, and for a list of faces or an attribute list a row merged as
+    /// GNU's C merges them (xfaces.c merge_face_ref), added once per value
+    /// to FACES and MERGED. What the display cannot realize shows as default.
+    fn face_handle(&self, names: &[String], faces: &mut Vec<Face>,
+                   merged: &mut std::collections::HashMap<u64, FaceHandle>, value: Value) -> FaceHandle {
+        let graph = Graph(self);
+        match graph.view(value.0) {
+            NodeView::Symbol(name) => return FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32),
+            NodeView::Cons(..) => {}
+            _ => return FaceHandle(0),
+        }
+        if let Some(&handle) = merged.get(&value.0) { return handle; }
+        let face = BoundedDatum::from_graph(&graph, value.0).ok()
+            .and_then(|datum| romacs_face::remap::parse_face_ref(&datum).ok())
+            .and_then(|face_ref| {
+                let view = romacs_face::View::bind(&self.display_state.theme, &romacs_face::Remap::empty()).ok()?;
+                face_of_attrs(&view.realize_ref(&face_ref), "merged face").ok()
+            });
+        let handle = match face {
+            Some(face) => { faces.push(face); FaceHandle(faces.len() as u32 - 1) }
+            None => FaceHandle(0),
+        };
+        merged.insert(value.0, handle);
+        handle
+    }
     /// GNU `redisplay_window` order for one window: make its buffer current,
     /// keep point visible, then `display_mode_line` (`src/xdisp.c:28200`)
     /// with that window's own -- possibly buffer-local -- `mode-line-format`.
@@ -583,7 +684,7 @@ impl Vm {
     }
     fn redisplay_window_inner(&mut self, root: usize, buffer_slot: usize, height: u32) -> Result<Option<mode_line::Band>> {
         if self.window(self.slots[root].value)?.mini {
-            return Ok(None);
+            return self.redisplay_window_fontify(root, buffer_slot, height).map(|_| None);
         }
         let format_slot = self.slot("mode-line-format");
         let value = self.variable_value(format_slot)?;
@@ -599,6 +700,9 @@ impl Vm {
         let band_height = if format.is_some() { self.window_state.line } else { 0 };
         let text_height = height.saturating_sub(band_height);
         self.redisplay_point_visibility(self.slots[root].value, text_height)?;
+        if !self.redisplay_window_fontify(root, buffer_slot, text_height)? {
+            return Ok(None);
+        }
         let Some(format) = format else { return Ok(None) };
         let state = self.mode_line_state(root, buffer_slot, text_height)?;
         // GNU redisplay_window installs a non-selected window's point before
@@ -649,6 +753,191 @@ impl Vm {
         // using the real selection, not the temporary evaluation context.
         outcome
     }
+    /// GNU `handle_fontified_prop` (`xdisp.c:4667`) from START to END of
+    /// the current buffer, which a window shows. The walk over unfontified
+    /// stretches and the calls are Lisp (`romacs--redisplay-fontify`,
+    /// rlisp/vm/prelude.el), so nothing is held across them; a signal is
+    /// logged there and never ends redisplay, and any other failure becomes
+    /// a display diagnostic. False when `fontification-functions` is nil,
+    /// so no Lisp ran.
+    fn fontify_range(&mut self, start: usize, end: usize) -> Result<bool> {
+        let functions = self.slot("fontification-functions");
+        if self.variable_value(functions)? == Value::NIL {
+            return Ok(false);
+        }
+        let call = Form::List(vec![
+            Form::Sym("romacs--redisplay-fontify".into()),
+            Form::Int(start as i64),
+            Form::Int(end as i64),
+        ]);
+        if let Err(error) = self.eval_form_raw(&call) {
+            self.display_state.diagnostics.push(format!("fontification: {error}"));
+        }
+        Ok(true)
+    }
+    /// Fontify the rows the window shows, then re-derive what that Lisp may
+    /// have changed: the window's buffer, which becomes current again as GNU
+    /// restores it after `fontification-functions`. Text or a window start
+    /// the Lisp changed can bring other rows into view, so the whole range
+    /// is fontified again, a bounded number of times as GNU's redisplay
+    /// retries. Faces alone it changed can show text past the end walked (a
+    /// smaller face): that text is fontified as GNU's iterator fontifies
+    /// what it reaches, while the end keeps growing, which point-max bounds.
+    /// False if Lisp deleted the window.
+    fn redisplay_window_fontify(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<bool> {
+        let functions = self.slot("fontification-functions");
+        if self.variable_value(functions)? == Value::NIL {
+            return Ok(true);
+        }
+        let mut range = self.displayed_range(self.slots[root].value, text_height)?;
+        let mut tries = 1;
+        while let Some((start, end)) = range {
+            let shown = self.window_text_state(root)?;
+            let ran = self.fontify_range(start, end)?;
+            let w = self.window(self.slots[root].value)?;
+            if !w.live() {
+                return Ok(false);
+            }
+            let buffer = w.buffer;
+            self.slots[buffer_slot].value = buffer;
+            self.slots[self.buffer_slot].value = buffer;
+            let now = self.window_text_state(root)?;
+            if !ran || now == shown {
+                break;
+            }
+            let next = self.displayed_range(self.slots[root].value, text_height)?;
+            range = if (now.1, now.2) == (shown.1, shown.2) {
+                // Only properties changed: the text now in view past END.
+                next.filter(|&(_, later)| later > end).map(|(_, later)| (end, later))
+            } else if tries < 3 {
+                tries += 1;
+                next
+            } else {
+                None
+            };
+        }
+        Ok(true)
+    }
+    /// What decides the rows a live window shows: its buffer's edits
+    /// (MODIFF, which property changes advance), its character edits
+    /// (CHARS_MODIFF) and its start.
+    fn window_text_state(&self, root: usize) -> Result<(u64, u64, Value)> {
+        let w = self.window(self.slots[root].value)?;
+        let start = self.marker_position_value(w.start)?;
+        let state = self.buffer_state(w.buffer)?;
+        Ok((state.modiff, state.chars_modiff, start))
+    }
+    /// GNU `Fformat_mode_line` (`src/xdisp.c:29058`): FORMAT expanded as
+    /// WINDOW's band (the selected window by default) for BUFFER (WINDOW's
+    /// by default), with WINDOW selected and BUFFER current meanwhile, by
+    /// the engine that builds the band. FACE nil gives the characters only
+    /// the faces their `:propertize' gives; t, the window's mode-line face;
+    /// another face, that face where they have none and appended where they
+    /// have one; an integer, no properties. Batch formats nothing.
+    pub(crate) fn format_mode_line(&mut self, args: &[Value]) -> Result<Value> {
+        if args.is_empty() || args.len() > 4 {
+            return Err("wrong primitive arity".into());
+        }
+        let arg = |i: usize| args.get(i).copied().unwrap_or(Value::NIL);
+        let (format, face, window, buffer) = (arg(0), arg(1), arg(2), arg(3));
+        self.ensure_windows()?;
+        let window = if window == Value::NIL { self.selected_window_value()? } else { window };
+        if !matches!(self.object_if(window), Some(Object::Window(_))) {
+            let predicate = self.intern("windowp");
+            return Err(self.signal_error("wrong-type-argument", &[predicate, window], "Wrong type argument: windowp".into()));
+        }
+        // GNU's `w->contents': an internal window's first child.
+        let buffer = if buffer != Value::NIL { buffer } else {
+            let w = self.window(window)?;
+            w.children.first().copied().unwrap_or(w.buffer)
+        };
+        if !matches!(self.object_if(buffer), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
+            let predicate = self.intern("bufferp");
+            return Err(self.signal_error("wrong-type-argument", &[predicate, buffer], "Wrong type argument: bufferp".into()));
+        }
+        if !self.buffer_state(buffer)?.live {
+            return Err("Attempt to format a mode line for a dead buffer".into());
+        }
+        let noninteractive = self.slot("noninteractive");
+        let target = if face.integer_value().is_some() || matches!(self.object_if(face), Some(Object::Bignum(_))) {
+            mode_line::Target::NoProp
+        } else {
+            mode_line::Target::String
+        };
+        if format == Value::NIL || self.variable_value(noninteractive)? != Value::NIL {
+            return Ok(self.allocate_object(Object::String(Box::new(data::LispString::from_bytes(vec![], false)))));
+        }
+        let face = if target == mode_line::Target::NoProp || face == Value::NIL || face == self.intern("default") {
+            Value::NIL
+        } else if face == Value::TRUE {
+            let selected = window == self.selected_window_value()?;
+            self.intern(if selected { "mode-line-active" } else { "mode-line-inactive" })
+        } else {
+            face
+        };
+        // A format can call format-mode-line again from :eval: each call
+        // roots its window, buffer and the selection it restores in slots
+        // of its own depth.
+        let depth = (0..).find(|d| { let slot = self.slot(&format!("#:vm2-format-mode-line-{d}")); self.slots[slot].value == Value::UNBOUND }).unwrap();
+        let [root, buffer_slot, face_slot, saved_window, saved_buffer] = ["", "-buffer", "-face", "-selected", "-current"]
+            .map(|suffix| self.slot(&format!("#:vm2-format-mode-line-{depth}{suffix}")));
+        self.slots[root].value = window;
+        self.slots[buffer_slot].value = buffer;
+        self.slots[face_slot].value = face;
+        self.slots[saved_window].value = self.selected_window_value()?;
+        self.slots[saved_buffer].value = self.slots[self.buffer_slot].value;
+        let format = self.mode_line_form(format);
+        let outcome = (|| {
+            let height = self.window(window)?.height.saturating_sub(self.window_state.line);
+            // Fselect_window (WINDOW, t): its point becomes its buffer's.
+            self.select_window_value(window, false)?;
+            self.slots[self.buffer_slot].value = buffer;
+            let state = self.mode_line_state(root, buffer_slot, height)?;
+            self.mode_line_expand(&format, &state, target)
+        })();
+        // unwind_format_mode_line: the old selection, if it lives, then
+        // the old current buffer.
+        let old = self.slots[saved_window].value;
+        if self.window(old).is_ok_and(|w| w.live()) { self.select_window_value(old, false)?; }
+        if self.buffer_state(self.slots[saved_buffer].value).is_ok_and(|b| b.live) {
+            self.slots[self.buffer_slot].value = self.slots[saved_buffer].value;
+        }
+        let face = self.slots[face_slot].value;
+        for slot in [root, buffer_slot, face_slot, saved_window, saved_buffer] { self.slots[slot].value = Value::UNBOUND; }
+        let band = outcome?;
+        let elt_slot = self.slot(mode_line::ELT_RESTARTED);
+        self.slots[elt_slot].value = Value::integer(band.elt)?;
+        self.mode_line_string(&band, face)
+    }
+    /// BAND's text with GNU's properties: each piece's `mode-line-elt-no'
+    /// and face, its `:propertize' face with FACE after it, else FACE.
+    /// GNU adds a piece's element number before a FACE it adds but after a
+    /// face the piece already had.
+    fn mode_line_string(&mut self, band: &mode_line::Band, face: Value) -> Result<Value> {
+        let text = &band.text;
+        // VM2 keys string properties by interned name.
+        self.intern("mode-line-elt-no");
+        let mut string = data::LispString::from_bytes(text.as_bytes().to_vec(), !text.is_ascii());
+        let mut bounds: Vec<usize> = band.runs.iter().map(|(r, _)| r).chain(band.elts.iter().map(|(r, _)| r))
+            .flat_map(|r| [r.start, r.end]).chain([0, text.len()]).collect();
+        bounds.sort_unstable();
+        bounds.dedup();
+        for span in bounds.windows(2) {
+            let range = ByteOffset(span[0])..ByteOffset(span[1]);
+            let own = band.runs.iter().find(|(r, _)| r.contains(&span[0])).map(|(_, name)| self.intern(name));
+            let elt = band.elts.iter().find(|(r, _)| r.contains(&span[0])).map(|(_, n)| *n);
+            let added = match own {
+                Some(own) if face != Value::NIL => Some(self.list_value(&[own, face])),
+                Some(own) => Some(own),
+                None => (face != Value::NIL).then_some(face),
+            };
+            // A later put lists its property first.
+            if own.is_none() && let Some(face) = added { string.properties.put(range.clone(), "face", face); }
+            if let Some(n) = elt { string.properties.put(range.clone(), "mode-line-elt-no", Value::integer(n)?); }
+            if own.is_some() && let Some(face) = added { string.properties.put(range, "face", face); }
+        }
+        Ok(self.allocate_object(Object::String(Box::new(string))))
+    }
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
         let buffer = self.slots[buffer_slot].value;
@@ -681,8 +970,9 @@ impl Vm {
         let accessible = b.accessible();
         let (begv_byte, zv_byte) = (accessible.start.0, accessible.end.0);
         let char_at = |byte: usize| b.char_of_byte(ByteOffset(byte)).map(|c| c.0 + 1);
-        let start_byte = b.byte_of_char(crate::coordinates::CharOffset(start - 1))?.0.clamp(begv_byte, zv_byte);
-        let point_byte = b.byte_of_char(crate::coordinates::CharOffset(point - 1))?.0.clamp(begv_byte, zv_byte);
+        // Another buffer than the window's (format-mode-line's BUFFER) may be shorter.
+        let byte_at = |pos: usize| b.byte_of_char(crate::coordinates::CharOffset(pos.clamp(1, b.len_chars() + 1) - 1)).map(|o| o.0.clamp(begv_byte, zv_byte));
+        let (start_byte, point_byte) = (byte_at(start)?, byte_at(point)?);
         // Window end: after the last displayed row, as GNU's window_end_pos.
         let mut end_byte = start_byte;
         for _ in 0..displayed {
@@ -784,9 +1074,10 @@ impl Vm {
             let byte = ByteOffset(bytes.start + at);
             let value = b.properties.get_property(byte, "face").unwrap_or(Value::NIL);
             let (face, whole) = self.painted_face(&names, value)?;
-            // The host paints no control character but newline; a space
-            // stands in for one, inexact, and the iterator refuses it anyway.
-            let control = ch.is_control() && ch != '\n';
+            // The host paints a control character other than newline and
+            // TAB as an escape; a space stands in for one, inexact, and the
+            // iterator refuses it anyway.
+            let control = ch.is_control() && ch != '\n' && ch != '\t';
             exact.push(!control && whole && b.properties.get_property(byte, "font-lock-face").is_none_or(|v| v == Value::NIL)
                 && !faced.iter().any(|range| range.contains(&byte)));
             let start = text.len();
@@ -847,27 +1138,32 @@ impl Vm {
             .theme
             .realize(name)
             .ok_or("unknown face")?;
-        let string = |a| match attrs.get(a) {
-            FaceSlot::Set(FaceValue::Str(s)) => Ok(s.to_string()),
-            _ => Err("face string required".to_owned()),
-        };
-        let color = |a| -> Result<[u8; 3]> {
-            let s = string(a)?;
-            let (red, green, blue) = romacs_display_protocol::x11_color_value(&s)
-                .ok_or_else(|| format!("invalid face colour {s:?} for {name}"))?;
-            Ok([red, green, blue])
-        };
-        let size = match attrs.get(Attribute::Height) {
-            FaceSlot::Set(FaceValue::Height(romacs_face::Height::Absolute(h))) => {
-                *h as f32 * 96.0 / 720.0
-            }
-            _ => return Err("absolute face height required".into()),
-        };
-        Ok(Face {
-            foreground: color(Attribute::Foreground)?,
-            background: color(Attribute::Background)?,
-            family: string(Attribute::Family)?,
-            pixel_size: size,
-        })
+        face_of_attrs(&attrs, name)
     }
+}
+
+/// The display's face for realized ATTRS of the face NAME.
+fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
+    let string = |a| match attrs.get(a) {
+        FaceSlot::Set(FaceValue::Str(s)) => Ok(s.to_string()),
+        _ => Err("face string required".to_owned()),
+    };
+    let color = |a| -> Result<[u8; 3]> {
+        let s = string(a)?;
+        let (red, green, blue) = romacs_display_protocol::x11_color_value(&s)
+            .ok_or_else(|| format!("invalid face colour {s:?} for {name}"))?;
+        Ok([red, green, blue])
+    };
+    let size = match attrs.get(Attribute::Height) {
+        FaceSlot::Set(FaceValue::Height(romacs_face::Height::Absolute(h))) => {
+            *h as f32 * 96.0 / 720.0
+        }
+        _ => return Err("absolute face height required".into()),
+    };
+    Ok(Face {
+        foreground: color(Attribute::Foreground)?,
+        background: color(Attribute::Background)?,
+        family: string(Attribute::Family)?,
+        pixel_size: size,
+    })
 }
