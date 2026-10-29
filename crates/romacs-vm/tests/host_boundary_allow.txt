@@ -25,7 +25,7 @@ crates/romacs-vm/src/bin/romacs-vm-census.rs:63 std::fs bin adapter that builds 
 crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:42 std::fs bin adapter that builds no worlds
-crates/romacs-vm/src/display.rs:426 delayed-variable reads through variable_value, which checks the fence
+crates/romacs-vm/src/display.rs:453 delayed-variable reads through variable_value, which checks the fence
 crates/romacs-vm/src/forwarded.rs:625 delayed-variable declares the variable; reads no slot
 crates/romacs-vm/src/forwarded.rs:1211 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/forwarded.rs:1388 delayed-variable declares the variable; reads no slot
@@ -67,14 +67,14 @@ crates/romacs-vm/src/world/arena.rs:293 libc::file the world allocator maps its 
 crates/romacs-vm/src/world/arena.rs:339 libc::file the world allocator reads its own executable mappings at its first allocation; an image records them, no Lisp value depends on them
 crates/romacs-vm/src/world/arena.rs:437 libc::file writes the world image to the file the builder opened through host
 crates/romacs-vm/src/world/image.rs:49 slot:process-environment rebuilds the environment lists from this process environment after restore, as Vm::new builds them
-crates/romacs-vm/src/world/mod.rs:103 slot:exec-path fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:103 slot:initial-environment fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:103 slot:process-environment fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:127 slot:exec-path clears the environment lists before a world capture; restore rebuilds them
-crates/romacs-vm/src/world/mod.rs:127 slot:initial-environment clears the environment lists before a world capture; restore rebuilds them
-crates/romacs-vm/src/world/mod.rs:127 slot:process-environment clears the environment lists before a world capture; restore rebuilds them
-crates/romacs-vm/src/world/mod.rs:229 dynamic:saved reads the bound variable, not the saved value
-crates/romacs-vm/src/world/mod.rs:315 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/world/mod.rs:108 slot:initial-environment fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:108 slot:process-environment fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:109 slot:exec-path fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:137 slot:exec-path clears the environment lists before a world capture; restore rebuilds them
+crates/romacs-vm/src/world/mod.rs:137 slot:initial-environment clears the environment lists before a world capture; restore rebuilds them
+crates/romacs-vm/src/world/mod.rs:137 slot:process-environment clears the environment lists before a world capture; restore rebuilds them
+crates/romacs-vm/src/world/mod.rs:267 dynamic:saved reads the bound variable, not the saved value
+crates/romacs-vm/src/world/mod.rs:357 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/world/sandbox.rs:54 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
 crates/romacs-vm/src/world/sandbox.rs:60 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
 crates/romacs-vm/src/world/sandbox.rs:81 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
