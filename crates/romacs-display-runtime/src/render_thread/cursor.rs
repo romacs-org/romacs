@@ -1,4 +1,5 @@
-//! Cursor animation, blinking, and size transition state.
+//! Cursor animation and size transition state. Blinking is Lisp's:
+//! GNU's blink-cursor-mode turns a window's cursor off in the frame.
 
 use crate::core::frame_glyphs::CursorStyle;
 use crate::core::types::{
@@ -45,8 +46,6 @@ struct CornerEase {
 /// Copyable cursor settings, excluding live animation and target state.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct CursorConfigSnapshot {
-    blink_enabled: bool,
-    blink_interval: std::time::Duration,
     anim_enabled: bool,
     anim_speed: f32,
     anim_style: CursorAnimStyle,
@@ -57,16 +56,10 @@ pub(super) struct CursorConfigSnapshot {
     size_transition_duration: f32,
 }
 
-/// Cursor animation, blinking, and size transition state.
+/// Cursor animation and size transition state.
 ///
 /// Extracted from RenderApp to group all cursor-related fields together.
 pub(super) struct CursorState {
-    // Blink state (managed by render thread)
-    pub(super) blink_on: bool,
-    pub(super) blink_enabled: bool,
-    pub(super) last_blink_toggle: romacs_display_protocol::frame_time::EventTime,
-    pub(super) blink_interval: std::time::Duration,
-
     // Animation (smooth motion)
     pub(super) anim_enabled: bool,
     pub(super) anim_speed: f32,
@@ -114,10 +107,6 @@ impl CursorState {
     pub(super) fn new(at: romacs_display_protocol::frame_time::EventTime) -> Self {
         let visual = VisualConfig::default();
         Self {
-            blink_on: true,
-            blink_enabled: visual.cursor_blink.enabled,
-            last_blink_toggle: at,
-            blink_interval: visual.cursor_blink.interval,
             anim_enabled: visual.cursor_motion.enabled,
             anim_speed: visual.cursor_motion.speed,
             anim_style: visual.cursor_motion.style,
@@ -162,8 +151,6 @@ impl CursorState {
 
 impl CursorState {
     pub(super) fn apply_visual_config(&mut self, config: &VisualConfig) {
-        self.blink_enabled = config.cursor_blink.enabled;
-        self.blink_interval = config.cursor_blink.interval;
         self.anim_enabled = config.cursor_motion.enabled;
         self.anim_speed = config.cursor_motion.speed;
         self.anim_style = config.cursor_motion.style;
@@ -178,15 +165,10 @@ impl CursorState {
         if !self.size_transition_enabled {
             self.size_animating = false;
         }
-        if !self.blink_enabled {
-            self.blink_on = true;
-        }
     }
 
     pub(super) fn config_snapshot(&self) -> CursorConfigSnapshot {
         CursorConfigSnapshot {
-            blink_enabled: self.blink_enabled,
-            blink_interval: self.blink_interval,
             anim_enabled: self.anim_enabled,
             anim_speed: self.anim_speed,
             anim_style: self.anim_style,
@@ -199,8 +181,6 @@ impl CursorState {
     }
 
     pub(super) fn apply_config(&mut self, config: CursorConfigSnapshot) {
-        self.blink_enabled = config.blink_enabled;
-        self.blink_interval = config.blink_interval;
         self.anim_enabled = config.anim_enabled;
         self.anim_speed = config.anim_speed;
         self.anim_style = config.anim_style;
@@ -380,13 +360,6 @@ impl CursorState {
 
     pub(super) fn is_animating(&self) -> bool {
         self.animating || self.size_animating
-    }
-
-    pub(super) fn next_blink_deadline(
-        &self,
-    ) -> Option<romacs_display_protocol::frame_time::EventTime> {
-        (self.blink_enabled && self.target.is_some())
-            .then_some(self.last_blink_toggle.plus(self.blink_interval))
     }
 
     /// Compute the 4 target corners for a cursor based on its style.
@@ -664,20 +637,6 @@ impl CursorState {
             self.current_h = self.size_target_h;
             self.size_animating = false;
         }
-        true
-    }
-
-    /// Reset blink to visible (e.g. when new frame arrives)
-    pub(super) fn reset_blink(&mut self, at: romacs_display_protocol::frame_time::EventTime) {
-        self.blink_on = true;
-        self.last_blink_toggle = at;
-    }
-
-    pub(super) fn force_blink_on(&mut self) -> bool {
-        if self.blink_on {
-            return false;
-        }
-        self.blink_on = true;
         true
     }
 }

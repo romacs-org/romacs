@@ -303,19 +303,14 @@ impl PartialEq for Frame {
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
-    // Exhaustive, so a new field must be placed on one side or the other.
-    let romacs_layout_input::WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-        text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap } = a;
-    (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px, *tab_width)
-        == (b.id, b.width, b.height, b.start_byte, b.point_byte, b.mode_line_face, b.vscroll_px, b.tab_width)
-        && *wrap == b.wrap && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
+    a.lays_out_like(b) && a.cursor_off == b.cursor_off
 }
 
 /// What the live loop last painted: the frame, the window ends its layout
 /// reported, and the presentation that showed it.
 struct Shown {
     frame: Frame,
-    ends: Vec<(u64, usize)>,
+    ends: Vec<romacs_vm::WindowEnd>,
     presentation: u64,
 }
 
@@ -360,6 +355,40 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
     } else { vm.frame_snapshot(width, height) }
 }
 
+/// What a first launch shows while it builds its world.
+const PREPARING: &str = "Preparing Romacs (first start)…";
+
+/// Show PREPARING in the window as presentation 1, before any VM can
+/// paint: one window of that text in a default face, laid out by an engine
+/// of its own. The launch's own frames then start at 2.
+fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), String> {
+    use romacs_layout_input::{FaceHandle, FrameSnapshot, PlacedWindowSnapshot, TextSlice, WindowSnapshot};
+    let face = Vm::new().display_default_face()?;
+    let snapshot = FrameSnapshot {
+        font_selection: Default::default(), font_alternatives: Default::default(), width, height,
+        windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
+            id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
+            text: TextSlice { utf8: PREPARING.into(), face_runs: vec![] }, mode_line: None,
+            mode_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face],
+        } }],
+    };
+    let (frame, _) = romacs_layout2::LayoutEngine::new()?.layout_frame(&snapshot, 1, None)?;
+    sender.submit(frame)
+}
+
+/// `--help`.
+const USAGE: &str = "\
+usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE...]
+  --loadup              run GNU's loadup chain; a live launch boots from its world
+  --world-store DIR     keep worlds in DIR (default $XDG_CACHE_HOME/romacs/worlds)
+  --world-reset         forget the store's failed and refused builds, so the next
+                        launch builds again
+  --world-reset=all     remove the store's worlds and files altogether
+  --geometry WxH        the window's size
+  -Q, --no-init         do not load the user's init file
+  ROMACS_WORLD=off      boot from source, without a world
+";
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("romacs-vm-gui: {error}");
@@ -382,11 +411,16 @@ fn run() -> Result<(), String> {
     // and zero journey keys taken over by GNU (evidence/loadup/LOADUP.md).
     let mut launch = startup::Launch::Workspace;
     let mut world_store = None;
-    let mut world_wait = false;
+    let mut world_reset = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--world-store" => world_store = Some(std::path::absolute(args.next().ok_or("missing world store")?).map_err(|e| e.to_string())?),
-            "--world-wait" => world_wait = true,
+            // Waiting for a missing world to build is what a launch does
+            // now; the flag stays accepted for the scripts that passed it.
+            "--world-wait" => {}
+            "--world-reset" => world_reset = Some(false),
+            "--world-reset=all" => world_reset = Some(true),
+            "--help" => { print!("{USAGE}"); return Ok(()); }
             "--wayland" => { socket = Some(args.next().ok_or("missing socket")?); live = false; },
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
@@ -416,19 +450,31 @@ fn run() -> Result<(), String> {
             _ => return Err(format!("unknown option {arg}")),
         }
     }
+    if let Some(everything) = world_reset {
+        let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store to reset")?;
+        let removed = romacs_vm::world::store::reset(&store, everything).map_err(|e| e.to_string())?;
+        eprintln!("romacs-world: {}", serde_json::json!({"event": "reset", "store": store, "everything": everything, "removed": removed}));
+        return Ok(());
+    }
     TRACE_LATENCY.store(trace_latency, std::sync::atomic::Ordering::Relaxed);
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
-    // A live --loadup launch boots from its world. Its builder builds here,
-    // before any window; a launch maps the world on the evaluator's thread
-    // while this one brings up the window and the GPU.
-    let world = match world_store {
-        Some(store) if live && launch == startup::Launch::Loadup => Some(world::open(store, width, height, floor)?),
-        _ => None,
+    // A live --loadup launch boots from its world, in --world-store or by
+    // default in the user's cache (world::default_store), unless
+    // ROMACS_WORLD=off. Its builder builds here, before any window; a launch
+    // opens and maps the world on the evaluator's thread while this one
+    // brings up the window and the GPU.
+    let world_store = match (live && launch == startup::Launch::Loadup, romacs_vm::world::store::disabled()) {
+        (true, false) => world_store.or_else(|| world::default_store(|name| std::env::var_os(name))),
+        (true, true) => {
+            eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": "ROMACS_WORLD=off"}));
+            None
+        }
+        (false, _) => None,
     };
-    if let Some(world) = world.as_ref().filter(|_| romacs_vm::world::store::building()) {
-        world::launch(world, width, height, floor, world_wait);
+    if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
+        world::launch(&world::open(store.clone(), width, height, floor)?, width, height, floor, || {});
     }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (host, sender) =
@@ -436,8 +482,30 @@ fn run() -> Result<(), String> {
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let worker = spawn_evaluator(move || {
         let sender = std::sync::Arc::new(sender);
-        let restored = world.and_then(|world| world::launch(&world, width, height, floor, world_wait));
-        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, restored);
+        let mut first_presentation = 1;
+        let world = world_store.and_then(|store| match world::open(store, width, height, floor) {
+            Ok(world) => Some(world),
+            Err(reason) => {
+                eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason}));
+                None
+            }
+        });
+        let restored = world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
+            // Said first, so a launcher sees it whether or not a window can.
+            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": PREPARING}));
+            let painted = preparing_frame(&sender, width, height);
+            if painted.is_ok() { first_presentation = 2; }
+            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing-frame", "painted": painted.is_ok(),
+                                                               "error": painted.err()}));
+        }));
+        // Bounding the store waits for the first frame, on a thread of its own.
+        let prune = world.map(|world| move || { std::thread::spawn(move || {
+            if let Ok(deleted) = world.prune() && !deleted.is_empty() {
+                eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted}));
+            }
+        }); });
+        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, restored,
+                              first_presentation, prune);
         if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
         let _ = result_tx.send(result);
         drop(sender);
@@ -553,7 +621,8 @@ fn paint(
     };
     eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
-        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":w.snapshot.point_byte})).collect::<Vec<_>>() }));
+        // Point as a buffer byte: a window publishes its text from a base byte.
+        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_base(w.snapshot.id) + w.snapshot.point_byte})).collect::<Vec<_>>() }));
     let glyphs: Vec<_> = frame.glyphs.iter().filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).filter_map(|glyph| {
         if let romacs_display_protocol::FrameGlyph::Char { char, row_role, face_id, x, y, clip_rect, .. } = glyph {
             let face = &frame.faces[face_id];
@@ -620,7 +689,7 @@ fn paint_prompt(
     sender: &PaintSender,
     presentation: u64,
     frame: &romacs_vm::HostFrame,
-) -> Result<(usize, Vec<(u64, usize)>), String> {
+) -> Result<(usize, Vec<romacs_vm::WindowEnd>), String> {
     let cursor = Some((frame.selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
     let (mut glyphs, ends) = engine.layout_frame(&frame.frame, presentation, cursor)?;
     let mut effects = romacs_display_protocol::EffectsConfig::default();
@@ -654,6 +723,8 @@ fn evaluate(
     mut height: u32,
     load_user_init: bool,
     restored: Option<(Box<Vm>, world::Carry)>,
+    first_presentation: u64,
+    after_first_frame: Option<impl FnOnce()>,
 ) -> Result<(), String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
     let (mut vm, carry) = match restored {
@@ -733,7 +804,7 @@ fn evaluate(
     }
     // A live GUI has a keyboard: prompts read it mid-command (prompt.rs).
     let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
-    host.borrow_mut().presentation = 1;
+    host.borrow_mut().presentation = first_presentation;
     let last_presentation = || host.borrow().presentation;
     if live {
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone() })));
@@ -746,6 +817,7 @@ fn evaluate(
     let mut live_presentation = presentation::Presentation::new();
     let mut terminal_modal = false;
     reply(json!({"ready":true,"presentation":last_presentation()}))?;
+    if let Some(after) = after_first_frame { after(); }
     let (input_tx, input_rx) = std::sync::mpsc::sync_channel(1);
     if !live { std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines() {
@@ -804,6 +876,15 @@ fn evaluate(
                         if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
                         live_presentation.changed();
                     }
+                    continue;
+                }
+                if live && let InputEvent::WindowFocus { focused, .. } = event {
+                    // keyboard.c's FOCUS_IN_EVENT and FOCUS_OUT_EVENT: special
+                    // events (frame.el handle-focus-in), which blink-cursor-mode
+                    // and other focus state follow.
+                    let event = if focused { "(list 'focus-in (selected-frame))" } else { "(list 'focus-out (selected-frame))" };
+                    if let Err(error) = vm.eval_source(&format!("(romacs--run-special-event {event})")) { echo::show(&mut vm, &error)?; }
+                    live_presentation.changed();
                     continue;
                 }
                 if live && let Some((session, input)) = vm.selected_terminal()? {

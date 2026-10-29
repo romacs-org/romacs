@@ -89,7 +89,6 @@ pub(super) fn draw(
     composition_view: &wgpu::TextureView,
     frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
     inputs: &FrameDrawInputs<'_>,
-    cursor_visible: bool,
     hovered_scroll_bar: Option<romacs_display_protocol::ScrollBarIdentity>,
 ) -> Result<ModelPicture, super::surface::FrameRenderFailure> {
     let Some(native_size) = SnapshotSize::new(native.content_size().0, native.content_size().1)
@@ -169,7 +168,7 @@ pub(super) fn draw(
         composition_view,
         frame,
         inputs.present_mapping,
-        cursor_visible,
+        true,
         inputs.animated_cursor,
         hovered_scroll_bar,
     );
@@ -179,15 +178,13 @@ pub(super) fn draw(
     // single-glyph mini-frame, scissored to the cell. Bit-identical to
     // the full render (offscreen_frame::filled_box_composite_matches_
     // full_render).
-    if cursor_visible {
-        composite_filled_box_cursor_cells(
-            renderer,
-            render,
-            composition_view,
-            inputs.present_mapping,
-            inputs.animated_cursor,
-        );
-    }
+    composite_filled_box_cursor_cells(
+        renderer,
+        render,
+        composition_view,
+        inputs.present_mapping,
+        inputs.animated_cursor,
+    );
     frame_stats::count(&frame_stats::COMPOSITE_ONLY_FRAMES);
     Ok(retained_frame_picture(
         render

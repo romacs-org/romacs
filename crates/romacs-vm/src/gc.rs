@@ -99,11 +99,12 @@ const CONS_BYTES: i64 = 16;
 const MIN_CONS_THRESHOLD: i64 = 80_000;
 /// A Romacs collection moves objects and walks compiled code, so it costs
 /// more per traced unit than GNU's: `gc-cons-percentage' is scaled by this
-/// before use, making GNU's 0.1 collect after about six traced heaps.
-const PERCENTAGE_SCALE: f64 = 15.0;
+/// before use, making GNU's 0.1 collect after about eleven traced heaps
+/// (DIVERGENCES.md VM2-GC-PACING has the measured candidates).
+const PERCENTAGE_SCALE: f64 = 17.0;
 /// The scaled percentage's ceiling. GNU's formula never collects at 2 (it
 /// counts half the allocation since as live); 1.8 holds a large setting at
-/// 18 traced heaps, three times the default's deferral.
+/// 18 traced heaps, about 1.6 times the default's deferral.
 const MAX_SCALED_PERCENTAGE: f64 = 1.8;
 
 /// `gc-cons-percentage' P as the collector uses it: P times
@@ -1058,11 +1059,20 @@ impl Vm {
 mod tests {
     use super::*;
 
+    /// Traced heaps allocated before a collection at scaled percentage S:
+    /// GNU's rule `a >= S * (live + a / 2)` solved for `a / live`.
+    fn deferral(s: f64) -> f64 { s / (1.0 - s / 2.0) }
+
     #[test]
     fn gc_cons_percentage_is_scaled_and_clamped_without_a_cliff() {
-        assert_eq!(scaled_percentage(0.1), 1.5, "GNU's default is six traced heaps");
-        assert_eq!(scaled_percentage(0.05), 0.75);
-        for large in [0.2, 0.6, 1.0, 2.0, 1e300, f64::INFINITY] {
+        assert_eq!(PERCENTAGE_SCALE, 17.0, "the measured choice (VM2-GC-PACING)");
+        assert_eq!(MAX_SCALED_PERCENTAGE, 1.8);
+        assert!((scaled_percentage(0.1) - 1.7).abs() < 1e-12);
+        let default = deferral(scaled_percentage(0.1));
+        assert!((default - 34.0 / 3.0).abs() < 1e-9, "GNU's default defers to about eleven traced heaps: {default}");
+        assert!((scaled_percentage(0.05) - 0.85).abs() < 1e-12);
+        assert!((deferral(MAX_SCALED_PERCENTAGE) - 18.0).abs() < 1e-9, "the ceiling defers to 18 traced heaps");
+        for large in [0.11, 0.2, 0.6, 1.0, 2.0, 1e300, f64::INFINITY] {
             assert_eq!(scaled_percentage(large), MAX_SCALED_PERCENTAGE, "{large}");
         }
         assert!(MAX_SCALED_PERCENTAGE < 2.0, "below GNU's never-collect point");

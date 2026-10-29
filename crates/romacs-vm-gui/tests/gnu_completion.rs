@@ -39,7 +39,7 @@ impl HostInput for Keys {
     fn input_pending(&mut self) -> bool {
         false
     }
-    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
+    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         let mini = &frame.frame.windows.last().unwrap().snapshot;
         self.frames.borrow_mut().push((mini.text.utf8.clone(), mini.height));
         Ok(vec![])

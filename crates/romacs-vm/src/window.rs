@@ -2,6 +2,7 @@
 use crate::{data::Object, *};
 #[path = "redisplay.rs"]
 mod redisplay;
+pub(crate) use redisplay::shown_bytes;
 #[path = "window_config.rs"]
 mod config;
 pub(crate) use config::WindowConfiguration;
@@ -932,10 +933,10 @@ impl Vm {
         }
         Ok(())
     }
-    pub fn display_apply_layout(&mut self, ends: &[(u64, usize)]) -> Result<()> {
+    pub fn display_apply_layout(&mut self, ends: &[crate::WindowEnd]) -> Result<()> {
         // Validate the complete journal before publishing any per-window end.
         let mut changes = vec![];
-        for &(id, end) in ends {
+        for &crate::WindowEnd { id, end, .. } in ends {
             let (index, w) = self
                 .objects
                 .iter()
@@ -948,13 +949,16 @@ impl Vm {
             let Object::Buffer(b) = self.object(w.buffer)? else {
                 return Err("buffer required".into());
             };
-            // A display with overlay strings ends at a display byte.
+            // A display with overlay strings ends at a display byte; any
+            // other, at a byte of the text it published.
+            let end = end + self.display_state.base(id);
             let end = self.display_state.segments(id)
                 .map_or(end, |segments| crate::display::buffer_of(segments, end, b.len_bytes()));
             let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
             changes.push((index, b.len_chars() - end_char));
         }
         self.display_state.hosted = true;
+        for end in ends { self.display_state.painted_rows(end); }
         for (index, distance) in changes {
             let Object::Window(w) = &mut self.objects[index] else {
                 unreachable!()

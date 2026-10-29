@@ -348,7 +348,7 @@ pub(crate) struct GuiFrameRenderState {
     /// while carrying an empty or stale string.  Each native preedit event
     /// atomically replaces this complete value.
     pub(super) input_method: InputMethodState,
-    /// Text cursor animation and blink state for this frame window.
+    /// Text cursor animation state for this frame window.
     pub(super) cursor: CursorState,
     /// Last known pointer position in native root-surface logical coordinates.
     pub mouse_pos: (f32, f32),
@@ -1208,7 +1208,7 @@ impl GuiFrameRenderState {
             return;
         }
         // Starting a frame satisfies the cursor layer too: every render path
-        // draws the cursor at its current blink state.
+        // draws the cursor.
         self.compositor.cursor_dirty = false;
     }
 
@@ -2625,28 +2625,6 @@ impl GuiFrameWindowManager {
         dirty
     }
 
-    pub(super) fn tick_top_level_cursor_blinks(
-        &mut self,
-        now: romacs_display_protocol::frame_time::EventTime,
-        cursor_wake_enabled: bool,
-        renderer: Option<&WgpuRenderer>,
-    ) -> bool {
-        let primary_winit_id = self.primary_winit_id;
-        let mut dirty = false;
-        self.for_each_top_level_window_mut(|window_state| {
-            let is_primary = window_state
-                .lifecycle
-                .native()
-                .is_some_and(|n| primary_winit_id == Some(n.window.id()));
-            dirty |= window_state.render.tick_cursor_blink(
-                now,
-                cursor_wake_enabled && is_primary,
-                renderer,
-            );
-        });
-        dirty
-    }
-
     pub(super) fn tick_top_level_cursor_animations(
         &mut self,
         at: romacs_display_protocol::frame_time::EventTime,
@@ -2768,25 +2746,6 @@ impl GuiFrameWindowManager {
         self.for_each_top_level_window_mut(|window_state| {
             window_state.render.compositor.child_frames.tick();
         });
-    }
-
-    pub(super) fn restart_top_level_cursor_blinks(
-        &mut self,
-        now: romacs_display_protocol::frame_time::EventTime,
-    ) -> bool {
-        let mut dirty = false;
-        self.for_each_top_level_window_mut(|window_state| {
-            dirty |= window_state.render.restart_cursor_blink(now);
-        });
-        dirty
-    }
-
-    pub(super) fn force_top_level_cursor_blink_on(&mut self) -> bool {
-        let mut dirty = false;
-        self.for_each_top_level_window_mut(|window_state| {
-            dirty |= window_state.render.force_cursor_blink_on();
-        });
-        dirty
     }
 
     pub(super) fn apply_top_level_transition_policy(

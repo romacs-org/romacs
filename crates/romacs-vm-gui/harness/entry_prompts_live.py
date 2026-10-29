@@ -65,7 +65,7 @@ def main():
                    'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
                    'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
                    'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop'}
-            for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT'):
+            for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD'):
                 if key in os.environ:
                     env[key] = os.environ[key]
             log_path = output / 'binary.stderr'

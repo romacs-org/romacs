@@ -453,67 +453,32 @@ impl Vm {
             self.stack[start].as_integer()?
         };
         let index = self.buffer_index()?;
-        let (chars, point, low, high) = match &self.objects[index] {
-            Object::Buffer(b) => {
-                let chars = b.as_str().chars().collect::<Vec<_>>();
-                let point = b.char_of_byte(b.point)?.0;
-                let range = b.accessible();
-                (
-                    chars,
-                    point,
-                    b.char_of_byte(range.start)?.0,
-                    b.char_of_byte(range.end)?.0,
-                )
-            }
-            Object::ByteBuffer(b) => (
-                b.bytes.iter().map(|&b| b as char).collect(),
-                b.point.0,
-                b.restriction.start.0,
-                b.restriction.end.0,
-            ),
+        // Byte scans: a newline byte is never part of another character.
+        let (text, point_byte, low_byte, high_byte): (&[u8], usize, usize, usize) = match &self.objects[index] {
+            Object::Buffer(b) => { let range = b.accessible(); (b.as_str().as_bytes(), b.point.0, range.start.0, range.end.0) }
+            Object::ByteBuffer(b) => (&b.bytes, b.point.0, b.restriction.start.0, b.restriction.end.0),
             _ => unreachable!(),
         };
+        let line = matches!(p, BeginningOfLine | EndOfLine).then(|| {
+            let start = crate::prim::line_beginning(text, low_byte, high_byte, point_byte, count.saturating_sub(1));
+            if p == EndOfLine { text[start..high_byte].iter().position(|&c| c == b'\n').map_or(high_byte, |i| start + i) } else { start }
+        });
+        let char_of = |byte: usize| -> std::result::Result<usize, CommandFault> {
+            Ok(match &self.objects[index] {
+                Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte))?.0,
+                _ => byte,
+            })
+        };
+        let (point, low, high) = (char_of(point_byte)?, char_of(low_byte)?, char_of(high_byte)?);
         let delta = if p == BackwardChar {
             -count
         } else {
             count
         };
-        let mut target = (point as i64).saturating_add(delta);
-        if matches!(p, BeginningOfLine | EndOfLine) {
-            let mut pos = point;
-            while pos > low && chars[pos - 1] != '\n' {
-                pos -= 1;
-            }
-            let lines = count.saturating_sub(1);
-            if lines >= 0 {
-                for _ in 0..lines {
-                    while pos < high && chars[pos] != '\n' {
-                        pos += 1;
-                    }
-                    if pos < high {
-                        pos += 1;
-                    } else {
-                        break;
-                    }
-                }
-            } else {
-                for _ in lines..0 {
-                    if pos == low {
-                        break;
-                    }
-                    pos -= 1;
-                    while pos > low && chars[pos - 1] != '\n' {
-                        pos -= 1;
-                    }
-                }
-            }
-            if p == EndOfLine {
-                while pos < high && chars[pos] != '\n' {
-                    pos += 1;
-                }
-            }
-            target = pos as i64;
-        }
+        let target = match line {
+            Some(byte) => char_of(byte)? as i64,
+            None => (point as i64).saturating_add(delta),
+        };
         let boundary = if target < (low as i64) {
             Some("beginning-of-buffer")
         } else if target > (high as i64) {

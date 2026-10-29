@@ -274,6 +274,21 @@ impl Vm {
         target.anchor = anchor;
         Ok(v)
     }
+    /// Whether overlay primitive P with ARGS changes what a window may show,
+    /// as GNU's modify_overlay calls tell redisplay (buffer.c): a new
+    /// overlay has no properties yet, deleting a detached one changes
+    /// nothing, and `overlay-put' changes something only with a value not
+    /// `eq' to the one there. Moving or removing overlays always counts.
+    fn changes_overlays(&self, p: Primitive, args: &[Value]) -> bool {
+        use Primitive::*;
+        match (p, args) {
+            (MakeOverlay, _) => false,
+            (DeleteOverlay, [overlay, ..]) => !matches!(self.overlay_range(*overlay), Ok(None)),
+            (OverlayPut, [overlay, prop, value, ..]) => self.overlay_get(*overlay, *prop).map_or(true, |old| old != *value),
+            (MoveOverlay | RemoveOverlays | DeleteOverlay | OverlayPut, _) => true,
+            _ => false,
+        }
+    }
     pub(crate) fn overlay_range(&self, v: Value) -> Result<Option<(u32, u32)>> {
         let o = self.overlay(v)?;
         let (Some(a), Some(b)) = (o.start, o.end) else {
@@ -656,6 +671,9 @@ impl Vm {
         }
         if (p as usize) < MakeMarker as usize {
             return self.text_annotation_primitive(p, start, n);
+        }
+        if self.changes_overlays(p, &self.stack[start..start + n]) {
+            self.display_state.overlays += 1;
         }
         let mut fixed = [Value::NIL; 5];
         let variable = if p == InsertBeforeMarkers && n > 5 {

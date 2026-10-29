@@ -28,11 +28,12 @@ use romacs_renderer_wgpu::WgpuRenderer;
 /// How long the visual-bell flash ramps down over.
 const VISUAL_BELL_DURATION_SECS: f32 = 0.15;
 
-struct GuiFrameImeOverlay<'a> {
-    text: &'a str,
-    x: f32,
-    y: f32,
-    height: f32,
+#[derive(Debug, PartialEq)]
+pub(in crate::render_thread) struct GuiFrameImeOverlay<'a> {
+    pub text: &'a str,
+    pub x: f32,
+    pub y: f32,
+    pub height: f32,
 }
 
 fn update_typing_speed_state(
@@ -87,6 +88,17 @@ fn frame_ime_preedit_overlay<'a>(
         y: target.y + offset_y,
         height: target.height,
     })
+}
+
+/// The IME pre-edit panel `draw_panels` draws for RENDER: its text and
+/// where, at the cursor's target.
+pub(in crate::render_thread) fn ime_preedit_overlay(render: &GuiFrameRenderState) -> Option<GuiFrameImeOverlay<'_>> {
+    frame_ime_preedit_overlay(
+        render.input_method.preedit(),
+        render.cursor.target_cloned(),
+        render.emacs_frame_id,
+        &render.compositor.child_frames,
+    )
 }
 
 /// Draw the IME pre-edit panel. Menus and tooltips use native surfaces.

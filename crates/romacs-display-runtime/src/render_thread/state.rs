@@ -1075,9 +1075,6 @@ impl RenderApp {
         }
         self.frame_windows
             .sync_top_level_cursor_config(&self.cursor_defaults, true);
-        if !self.cursor_defaults.blink_enabled {
-            self.frame_windows.force_top_level_cursor_blink_on();
-        }
         self.render_policy = next_policy;
     }
 

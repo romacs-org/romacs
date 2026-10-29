@@ -36,9 +36,9 @@ fn buffer_swap_resets_the_window_end_after_real_layout_and_journal() {
     let (_, ends) = romacs_layout2::layout_frame(&snapshot, 1).unwrap();
     let end = ends
         .iter()
-        .find(|(id, _)| *id == snapshot.windows[0].snapshot.id)
+        .find(|end| end.id == snapshot.windows[0].snapshot.id)
         .unwrap()
-        .1;
+        .end;
     assert!(end > 0 && end < 2000, "real layout must leave undisplayed text: {end}");
     vm.display_apply_layout(&ends).unwrap();
 

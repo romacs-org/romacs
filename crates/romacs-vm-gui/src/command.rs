@@ -68,7 +68,7 @@ mod tests {
     struct Keys(std::collections::VecDeque<CommandEvent>);
     impl romacs_vm::HostInput for Keys {
         fn input_pending(&mut self) -> bool { !self.0.is_empty() }
-        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
         fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
             self.0.pop_front().map(romacs_vm::HostEvent::Key).ok_or_else(|| "keys exhausted".into())
         }
@@ -80,7 +80,7 @@ mod tests {
     struct Scripted(std::collections::VecDeque<Option<CommandEvent>>);
     impl romacs_vm::HostInput for Scripted {
         fn input_pending(&mut self) -> bool { false }
-        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
         fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
             match self.0.pop_front().ok_or("keys exhausted")? {
                 Some(key) => Ok(romacs_vm::HostEvent::Key(key)),
@@ -281,9 +281,10 @@ mod tests {
         let before = vm.frame_snapshot(800, 280).unwrap();
         keys.dispatch(&mut vm, CommandEvent::Character(14)).unwrap();
         let after = vm.frame_snapshot(800, 280).unwrap();
+        // A window publishes from its start's line, "line N λ".
         let start_line = |s: &romacs_layout_input::FrameSnapshot| {
             let w = &s.windows[0].snapshot;
-            w.text.utf8[..w.start_byte].bytes().filter(|b| *b == b'\n').count()
+            w.text.utf8[w.start_byte..].split(' ').nth(1).unwrap().parse::<usize>().unwrap()
         };
         assert_eq!(start_line(&after), start_line(&before) + 1, "AUTO_SCROLL_MINIMAL_REVEAL");
         for _ in 0..60 {
@@ -292,13 +293,13 @@ mod tests {
         }
         let stable = vm.frame_snapshot(800, 280).unwrap();
         let w = &stable.windows[0].snapshot;
-        let expected = (w.start_byte, w.point_byte);
+        let expected = (w.text.utf8.clone(), w.start_byte, w.point_byte);
         for _ in 0..5 {
             let outcome = keys.dispatch(&mut vm, CommandEvent::Character(14)).unwrap().unwrap();
             assert_eq!(outcome.signal.unwrap().condition, "end-of-buffer");
             let snapshot = vm.frame_snapshot(800, 280).unwrap();
             let w = &snapshot.windows[0].snapshot;
-            assert_eq!((w.start_byte, w.point_byte), expected, "EOF_POINT_AND_VIEWPORT_STABLE");
+            assert_eq!((w.text.utf8.clone(), w.start_byte, w.point_byte), expected, "EOF_POINT_AND_VIEWPORT_STABLE");
         }
     }
 

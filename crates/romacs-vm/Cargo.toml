@@ -41,7 +41,14 @@ libsqlite3-sys = { version = "0.38", features = ["bundled"] }
 [build-dependencies]
 sha2 = "0.11"
 
+[features]
+# Test-only hooks of the world store (world::store::pause_for_test). Only
+# test targets enable it, through the dev-dependency on this crate below.
+world-test-hooks = []
+
 [dev-dependencies]
+# This crate with its test hooks, for its own tests.
+romacs-vm = { path = ".", features = ["world-test-hooks"] }
 romacs-coordinate-contract = { path = "../../tests/coordinate-contract" }
 # For tests that must drive the REAL producer chain: VM to frame_snapshot to
 # layout_frame to display_apply_layout to (window-end). A dev-dependency keeps

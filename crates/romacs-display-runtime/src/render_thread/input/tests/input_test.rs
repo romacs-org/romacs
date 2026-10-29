@@ -105,39 +105,6 @@ fn make_test_app_with_input(
     (app, emacs)
 }
 
-/// A key whose command changes nothing gets no new frame, so the blink cannot
-/// wait for frame ingestion: forwarding the press shows the cursor again,
-/// for a whole interval, as a cursor-only composite.
-#[test]
-fn a_forwarded_key_press_restarts_a_blinked_off_cursor() {
-    use winit::keyboard::{KeyCode, PhysicalKey};
-    let (mut app, _emacs) = make_test_app_with_input(200, 100, 1.0);
-    let before = romacs_display_protocol::frame_time::observe_platform_now();
-    {
-        let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
-        render.set_current_frame(Some(FrameGlyphBuffer::with_size(100.0, 50.0)), None, Default::default(), Default::default());
-        render.cursor.blink_enabled = true;
-        render.cursor.blink_on = false;
-        render.cursor.last_blink_toggle = before;
-        render.begin_presentable_render();
-    }
-    app.send_native_key(
-        winit::window::WindowId::from_raw(1),
-        PhysicalKey::Code(KeyCode::KeyA),
-        crate::thread_comm::InputEvent::Key {
-            key: crate::host_types::FrontendKey::Keysym('a' as u32),
-            modifiers: 0,
-            pressed: true,
-            emacs_frame_id: 0,
-        },
-    );
-    let render = &app.frame_windows.primary_window_mut().unwrap().render;
-    assert!(render.cursor.blink_on, "the cursor stayed blinked off after input");
-    assert!(render.cursor.last_blink_toggle > before, "the blink interval restarts at the key");
-    assert!(render.has_presentable_cursor_change(), "showing the cursor owes a cursor frame");
-    assert!(!render.has_presentable_dirty_content(), "and not a content repaint");
-}
-
 #[test]
 fn stale_root_presentation_does_not_own_newly_exposed_surface_area() {
     let mut app = make_test_app(200, 100, 1.0);
