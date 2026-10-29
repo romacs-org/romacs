@@ -114,3 +114,19 @@ fn a_malformed_let_makes_and_unwinds_the_bindings_before_it() {
         ("(let ((:k 1)) :k)", "((setting-constant :k) nil)"),
     ]);
 }
+
+/// eval_sub's minimum arity comes before the form's own checks; Fsetq
+/// takes pairs in turn, so an odd count is met only after the earlier
+/// pairs are set and checked.
+#[test]
+fn a_malformed_form_checks_arity_and_shape_in_gnus_order() {
+    watched(&[
+        ("(defconst 1)", "((wrong-number-of-arguments defconst 1) nil)"),
+        ("(defconst 1 2 3 4)", "((wrong-type-argument symbolp 1) nil)"),
+        ("(defvar 1 2 3 4)", "((wrong-type-argument symbolp 1) nil)"),
+        ("(list (setq ww-x 0) (condition-case e (setq ww-x 1 ww-y) (error e)) ww-x)", "((0 (wrong-number-of-arguments setq 3) 1) ((set 0) (set 1)))"),
+        ("(setq 1 2 ww-y)", "((wrong-type-argument symbolp 1) nil)"),
+        ("(setq ww-x 5 1 2 ww-y)", "((wrong-type-argument symbolp 1) ((set 5)))"),
+        ("(condition-case 1)", "((wrong-number-of-arguments condition-case 1) nil)"),
+    ]);
+}

@@ -116,17 +116,23 @@ pub(crate) fn malformed_let(star: bool, varlist: &Form) -> Option<Form> {
     tail.map(|_| Form::List(vec![Form::Sym("let*".into()), prefix(elts.len()), listp(varlist)]))
 }
 
-/// Fsetq: each value form, then Fset of its variable, pair by pair. The
-/// first variable that is not a symbol (symbolp), is nil or t, or is a
-/// keyword (set_internal lets a keyword be set only to itself) signals
-/// after its value form, the earlier pairs set.
-pub(crate) fn malformed_setq(pairs: &[Form]) -> Option<Form> {
+/// Fsetq: pair by pair, a variable with no value form is
+/// wrong-number-of-arguments, else its value form runs and Fset checks the
+/// variable: not a symbol (symbolp), nil or t, or a keyword
+/// (set_internal lets a keyword be set only to itself) signals, the
+/// earlier pairs set.
+pub(crate) fn malformed_setq(args: &[Form]) -> Option<Form> {
     let keyword = |form: &Form| matches!(form, Form::Sym(s) if s.starts_with(':'));
-    let k = pairs.chunks_exact(2).position(|pair| !symbol(&pair[0]) || is_nil(&pair[0]) || matches!(&pair[0], Form::Sym(s) if s == "t") || keyword(&pair[0]))?;
-    let (var, value, rest) = (&pairs[2 * k], &pairs[2 * k + 1], &pairs[2 * k + 2..]);
+    let bad = |var: &Form| !symbol(var) || is_nil(var) || matches!(var, Form::Sym(s) if s == "t") || keyword(var);
+    let k = args.chunks(2).position(|pair| pair.len() == 1 || bad(&pair[0]))?;
+    let (var, rest) = (&args[2 * k], &args[2 * k + 1..]);
     let setq = |pairs: &[Form]| Form::List([vec![Form::Sym("setq".into())], pairs.to_vec()].concat());
     let mut forms = Vec::new();
-    if k > 0 { forms.push(setq(&pairs[..2 * k])) }
+    if k > 0 { forms.push(setq(&args[..2 * k])) }
+    let Some((value, rest)) = rest.split_first() else {
+        forms.push(signal("wrong-number-of-arguments", vec![Form::Sym("setq".into()), Form::Int(args.len() as i64)]));
+        return Some(progn(forms));
+    };
     if !symbol(var) {
         forms.extend([value.clone(), signal("wrong-type-argument", vec![Form::Sym("symbolp".into()), var.clone()])]);
     } else if keyword(var) {

@@ -2078,6 +2078,10 @@ impl Vm {
                     },
                     "defvar-local" | "defcustom" | "defgroup" | "defvar-keymap" => self.variable_definition(b, head, rest),
                     "defvar" | "defconst" if !rest.is_empty() && rest.len() <= 3 => {
+                        // eval_sub's minimum arity, then Fdefconst's CHECK_SYMBOL.
+                        if head == "defconst" && rest.len() < 2 {
+                            return self.expr(b, &let_forms::signal("wrong-number-of-arguments", vec![Form::Sym("defconst".into()), Form::Int(1)]));
+                        }
                         if let Some(form) = let_forms::malformed_definition(&rest[0]) {
                             return self.expr(b, &form);
                         }
@@ -2117,8 +2121,6 @@ impl Vm {
                                 ]);
                                 self.expr(b, &lowered)?;
                             }
-                        } else if head == "defconst" {
-                            return self.expr(b, &let_forms::signal("wrong-number-of-arguments", vec![Form::Sym("defconst".into()), Form::Int(1)]));
                         } else {
                             b.local_specials.insert(name.into());
                         }
@@ -2149,7 +2151,7 @@ impl Vm {
                         Ok(r)
                     }
                     "interactive" => self.expr(b, &Form::Sym("nil".into())),
-                    "setq" if rest.len().is_multiple_of(2) => {
+                    "setq" => {
                         if let Some(form) = let_forms::malformed_setq(rest) {
                             return self.expr(b, &form);
                         }
