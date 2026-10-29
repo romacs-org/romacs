@@ -67,13 +67,13 @@ fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
     }
     let integer = cx.intern("integer");
     let named = id_format != Value::NIL && id_format != integer;
-    let metadata = match std::fs::symlink_metadata(&path) {
+    let metadata = match crate::host::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(_) => return Ok(Step::Done(Value::NIL)),
     };
-    let file_type = if metadata.is_dir() { Value::TRUE }
+    let file_type = if metadata.file_type().is_dir() { Value::TRUE }
     else if metadata.file_type().is_symlink() {
-        let target = match std::fs::read_link(&path) { Ok(target) => target, Err(_) => return Ok(Step::Done(Value::NIL)) };
+        let target = match crate::host::read_link(&path) { Ok(target) => target, Err(_) => return Ok(Step::Done(Value::NIL)) };
         let target = target.to_str().ok_or_else(|| Fault::Error("VM2 file-attributes non-UTF-8 symlink target decoding unsupported".into()))?;
         cx.make_string(target.as_bytes().to_vec(), !target.is_ascii())
     } else { Value::NIL };
@@ -100,7 +100,7 @@ fn symlink_expanded(cx: &mut Leaf<'_>, filename: Value, _: &[Value]) -> Next {
         return Ok(Step::Call { f: handler, args: vec![operation, filename], then: returned, saved: vec![] });
     }
     let path = cx.string_text(filename)?;
-    let target = match std::fs::read_link(path) {
+    let target = match crate::host::read_link(path) {
         Ok(target) => target,
         Err(_) => return Ok(Step::Done(Value::NIL)),
     };
@@ -259,7 +259,7 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
         return Ok(Step::Call { f: handler, args: vec![operation, expanded], then: returned, saved: vec![] });
     }
     let path = cx.string_text(expanded)?.to_owned();
-    let insensitive = filesystem_case_insensitive(std::path::Path::new(&path))
+    let insensitive = crate::host::case_insensitive(std::path::Path::new(&path), filesystem_case_insensitive)
         .map_err(|reason| Fault::Error(format!("VM2 filesystem case sensitivity unknown: {reason}")))?;
     Ok(Step::Done(if insensitive { Value::TRUE } else { Value::NIL }))
 }}
@@ -268,12 +268,12 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
 // directory entries only. Never create a probe or infer from the OS name.
 // Like GNU, a directory that cannot tell defers to its ancestors.
 #[cfg(unix)]
-fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bool, &'static str> {
+pub(crate) fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bool, &'static str> {
     let mut directory = path;
     loop {
-        match std::fs::metadata(directory) {
-            Ok(m) if m.is_dir() => break,
-            Ok(m) if m.is_file() => {
+        match crate::host::metadata(directory) {
+            Ok(m) if m.file_type().is_dir() => break,
+            Ok(m) if m.file_type().is_file() => {
                 directory = directory.parent().ok_or("no containing directory")?;
                 break;
             }
@@ -318,8 +318,8 @@ fn case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'stat
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
     use std::os::unix::fs::MetadataExt;
     let identity = |m: &std::fs::Metadata| (m.dev(), m.ino());
-    let directory_before = std::fs::metadata(directory).map_err(|_| "cannot stat directory")?;
-    let entries = std::fs::read_dir(directory).map_err(|_| "cannot read directory")?;
+    let directory_before = crate::host::metadata(directory).map_err(|_| "cannot stat directory")?;
+    let entries = crate::host::read_dir(directory).map_err(|_| "cannot read directory")?;
     let mut names = std::collections::HashSet::new();
     for entry in entries {
         if names.len() >= 4096 {
@@ -334,9 +334,9 @@ fn case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'stat
     for name in &names {
         let original = directory.join(name);
         let before =
-            std::fs::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
+            crate::host::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
         // Special files and symlinks are not reliable filesystem witnesses.
-        if !(before.is_file() || before.is_dir()) {
+        if !(before.file_type().is_file() || before.file_type().is_dir()) {
             continue;
         }
         for (index, byte) in name.as_bytes().iter().enumerate() {
@@ -346,7 +346,7 @@ fn case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'stat
             let mut bytes = name.as_bytes().to_vec();
             bytes[index] ^= 0x20;
             let alternate = std::ffi::OsString::from_vec(bytes);
-            let observed = match std::fs::symlink_metadata(directory.join(&alternate)) {
+            let observed = match crate::host::symlink_metadata(directory.join(&alternate)) {
                 Ok(m) => Some(identity(&m)),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                 Err(_) => return Err("cannot stat alternate spelling"),
@@ -357,9 +357,9 @@ fn case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'stat
                 continue;
             };
             let after =
-                std::fs::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
+                crate::host::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
             let directory_after =
-                std::fs::metadata(directory).map_err(|_| DIRECTORY_CHANGED)?;
+                crate::host::metadata(directory).map_err(|_| DIRECTORY_CHANGED)?;
             if identity(&before) != identity(&after)
                 || identity(&directory_before) != identity(&directory_after)
                 || directory_before.mtime() != directory_after.mtime()

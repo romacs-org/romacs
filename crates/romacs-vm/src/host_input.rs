@@ -92,7 +92,7 @@ impl Vm {
                     _ => return Err("romacs--read-host-event: SECONDS is not a number".into()),
                 };
                 let wait = std::time::Duration::try_from_secs_f64(seconds.clamp(0.0, 1e9)).unwrap_or_default();
-                Some(std::time::Instant::now() + wait)
+                Some(crate::host::monotonic() + wait)
             }
         };
         // Taken, not borrowed: the redisplay below needs `&mut self`, and a
@@ -159,7 +159,7 @@ impl Vm {
                 redraw = false;
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
             }
-            let timeout = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
+            let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
             match host.next_event(timeout)? {
                 HostEvent::Resize { width, height } => {
                     let (line, column) = (self.window_state.line, self.window_state.column);

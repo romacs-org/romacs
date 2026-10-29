@@ -36,6 +36,7 @@
 //! and is never a stored value (`set_internal` refuses to store it).
 use super::*;
 use crate::prim::Fault;
+use crate::world::Access;
 
 /// GNU `Lisp_Fwd` kinds (lisp.h). The payload indexes the matching vector
 /// of [`Forwarded`]. `Lisp_Fwd_Kboard_Obj` is not modelled (no variable the
@@ -46,7 +47,19 @@ pub(crate) enum Fwd {
     Bool(u16),
     Int(u16),
     Buffer(u16),
+    /// A world build's fence (`crate::world`) around the variable at this
+    /// slot: its own redirect is kept by the fence, and every access checks
+    /// the fence, then acts through that redirect. Only `native_forwarding`
+    /// sees it; the kind queries see the redirect it keeps.
+    Fence(u32),
 }
+romacs_snapshot::snapshot_enum!(Fwd {
+    Fwd::Obj(f0) => (f0),
+    Fwd::Bool(f0) => (f0),
+    Fwd::Int(f0) => (f0),
+    Fwd::Buffer(f0) => (f0),
+    Fwd::Fence(f0) => (f0),
+});
 
 /// GNU `enum Lisp_Fwd_Predicate`, checked by `store_symval_forwarding` for a
 /// non-nil value stored into a per-buffer variable. Only the predicates of
@@ -671,6 +684,7 @@ pub(crate) struct Forwarded {
     buffer_vars: Vec<usize>,
     by_name: HashMap<&'static str, Fwd>,
 }
+romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, gc_cons, defaults, object_vars, buffer_vars, by_name });
 
 impl Default for Forwarded {
     fn default() -> Self {
@@ -772,6 +786,7 @@ impl Forwarded {
 /// local here": the buffer sees the default.
 #[derive(Clone, Default)]
 pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<String>, Option<Value>);
+romacs_snapshot::snapshot_tuple!(PerBuffer(f0, f1, f2, f3, f4));
 
 /// Native scalar state, not Lisp Values: safe through moving collection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -781,10 +796,15 @@ pub(crate) enum VisitedModtime {
     Missing,
     Known { seconds: i64, nanos: i64, size: Option<u64> },
 }
+romacs_snapshot::snapshot_enum!(VisitedModtime {
+    VisitedModtime::Unknown => (),
+    VisitedModtime::Missing => (),
+    VisitedModtime::Known { seconds, nanos, size } => (seconds, nanos, size),
+});
 
 pub(crate) fn file_identity(path: &str) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
-    let metadata = std::fs::metadata(path).ok()?;
+    let metadata = crate::host::metadata(path).ok()?;
     Some((metadata.dev(), metadata.ino()))
 }
 
@@ -838,22 +858,40 @@ const UNBINDABLE: &str = "Built-in variable may not be unbound : ";
 impl Vm {
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
+    /// A fenced built-in variable is the forwarding the fence keeps; a
+    /// fenced plain one is `Fwd::Fence`.
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
-        if self.variable_redirects.get(slot).copied().flatten().is_none() {
-            let name = self.symbol_names.get(slot)?.clone();
-            if self.names.get(&name) != Some(&slot) {
-                return None;
-            }
-            self.initialize_variable_redirect(&name, slot);
+        self.resolve_redirect(slot);
+        match self.variable_redirects.get(slot).copied().flatten() {
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => Some(self.fenced_forwarding(slot).unwrap_or(fwd)),
+            Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
+            _ => None,
         }
+    }
+    /// [`Vm::forwarding`] as the access paths dispatch on it: every fenced
+    /// variable is `Fwd::Fence`.
+    fn access_forwarding(&mut self, slot: usize) -> Option<Fwd> {
+        self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             _ => None,
         }
     }
+    /// Initialise interned SLOT's lazy redirect.
+    #[inline(always)]
+    fn resolve_redirect(&mut self, slot: usize) {
+        if self.variable_redirects.get(slot).copied().flatten().is_none()
+            && let Some(name) = self.symbol_names.get(slot)
+            && self.names.get(name) == Some(&slot)
+        {
+            let name = name.clone();
+            self.initialize_variable_redirect(&name, slot);
+        }
+    }
     /// [`Vm::forwarding`] without caching, for `&self` readers.
     pub(super) fn forwarding_ref(&self, slot: usize) -> Option<Fwd> {
         match self.variable_redirects.get(slot).copied().flatten() {
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => Some(self.fenced_forwarding(slot).unwrap_or(fwd)),
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             Some(_) => None,
             None => {
@@ -869,7 +907,7 @@ impl Vm {
         }
     }
     pub(super) fn native_forwarding(&mut self, slot: usize) -> Option<Fwd> {
-        self.localized_boolean(slot).or_else(|| self.forwarding(slot))
+        self.localized_boolean(slot).or_else(|| self.access_forwarding(slot))
     }
     pub(super) fn check_boolean_default(&self, slot: usize, value: Value) -> Result<()> {
         if self.localized_boolean(slot).is_some() && value != Value::NIL && value != Value::TRUE {
@@ -909,7 +947,7 @@ impl Vm {
             Init::Str(text) => self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii()),
             Init::Float(x) => self.allocate_object(data::Object::Float(x)),
             Init::Getenv(name, fallback) => {
-                let text = std::env::var(name).unwrap_or_else(|_| fallback.to_owned());
+                let text = crate::host::getenv(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::SystemName => prim::prims::sysname::initial_value(self),
@@ -927,13 +965,13 @@ impl Vm {
                 self.list_value(&values)
             }
             Init::RuntimeFile(name, slash) => {
-                let root = std::env::var_os("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
+                let root = crate::host::getenv("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
                     .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
                 let text = format!("{}{}", root.join(name).display(), if slash { "/" } else { "" });
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::Invocation(name) => {
-                let exe = std::env::current_exe().unwrap_or_default();
+                let exe = crate::host::current_exe().unwrap_or_default();
                 let text = if name {
                     exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
                 } else {
@@ -1137,7 +1175,7 @@ impl Vm {
             let identity = self.eval_buffer_name(value).ok().flatten()
                 .and_then(|path| file_identity(&path));
             let truename = self.eval_buffer_name(value).ok().flatten().map(|path| {
-                std::fs::canonicalize(&path).ok().and_then(|p| p.to_str().map(str::to_owned)).unwrap_or(path)
+                crate::host::canonicalize(&path).ok().and_then(|p| p.to_str().map(str::to_owned)).unwrap_or(path)
             });
             let locals = self.per_buffer_mut(buffer).expect("live buffer");
             locals.2 = identity;
@@ -1157,6 +1195,7 @@ impl Vm {
                 let buffer = self.buffer_index()?;
                 self.forwarded_buffer_value(buffer, i)
             }
+            Fwd::Fence(slot) => return self.fenced(slot as usize, Access::Read, |vm| vm.variable_value(slot as usize)),
         })
     }
     /// GNU `default_value`, SYMBOL_FORWARDED arm: a per-buffer variable's
@@ -1164,6 +1203,7 @@ impl Vm {
     pub(super) fn forwarded_default(&mut self, fwd: Fwd) -> Result<Value> {
         match fwd {
             Fwd::Buffer(i) => Ok(self.per_buffer_default(i)),
+            Fwd::Fence(slot) => self.fenced(slot as usize, Access::Read, |vm| vm.default_value(slot as usize)),
             _ => self.forwarded_value(fwd),
         }
     }
@@ -1202,6 +1242,7 @@ impl Vm {
                     self.per_buffer_mut(buffer).expect("live buffer").set(i, value);
                 }
             }
+            Fwd::Fence(_) => unreachable!("set_forwarded acts through the fence"),
         }
         Ok(())
     }
@@ -1218,6 +1259,9 @@ impl Vm {
     }
     /// GNU `set_internal`, SYMBOL_FORWARDED arm (data.c:1791-1818).
     pub(super) fn set_forwarded(&mut self, slot: usize, fwd: Fwd, value: Value, flag: SetFlag) -> std::result::Result<(), Fault> {
+        if let Fwd::Fence(cell) = fwd {
+            return self.fenced(cell as usize, Access::Write, |vm| vm.assign_variable(slot, value)).map_err(Fault::Error);
+        }
         if value == Value::UNBOUND {
             return Err(Fault::Error(format!("{UNBINDABLE}{}", self.symbol_names[slot])));
         }
@@ -1246,6 +1290,7 @@ impl Vm {
                 self.forwarded.defaults[i as usize] = value;
                 Ok(())
             }
+            Fwd::Fence(cell) => self.fenced(cell as usize, Access::Write, |vm| vm.set_default_value(slot, value)),
             _ => self.set_forwarded(slot, fwd, value, flag),
         }
     }
@@ -1302,6 +1347,7 @@ impl Vm {
             local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         }
         match fwd {
+            Fwd::Fence(_) => unreachable!("unbind_one restores a fenced binding through the fence"),
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = old,
             Fwd::Bool(i) => self.forwarded.bools[i as usize] = old != Value::NIL,
             Fwd::Int(i) => {
@@ -1346,7 +1392,8 @@ impl Vm {
                 }
                 Ok(())
             }
-            _ => Err(unlocalizable(&self.symbol_names[slot])),
+            Fwd::Obj(_) | Fwd::Int(_) => Err(unlocalizable(&self.symbol_names[slot])),
+            Fwd::Fence(_) => self.fenced(slot, Access::Write, |vm| vm.make_local_variable(slot)),
         }
     }
     /// The condition GNU signals for a forwarded store fault rendered by

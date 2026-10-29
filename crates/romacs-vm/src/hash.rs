@@ -31,6 +31,11 @@ pub(super) enum Test {
     Eql,
     Equal,
 }
+romacs_snapshot::snapshot_enum!(Test {
+    Test::Eq => (),
+    Test::Eql => (),
+    Test::Equal => (),
+});
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Weakness {
     None,
@@ -39,6 +44,13 @@ pub(super) enum Weakness {
     KeyOrValue,
     KeyAndValue,
 }
+romacs_snapshot::snapshot_enum!(Weakness {
+    Weakness::None => (),
+    Weakness::Key => (),
+    Weakness::Value => (),
+    Weakness::KeyOrValue => (),
+    Weakness::KeyAndValue => (),
+});
 impl Weakness {
     /// GNU `keep_entry_p`.
     pub(super) fn keep(self, key: bool, value: bool) -> bool {
@@ -81,6 +93,7 @@ pub(super) struct HashTable {
     count: usize,
     stale: bool,
 }
+romacs_snapshot::snapshot_struct!(HashTable { test, weakness, local_bindings, size, keys, values, hashes, moving, next, buckets, free, count, stale });
 impl HashTable {
     pub(super) fn new(test: Test, weakness: Weakness, size: usize) -> Self {
         Self {
@@ -124,6 +137,22 @@ impl HashTable {
     }
     pub(super) fn size(&self) -> usize {
         self.size
+    }
+    /// The free list as later inserts observe it, the slot the next one
+    /// takes last. A bottom run that continues the fresh slot order, the
+    /// last materialized slot down, is dropped: such a table takes the same
+    /// slots as one that never materialized them. With the count it fixes
+    /// where later entries iterate.
+    pub(super) fn free_slots(&self) -> &[u32] {
+        let len = self.keys.len();
+        let fresh = self.free.iter().enumerate().take_while(|&(k, &slot)| slot as usize + k + 1 == len).count();
+        &self.free[fresh..]
+    }
+    /// The hash slot I's lookups compare, which a key mutated since its
+    /// insertion no longer has; None when it read a heap index, which a
+    /// collection moves.
+    pub(super) fn content_hash(&self, i: usize) -> Option<u64> {
+        (!self.moving[i]).then(|| self.hashes[i])
     }
     pub(super) fn entry(&self, i: usize) -> Option<(Value, Value)> {
         let key = *self.keys.get(i)?;

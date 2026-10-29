@@ -4,6 +4,12 @@ use std::ops::Range;
 /// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FontSelectionAttribute { Width, Height, Weight, Slant }
+romacs_snapshot::snapshot_enum!(FontSelectionAttribute {
+    FontSelectionAttribute::Width => (),
+    FontSelectionAttribute::Height => (),
+    FontSelectionAttribute::Weight => (),
+    FontSelectionAttribute::Slant => (),
+});
 pub const DEFAULT_FONT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [
     FontSelectionAttribute::Width, FontSelectionAttribute::Height,
     FontSelectionAttribute::Weight, FontSelectionAttribute::Slant,
@@ -18,6 +24,7 @@ pub struct FontSelectionState {
     shifts: [u8; 4],
     revision: u64,
 }
+romacs_snapshot::snapshot_struct!(FontSelectionState { order, shifts, revision });
 
 impl Default for FontSelectionState {
     fn default() -> Self {
@@ -57,6 +64,7 @@ pub struct FontAlternativeState {
     family_alist: Vec<Vec<String>>,
     revision: u64,
 }
+romacs_snapshot::snapshot_struct!(FontAlternativeState { family_alist, revision });
 
 impl FontAlternativeState {
     pub fn family_alist(&self) -> &[Vec<String>] { &self.family_alist }
@@ -88,6 +96,7 @@ pub struct PlacedWindowSnapshot {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaceHandle(pub u32);
+romacs_snapshot::snapshot_tuple!(FaceHandle(f0));
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Face {
@@ -96,18 +105,21 @@ pub struct Face {
     pub family: String,
     pub pixel_size: f32,
 }
+romacs_snapshot::snapshot_struct!(Face { foreground, background, family, pixel_size });
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FaceRun {
     pub bytes: Range<usize>,
     pub face: FaceHandle,
 }
+romacs_snapshot::snapshot_struct!(FaceRun { bytes, face });
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextSlice {
     pub utf8: String,
     pub face_runs: Vec<FaceRun>,
 }
+romacs_snapshot::snapshot_struct!(TextSlice { utf8, face_runs });
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowSnapshot {
@@ -128,12 +140,18 @@ pub struct WindowSnapshot {
     /// How a line wider than the window shows.
     pub wrap: LineWrap,
 }
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap });
 
 /// GNU's `it->line_wrap': `truncate-lines' (or a partial-width window
 /// under `truncate-partial-width-windows') truncates, `word-wrap'
 /// continues at word boundaries, else lines continue at the window edge.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LineWrap { Truncate, #[default] Window, Word }
+romacs_snapshot::snapshot_enum!(LineWrap {
+    LineWrap::Truncate => (),
+    LineWrap::Window => (),
+    LineWrap::Word => (),
+});
 
 /// The stretch a TAB at X takes on a window-system frame (GNU xdisp.c
 /// `gui_produce_glyphs`): to the next multiple of TAB_WIDTH spaces of the

@@ -16,6 +16,15 @@ pub(super) struct RequestCode {
     /// discarded build.
     unclaimed_caches: Vec<usize>,
 }
+romacs_snapshot::snapshot_struct!(RequestCode { permanent, image_caches, live, free, free_caches, compiling, compiled, since_collection, unclaimed_caches });
+
+impl RequestCode {
+    /// Whether every cache slot a builder took is owned: no build is open
+    /// and none left one behind.
+    pub(super) fn unclaimed_caches_empty(&self) -> bool {
+        self.unclaimed_caches.is_empty()
+    }
+}
 
 impl Vm {
     pub(super) fn require_live_function(&self, function: usize) -> Result<()> {
@@ -233,7 +242,7 @@ impl Vm {
         if self.may_collect(0)
             && self.stack.is_empty()
             && (self.collection_due()
-                || (outermost && self.request_code.since_collection >= 1024))
+                || (outermost && self.request_code.since_collection >= self.code_collection_threshold()))
         {
             match &mut outcome {
                 Ok(value) => self.collect(std::slice::from_mut(value)),
@@ -241,6 +250,14 @@ impl Vm {
             }
         }
         outcome
+    }
+
+    /// How much request code a request boundary lets accumulate before it
+    /// collects: 1024 functions, or a quarter of the code installed, so that,
+    /// as with objects (`gc_threshold`), the collections a load pays grow
+    /// with what it adds rather than with what the heap already holds.
+    fn code_collection_threshold(&self) -> usize {
+        ((self.functions.len() - self.request_code.free.len()) / 4).max(1024)
     }
 
     pub(super) fn retire_code(&mut self, marks: &[bool]) {

@@ -836,6 +836,65 @@ class VerifyForwardMerge(unittest.TestCase):
         self.assertIn('census-warm: 1 dropped (lisp/b.el)', err)
 
 
+class VerifyCandidateMerge(unittest.TestCase):
+    """A candidate merges a branch that forked before a lowering master
+    recorded: the merge keeps master's file, and the branch's step to it is
+    master's own history, unless the branch changed the file itself."""
+
+    def repo(self, side_raises):
+        tmp = tempfile.TemporaryDirectory(prefix='prt-candidate-')
+        self.addCleanup(tmp.cleanup)
+        root = pathlib.Path(tmp.name)
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t', GIT_COMMITTER_NAME='t',
+                   GIT_COMMITTER_EMAIL='t@t', GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_SYSTEM='/dev/null')
+
+        def git(*a):
+            return subprocess.run(['git', '-C', str(root), *a], check=True, capture_output=True, env=env,
+                                  text=True).stdout.strip()
+        git('init', '-q', '-b', 'master')
+        for rel in pr.GATE_TESTS:
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text((ROOT / rel).read_text())
+        (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet()))
+        git('add', '.')
+        git('commit', '-q', '--no-gpg-sign', '-m', 'base')
+        git('checkout', '-q', '-b', 'side')
+        if side_raises:
+            (root / pr.RATCHET_NAME).write_text(json.dumps(ratchet(warm=('lisp/a.el', 'lisp/b.el', 'lisp/c.el'))))
+        else:
+            (root / 'work').write_text('x')
+            git('add', '.')
+        git('commit', '-q', '--no-gpg-sign', '-am', 'side work')
+        git('checkout', '-q', 'master')
+        lowered = ratchet(warm=('lisp/a.el',))
+        lowered['lowerings'] = [{'unit': 'census-warm', 'members': ['lisp/b.el'],
+                                 'because': 'lisp/ was replaced by the GNU pin'}]
+        (root / pr.RATCHET_NAME).write_text(json.dumps(lowered))
+        git('commit', '-q', '--no-gpg-sign', '-am', 'master records a lowering')
+        base = git('rev-parse', 'HEAD')
+        git('checkout', '-q', '-b', 'lane')
+        git('merge', '-q', '--no-ff', '--no-gpg-sign', '--no-commit', '-X', 'ours', 'side')
+        (root / pr.RATCHET_NAME).write_text(json.dumps(lowered))
+        git('add', pr.RATCHET_NAME)
+        git('commit', '-q', '--no-gpg-sign', '-m', 'merge side')
+        return root, base
+
+    def verify(self, root, base):
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            status = pr.cmd_verify(type('A', (), {'root': str(root), 'base': base, 'candidate': True})())
+        return status, err.getvalue()
+
+    def test_a_branch_that_left_the_file_alone_merges(self):
+        status, err = self.verify(*self.repo(side_raises=False))
+        self.assertEqual(status, 0, err)
+
+    def test_a_raise_the_merge_drops_is_refused(self):
+        status, err = self.verify(*self.repo(side_raises=True))
+        self.assertEqual(status, pr.EXIT_LOWER, err)
+        self.assertIn('census-warm: 2 dropped (lisp/b.el, lisp/c.el)', err)
+
+
 class Wiring(unittest.TestCase):
     def test_the_gate_runs_every_unit(self):
         self.assertEqual(pr.wiring(ROOT), [])

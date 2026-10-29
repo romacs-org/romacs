@@ -251,6 +251,16 @@ pub(crate) enum State {
 }
 
 impl Handle {
+    /// Whether it still holds SQLite's connection or statement.
+    pub(crate) fn is_live(&self) -> bool {
+        match &self.state {
+            State::Database(db) => db.is_some(),
+            State::Set { statement, .. } => statement.is_some(),
+        }
+    }
+}
+
+impl Handle {
     /// print.c: `#<sqlite db=PTR [stmt=PTR] name=NAME>`, a closed pointer as
     /// glibc's `(nil)`.
     pub(crate) fn describe(&self) -> String {

@@ -48,6 +48,24 @@ pub enum SyntaxClass {
     /// '|' — Generic string fence (Sstring_fence = 15)
     StringFence = 15,
 }
+romacs_snapshot::snapshot_enum!(SyntaxClass {
+    SyntaxClass::Whitespace => (),
+    SyntaxClass::Punctuation => (),
+    SyntaxClass::Word => (),
+    SyntaxClass::Symbol => (),
+    SyntaxClass::Open => (),
+    SyntaxClass::Close => (),
+    SyntaxClass::Quote => (),
+    SyntaxClass::StringDelim => (),
+    SyntaxClass::Math => (),
+    SyntaxClass::Escape => (),
+    SyntaxClass::CharQuote => (),
+    SyntaxClass::Comment => (),
+    SyntaxClass::EndComment => (),
+    SyntaxClass::InheritStd => (),
+    SyntaxClass::CommentFence => (),
+    SyntaxClass::StringFence => (),
+});
 
 pub const SYNTAX_CLASS_COUNT: usize = 16;
 const SYNTAX_CLASS_DESIGNATORS: [char; SYNTAX_CLASS_COUNT] = [

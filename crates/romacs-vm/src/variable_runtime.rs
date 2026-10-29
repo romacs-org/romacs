@@ -214,6 +214,9 @@ impl Vm {
             let localized = self.slots[slot].local != Value::NIL;
             self.variable_redirects[slot] = Some(if localized { VariableRedirect::Localized } else { VariableRedirect::Plain });
         }
+        if self.fence.is_some() {
+            self.observe_new_variable(slot);
+        }
     }
     /// Publish SLOT's local TABLE, retaining native Boolean forwarding.
     pub(super) fn install_local_table(&mut self, slot: usize, table: Value, explicit: bool) {
@@ -289,6 +292,12 @@ impl Vm {
             [value] = self.release_frame(frame);
             notified?;
         }
+        self.assign_variable(slot, value)
+    }
+    /// `set_variable_value` once the watchers have been told: the store,
+    /// which a fenced variable makes through the fence.
+    pub(super) fn assign_variable(&mut self, slot: usize, value: Value) -> Result<()> {
+        let base = self.indirect_variable(slot);
         if let Some(fwd) = self.native_forwarding(base) {
             if value == Value::UNBOUND {
                 return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
@@ -303,6 +312,24 @@ impl Vm {
         let local = self.variable_binding_slot(slot, true)?;
         self.slots[local].value = value;
         Ok(())
+    }
+    /// GNU `default_value` (data.c:1960) of the variable at SLOT, the end of
+    /// its alias chain: UNBOUND when void.
+    pub(super) fn default_value(&mut self, slot: usize) -> Result<Value> {
+        match self.native_forwarding(slot) {
+            Some(fwd) => self.forwarded_default(fwd),
+            None => Ok(self.slots[slot].value),
+        }
+    }
+    /// GNU `set_default_internal` (data.c:2063) at SLOT, after its checks.
+    pub(super) fn set_default_value(&mut self, slot: usize, value: Value) -> std::result::Result<(), crate::prim::Fault> {
+        match self.native_forwarding(slot) {
+            Some(fwd) => self.set_forwarded_default(slot, fwd, value, forwarded::SetFlag::Set),
+            None => {
+                self.slots[slot].value = value;
+                Ok(())
+            }
+        }
     }
     /// `set_variable_value's notifications of the value in FRAME.
     fn notify_set(&mut self, base: usize, frame: &crate::gc::RootFrame) -> Result<()> {
@@ -334,6 +361,12 @@ impl Vm {
     /// set_default_internal, which reports `set'.
     pub(super) fn bind_variable(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);
+        // A `let' moves a fenced value aside and back unread; a watcher
+        // would see it, so a build refuses that.
+        if let Some(forwarded::Fwd::Fence(cell)) = self.native_forwarding(base) {
+            self.fence_watched(base);
+            return self.unfenced(cell as usize, |vm| vm.bind_variable(slot, value));
+        }
         let local = self.variable_binding_slot(base, false)?;
         let forwarded = self.native_forwarding(base).filter(|_| local == base);
         let binding = match forwarded {
@@ -435,6 +468,7 @@ impl Vm {
                 match self.forwarding(slot) {
                     Some(forwarded::Fwd::Buffer(_)) => Ok(symbol),
                     Some(forwarded::Fwd::Bool(_)) => { self.promote_boolean_local(slot, false)?; Ok(symbol) }
+                    Some(forwarded::Fwd::Fence(_)) => self.fenced(slot, crate::world::Access::Write, |vm| vm.variable_primitive(p, start, n)),
                     _ => Err(forwarded::unlocalizable(&self.symbol_names[slot])),
                 }
             }
@@ -458,6 +492,11 @@ impl Vm {
             },
             // A built-in variable is always bound (GNU Fboundp), so `defvar'
             // never replaces its value.
+            // These read or write the toplevel or saved value, never a let's.
+            DefvarBoundp | DefvarSetDefault if matches!(self.native_forwarding(slot), Some(forwarded::Fwd::Fence(_))) => {
+                let access = if p == DefvarBoundp { crate::world::Access::SavedRead } else { crate::world::Access::SavedWrite };
+                self.fenced(slot, access, |vm| vm.variable_primitive(p, start, n))
+            }
             DefvarBoundp if self.native_forwarding(slot).is_some() => Ok(Value::TRUE),
             DefvarSetDefault if self.native_forwarding(slot).is_some() => {
                 let fwd = self.native_forwarding(slot).unwrap();

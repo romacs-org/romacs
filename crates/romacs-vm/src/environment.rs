@@ -1,7 +1,7 @@
 use crate::Vm;
 
 pub(super) fn snapshot() -> Vec<Vec<u8>> {
-    std::env::vars_os().map(|(name, value)| {
+    crate::host::env_snapshot().into_iter().map(|(name, value)| {
         let mut entry = name.into_encoded_bytes();
         entry.push(b'=');
         entry.extend(value.into_encoded_bytes());
@@ -60,13 +60,13 @@ pub(crate) fn startup_directory() -> Option<&'static [u8]> {
     use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
     static DIRECTORY: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
     DIRECTORY.get_or_init(|| {
-        let dot = std::fs::metadata(".").ok();
-        if let (Some(pwd), Some(dot)) = (std::env::var_os("PWD"), dot.as_ref())
-            && let Ok(meta) = std::fs::metadata(&pwd)
+        let dot = crate::host::metadata(".").ok();
+        if let (Some(pwd), Some(dot)) = (crate::host::getenv("PWD"), dot.as_ref())
+            && let Ok(meta) = crate::host::metadata(&pwd)
             && meta.dev() == dot.dev() && meta.ino() == dot.ino()
         {
             return Some(pwd.as_bytes().to_vec());
         }
-        std::env::current_dir().ok().map(|dir| dir.as_os_str().as_bytes().to_vec())
+        crate::host::current_dir().ok().map(|dir| dir.as_os_str().as_bytes().to_vec())
     }).as_deref().filter(|dir| dir.first() != Some(&b'('))
 }

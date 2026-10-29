@@ -387,12 +387,17 @@ pub(super) enum CharTableSlot {
     Value(Value),
     Node(CharTableNodeHandle),
 }
+romacs_snapshot::snapshot_enum!(CharTableSlot {
+    CharTableSlot::Value(f0) => (f0),
+    CharTableSlot::Node(f0) => (f0),
+});
 
 pub(super) struct CharTableNode {
     pub(super) depth: usize,
     pub(super) min_char: usize,
     pub(super) slots: Vec<CharTableSlot>,
 }
+romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots });
 
 impl CharTableNode {
     pub(super) const WIDTHS: [usize; 4] = [65536, 4096, 128, 1];
@@ -407,37 +412,39 @@ impl CharTableNode {
     }
 
     /// Test-only convenience for known-valid native nodes. Runtime callers
-    /// propagate checked_get errors instead of indexing imported geometry.
+    /// propagate checked_span errors instead of indexing imported geometry.
     #[cfg(test)]
     pub(super) fn get(handle: &CharTableNodeHandle, index: usize) -> Value {
-        Self::checked_get(handle, index).expect("valid native character table")
+        Self::checked_span(handle, index).expect("valid native character table").0
     }
 
-    pub(super) fn checked_get(handle: &CharTableNodeHandle, index: usize) -> Result<Value> {
+    /// INDEX's raw value under HANDLE and the inclusive character range of
+    /// the slot holding it, refusing geometry a lookup cannot trust.
+    pub(super) fn checked_span(handle: &CharTableNodeHandle, index: usize) -> Result<(Value, usize, usize)> {
         let mut current = Arc::clone(handle);
         let mut seen = HashSet::default();
         loop {
             if !seen.insert(char_table_node_id(&current)) { return Err("cyclic sub-char-table".into()); }
-            let slot = {
+            let (slot, from, width) = {
                 let node = current.lock().unwrap();
                 let offset = index.checked_sub(node.min_char).ok_or("invalid sub-char-table geometry")?;
                 let width = *Self::WIDTHS.get(node.depth).ok_or("invalid sub-char-table geometry")?;
                 let slot_index = offset / width;
                 let slot = node.slots.get(slot_index).cloned().ok_or("invalid sub-char-table geometry")?;
                 let depth = node.depth;
-                let min = node.min_char + slot_index * width;
+                let from = node.min_char + slot_index * width;
                 drop(node);
                 if let CharTableSlot::Node(child) = &slot {
                     if depth == 3 { return Err("invalid sub-char-table geometry".into()); }
                     let child = child.lock().unwrap();
-                    if child.depth != depth + 1 || child.min_char != min {
+                    if child.depth != depth + 1 || child.min_char != from {
                         return Err("invalid sub-char-table geometry".into());
                     }
                 }
-                slot
+                (slot, from, width)
             };
             match slot {
-                CharTableSlot::Value(value) => return Ok(value),
+                CharTableSlot::Value(value) => return Ok((value, from, from + width - 1)),
                 CharTableSlot::Node(child) => current = child,
             }
         }
@@ -566,6 +573,7 @@ pub(super) struct CharTable {
     pub parent: Value,
     pub extras: Vec<Value>,
 }
+romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras });
 
 // Lisp copy-sequence shares payload values, never native subdivision nodes.
 impl Clone for CharTable {
@@ -640,42 +648,30 @@ impl CharTable {
         Ok(())
     }
     pub fn get(&self, index: usize) -> Result<Value> {
-        if index >= Self::LEN { return Err("index out of range".into()); }
-        let value = if index < 128 {
-            match &self.ascii {
-                CharTableSlot::Value(value) => *value,
-                CharTableSlot::Node(node) => {
-                    let node = node.lock().unwrap();
-                    if node.depth != 3 || node.min_char != 0 { return Err("invalid ASCII sub-char-table".into()); }
-                    match node.slots.get(index) {
-                        Some(CharTableSlot::Value(value)) => *value,
-                        _ => return Err("invalid ASCII sub-char-table".into()),
-                    }
-                },
-            }
-        } else { CharTableNode::checked_get(&self.root, index)? };
-        Ok(if value == Value::NIL { self.default } else { value })
+        self.span(index).map(|(value, ..)| value)
     }
     /// char_table_ref_and_range at slot granularity: INDEX's value (the
-    /// default for nil) and the inclusive character range of its slot.
+    /// default for nil) and the inclusive character range of its slot. ASCII
+    /// reads the table's own ASCII slot, which a literal may detach from the
+    /// root; the root's range for a higher character starts above it.
     pub(crate) fn span(&self, index: usize) -> Result<(Value, usize, usize)> {
         if index >= Self::LEN { return Err("index out of range".into()); }
-        let mut current = Arc::clone(&self.root);
-        loop {
-            let (slot, from, width) = {
-                let node = current.lock().unwrap();
-                let width = CharTableNode::WIDTHS[node.depth];
-                let at = (index - node.min_char) / width;
-                (node.slots.get(at).cloned().ok_or("invalid sub-char-table geometry")?, node.min_char + at * width, width)
-            };
-            match slot {
-                CharTableSlot::Value(value) => {
-                    let value = if value == Value::NIL { self.default } else { value };
-                    return Ok((value, from, from + width - 1));
-                }
-                CharTableSlot::Node(child) => current = child,
+        let (value, from, to) = match &self.ascii {
+            _ if index >= 128 => {
+                let (value, from, to) = CharTableNode::checked_span(&self.root, index)?;
+                (value, from.max(128), to)
             }
-        }
+            CharTableSlot::Value(value) => (*value, 0, 127),
+            CharTableSlot::Node(node) => {
+                let node = node.lock().unwrap();
+                if node.depth != 3 || node.min_char != 0 { return Err("invalid ASCII sub-char-table".into()); }
+                match node.slots.get(index) {
+                    Some(CharTableSlot::Value(value)) => (*value, index, index),
+                    _ => return Err("invalid ASCII sub-char-table".into()),
+                }
+            }
+        };
+        Ok((if value == Value::NIL { self.default } else { value }, from, to))
     }
     pub fn set(&mut self, index: usize, value: Value) -> Result<()> {
         self.set_range(index, index, value)

@@ -318,7 +318,7 @@ defsubr! { name = "romacs--set-idle", gnu = "keyboard.c:4695", effect = Global,
 fn set_idle(cx, idle: Value) {
     // The state timer_start_idle (IDLE non-nil) and timer_stop_idle set;
     // rlisp/vm/subprocess.el `romacs--timer-start-idle' is the rest.
-    cx.set_idle_since((idle != Value::NIL).then(std::time::Instant::now));
+    cx.set_idle_since((idle != Value::NIL).then(crate::host::monotonic));
     Ok(Value::NIL)
 }}
 

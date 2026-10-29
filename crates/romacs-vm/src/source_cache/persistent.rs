@@ -69,9 +69,9 @@ impl Vm {
         let digest: [u8; 32] = Sha256::digest(data.as_bytes()).into();
         let hash = builder.publish(store, digest)?;
         let index = store.join(format!("source-{k}"));
-        let temporary = store.join(format!(".source-{k}-{}", std::process::id()));
-        std::fs::write(&temporary, hash)
-            .and_then(|_| std::fs::rename(&temporary, index))
+        let temporary = store.join(format!(".source-{k}-{}", crate::host::pid()));
+        crate::host::write(&temporary, hash)
+            .and_then(|_| crate::host::rename(&temporary, index))
             .map_err(|e| e.to_string())
     }
     pub(super) fn load_source_ir(&mut self, k: &str, form: &Form) -> Result<Option<usize>> {
@@ -81,7 +81,7 @@ impl Vm {
         let Some(store) = &self.source_cache.store else {
             return Ok(None);
         };
-        let Ok(hash) = std::fs::read_to_string(store.join(format!("source-{k}"))) else {
+        let Ok(hash) = crate::host::read_to_string(store.join(format!("source-{k}"))) else {
             return Ok(None);
         };
         // SAFETY: immutable-inode image store; same deployment contract as --image.

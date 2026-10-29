@@ -2,6 +2,7 @@
 //! Leaf; Lisp handlers return Step::Call so no evaluator runs inside a leaf.
 //! See evidence/filesave/README.md for the supported filename boundary.
 use super::*;
+use crate::host;
 use std::os::unix::fs::MetadataExt;
 
 fn refusal(what: &str) -> Fault {
@@ -209,7 +210,7 @@ fn file_modes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> N
     let (path, expanded) = match dir_to_file(cx, expanded, file_modes_expanded, saved, 1, false)? { Ok(file) => file, Err(call) => return call };
     if let Some(call) = handler(cx, expanded, "file-modes", vec![expanded, flag])? { return call; }
     native_encoding(cx)?;
-    let meta = if flag == Value::NIL { std::fs::metadata(&path) } else { std::fs::symlink_metadata(&path) };
+    let meta = if flag == Value::NIL { host::metadata(&path) } else { host::symlink_metadata(&path) };
     let value = match meta {
         Ok(meta) => Value::integer(i64::from(meta.mode() & 0o7777)).map_err(Fault::Error)?,
         Err(e) if metadata_missing(&e) => Value::NIL,
@@ -283,14 +284,13 @@ fn rename_file(cx, file: Value, newname: Value; optional overwrite: Value) -> St
 
 defsubr! { name = "make-temp-name", gnu = "fileio.c:830", effect = Global,
 fn make_temp_name(cx, prefix: Value) {
-    use std::io::Read;
     let bytes = cx.string_bytes(prefix)?;
     if bytes.contains(&0) { return Err(Fault::Wrong("filenamep", prefix)); }
     let text = cx.string_text(prefix)?;
     native_encoding(cx)?;
     // GNU GT_NOCREATE neither expands PREFIX nor dispatches name handlers.
     // Randomness is read from the kernel without creating any path.
-    let mut random = std::fs::File::open("/dev/urandom").map_err(|e| errno(cx, "Creating file name with prefix", &[prefix], e))?;
+    let mut random = host::random_source().map_err(|e| errno(cx, "Creating file name with prefix", &[prefix], e))?;
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     for _ in 0..238328 {
         let mut suffix = Vec::with_capacity(6);
@@ -301,7 +301,7 @@ fn make_temp_name(cx, prefix: Value) {
         }
         let mut candidate = text.as_bytes().to_vec(); candidate.extend(suffix);
         let path = std::str::from_utf8(&candidate).expect("UTF-8 prefix plus ASCII suffix");
-        match std::fs::symlink_metadata(path) {
+        match host::symlink_metadata(path) {
             Ok(_) => continue,
             Err(e) if e.raw_os_error() == Some(libc::ENOENT) => {
                 return Ok(cx.make_string(candidate, !text.is_ascii()));
@@ -349,7 +349,7 @@ fn file_regular_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) ->
     let (path, expanded) = match dir_to_file(cx, expanded, file_regular_expanded, saved, 0, false)? { Ok(file) => file, Err(call) => return call };
     if let Some(call) = handler(cx, expanded, "file-regular-p", vec![expanded])? { return call; }
     native_encoding(cx)?;
-    Ok(Step::Done(if std::fs::metadata(&path).is_ok_and(|m| m.is_file()) { Value::TRUE } else { Value::NIL }))
+    Ok(Step::Done(if host::metadata(&path).is_ok_and(|m| m.file_type().is_file()) { Value::TRUE } else { Value::NIL }))
 }
 
 defsubr! { name = "file-directory-p", gnu = "fileio.c:3185", effect = Global,
@@ -361,7 +361,7 @@ fn file_directory_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) 
     let (path, expanded) = match dir_to_file(cx, expanded, file_directory_expanded, saved, 0, false)? { Ok(file) => file, Err(call) => return call };
     if let Some(call) = handler(cx, expanded, "file-directory-p", vec![expanded])? { return call; }
     native_encoding(cx)?;
-    Ok(Step::Done(if std::path::Path::new(&path).is_dir() { Value::TRUE } else { Value::NIL }))
+    Ok(Step::Done(if host::probe(host::Probe::IsDir, &path) { Value::TRUE } else { Value::NIL }))
 }
 
 /// gnulib gen_tempname's six random filename characters.
@@ -369,7 +369,7 @@ fn temp_name_letters() -> String {
     use std::hash::{BuildHasher, Hasher};
     const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-    hasher.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+    hasher.write_u128(host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
     let mut bits = hasher.finish();
     (0..6).map(|_| { let c = LETTERS[(bits % 62) as usize]; bits /= 62; c as char }).collect()
 }
@@ -380,7 +380,7 @@ fn temp_name_letters() -> String {
 // is written by `write-region'.
 defsubr! { name = "make-temp-file-internal", gnu = "fileio.c:767", effect = Global,
 fn make_temp_file_internal(cx, prefix: Value, dir_flag: Value, suffix: Value, text: Value) -> Step {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    use std::os::unix::fs::OpenOptionsExt;
     let (head, tail) = (cx.string_text(prefix)?, cx.string_text(suffix)?);
     native_encoding(cx)?;
     let kind = if dir_flag == Value::NIL { 0 } else if dir_flag.integer_value() == Some(0) { 2 } else { 1 };
@@ -388,9 +388,9 @@ fn make_temp_file_internal(cx, prefix: Value, dir_flag: Value, suffix: Value, te
     let path = loop {
         let path = format!("{head}{}{tail}", temp_name_letters());
         let made = match kind {
-            0 => std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).map(drop),
-            1 => std::fs::DirBuilder::new().mode(0o700).create(&path),
-            _ => match std::fs::symlink_metadata(&path) {
+            0 => host::open_output(&path, host::OpenOptions::new().write(true).create_new(true).mode(0o600)).map(drop),
+            1 => host::create_dir(&path, 0o700),
+            _ => match host::symlink_metadata(&path) {
                 Ok(_) => Err(std::io::Error::from_raw_os_error(libc::EEXIST)),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(e) => Err(e),
@@ -442,7 +442,7 @@ fn delete_directory_internal(cx, directory: Value) -> Step {
 fn delete_directory_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
     let (path, expanded) = match dir_to_file(cx, expanded, delete_directory_expanded, saved, 0, true)? { Ok(file) => file, Err(call) => return call };
     native_encoding(cx)?;
-    std::fs::remove_dir(&path).map_err(|e| errno(cx, "Removing directory", &[expanded], e))?;
+    host::remove_dir(&path).map_err(|e| errno(cx, "Removing directory", &[expanded], e))?;
     Ok(Step::Done(Value::NIL))
 }
 
@@ -496,7 +496,7 @@ fn create_name(
 
 /// The process umask, which GNU reads once at startup (fileio.c realmask).
 fn umask() -> std::result::Result<u32, Fault> {
-    let status = std::fs::read_to_string("/proc/self/status").map_err(|e| Fault::Error(format!("VM2 umask: {e}")))?;
+    let status = host::read_to_string("/proc/self/status").map_err(|e| Fault::Error(format!("VM2 umask: {e}")))?;
     status.lines().find_map(|line| line.strip_prefix("Umask:"))
         .and_then(|mask| u32::from_str_radix(mask.trim(), 8).ok())
         .ok_or_else(|| Fault::Error("VM2 umask: no Umask in /proc/self/status".into()))
@@ -509,7 +509,7 @@ fn umask() -> std::result::Result<u32, Fault> {
 defsubr! { name = "copy-file", gnu = "fileio.c:2252", effect = Global,
 fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Value, keep_time: Value,
              preserve_uid_gid: Value, preserve_permissions: Value) -> Step {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let (source, file) = name(cx, file)?;
     let (target, newname) = cp_target(cx, file, newname)?;
@@ -517,23 +517,23 @@ fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Val
     if let Some(call) = handler(cx, file, "copy-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, newname, "copy-file", args)? { return call; }
     native_encoding(cx)?;
-    let mut input = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(&source)
+    let mut input = host::open_input(&source, libc::O_NONBLOCK)
         .map_err(|e| errno(cx, "Opening input file", &[file], e))?;
-    let status = input.metadata().map_err(|e| errno(cx, "Input file status", &[file], e))?;
-    if !status.is_file() {
-        let code = if status.is_dir() { libc::EISDIR } else { libc::EINVAL };
+    let status = input.stat().map_err(|e| errno(cx, "Input file status", &[file], e))?;
+    if !status.file_type().is_file() {
+        let code = if status.file_type().is_dir() { libc::EISDIR } else { libc::EINVAL };
         return Err(errno(cx, "Non-regular file", &[file], std::io::Error::from_raw_os_error(code)));
     }
-    if preserve_permissions != Value::NIL && cx.filesave_has_acl(&input) {
+    if preserve_permissions != Value::NIL && input.has_acl() {
         return Err(refusal("copy-file ACL preservation"));
     }
     let new_mask = status.mode() & if preserve_uid_gid != Value::NIL { 0o700 } else { 0o777 };
-    let created = std::fs::OpenOptions::new().write(true).create_new(true).mode(new_mask).open(&target);
+    let created = host::open_output(&target, host::OpenOptions::new().write(true).create_new(true).mode(new_mask));
     let (mut output, already_exists) = match created {
         Ok(output) => (output, false),
         Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
             may_replace(cx, ok_if_already_exists, newname, "copy-file")?;
-            let output = std::fs::OpenOptions::new().write(true).truncate(true).open(&target)
+            let output = host::open_output(&target, host::OpenOptions::new().write(true).truncate(true))
                 .map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
             (output, true)
         }
@@ -541,13 +541,13 @@ fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Val
     };
     if already_exists {
         // GNU has already truncated the output when it finds it is the input.
-        let existing = output.metadata().map_err(|e| errno(cx, "Output file status", &[newname], e))?;
+        let existing = host::file_metadata(&output).map_err(|e| errno(cx, "Output file status", &[newname], e))?;
         if (existing.dev(), existing.ino()) == (status.dev(), status.ino()) {
             let same = std::io::Error::from_raw_os_error(0);
             return Err(errno(cx, "Input and output files are the same", &[file, newname], same));
         }
     }
-    if !cx.filesave_clone(&output, &input) {
+    if !host::clone_file(&output, &input) {
         // Read and write the rest, whatever copy_file_range did, as GNU does.
         let mut buffer = vec![0; 1 << 16];
         loop {
@@ -564,9 +564,9 @@ fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Val
     let mut preserved = status.mode() & 0o7777;
     let mut default = status.mode() & 0o777 & !realmask;
     if preserve_uid_gid != Value::NIL
-        && std::os::unix::fs::fchown(&output, Some(status.uid()), Some(status.gid())).is_err()
+        && host::fchown(&output, Some(status.uid()), Some(status.gid())).is_err()
     {
-        if std::os::unix::fs::fchown(&output, None, Some(status.gid())).is_ok() {
+        if host::fchown(&output, None, Some(status.gid())).is_ok() {
             preserved &= !0o4000;
         } else {
             // The group is wrong: drop set-id bits, give group the other bits.
@@ -607,7 +607,7 @@ fn add_name_to_file(cx, file: Value, newname: Value; optional ok_if_already_exis
     if let Some(call) = handler(cx, file, "add-name-to-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, newname, "add-name-to-file", args)? { return call; }
     native_encoding(cx)?;
-    create_name(cx, || std::fs::hard_link(&source, &target), &target, newname, ok_if_already_exists, "add-name-to-file")?
+    create_name(cx, || host::hard_link(&source, &target), &target, newname, ok_if_already_exists, "add-name-to-file")?
         .map_err(|e| errno(cx, "Adding new name", &[file, newname], e))?;
     Ok(Step::Done(Value::NIL))
 }}
@@ -636,7 +636,7 @@ fn make_symbolic_link(cx, target: Value, linkname: Value; optional ok_if_already
         return Err(Fault::Wrong("filenamep", target));
     }
     let literal = cx.string_text(target)?;
-    create_name(cx, || std::os::unix::fs::symlink(&literal, &link), &link, linkname, ok_if_already_exists, "make-symbolic-link")?
+    create_name(cx, || host::symlink(&literal, &link), &link, linkname, ok_if_already_exists, "make-symbolic-link")?
         .map_err(|e| errno(cx, "Making symbolic link", &[target, linkname], e))?;
     Ok(Step::Done(Value::NIL))
 }}

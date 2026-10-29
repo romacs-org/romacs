@@ -8,32 +8,25 @@ pub(crate) struct Account {
 }
 
 pub(crate) fn real_uid() -> u32 {
-    unsafe { libc::getuid() }
+    crate::host::uid()
 }
 
 pub(crate) fn effective_uid() -> u32 {
-    unsafe { libc::geteuid() }
+    crate::host::euid()
 }
 
-fn account(lookup: impl Fn(*mut libc::passwd, *mut libc::c_char, usize, *mut *mut libc::passwd) -> libc::c_int) -> Option<Account> {
-    let mut buffer = vec![0 as libc::c_char; 16 * 1024];
-    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut found: *mut libc::passwd = std::ptr::null_mut();
-    if lookup(&mut entry, buffer.as_mut_ptr(), buffer.len(), &mut found) != 0 || found.is_null() {
-        return None;
-    }
-    let text = |p: *const libc::c_char| if p.is_null() { String::new() } else {
-        unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned()
-    };
-    let home = (!entry.pw_dir.is_null()).then(|| text(entry.pw_dir));
-    Some(Account { name: text(entry.pw_name), gecos: text(entry.pw_gecos), home })
+const BUFFER: usize = 16 * 1024;
+
+fn account(entry: crate::host::Passwd) -> Account {
+    let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+    Account { name: entry.name.map(text).unwrap_or_default(), gecos: text(entry.gecos), home: entry.dir.map(text) }
 }
 
 pub(crate) fn by_uid(uid: u32) -> Option<Account> {
-    account(|entry, buffer, size, found| unsafe { libc::getpwuid_r(uid, entry, buffer, size, found) })
+    crate::host::user_by_uid(uid, BUFFER).ok().map(account)
 }
 
 pub(crate) fn by_name(name: &str) -> Option<Account> {
     let name = std::ffi::CString::new(name).ok()?;
-    account(|entry, buffer, size, found| unsafe { libc::getpwnam_r(name.as_ptr(), entry, buffer, size, found) })
+    crate::host::user_by_name(&name, BUFFER).ok().map(account)
 }

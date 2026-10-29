@@ -8,13 +8,20 @@ pub(super) struct Activation {
     args: std::ops::Range<usize>,
     pub dynamic: usize,
 }
+romacs_snapshot::snapshot_struct!(Activation { token, function, resolved, args, dynamic });
 #[derive(Default)]
 pub(super) struct Backtrace {
     pub frames: Vec<Activation>,
     arguments: Vec<Value>,
     next_token: usize,
     pub bindings: Vec<(usize, Value)>,
+    /// While a world build observes startup: the token counter, parked here
+    /// so that `next_token` stays at its maximum and every call takes the
+    /// counter's overflow path, which records the symbol called through.
+    /// Symbols are stable slot IDs, so the record needs no tracing.
+    observed: Option<(usize, Vec<usize>)>,
 }
+romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, observed });
 impl Backtrace {
     pub fn enter(
         &mut self,
@@ -26,18 +33,41 @@ impl Backtrace {
         let mark = self.frames.len();
         let start = self.arguments.len();
         self.arguments.extend_from_slice(args);
-        self.next_token = self
-            .next_token
-            .checked_add(1)
-            .expect("backtrace token exhausted");
+        let token = match self.next_token.checked_add(1) {
+            Some(token) => {
+                self.next_token = token;
+                token
+            }
+            None => self.observed_call(function),
+        };
         self.frames.push(Activation {
-            token: self.next_token,
+            token,
             function,
             resolved,
             args: start..self.arguments.len(),
             dynamic,
         });
         mark
+    }
+    /// A call while startup is observed: its token, from the parked counter.
+    #[cold]
+    #[inline(never)]
+    fn observed_call(&mut self, function: Value) -> usize {
+        let (counter, calls) = self.observed.as_mut().expect("backtrace token exhausted");
+        *counter = counter.checked_add(1).expect("backtrace token exhausted");
+        calls.extend(function.index_if(7).and_then(|i| i.checked_sub(1)));
+        *counter
+    }
+    /// Record the functions every call names, from now until `observed`.
+    pub fn observe(&mut self) {
+        self.observed = Some((std::mem::replace(&mut self.next_token, usize::MAX), Vec::new()));
+    }
+    /// The symbols called through since `observe`, in call order, and the
+    /// counter back.
+    pub fn observed(&mut self) -> Vec<usize> {
+        let (counter, calls) = self.observed.take().expect("observing calls");
+        self.next_token = counter;
+        calls
     }
     pub fn resolve_pending(&mut self, resolved: Value) {
         self.frames
@@ -161,17 +191,18 @@ impl Vm {
             return Ok(self.slots[local.index(7)? - 1].value);
         }
         let fwd = self.localized_boolean(slot).or_else(|| self.forwarding_ref(slot));
-        for &(next, old, next_owner, next_default) in &self.dynamic[at + 1..] {
-            if next != slot {
-                continue;
-            }
-            if matches!(fwd, Some(forwarded::Fwd::Buffer(_)))
-                && (default != next_default || (!default && owner != next_owner))
-            {
-                continue;
-            }
-            return Ok(old);
+        let saved = self.dynamic[at + 1..].iter().find(|&&(next, _, next_owner, next_default)| next == slot
+            && !(matches!(fwd, Some(forwarded::Fwd::Buffer(_))) && (default != next_default || (!default && owner != next_owner))));
+        let saved = saved.map(|&(_, old, _, _)| old);
+        self.fence_binding(slot, at, owner);
+        match saved {
+            Some(old) => Ok(old),
+            None => self.unfenced(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
         }
+    }
+    /// The current value of the binding of SLOT that OWNER and DEFAULT name.
+    fn backtrace_live_value(&mut self, slot: usize, owner: Value, default: bool) -> Result<Value> {
+        let fwd = self.localized_boolean(slot).or_else(|| self.forwarding_ref(slot));
         match fwd {
             Some(forwarded::Fwd::Buffer(i)) if !default => {
                 let buffer = owner

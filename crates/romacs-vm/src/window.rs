@@ -66,6 +66,7 @@ pub(super) struct Window {
     pub end_valid: bool,
     pub force_start: bool,
 }
+romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, vscroll_px, pending_vscroll, hscroll, parameters, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
 impl Window {
     fn new(id: u64, buffer: Value) -> Self {
         Self {
@@ -151,6 +152,7 @@ pub(super) struct WindowState {
     /// The mini-window's height in lines (xdisp.c resize_mini_window).
     pub mini_lines: u32,
 }
+romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines });
 impl Default for WindowState {
     fn default() -> Self {
         Self {

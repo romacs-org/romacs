@@ -14,13 +14,17 @@ use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, Measur
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
-    let snapshot = WindowSnapshot {
+    let frame = layout(&metrics_snapshot(face), 1)?;
+    Ok((frame.char_height.ceil() as u32, frame.char_width.ceil() as u32))
+}
+
+/// An empty window in FACE alone: what the frame's character cell is.
+fn metrics_snapshot(face: &Face) -> WindowSnapshot {
+    WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), faces: vec![face.clone()],
-    };
-    let frame = layout(&snapshot, 1)?;
-    Ok((frame.char_height.ceil() as u32, frame.char_width.ceil() as u32))
+    }
 }
 
 /// Stateful font discovery cache. Contains only owned font data, never VM values.
@@ -35,6 +39,15 @@ impl LayoutEngine {
     /// The host layout hook: INPUT's geometry as painting would lay it out.
     pub fn measure(&mut self, input: &MeasureInput) -> Result<Measured, String> {
         measure_inner(input, &mut self.resolver)
+    }
+    /// `frame_metrics`, from this engine's fonts.
+    pub fn frame_metrics(&mut self, face: &Face) -> Result<(u32, u32), String> {
+        let frame = self.layout(&metrics_snapshot(face), 1)?;
+        Ok((frame.char_height.ceil() as u32, frame.char_width.ceil() as u32))
+    }
+    /// The files this engine's answers came from (`FontResolver::font_inputs`).
+    pub fn font_inputs(&self) -> Vec<String> {
+        self.resolver.font_inputs()
     }
     pub fn layout(&mut self, snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyphBuffer, String> {
         let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;

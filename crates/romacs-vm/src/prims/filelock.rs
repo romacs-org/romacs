@@ -2,8 +2,9 @@
 //! See evidence/filelock-save/REPORT.md for platform/representation boundaries.
 use super::*;
 use crate::forwarded::VisitedModtime;
-use std::io::{Read, Write};
-use std::os::unix::{ffi::OsStrExt, fs::{OpenOptionsExt, PermissionsExt}};
+use std::io::Write;
+use crate::host;
+use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
 use std::path::Path;
 
 fn variable(cx: &mut Leaf<'_>, name: &str) -> Out {
@@ -34,34 +35,32 @@ fn host(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
 fn login(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
     let name = variable(cx, "user-login-name")?;
     if name != Value::NIL { return Ok(cx.string_bytes(name).unwrap_or_default()); }
-    if let Some(name) = std::env::var_os("LOGNAME").or_else(|| std::env::var_os("USER")) {
+    if let Some(name) = host::getenv("LOGNAME").or_else(|| host::getenv("USER")) {
         return Ok(name.as_os_str().as_bytes().to_vec());
     }
     Ok(cx.filelock_login_name())
 }
 fn identity(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
     let mut id = login(cx)?; id.push(b'@'); id.extend(host(cx)?);
-    id.extend(format!(".{}", std::process::id()).bytes());
+    id.extend(format!(".{}", host::pid()).bytes());
     // GNU accepts legacy identities without a boot field. Do not publish a
     // /proc/stat timestamp: it differs from GNU gnulib boot-time on this host.
     Ok(id)
 }
 #[derive(Debug)]
 enum Owner { Free, Ours, Other { user: Vec<u8>, diagnostic: Vec<u8> } }
-fn read_lock(cx: &Leaf<'_>, path: &Path) -> std::io::Result<Vec<u8>> {
+fn read_lock(path: &Path) -> std::io::Result<Vec<u8>> {
     loop {
-        match std::fs::read_link(path) {
+        match host::read_link(path) {
             Ok(target) => return Ok(target.as_os_str().as_bytes().to_vec()),
             Err(e) if e.raw_os_error() == Some(libc::EINVAL) => {
-                match std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path) {
+                match host::open_input(path, libc::O_NOFOLLOW | libc::O_NONBLOCK) {
                     Ok(mut file) => {
                         // GNU can block on a FIFO. Refuse nonregular lock files.
-                        if !file.metadata()?.is_file() { return Err(errno(libc::EINVAL)); }
-                        let mut bytes = Vec::new();
-                        let read = (&mut file).take(8193).read_to_end(&mut bytes);
-                        cx.fileio_close_output(file)?;
-                        read?;
-                        return Ok(bytes);
+                        if !file.stat()?.file_type().is_file() { return Err(errno(libc::EINVAL)); }
+                        let read = file.read_range(0, 8193);
+                        file.close()?;
+                        return read;
                     }
                     Err(e) if e.raw_os_error() == Some(libc::ELOOP) => continue,
                     Err(e) => return Err(e),
@@ -78,7 +77,7 @@ fn decimal(bytes: &[u8]) -> Option<(i64, usize)> {
     Some((std::str::from_utf8(&bytes[..end]).ok()?.parse().unwrap_or(if start == 1 { i64::MIN } else { i64::MAX }), end))
 }
 fn owner(cx: &Leaf<'_>, path: &Path, local_host: &[u8]) -> std::io::Result<Owner> {
-    let bytes = match read_lock(cx, path) {
+    let bytes = match read_lock(path) {
         Ok(bytes) => bytes,
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => return Ok(Owner::Free),
         Err(e) => return Err(e),
@@ -95,7 +94,7 @@ fn owner(cx: &Leaf<'_>, path: &Path, local_host: &[u8]) -> std::io::Result<Owner
             if n != text.len() { return Err(errno(libc::EINVAL)); } boot
         };
         let local = &bytes[at+1..dot] == local_host;
-        if local && pid == i64::from(std::process::id()) { return Ok(Owner::Ours); }
+        if local && pid == i64::from(host::pid()) { return Ok(Owner::Ours); }
         let alive = if local && pid > 0 && pid <= i64::from(i32::MAX) {
             // kill(pid, 0) probes existence/permission only; sends no signal.
             cx.filelock_process_exists(pid as i32)
@@ -108,23 +107,23 @@ fn owner(cx: &Leaf<'_>, path: &Path, local_host: &[u8]) -> std::io::Result<Owner
             return Ok(Owner::Other { user: bytes[..at].to_vec(), diagnostic });
         }
     }
-    match std::fs::remove_file(path) { Ok(()) => Ok(Owner::Free), Err(e) if e.raw_os_error() == Some(libc::ENOENT) => Ok(Owner::Free), Err(e) => Err(e) }
+    match host::remove_file(path) { Ok(()) => Ok(Owner::Free), Err(e) if e.raw_os_error() == Some(libc::ENOENT) => Ok(Owner::Free), Err(e) => Err(e) }
 }
 fn create(cx: &Leaf<'_>, path: &Path, identity: &[u8], force: bool) -> std::io::Result<()> {
     if identity.len() > 8192 { return Err(errno(libc::ENAMETOOLONG)); }
     let target = std::ffi::OsStr::from_bytes(identity);
-    let mut result = std::os::unix::fs::symlink(target, path);
+    let mut result = host::symlink(target, path);
     if force && result.as_ref().is_err_and(|e| e.raw_os_error() == Some(libc::EEXIST)) {
-        let _ = std::fs::remove_file(path); result = std::os::unix::fs::symlink(target, path);
+        let _ = host::remove_file(path); result = host::symlink(target, path);
     }
     if !result.as_ref().is_err_and(|e| matches!(e.raw_os_error(), Some(libc::ENOSYS | libc::EPERM | libc::ENAMETOOLONG))) { return result; }
     let (nonce, mut file) = cx.filelock_create_nonce(path)?;
     let result = (|| {
         file.write_all(identity)?; file.set_permissions(std::fs::Permissions::from_mode(0o644))?;
         cx.fileio_close_output(file)?;
-        if force { std::fs::rename(&nonce, path) } else { std::fs::hard_link(&nonce, path) }
+        if force { host::rename(&nonce, path) } else { host::hard_link(&nonce, path) }
     })();
-    let _ = std::fs::remove_file(nonce); result
+    let _ = host::remove_file(nonce); result
 }
 
 // MODE: query 0, lock 1, unlock 2. All Lisp values crossing callbacks are saved.
@@ -160,7 +159,7 @@ fn got_lock_name(cx: &mut Leaf<'_>, lock: Value, saved: &[Value]) -> Next {
         };
     }
     if mode == 2 {
-        let result = owner(cx, Path::new(&path), &local_host).and_then(|o| if matches!(o, Owner::Ours) { std::fs::remove_file(&path) } else { Ok(()) });
+        let result = owner(cx, Path::new(&path), &local_host).and_then(|o| if matches!(o, Owner::Ours) { host::remove_file(&path) } else { Ok(()) });
         if let Err(e) = result {
             if e.raw_os_error() != Some(libc::ENOENT) {
                 let Fault::Signal(condition, data) = io_fault(cx, "Unlocking file", saved[0], e) else { unreachable!() };
@@ -181,10 +180,10 @@ fn supersession(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     };
     let threatened = state.is_some_and(|state| match state {
         VisitedModtime::Unknown => false,
-        VisitedModtime::Missing => std::fs::metadata(&name).is_ok(),
+        VisitedModtime::Missing => host::metadata(&name).is_ok(),
         VisitedModtime::Known { seconds, nanos, size } => {
             use std::os::unix::fs::MetadataExt;
-            std::fs::metadata(&name).is_ok_and(|m| m.mtime() != seconds || m.mtime_nsec() != nanos || size.is_some_and(|s| s != m.len()))
+            host::metadata(&name).is_ok_and(|m| m.mtime() != seconds || m.mtime_nsec() != nanos || size.is_some_and(|s| s != m.len()))
         }
     });
     let ours = if saved[1] == Value::NIL { false } else {

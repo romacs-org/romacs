@@ -1502,6 +1502,22 @@ def candidate_problems(old: dict, new: dict, label: str) -> list[str]:
     return problems
 
 
+def unchanged_side(root, at, parent, parents, version) -> bool:
+    """Whether a merge's step from PARENT is another parent's history.
+
+    The merge kept another parent's file verbatim, and PARENT's file is
+    still the one at its fork from that parent: every difference from
+    PARENT was made, and verified, on the other parent's chain.
+    """
+    for other in parents:
+        if other == parent or at(other) != version:
+            continue
+        fork = git(root, 'merge-base', parent, other).strip()
+        if at(fork) == at(parent):
+            return True
+    return False
+
+
 def cmd_verify(args) -> int:
     root = pathlib.Path(args.root).resolve()
     candidate = getattr(args, 'candidate', False)
@@ -1543,6 +1559,8 @@ def cmd_verify(args) -> int:
         for parent in ps:
             old = at(parent)
             if old is None:
+                continue
+            if candidate and rev is not None and unchanged_side(root, at, parent, ps, version):
                 continue
             if version is None:
                 problems.append(f'{label}: {RATCHET_NAME} was deleted (present in parent {parent[:11]})')

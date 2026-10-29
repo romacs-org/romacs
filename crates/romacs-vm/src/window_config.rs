@@ -33,6 +33,7 @@ pub(crate) struct SavedWindow {
     /// makes persistent, VALUE nil where the window had none.
     parameters: Vec<(Value, Value)>,
 }
+romacs_snapshot::snapshot_struct!(SavedWindow { window, buffer, start, point, parent, children, horizontal, x, y, width, height, normal_lines, normal_cols, left_margin, right_margin, vscroll_px, hscroll, combination_limit, dedicated, parameters });
 
 /// GNU `struct save_window_data`, for the one frame VM2 has.
 #[derive(Clone)]
@@ -44,6 +45,7 @@ pub(crate) struct WindowConfiguration {
     /// The root's subtree in preorder, then the minibuffer window.
     windows: Vec<SavedWindow>,
 }
+romacs_snapshot::snapshot_struct!(WindowConfiguration { frame, current_window, current_buffer, root, windows });
 
 impl WindowConfiguration {
     pub(crate) fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {

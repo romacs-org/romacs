@@ -93,6 +93,7 @@ pub(crate) struct DefunStart {
     pub begv: i64,
     pub modiff: u64,
 }
+romacs_snapshot::snapshot_struct!(DefunStart { pos, value, begv, modiff });
 
 /// Why a scan stopped short of a result.
 #[derive(Debug, PartialEq, Eq)]

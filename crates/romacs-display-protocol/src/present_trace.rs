@@ -34,7 +34,6 @@ use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 use serde::Serialize;
 use std::{
     ffi::OsString,
-    fs::OpenOptions,
     io::{self, BufWriter, Write},
     path::PathBuf,
     sync::{
@@ -170,7 +169,7 @@ fn recorder() -> Option<&'static Recorder> {
             let writer = match std::thread::Builder::new()
                 .name("romacs-present-trace".into())
                 .spawn(move || {
-                    let result = OpenOptions::new()
+                    let result = std::fs::OpenOptions::new()
                         .create(true)
                         .append(true)
                         .open(path)

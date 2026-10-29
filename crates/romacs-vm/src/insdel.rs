@@ -52,6 +52,7 @@ pub(crate) struct ChangeSlots {
     undoable: usize,
     pub(crate) inhibit_record_point: usize,
 }
+romacs_snapshot::snapshot_struct!(ChangeSlots { read_only, inhibit_read_only, inhibit_hooks, before, after, first, truename, filename, mark_active, select_regions, combine, deactivate, undoable, inhibit_record_point });
 
 /// An insertion that may skip the bracket (`Vm::quiet_insertion'): whether
 /// modification hooks are inhibited, and buffer, point and modified state

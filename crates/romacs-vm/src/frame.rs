@@ -11,6 +11,7 @@ pub(super) struct Frame {
     pub parameters: Vec<(Value, Value)>,
     pub live: bool,
 }
+romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live });
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         for v in [&mut self.root, &mut self.selected, &mut self.minibuffer,
@@ -32,6 +33,7 @@ pub(super) struct Terminal {
     /// The parameter alist (terminal.c `param_alist').
     pub params: Value,
 }
+romacs_snapshot::snapshot_struct!(Terminal { frame, live, terminal_coding, keyboard_coding, params });
 impl Terminal {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.frame); f(&mut self.terminal_coding); f(&mut self.keyboard_coding); f(&mut self.params);

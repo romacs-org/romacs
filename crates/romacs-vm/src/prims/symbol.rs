@@ -21,7 +21,7 @@ fn symbol_with_pos_p(_cx, _object: Value) {
 
 defsubr! { name = "symbol-plist", gnu = "data.c:818", effect = Reads,
 fn symbol_plist(cx, symbol: Value) {
-    cx.symbol_plist(symbol)
+    cx.observed_symbol_plist(symbol)
 }}
 
 defsubr! { name = "setplist", gnu = "data.c:1029", effect = Global,
