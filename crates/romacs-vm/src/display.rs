@@ -758,14 +758,15 @@ impl Vm {
     /// stretches and the calls are Lisp (`romacs--redisplay-fontify`,
     /// rlisp/vm/prelude.el), so nothing is held across them; a signal is
     /// logged there and never ends redisplay, and any other failure becomes
-    /// a display diagnostic. False when no Lisp ran.
-    fn fontify_displayed(&mut self, window: Value, text_height: u32) -> Result<bool> {
+    /// a display diagnostic. The end of the range walked, or None when no
+    /// Lisp ran.
+    fn fontify_displayed(&mut self, window: Value, text_height: u32) -> Result<Option<usize>> {
         let functions = self.slot("fontification-functions");
         if self.variable_value(functions)? == Value::NIL {
-            return Ok(false);
+            return Ok(None);
         }
         let Some((start, end)) = self.displayed_range(window, text_height)? else {
-            return Ok(false);
+            return Ok(None);
         };
         let call = Form::List(vec![
             Form::Sym("romacs--redisplay-fontify".into()),
@@ -775,18 +776,19 @@ impl Vm {
         if let Err(error) = self.eval_form_raw(&call) {
             self.display_state.diagnostics.push(format!("fontification: {error}"));
         }
-        Ok(true)
+        Ok(Some(end))
     }
     /// Fontify the rows the window shows, then re-derive what that Lisp may
     /// have changed: the window's buffer, which becomes current again as GNU
     /// restores it after `fontification-functions`. Text or a window start
-    /// the Lisp changed can bring other rows into view, so fontify again,
-    /// a bounded number of times as GNU's redisplay retries. False if Lisp
-    /// deleted the window.
+    /// the Lisp changed can bring other rows into view, and so can faces it
+    /// changed (a smaller face shows text past the end walked), so fontify
+    /// again, a bounded number of times as GNU's redisplay retries. False if
+    /// Lisp deleted the window.
     fn redisplay_window_fontify(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<bool> {
         for _ in 0..3 {
             let shown = self.window_text_state(root)?;
-            let ran = self.fontify_displayed(self.slots[root].value, text_height)?;
+            let walked = self.fontify_displayed(self.slots[root].value, text_height)?;
             let w = self.window(self.slots[root].value)?;
             if !w.live() {
                 return Ok(false);
@@ -794,18 +796,28 @@ impl Vm {
             let buffer = w.buffer;
             self.slots[buffer_slot].value = buffer;
             self.slots[self.buffer_slot].value = buffer;
-            if !ran || self.window_text_state(root)? == shown {
+            let Some(walked) = walked else { break };
+            let now = self.window_text_state(root)?;
+            if now == shown {
+                break;
+            }
+            // Only properties changed: again only if the rows now end later.
+            if (now.1, now.2) == (shown.1, shown.2)
+                && self.displayed_range(self.slots[root].value, text_height)?.is_none_or(|(_, end)| end <= walked)
+            {
                 break;
             }
         }
         Ok(true)
     }
-    /// What decides the rows a live window shows: its buffer's character
-    /// edits (CHARS_MODIFF) and its start.
-    fn window_text_state(&self, root: usize) -> Result<(u64, Value)> {
+    /// What decides the rows a live window shows: its buffer's edits
+    /// (MODIFF, which property changes advance), its character edits
+    /// (CHARS_MODIFF) and its start.
+    fn window_text_state(&self, root: usize) -> Result<(u64, u64, Value)> {
         let w = self.window(self.slots[root].value)?;
         let start = self.marker_position_value(w.start)?;
-        Ok((self.buffer_state(w.buffer)?.chars_modiff, start))
+        let state = self.buffer_state(w.buffer)?;
+        Ok((state.modiff, state.chars_modiff, start))
     }
     /// GNU `Fformat_mode_line` (`src/xdisp.c:29058`): FORMAT expanded as
     /// WINDOW's band (the selected window by default) for BUFFER (WINDOW's

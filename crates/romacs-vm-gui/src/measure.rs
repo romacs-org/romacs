@@ -230,6 +230,26 @@ mod tests {
         assert!(called.split(' ').count() < rows, "{called}: fewer lines than the window's {rows} rows");
     }
 
+    /// Fontification that swaps a tall face for a small one shows more of a
+    /// continued line than the walk measured with the tall face, so
+    /// redisplay walks again: every position it paints is fontified.
+    #[test]
+    fn redisplay_fontifies_what_a_shrinking_face_brings_into_view() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
+          (insert (propertize (make-string 3000 ?x) 'face 'hosted-big))
+          (goto-char 1) (set-window-start nil 1)
+          (setq fontification-functions
+                (list (lambda (pos)
+                        (let ((end (min (point-max) (+ pos 300))))
+                          (remove-text-properties pos end '(face nil))
+                          (put-text-property pos end 'fontified t))))))"#);
+        h.paint();
+        let end = h.eval("(window-end)").parse::<i64>().unwrap();
+        assert!(end > 301, "the window shows past the first fontified chunk: {end}");
+        assert_eq!(h.eval("(text-property-not-all 1 (window-end) 'fontified t)"), "nil", "unfontified text before the window end {end}");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]
