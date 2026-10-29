@@ -536,109 +536,122 @@ unsafe fn shadow_executable(old: usize) -> bool {
     true
 }
 
-/// A file's identity: device, inode, size, and modification and change
-/// times.
+/// What identifies a loaded object's code, read from its mapping.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct FileId([u64; 7]);
-
-fn file_id(stat: &libc::stat) -> FileId {
-    FileId([stat.st_dev, stat.st_ino, stat.st_size as u64, stat.st_mtime as u64, stat.st_mtime_nsec as u64,
-            stat.st_ctime as u64, stat.st_ctime_nsec as u64])
+enum Identity<'a> {
+    /// Its GNU build-id note.
+    BuildId(&'a [u8]),
+    /// With no build-id: the SHA-256 of its executable segments as mapped.
+    Code([u8; 32]),
 }
 
-/// The files of the libraries this process maps as code, as the dynamic
-/// loader left them before the first allocation. Read without allocating.
+/// The libraries this process loaded before its first allocation, each
+/// by its name and the identity its mapping gives (`identity`), read
+/// through dl_iterate_phdr from the objects themselves: no path is
+/// looked up, so no file another one replaced or overmounted at its path
+/// can stand in for it. Read without allocating.
 unsafe fn libraries_digest() -> Option<[u8; 32]> {
-    static mut MAPS: [u8; 65536] = [0; 65536];
+    struct Walk {
+        entries: &'static mut [[u8; 32]; 256],
+        count: usize,
+        complete: bool,
+    }
     static mut ENTRIES: [[u8; 32]; 256] = [[0; 32]; 256];
-    let buffer = unsafe { &mut *std::ptr::addr_of_mut!(MAPS) };
-    let fd = unsafe { libc::open(c"/proc/self/maps".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return None;
-    }
-    let mut len = 0;
-    let mut ended = false;
-    while len < buffer.len() {
-        let n = unsafe { libc::read(fd, buffer[len..].as_mut_ptr().cast(), buffer.len() - len) };
-        if n < 0 {
-            break;
+    unsafe extern "C" fn each(info: *mut libc::dl_phdr_info, _: libc::size_t, data: *mut libc::c_void) -> libc::c_int {
+        let walk = unsafe { &mut *data.cast::<Walk>() };
+        let info = unsafe { &*info };
+        let name = if info.dlpi_name.is_null() { &[][..] } else { unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) }.to_bytes() };
+        // The executable, keyed by its file's content, and the vDSO, the
+        // kernel's, which no image refers to.
+        if name.is_empty() || name.starts_with(b"linux-vdso") {
+            return 0;
         }
-        if n == 0 {
-            ended = true;
-            break;
+        let headers = unsafe { std::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize) };
+        let entry = unsafe { identity(info.dlpi_addr as usize, headers) }.and_then(|id| {
+            (walk.count < walk.entries.len()).then(|| library_entry(name, id))
+        });
+        match entry {
+            Some(entry) => {
+                walk.entries[walk.count] = entry;
+                walk.count += 1;
+                0
+            }
+            None => {
+                walk.complete = false;
+                1
+            }
         }
-        len += n as usize;
     }
-    unsafe { libc::close(fd) };
-    // A listing that did not end within the buffer is incomplete.
-    if !ended {
-        return None;
-    }
-    let stat = |path: &[u8]| -> Option<FileId> {
-        let mut name = [0u8; 4096];
-        if path.len() >= name.len() {
-            return None;
-        }
-        name[..path.len()].copy_from_slice(path);
-        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-        (unsafe { libc::stat(name.as_ptr().cast(), &mut stat) } == 0).then(|| file_id(&stat))
-    };
-    let own = stat(b"/proc/self/exe")?;
-    library_digest(&buffer[..len], own, stat, unsafe { &mut *std::ptr::addr_of_mut!(ENTRIES) })
+    let mut walk = Walk { entries: unsafe { &mut *std::ptr::addr_of_mut!(ENTRIES) }, count: 0, complete: true };
+    unsafe { libc::dl_iterate_phdr(Some(each), (&raw mut walk).cast()) };
+    walk.complete.then(|| entries_digest(&mut walk.entries[..walk.count]))
 }
 
-/// The SHA-256 of the libraries MAPS lists as mapped code, but OWN, the
-/// executable, keyed apart: each by path and identity, in no order, since
-/// where each loaded is random. IDENTIFY gives the identity of the file a
-/// path names now; it counts only when it is the object mapped there, by
-/// the inode the listing gives and its device, where both devices are block
-/// devices (btrfs lists a superblock's anonymous device, and stat a
-/// subvolume's). None, failing closed, when a mapping's file is deleted or
-/// replaced, or when any identity is unknown or more libraries are mapped
-/// than ENTRIES holds: a world keyed on an incomplete inventory could
-/// outlive a change.
-fn library_digest(maps: &[u8], own: FileId, mut identify: impl FnMut(&[u8]) -> Option<FileId>,
-                  entries: &mut [[u8; 32]]) -> Option<[u8; 32]> {
-    use sha2::Digest;
-    let mut count = 0;
-    for line in maps.split(|&b| b == b'\n') {
-        // start-end perms offset dev inode path
-        let mut fields = line.splitn(6, |&b| b == b' ');
-        let (Some(range), Some(perms)) = (fields.next(), fields.next()) else { continue };
-        let number = |text: Option<&[u8]>, radix| text.and_then(|t| std::str::from_utf8(t).ok()).and_then(|t| u64::from_str_radix(t, radix).ok());
-        let device = fields.nth(1).and_then(|d| {
-            let mut parts = d.splitn(2, |&b| b == b':');
-            Some((number(parts.next(), 16)?, number(parts.next(), 16)?))
-        });
-        let inode = number(fields.next(), 10);
-        let name = fields.next().map(|rest| rest.trim_ascii_start()).unwrap_or_default();
-        if range.is_empty() || perms.get(2) != Some(&b'x') || name.first() != Some(&b'/') {
-            continue;
+/// The identity of the object loaded at BASE with program HEADERS: its
+/// build-id note, or the digest of its executable segments as mapped.
+/// None when it has neither.
+unsafe fn identity(base: usize, headers: &[libc::Elf64_Phdr]) -> Option<Identity<'static>> {
+    for header in headers.iter().filter(|h| h.p_type == libc::PT_NOTE) {
+        let notes = unsafe { std::slice::from_raw_parts((base + header.p_vaddr as usize) as *const u8, header.p_memsz as usize) };
+        if let Some(id) = build_id(notes) {
+            return Some(Identity::BuildId(id));
         }
-        if name.ends_with(b" (deleted)") {
-            return None;
-        }
-        let named = identify(name)?;
-        let (Some((major, minor)), Some(inode)) = (device, inode) else { return None };
-        let (named_major, named_minor) = (libc::major(named.0[0]) as u64, libc::minor(named.0[0]) as u64);
-        if inode != named.0[1] || (major != 0 && named_major != 0 && (major, minor) != (named_major, named_minor)) {
-            return None;
-        }
-        if (named.0[0], named.0[1]) == (own.0[0], own.0[1]) {
-            continue;
-        }
-        if count == entries.len() {
-            return None;
-        }
-        let mut digest = sha2::Sha256::new();
-        digest.update(name);
-        for n in named.0 {
-            digest.update(n.to_le_bytes());
-        }
-        entries[count] = digest.finalize().into();
-        count += 1;
     }
-    let entries = &mut entries[..count];
+    use sha2::Digest;
+    let mut digest = sha2::Sha256::new();
+    let mut any = false;
+    for header in headers.iter().filter(|h| h.p_type == libc::PT_LOAD && h.p_flags & libc::PF_X != 0) {
+        // Mapped from the file, readable and initialized: code.
+        let code = unsafe { std::slice::from_raw_parts((base + header.p_vaddr as usize) as *const u8, header.p_filesz as usize) };
+        digest.update(code);
+        any = true;
+    }
+    any.then(|| Identity::Code(digest.finalize().into()))
+}
+
+/// The GNU build-id in NOTES, an ELF note section.
+fn build_id(notes: &[u8]) -> Option<&[u8]> {
+    const NT_GNU_BUILD_ID: u32 = 3;
+    let word = |at: usize| notes.get(at..at + 4).map(|b| u32::from_ne_bytes(b.try_into().unwrap()));
+    let mut at = 0;
+    while at + 12 <= notes.len() {
+        let (name_size, desc_size, kind) = (word(at)? as usize, word(at + 4)? as usize, word(at + 8)?);
+        let name = at + 12;
+        let desc = name + name_size.next_multiple_of(4);
+        let next = desc + desc_size.next_multiple_of(4);
+        if next > notes.len() {
+            return None;
+        }
+        if kind == NT_GNU_BUILD_ID && &notes[name..name + name_size] == b"GNU\0" && desc_size > 0 {
+            return Some(&notes[desc..desc + desc_size]);
+        }
+        at = next;
+    }
+    None
+}
+
+/// One library's entry: its name and identity, digested.
+fn library_entry(name: &[u8], id: Identity<'_>) -> [u8; 32] {
+    use sha2::Digest;
+    let mut digest = sha2::Sha256::new();
+    digest.update(name);
+    match id {
+        Identity::BuildId(bytes) => {
+            digest.update(b"\0build-id\0");
+            digest.update(bytes);
+        }
+        Identity::Code(hash) => {
+            digest.update(b"\0code\0");
+            digest.update(hash);
+        }
+    }
+    digest.finalize().into()
+}
+
+/// The digest of ENTRIES, in no order, since where each library loaded is
+/// random, and once each.
+fn entries_digest(entries: &mut [[u8; 32]]) -> [u8; 32] {
+    use sha2::Digest;
     entries.sort_unstable();
     let mut digest = sha2::Sha256::new();
     for (i, entry) in entries.iter().enumerate() {
@@ -646,13 +659,14 @@ fn library_digest(maps: &[u8], own: FileId, mut identify: impl FnMut(&[u8]) -> O
             digest.update(entry);
         }
     }
-    Some(digest.finalize().into())
+    digest.finalize().into()
 }
 
 /// The digest of the libraries this process mapped before its first
-/// allocation: what a world's key binds of them. A library changed in
-/// place, or another one found, changes it. None when they could not all
-/// be identified (`library_digest`).
+/// allocation: what a world's key binds of them. A library rebuilt, or
+/// another one loaded, changes it. None when one could not be identified,
+/// or more were loaded than the inventory holds: a world is not keyed on
+/// an incomplete one (`libraries_digest`).
 pub fn libraries() -> Option<[u8; 32]> {
     state();
     unsafe { LIBRARIES }
@@ -927,58 +941,78 @@ mod tests {
         assert_eq!((class_size(63), class_size(64), class_size(CLASSES - 1)), (1024, 1280, SMALL_MAX));
     }
 
-    fn id(dev: u64, ino: u64) -> FileId {
-        FileId([dev, ino, 100, 1, 2, 3, 4])
-    }
-
-    /// A maps line of a code mapping of PATH, inode INO on device DEV.
-    fn line(dev: &str, ino: u64, path: &str) -> String {
-        format!("1000-2000 r-xp 00001000 {dev} {ino}                    {path}\n")
+    /// A note section of NOTES, (name, type, desc).
+    fn notes(notes: &[(&[u8], u32, &[u8])]) -> Vec<u8> {
+        let mut out = vec![];
+        for (name, kind, desc) in notes {
+            out.extend((name.len() as u32).to_ne_bytes());
+            out.extend((desc.len() as u32).to_ne_bytes());
+            out.extend(kind.to_ne_bytes());
+            out.extend(*name);
+            out.resize(out.len().next_multiple_of(4), 0);
+            out.extend(*desc);
+            out.resize(out.len().next_multiple_of(4), 0);
+        }
+        out
     }
 
     #[test]
-    fn libraries_are_known_by_the_object_mapped_and_fail_closed() {
-        let ext4 = libc::makedev(259, 2);
-        let own = id(ext4, 1);
-        let maps = [line("103:02", 1, "/exe"), line("103:02", 7, "/lib/a.so"), line("00:1e", 8, "/lib/b.so"),
-                    "7000-8000 rw-p 00000000 00:00 0\n".into(), line("00:00", 0, "[vdso]")].concat();
-        let files = |path: &[u8]| -> Option<FileId> {
-            match path {
-                b"/exe" => Some(id(ext4, 1)),
-                b"/lib/a.so" => Some(id(ext4, 7)),
-                // btrfs: stat gives the subvolume's device, not the listing's.
-                b"/lib/b.so" => Some(id(libc::makedev(0, 55), 8)),
-                _ => None,
-            }
+    fn a_build_id_is_read_from_its_note() {
+        let id = [0xab, 0xcd, 0xef, 0x01, 0x23];
+        let section = notes(&[(b"GNU\0", 1, b"abi-tag!"), (b"GNU\0", 3, &id)]);
+        assert_eq!(build_id(&section), Some(&id[..]));
+        assert_eq!(build_id(&notes(&[(b"FDO\0", 3, &id)])), None);
+        assert_eq!(build_id(&section[..section.len() - 4]), None);
+    }
+
+    #[test]
+    fn a_library_is_known_by_its_build_id_or_its_code_in_no_order() {
+        let digest = |list: &[(&[u8], Identity)]| {
+            let mut entries: Vec<[u8; 32]> = list.iter().map(|(name, id)| library_entry(name, *id)).collect();
+            entries_digest(&mut entries)
         };
-        let mut entries = [[0u8; 32]; 4];
-        let digest = library_digest(maps.as_bytes(), own, files, &mut entries).expect("all identified");
-        // In no order: the loader's placement is random.
-        let swapped = [line("00:1e", 8, "/lib/b.so"), line("103:02", 1, "/exe"), line("103:02", 7, "/lib/a.so")].concat();
-        assert_eq!(library_digest(swapped.as_bytes(), own, files, &mut entries), Some(digest));
-        // Changed in place: another identity, another digest.
-        let changed = |path: &[u8]| files(path).map(|f| if path == b"/lib/a.so" { FileId([f.0[0], 7, 100, 9, 9, 9, 9]) } else { f });
-        assert_ne!(library_digest(maps.as_bytes(), own, changed, &mut entries), Some(digest));
+        let libc_id: &[u8] = &[1, 2, 3];
+        let code = Identity::Code([7; 32]);
+        let base = digest(&[(b"/usr/lib/libc.so.6", Identity::BuildId(libc_id)), (b"/usr/lib/libz.so.1", code)]);
+        assert_eq!(digest(&[(b"/usr/lib/libz.so.1", code), (b"/usr/lib/libc.so.6", Identity::BuildId(libc_id))]), base);
+        // Another build at the same path, overmounted or replaced, whatever
+        // device and inode it has.
+        assert_ne!(digest(&[(b"/usr/lib/libc.so.6", Identity::BuildId(&[9, 9])), (b"/usr/lib/libz.so.1", code)]), base);
+        assert_ne!(digest(&[(b"/usr/lib/libc.so.6", Identity::BuildId(libc_id)), (b"/usr/lib/libz.so.1", Identity::Code([8; 32]))]), base);
+    }
 
-        // Replaced after it loaded: its path names another inode.
-        let replaced = |path: &[u8]| files(path).map(|f| if path == b"/lib/a.so" { id(ext4, 99) } else { f });
-        assert_eq!(library_digest(maps.as_bytes(), own, replaced, &mut entries), None);
-        // The same inode number on another block device.
-        let moved = |path: &[u8]| files(path).map(|f| if path == b"/lib/a.so" { id(libc::makedev(259, 3), 7) } else { f });
-        assert_eq!(library_digest(maps.as_bytes(), own, moved, &mut entries), None);
-        // A mapping of a deleted file, or one whose identity cannot be read.
-        let deleted = [maps.clone(), line("103:02", 9, "/lib/c.so (deleted)")].concat();
-        assert_eq!(library_digest(deleted.as_bytes(), own, files, &mut entries), None);
-        let unknown = [maps.clone(), line("103:02", 9, "/lib/c.so")].concat();
-        assert_eq!(library_digest(unknown.as_bytes(), own, files, &mut entries), None);
-        // More libraries than the inventory holds.
-        let mut small = [[0u8; 32]; 1];
-        assert_eq!(library_digest(maps.as_bytes(), own, files, &mut small), None);
+    /// The build-id the file at PATH carries, read from its ELF section
+    /// headers: what the mapping's note must agree with.
+    fn file_build_id(path: &str) -> Option<Vec<u8>> {
+        let bytes = std::fs::read(path).ok()?;
+        let at = |o: usize, n: usize| u64::from_le_bytes(bytes[o..o + n].iter().chain([0u8; 8].iter()).take(8).copied().collect::<Vec<_>>().try_into().unwrap()) as usize;
+        let (shoff, shentsize, shnum) = (at(0x28, 8), at(0x3a, 2), at(0x3c, 2));
+        (0..shnum).find_map(|i| {
+            let h = shoff + i * shentsize;
+            (at(h + 4, 4) == 7).then(|| build_id(&bytes[at(h + 0x18, 8)..at(h + 0x18, 8) + at(h + 0x20, 8)]).map(<[u8]>::to_vec)).flatten()
+        })
     }
 
     #[test]
-    fn this_process_identifies_its_libraries() {
+    fn this_process_knows_libc_by_the_build_id_it_mapped() {
         assert!(unsafe { libraries_digest() }.is_some());
+        let mut found: Option<(String, Vec<u8>)> = None;
+        unsafe extern "C" fn each(info: *mut libc::dl_phdr_info, _: libc::size_t, data: *mut libc::c_void) -> libc::c_int {
+            let info = unsafe { &*info };
+            let name = unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) }.to_string_lossy().into_owned();
+            if name.contains("libc.so") {
+                let headers = unsafe { std::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize) };
+                let id = match unsafe { identity(info.dlpi_addr as usize, headers) } {
+                    Some(Identity::BuildId(id)) => id.to_vec(),
+                    other => panic!("libc without a build-id: {other:?}"),
+                };
+                unsafe { *data.cast::<Option<(String, Vec<u8>)>>() = Some((name, id)) };
+            }
+            0
+        }
+        unsafe { libc::dl_iterate_phdr(Some(each), (&raw mut found).cast()) };
+        let (path, mapped) = found.expect("libc is loaded");
+        assert_eq!(file_build_id(&path), Some(mapped), "{path}");
     }
 
     #[test]
