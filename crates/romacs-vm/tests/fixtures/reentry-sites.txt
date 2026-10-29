@@ -94,6 +94,7 @@ prim/leaf/buffer_locals.rs reset_buffer_locals set_variable_value 1 held  # a le
 prim/leaf/coding.rs coding_convert_string variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs coding_string_result variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs set_coding_system_priority variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/coding.rs set_coding_category_order variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/process.rs decode_output variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/callint.rs keep_all_history variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/callint.rs run_command variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
