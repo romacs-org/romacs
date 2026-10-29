@@ -22,8 +22,8 @@ MUTANTS = [
     ("rh-args-dropped", RH, "    Ok(Step::Call { f, args: args.to_vec(), then, saved })", "    Ok(Step::Call { f, args: vec![], then, saved })", ["run-hook-with-args"]),
     ("rh-t-not-spliced", RH, "        if element == Value::TRUE {", "        if false {", ["run-hook-with-args"]),
     ("rh-global-t-called", RH, "        if element != Value::TRUE {", "        if true {", ["run-hook-with-args"]),
-    # Only differs on (lambda ...) list hook functions, which VM2 cannot call
-    # (pinned VALUE, VM2-RUNHOOKS1); the unit test asserts which object reached funcall.
+    # Only differs on (lambda ...) list hook functions; the unit test asserts
+    # which object reached funcall.
     ("rh-function-value-walked", RH, "        if cx.pair(val).is_none() || function_p(cx, val)? {", "        if cx.pair(val).is_none() {", "test:prims::t2_tests::run_hooks_calls_lambda_lists_whole"),
     # Every hook function receives only the first argument (the call site).
     ("rh-only-first-arg", RH, "    Ok(Step::Call { f, args: args.to_vec(), then, saved })", "    Ok(Step::Call { f, args: args[..args.len().min(1)].to_vec(), then, saved })", ["run-hook-with-args"]),

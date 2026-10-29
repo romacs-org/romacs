@@ -29,10 +29,12 @@ pub(super) struct Terminal {
     /// TERMINAL_KEYBOARD_CODING (terminal.c create_terminal defaults).
     pub terminal_coding: Value,
     pub keyboard_coding: Value,
+    /// The parameter alist (terminal.c `param_alist').
+    pub params: Value,
 }
 impl Terminal {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
-        f(&mut self.frame); f(&mut self.terminal_coding); f(&mut self.keyboard_coding);
+        f(&mut self.frame); f(&mut self.terminal_coding); f(&mut self.keyboard_coding); f(&mut self.params);
     }
     pub fn storage_bytes(&self) -> usize { size_of::<Self>() }
 }
@@ -59,7 +61,7 @@ impl Vm {
     pub(super) fn allocate_initial_frame(&mut self, root: Value, minibuffer: Value) -> Result<()> {
         let (undecided, no_conversion) = (self.intern("undecided"), self.intern("no-conversion"));
         let terminal = self.allocate_object(Object::Terminal(Box::new(Terminal {
-            frame: Value::NIL, live: true, terminal_coding: undecided, keyboard_coding: no_conversion,
+            frame: Value::NIL, live: true, terminal_coding: undecided, keyboard_coding: no_conversion, params: Value::NIL,
         })));
         // make_initial_frame (frame.c:1441) names the initial frame F1.
         let name = (self.intern("name"), self.make_lisp_string(b"F1".to_vec(), false));
