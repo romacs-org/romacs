@@ -817,3 +817,38 @@ fn whole(snapshot: &romacs_layout_input::WindowSnapshot) -> crate::WindowEnd {
     let len = snapshot.text.utf8.len();
     crate::WindowEnd { id: snapshot.id, end: len, visible_end: len + 1, body_height: snapshot.height as f32, rows: vec![] }
 }
+
+/// Overlay calls that change nothing a window may show leave its record
+/// standing, as GNU's buffer.c calls no modify_overlay for them: a new
+/// overlay (no properties yet), deleting a detached one, and `overlay-put'
+/// of a value `eq' to the one there. A real change still redisplays fully.
+#[test]
+fn overlay_calls_that_change_nothing_keep_the_window() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (setq walks 0) (set-buffer (get-buffer-create "kept"))
+                          (dotimes (i 10) (insert (format "line %d\n" i)))
+                          (set-window-buffer nil (current-buffer)) (goto-char 1)
+                          (setq fontification-functions (list (lambda (_) (setq walks (1+ walks)))))
+                          (setq mode-line-format '("%l")))"#);
+    // Each frame painted, as the GUI does: the record cursor moves reuse.
+    let mut frame = |vm: &mut Vm| {
+        let snapshot = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+        vm.display_apply_layout(&[whole(&snapshot)]).unwrap();
+    };
+    let walks = |vm: &mut Vm| run(vm, "walks").as_integer().unwrap();
+    frame(&mut vm);
+    frame(&mut vm);
+    let before = walks(&mut vm);
+    for (form, changes) in [("(setq o (make-overlay 1 3))", false), ("(overlay-put o 'face nil)", false),
+                            ("(forward-char 1)", false), ("(overlay-put o 'face 'bold)", true),
+                            ("(delete-overlay o)", true), ("(delete-overlay o)", false)] {
+        let before = walks(&mut vm);
+        run(&mut vm, form);
+        frame(&mut vm);
+        assert_eq!(walks(&mut vm) > before, changes, "{form}");
+    }
+    assert!(walks(&mut vm) > before);
+}
