@@ -105,8 +105,12 @@ static FORMER: AtomicUsize = AtomicUsize::new(0);
 /// A builder's arena is a shared mapping of this unlinked file, and an
 /// image is copied from the file (`write_image`); -1 elsewhere.
 static BACKING: AtomicI32 = AtomicI32::new(-1);
-/// The digest of the libraries mapped as the arena started (`libraries`).
-static mut LIBRARIES: Option<[u8; 32]> = None;
+/// The libraries loaded as the arena started (`libraries`): for each, its
+/// name, where it loaded and its program headers, the loader's own, which
+/// stay for the process's life; and whether they all fit.
+static mut LOADED: [(usize, usize, usize, usize); 256] = [(0, 0, 0, 0); 256];
+static mut LOADED_COUNT: usize = 0;
+static mut LOADED_COMPLETE: bool = false;
 
 /// What became of the image this process adopted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -302,7 +306,7 @@ fn state() -> u8 {
 
 /// Reserve a fresh range at a random address in the window.
 unsafe fn start() -> u8 {
-    unsafe { LIBRARIES = libraries_digest() };
+    unsafe { take_inventory() };
     let building = !unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null();
     SCRUB.store(building, Ordering::Relaxed);
     let Some(reserve) = (unsafe { reserve() }) else { return SYSTEM };
@@ -536,77 +540,106 @@ unsafe fn shadow_executable(old: usize) -> bool {
     true
 }
 
-/// What identifies a loaded object's code, read from its mapping.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Identity<'a> {
-    /// Its GNU build-id note.
-    BuildId(&'a [u8]),
-    /// With no build-id: the SHA-256 of its executable segments as mapped.
-    Code([u8; 32]),
-}
-
-/// The libraries this process loaded before its first allocation, each
-/// by its name and the identity its mapping gives (`identity`), read
-/// through dl_iterate_phdr from the objects themselves: no path is
-/// looked up, so no file another one replaced or overmounted at its path
-/// can stand in for it. Read without allocating.
-unsafe fn libraries_digest() -> Option<[u8; 32]> {
-    struct Walk {
-        entries: &'static mut [[u8; 32]; 256],
-        count: usize,
-        complete: bool,
-    }
-    static mut ENTRIES: [[u8; 32]; 256] = [[0; 32]; 256];
-    unsafe extern "C" fn each(info: *mut libc::dl_phdr_info, _: libc::size_t, data: *mut libc::c_void) -> libc::c_int {
-        let walk = unsafe { &mut *data.cast::<Walk>() };
+/// Note the libraries loaded so far (`LOADED`), through dl_iterate_phdr:
+/// the objects themselves, not paths. The executable, keyed by its file's
+/// content, and the vDSO, the kernel's, which no image refers to, are left
+/// out. Allocates nothing.
+unsafe fn take_inventory() {
+    unsafe extern "C" fn each(info: *mut libc::dl_phdr_info, _: libc::size_t, _: *mut libc::c_void) -> libc::c_int {
         let info = unsafe { &*info };
-        let name = if info.dlpi_name.is_null() { &[][..] } else { unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) }.to_bytes() };
-        // The executable, keyed by its file's content, and the vDSO, the
-        // kernel's, which no image refers to.
+        if info.dlpi_name.is_null() {
+            return 0;
+        }
+        let name = unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) }.to_bytes();
         if name.is_empty() || name.starts_with(b"linux-vdso") {
             return 0;
         }
-        let headers = unsafe { std::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize) };
-        let entry = unsafe { identity(info.dlpi_addr as usize, headers) }.and_then(|id| {
-            (walk.count < walk.entries.len()).then(|| library_entry(name, id))
-        });
-        match entry {
-            Some(entry) => {
-                walk.entries[walk.count] = entry;
-                walk.count += 1;
-                0
-            }
-            None => {
-                walk.complete = false;
-                1
-            }
+        let count = unsafe { LOADED_COUNT };
+        if count == 256 {
+            unsafe { LOADED_COMPLETE = false };
+            return 1;
         }
+        unsafe {
+            LOADED[count] = (info.dlpi_name as usize, info.dlpi_addr as usize, info.dlpi_phdr as usize, info.dlpi_phnum as usize);
+            LOADED_COUNT = count + 1;
+        }
+        0
     }
-    let mut walk = Walk { entries: unsafe { &mut *std::ptr::addr_of_mut!(ENTRIES) }, count: 0, complete: true };
-    unsafe { libc::dl_iterate_phdr(Some(each), (&raw mut walk).cast()) };
-    walk.complete.then(|| entries_digest(&mut walk.entries[..walk.count]))
+    unsafe {
+        LOADED_COMPLETE = true;
+        libc::dl_iterate_phdr(Some(each), std::ptr::null_mut());
+    }
 }
 
-/// The identity of the object loaded at BASE with program HEADERS: its
-/// build-id note, or the digest of its executable segments as mapped.
-/// None when it has neither.
-unsafe fn identity(base: usize, headers: &[libc::Elf64_Phdr]) -> Option<Identity<'static>> {
-    for header in headers.iter().filter(|h| h.p_type == libc::PT_NOTE) {
-        let notes = unsafe { std::slice::from_raw_parts((base + header.p_vaddr as usize) as *const u8, header.p_memsz as usize) };
-        if let Some(id) = build_id(notes) {
-            return Some(Identity::BuildId(id));
+/// A library loaded before the first allocation, as the loader mapped it.
+#[derive(Clone, Copy, Debug)]
+pub struct Library {
+    /// Its name, as the loader found it: a path.
+    pub name: &'static [u8],
+    base: usize,
+    headers: &'static [libc::Elf64_Phdr],
+}
+
+/// The libraries this process loaded before its first allocation, or
+/// None when there were more than the inventory holds.
+pub fn libraries() -> Option<Vec<Library>> {
+    state();
+    if !unsafe { LOADED_COMPLETE } {
+        return None;
+    }
+    let loaded: &[(usize, usize, usize, usize); 256] = unsafe { &*std::ptr::addr_of!(LOADED) };
+    let loaded = &loaded[..unsafe { LOADED_COUNT }];
+    Some(loaded.iter().map(|&(name, base, phdr, phnum)| unsafe { Library::at(name as *const libc::c_char, base, phdr, phnum) }).collect())
+}
+
+impl Library {
+    /// The object a dl_phdr_info describes: NAME, loaded at BASE, with
+    /// PHNUM program headers at PHDR.
+    ///
+    /// # Safety
+    /// The object stays loaded for the process's life.
+    pub unsafe fn at(name: *const libc::c_char, base: usize, phdr: usize, phnum: usize) -> Library {
+        Library { name: unsafe { std::ffi::CStr::from_ptr(name) }.to_bytes(), base,
+                  headers: unsafe { std::slice::from_raw_parts(phdr as *const libc::Elf64_Phdr, phnum) } }
+    }
+
+    /// The GNU build-id note of its PT_NOTE segments, as mapped.
+    pub fn build_id(&self) -> Option<&'static [u8]> {
+        self.headers.iter().filter(|h| h.p_type == libc::PT_NOTE).find_map(|h| {
+            build_id(unsafe { std::slice::from_raw_parts((self.base + h.p_vaddr as usize) as *const u8, h.p_memsz as usize) })
+        })
+    }
+
+    /// Where its first segment is mapped: an address in the object.
+    pub fn address(&self) -> usize {
+        self.headers.iter().find(|h| h.p_type == libc::PT_LOAD).map_or(self.base, |h| self.base + h.p_vaddr as usize)
+    }
+
+    /// What the loader leaves as the file has it: each non-writable
+    /// PT_LOAD segment's bytes, code and read-only data, as mapped, but for
+    /// the RELRO range the loader writes, each with the file offset it maps.
+    /// Position-independent code and data are not relocated there, so they
+    /// are alike in every process. None when a segment is not readable.
+    pub fn constant_segments(&self) -> Option<Vec<(u64, &'static [u8])>> {
+        let relro = self.headers.iter().filter(|h| h.p_type == libc::PT_GNU_RELRO)
+            .map(|h| (h.p_vaddr, h.p_vaddr + h.p_memsz)).collect::<Vec<_>>();
+        let mut out = vec![];
+        for h in self.headers.iter().filter(|h| h.p_type == libc::PT_LOAD && h.p_flags & libc::PF_W == 0) {
+            if h.p_flags & libc::PF_R == 0 {
+                return None;
+            }
+            // The segment's file bytes, less any RELRO range within them.
+            let mut pieces = vec![(h.p_vaddr, h.p_vaddr + h.p_filesz)];
+            for &(lo, hi) in &relro {
+                pieces = pieces.into_iter().flat_map(|(a, b)| [(a, b.min(lo)), (a.max(hi), b)]).filter(|(a, b)| a < b).collect();
+            }
+            for (a, b) in pieces {
+                let bytes = unsafe { std::slice::from_raw_parts((self.base + a as usize) as *const u8, (b - a) as usize) };
+                out.push((h.p_offset + (a - h.p_vaddr), bytes));
+            }
         }
+        (!out.is_empty()).then_some(out)
     }
-    use sha2::Digest;
-    let mut digest = sha2::Sha256::new();
-    let mut any = false;
-    for header in headers.iter().filter(|h| h.p_type == libc::PT_LOAD && h.p_flags & libc::PF_X != 0) {
-        // Mapped from the file, readable and initialized: code.
-        let code = unsafe { std::slice::from_raw_parts((base + header.p_vaddr as usize) as *const u8, header.p_filesz as usize) };
-        digest.update(code);
-        any = true;
-    }
-    any.then(|| Identity::Code(digest.finalize().into()))
 }
 
 /// The GNU build-id in NOTES, an ELF note section.
@@ -628,48 +661,6 @@ fn build_id(notes: &[u8]) -> Option<&[u8]> {
         at = next;
     }
     None
-}
-
-/// One library's entry: its name and identity, digested.
-fn library_entry(name: &[u8], id: Identity<'_>) -> [u8; 32] {
-    use sha2::Digest;
-    let mut digest = sha2::Sha256::new();
-    digest.update(name);
-    match id {
-        Identity::BuildId(bytes) => {
-            digest.update(b"\0build-id\0");
-            digest.update(bytes);
-        }
-        Identity::Code(hash) => {
-            digest.update(b"\0code\0");
-            digest.update(hash);
-        }
-    }
-    digest.finalize().into()
-}
-
-/// The digest of ENTRIES, in no order, since where each library loaded is
-/// random, and once each.
-fn entries_digest(entries: &mut [[u8; 32]]) -> [u8; 32] {
-    use sha2::Digest;
-    entries.sort_unstable();
-    let mut digest = sha2::Sha256::new();
-    for (i, entry) in entries.iter().enumerate() {
-        if i == 0 || entries[i - 1] != *entry {
-            digest.update(entry);
-        }
-    }
-    digest.finalize().into()
-}
-
-/// The digest of the libraries this process mapped before its first
-/// allocation: what a world's key binds of them. A library rebuilt, or
-/// another one loaded, changes it. None when one could not be identified,
-/// or more were loaded than the inventory holds: a world is not keyed on
-/// an incomplete one (`libraries_digest`).
-pub fn libraries() -> Option<[u8; 32]> {
-    state();
-    unsafe { LIBRARIES }
 }
 
 /// How the image this process adopted fared.
@@ -965,22 +956,6 @@ mod tests {
         assert_eq!(build_id(&section[..section.len() - 4]), None);
     }
 
-    #[test]
-    fn a_library_is_known_by_its_build_id_or_its_code_in_no_order() {
-        let digest = |list: &[(&[u8], Identity)]| {
-            let mut entries: Vec<[u8; 32]> = list.iter().map(|(name, id)| library_entry(name, *id)).collect();
-            entries_digest(&mut entries)
-        };
-        let libc_id: &[u8] = &[1, 2, 3];
-        let code = Identity::Code([7; 32]);
-        let base = digest(&[(b"/usr/lib/libc.so.6", Identity::BuildId(libc_id)), (b"/usr/lib/libz.so.1", code)]);
-        assert_eq!(digest(&[(b"/usr/lib/libz.so.1", code), (b"/usr/lib/libc.so.6", Identity::BuildId(libc_id))]), base);
-        // Another build at the same path, overmounted or replaced, whatever
-        // device and inode it has.
-        assert_ne!(digest(&[(b"/usr/lib/libc.so.6", Identity::BuildId(&[9, 9])), (b"/usr/lib/libz.so.1", code)]), base);
-        assert_ne!(digest(&[(b"/usr/lib/libc.so.6", Identity::BuildId(libc_id)), (b"/usr/lib/libz.so.1", Identity::Code([8; 32]))]), base);
-    }
-
     /// The build-id the file at PATH carries, read from its ELF section
     /// headers: what the mapping's note must agree with.
     fn file_build_id(path: &str) -> Option<Vec<u8>> {
@@ -995,24 +970,16 @@ mod tests {
 
     #[test]
     fn this_process_knows_libc_by_the_build_id_it_mapped() {
-        assert!(unsafe { libraries_digest() }.is_some());
-        let mut found: Option<(String, Vec<u8>)> = None;
-        unsafe extern "C" fn each(info: *mut libc::dl_phdr_info, _: libc::size_t, data: *mut libc::c_void) -> libc::c_int {
-            let info = unsafe { &*info };
-            let name = unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) }.to_string_lossy().into_owned();
-            if name.contains("libc.so") {
-                let headers = unsafe { std::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize) };
-                let id = match unsafe { identity(info.dlpi_addr as usize, headers) } {
-                    Some(Identity::BuildId(id)) => id.to_vec(),
-                    other => panic!("libc without a build-id: {other:?}"),
-                };
-                unsafe { *data.cast::<Option<(String, Vec<u8>)>>() = Some((name, id)) };
-            }
-            0
+        let libraries = libraries().expect("an inventory");
+        let libc = libraries.iter().find(|l| std::str::from_utf8(l.name).is_ok_and(|n| n.contains("libc.so"))).expect("libc is loaded");
+        let path = std::str::from_utf8(libc.name).unwrap();
+        assert_eq!(file_build_id(path).as_deref(), libc.build_id(), "{path}");
+        let segments = libc.constant_segments().expect("readable");
+        // Read-only data and code, as the file has them at those offsets.
+        let file = std::fs::read(path).unwrap();
+        for (offset, bytes) in segments {
+            assert_eq!(&file[offset as usize..offset as usize + bytes.len()], bytes);
         }
-        unsafe { libc::dl_iterate_phdr(Some(each), (&raw mut found).cast()) };
-        let (path, mapped) = found.expect("libc is loaded");
-        assert_eq!(file_build_id(&path), Some(mapped), "{path}");
     }
 
     #[test]
