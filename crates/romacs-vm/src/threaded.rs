@@ -2328,8 +2328,8 @@ unsafe fn invoke_full(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
-            if let Some((condition, data)) = lambda_list_signal(e.vm, target, argc) {
-                return raise(e, condition, &data);
+            if let Some(replay) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
+                return nested_then(e, r, |vm| vm.eval_primitive(&[replay, Value::NIL])).map_or(Value::UNBOUND, |(_, value)| value);
             }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_invoke_full(e, r, pc, closure, start, argc),
@@ -2773,8 +2773,8 @@ unsafe fn t2_dispatch(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
-            if let Some((condition, data)) = lambda_list_signal(e.vm, target, argc) {
-                return raise(e, condition, &data);
+            if let Some(replay) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
+                return nested_then(e, r, |vm| vm.eval_primitive(&[replay, Value::NIL])).map_or(Value::UNBOUND, |(_, value)| value);
             }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_dispatch(e, r, pc, closure, start, argc),
@@ -3287,35 +3287,61 @@ unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Op
     unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
 }
 /// eval.c funcall_lambda's argument walk for a `(lambda ARGS . BODY)'
-/// list called with ARGC arguments: the signal it raises before the body
-/// runs, with the list itself as the function datum. A parameter that is
-/// not a symbol or a misplaced &optional or &rest is invalid-function; a
-/// missing required argument (met in order) or one too many is
-/// wrong-number-of-arguments.
-fn lambda_list_signal(vm: &mut Vm, list: Value, argc: usize) -> Option<(&'static str, Vec<Value>)> {
-    let (and_rest, and_optional) = (Value::reference(vm.slot("&rest") + 1, 7), Value::reference(vm.slot("&optional") + 1, 7));
+/// list called with ARGS. One parameter at a time it is checked, takes its
+/// argument and is bound (dynamically: a list function has no lexenv). A
+/// parameter that is not a symbol or a misplaced &optional or &rest is
+/// invalid-function, binding nil, t or a keyword is setting-constant, and
+/// a missing or excess argument is wrong-number-of-arguments, with the list
+/// itself as the function datum. When the walk signals, returns the form
+/// that replays it: the bindings made before the failure around GNU's
+/// signal, so their variable watchers see the let and the unlet.
+fn lambda_list_failure(vm: &mut Vm, list: Value, args: Vec<Value>) -> Option<Value> {
+    let symbol = |vm: &mut Vm, name: &str| Value::reference(vm.slot(name) + 1, 7);
+    let (and_rest, and_optional) = (symbol(vm, "&rest"), symbol(vm, "&optional"));
+    let constant = |vm: &Vm, param: Value| param == Value::NIL || param == Value::TRUE || {
+        let slot = param.index_if(7).map(|i| i - 1);
+        slot.is_some_and(|slot| vm.symbol_names[slot].starts_with(':') && vm.names.get(&vm.symbol_names[slot]) == Some(&slot))
+    };
     let (_, tail) = vm.cons_pair(list).ok()?;
     let (mut params, _) = vm.cons_pair(tail).ok()?;
-    let invalid = || Some(("invalid-function", vec![list]));
-    let arity = || Some(("wrong-number-of-arguments", vec![list, Value::integer(argc as i64).unwrap()]));
-    let (mut optional, mut rest, mut previous_rest, mut i) = (false, false, false, 0);
-    while let Ok((next, more)) = vm.cons_pair(params) {
-        if next.tag() != 7 && next != Value::NIL && next != Value::TRUE { return invalid() }
+    let argc = args.len();
+    let invalid = Some(("invalid-function", vec![list]));
+    let arity = Some(("wrong-number-of-arguments", vec![list, Value::integer(argc as i64).unwrap()]));
+    let (mut bindings, mut optional, mut rest, mut previous_rest, mut i) = (vec![], false, false, false, 0);
+    let failure = loop {
+        let Ok((next, more)) = vm.cons_pair(params) else {
+            break if params != Value::NIL || previous_rest { invalid } else if i < argc { arity } else { None };
+        };
+        if next.tag() != 7 && next != Value::NIL && next != Value::TRUE { break invalid }
         if next == and_rest {
-            if rest || previous_rest { return invalid() }
+            if rest || previous_rest { break invalid }
             (rest, previous_rest) = (true, true);
         } else if next == and_optional {
-            if optional || rest || previous_rest { return invalid() }
+            if optional || rest || previous_rest { break invalid }
             optional = true;
         } else {
-            if rest { i = argc } else if i < argc { i += 1 } else if !optional { return arity() }
+            let arg = if rest { let all = vm.list_value(&args[i..]); i = argc; all }
+                else if i < argc { i += 1; args[i - 1] }
+                else if !optional { break arity }
+                else { Value::NIL };
+            if constant(vm, next) { break Some(("setting-constant", vec![next])) }
+            bindings.push((next, arg));
             previous_rest = false;
         }
         params = more;
-    }
-    if params != Value::NIL || previous_rest { return invalid() }
-    if i < argc { return arity() }
-    None
+    };
+    let (condition, data) = failure?;
+    let quote = symbol(vm, "quote");
+    let quoted = |vm: &mut Vm, value: Value| vm.list_value(&[quote, value]);
+    let bindings: Vec<Value> = bindings.into_iter().map(|(param, arg)| { let arg = quoted(vm, arg); vm.list_value(&[param, arg]) }).collect();
+    let data: Vec<Value> = data.into_iter().map(|datum| quoted(vm, datum)).collect();
+    let (list_fn, signal, condition) = (symbol(vm, "list"), symbol(vm, "signal"), symbol(vm, condition));
+    let data = vm.list_value(&[vec![list_fn], data].concat());
+    let condition = quoted(vm, condition);
+    let raise = vm.list_value(&[signal, condition, data]);
+    let bindings = vm.list_value(&bindings);
+    let r#let = symbol(vm, "let");
+    Some(vm.list_value(&[r#let, bindings, raise]))
 }
 /// GNU `(lambda ...)' list functions: a list headed by `lambda' whose cdr
 /// is a cons (funcall_lambda signals `invalid-function' otherwise).

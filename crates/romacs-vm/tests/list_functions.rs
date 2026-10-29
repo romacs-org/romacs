@@ -44,3 +44,38 @@ fn a_lambda_list_with_a_bad_arglist_or_count_signals_as_gnu() {
     assert_eq!(vm.eval_source(r#"(list (condition-case e (funcall '(lambda ((a b) 3.15) 84) 5 4) (error e)) (condition-case e (eval '(funcall '(lambda ((a b) 3.15) 84) 5 4)) (error e)) (condition-case e (funcall '(lambda (x) x)) (error e)) (condition-case e (funcall '(lambda (x) x) 1 2) (error e)) (condition-case e (funcall '(lambda (&rest) 1)) (error e)) (condition-case e (funcall '(lambda (&optional &optional) 1)) (error e)) (condition-case e (funcall '(lambda (a . b) 1) 1) (error e)) (condition-case e (apply '(lambda (a 5) 1) '(1)) (error e)) (funcall '(lambda (a &optional b &rest c) (list a b c)) 1 2 3 4) (condition-case e (mapcar '(lambda (&rest &optional) 1) '(1)) (error e)))"#).unwrap().display().unwrap(),
         r#"((invalid-function (lambda ((a b) 3.15) 84)) (invalid-function (lambda ((a b) 3.15) 84)) (wrong-number-of-arguments (lambda (x) x) 0) (wrong-number-of-arguments (lambda (x) x) 2) (invalid-function (lambda (&rest) 1)) (invalid-function (lambda (&optional &optional) 1)) (invalid-function (lambda (a . b) 1)) (invalid-function (lambda (a 5) 1)) (1 2 (3 4)) (invalid-function (lambda (&rest &optional) 1)))"#);
 }
+
+/// ROWS of (FORM EXPECTED): FORM run as `(eval 'FORM t)' with a watcher
+/// logging (OPERATION NEWVAL) for special variable ww-x; EXPECTED is
+/// pinned GNU's (RESULT-OR-ERROR LOG).
+fn watched(rows: &[(&str, &str)]) {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source("(progn (defvar ww-log nil) (defvar ww-x 0) (add-variable-watcher 'ww-x (lambda (_s n o _w) (setq ww-log (cons (list o n) ww-log)))))").unwrap();
+    for (form, expected) in rows {
+        let source = format!("(progn (setq ww-log nil) (list (condition-case e (eval '{form} t) (error e)) (reverse ww-log)))");
+        assert_eq!(vm.eval_source(&source).map(|v| v.display().unwrap()), Ok(expected.to_string()), "{form}");
+    }
+}
+
+/// funcall_lambda checks, takes the argument and binds one parameter at a
+/// time, so a bad parameter signals after the earlier ones are bound (their
+/// watchers see the let and the unlet), and binding nil, t or a keyword is
+/// setting-constant.
+#[test]
+fn a_lambda_list_binds_each_parameter_before_checking_the_next() {
+    watched(&[
+        ("(funcall '(lambda (nil 5) 1) 2 3)", "((setting-constant nil) nil)"),
+        ("(funcall '(lambda (ww-x nil) 1) 2 3)", "((setting-constant nil) ((let 2) (unlet 0)))"),
+        ("(funcall '(lambda (ww-x 5) 1) 2 3)", "((invalid-function (lambda (ww-x 5) 1)) ((let 2) (unlet 0)))"),
+        ("(funcall '(lambda (ww-x y) 1) 2)", "((wrong-number-of-arguments (lambda (ww-x y) 1) 1) ((let 2) (unlet 0)))"),
+        ("(funcall '(lambda (ww-x . y) 1) 2)", "((invalid-function (lambda (ww-x . y) 1)) ((let 2) (unlet 0)))"),
+        ("(funcall '(lambda (ww-x &rest) 1) 2)", "((invalid-function (lambda (ww-x &rest) 1)) ((let 2) (unlet 0)))"),
+        ("(funcall '(lambda (ww-x) 1) 2 3)", "((wrong-number-of-arguments (lambda (ww-x) 1) 2) ((let 2) (unlet 0)))"),
+        ("(funcall '(lambda (&rest ww-x) 1) 2 3)", "(1 ((let (2 3)) (unlet 0)))"),
+        ("(funcall '(lambda (&rest ww-x &optional) 1) 2 3)", "((invalid-function (lambda (&rest ww-x &optional) 1)) ((let (2 3)) (unlet 0)))"),
+        ("(funcall '(lambda (:k) 1) 2)", "((setting-constant :k) nil)"),
+        ("(funcall '(lambda (t) 1) 2)", "((setting-constant t) nil)"),
+        ("(funcall '(lambda (ww-x &optional y nil) 1) 2)", "((setting-constant nil) ((let 2) (unlet 0)))"),
+    ]);
+}
