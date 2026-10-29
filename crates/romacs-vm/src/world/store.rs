@@ -31,16 +31,19 @@ const IMAGE_ENV: &str = "ROMACS_WORLD_IMAGE";
 const BUILD_ENV: &str = "ROMACS_WORLD_BUILD";
 
 /// One recipe's world in a store.
+#[derive(Clone)]
 pub struct World {
     pub store: PathBuf,
     pub key: [u8; 32],
     pub recipe: Vec<String>,
 }
 
-/// What this process does with its world.
-pub enum Launch {
-    /// The image is mapped: its VM, to reinitialize, and its manifest.
-    Restored { vm: Box<Vm>, manifest: Json },
+/// What this process does with its world. T is what the embedder carries
+/// beside the VM.
+pub enum Launch<T> {
+    /// The image is mapped: its VM, to reinitialize, what the builder
+    /// carried, and the manifest.
+    Restored { vm: Box<Vm>, carry: T, manifest: Json },
     /// This process builds the world: run the recipe in build mode, then
     /// `finish_build`.
     Build,
@@ -133,15 +136,16 @@ impl World {
 
     /// What this process does: see the module documentation. BUILDER_ARGS
     /// are this process's arguments as a builder, which runs elsewhere, needs
-    /// them: every path absolute.
-    pub fn launch(&self, builder_args: impl FnOnce() -> Vec<OsString>) -> Launch {
+    /// them: every path absolute. With WAIT a missing or stale world is
+    /// built first, and the launch then boots from it.
+    pub fn launch<T: 'static>(&self, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool) -> Launch<T> {
         if host::getenv(IMAGE_ENV).is_some() {
             host::unset_env(IMAGE_ENV);
-            return match image::restore(&self.key) {
-                Some(vm) => {
+            return match image::restore::<T>(&self.key) {
+                Some((vm, carry)) => {
                     let manifest = host::read_to_string(self.file(".json")).ok()
                         .and_then(|text| serde_json::from_str(&text).ok()).unwrap_or(Json::Null);
-                    Launch::Restored { vm: Box::new(vm), manifest }
+                    Launch::Restored { vm: Box::new(vm), carry, manifest }
                 }
                 None => Launch::Chain { reason: json!({"image": format!("{:?}", arena::restore_outcome())}) },
             };
@@ -156,21 +160,40 @@ impl World {
         if !arena::active() {
             return Launch::Chain { reason: json!("no arena") };
         }
-        match self.valid_manifest() {
+        let mut builder_args = Some(builder_args);
+        let mut args = move || builder_args.take().map(|f| f()).unwrap_or_default();
+        let mut valid = self.valid_manifest();
+        if let (Err(_), true) = (&valid, wait) {
+            let built = self.start_builder(args()).and_then(|mut child| child.wait());
+            valid = match built {
+                Ok(status) if status.success() => self.valid_manifest(),
+                Ok(status) => Err(json!({"builder": status.to_string()})),
+                Err(e) => Err(json!({"builder": e.to_string()})),
+            };
+            if let Err(reason) = valid {
+                return Launch::Chain { reason: json!({"world": reason}) };
+            }
+        }
+        match valid {
             Ok(_) => {
                 let error = host::exec_unrandomized(IMAGE_ENV, self.file(".rwi").as_os_str());
                 Launch::Chain { reason: json!({"exec": error.to_string()}) }
             }
             Err(reason) => {
-                let started = self.start_builder(builder_args());
+                let started = self.start_builder(args()).map(|child| {
+                    let pid = child.id();
+                    // Reap it, whoever outlives whom.
+                    std::thread::spawn(move || { let mut child = child; let _ = child.wait(); });
+                    pid
+                });
                 Launch::Chain { reason: json!({"world": reason, "builder": started.map_err(|e| e.to_string()).ok()}) }
             }
         }
     }
 
     /// Start a builder with ARGS unless one runs: detached, in the pinned
-    /// environment under the store, its output in `KEY.log`. The pid.
-    fn start_builder(&self, args: Vec<OsString>) -> std::io::Result<u32> {
+    /// environment under the store, its output in `KEY.log`.
+    fn start_builder(&self, args: Vec<OsString>) -> std::io::Result<std::process::Child> {
         use std::os::unix::process::CommandExt;
         if !self.lock()? {
             return Err(std::io::Error::other("a builder runs"));
@@ -179,14 +202,10 @@ impl World {
         let log = host::open_output(self.file(".log"), host::OpenOptions::new().write(true).create(true).truncate(true))?;
         let mut env = pinned_env(&host::env_snapshot(), &pinned);
         env.push((BUILD_ENV.into(), self.store.clone().into_os_string()));
-        let child = host::unrandomized_command(host::current_exe()?)?
+        host::unrandomized_command(host::current_exe()?)?
             .args(args).env_clear().envs(env).current_dir(pinned.join("cwd"))
             .stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log)
-            .process_group(0).spawn()?;
-        let pid = child.id();
-        // Reap it, whoever outlives whom.
-        std::thread::spawn(move || { let mut child = child; let _ = child.wait(); });
-        Ok(pid)
+            .process_group(0).spawn()
     }
 
     /// Whether no builder holds this world's lock. A builder takes it for
@@ -233,11 +252,12 @@ impl World {
         Ok(())
     }
 
-    /// The builder's end: check what startup read, then publish VM as this
-    /// world's image with EVENTS, what the recipe printed, in its manifest.
-    /// A build with any refusal publishes its manifest only, so launches
-    /// boot from source until its records change. The image's length.
-    pub fn finish_build(&self, mut vm: Vm, events: Json) -> Result<usize, String> {
+    /// The builder's end: check what startup read, then publish VM, with
+    /// CARRY beside it, as this world's image, and EVENTS, what the recipe
+    /// printed, in its manifest. A build with any refusal publishes its
+    /// manifest only, so launches boot from source until its records
+    /// change. The image's length.
+    pub fn finish_build<T: 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
         vm.world_check_inputs();
         let trace = host::leave_build().ok_or("no world build was recording")?;
         let records: Vec<&Json> = trace["records"].as_array().map(|r| r.iter().filter(|r| host::keyed(r)).collect()).unwrap_or_default();
@@ -260,7 +280,7 @@ impl World {
         let temporary = self.file(".rwi.new");
         let file = host::open_output(&temporary, host::OpenOptions::new().write(true).create(true).truncate(true))
             .map_err(|e| e.to_string())?;
-        let len = image::capture(vm, &file, self.key)?;
+        let len = image::capture(vm, carry, &file, self.key)?;
         file.sync_all().map_err(|e| e.to_string())?;
         host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string())?;
         publish(".json", &text).map_err(|e| e.to_string())?;

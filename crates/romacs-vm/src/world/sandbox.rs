@@ -115,9 +115,11 @@ pub fn build_roots(recipe: Vec<PathBuf>, dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The directories a build may list but not read files beneath: HOME, a
-/// keyed fact, whose entries answer a case probe (`host::case_insensitive`).
+/// keyed fact, and its ancestors, whose entries answer a case probe that
+/// climbs from an empty HOME (`host::case_insensitive`).
 pub fn list_roots() -> Vec<PathBuf> {
-    crate::host::getenv("HOME").map(PathBuf::from).into_iter().collect()
+    let Some(home) = crate::host::getenv("HOME").map(PathBuf::from) else { return vec![] };
+    home.ancestors().map(Path::to_owned).collect()
 }
 
 /// The roots this binary itself reads at run time: its build tree (etc/,

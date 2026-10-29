@@ -143,8 +143,8 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
         let cwd = host::current_dir().unwrap_or_default();
         absolute_args(&std::env::args_os().skip(1).collect::<Vec<_>>(), &cwd)
     };
-    match world.launch(builder_args) {
-        Launch::Restored { vm, manifest } => {
+    match world.launch::<()>(builder_args, false) {
+        Launch::Restored { vm, manifest, .. } => {
             let mut vm = *vm;
             vm.world_reinit();
             if let Err(e) = crate::eval(&mut vm, "(romacs-world-restart)") {
@@ -179,7 +179,7 @@ fn build(world: &World, args: &crate::Args, count: usize) -> ! {
         crate::emit(json!({"event": "world-build", "ok": false, "chain": chain}));
         std::process::exit(3);
     }
-    match world.finish_build(vm, json!({"chain": chain})) {
+    match world.finish_build(vm, (), json!({"chain": chain})) {
         Ok(len) => {
             crate::emit(json!({"event": "world-build", "ok": true, "image_bytes": len}));
             std::process::exit(0)

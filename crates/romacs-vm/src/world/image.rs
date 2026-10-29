@@ -71,22 +71,26 @@ impl Vm {
     }
 }
 
-/// Capture VM into FILE as an image keyed KEY: refused unless the VM is at
-/// rest. The arena is this process's heap; nothing else allocates while the
-/// image is written, and the process exits after it.
-pub fn capture(vm: Vm, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
+/// Capture VM, and CARRY, what the embedder keeps beside it, into FILE as an
+/// image keyed KEY: refused unless the VM is at rest. The arena is this
+/// process's heap; nothing else allocates while the image is written, and
+/// the process exits after it. CARRY travels as it is, unencoded: the key
+/// binds the embedder, so its restorer knows CARRY's type.
+pub fn capture<T: 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     vm.world_quiescent()?;
     let counters = [crate::expand::next_generated(), 0, 0, 0];
-    let root = Box::into_raw(Box::new(vm)) as usize;
+    let root = Box::into_raw(Box::new((vm, carry))) as usize;
     let fields = ImageFields { len: 0, root, counters, layout: arena::layout(), key };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"));
     // The VM stays allocated: the image owns it, and this process exits.
     written
 }
 
-/// The VM of the image this process mapped, when it was made for KEY,
-/// with the process-global counters it depends on restored. Taken once.
-pub fn restore(key: &[u8; 32]) -> Option<Vm> {
+/// The VM and carry of the image this process mapped, when it was made for
+/// KEY, with the process-global counters it depends on restored. Taken once.
+///
+/// T must be the type `capture` carried: KEY binds the embedder that made it.
+pub fn restore<T: 'static>(key: &[u8; 32]) -> Option<(Vm, T)> {
     use std::sync::atomic::AtomicBool;
     static TAKEN: AtomicBool = AtomicBool::new(false);
     let fields = arena::mapped_image().filter(|fields| fields.key == *key)?;
@@ -94,6 +98,6 @@ pub fn restore(key: &[u8; 32]) -> Option<Vm> {
         return None;
     }
     crate::expand::raise_generated(fields.counters[0]);
-    let vm = unsafe { Box::from_raw(fields.root as *mut Vm) };
-    Some(*vm)
+    let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
+    Some(*root)
 }

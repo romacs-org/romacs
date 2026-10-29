@@ -270,6 +270,13 @@ impl Drop for SiteGuard {
     }
 }
 
+/// The top-level form at LINE of FILE, whose first line is HEAD, is the site
+/// of what follows until the guard drops: for an embedder that evaluates a
+/// file's forms itself.
+pub fn form_site(file: &Path, line: usize, head: &str) -> SiteGuard {
+    enter_site(|| Site { file: file.to_string_lossy().into_owned(), line, head: head.chars().take(80).collect() })
+}
+
 /// Make the form SITE describes the site of what follows, until the guard
 /// drops. SITE is built only in build mode.
 pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
@@ -801,6 +808,12 @@ pub fn case_insensitive(path: &Path, classify: fn(&Path) -> Result<bool, &'stati
     MODE.with(|m| m.set(Mode::Off));
     let result = classify(path);
     MODE.with(|m| m.set(Mode::Build));
+    // Confinement may hide what answers the probe: a build cannot know its
+    // answer is the host's.
+    if result.is_err() && CONFINED.with(Cell::get) {
+        refuse("confined", json!({"case probe": path_json(path), "error": result.err()}));
+        return result;
+    }
     let observed = match result { Ok(answer) => json!(answer), Err(reason) => json!({"error": reason}) };
     if keyed_path(path, "case probe") {
         record("case", json!({"path": path_json(path), "result": observed}));
