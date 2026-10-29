@@ -25,6 +25,12 @@ mod batch;
 mod user_init;
 mod measure;
 mod timers;
+mod world;
+
+/// Every allocation in the world arena, so a world image can be this
+/// process's heap (`romacs_vm::world::arena`).
+#[global_allocator]
+static ALLOCATOR: romacs_vm::world::arena::Arena = romacs_vm::world::arena::Arena;
 
 const SCENE: &str = include_str!("../scene.el");
 
@@ -189,8 +195,12 @@ fn run() -> Result<(), String> {
     // reverted: launch-to-ready 0.13s -> 0.95s (median of 5) with zero journey steps gained
     // and zero journey keys taken over by GNU (evidence/loadup/LOADUP.md).
     let mut launch = startup::Launch::Workspace;
+    let mut world_store = None;
+    let mut world_wait = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--world-store" => world_store = Some(std::path::absolute(args.next().ok_or("missing world store")?).map_err(|e| e.to_string())?),
+            "--world-wait" => world_wait = true,
             "--wayland" => { socket = Some(args.next().ok_or("missing socket")?); live = false; },
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
@@ -223,14 +233,22 @@ fn run() -> Result<(), String> {
     TRACE_LATENCY.store(trace_latency, std::sync::atomic::Ordering::Relaxed);
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
-    let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
+    // A live --loadup launch boots from its world, decided before any window.
+    let restored = match world_store {
+        Some(store) if live && launch == startup::Launch::Loadup => {
+            let world = world::open(store, width, height, floor)?;
+            world::launch(&world, width, height, floor, world_wait).map(SendWorld)
+        }
+        _ => None,
+    };
+    let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (host, sender) =
         PaintHost::wayland(std::path::Path::new(&socket), width, height, if live { "romacs — VM" } else { "VM G1a" }.into())?;
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let worker = spawn_evaluator(move || {
         let sender = std::sync::Arc::new(sender);
-        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init);
+        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, restored.map(|w| w.0));
         if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
         let _ = result_tx.send(result);
         drop(sender);
@@ -442,6 +460,12 @@ fn paint_prompt(
     Ok((count, ends))
 }
 #[allow(clippy::too_many_arguments)] // host options, as for paint()
+/// A restored VM handed to the evaluator thread, which owns it from then on:
+/// nothing else holds any of its parts.
+struct SendWorld((Box<Vm>, world::Carry));
+unsafe impl Send for SendWorld {}
+
+#[allow(clippy::too_many_arguments)]
 fn evaluate(
     sender: &std::sync::Arc<PaintSender>,
     floor: Option<usize>,
@@ -452,9 +476,17 @@ fn evaluate(
     mut width: u32,
     mut height: u32,
     load_user_init: bool,
+    restored: Option<(Box<Vm>, world::Carry)>,
 ) -> Result<(), String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
-    let mut vm = Vm::new();
+    let (mut vm, carry) = match restored {
+        Some((vm, carry)) => {
+            let mut vm = *vm;
+            vm.world_reinit();
+            (vm, Some(carry))
+        }
+        None => (Vm::new(), None),
+    };
     // Measuring primitives ask the engine that paints (VM2-WTPS1).
     vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
     let terminal_service = terminal_service::Service::new();
@@ -467,29 +499,28 @@ fn evaluate(
     if let Some(floor) = floor {
         vm.set_collection_floor(floor);
     }
-    let (line_height, column_width) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
-    vm.set_frame_geometry(width, height, line_height, column_width)?;
+    // A restored VM holds the geometry and what follows, up to the chain's
+    // end: its world's recipe fixed them.
+    if carry.is_none() {
+        let (line_height, column_width) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
+        vm.set_frame_geometry(width, height, line_height, column_width)?;
+    }
     if live {
-        if launch != startup::Launch::GnuOnly {
-            vm.eval_source("(defvar interprogram-cut-function 'romacs-clipboard-select-text) (defvar interprogram-paste-function 'romacs-clipboard-selection-value)")?;
+        if launch != startup::Launch::GnuOnly && carry.is_none() {
+            vm.eval_source(world::INTERPROGRAM)?;
         }
         // The launch font's face, as source: declared BEFORE GNU's Lisp, so
         // GNU's own `defface' (custom.el) leaves the declared face alone, and
         // after the workspace's own faces otherwise, exactly as before.
-        let font = match std::env::var("ROMACS_GUI_FONT") {
-            Ok(family) => {
-                if family.chars().any(char::is_control) { return Err("font family contains a control character".into()); }
-                let points = std::env::var("ROMACS_GUI_FONT_SIZE").unwrap_or_else(|_| "14".into())
-                    .parse::<u32>().map_err(|e| e.to_string())?;
-                if !(6..=72).contains(&points) { return Err("font size must be 6..72 points".into()); }
-                Some((format!("(defface default '((t (:foreground \"#d4c5a0\" :background \"#000000\" :family {} :height {}))) \"Launch font\")", serde_json::to_string(&family).map_err(|e|e.to_string())?, points * 10), points))
-            }
-            Err(_) => None,
-        };
+        let font = world::launch_font()?;
         let started = if launch == startup::Launch::Workspace {
             let started = startup::initialize(&mut vm)?;
             if let Some((source, _)) = &font { vm.eval_source(source)?; }
             started
+        } else if let Some(carry) = carry {
+            // As a fresh process takes the per-process startup steps.
+            vm.eval_source("(romacs-world-restart)")?;
+            startup::resume_loadup(&mut vm, launch, carry.loadup)?
         } else {
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };

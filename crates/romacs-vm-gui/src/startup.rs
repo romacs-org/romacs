@@ -226,7 +226,7 @@ pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup:
 /// romacs' bundled Lisp (rlisp/, beside gnu-lisp/): it follows GNU's own
 /// load-path, so it stays loadable by name and cannot be found in place of a
 /// GNU file on that path.
-fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
+pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
     Ok(runtime_load_path(dir)?.into_iter().filter(|p| !p.starts_with(dir)).collect())
 }
 
@@ -384,10 +384,22 @@ pub fn initialize_loadup(vm: &mut Vm, launch: Launch, font: Option<&str>) -> Res
 
 /// [`initialize_loadup`] with GNU's Lisp from `dir`.
 pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &std::path::Path) -> Result<Started, String> {
-    // One canonical directory for loadup and for finding rlisp/ beside
-    // it: `.` or a symlinked gnu-lisp/ must not pick a different sibling.
     let files = take_queued();
-    let dir = &dir.canonicalize().map_err(|e| format!("GNU lisp directory {}: {e}", dir.display()))?;
+    let dir = &lisp_root(dir)?;
+    let loadup = initialize_chain(vm, launch, font, dir)?;
+    let session = initialize_session(vm, launch, loadup, dir)?;
+    open_workspace(vm, session, &files, dir)
+}
+
+/// One canonical directory for loadup and for finding rlisp/ beside it:
+/// `.` or a symlinked gnu-lisp/ must not pick a different sibling.
+pub fn lisp_root(dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    romacs_vm::host::canonicalize(dir).map_err(|e| format!("GNU lisp directory {}: {e}", dir.display()))
+}
+
+/// The launch up to the end of the GNU-loadup chain and the bundled
+/// packages' autoloads: what a world of this launch holds.
+pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &std::path::Path) -> Result<crate::loadup::Loadup, String> {
     // Plain functions only, defined with VM2's own `defun` before GNU's
     // byte-run.el replaces it; the host's paint and quit checks read them.
     vm.eval_source(GUI_SUPPORT)?;
@@ -415,6 +427,22 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
         if let Some(autoloads) = bundled_autoloads(dir)? {
             vm.load_file(&autoloads).map_err(|e| format!("{}: {e}", autoloads.display()))?;
         }
+    }
+    Ok(loadup)
+}
+
+/// A launch restored from its world (`world::Carry`) from the chain's end on.
+pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup) -> Result<Started, String> {
+    let files = take_queued();
+    let dir = lisp_root(&lisp_dir())?;
+    let session = initialize_session(vm, launch, loadup, &dir)?;
+    open_workspace(vm, session, &files, &dir)
+}
+
+/// The launch after [`initialize_chain`]: the interactive session and
+/// Romacs's layers, up to the workspace.
+pub fn initialize_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup, dir: &std::path::Path) -> Result<Started, String> {
+    if launch == Launch::Loadup {
         // What an interactive session on this display adds to the batch
         // chain, then Romacs's defaults for GNU's minibuffer completion,
         // which the user's init may override.
@@ -425,18 +453,7 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     }
     let gnu_mode_line = vm.eval_source("(default-boundp 'mode-line-format)")? != romacs_vm::Fixed::NIL;
     if launch == Launch::GnuOnly {
-        if !files.is_empty() {
-            return Err("FILE arguments need romacs's visiting command, which --gnu-lisp does not install".into());
-        }
-        let started = Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line };
-        vm.eval_source(&format!(
-            "(progn (set-buffer (get-buffer-create \"*scratch*\")) (erase-buffer)
-                    (insert {} \"\\n\\n\" {} \"\\n\\nNo romacs stand-ins (--gnu-lisp). Close the window to quit.\\n\\n\")
-                    (set-window-buffer (selected-window) (current-buffer)) (goto-char (point-max))
-                    (set-window-point (selected-window) (point)))",
-            lisp_string(&started.status()), lisp_string(&mode_line_note(gnu_mode_line)),
-        ))?;
-        return Ok(started);
+        return Ok(Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line });
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-find-file.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
@@ -447,9 +464,27 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     let bindings = bind_journey_keys(vm, true)?;
-    let started = Started { launch, loadup: Some(loadup), bindings, gnu_mode_line };
+    Ok(Started { launch, loadup: Some(loadup), bindings, gnu_mode_line })
+}
+
+/// The launch after [`initialize_session`]: the workspace, visiting FILES,
+/// and the GUI's extensions.
+pub fn open_workspace(vm: &mut Vm, started: Started, files: &[std::path::PathBuf], dir: &std::path::Path) -> Result<Started, String> {
+    if started.launch == Launch::GnuOnly {
+        if !files.is_empty() {
+            return Err("FILE arguments need romacs's visiting command, which --gnu-lisp does not install".into());
+        }
+        vm.eval_source(&format!(
+            "(progn (set-buffer (get-buffer-create \"*scratch*\")) (erase-buffer)
+                    (insert {} \"\\n\\n\" {} \"\\n\\nNo romacs stand-ins (--gnu-lisp). Close the window to quit.\\n\\n\")
+                    (set-window-buffer (selected-window) (current-buffer)) (goto-char (point-max))
+                    (set-window-point (selected-window) (point)))",
+            lisp_string(&started.status()), lisp_string(&mode_line_note(started.gnu_mode_line)),
+        ))?;
+        return Ok(started);
+    }
     workspace(vm, &started, files.is_empty())?;
-    visit_files(vm, &files)?;
+    visit_files(vm, files)?;
     load_gui_extensions(vm, dir)?;
     Ok(started)
 }

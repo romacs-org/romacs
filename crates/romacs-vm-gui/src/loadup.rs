@@ -418,8 +418,9 @@ pub fn drive_bootstrap(vm: &mut Vm, bootstrap: &Path, load_path: &[PathBuf]) -> 
 /// Every top-level form of `file` in order, its load sites through the
 /// wrapper; each site's file is found on `search` as `load` finds it.
 fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Loadup, String> {
-    let loadup = file.canonicalize().map_err(|e| format!("{}: {e}", file.display()))?;
-    let source = std::fs::read_to_string(&loadup).map_err(|e| format!("{}: {e}", loadup.display()))?;
+    // Through the host boundary, so a world build records the file it ran.
+    let loadup = romacs_vm::host::canonicalize(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let source = romacs_vm::host::read_to_string(&loadup).map_err(|e| format!("{}: {e}", loadup.display()))?;
     let (spans, sites) = load_sites(&source)?;
     let file_name = loadup.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
@@ -439,7 +440,10 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
         let text = rewrite(&source[start..end], start, &inside);
         let from = steps_len(vm);
         let logged = log_len(vm)?;
+        // The form is the site of what it reads, as when the loader runs it.
+        let site = romacs_vm::host::form_site(&loadup, line, source[start..end].trim_start().lines().next().unwrap_or(""));
         let outcome = vm.eval_source(&text).map(|_| ());
+        drop(site);
         let to = steps_len(vm);
         let invoked = invoked_since(vm, logged)?;
         // Attribute this form's loader steps to the sites it invoked, in order.
