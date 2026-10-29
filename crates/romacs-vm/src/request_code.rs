@@ -363,12 +363,16 @@ mod tests {
         assert_eq!(vm.execute_raw(live).unwrap().as_integer().unwrap(), 42);
     }
     /// A compilation that fails after its builder took a cache slot (for
-    /// `(foo)') installs no function to own it; collections reclaim it.
+    /// `(foo)'; `(lambda)' fails at compile time) installs no function to
+    /// own it; collections reclaim it.
     #[test]
     fn failed_compilations_do_not_accumulate_cache_slots() {
         let mut vm = Vm::new();
         for i in 0..2_000 {
-            assert!(vm.eval_source_raw("(progn (foo) (let ((nil 1)) nil))").is_err());
+            assert!(vm.eval_source_raw("(progn (foo) (lambda))").is_err());
+            if i == 0 {
+                assert!(!vm.request_code.unclaimed_caches.is_empty(), "the failure left its slot unowned");
+            }
             if i % 10 == 0 {
                 vm.collect(&mut []);
             }
@@ -391,7 +395,7 @@ mod tests {
         cold.eval_source_raw(source).unwrap();
         let mut vm = Vm::new();
         vm.set_source_cache_store(dir.clone()).unwrap();
-        assert!(vm.eval_source_raw("(progn (foo) (let ((nil 1)) nil))").is_err());
+        assert!(vm.eval_source_raw("(progn (foo) (lambda))").is_err());
         let orphans = vm.request_code.unclaimed_caches.clone();
         assert!(orphans.contains(&0), "the failed build left slot 0: {orphans:?}");
         vm.eval_source_raw(source).unwrap();
@@ -437,7 +441,7 @@ mod tests {
         for fault in [ArtifactFault::Installing, ArtifactFault::Remapped] {
             let mut vm = Vm::new();
             vm.set_source_cache_store(dir.clone()).unwrap();
-            assert!(vm.eval_source_raw("(progn (foo) (let ((nil 1)) nil))").is_err());
+            assert!(vm.eval_source_raw("(progn (foo) (lambda))").is_err());
             let before = vm.request_code.unclaimed_caches.clone();
             assert!(!before.is_empty());
             ARTIFACT_FAULT.set(Some(fault));
