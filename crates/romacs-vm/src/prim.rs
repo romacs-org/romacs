@@ -1610,6 +1610,10 @@ mod leaf {
         pub fn list_limit(&self) -> usize {
             self.vm.list_limit()
         }
+        /// More links than an alias chain of distinct symbols can have.
+        pub fn symbol_limit(&self) -> usize {
+            self.vm.slots.len()
+        }
         /// Characters FROM..TO of STRING as a fresh string of the same
         /// multibyteness, carrying STRING's text properties for that range
         /// (GNU fns.c Fsubstring: make_specified_string + copy_text_properties).

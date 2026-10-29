@@ -197,8 +197,6 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "frame-resize-pixelwise", gnu: "frame.c:7625", kind: Kind::Bool(false) },
     CVariable { name: "frame-size-history", gnu: "frame.c:7695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "garbage-collection-messages", gnu: "alloc.c:7495", kind: Kind::Bool(false) },
-    CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
-    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
     CVariable { name: "global-mode-string", gnu: "xdisp.c:38701", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "glyph-table", gnu: "dispnew.c:7549", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "glyphless-char-display", gnu: "xdisp.c:39349", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: Some("glyphless-char-display"), extras: &[Init::Symbol("empty-box")], init: Init::Nil, ranges: &[] })) },
@@ -478,6 +476,10 @@ pub(crate) struct CVariable {
 /// only those the bootstrap chain, the census or the variable harness
 /// actually reached (ruling R216: no speculative ports).
 pub(crate) static C_VARIABLES: &[CVariable] = &[
+    // The collector's pacing reads both (`Vm::collection_due`), scaling the
+    // percentage internally (DIVERGENCES VM2-GC-PACING).
+    CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
+    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
     // cl-generic's dispatcher compiler checks whether GNU is being dumped.
     CVariable { name: "purify-flag", gnu: "alloc.c:7487", kind: Kind::Lisp(Init::Nil) },
     // GNU warning text expands command keys while compiling obsolete method calls.
@@ -672,6 +674,9 @@ pub(crate) struct Forwarded {
     bools: Vec<bool>,
     ints: Vec<i64>,
     eval_limit_index: usize,
+    /// `gc-cons-threshold' and `gc-cons-percentage', read by the collector's
+    /// pacing (`Vm::collection_due').
+    gc_cons: (usize, usize),
     /// Per-buffer defaults (`buffer_defaults`).
     defaults: Vec<Value>,
     /// Table index behind each Obj / Buffer payload, for lazy initial values.
@@ -679,7 +684,7 @@ pub(crate) struct Forwarded {
     buffer_vars: Vec<usize>,
     by_name: HashMap<&'static str, Fwd>,
 }
-romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, defaults, object_vars, buffer_vars, by_name });
+romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, gc_cons, defaults, object_vars, buffer_vars, by_name });
 
 impl Default for Forwarded {
     fn default() -> Self {
@@ -690,6 +695,7 @@ impl Default for Forwarded {
             bools: vec![],
             ints: vec![],
             eval_limit_index: 0,
+            gc_cons: (0, 0),
             defaults: vec![],
             object_vars: vec![],
             buffer_vars: vec![],
@@ -720,6 +726,8 @@ impl Default for Forwarded {
         }
         let Some(Fwd::Int(i)) = store.lookup("max-lisp-eval-depth") else { unreachable!() };
         store.eval_limit_index = i as usize;
+        let (Some(Fwd::Int(threshold)), Some(Fwd::Obj(percentage))) = (store.lookup("gc-cons-threshold"), store.lookup("gc-cons-percentage")) else { unreachable!() };
+        store.gc_cons = (threshold as usize, percentage as usize);
         store
     }
 }
@@ -727,6 +735,19 @@ impl Default for Forwarded {
 impl Forwarded {
     #[inline(always)]
     pub(super) fn eval_limit(&self) -> i64 { self.ints[self.eval_limit_index] }
+    pub(super) fn gc_cons_threshold(&self) -> i64 { self.ints[self.gc_cons.0] }
+    /// `gc-cons-percentage': its value, or its initial float before Lisp
+    /// first reads it (initial values are materialized lazily).
+    pub(super) fn gc_cons_percentage(&self) -> std::result::Result<Value, f64> {
+        let value = self.objects[self.gc_cons.1];
+        if value != Value::UNBOUND {
+            return Ok(value);
+        }
+        match C_VARIABLES[self.object_vars[self.gc_cons.1]].kind {
+            Kind::Lisp(Init::Float(initial)) => Err(initial),
+            _ => unreachable!("gc-cons-percentage starts as a float"),
+        }
+    }
     /// Direct C-global integer access, without constructing a Lisp Value.
     pub(super) fn integer(&self, name: &str) -> i64 {
         let Some(Fwd::Int(i)) = self.lookup(name) else { panic!("not a forwarded integer: {name}") };
@@ -1310,19 +1331,20 @@ impl Vm {
     /// unrestored, as does a saved integer that set-default-toplevel-value
     /// replaced with a non-integer, which signals once the watchers ran.
     pub(super) fn unbind_forwarded(&mut self, slot: usize, fwd: Fwd, old: Value, owner: Value, let_default: bool) -> Result<()> {
-        let local = owner.index_if(0).and_then(|n| n.checked_sub(1));
+        let mut local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         if let Fwd::Buffer(i) = fwd && !let_default && !local.is_some_and(|buffer| self.per_buffer_local_p(buffer, i)) {
             return Ok(());
         }
+        let mut old = old;
         if self.variable_trapped(slot) {
-            if matches!(fwd, Fwd::Buffer(_)) && !let_default {
-                self.notify_watchers_at(slot, old, "unlet", Some(owner))?;
-            } else {
-                self.notify_watchers_at(slot, old, "set", Some(Value::NIL))?;
-                if !matches!(fwd, Fwd::Buffer(_)) && self.localized_boolean(slot).is_none() {
-                    self.notify_watchers(slot, old, "unlet")?;
-                }
-            }
+            // The popped value is rooted across its watchers and read back.
+            let frame = self.root_frame(&[old, owner]);
+            let notified = self.notify_unbind_forwarded(slot, fwd, &frame, let_default);
+            let owner;
+            [old, owner] = self.release_frame(frame);
+            notified?;
+            // The owner's index, as its buffer may have moved.
+            local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         }
         match fwd {
             Fwd::Fence(_) => unreachable!("unbind_one restores a fenced binding through the fence"),
@@ -1340,6 +1362,18 @@ impl Vm {
             }
             Fwd::Buffer(i) if let_default => self.forwarded.defaults[i as usize] = old,
             Fwd::Buffer(i) => self.per_buffer_mut(local.expect("live owner")).expect("live buffer").set(i, old),
+        }
+        Ok(())
+    }
+    /// `unbind_forwarded's notifications, reading OLD and OWNER from FRAME
+    /// before each.
+    fn notify_unbind_forwarded(&mut self, slot: usize, fwd: Fwd, frame: &crate::gc::RootFrame, let_default: bool) -> Result<()> {
+        if matches!(fwd, Fwd::Buffer(_)) && !let_default {
+            return self.notify_watchers_at(slot, self.rooted(frame, 0), "unlet", Some(self.rooted(frame, 1)));
+        }
+        self.notify_watchers_at(slot, self.rooted(frame, 0), "set", Some(Value::NIL))?;
+        if !matches!(fwd, Fwd::Buffer(_)) && self.localized_boolean(slot).is_none() {
+            self.notify_watchers(slot, self.rooted(frame, 0), "unlet")?;
         }
         Ok(())
     }

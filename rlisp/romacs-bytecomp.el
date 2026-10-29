@@ -7,7 +7,11 @@
 ;; bytecomp's `byte-compile--reify-function' cannot read one back into
 ;; source.  `byte-compile' of a function value, or of a symbol whose
 ;; definition is one, therefore returns that function; a `(lambda ...)'
-;; list is evaluated in the dialect GNU would compile it in.  Any other
+;; list goes through bytecomp's own front end (macroexpansion, then
+;; closure conversion as a check) and its expansion is evaluated in the
+;; dialect GNU would compile it in, so each macro expands once; a body
+;; that front end refuses gives GNU's diagnostic string, as
+;; `byte-compile' returns it, and no function.  Any other
 ;; argument, and file compilation, stay GNU's.  DIVERGENCES.md
 ;; VM2-BYTECOMP1.
 ;;
@@ -16,6 +20,23 @@
 ;; `byte-compile' calls already see it.
 
 ;;; Code:
+
+(defun romacs-bytecomp--front-end (fun lexical)
+  "Run `byte-compile''s front end on the `(lambda ...)' list FUN.
+LEXICAL is the dialect it compiles in.  Return FUN macroexpanded, or
+the diagnostic string `byte-compile' returns when the front end
+signals.  `byte-compile-preprocess''s two steps run separately: its
+closure conversion yields bytecomp's internal forms, so it only
+checks.  The macros are bytecomp's, so the form is evaluated once
+bytecomp is loaded."
+  (require 'bytecomp)
+  (eval `(displaying-byte-compile-warnings
+          (byte-compile-close-variables
+           (let* ((lexical-binding ,lexical)
+                  (expanded (macroexpand-all ',fun byte-compile-macro-environment)))
+             (cconv-closure-convert expanded byte-compile-bound-variables)
+             expanded)))
+        t))
 
 (defun romacs-bytecomp--function-value (compile form)
   "Return FORM's function when it is already VM2 code, else call COMPILE.
@@ -30,9 +51,12 @@ FORM is `byte-compile''s argument: a symbol, a function value, a
      ((eq (car-safe fun) 'lambda)
       ;; bytecomp.el:2986: a symbol's list definition is dynamic code; a
       ;; list argument compiles in the caller's `lexical-binding'.
-      (let ((value (funcall wrap (eval fun (and (not (symbolp form)) lexical-binding)))))
-        (when (symbolp form) (fset form value))
-        value))
+      (let* ((lexical (and (not (symbolp form)) lexical-binding))
+             (expanded (romacs-bytecomp--front-end fun lexical)))
+        (if (stringp expanded) expanded
+          (let ((value (funcall wrap (eval expanded lexical))))
+            (when (symbolp form) (fset form value))
+            value))))
      (t (funcall compile form)))))
 
 (advice-add 'byte-compile :around #'romacs-bytecomp--function-value)

@@ -1,0 +1,201 @@
+# Native call sites of calls that can run Lisp or collect (tests/reentry_sites.rs),
+# re-derived from the source: FILE FUNCTION CALLEE COUNT CLASS  # reason.
+#
+# The rule: no heap Value stays in a Rust local across such a call. A Value
+# needed afterwards lives in traced storage and is read back.
+#
+#   suspended  the calling engine is suspended (`suspend_code', its registers
+#              set aside but traced), so the call may collect; afterwards it
+#              reads engine state and registers again.
+#   rooted     the frame keeps what it uses afterwards in a RootFrame, a
+#              binding, a #: slot or a form object, and reads it back.
+#   clean      no heap Value from before the call is used after it.
+#   held       collection cannot run during the call (`Vm::may_collect'): an
+#              unsuspended engine (a leaf, T2 continuation or legacy primitive),
+#              an open compiler builder, or watchers notified by a native
+#              writer that has not rooted its frame.
+#   boundary   an embedder or top-level request: the caller keeps no raw Value.
+#   collector  a collection point; its caller passes every root.
+autoload.rs autoload_do_load load_with_autoload_queue 1 rooted  # FUNDEF is rooted in the PENDING binding and read back; FUNNAME is a symbol
+autoload.rs autoload_do_load unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+autoload.rs load_source_named load_file_raw 1 clean  # FILE is read before the load
+autoload.rs load_with_autoload_queue load_source_named 1 rooted  # the queue and saved match data are bindings, read back from their slots
+autoload.rs load_with_autoload_queue unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+bootstrap.rs bootstrap_primitive call_lisp_at_write 1 held  # defalias-fset-function from a legacy primitive call: its engine is not suspended
+command.rs command_event eval_form_raw 6 clean  # events become forms and the binding a name before each call
+display.rs fontify_range eval_form_raw 1 clean  # the call is a form of fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
+eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
+eval_form.rs eval_primitive compile 1 held  # an open compiler builder holds collection
+eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environment are converted to forms first
+forwarded.rs notify_unbind_forwarded notify_watchers 1 rooted  # OLD and OWNER are read from the caller's frame before each call
+forwarded.rs notify_unbind_forwarded notify_watchers_at 2 rooted  # OLD and OWNER are read from the caller's frame before each call
+gc.rs assert_no_retention_growth collect 1 collector  # a test helper collecting with no engine running
+handle.rs collect_garbage collect 1 collector  # embedder API: no engine runs and handles are rooted
+handle.rs eval_form eval_form_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
+handle.rs eval_source eval_source_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
+handle.rs execute execute_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
+handle.rs invoke_prepared invoke_prepared_raw 1 boundary  # embedder API: arguments come from Rooted handles
+handle.rs load_file load_file_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
+host_input.rs host_wait_state eval_form_raw 1 clean  # a constant form; its value is printed before anything else allocates
+insdel.rs mark_deactivated set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
+lib.rs execute_raw execute_rooted 1 clean  # no roots
+lib.rs execute_rooted execute 1 rooted  # ROOTS are a frame, written back after
+lib.rs expr_now expand_macro 1 held  # an open compiler builder holds collection
+lib.rs force_lazy compile_lazy_request 1 held  # an open compiler builder holds collection
+lib.rs primitive loader_primitive 1 held  # a legacy primitive call: its engine is not suspended
+lib.rs restore_binding notify_watchers 1 rooted  # the popped VALUE is a frame, read back for the restore
+lib.rs restore_binding notify_watchers_at 2 rooted  # the popped VALUE and OWNER are a frame, read back for the restore
+lib.rs restore_binding unbind_forwarded 1 rooted  # it roots OLD and OWNER itself
+lib.rs unbind unbind_one 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+lib.rs unbind unwind 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+lib.rs unbind_after unbind 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+lib.rs unbind_after unwind 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+lib.rs unbind_one unbind 1 clean  # backtrace bookkeeping, runs no Lisp
+lib.rs unwind unbind_one 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+loader.rs bind_named bind_variable 1 held  # a native writer: its watchers hold collection (rooted_write unset)
+loader.rs build_load_history set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
+loader.rs eval_load_toplevel cached_source_form 1 held  # an open compiler builder holds collection
+loader.rs eval_load_toplevel compile_request 1 held  # an open compiler builder holds collection
+loader.rs eval_load_toplevel eval_load_toplevel 3 clean  # FORM's objects are rooted; only the last child's value is returned
+loader.rs eval_load_toplevel execute_raw 1 clean  # FORM's objects are rooted
+loader.rs eval_load_toplevel expand_macro 1 clean  # FORM's objects are rooted; the expansion is a new form
+loader.rs eval_load_toplevel set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
+loader.rs file_shorthands eval_source_raw 1 rooted  # TEXT is a form object and FUNCTION its variable, both read back after
+loader.rs file_shorthands reader_call 1 clean  # nothing is used after the call but its value
+loader.rs load_file_raw eval_load_toplevel 2 rooted  # the last form's value is a frame; the after-load call roots it as a form object
+loader.rs load_file_raw unbind_after 2 held  # native unbinding: watchers hold collection (rooted_write unset)
+loader.rs load_file_raw unwind 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+loader.rs loader_primitive autoload_do_load 1 clean  # ARGS are not used after the load
+loader.rs loader_primitive eval_primitive 1 clean  # ARGS are not used after the evaluation
+loader.rs loader_primitive load_file_raw 1 clean  # ARGS are read before the load
+loader.rs loader_primitive load_with_autoload_queue 1 clean  # FEATURE, used after, is a symbol, which never moves
+loader.rs loader_primitive macroexpand_primitive 1 clean  # ARGS are not used after the expansion
+loader.rs loader_primitive read_host_event 1 clean  # SECONDS is read before the wait
+macroexpand.rs call_macro_expander compile_request 1 held  # an open compiler builder holds collection
+macroexpand.rs call_macro_expander execute_raw 1 rooted  # ARGS are a frame across making the closure, read back
+macroexpand.rs call_macro_expander reader_call 2 clean  # FUNCTION and ARGS are the call's own, rooted by it
+macroexpand.rs macroexpand_primitive macroexpand_value 1 clean  # ARGS are not used after the expansion
+macroexpand.rs macroexpand_steps autoload_do_load 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
+macroexpand.rs macroexpand_steps call_macro_expander 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
+mode_line.rs decode_mode_spec eval_form_raw 1 clean  # a constant form; the window and buffer are #: slots (display.rs)
+mode_line.rs mode_line_element eval_form_raw 1 rooted  # elements are forms with rooted objects; the window and buffer are #: slots (display.rs)
+prim.rs attach_variable_history set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim.rs default_cell_set notify 2 held  # a leaf or T2 continuation: its engine is not suspended
+prim.rs detected_source variable_set 1 held  # a native writer: its watchers hold collection (rooted_write unset)
+prim.rs install_lisp_prelude_raw eval_source_raw 2 boundary  # VM setup: no caller Values
+prim.rs make_variable_alias notify 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim.rs notify notify_watchers_at 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
+prim.rs variable_set set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/buffer_locals.rs kill_local notify 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/buffer_locals.rs reset_buffer_locals set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/coding.rs coding_convert_string variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/coding.rs coding_string_result variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/coding.rs set_coding_system_priority variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/process.rs decode_output variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/callint.rs keep_all_history variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/callint.rs run_command variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/coding.rs set_safe_terminal_coding_system_internal variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/expand_file_name.rs decode_file variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/face.rs function_height safe_call 1 held  # a leaf: its engine is not suspended
+prims/face.rs set_lisp_face_attribute variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/fileio.rs write_chosen variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
+prims/frame.rs frame_or_buffer_changed_p variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/insdel.rs self_insert_command variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/insert_coding.rs advance variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/insert_coding.rs decided variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/insert_coding.rs decode variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/insert_coding.rs encoded_name variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/insert_coding.rs read_undecided variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/insert_coding.rs visited variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/keyboard.rs clear_this_command_keys variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/keyboard.rs discard_input variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/keyboard.rs set_this_command_keys variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
+prims/message.rs show variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prims/vars.rs defvaralias variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+protocol.rs submit eval_source_raw 1 boundary  # a protocol request: the result is printed right after
+protocol.rs submit invoke_prepared_raw 1 boundary  # ARGS become the engine's registers before it can collect
+reader.rs character_name reader_call 1 rooted  # the reader's partial forms live in external_roots
+reader.rs compile_source compile 1 held  # an open compiler builder holds collection
+reader.rs eval_source_forms cached_source_form 1 held  # an open compiler builder holds collection
+reader.rs eval_source_forms execute_raw 1 rooted  # the last value is a frame; the form's objects are rooted
+reader.rs eval_source_inner execute_raw 1 clean  # a cached submission, nothing held
+reader.rs eval_source_raw finish_request 1 collector  # the request's result is its root
+reader.rs get reader_call 1 rooted  # the stream and partial forms live in external_roots
+reader.rs request_source_ir compile_request 1 held  # an open compiler builder holds collection
+reader.rs request_source_ir finish_request 1 collector  # no Values outstanding
+reader.rs unget reader_call 1 rooted  # the stream and partial forms live in external_roots
+request_code.rs compile_request compile 1 held  # an open compiler builder holds collection
+request_code.rs eval_form_raw compile_request 1 held  # an open compiler builder holds collection
+request_code.rs eval_form_raw execute_raw 1 clean  # FORM's objects are rooted
+request_code.rs eval_form_raw finish_request 1 collector  # the request's result is its root
+request_code.rs finish_request collect 1 collector  # at a request boundary, when may_collect(0)
+source_cache.rs cached_source_form compile 1 held  # an open compiler builder holds collection
+source_cache.rs cached_source_form compile_request 1 held  # an open compiler builder holds collection
+source_cache.rs expand_macro autoload_do_load 1 clean  # ITEMS are forms; the macro is looked up again after the load
+source_cache.rs expand_macro call_macro_expander 1 clean  # FUNCTION and the literal arguments are the call's own, rooted by it
+source_cache/prepared.rs call_prepared execute_args 1 boundary  # ARGS become the engine's registers before it can collect
+source_cache/prepared.rs call_prepared finish_request 1 collector  # the request's result is its root
+source_cache/prepared.rs invoke_prepared_raw prepared_function 1 rooted  # ARGS are a frame across the refresh, read back for the call
+source_cache/prepared.rs prepare_source prepared_function 1 clean  # no caller Values
+source_cache/prepared.rs prepared_function cached_source_form 1 held  # an open compiler builder holds collection
+source_cache/prepared.rs prepared_function execute_raw 1 clean  # FORM's objects are rooted
+terminal_host.rs declare_terminal_errors eval_source_raw 1 boundary  # a world build or host setup declaring a constant error: no caller Values
+threaded.rs autoload_then autoload_do_load 1 suspended  # inside call_suspended
+threaded.rs autoload_then nested_then 1 suspended  # FUNCTION and FUNDEF are rooted by the load
+threaded.rs bind_special bind_variable 1 suspended  # inside watched_write; bind_variable roots the value across its watchers
+threaded.rs bind_special watched_write 1 rooted  # VALUE is a frame while watched, read back for the fault's data
+threaded.rs checked_unbind unbind_one 1 suspended  # inside watched_write
+threaded.rs checked_unbind watched_write 1 suspended  # the engine is suspended when any variable is watched
+threaded.rs cold_step bind_special 1 suspended  # the value is read from its register; nothing is reused after
+threaded.rs cold_step checked_unbind 1 suspended  # see checked_unbind
+threaded.rs cold_step set_variable_value 1 suspended  # inside watched_write; the value is read again from its register
+threaded.rs cold_step watched_write 1 suspended  # the engine is suspended when the variable is watched
+threaded.rs execute execute_args 1 clean  # no arguments
+threaded.rs execute_args_inner force_lazy 1 held  # an open compiler builder holds collection
+threaded.rs execute_args_inner poll_collect 1 collector  # the stress collection; the arguments are registers
+threaded.rs execute_args_inner unwind 1 held  # the engine still runs: its registers are untraced
+threaded.rs force_lazy call_suspended 1 suspended  # the caller's registers are rebased from the result
+threaded.rs force_lazy force_lazy 1 held  # an open compiler builder holds collection
+threaded.rs invoke_full autoload_then 1 suspended  # registers are rebased from the result
+threaded.rs invoke_full lambda_list_raise 1 rooted  # the walk's bindings and data are external roots, read back per binding
+threaded.rs invoke_full lambda_list_then 1 suspended  # registers are rebased from the result; the closure is fresh
+threaded.rs lambda_list_raise bind_special 1 rooted  # each parameter and argument is read from the external roots before its binding
+threaded.rs lambda_list_then eval_primitive 1 suspended  # inside nested_then; LIST is an argument read before any Lisp
+threaded.rs lambda_list_then nested_then 1 suspended  # registers are rebased from the result
+threaded.rs nested_then call_suspended 1 suspended  # the caller's registers are rebased from the result
+threaded.rs poll_collect collect 1 collector  # the engine is suspended first
+threaded.rs poll_resume poll_collect 1 collector  # when may_collect(1)
+threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
+threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended
+threaded.rs reader_call compile_request 1 held  # an open compiler builder holds collection
+threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are quoted objects; the caller's registers are set aside
+threaded.rs reentrant_load call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
+threaded.rs reentrant_load loader_primitive 1 suspended  # inside call_suspended
+threaded.rs resolve_entry force_lazy 1 suspended  # registers are rebased from the result
+threaded.rs resolve_head autoload_then 1 suspended  # registers are rebased from the result
+threaded.rs return_unbind checked_unbind 1 suspended  # the return value is read from its register after
+threaded.rs route_escape checked_unbind 2 suspended  # the exit and its control stay engine state across the restores
+threaded.rs signal_hook call_suspended 1 suspended  # CONDITION and DATA are the pending escape and quoted objects
+threaded.rs signal_hook compile 1 held  # an open compiler builder holds collection
+threaded.rs signal_hook execute_raw 1 clean  # inside call_suspended; nothing held
+threaded.rs t2_dispatch autoload_then 1 suspended  # registers are rebased from the result
+threaded.rs t2_dispatch lambda_list_raise 1 rooted  # the walk's bindings and data are external roots, read back per binding
+threaded.rs t2_dispatch lambda_list_then 1 suspended  # registers are rebased from the result; the closure is fresh
+threaded.rs t2_enter_closure force_lazy 1 suspended  # registers are rebased from the result
+threaded.rs take_step poll_collect 1 collector  # garbage-collect, when may_collect(1)
+threaded_signal.rs handler_callback reader_call 1 suspended  # the engine is suspended; OBJECT and FUNCTION are the call's own
+threaded_signal.rs prepare_signal signal_hook 1 suspended  # the condition stays the engine's pending escape
+threaded_signal.rs search handler_callback 1 suspended  # each step reads the escape and handler again
+variable_runtime.rs bind_variable bind_variable 1 clean  # a fenced variable's binding, again through the fence: VALUE is passed on and nothing is used after
+variable_runtime.rs bind_variable notify_watchers 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
+variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
+variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
+variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
+variable_runtime.rs variable_primitive notify_watchers_at 1 held  # a legacy primitive: its engine is not suspended
+variable_runtime.rs variable_primitive set_variable_value 1 held  # a legacy primitive: its engine is not suspended
+watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back
+watchers.rs notify_watchers notify_watchers_at 1 clean  # a tail call
+watchers.rs notify_watchers_at call_lisp_at_write 1 rooted  # the list, value and place are a frame, read back after each watcher
+watchers.rs safe_call reader_call 1 held  # called from leaves, whose engine is not suspended
+world/store.rs finish_build collect_garbage 1 collector  # a build's end: no engine runs, and the VM is all the image holds

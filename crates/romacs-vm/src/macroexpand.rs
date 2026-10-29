@@ -48,11 +48,15 @@ impl Vm {
             let form = self.expansion_form(function, 0)?;
             let form = Form::List(vec![Form::Sym("function".into()), form]);
             let entry = self.compile_request(&form)?.0;
+            // ARGS are rooted across making the closure and read back.
+            let frame = self.root_frame(args);
             self.propagate_next = true;
             let result = self.execute_raw(entry);
             self.release_request_entry(entry);
             self.propagate_next = false;
-            result?
+            let args: Vec<Value> = (0..args.len()).map(|i| self.rooted(&frame, i)).collect();
+            self.drop_frame(frame);
+            return self.reader_call(result?, &args);
         } else {
             function
         };
@@ -65,12 +69,7 @@ impl Vm {
             let count = Value::integer(args.len() as i64)?;
             return self.macroexpand_fault("wrong-number-of-arguments", &[name, count]);
         }
-        // The caller's reentrant engine inhibits collection, as does the
-        // compiler expansion path. Preserve this for direct native callers.
-        let threshold = std::mem::replace(&mut self.gc_threshold, usize::MAX);
-        let result = self.macroexpand_value(args[0], args.get(1).copied().unwrap_or(Value::NIL));
-        self.gc_threshold = threshold;
-        result
+        self.macroexpand_value(args[0], args.get(1).copied().unwrap_or(Value::NIL))
     }
 
     fn macro_symbol_slot(&self, symbol: Value) -> Option<usize> {
@@ -83,9 +82,19 @@ impl Vm {
         }
     }
 
-    fn macroexpand_value(&mut self, mut form: Value, environment: Value) -> Result<Value> {
+    /// FORM and ENVIRONMENT are rooted across each step, which can load an
+    /// autoload and call an expander; every use reads them back.
+    fn macroexpand_value(&mut self, form: Value, environment: Value) -> Result<Value> {
+        let frame = self.root_frame(&[form, environment]);
+        let result = self.macroexpand_steps(&frame);
+        self.drop_frame(frame);
+        result
+    }
+
+    fn macroexpand_steps(&mut self, frame: &crate::gc::RootFrame) -> Result<Value> {
         for _ in 0..4096 {
-            let Ok((mut definition, arguments)) = self.cons_pair(form) else {
+            let (form, environment) = (self.rooted(frame, 0), self.rooted(frame, 1));
+            let Ok((mut definition, _)) = self.cons_pair(form) else {
                 return Ok(form);
             };
             let mut symbol = definition;
@@ -126,6 +135,7 @@ impl Vm {
             } else {
                 let macro_symbol = self.intern("macro");
                 let loaded = self.autoload_do_load(definition, symbol, macro_symbol)?;
+                let form = self.rooted(frame, 0);
                 // autoload_do_load can install an alias to a native macro.
                 if let Some(slot) = self.macro_symbol_slot(symbol) {
                     let end = self.macro_alias_end(slot);
@@ -149,6 +159,8 @@ impl Vm {
                 }
             };
             // apply1 validates the argument spine only after a macro is found.
+            let form = self.rooted(frame, 0);
+            let arguments = self.cons_pair(form)?.1;
             let args = match self.list_values(arguments) {
                 Ok(args) => args,
                 Err(_) => {
@@ -157,10 +169,11 @@ impl Vm {
                 }
             };
             let newform = self.call_macro_expander(expander, &args)?;
+            let form = self.rooted(frame, 0);
             if newform == form {
                 return Ok(form);
             }
-            form = newform;
+            self.set_rooted(frame, 0, newform);
         }
         Err("macro expansion limit exceeded".into())
     }

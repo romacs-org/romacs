@@ -19,7 +19,7 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 22] = [
+        let checks: [(&str, bool); 27] = [
             ("stack", self.stack.is_empty()),
             ("dynamic", self.dynamic.is_empty()),
             ("eval_depth", self.eval_depth == 0),
@@ -42,6 +42,13 @@ impl Vm {
             ("regexp_cache", self.regexp_cache.is_empty()),
             ("idle_since", self.idle_since.is_none()),
             ("suspended_code", self.suspended_code.is_empty()),
+            // The collector's reentry state: no engine running or suspended,
+            // no frame holding Values out of its sight.
+            ("suspended_stacks", self.suspended_stacks.is_empty()),
+            ("running_engines", self.running_engines == 0),
+            ("gc_holds", self.gc_holds == 0),
+            ("rooted_write", !self.rooted_write),
+            ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
         ];
         if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
             return Err(format!("world capture refused: {field} is not at rest"));
@@ -79,6 +86,7 @@ impl Vm {
         self.rooted = crate::handle::RootSet::default();
         self.process_jobs = Default::default();
         self.subprocesses = Default::default();
+        self.gc_stress.rearm();
     }
 }
 
@@ -111,4 +119,23 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     crate::expand::raise_generated(fields.counters[0]);
     let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
     Some(*root)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Vm;
+
+    #[test]
+    fn the_collectors_reentry_state_is_at_rest_or_refused() {
+        let refusal = |change: fn(&mut Vm)| {
+            let mut vm = Vm::new();
+            assert_eq!(vm.world_quiescent(), Ok(()));
+            change(&mut vm);
+            vm.world_quiescent().unwrap_err()
+        };
+        assert!(refusal(|vm| vm.suspended_stacks.push(vec![])).contains("suspended_stacks"));
+        assert!(refusal(|vm| vm.running_engines = 1).contains("running_engines"));
+        assert!(refusal(|vm| vm.gc_holds = 1).contains("gc_holds"));
+        assert!(refusal(|vm| vm.rooted_write = true).contains("rooted_write"));
+    }
 }

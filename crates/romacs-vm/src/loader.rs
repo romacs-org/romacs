@@ -399,10 +399,12 @@ impl Vm {
         // Child compilations must not erase its nonconstant-macro guards.
         let saved_expanded_macros = std::mem::take(&mut self.expanded_macros);
         let saved_expanded_symbols = std::mem::take(&mut self.expanded_symbols);
+        // The last form's value is rooted across reading the next one, which
+        // can call Lisp (a `\N{NAME}' character).
+        let last = self.root_frame(&[Value::NIL]);
         let result = (|| {
             let mut at = 0;
             let mut ordinal = 0;
-            let mut result = Value::NIL;
             // The line of byte `counted`, kept as reading advances: counting
             // from the start for each form made a file's load quadratic.
             let (mut line, mut counted) = (1, 0);
@@ -440,7 +442,7 @@ impl Vm {
                 drop(site);
                 match evaluated {
                     Ok(v) => {
-                        result = v;
+                        self.set_rooted(&last, 0, v);
                         self.loader.completed_forms += 1;
                         self.loader.steps[step]["status"] = "ok".into();
                     }
@@ -460,8 +462,10 @@ impl Vm {
             }
             self.loader.completed_files += 1;
             self.build_load_history(history_slot)?;
-            Ok(result)
+            Ok(())
         })();
+        let [value] = self.release_frame(last);
+        let result = result.map(|()| value);
         self.lazy_regime = saved_regime;
         self.defer_expansion_errors = saved_defer;
         self.file_specials = saved_file_specials;
