@@ -26,6 +26,35 @@ impl FaceTable {
     }
 }
 
+/// What a window's rows depend on, besides the buffer it shows (a window
+/// that shows another buffer forgets its rows): its buffer's text and
+/// properties (MODIFF), narrowing, start, size, vertical scroll, the faces'
+/// fonts and the buffer's line layout variables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RowsKey {
+    modiff: u64,
+    accessible: (usize, usize),
+    start: usize,
+    size: (u32, u32, u32, u32),
+    vscroll: u32,
+    faces: u64,
+    tab_width: u32,
+    wrap: romacs_layout_input::LineWrap,
+}
+
+/// A window's text as a snapshot publishes it (`Vm::window_text`): byte
+/// offsets are into TEXT, which starts at buffer byte BASE.
+struct ShownText {
+    text: TextSlice,
+    start_byte: usize,
+    point_byte: usize,
+    faces: Vec<Face>,
+    base: usize,
+    table: std::rc::Rc<FaceTable>,
+    /// The merged face rows FACES gained, by `face' value.
+    merged: std::collections::HashMap<u64, FaceHandle>,
+}
+
 pub(super) struct DisplayState {
     theme: Theme,
     /// THEME's realized face table, until THEME changes.
@@ -46,6 +75,14 @@ pub(super) struct DisplayState {
     segments: std::collections::BTreeMap<u64, Vec<mini_window::Segment>>,
     /// Per window id, the buffer byte its last publication's text starts at.
     bases: std::collections::BTreeMap<u64, usize>,
+    /// Per window id, what its last publication's rows depend on and the
+    /// length of the text it published, until a paint reports the rows.
+    published_rows: std::collections::BTreeMap<u64, (RowsKey, usize)>,
+    /// Per window id, the buffer byte its fully visible rows end at (MAX:
+    /// through the end of its text), as painting that geometry reported.
+    rows: std::collections::BTreeMap<u64, (RowsKey, usize)>,
+    /// Advances when what fonts faces realize may change.
+    face_revision: u64,
     pub version: u64,
     /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
     pub(super) hosted: bool,
@@ -58,9 +95,16 @@ impl DisplayState {
     fn set_theme(&mut self, theme: Theme) {
         self.theme = theme;
         self.face_table = None;
+        self.face_revision += 1;
+    }
+    /// Forget window ID's rows: it shows another buffer.
+    pub(super) fn forget_rows(&mut self, id: u64) {
+        self.published_rows.remove(&id);
+        self.rows.remove(&id);
     }
     pub(super) fn set_font_alternative_families(&mut self, names: Vec<Vec<String>>) {
         self.font_alternatives.set_family_alist(names);
+        self.face_revision += 1;
         self.previous.clear();
         self.version = self.version.wrapping_add(1);
     }
@@ -71,6 +115,7 @@ impl DisplayState {
     }
     pub(super) fn set_font_selection_order(&mut self, order: [romacs_layout_input::FontSelectionAttribute; 4]) {
         if self.font_selection_order.set_order(order) {
+            self.face_revision += 1;
             self.previous.clear();
             self.version = self.version.wrapping_add(1);
         }
@@ -86,6 +131,7 @@ impl DisplayState {
         self.previous.remove(&id);
         self.segments.remove(&id);
         self.bases.remove(&id);
+        self.forget_rows(id);
     }
     /// How window ID's last publication maps display bytes to buffer bytes.
     pub(super) fn segments(&self, id: u64) -> Option<&[mini_window::Segment]> {
@@ -94,6 +140,14 @@ impl DisplayState {
     /// The buffer byte window ID's last publication starts at.
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
+    }
+    /// Window ID's last publication was painted and its fully visible rows
+    /// end at VISIBLE_END, an offset into its text.
+    pub(super) fn painted_rows(&mut self, id: u64, visible_end: usize) {
+        if let Some(&(key, len)) = self.published_rows.get(&id) {
+            let end = if visible_end > len { usize::MAX } else { self.base(id) + visible_end };
+            self.rows.insert(id, (key, end));
+        }
     }
     pub fn new() -> Self {
         let mut attrs = AttrsBuilder::default();
@@ -131,6 +185,9 @@ impl DisplayState {
             previous: std::collections::BTreeMap::new(),
             segments: std::collections::BTreeMap::new(),
             bases: std::collections::BTreeMap::new(),
+            published_rows: std::collections::BTreeMap::new(),
+            rows: std::collections::BTreeMap::new(),
+            face_revision: 0,
             theme: Theme::build(
                 Arc::new(defs),
                 None,
@@ -518,8 +575,129 @@ impl Vm {
         if !w.live() {
             return Err("window deleted during snapshot".into());
         }
-        let (id, buffer, start, mini, vscroll) = (w.id, w.buffer, w.start, w.mini, w.vscroll_px);
+        let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
+        let ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, mut faces, base, table, mut merged }
+            = self.window_text(window, height)?;
+        self.display_state.bases.insert(id, base);
+        // No version bump here: this runs once per WINDOW, and
+        // `display_state.width/height` is frame-wide, so each window's own
+        // dimensions looked like a frame resize and every `frame_snapshot`
+        // republished all windows as changed -- the same shared-state
+        // mistake as the formerly shared `previous` snapshot. A genuine
+        // resize is still caught, because width and height are fields of
+        // the snapshot and so are compared per window below.
+        self.display_state.width = width;
+        self.display_state.height = height;
+        // The mini-window shows its overlay strings (icomplete's candidates).
+        let (utf8, face_runs, start_byte, point_byte) = if mini {
+            let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
+            if spliced.has_strings() {
+                let mut strings = vec![];
+                for (bytes, value) in &spliced.string_faces {
+                    strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&table, &mut faces, &mut merged, *value) });
+                }
+                let runs = mini_window::display_face_runs(&face_runs, &spliced.segments, strings);
+                let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
+                self.display_state.segments.insert(id, spliced.segments);
+                (spliced.text, runs, start, point)
+            } else {
+                self.display_state.segments.remove(&id);
+                (utf8, face_runs, start_byte, point_byte)
+            }
+        } else {
+            (utf8, face_runs, start_byte, point_byte)
+        };
+        let rows_key = if mini { None } else { Some(self.rows_key(window)?) };
+        let mut snapshot = WindowSnapshot {
+            id,
+            width,
+            height,
+            start_byte,
+            point_byte,
+            buffer_version: self.display_state.version,
+            text: TextSlice { utf8, face_runs },
+            mode_line: mode_line.map(|band| {
+                TextSlice {
+                    face_runs: band.runs.into_iter()
+                        .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: table.handle(&face)? }))
+                        .collect(),
+                    utf8: band.text,
+                }
+            }),
+            mode_line_face: table.handle(&band_face).ok_or("mode-line face required")?,
+            vscroll_px: self.window(window)?.vscroll_px,
+            faces,
+            tab_width: self.buffer_tab_width(buffer)?,
+            wrap: self.window_line_wrap(window, buffer)?,
+        };
+        // The owned last publication also covers mutation paths with specialised
+        // fast dispatch (point moves, regexp, yank), without retaining GC handles.
+        // Keyed per window: one shared snapshot made each window compare
+        // against whichever window published last, so alternating between
+        // two unchanged windows repainted the frame every time.
+        if let Some(previous) = self.display_state.previous.get(&id) {
+            let mut comparable = previous.clone();
+            comparable.buffer_version = snapshot.buffer_version;
+            if comparable != snapshot {
+                self.display_state.version += 1;
+            }
+        } else {
+            // A window's first publication is itself a change.
+            self.display_state.version += 1;
+        }
+        snapshot.buffer_version = self.display_state.version;
+        match rows_key {
+            Some(key) => { self.display_state.published_rows.insert(id, (key, snapshot.text.utf8.len())); }
+            None => { self.display_state.published_rows.remove(&id); }
+        }
+        self.display_state.previous.insert(id, snapshot.clone());
+        Ok(snapshot)
+    }
+    /// What WINDOW's rows depend on now (`RowsKey`).
+    fn rows_key(&mut self, window: Value) -> Result<RowsKey> {
+        let w = self.window(window)?;
+        let (buffer, start, size, vscroll) = (w.buffer, w.start, (w.width, w.height, w.left_margin, w.right_margin), w.vscroll_px);
+        let start = self.marker_position_value(start)?.integer_value().unwrap_or(1) as usize;
+        let modiff = self.buffer_state(buffer)?.modiff;
+        let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+        let accessible = b.accessible();
+        Ok(RowsKey { modiff, accessible: (accessible.start.0, accessible.end.0), start, size, vscroll,
+            faces: self.display_state.face_revision, tab_width: self.buffer_tab_width(buffer)?,
+            wrap: self.window_line_wrap(window, buffer)? })
+    }
+    /// The buffer byte where WINDOW's fully visible rows end (MAX: through
+    /// the end of its buffer's accessible text), from its start, with the
+    /// mode line it last showed (GNU's CURRENT_MODE_LINE_HEIGHT): from the
+    /// last paint while what its rows depend on is unchanged, else from
+    /// laying it out as painting will. None before its first paint, or
+    /// with no layout host. Runs no Lisp.
+    pub(crate) fn visible_rows_end(&mut self, window: Value, width: u32, height: u32) -> Result<Option<usize>> {
+        let key = self.rows_key(window)?;
+        let id = self.window(window)?.id;
+        if let Some(&(known, end)) = self.display_state.rows.get(&id) && known == key { return Ok(Some(end)); }
+        let same_faces = self.display_state.rows.get(&id).is_some_and(|(known, _)| known.faces == key.faces);
+        let Some(shown) = self.display_state.previous.get(&id).filter(|_| same_faces && self.has_layout_host()) else { return Ok(None) };
+        let (mode_line, mode_line_face) = (shown.mode_line.clone(), shown.mode_line_face);
+        let ShownText { text, start_byte, point_byte, faces, base, .. } = self.window_text(window, height)?;
+        let len = text.utf8.len();
+        let snapshot = WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: 0, text, mode_line,
+            mode_line_face, vscroll_px: key.vscroll, faces, tab_width: key.tab_width, wrap: key.wrap };
+        let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
+            font_alternatives: self.font_alternative_state()?, width, height,
+            windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+        let visible_end = self.host_lay_out(&frame)?.first().ok_or("layout host laid out no window")?.visible_end;
+        let end = if visible_end > len { usize::MAX } else { base + visible_end };
+        self.display_state.rows.insert(id, (key, end));
+        Ok(Some(end))
+    }
+    /// The text WINDOW shows from its start, as a snapshot publishes it:
+    /// for any window but the mini-window, only the bytes the rows of a
+    /// window HEIGHT pixels tall can show, so that a frame costs what its
+    /// windows show rather than what their buffers hold. Runs no Lisp.
+    fn window_text(&mut self, window: Value, height: u32) -> Result<ShownText> {
+        let w = self.window(window)?;
+        let (buffer, start, mini, vscroll) = (w.buffer, w.start, w.mini, w.vscroll_px);
         let start = self
             .marker_position_value(start)?
             .integer_value()
@@ -612,75 +790,7 @@ impl Vm {
                 })
             }
         }
-        self.display_state.bases.insert(id, base);
-        // No version bump here: this runs once per WINDOW, and
-        // `display_state.width/height` is frame-wide, so each window's own
-        // dimensions looked like a frame resize and every `frame_snapshot`
-        // republished all windows as changed -- the same shared-state
-        // mistake as the formerly shared `previous` snapshot. A genuine
-        // resize is still caught, because width and height are fields of
-        // the snapshot and so are compared per window below.
-        self.display_state.width = width;
-        self.display_state.height = height;
-        // The mini-window shows its overlay strings (icomplete's candidates).
-        let (utf8, face_runs, start_byte, point_byte) = if mini {
-            let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
-            if spliced.has_strings() {
-                let mut strings = vec![];
-                for (bytes, value) in &spliced.string_faces {
-                    strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&table, &mut faces, &mut merged, *value) });
-                }
-                let runs = mini_window::display_face_runs(&face_runs, &spliced.segments, strings);
-                let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
-                self.display_state.segments.insert(id, spliced.segments);
-                (spliced.text, runs, start, point)
-            } else {
-                self.display_state.segments.remove(&id);
-                (utf8, face_runs, start_byte, point_byte)
-            }
-        } else {
-            (utf8, face_runs, start_byte, point_byte)
-        };
-        let mut snapshot = WindowSnapshot {
-            id,
-            width,
-            height,
-            start_byte,
-            point_byte,
-            buffer_version: self.display_state.version,
-            text: TextSlice { utf8, face_runs },
-            mode_line: mode_line.map(|band| {
-                TextSlice {
-                    face_runs: band.runs.into_iter()
-                        .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: table.handle(&face)? }))
-                        .collect(),
-                    utf8: band.text,
-                }
-            }),
-            mode_line_face: table.handle(&band_face).ok_or("mode-line face required")?,
-            vscroll_px: self.window(window)?.vscroll_px,
-            faces,
-            tab_width: self.buffer_tab_width(buffer)?,
-            wrap: self.window_line_wrap(window, buffer)?,
-        };
-        // The owned last publication also covers mutation paths with specialised
-        // fast dispatch (point moves, regexp, yank), without retaining GC handles.
-        // Keyed per window: one shared snapshot made each window compare
-        // against whichever window published last, so alternating between
-        // two unchanged windows repainted the frame every time.
-        if let Some(previous) = self.display_state.previous.get(&id) {
-            let mut comparable = previous.clone();
-            comparable.buffer_version = snapshot.buffer_version;
-            if comparable != snapshot {
-                self.display_state.version += 1;
-            }
-        } else {
-            // A window's first publication is itself a change.
-            self.display_state.version += 1;
-        }
-        snapshot.buffer_version = self.display_state.version;
-        self.display_state.previous.insert(id, snapshot.clone());
-        Ok(snapshot)
+        Ok(ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, faces, base, table, merged })
     }
     /// The row of FACES for a `face' property VALUE: a face symbol's own
     /// row, and for a list of faces or an attribute list a row merged as

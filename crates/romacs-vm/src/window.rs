@@ -380,7 +380,10 @@ impl Vm {
         }
         self.discard_buffer_from_window(buffer, v)?;
         let w = self.window_mut(v)?;
+        let id = w.id;
         w.buffer = buffer;
+        self.display_state.forget_rows(id);
+        let w = self.window_mut(v)?;
         w.end_distance = 0;
         w.end_valid = false;
         // GNU resets margins when KEEP-MARGINS is nil
@@ -931,10 +934,10 @@ impl Vm {
         }
         Ok(())
     }
-    pub fn display_apply_layout(&mut self, ends: &[(u64, usize)]) -> Result<()> {
+    pub fn display_apply_layout(&mut self, ends: &[crate::WindowEnd]) -> Result<()> {
         // Validate the complete journal before publishing any per-window end.
         let mut changes = vec![];
-        for &(id, end) in ends {
+        for &crate::WindowEnd { id, end, .. } in ends {
             let (index, w) = self
                 .objects
                 .iter()
@@ -956,6 +959,7 @@ impl Vm {
             changes.push((index, b.len_chars() - end_char));
         }
         self.display_state.hosted = true;
+        for end in ends { self.display_state.painted_rows(end.id, end.visible_end); }
         for (index, distance) in changes {
             let Object::Window(w) = &mut self.objects[index] else {
                 unreachable!()

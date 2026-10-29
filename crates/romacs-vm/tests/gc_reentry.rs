@@ -91,7 +91,7 @@ struct Keys(std::collections::VecDeque<HostEvent>);
 
 impl HostInput for Keys {
     fn input_pending(&mut self) -> bool { false }
-    fn redisplay(&mut self, _: HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+    fn redisplay(&mut self, _: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
     fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
         self.0.pop_front().ok_or_else(|| "host script exhausted".to_string())
     }

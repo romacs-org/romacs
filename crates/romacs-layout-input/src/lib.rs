@@ -129,6 +129,20 @@ pub struct WindowSnapshot {
     pub wrap: LineWrap,
 }
 
+/// What laying a window out established about the text it published, in
+/// byte offsets into that text: where its last displayed row ends (GNU's
+/// `window_end_pos') and how far its fully visible rows reach, which is
+/// where point can be without redisplay choosing another start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowEnd {
+    pub id: u64,
+    /// The byte after the last displayed character.
+    pub end: usize,
+    /// Every position before this byte is on a fully visible row: one past
+    /// the text's length when its end position is on one too.
+    pub visible_end: usize,
+}
+
 /// GNU's `it->line_wrap': `truncate-lines' (or a partial-width window
 /// under `truncate-partial-width-windows') truncates, `word-wrap'
 /// continues at word boundaries, else lines continue at the window edge.

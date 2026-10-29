@@ -14,6 +14,10 @@ impl romacs_vm::LayoutHost for Host {
         let mut engine = self.engine.try_borrow_mut().map_err(|_| "the layout engine is painting".to_owned())?;
         engine.measure(input)
     }
+    fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
+        let mut engine = self.engine.try_borrow_mut().map_err(|_| "the layout engine is painting".to_owned())?;
+        engine.layout_frame(frame, 1, None).map(|(_, ends)| ends)
+    }
 }
 
 #[cfg(test)]
@@ -189,6 +193,40 @@ mod tests {
         let line = h.eval("(frame-char-height)").parse::<i64>().unwrap();
         let tall = h.eval("(cdr (window-text-pixel-size nil 4 5))").parse::<i64>().unwrap();
         assert!(tall > line, "{tall} > {line}");
+    }
+
+    /// Redisplay keeps the window start exactly when point is on a row the
+    /// start shows whole, as the iterator measures it over the host's
+    /// layout (`pos-visible-in-window-p'), whether point moved or text
+    /// changed; every paint then shows the cursor on a whole row.
+    #[test]
+    fn the_start_stays_exactly_while_point_shows_on_a_whole_row() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
+          (let ((i 0))
+            (while (< i 50)
+              (insert (format "line %d " i) (make-string (* 13 (% i 5)) ?x)
+                      (if (= (% i 7) 3) (propertize "BIG" 'face 'hosted-big) "") "\n")
+              (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        let first = h.paint();
+        let band = first.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map(|g| g.2).unwrap();
+        let steps = ["(forward-char 1)", "(forward-char 1)", "(forward-line 1)", "(insert \"abc\")",
+                     "(insert \"\\n\")", "(delete-char -1)", "(insert (make-string 40 ?y))", "(backward-char 3)"];
+        let (mut kept, mut moved) = (0, 0);
+        for step in 0..400 {
+            let form = steps[step % steps.len()];
+            let start = h.eval(&format!("(progn (if (eobp) (goto-char 1) {form}) (window-start))"));
+            let visible = h.eval("(pos-visible-in-window-p (point) nil t)");
+            let whole = visible != "nil" && visible.split(' ').count() == 2;
+            let paint = h.paint();
+            let (_, y, _, height) = paint.cursor.expect("the selected window's cursor");
+            assert!(y >= 0.0 && y + height <= band, "step {step} {form}: cursor at {y}+{height} past the text area {band}");
+            let after = h.eval("(window-start)");
+            assert_eq!(after == start, whole, "step {step} {form}: start {start} -> {after}, point visible {visible}");
+            if whole { kept += 1 } else { moved += 1 }
+        }
+        assert!(kept > 300 && moved > 3, "kept {kept}, moved {moved}");
     }
 
     /// A window that starts on a continuation row: the host's glyphs and

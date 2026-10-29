@@ -24,8 +24,10 @@ fn frame_layout_consumes_real_vm_window_tree() {
         _ => None,
     }).collect();
     assert!(chars.iter().any(|(c, _, y, clip, _)| *c == 'L' && *y == upper as f32 && clip.is_some_and(|r| r.y == upper as f32)), "lower window must be offset/clipped: {chars:?}");
-    assert!(ends.contains(&(snapshot.windows[0].snapshot.id, 3)));
-    assert!(ends.contains(&(snapshot.windows[1].snapshot.id, 5)));
+    let end_of = |id| ends.iter().find(|end| end.id == id).map(|end| (end.end, end.visible_end));
+    // Each window shows its whole text, end position included.
+    assert_eq!(end_of(snapshot.windows[0].snapshot.id), Some((3, 4)));
+    assert_eq!(end_of(snapshot.windows[1].snapshot.id), Some((5, 6)));
     assert!(frame.faces.len() >= 3 * 2, "window faces must not collide");
     assert!(chars.iter().all(|(_,_,_,_,id)| frame.faces.contains_key(id)));
     vm.display_apply_layout(&ends).unwrap();
@@ -145,7 +147,7 @@ fn margins_consuming_the_body_still_render_the_frame() {
     assert_eq!(ends.len(), snapshot.windows.len(),
                "every window must still report a window-end");
     // An empty body displays nothing, so window-end equals window-start.
-    for (placed, (id, end)) in snapshot.windows.iter().zip(&ends) {
+    for (placed, romacs_layout_input::WindowEnd { id, end, .. }) in snapshot.windows.iter().zip(&ends) {
         assert_eq!(*id, placed.snapshot.id);
         if placed.snapshot.width == 0 {
             assert_eq!(*end, placed.snapshot.start_byte,
@@ -209,7 +211,7 @@ fn an_empty_body_positioned_outside_the_frame_still_renders() {
         .expect("an empty body outside the frame must not fail layout");
     assert_eq!((frame.width, frame.height), (width as f32, 300.0));
     assert_eq!(ends.len(), snapshot.windows.len());
-    for (placed, (id, end)) in snapshot.windows.iter().zip(&ends) {
+    for (placed, romacs_layout_input::WindowEnd { id, end, .. }) in snapshot.windows.iter().zip(&ends) {
         assert_eq!(*id, placed.snapshot.id);
         if placed.snapshot.width == 0 {
             assert_eq!(*end, placed.snapshot.start_byte,

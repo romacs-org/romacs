@@ -118,7 +118,7 @@ impl HostInput for GuiHost {
         shared.closed || !shared.pending.is_empty()
     }
 
-    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
+    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         let started = std::time::Instant::now();
         let wait = Duration::from_secs(30);
         let presentation = {

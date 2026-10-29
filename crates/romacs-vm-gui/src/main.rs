@@ -309,7 +309,7 @@ fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input
 /// reported, and the presentation that showed it.
 struct Shown {
     frame: Frame,
-    ends: Vec<(u64, usize)>,
+    ends: Vec<romacs_vm::WindowEnd>,
     presentation: u64,
 }
 
@@ -599,7 +599,7 @@ fn paint_prompt(
     sender: &PaintSender,
     presentation: u64,
     frame: &romacs_vm::HostFrame,
-) -> Result<(usize, Vec<(u64, usize)>), String> {
+) -> Result<(usize, Vec<romacs_vm::WindowEnd>), String> {
     let cursor = Some((frame.selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
     let (mut glyphs, ends) = engine.layout_frame(&frame.frame, presentation, cursor)?;
     let mut effects = romacs_display_protocol::EffectsConfig::default();

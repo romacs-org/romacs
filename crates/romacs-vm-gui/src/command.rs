@@ -68,7 +68,7 @@ mod tests {
     struct Keys(std::collections::VecDeque<CommandEvent>);
     impl romacs_vm::HostInput for Keys {
         fn input_pending(&mut self) -> bool { !self.0.is_empty() }
-        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
         fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
             self.0.pop_front().map(romacs_vm::HostEvent::Key).ok_or_else(|| "keys exhausted".into())
         }
@@ -80,7 +80,7 @@ mod tests {
     struct Scripted(std::collections::VecDeque<Option<CommandEvent>>);
     impl romacs_vm::HostInput for Scripted {
         fn input_pending(&mut self) -> bool { false }
-        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
         fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
             match self.0.pop_front().ok_or("keys exhausted")? {
                 Some(key) => Ok(romacs_vm::HostEvent::Key(key)),

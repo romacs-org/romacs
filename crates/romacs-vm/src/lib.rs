@@ -34,6 +34,7 @@ mod processors;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use layout_host::LayoutHost;
+pub use romacs_layout_input::WindowEnd;
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
 // Maps keyed by slots and ids the VM allocates use FxHash. Maps keyed by
 // names, which Lisp, files and the network supply, use foldhash with a random

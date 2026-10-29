@@ -10,7 +10,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, LineWrap, tab_advance};
+use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, LineWrap, WindowEnd, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -29,7 +29,7 @@ impl LayoutEngine {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())? })
     }
-    pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
+    pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
         layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)
     }
     /// The host layout hook: INPUT's geometry as painting would lay it out.
@@ -46,17 +46,17 @@ impl LayoutEngine {
 
 /// Stateless convenience for fixtures; interactive hosts retain a LayoutEngine.
 /// One publication for every VM-produced leaf. Commit ends only after paint.
-pub fn layout_frame(snapshot: &FrameSnapshot, presentation: u64) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
+pub fn layout_frame(snapshot: &FrameSnapshot, presentation: u64) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
     LayoutEngine::new()?.layout_frame(snapshot, presentation, None)
 }
 
 /// Publish point using the same shaped advances and row metrics as text.
 /// Selection and color are evaluator-owned policy; this pass owns geometry.
-pub fn layout_frame_with_cursors(snapshot: &FrameSnapshot, presentation: u64, selected: u64, cursor_color: Color) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
+pub fn layout_frame_with_cursors(snapshot: &FrameSnapshot, presentation: u64, selected: u64, cursor_color: Color) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
     LayoutEngine::new()?.layout_frame(snapshot, presentation, Some((selected, cursor_color)))
 }
 
-fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>, resolver: &mut FontResolver) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
+fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>, resolver: &mut FontResolver) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
     resolver.set_selection_state(snapshot.font_selection);
     resolver.set_alternative_state(snapshot.font_alternatives.clone());
     let first = snapshot.windows.first().ok_or("empty frame")?;
@@ -84,8 +84,8 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         }
         // Windows with a mode line always own a cursor; the minibuffer (no mode
         // line) only while it is the selected window, i.e. a prompt is active.
-        let end = append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id).map(|(id, color)| (id == placed.snapshot.id, color)))?;
-        ends.push((placed.snapshot.id, end));
+        let (end, visible_end) = append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id).map(|(id, color)| (id == placed.snapshot.id, color)))?;
+        ends.push(WindowEnd { id: placed.snapshot.id, end, visible_end });
     }
     Ok((frame, ends))
 }
@@ -131,7 +131,9 @@ pub fn layout(snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyph
     Ok(frame)
 }
 
-fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>) -> Result<usize, String> {
+/// Paint SNAPSHOT's window at OX, OY: the end of its last displayed row,
+/// and the end of its fully visible rows (`WindowEnd`).
+fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>) -> Result<(usize, usize), String> {
     let text = &snapshot.text.utf8;
     if snapshot.height == 0
         || snapshot.faces.is_empty()
@@ -157,7 +159,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // repaired to prevent. A window whose *total* geometry does not fit its
     // parent is still rejected, by layout_frame's placement check.
     if snapshot.width == 0 {
-        return Ok(snapshot.start_byte);
+        return Ok((snapshot.start_byte, snapshot.start_byte));
     }
     validate_runs(&snapshot.text, snapshot.faces.len())?;
     if let Some(band) = &snapshot.mode_line {
@@ -206,6 +208,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // on this row; past the truncation glyph, the rest of the line is hidden.
     let (mut continued, mut hpos, mut hidden) = (0.0f32, 0usize, false);
     let mut drawing = line_start == snapshot.start_byte;
+    // The first byte of the row being built, and the end of the rows
+    // above it that show whole: a row is fully visible when it lies
+    // within the text area (GNU's cursor_row_fully_visible_p).
+    let (mut row_start, mut visible_end) = (snapshot.start_byte, snapshot.start_byte);
+    let fully_visible = |y: f32, height: f32| y >= 0.0 && y + height <= body_height;
     for (byte, ch) in text[line_start..].char_indices().map(|(at, ch)| (line_start + at, ch)) {
         // The window start begins a row: at a line start, or where the row
         // before it breaks, which the character there decides below, so
@@ -221,6 +228,10 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let at_point = (drawing || starting) && byte == snapshot.point_byte;
         if at_point { point_rect = (!hidden).then_some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         if ch == '\n' {
+            if drawing {
+                if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte + 1; }
+                row_start = byte + 1;
+            }
             x = 0.0;
             y += row_height;
             row_height = metrics[0].1;
@@ -239,6 +250,10 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let mut advance_px = width(frame, x + continued);
         if !truncate && hpos > 0 && x + advance_px > last_x {
             if drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
+            if drawing {
+                if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
+                row_start = byte;
+            }
             // A TAB that does not fit continues from the text area's edge.
             continued += if matches!(shown, Shown::Tab) { last_x } else { x };
             (x, y, row_height, hpos) = (0.0, y + row_height, metrics[0].1, 0);
@@ -284,6 +299,10 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     }
     if snapshot.point_byte == text.len() && end_byte == text.len() {
         point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0));
+    }
+    // The last row holds the text's end position too, when layout reached it.
+    if end_byte == text.len() && visible_end == row_start && fully_visible(y, row_height) {
+        visible_end = text.len() + 1;
     }
     if let (Some((active, color)), Some((x, y, width, height, ascent))) = (cursor, point_rect) {
         // No cursor may bleed into the mode line or another window.
@@ -335,7 +354,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             x += advance;
         }
     }
-    Ok(end_byte)
+    Ok((end_byte, visible_end))
 }
 
 /// Draw CH at X, Y in face ID, whose ascent, height and nominal advance

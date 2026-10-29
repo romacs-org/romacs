@@ -36,7 +36,7 @@ struct Script {
 
 impl HostInput for Script {
     fn input_pending(&mut self) -> bool { self.pending }
-    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
+    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         let mut seen = self.seen.borrow_mut();
         let mini = frame.frame.windows.last().ok_or("frame without minibuffer")?;
         seen.mini.push(mini.snapshot.text.utf8.clone());
@@ -45,7 +45,7 @@ impl HostInput for Script {
             frame.frame.windows[0].snapshot.mode_line.as_ref().map(|m| m.utf8.clone()).unwrap_or_default(),
         );
         seen.widths.push(frame.frame.width);
-        Ok(self.first_end.map(|end| vec![(frame.frame.windows[0].snapshot.id, end)]).unwrap_or_default())
+        Ok(self.first_end.map(|end| vec![romacs_vm::WindowEnd { id: frame.frame.windows[0].snapshot.id, end, visible_end: 0 }]).unwrap_or_default())
     }
     fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
         self.seen.borrow_mut().reads += 1;

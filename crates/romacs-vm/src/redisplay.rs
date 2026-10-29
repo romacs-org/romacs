@@ -84,8 +84,17 @@ impl Vm {
         });
         let clamped = b.char_of_byte(coordinates::ByteOffset(start_byte))?.0 + 1;
         // Over a host's layout, which continues lines, rows are screen
-        // lines: the iterator chooses, unless it refuses the text.
+        // lines. Point on a fully visible row keeps the start, as the rows
+        // painting that start reports (GNU's try_cursor_movement and
+        // try_window): only a point outside them makes the iterator choose
+        // another start, unless it refuses the text.
         if !forced && self.display_state.hosted && self.has_layout_host() {
+            if self.point_on_visible_rows(window, start_byte, point_byte)? {
+                if clamped != start { self.set_marker_object(start_marker, Value::integer(clamped as i64)?, buffer)?; }
+                return Ok(());
+            }
+            let Object::Buffer(b) = self.object(buffer)? else { return Ok(()) };
+            let text = b.as_str();
             let point_line = text[begv..point_byte].rfind('\n').map_or(begv, |newline| begv + newline + 1);
             let distance = if point_byte < start_byte {
                 text.as_bytes()[point_line..start_byte].iter().filter(|&&c| c == b'\n').count()
@@ -193,6 +202,17 @@ impl Vm {
             None => b.char_of_byte(ByteOffset(rows_end(b.as_str(), from, rows, accessible.end.0)))?.0 + 1,
         };
         Ok((start < end).then_some((start, end)))
+    }
+
+    /// POINT_BYTE is on a fully visible row of WINDOW from START_BYTE,
+    /// which a vertically scrolled window, whose first row may be partly
+    /// hidden, never answers.
+    fn point_on_visible_rows(&mut self, window: Value, start_byte: usize, point_byte: usize) -> Result<bool> {
+        let w = self.window(window)?;
+        if w.vscroll_px != 0 { return Ok(false); }
+        let column = self.window_state.column;
+        let (width, height) = (w.width.saturating_sub((w.left_margin + w.right_margin) * column), w.height);
+        Ok(point_byte >= start_byte && self.visible_rows_end(window, width, height)?.is_some_and(|end| point_byte < end))
     }
 
     fn set_window_point_position(&mut self, window: Value, position: Value) -> Result<()> {

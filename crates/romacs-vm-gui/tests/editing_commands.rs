@@ -35,7 +35,7 @@ fn setup() -> Vm {
 struct Keys(VecDeque<HostEvent>);
 impl HostInput for Keys {
     fn input_pending(&mut self) -> bool { false }
-    fn redisplay(&mut self, _: HostFrame) -> Result<Vec<(u64, usize)>, String> {
+    fn redisplay(&mut self, _: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         Ok(vec![])
     }
     fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {

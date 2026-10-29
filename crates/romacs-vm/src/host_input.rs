@@ -45,7 +45,7 @@ pub trait HostInput {
     fn input_pending(&mut self) -> bool;
     /// Paint `frame`; return the layout's window ends to commit
     /// (`Vm::display_apply_layout').
-    fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<(u64, usize)>, String>;
+    fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String>;
     /// Block until the next event, or until TIMEOUT passes (`Timeout').
     fn next_event(&mut self, timeout: Option<std::time::Duration>) -> std::result::Result<HostEvent, String>;
 
@@ -184,7 +184,7 @@ mod tests {
     struct Keys(Vec<i64>);
     impl HostInput for Keys {
         fn input_pending(&mut self) -> bool { true }
-        fn redisplay(&mut self, _: HostFrame) -> std::result::Result<Vec<(u64, usize)>, String> { Ok(Vec::new()) }
+        fn redisplay(&mut self, _: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> { Ok(Vec::new()) }
         fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<HostEvent, String> {
             Ok(HostEvent::Key(CommandEvent::Character(self.0.remove(0))))
         }
