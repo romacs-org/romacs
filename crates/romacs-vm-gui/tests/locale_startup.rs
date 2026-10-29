@@ -37,3 +37,36 @@ fn locale_startup_matches_pinned_gnu() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A VM restored from a world takes the locale step again in its own
+/// process (`romacs-world-restart'), from the state the chain had before
+/// its first locale step: one built under en_US.UTF-8 and restored with
+/// LANG unset, C or C.UTF-8 answers as pinned GNU started under that LANG.
+#[test]
+fn a_replayed_locale_step_matches_pinned_gnu_started_there() {
+    let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let dir = std::env::temp_dir().join(format!("romacs-locale-replay-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let state = "(princ (list (terminal-coding-system) (keyboard-coding-system) locale-coding-system
+      current-language-environment current-iso639-language default-process-coding-system
+      (default-value 'buffer-file-coding-system) (car (coding-system-priority-list))
+      (and (char-displayable-p #x2026) t) (and (char-displayable-p #x3bb) t)))";
+    let run = |binary: &str, lang: Option<&str>, form: &str| {
+        let mut command = Command::new(binary);
+        command.args(["-Q", "--batch", "--eval", form]).current_dir(&dir)
+            .env("HOME", &dir).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LANG");
+        if let Some(lang) = lang { command.env("LANG", lang); }
+        let output = command.output().unwrap();
+        (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(),
+         String::from_utf8_lossy(&output.stderr).lines().last().unwrap_or_default().to_owned())
+    };
+    for lang in [None, Some("C"), Some("C.UTF-8")] {
+        let expected = run(&gnu, lang, state);
+        assert_eq!(expected.0, Some(0), "pinned GNU, LANG={lang:?}: {}", expected.2);
+        let setenv = lang.map_or("(setenv \"LANG\")".to_owned(), |lang| format!("(setenv \"LANG\" {lang:?})"));
+        let actual = run(romacs, Some("en_US.UTF-8"), &format!("(progn {setenv} (romacs-world-restart) {state})"));
+        assert_eq!((actual.0, &actual.1), (expected.0, &expected.1), "built under en_US.UTF-8, replayed with LANG={lang:?}: {}", actual.2);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

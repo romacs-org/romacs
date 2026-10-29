@@ -169,17 +169,65 @@
   (and (listp custom-delayed-init-variables) (reverse custom-delayed-init-variables))
   "The preloaded variables whose standard value depends on the runtime, in load order.
 These are `custom-delayed-init-variables' as the preloaded files left it.")
+;; The locale step changes the language and coding state the chain left; a
+;; later step, as a VM restored from a world takes in its own process,
+;; starts again from that state, as a fresh process starts from its dump's.
+(defconst romacs--locale-variables
+  '(current-language-environment current-locale-environment current-iso639-language
+    system-messages-locale system-time-locale woman-locale locale-coding-system
+    default-sendmail-coding-system default-process-coding-system
+    default-file-name-coding-system default-input-method buffer-file-coding-system)
+  "The variables `set-locale-environment' sets, directly or through
+`set-language-environment' and `prefer-coding-system'.")
+(defvar romacs--locale-defaults nil
+  "The language and coding state before this session's first locale step
+\(`romacs--locale-state'), which each later step starts from.")
+(defun romacs--locale-state ()
+  "What the locale step changes: each of `romacs--locale-variables' by its
+default value (a bare symbol when void), the display table, the coding
+system and charset priorities, and the terminal and keyboard coding
+systems."
+  (list (mapcar (lambda (variable)
+                  (if (default-boundp variable) (cons variable (default-value variable)) variable))
+                romacs--locale-variables)
+        (and standard-display-table (copy-sequence standard-display-table))
+        (coding-system-priority-list)
+        (charset-priority-list)
+        (terminal-coding-system)
+        (keyboard-coding-system)))
+(defun romacs--restore-locale-state (state)
+  "Give the language and coding state STATE (`romacs--locale-state') back.
+A language environment other than STATE's is left first, as
+`set-language-environment' leaves it."
+  (let ((variables (nth 0 state)))
+    (unless (equal current-language-environment
+                   (cdr (assq 'current-language-environment variables)))
+      (run-hooks 'exit-language-environment-hook)
+      (let ((func (get-language-info current-language-environment 'exit-function)))
+        (if (functionp func) (funcall func))))
+    (dolist (variable variables)
+      (if (consp variable)
+          (set-default (car variable) (cdr variable))
+        (makunbound variable)))
+    (setq standard-display-table (and (nth 1 state) (copy-sequence (nth 1 state))))
+    (apply #'set-coding-system-priority (nth 2 state))
+    (apply #'set-charset-priority (nth 3 state))
+    (set-terminal-coding-system-internal (nth 4 state))
+    (set-keyboard-coding-system-internal (nth 5 state))))
 ;; The per-process steps startup.el takes before the init file, in batch
 ;; and in an interactive session alike.
 (defun romacs--startup-environment ()
   "Take the per-process steps startup.el takes before the init file.
 `normal-top-level' (startup.el:639-668) sets Unix's end-of-line
 mnemonics, then the language environment and coding systems from this
-process's LANG and LC_* (`set-locale-environment'); `command-line'
-\(startup.el:1300) then begins initialization, in the directory the
-process started in."
+process's LANG and LC_* (`set-locale-environment'), from the state the
+chain left (`romacs--locale-defaults'); `command-line' \(startup.el:1300)
+then begins initialization, in the directory the process started in."
   (setq eol-mnemonic-dos "(DOS)"
         eol-mnemonic-mac "(Mac)")
+  (if romacs--locale-defaults
+      (romacs--restore-locale-state romacs--locale-defaults)
+    (setq romacs--locale-defaults (romacs--locale-state)))
   (set-locale-environment nil)
   (setq before-init-time (current-time) after-init-time nil
         command-line-default-directory default-directory))

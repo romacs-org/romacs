@@ -11,7 +11,10 @@ A restored launch takes the per-process startup steps a source boot takes:
 started in a subdirectory with a file argument from another, without -Q,
 its startup screen starts in the launch's directory, as GNU's
 fancy-startup-screen starts in `command-line-default-directory', the same
-as a source boot's.  Each launch must reach its first frame. The binary's own lines say which:
+as a source boot's.  So are its language and coding systems: with LANG
+unset, C or en_US.UTF-8 (which the world reads as keyed facts, so a
+changed one has it built again), a restored launch's are a source boot's
+and pinned GNU's (ROMACS_GNU_ORACLE, batch) under that LANG.  Each launch must reach its first frame. The binary's own lines say which:
 `romacs-world: {"mode": ...}`, `{"event": "preparing"...}`, `{"event":
 "pruned"...}`.
 
@@ -53,6 +56,42 @@ def store_state(store):
     if not store.exists():
         return {}
     return {p.name: p.stat().st_mtime_ns for p in store.iterdir() if p.is_file()}
+
+
+# The language and coding state startup.el's locale step leaves.
+LOCALE_STATE = """(list (terminal-coding-system) (keyboard-coding-system) locale-coding-system
+  current-language-environment current-iso639-language default-process-coding-system
+  (default-value 'buffer-file-coding-system) (car (coding-system-priority-list)))"""
+
+
+def check_locale(launch, home, output):
+    """Per LANG, a restored launch's locale state, a source boot's and
+    pinned GNU's in batch."""
+    gnu = os.environ.get('ROMACS_GNU_ORACLE')
+    if not gnu:
+        raise AssertionError('ROMACS_GNU_ORACLE names no pinned GNU')
+    results = []
+    for lang in (None, 'C', 'en_US.UTF-8'):
+        extra, drop = ({'LANG': lang}, ()) if lang else ({}, ('LANG',))
+        tag = lang or 'unset'
+        states = {}
+        for name, world in (('restored', {}), ('source', {'ROMACS_WORLD': 'off'})):
+            path = output / f'locale-{tag}-{name}.state'
+            (home / 'config/romacs/init.el').write_text(f"""(run-with-timer 0.5 nil
+  (lambda () (with-temp-file {json.dumps(str(path))} (prin1 {LOCALE_STATE} (current-buffer)))))
+""")
+            entry = launch(f'locale-{tag}-{name}', {**extra, **world}, arguments=(), state=path, drop=drop)
+            states[name] = path.read_text()
+            states[f'{name}_mode'] = (entry['world'] or {}).get('mode')
+        gnu_env = {k: v for k, v in {'HOME': str(home), 'PATH': os.environ.get('PATH', '/usr/bin:/bin'), **extra}.items()}
+        answer = subprocess.run([gnu, '-Q', '--batch', '--eval', f'(prin1 {LOCALE_STATE})'], env=gnu_env,
+                                capture_output=True, text=True, timeout=60)
+        states['gnu'] = answer.stdout
+        states['lang'] = lang
+        states['ok'] = (states['restored_mode'] == 'restored' and states['source_mode'] == 'source'
+                        and states['restored'] == states['source'] == states['gnu'])
+        results.append(states)
+    return results
 
 
 def main():
@@ -105,14 +144,15 @@ def main():
                 subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x800'],
                                env=env, check=True, timeout=15)
 
-                def launch(name, extra_env, arguments=('-Q',), cwd=work, state=None):
+                def launch(name, extra_env, arguments=('-Q',), cwd=work, state=None, drop=()):
                     """Run --loadup to its first frame, and to STATE when given: how
-                    it booted and how long that took."""
+                    it booted and how long that took.  DROP names variables
+                    the launch's environment lacks."""
                     log_path = output / f'{name}.stderr'
                     with log_path.open('w') as log:
                         started = time.monotonic()
                         process = subprocess.Popen([str(binary), '--loadup', '--trace-scene', *arguments],
-                                                   env={**env, **extra_env}, cwd=cwd,
+                                                   env={k: v for k, v in {**env, **extra_env}.items() if k not in drop}, cwd=cwd,
                                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log)
                         try:
                             if name == 'first':
@@ -200,6 +240,9 @@ def main():
                       (screen['world'] or {}).get('mode') == 'restored' and screen['state'] == expected
                       and report['launches'][-1]['state'] == expected,
                       {'expected': expected, 'launches': report['launches'][-2:]})
+                locale = check_locale(launch, home, output)
+                check('a restored launch takes its own locale, as a source boot and pinned GNU do there',
+                      all(r['ok'] for r in locale), locale)
         report['status'] = 'PASS' if not report['failures'] else 'FAIL'
     except Exception as error:  # noqa: BLE001 - the report carries it
         report['error'] = repr(error)
