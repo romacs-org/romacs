@@ -7,6 +7,7 @@ use crate::user_db::{self, Account};
 /// getenv: the launch environment, which Lisp's setenv does not change.
 fn launch_env(vm: &mut Vm, name: &str) -> Option<Vec<u8>> {
     let slot = vm.slot("initial-environment");
+    crate::host::lisp_env(crate::host::EnvList::Initial, name.as_bytes());
     let mut tail = vm.variable_value(slot).ok()?;
     let prefix = format!("{name}=");
     while let Ok((entry, rest)) = vm.cons_pair(tail) {

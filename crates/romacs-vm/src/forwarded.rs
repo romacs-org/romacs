@@ -757,7 +757,7 @@ pub(crate) enum VisitedModtime {
 
 pub(crate) fn file_identity(path: &str) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
-    let metadata = std::fs::metadata(path).ok()?;
+    let metadata = crate::host::metadata(path).ok()?;
     Some((metadata.dev(), metadata.ino()))
 }
 
@@ -882,7 +882,7 @@ impl Vm {
             Init::Str(text) => self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii()),
             Init::Float(x) => self.allocate_object(data::Object::Float(x)),
             Init::Getenv(name, fallback) => {
-                let text = std::env::var(name).unwrap_or_else(|_| fallback.to_owned());
+                let text = crate::host::getenv(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::SystemName => prim::prims::sysname::initial_value(self),
@@ -900,13 +900,13 @@ impl Vm {
                 self.list_value(&values)
             }
             Init::RuntimeFile(name, slash) => {
-                let root = std::env::var_os("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
+                let root = crate::host::getenv("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
                     .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
                 let text = format!("{}{}", root.join(name).display(), if slash { "/" } else { "" });
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::Invocation(name) => {
-                let exe = std::env::current_exe().unwrap_or_default();
+                let exe = crate::host::current_exe().unwrap_or_default();
                 let text = if name {
                     exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
                 } else {
@@ -1110,7 +1110,7 @@ impl Vm {
             let identity = self.eval_buffer_name(value).ok().flatten()
                 .and_then(|path| file_identity(&path));
             let truename = self.eval_buffer_name(value).ok().flatten().map(|path| {
-                std::fs::canonicalize(&path).ok().and_then(|p| p.to_str().map(str::to_owned)).unwrap_or(path)
+                crate::host::canonicalize(&path).ok().and_then(|p| p.to_str().map(str::to_owned)).unwrap_or(path)
             });
             let locals = self.per_buffer_mut(buffer).expect("live buffer");
             locals.2 = identity;

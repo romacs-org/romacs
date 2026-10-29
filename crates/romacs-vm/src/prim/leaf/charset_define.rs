@@ -27,14 +27,14 @@ impl Leaf<'_> {
             let default = self.variable_value(default_symbol)?.unwrap_or(Value::NIL);
             let base = if matches!(self.kind(default), Kind::String | Kind::Bytes) {
                 std::path::PathBuf::from(std::ffi::OsString::from_vec(self.string_view(default)?.bytes().to_vec()))
-            } else { std::env::current_dir().map_err(|e| Fault::Error(e.to_string()))? };
+            } else { crate::host::current_dir().map_err(|e| Fault::Error(e.to_string()))? };
             for directory in directories {
                 let directory = if directory.is_absolute() { directory } else { base.join(directory) };
                 for suffix in [".map", ".txt"] {
                     let mut suffixed = filename.clone();
                     suffixed.push(suffix);
                     let path = directory.join(suffixed);
-                    match std::fs::read(path) {
+                    match crate::host::read_file(path) {
                         Ok(bytes) => return Ok(crate::charset::map::read_entries(&bytes, min, max)),
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
                         Err(error) => return Err(Fault::Error(format!("Loading charset map: {error}"))),

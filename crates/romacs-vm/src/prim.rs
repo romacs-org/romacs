@@ -204,11 +204,11 @@ mod leaf {
         }
         /// The bytes of a DOC file, read once per path and modification time.
         pub(crate) fn doc_file_bytes(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<Vec<u8>>> {
-            let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+            let modified = crate::host::metadata(path).and_then(|m| m.modified()).ok()?;
             if let Some((cached, at, bytes)) = &self.vm.doc_file && cached == path && *at == modified {
                 return Some(bytes.clone());
             }
-            let bytes = std::sync::Arc::new(std::fs::read(path).ok()?);
+            let bytes = std::sync::Arc::new(crate::host::read_file(path).ok()?);
             self.vm.doc_file = Some((path.to_path_buf(), modified, bytes.clone()));
             Some(bytes)
         }

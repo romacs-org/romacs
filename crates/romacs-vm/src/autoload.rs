@@ -195,7 +195,7 @@ impl Vm {
             return Err("load mustsuffix requires a source suffix".into());
         }
         self.load_file_raw(&path)?;
-        Ok(std::fs::canonicalize(&path).unwrap_or(path))
+        Ok(crate::host::canonicalize(&path).unwrap_or(path))
     }
     /// GNU `un_autoload`: undo the current level's records, newest first.
     fn un_autoload(&mut self, queue: usize) {

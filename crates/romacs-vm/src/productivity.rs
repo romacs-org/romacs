@@ -29,7 +29,7 @@ impl Vm {
                     .ok_or_else(|| "not-unicode-string".into())
             })
             .collect::<Result<Vec<_>>>()?;
-        let output = std::process::Command::new(&args[0])
+        let output = crate::host::command(&args[0])
             .args(&args[1..])
             .stdin(std::process::Stdio::null())
             .output()

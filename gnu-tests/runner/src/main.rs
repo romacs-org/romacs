@@ -307,7 +307,7 @@ fn main() {
             std::process::exit(3);
         }
     }
-    let plan: Json = std::fs::read_to_string(&args.plan)
+    let plan: Json = romacs_vm::host::read_to_string(&args.plan)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_else(|| {

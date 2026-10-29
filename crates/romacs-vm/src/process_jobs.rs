@@ -122,11 +122,11 @@ impl Jobs {
         for job in self.jobs.values() {
             job.cancel.store(true, Ordering::Release);
         }
-        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let deadline = crate::host::monotonic() + Duration::from_secs(1);
         loop {
             self.workers.retain(|worker| !worker.is_finished());
             if self.workers.is_empty() { return Ok(()); }
-            if std::time::Instant::now() >= deadline {
+            if crate::host::monotonic() >= deadline {
                 return Err("CLI job cleanup did not settle within one second".into());
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -173,8 +173,6 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
     use std::io::{Read, Write};
     use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
-    use std::time::Instant;
 
     fn nonblocking(fd: i32) -> std::io::Result<()> {
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -213,13 +211,13 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
         output.error = Some("CLI job cancelled".into());
         return output;
     }
-    let started = Instant::now();
-    let child = Command::new(&request.argv[0])
+    let started = crate::host::monotonic();
+    let child = crate::host::command(&request.argv[0])
         .args(&request.argv[1..])
         .current_dir(&request.directory)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .process_group(0)
         .spawn();
     let mut child = match child {
@@ -245,7 +243,7 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
             output.error = Some("CLI job cancelled".into());
             break;
         }
-        if started.elapsed() >= request.timeout {
+        if crate::host::monotonic().saturating_duration_since(started) >= request.timeout {
             output.error = Some("CLI job timed out".into());
             break;
         }
@@ -294,10 +292,8 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
         std::thread::sleep(Duration::from_millis(5));
     }
     // Keep the leader unreaped until its group is killed, pinning the numeric PID.
-    unsafe {
-        libc::kill(-pid, libc::SIGKILL);
-        libc::kill(pid, libc::SIGKILL);
-    }
+    let _ = crate::host::kill(-pid, libc::SIGKILL);
+    let _ = crate::host::kill(pid, libc::SIGKILL);
     stdin.take();
     match child.wait() {
         Ok(status) => output.status = status.code(),

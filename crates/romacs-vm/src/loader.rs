@@ -137,7 +137,7 @@ impl Vm {
                 vec![PathBuf::from(format!("{}.el", base.display())), base]
             };
             for p in candidates {
-                if p.is_file() {
+                if crate::host::probe(crate::host::Probe::IsFile, &p) {
                     return Ok(Some(p));
                 }
             }
@@ -325,7 +325,7 @@ impl Vm {
         // `load-file-name', its `load-history' entry and the after-load
         // argument. The canonical path detects recursion and reads.
         let named = expanded_path(path)?;
-        let path = std::fs::canonicalize(&named)
+        let path = crate::host::canonicalize(&named)
             .map_err(|e| format!("file missing: {}: {e}", path.display()))?;
         if self.loader.active.len() >= 128 {
             return Err(format!("recursive source load: {}", path.display()));
@@ -344,7 +344,7 @@ impl Vm {
             return Err(format!("Recursive load: {}", path.display()));
         }
         let bytes =
-            std::fs::read(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;
+            crate::host::read_file(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;
         let source = decode_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         // Each public variable binds as a `let' does, in pinned GNU's order:
         // Fload's lread--unescaped-character-literals, then
@@ -529,7 +529,7 @@ impl Vm {
 /// An absolute file name with `.' and `..' resolved lexically, as
 /// expand-file-name would leave openp's result.
 fn expanded_path(path: &Path) -> Result<String> {
-    let absolute = std::path::absolute(path).map_err(|e| format!("file missing: {}: {e}", path.display()))?;
+    let absolute = crate::host::absolute(path).map_err(|e| format!("file missing: {}: {e}", path.display()))?;
     let mut parts: Vec<std::path::Component> = vec![];
     for part in absolute.components() {
         match part {
