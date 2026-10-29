@@ -154,8 +154,13 @@ struct ShownKey {
     buffer: Value,
     selected: Value,
     modiff: u64,
+    /// The accessible region (GNU's clip_changed): narrowing edits nothing.
+    accessible: (usize, usize),
     start: i64,
     mark: Value,
+    /// A terminal's session and output revision: its colors restyle the
+    /// buffer's faces with no modification of its own.
+    terminal: Option<(u64, Option<u64>)>,
     geometry: (u32, u32, u32, i64, u32),
     root: (u32, u32),
     metrics: (u32, u32),
@@ -720,10 +725,16 @@ impl Vm {
         let root = self.window(root).map_or((0, 0), |r| (r.x, r.width));
         let start = self.marker_position_value(start)?.integer_value().unwrap_or(1);
         let modiff = self.buffer_state(buffer)?.modiff;
+        let accessible = match self.object(buffer)? {
+            Object::Buffer(b) => { let region = b.accessible(); (region.start.0, region.end.0) }
+            _ => (0, 0),
+        };
         let mark = match self.buffer_mark_value(buffer) {
             Some(marker) => self.marker_position_value(marker)?,
             None => Value::NIL,
         };
+        let terminal = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer)
+            .map(|binding| (binding.session, binding.revision));
         let saved = self.slots[self.buffer_slot].value;
         self.slots[self.buffer_slot].value = buffer;
         let variables = DISPLAY_VARIABLES.iter().map(|name| {
@@ -738,8 +749,10 @@ impl Vm {
             buffer,
             selected: self.selected_window_value()?,
             modiff,
+            accessible,
             start,
             mark,
+            terminal,
             geometry: (x, width, height, hscroll, vscroll),
             root,
             metrics: (self.window_state.line, self.window_state.column),

@@ -746,6 +746,12 @@ fn unchanged_windows_redisplay_only_their_cursor_and_mode_line() {
     snapshot(&mut vm);
     assert!(counts(&mut vm).0 > walks, "an overlay change walks the text");
     let (walks, _) = counts(&mut vm);
+    run(&mut vm, "(narrow-to-region 1 20)");
+    snapshot(&mut vm);
+    assert!(counts(&mut vm).0 > walks, "narrowing walks the text");
+    run(&mut vm, "(widen)");
+    snapshot(&mut vm);
+    let (walks, _) = counts(&mut vm);
     snapshot(&mut vm);
     assert_eq!(counts(&mut vm).0, walks, "and then nothing changed");
 }
