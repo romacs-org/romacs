@@ -23,6 +23,7 @@
 //! runs every variable is wrapped so, to observe its reads. No path of an
 //! unfenced variable changes. Calls are observed through the backtrace's
 //! token counter (`Backtrace::observe`).
+pub mod arena;
 pub mod sandbox;
 
 use crate::data::Object;
