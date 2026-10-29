@@ -10,6 +10,9 @@ pub(super) struct RequestCode {
     free_caches: Vec<usize>,
     compiling: bool,
     compiled: Vec<usize>,
+    /// Request functions installed since the last collection that only a
+    /// collection can retire: an entry released when its request returns
+    /// (`release_request_entry') is not one.
     pub(super) since_collection: usize,
     /// Cache slots a builder took that no installed function's code owns
     /// yet: at a collection, where no builder is open, those of a failed or
@@ -228,6 +231,7 @@ impl Vm {
         f.capture_mutations = Vec::new();
         self.request_code.live[id] = false;
         self.request_code.free.push(id);
+        self.request_code.since_collection = self.request_code.since_collection.saturating_sub(1);
         for program in self.programs_mut() {
             program.release_entry(id);
         }
@@ -381,6 +385,8 @@ mod tests {
     #[test]
     fn repeated_mode_line_eval_forms_compile_once() {
         let mut vm = Vm::new();
+        // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+        vm.set_gc_stress(0);
         vm.set_frame_geometry(80, 25, 1, 1).unwrap();
         vm.eval_source_raw("(defmacro ml-probe () \"one\") (setq ml-format '(:eval (concat (ml-probe) \"!\")))").unwrap();
         let shown = |vm: &mut Vm| {
@@ -410,6 +416,35 @@ mod tests {
             assert_eq!(vm.call_prepared_source_raw(call, &args(n)).unwrap().as_integer().unwrap(), n + 2);
         }
         assert_eq!((vm.functions.len(), vm.request_code.since_collection), (functions, requests), "a call compiled code");
+    }
+    /// The first call prepares its lambda, which runs Lisp; a moving
+    /// collection there must not leave the caller's arguments stale.
+    #[test]
+    fn a_first_prepared_call_keeps_its_arguments_across_collection() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defun prepared-pair (a b) (list (car a) (aref b 0)))").unwrap();
+        // Garbage below the arguments, so a collection moves them.
+        vm.eval_source_raw("(dotimes (_ 100) (list 1 2) (make-vector 2 0))").unwrap();
+        let pair = vm.eval_source_raw("(cons (list 'first (make-string 3 ?a)) (vector 'second))").unwrap();
+        let (a, b) = vm.cons_pair(pair).unwrap();
+        vm.set_gc_stress(1);
+        let before = vm.heap_stats().collections;
+        let value = vm.call_prepared_source_raw("(lambda (a b) (prepared-pair a b))", &[a, b]).unwrap();
+        assert!(vm.heap_stats().collections > before, "the preparation collected");
+        assert_eq!(vm.display(value).unwrap(), "(first second)");
+    }
+    /// Entries released as their requests return need no collection: they
+    /// do not count toward the one the 1024th retirable function forces.
+    #[test]
+    fn released_request_entries_do_not_force_collections() {
+        let mut vm = Vm::new();
+        // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+        vm.set_gc_stress(0);
+        vm.eval_source_raw("(defun released-probe (n) (eval (list '+ n 1)))").unwrap();
+        let before = vm.heap_stats().collections;
+        vm.eval_source_raw("(dotimes (i 5000) (released-probe i))").unwrap();
+        assert_eq!(vm.heap_stats().collections, before, "5000 released eval entries forced a collection");
+        assert!(vm.request_code.since_collection < 16, "{} retirable functions counted", vm.request_code.since_collection);
     }
     /// A compilation that fails after its builder took a cache slot (for
     /// `(foo)') installs no function to own it; collections reclaim it.
@@ -520,13 +555,17 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
-    fn short_distinct_requests_collect_and_reuse_code_slots() {
+    fn short_distinct_requests_reuse_code_slots_without_collecting() {
         let mut vm = Vm::new();
+        // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+        vm.set_gc_stress(0);
         for n in 0..100_000 {
             let form = Form::List(vec![Form::Sym("+".into()), Form::Int(n), Form::Int(2)]);
             assert_eq!(vm.eval_form_raw(&form).unwrap().as_integer().unwrap(), n + 2);
         }
-        assert!(vm.heap_stats().collections >= 97);
+        // Each entry is released as its request returns: its slot is reused
+        // at once, with nothing left for a collection to retire.
+        assert_eq!(vm.heap_stats().collections, 0);
         assert!(vm.functions.len() <= 1024, "function high-water slots grow");
         assert!(vm.caches.len() <= 1024, "IR caches grow");
         vm.collect(&mut []);
