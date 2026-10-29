@@ -52,7 +52,7 @@ impl Vm {
             result = if prim::native_watcher(self, watcher).is_some() {
                 prim::call_native_watcher(self, watcher, &args)
             } else {
-                self.call_lisp_watcher(watcher, &args)
+                self.call_lisp_at_write(watcher, &args)
             };
             if result.is_err() { break; }
             let rest = self.cons_pair(self.rooted(&frame, 0)).map_or(Value::NIL, |(_, rest)| rest);
@@ -70,12 +70,12 @@ impl Vm {
         if self.variable_binding_slot(base, false)? != base { return Ok(true); }
         Ok(self.local_table(base)?.is_some() && !self.slots[base].explicit_local)
     }
-    /// calln (WATCHER, ARGS...) at a write point; the engine grows its code
-    /// cache for functions the watcher compiled (`lower_function'). A
-    /// non-local exit is left in `propagated_escape' for the writer; an
-    /// escape already pending there survives a watcher that returns, rooted
-    /// across it.
-    fn call_lisp_watcher(&mut self, watcher: Value, args: &[Value]) -> Result<()> {
+    /// calln (FUNCTION, ARGS...) at a write point (a variable watcher, a
+    /// `defalias-fset-function'); the engine grows its code cache for
+    /// functions FUNCTION compiled (`lower_function'). A non-local exit is
+    /// left in `propagated_escape' for the writer; an escape already pending
+    /// there survives a FUNCTION that returns, rooted across it.
+    pub(crate) fn call_lisp_at_write(&mut self, watcher: Value, args: &[Value]) -> Result<()> {
         let mut pending = self.propagated_escape.take();
         let hooked = std::mem::take(&mut self.propagated_escape_hooked);
         let depth = self.propagated_eval_depth.take();
@@ -92,5 +92,15 @@ impl Vm {
             self.propagated_eval_depth = depth;
         }
         result.map(|_| ())
+    }
+    /// xdisp.c safe_calln: FUNCTION's value, or nil when it exits
+    /// non-locally (the exit is dropped; an escape already pending
+    /// survives). Called where `call_lisp_at_write' may be; its callers are
+    /// leaves, whose unsuspended engine holds collection.
+    pub(crate) fn safe_call(&mut self, function: Value, args: &[Value]) -> Value {
+        let pending = (self.propagated_escape.take(), std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
+        let result = self.reader_call(function, args);
+        (self.propagated_escape, self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
+        result.unwrap_or(Value::NIL)
     }
 }

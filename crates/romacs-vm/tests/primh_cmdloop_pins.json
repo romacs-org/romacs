@@ -47,14 +47,8 @@
     "expected": "(sig (wrong-type-argument commandp #[0 \"\\300\\207\" [1] 1]))",
     "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda () 1))) (error (list 'sig e))))"
   },
-  "call-interactively/0439": {
-    "accepted": "(sig (void-function (lambda (&rest a) (interactive \"p\") a)))",
-    "class": "MISSING",
-    "expected": "(ok (1))",
-    "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively '(lambda (&rest a) (interactive \"p\") a))) (error (list 'sig e))))"
-  },
   "call-interactively/0440": {
-    "accepted": "(sig (void-function (lambda (&rest a) \"doc\" (ignore) (interactive (list 1 2)) a)))",
+    "accepted": "(sig (void-function ignore))",
     "class": "MISSING",
     "expected": "(ok (1 2))",
     "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively '(lambda (&rest a) \"doc\" (ignore) (interactive (list 1 2)) a))) (error (list 'sig e))))"
@@ -275,12 +269,6 @@
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (funcall-interactively a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
-  "funcall-interactively/0507": {
-    "accepted": "(sig (void-function (lambda (a) (list 'lam a))))",
-    "class": "MISSING",
-    "expected": "(ok (lam 1))",
-    "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively '(lambda (a) (list 'lam a)) 1)) (error (list 'sig e))))"
-  },
   "funcall-interactively/0508": {
     "accepted": "(sig (void-function called-interactively-p))",
     "class": "MISSING",
@@ -292,12 +280,6 @@
     "class": "PRINTER",
     "expected": "(ok (1 2 1 2 . #2))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))"
-  },
-  "interactive-form/0110": {
-    "accepted": "(sig (error \"defalias: a list function descriptor such as (lambda ...) is not supported in VM2 yet\"))",
-    "class": "SIGNAL-VS-VALUE",
-    "expected": "(ok (interactive \"P\"))",
-    "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-j '(lambda (x) (interactive \"P\") x)) (interactive-form 'cl-j))) (error (list 'sig e))))"
   },
   "interactive-form/0123": {
     "accepted": "(sig (void-function advice-add))",
@@ -562,24 +544,6 @@
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
-  },
-  "run-hook-with-args/0518": {
-    "accepted": "(ok ((err (void-function (lambda (x) (set 'cl-log (cons (list 'lam x) (symbol-value 'cl-log)))))) nil))",
-    "class": "VALUE",
-    "expected": "(ok (nil ((lam 1))))",
-    "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list '(lambda (x) (set 'cl-log (cons (list 'lam x) (symbol-value 'cl-log)))))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))"
-  },
-  "run-hook-with-args/0519": {
-    "accepted": "(ok ((err (void-function (lambda (x) (set 'cl-log (cons (list 'lam x) (symbol-value 'cl-log)))))) nil))",
-    "class": "VALUE",
-    "expected": "(ok (nil ((lam 1))))",
-    "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h '(lambda (x) (set 'cl-log (cons (list 'lam x) (symbol-value 'cl-log))))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))"
-  },
-  "run-hook-with-args/0529": {
-    "accepted": "(ok ((err (void-function (lambda (&rest a) (set 'cl-log (cons (cons 'lam a) (symbol-value 'cl-log)))))) nil))",
-    "class": "VALUE",
-    "expected": "(ok (nil ((lam arg 2) (arg 2))))",
-    "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h '(lambda (&rest a) (set 'cl-log (cons (cons 'lam a) (symbol-value 'cl-log))))) (make-local-variable 'cl-h) (set 'cl-h (list t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0552": {
     "accepted": "VM-ERROR circular list printing requires print-circle",

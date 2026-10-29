@@ -16,5 +16,5 @@
   "(eq (last-nonminibuffer-frame) (selected-frame))",
   "(eq (funcall #'last-nonminibuffer-frame) (selected-frame))"
  ],
- "rust": "src/prims/frame.rs:12"
+ "rust": "src/prims/frame.rs:64"
 }

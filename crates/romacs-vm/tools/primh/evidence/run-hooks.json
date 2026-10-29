@@ -818,12 +818,6 @@
  "pinned": {
   "run-hooks/0018": "PRINTER",
   "run-hooks/0026": "PRINTER",
-  "run-hooks/0041": "VALUE",
-  "run-hooks/0042": "VALUE",
-  "run-hooks/0048": "VALUE",
-  "run-hooks/0049": "VALUE",
-  "run-hooks/0072": "VALUE",
-  "run-hooks/0080": "VALUE",
   "run-hooks/0118": "PRINTER"
  }
 }
