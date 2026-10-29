@@ -1330,25 +1330,27 @@ mod leaf {
         }
         pub fn resolve_obarray(&mut self, value: Value) -> super::Out { self.vm.resolve_obarray(value) }
         pub fn intern_in(&mut self, table: Value, name: Value) -> super::Out { self.vm.obarray_intern(table, name) }
+        /// The Lisp name NAME looks a symbol up by: a string itself, or a
+        /// symbol's `symbol-name' (decoded from its key, symkey.rs).
+        fn lookup_name(&mut self, name: Value) -> std::result::Result<Value, Fault> {
+            if self.kind(name) == Kind::Symbol { self.symbol_name_value(name) }
+            else if self.vm.str_view(name).is_some() { Ok(name) }
+            else { Err(Fault::Wrong("stringp", name)) }
+        }
         pub fn lookup_in(&mut self, table: Value, name: Value) -> super::Out {
             let symbol = self.kind(name) == Kind::Symbol;
-            let text;
-            let (bytes, chars) = if symbol {
-                text = self.symbol_name(name)?;
-                (text.as_bytes(), text.chars().count())
-            } else {
-                let view = self.vm.str_view(name).ok_or(Fault::Wrong("stringp", name))?;
-                (view.bytes, view.chars)
-            };
-            let found = self.vm.obarray_lookup_value(table, bytes, chars);
+            let text = self.lookup_name(name)?;
+            let view = self.vm.str_view(text).expect("lookup name is a string");
+            let found = self.vm.obarray_lookup_value(table, view.bytes, view.chars);
             Ok(found.filter(|&v| !symbol || v == name).unwrap_or(Value::NIL))
         }
         pub fn unintern_in(&mut self, table: Value, name: Value) -> super::Out {
             let found = self.lookup_in(table, name)?;
             // nil is both a legitimate interned symbol and the missing sentinel.
             if found == Value::NIL {
-                let text = if self.kind(name) == Kind::Symbol { self.symbol_name(name)? } else { self.string_text(name)? };
-                if text != "nil" || self.vm.obarray_lookup_value(table, b"nil", 3) != Some(Value::NIL) { return Ok(Value::NIL); }
+                let text = self.lookup_name(name)?;
+                let is_nil = self.vm.str_view(text).is_some_and(|view| view.bytes == b"nil");
+                if !is_nil || self.vm.obarray_lookup_value(table, b"nil", 3) != Some(Value::NIL) { return Ok(Value::NIL); }
             }
             Ok(if self.vm.obarray_unintern(table, found) { Value::TRUE } else { Value::NIL })
         }
