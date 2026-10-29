@@ -52,6 +52,9 @@ CASES = [
     '(format-mode-line (list \'(:propertize "p" face italic) (propertize "s" \'face \'bold)))',
     '(format-mode-line (list \'(:eval (propertize " k " \'face \'bold)) "rest"))',
     '(format-mode-line (list (propertize "pre" \'face \'bold) "%%" (propertize "post" \'face \'italic)))',
+    # One string of several faces with a %-construct inside a run.
+    '(format-mode-line (list (concat (propertize "ab" \'face \'bold) "c%%d" (propertize "ef" \'face \'italic) "g")))',
+    '(format-mode-line (list (concat "x" (propertize "y%by" \'face \'bold) "z")))',
     # Two windows on one buffer at different points: WINDOW is selected
     # while it formats, and the selection and point come back after.
     '''(let ((w (split-window))) (set-window-point w 14) (prog1 (list (format-mode-line "%l:%c" nil w) (format-mode-line '(:eval (format "%d" (point))) nil w) (format-mode-line "%l:%c") (point) (eq (selected-window) (frame-first-window)) (buffer-name) (window-point w)) (delete-window w)))''',

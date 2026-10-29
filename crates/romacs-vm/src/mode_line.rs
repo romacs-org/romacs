@@ -207,21 +207,19 @@ impl Band {
     }
 
     /// Append S, the characters from START of a string whose own faces
-    /// are OWN, each run in its own face.
-    fn push_own(&mut self, s: &str, own: &[Option<String>], start: usize) {
-        let mut chars = s.char_indices().peekable();
-        let mut k = start;
-        while let Some((from, _)) = chars.next() {
-            let face = own.get(k).cloned().flatten();
-            k += 1;
-            let mut to = s.len();
-            while let Some(&(at, _)) = chars.peek() {
-                if own.get(k).cloned().flatten() != face { to = at; break; }
-                chars.next();
-                k += 1;
+    /// are OWN (`ml_own_faces'), each run in its own face.
+    fn push_own(&mut self, s: &str, own: &[(usize, Option<String>)], start: usize) {
+        let mut run = own.partition_point(|(at, _)| *at <= start).saturating_sub(1);
+        let mut from = 0;
+        for (k, (at, _)) in s.char_indices().enumerate() {
+            // Character K of S is the string's character START + K.
+            if own.get(run + 1).is_some_and(|(next, _)| start + k >= *next) {
+                if at > from { self.push(&s[from..at], own[run].1.as_ref()); }
+                from = at;
+                while own.get(run + 1).is_some_and(|(next, _)| start + k >= *next) { run += 1; }
             }
-            self.push(&s[from..to], face.as_ref());
         }
+        if from < s.len() { self.push(&s[from..], own[run].1.as_ref()); }
     }
 
     fn push_clipped(&mut self, s: &str) {
@@ -238,6 +236,11 @@ impl Band {
             self.text.extend(shown.into_iter().flatten());
         }
     }
+}
+
+/// The face of character K of a string whose own faces are OWN.
+fn own_face(own: &[(usize, Option<String>)], k: usize) -> Option<&String> {
+    own[..own.partition_point(|(at, _)| *at <= k)].last().and_then(|(_, face)| face.as_ref())
 }
 
 impl Vm {
@@ -296,24 +299,24 @@ impl Vm {
         })
     }
 
-    /// A propertized string element's own faces, by character, where the
-    /// element's PROPS give none: GNU merges PROPS onto a string's own
-    /// properties unless it is risky (display_mode_element), so each
-    /// character shows its `face' (a symbol, or a face list's first one).
-    /// None when no character has one.
-    fn ml_own_faces(&mut self, elt: &Form, props: Option<&String>, risky: bool) -> Result<Option<Vec<Option<String>>>> {
+    /// A propertized string element's own faces where the element's PROPS
+    /// give none: GNU merges PROPS onto a string's own properties unless it
+    /// is risky (display_mode_element), so each character shows its `face'
+    /// (a symbol, or a face list's first one). Runs of one face, each from
+    /// its first character; None when no character has one.
+    fn ml_own_faces(&mut self, elt: &Form, props: Option<&String>, risky: bool) -> Result<Option<Vec<(usize, Option<String>)>>> {
         if props.is_some() || risky { return Ok(None); }
         let Form::Object(object) = elt else { return Ok(None) };
         let value = object.value(self)?;
-        if !matches!(self.object_if(value), Some(data::Object::String(_))) { return Ok(None); }
-        let count = String::from_utf8_lossy(&self.string_bytes(value)?).chars().count();
+        if !matches!(self.object_if(value), Some(data::Object::String(_))) || self.string_bytes(value)?.is_empty() { return Ok(None); }
         let face = self.intern("face");
-        let mut faces = Vec::with_capacity(count);
-        for i in 0..count {
-            let v = self.property_textget(value, i as i64, face).map_err(crate::forwarded::fault_text)?;
-            faces.push(self.ml_face_name(v));
+        let mut runs: Vec<(usize, Option<String>)> = vec![];
+        for start in self.property_run_starts(value).map_err(crate::forwarded::fault_text)? {
+            let v = self.property_textget(value, start, face).map_err(crate::forwarded::fault_text)?;
+            let name = self.ml_face_name(v);
+            if runs.last().is_none_or(|(_, last)| *last != name) { runs.push((start as usize, name)); }
         }
-        Ok(faces.iter().any(Option::is_some).then_some(faces))
+        Ok(runs.iter().any(|(_, face)| face.is_some()).then_some(runs))
     }
 
     /// A `face' property's name: a symbol, or a face list's first symbol.
@@ -434,7 +437,13 @@ impl Vm {
                         rest = &rest[percent..];
                         continue;
                     }
-                    // rest starts with '%'.
+                    // rest starts with '%'. Its expansion takes the string's
+                    // own face there (xdisp.c display_mode_element takes the
+                    // text properties at the construct's offset).
+                    let face = match &own {
+                        Some(own) => own_face(own, chars(&s[..rest.as_ptr() as usize - s.as_ptr() as usize]) as usize),
+                        None => props.as_ref(),
+                    };
                     rest = &rest[1..];
                     let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
                     // GNU accumulates the width in a C `int` (`xdisp.c:28663`);
@@ -457,9 +466,9 @@ impl Vm {
                     let spec = self.decode_mode_spec(state, c, field, band.target)?;
                     let shown = if prec > 0 { char_prefix(&spec, prec as usize) } else { spec.as_str() };
                     let mut written = chars(shown);
-                    band.push(shown, props.as_ref());
+                    band.push(shown, face);
                     if field > written {
-                        band.pad(field - written, props.as_ref());
+                        band.pad(field - written, face);
                         written = field;
                     }
                     n += written;
