@@ -48,8 +48,37 @@ pub fn open(store: PathBuf, width: u32, height: u32, floor: Option<usize>) -> Re
     let recipe = vec![
         "consumer romacs-vm-gui".to_owned(), "launch loadup live".into(), format!("geometry {width} {height}"),
         format!("floor {floor:?}"), font, format!("lisp {}", dir.display()),
+        font_environment(|name| std::env::var_os(name)),
     ];
     World::new(store, recipe).map_err(|e| e.to_string())
+}
+
+/// What chooses Fontconfig's configuration and the launch font, from GET:
+/// its own variables and the directories it finds its per-user files in.
+/// No host fact records them, since Fontconfig reads them itself.
+const FONT_ENVIRONMENT: [&str; 8] = ["FONTCONFIG_FILE", "FONTCONFIG_PATH", "FONTCONFIG_SYSROOT", "HOME",
+                                     "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "ROMACS_GUI_FONT_SIZE"];
+
+fn font_environment(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> String {
+    let values: Vec<serde_json::Value> = FONT_ENVIRONMENT.iter()
+        .map(|name| get(name).map_or(serde_json::Value::Null, |v| json!(v.to_string_lossy())))
+        .collect();
+    format!("font-environment {}", serde_json::Value::Array(values))
+}
+
+/// The per-user configuration Fontconfig would read if it were there, from
+/// GET: a build records whether each is, since one appearing changes the
+/// configuration without touching any file the build read.
+fn user_font_configuration(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    let home = get("HOME").map(PathBuf::from);
+    let config = get("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(".config")));
+    let mut paths: Vec<PathBuf> = config.into_iter()
+        .flat_map(|c| ["fontconfig", "fontconfig/fonts.conf", "fontconfig/conf.d"].map(|p| c.join(p)))
+        .collect();
+    paths.extend(home.into_iter().flat_map(|h| [".fonts.conf", ".fonts.conf.d"].map(|p| h.join(p))));
+    paths.extend(get("FONTCONFIG_FILE").map(PathBuf::from));
+    paths.extend(get("FONTCONFIG_PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()));
+    paths
 }
 
 /// This launch with WORLD: the restored VM and its carry, or None to boot
@@ -128,6 +157,9 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result
         for input in engine.borrow().font_inputs() {
             let _ = romacs_vm::host::metadata(&input);
         }
+        for path in user_font_configuration(|name| std::env::var_os(name)) {
+            let _ = romacs_vm::host::metadata(&path);
+        }
         let len = world.finish_build(vm, Carry { loadup }, json!({}))?;
         eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
         Ok(())
@@ -137,6 +169,25 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_font_environment_keys_a_world_and_names_the_per_user_configuration() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |name: &str| {
+            pairs.iter().find(|(n, _)| *n == name).map(|(_, v)| std::ffi::OsString::from(v))
+        };
+        let base: &[(&str, &str)] = &[("HOME", "/h"), ("XDG_CONFIG_HOME", "/h/.config")];
+        let other: &[(&str, &str)] = &[("HOME", "/h"), ("XDG_CONFIG_HOME", "/h/.config"), ("FONTCONFIG_FILE", "/etc/other.conf")];
+        let path: &[(&str, &str)] = &[("HOME", "/h"), ("XDG_CONFIG_HOME", "/h/.config"), ("FONTCONFIG_PATH", "/a:/b")];
+        let keys: Vec<String> = [base, other, path].iter().map(|pairs| font_environment(env(pairs))).collect();
+        assert!(keys[0] != keys[1] && keys[0] != keys[2] && keys[1] != keys[2], "{keys:?}");
+        let scratch = std::env::temp_dir().join(format!("romacs-gui-font-env-{}", std::process::id()));
+        let world = |line: &String| World::new(scratch.join("store"), vec!["consumer test".into(), line.clone()]).unwrap().key;
+        assert_ne!(world(&keys[0]), world(&keys[1]));
+        assert_eq!(user_font_configuration(env(path)), ["/h/.config/fontconfig", "/h/.config/fontconfig/fonts.conf",
+            "/h/.config/fontconfig/conf.d", "/h/.fonts.conf", "/h/.fonts.conf.d", "/a", "/b"].map(PathBuf::from));
+        assert!(user_font_configuration(env(other)).contains(&PathBuf::from("/etc/other.conf")));
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
 
     #[test]
     fn a_builder_gets_the_recipe_and_an_absolute_store_whatever_the_launch_was_given() {
