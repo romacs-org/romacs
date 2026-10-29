@@ -143,6 +143,7 @@ fn reseed_forms_restate_their_gnu_sources() {
         ("emacs-lisp/cl-extra.el", "(defvar cl--random-state (cl--make-random-state (cl--random-time)))",
          "(setq cl--random-state (cl--make-random-state (cl--random-time)))"),
         ("progmodes/project.el", "(defcustom project-list-file", "(custom-reevaluate-setting 'project-list-file)"),
+        ("subr.el", "(defvar user-emacs-directory\n  ;; The value does not matter since Emacs sets this at startup.\n  nil", "(let ((user-emacs-directory nil))"),
         ("emacs-lisp/find-func.el",
          "(defvar find-function-C-source-directory\n  (let ((dir (expand-file-name \"src\" source-directory)))\n    (if (file-accessible-directory-p dir) dir))",
          "(let ((dir (expand-file-name \"src\" source-directory)))\n             (if (file-accessible-directory-p dir) dir))"),

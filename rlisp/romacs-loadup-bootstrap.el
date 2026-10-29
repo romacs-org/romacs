@@ -159,18 +159,6 @@
 (load "emacs-lisp/rmc.el" nil t t)
 (load "leim/leim-list.el" nil t t)
 
-;; startup.el normal-top-level (startup.el:585-592), before command-line:
-;; the per-user directory, which `locate-user-emacs-file' and the delayed
-;; standard values below build on.  A GUI session then names its own
-;; (rlisp/romacs-gui-loadup.el).
-(setq startup--xdg-config-home-emacs
-      (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
-        (if xdg-config-home
-            (concat xdg-config-home "/emacs/")
-          startup--xdg-config-default)))
-(setq user-emacs-directory
-      (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
-
 ;; startup.el command-line (startup.el:1479): variables whose standard value
 ;; depends on the runtime (user-mail-address and friends) get it once the
 ;; preloaded files are in.  Romacs does not run command-line in this
@@ -187,11 +175,23 @@ These are `custom-delayed-init-variables' as the preloaded files left it.")
 ;; world runs them again (`romacs-world-restart').
 (defun romacs-batch-startup ()
   "Take the per-process steps of startup.el's `command-line', as batch does.
-The delayed variables get their standard values in this process's context,
-and `after-init-time' its clock."
+The per-user directory is found as `normal-top-level' finds it, the
+delayed variables get their standard values in this process's context, and
+`after-init-time' its clock."
   (unwind-protect
       (progn
         (romacs--startup-phase t)
+        ;; startup.el normal-top-level (startup.el:585-592), before
+        ;; command-line: the per-user directory, which
+        ;; `locate-user-emacs-file' and the delayed standard values build on.
+        ;; A GUI session then names its own (rlisp/romacs-gui-loadup.el).
+        (setq startup--xdg-config-home-emacs
+              (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
+                (if xdg-config-home
+                    (concat xdg-config-home "/emacs/")
+                  startup--xdg-config-default)))
+        (setq user-emacs-directory
+              (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
         (let ((user-emacs-directory-warning nil))
           (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
         (setq custom-delayed-init-variables t)
@@ -214,8 +214,11 @@ A session that takes its own after the chain's sets it to them
      (setq cl--random-state (cl--make-random-state (cl--random-time)))
      "GNU dumps no cl- library but cl-preloaded, so each process seeds the state from its clock when cl-extra loads")
     (project "progmodes/project.el"
-     (custom-reevaluate-setting 'project-list-file)
-     "GNU dumps no project.el, so each process computes the file against its own directories when project loads")
+     ;; As loadup loads it: before startup names the per-user directory,
+     ;; which is still subr.el's nil, so the file is the working directory's.
+     (let ((user-emacs-directory nil))
+       (custom-reevaluate-setting 'project-list-file))
+     "GNU dumps no project.el; loadup loads it (flymake-log's eager expansion), so each process computes the file against its own working directory")
     (find-func "emacs-lisp/find-func.el"
      (setq find-function-C-source-directory
            (let ((dir (expand-file-name "src" source-directory)))

@@ -16,7 +16,9 @@ def roots(path):
     out = {}
     with open(path, encoding='utf-8') as f:
         for line in f:
-            root, name, digest = line.rstrip('\n').split('\t')
+            # A name may hold a tab; the root and the digest hold none.
+            rest, digest = line.rstrip('\n').rsplit('\t', 1)
+            root, name = rest.split('\t', 1)
             out[(root, name)] = digest
     return out
 
