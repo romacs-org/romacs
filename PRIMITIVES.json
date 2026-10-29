@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "2ff947734f2a4c02856776b9b5cf8911ed2cec45aea14f2280d3418b2d6ecdb3",
+  "source_fingerprint": "5bf46a4b64cb558edc67a6b2329969851fa9a9d45dbe207d6e185a556ef683d1",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1044,
-  "parsed_vm2_only": 1044
+  "parsed_total": 1045,
+  "parsed_vm2_only": 1045
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -852,7 +852,7 @@
   "coding-system-priority-list": {
    "name": "coding-system-priority-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/coding.rs:231"
+   "registered_at": "crates/romacs-vm/src/prims/coding.rs:234"
   },
   "coding-system-put": {
    "name": "coding-system-put",
@@ -1597,7 +1597,7 @@
   "find-coding-systems-region-internal": {
    "name": "find-coding-systems-region-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/coding.rs:266"
+   "registered_at": "crates/romacs-vm/src/prims/coding.rs:269"
   },
   "find-file-name-handler": {
    "name": "find-file-name-handler",
@@ -1607,7 +1607,7 @@
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/coding.rs:273"
+   "registered_at": "crates/romacs-vm/src/prims/coding.rs:276"
   },
   "fixnump": {
    "name": "fixnump",
@@ -2298,7 +2298,7 @@
   "keyboard-coding-system": {
    "name": "keyboard-coding-system",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/coding.rs:260"
+   "registered_at": "crates/romacs-vm/src/prims/coding.rs:263"
   },
   "keymap-parent": {
    "name": "keymap-parent",
@@ -3928,6 +3928,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/digest.rs:8"
   },
+  "romacs--set-coding-category-order": {
+   "name": "romacs--set-coding-category-order",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/coding.rs:231"
+  },
   "romacs--set-idle": {
    "name": "romacs--set-idle",
    "implementation": "vm2",
@@ -4254,7 +4259,7 @@
   "set-keyboard-coding-system-internal": {
    "name": "set-keyboard-coding-system-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/coding.rs:251"
+   "registered_at": "crates/romacs-vm/src/prims/coding.rs:254"
   },
   "set-keymap-parent": {
    "name": "set-keymap-parent",
@@ -4321,7 +4326,7 @@
   "set-terminal-coding-system-internal": {
    "name": "set-terminal-coding-system-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/coding.rs:234"
+   "registered_at": "crates/romacs-vm/src/prims/coding.rs:237"
   },
   "set-terminal-parameter": {
    "name": "set-terminal-parameter",
@@ -4832,7 +4837,7 @@
   "terminal-coding-system": {
    "name": "terminal-coding-system",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/coding.rs:244"
+   "registered_at": "crates/romacs-vm/src/prims/coding.rs:247"
   },
   "terminal-list": {
    "name": "terminal-list",

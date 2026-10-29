@@ -1483,6 +1483,36 @@ impl Leaf<'_> {
         self.variable_set(variable, list)?;
         Ok(Value::NIL)
     }
+    /// Romacs: the categories' priority order from CATEGORIES, symbols as
+    /// `coding-category-list' names them, then the rest in their order,
+    /// with `coding-category-list' updated as coding.c updates it.  It
+    /// gives back an order `coding-category-list' recorded, which
+    /// `set-coding-system-priority' cannot for a category with no coding
+    /// system set up (startup's locale replay, rlisp/romacs-loadup-bootstrap.el).
+    pub fn set_coding_category_order(&mut self, categories: &[Value]) -> super::super::Out {
+        self.coding_init()?;
+        let priorities = self.coding_category_state(PRIORITIES)?;
+        let mut order: Vec<usize> = Vec::with_capacity(CATEGORIES.len());
+        for &category in categories {
+            let name = self.symbol_name(category)?;
+            let index = name.strip_prefix("coding-category-").and_then(|short| CATEGORIES.iter().position(|c| *c == short))
+                .ok_or(Fault::Wrong("coding-category-p", category))?;
+            if !order.contains(&index) { order.push(index); }
+        }
+        for i in 0..CATEGORIES.len() {
+            let category = self.vector_get(priorities, num(i as i64))?.integer_value().unwrap_or(0) as usize;
+            if !order.contains(&category) { order.push(category); }
+        }
+        let mut names = Vec::with_capacity(order.len());
+        for (i, &category) in order.iter().enumerate() {
+            self.vector_set(priorities, num(i as i64), num(category as i64))?;
+            names.push(self.intern(&format!("coding-category-{}", CATEGORIES[category])));
+        }
+        let list = self.coding_list(&names);
+        let variable = self.intern("coding-category-list");
+        self.variable_set(variable, list)?;
+        Ok(Value::NIL)
+    }
     /// coding.c Fcoding_system_priority_list: the base names of the systems
     /// set up for each category, in priority order.
     pub fn coding_system_priority_list(&mut self, highestp: Value) -> super::super::Out {
