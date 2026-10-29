@@ -278,6 +278,14 @@ impl Vm {
         if let Some(crate::data::Object::HashTable(t)) = self.object_if(value) {
             return self.print_table(t, None, |vm, v| vm.format_print(v, quoted, depth + 1));
         }
+        // print.c PVEC_BUFFER: princ prints the bare name.
+        if let Ok(state) = self.buffer_state(value) {
+            return Ok(match &state.name {
+                Some(name) if quoted => format!("#<buffer {name}>"),
+                Some(name) => name.clone(),
+                None => "#<killed buffer>".into(),
+            }.into_bytes());
+        }
         if let Some(crate::data::Object::Process(process)) = self.object_if(value) {
             // print.c PVEC_PROCESS: princ prints the bare name.
             let name = self.process_name_text(process);

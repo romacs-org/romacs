@@ -28,6 +28,12 @@ pub(crate) fn push_char(key: &mut String, code: u32) {
     }
 }
 
+/// TEXT made safe to join printer output, which is decoded as keys: a
+/// genuine U+FDD0 doubled, everything else as it is.
+pub(crate) fn escape_text(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains(ESC) { text.replace(ESC, "\u{fdd0}\u{fdd0}").into() } else { text.into() }
+}
+
 /// The key of a name given as internal multibyte BYTES.
 pub(crate) fn from_internal(bytes: &[u8]) -> String {
     let mut key = String::with_capacity(bytes.len());

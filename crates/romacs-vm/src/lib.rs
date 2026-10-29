@@ -2775,7 +2775,7 @@ impl Vm {
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Sqlite(h) => Ok(h.describe()),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
-                data::Object::Marker(_) => Ok("#<marker>".into()),
+                data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),
                 data::Object::ByteBuffer(_) => Ok("#<byte-buffer>".into()),
                 data::Object::SyntaxTable(_) => Ok("#<syntax-table>".into()),

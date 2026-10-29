@@ -38,3 +38,18 @@ fn completion_over_obarrays_offers_decoded_names_as_gnu() {
     assert_eq!(vm.eval_source(form).unwrap().display().unwrap(),
         "(((64976 983040 113)) (122 122 114 4194303 107) ((122 122 114 4194303 107)) ((121 4194303) t (121 4194303)))");
 }
+
+#[test]
+fn printed_text_keeps_escape_range_characters_as_gnu() {
+    let mut vm = vm();
+    vm.eval_source(SETUP).unwrap();
+    vm.eval_source("(progn (setq b (get-buffer-create n)) (set-buffer b) (insert \"ab\") (setq m (copy-marker 2)))").unwrap();
+    let form = "(list (append (prin1-to-string b) nil) (append (format \"%s\" b) nil) (append (prin1-to-string n) nil)
+      (append (prin1-to-string m) nil) (append (format \"%S\" m) nil) (append (prin1-to-string s) nil)
+      (append (prin1-to-string (list s raw b)) nil) (append (prin1-to-string b t) nil))";
+    assert_eq!(vm.eval_source(form).unwrap().display().unwrap(),
+        "((35 60 98 117 102 102 101 114 32 64976 983040 983160 62) (64976 983040 983160) (34 64976 983040 983160 34) \
+         (35 60 109 97 114 107 101 114 32 97 116 32 50 32 105 110 32 64976 983040 983160 62) \
+         (35 60 109 97 114 107 101 114 32 97 116 32 50 32 105 110 32 64976 983040 983160 62) (64976 983040 983160) \
+         (40 64976 983040 983160 32 114 4194303 32 35 60 98 117 102 102 101 114 32 64976 983040 983160 62 41) (64976 983040 983160))");
+}

@@ -529,13 +529,15 @@ impl Vm {
                 return Ok(format!("{}{}.0e+NaN", if n.is_sign_negative() { "-" } else { "" }, n.to_bits() & 0x0007_ffff_ffff_ffff));
             }
         }
+        // Text from Lisp data joins output decoded as symbol keys (symkey.rs).
         if let Ok(state) = self.buffer_state(value) {
             return Ok(match &state.name {
-                Some(name) if quoted => format!("#<buffer {name}>"),
-                Some(name) => name.clone(),
+                Some(name) if quoted => format!("#<buffer {}>", crate::symkey::escape_text(name)),
+                Some(name) => crate::symkey::escape_text(name).into_owned(),
                 None => "#<killed buffer>".into(),
             });
         }
+        if let Some(text) = self.marker_text(value, true) { return Ok(text); }
         if let Some(name) = value.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)) {
             let prefix = if options.gensym && self.printed_as_gensym(value) { "#:" } else { "" };
             if name.is_empty() { return Ok(if prefix.is_empty() { "##" } else { prefix }.into()); }
@@ -555,7 +557,7 @@ impl Vm {
         }
         if let Some(data::Object::Process(process)) = self.object_if(value) {
             // print.c PVEC_PROCESS: the name, inside #<process ...> when escaping.
-            let name = self.process_name_text(process);
+            let name = crate::symkey::escape_text(&self.process_name_text(process)).into_owned();
             return Ok(if quoted { format!("#<process {name}>") } else { name });
         }
         if let Some(data::Object::CharTable(table)) = self.object_if(value) {
@@ -564,10 +566,28 @@ impl Vm {
         if let Some(data::Object::SubCharTable(node)) = self.object_if(value) {
             return self.print_sub_char_table_body(node, quoted, options, depth);
         }
-        if matches!(self.object_if(value), Some(data::Object::SyntaxTable(_) | data::Object::Marker(_) | data::Object::Overlay(_) | data::Object::Frame(_) | data::Object::Terminal(_))) {
+        if matches!(self.object_if(value), Some(data::Object::SyntaxTable(_) | data::Object::Overlay(_) | data::Object::Frame(_) | data::Object::Terminal(_))) {
             return Err("printing this object representation is not supported".into());
         }
-        self.display(value)
+        self.display(value).map(|text| crate::symkey::escape_text(&text).into_owned())
+    }
+
+    /// print.c PVEC_MARKER: `#<marker [(moves after insertion) ]at N in
+    /// BUFFER>' or `in no buffer'; ESCAPED for printer output (symkey.rs).
+    pub(crate) fn marker_text(&self, value: Value, escaped: bool) -> Option<String> {
+        let Some(data::Object::Marker(marker)) = self.object_if(value) else { return None };
+        let mut text = String::from("#<marker ");
+        if marker.bias == crate::anchors::Bias::Right { text.push_str("(moves after insertion) "); }
+        let name = self.buffer_state(marker.buffer).ok().and_then(|state| state.name.clone());
+        match (name, self.marker_position_value(value).ok().and_then(|p| p.as_integer().ok())) {
+            (Some(name), Some(position)) => {
+                let name = if escaped { crate::symkey::escape_text(&name).into_owned() } else { name };
+                text.push_str(&format!("at {position} in {name}"));
+            }
+            _ => text.push_str("in no buffer"),
+        }
+        text.push('>');
+        Some(text)
     }
 }
 
