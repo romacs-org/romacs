@@ -1005,10 +1005,12 @@ run no timers).  Return GNU's got_some_output."
   "What keyboard.c read_char's wait_reading_process_output does for the
 processes while the command loop idles for a key: read the output, finish
 the connections and report the status changes that are ready now, without
-waiting or running timers.  Non-nil if anything was ready."
-  (let ((activity (romacs--proc-activity)))
-    (romacs--wait-reading-process-output 'minimum nil -1)
-    (/= activity (romacs--proc-activity))))
+waiting or running timers.  Non-nil if anything was ready.  With no
+process there is nothing to read, and no wait."
+  (when (process-list)
+    (let ((activity (romacs--proc-activity)))
+      (romacs--wait-reading-process-output 'minimum nil -1)
+      (/= activity (romacs--proc-activity)))))
 
 (defun accept-process-output (&optional process seconds millisec just-this-one)
   "Allow any pending output from subprocesses to be read by Emacs.
