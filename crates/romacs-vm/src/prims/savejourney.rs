@@ -228,7 +228,7 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
         return Ok(Step::Call { f: handler, args: vec![operation, expanded], then: returned, saved: vec![] });
     }
     let path = cx.string_text(expanded)?.to_owned();
-    let insensitive = filesystem_case_insensitive(std::path::Path::new(&path))
+    let insensitive = crate::host::case_insensitive(std::path::Path::new(&path), filesystem_case_insensitive)
         .map_err(|reason| Fault::Error(format!("VM2 filesystem case sensitivity unknown: {reason}")))?;
     Ok(Step::Done(if insensitive { Value::TRUE } else { Value::NIL }))
 }}
@@ -237,7 +237,7 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
 // directory entries only. Never create a probe or infer from the OS name.
 // Like GNU, a directory that cannot tell defers to its ancestors.
 #[cfg(unix)]
-fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bool, &'static str> {
+pub(crate) fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bool, &'static str> {
     let mut directory = path;
     loop {
         match crate::host::metadata(directory) {

@@ -429,6 +429,9 @@ impl Vm {
                     head: form_source.trim_start().lines().next().unwrap_or("").chars().take(80).collect(),
                 });
                 let evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
+                if evaluated.is_ok() && crate::host::mode() == crate::host::Mode::Build {
+                    self.world_form_done();
+                }
                 drop(site);
                 match evaluated {
                     Ok(v) => {

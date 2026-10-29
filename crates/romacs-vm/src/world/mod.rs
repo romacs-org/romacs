@@ -30,14 +30,15 @@ use crate::forwarded::Fwd;
 use crate::{Value, VariableRedirect, Vm, host};
 use serde_json::json;
 
-/// A fenced value's root (§6.2). Root 4, the re-seed variables, arrives with
-/// the re-seed table. `Observed` is no root: a variable startup may read.
+/// A fenced value's root (§6.2). `Observed` is no root: a variable startup
+/// may read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Root {
     Observed = 0,
     Environment = 1,
     Directory = 2,
     Delayed = 3,
+    Reseed = 4,
     Random = 5,
     Input = 6,
 }
@@ -105,6 +106,15 @@ impl Vm {
             self.fence_mut().random = true;
         }
         host::begin_recipe();
+    }
+
+    /// A top-level form of a loaded file ends: a re-seed form's variable is
+    /// fenced from here (root 4).
+    pub(crate) fn world_form_done(&mut self) {
+        if let Some(name) = host::reseed_output().filter(|_| self.fence.is_some()) {
+            let slot = self.slot(name);
+            self.fence_variable(slot, Root::Reseed);
+        }
     }
 
     /// `romacs--startup-phase`: the startup function's run begins (ON) or
@@ -274,7 +284,7 @@ impl Vm {
             }
             return;
         }
-        if cell.root == Root::Input && read {
+        if (cell.root == Root::Input && read) || host::reseed_reads(&self.symbol_names[slot]) {
             return;
         }
         let per_buffer = matches!(cell.redirect, Some(VariableRedirect::Forwarded(Fwd::Buffer(_))));

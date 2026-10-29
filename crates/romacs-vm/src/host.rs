@@ -133,8 +133,39 @@ pub const P_ENV: [&str; 15] = [
 const BAKED: (&str, &str) = ("/version.el", "(defconst emacs-build-time");
 
 /// Load-time forms outside startup that GNU evaluates in each process and
-/// restore re-seeds, as (file suffix, form head). Their P read is allowed.
-const RESEED: [(&str, &str); 0] = [];
+/// restore re-seeds (`romacs--world-reseed`): (file suffix, form head, the P
+/// fact or fenced variable the form may read, the variable it sets, which is
+/// fenced once the form ends).
+const RESEED: [(&str, &str, &str, Option<&str>); 4] = [
+    ("/emacs-lisp/cl-extra.el", "(defvar cl--random-state", "clock", Some("cl--random-state")),
+    ("/progmodes/project.el", "(defcustom project-list-file", "default-directory", Some("project-list-file")),
+    ("/emacs-lisp/find-func.el", "(defvar find-function-C-source-directory", "default-directory",
+     Some("find-function-C-source-directory")),
+    // Its output is exec-path's standard-value property, which no fence
+    // holds.
+    ("/cus-start.el", "(let* ((quoter", "exec-path", None),
+];
+
+/// The re-seed entry of the form being loaded, if it is one.
+fn reseed_entry() -> Option<(&'static str, Option<&'static str>)> {
+    with_build(|b| b.site.as_deref().and_then(|site| RESEED.iter().find(|r| site.at((r.0, r.1)))).map(|r| (r.2, r.3)))
+        .flatten()
+}
+
+/// Whether the form being loaded re-seeds and may read WHAT: a P fact's
+/// name or a fenced variable's.
+pub(crate) fn reseed_reads(what: &str) -> bool {
+    let allowed = reseed_entry().is_some_and(|(reads, _)| reads == what);
+    if allowed {
+        record("reseed", json!({"reads": what}));
+    }
+    allowed
+}
+
+/// The variable the form being loaded re-seeds, if it is a re-seed entry.
+pub(crate) fn reseed_output() -> Option<&'static str> {
+    reseed_entry().and_then(|(_, output)| output)
+}
 
 /// The one site that may switch the startup phase.
 const STARTUP: &str = "/rlisp/romacs-loadup-bootstrap.el";
@@ -281,7 +312,7 @@ fn p_read(fact: Fact<'_>, what: String) {
             (Phase::Init, _) => Some("init"),
             (Phase::Startup, _) => Some("startup"),
             (Phase::Recipe, Class::B) => Some("baked"),
-            (Phase::Recipe, _) if site.is_some_and(|s| RESEED.iter().any(|&r| s.at(r))) => Some("reseed"),
+            (Phase::Recipe, _) if site.is_some_and(|s| RESEED.iter().any(|r| s.at((r.0, r.1)) && what == r.2)) => Some("reseed"),
             _ => None,
         };
         let item = json!({"kind": "p-read", "site": b.site(), "what": what, "allowed": allowed});
@@ -730,6 +761,21 @@ pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
         };
         probed("statvfs", Path::new(OsStr::from_bytes(path.to_bytes())), observed);
     }
+    result
+}
+
+/// Whether the filesystem holding PATH folds case, as CLASSIFY observes it:
+/// one keyed fact. The listings and stats that answer it are not recorded,
+/// since the build consumed only the answer, and restore asks again.
+pub fn case_insensitive(path: &Path, classify: fn(&Path) -> Result<bool, &'static str>) -> Result<bool, &'static str> {
+    if !building() {
+        return classify(path);
+    }
+    MODE.with(|m| m.set(Mode::Off));
+    let result = classify(path);
+    MODE.with(|m| m.set(Mode::Build));
+    let observed = match result { Ok(answer) => json!(answer), Err(reason) => json!({"error": reason}) };
+    record("case", json!({"path": path_json(path), "result": observed}));
     result
 }
 

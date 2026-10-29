@@ -35,8 +35,9 @@ fn handled(abi: i64) -> u64 {
     (1 << rights) - 1
 }
 
-/// Confine this thread: read and execute beneath each of READ, write each
-/// file of WRITE, nothing else. A root that does not exist is skipped.
+/// Confine this thread: read and execute beneath each of READ, list beneath
+/// each of `list_roots`, write each file of WRITE, nothing else. A root that
+/// does not exist is skipped.
 pub fn confine(read: &[PathBuf], write: &[PathBuf]) -> io::Result<()> {
     let abi = unsafe { libc::syscall(libc::SYS_landlock_create_ruleset, std::ptr::null::<RulesetAttr>(), 0, CREATE_RULESET_VERSION) };
     if abi < 1 {
@@ -51,6 +52,9 @@ pub fn confine(read: &[PathBuf], write: &[PathBuf]) -> io::Result<()> {
     let ruleset = unsafe { <std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(ruleset as i32) };
     for path in read {
         allow(&ruleset, path, EXECUTE | READ_FILE | READ_DIR)?;
+    }
+    for path in list_roots() {
+        allow(&ruleset, &path, READ_DIR)?;
     }
     for path in write {
         allow(&ruleset, path, WRITE_FILE | (handled & TRUNCATE))?;
@@ -93,6 +97,12 @@ pub fn build_roots(recipe: Vec<PathBuf>, dir: &Path) -> Vec<PathBuf> {
     roots.push(dir.join("p"));
     roots.extend(runtime_roots());
     roots
+}
+
+/// The directories a build may list but not read files beneath: HOME, a
+/// keyed fact, whose entries answer a case probe (`host::case_insensitive`).
+pub fn list_roots() -> Vec<PathBuf> {
+    crate::host::getenv("HOME").map(PathBuf::from).into_iter().collect()
 }
 
 /// The roots this binary itself reads at run time: its build tree (etc/,

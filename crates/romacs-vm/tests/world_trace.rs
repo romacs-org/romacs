@@ -113,6 +113,48 @@ fn startup_reads_p_facts_and_only_the_bootstrap_switches() {
     assert_eq!(items(&trace, "records", "startup").len(), 2, "{trace}");
 }
 
+/// A re-seed form may read its own P fact or fenced variable, and only that;
+/// its variable is fenced once the form ends (root 4).
+#[test]
+fn a_reseed_form_reads_its_fact_and_fences_its_variable() {
+    let dir = scratch("reseed");
+    let extra = write(&dir.join("emacs-lisp/cl-extra.el"),
+                      "(defvar cl--random-state (current-time))\n(defvar cl-other (current-time))\n");
+    let project = write(&dir.join("progmodes/project.el"),
+                        "(defcustom project-list-file (expand-file-name \"p\") \"\" :type 'file)\n");
+    let after = write(&dir.join("after.el"), "(defvar seen (car cl--random-state))\n(defvar seen2 project-list-file)\n");
+    let (_, trace) = build(&[extra, project, after]);
+    let reseeds: Vec<_> = items(&trace, "records", "reseed").iter().map(|r| r["reads"].as_str().unwrap()).collect();
+    assert_eq!(reseeds, ["default-directory"], "{trace}");
+    let allowed: Vec<_> = items(&trace, "records", "p-read").iter().filter_map(|r| r["allowed"].as_str()).filter(|a| *a != "init").collect();
+    assert_eq!(allowed, ["reseed"], "{trace}");
+    let fenced: Vec<_> = items(&trace, "refusals", "fence").iter()
+        .map(|r| (r["root"].as_u64().unwrap(), r["symbol"].as_str().unwrap(), r["site"]["line"].as_u64().unwrap())).collect();
+    assert_eq!(fenced, [(4, "cl--random-state", 1), (4, "project-list-file", 2)], "{trace}");
+    assert_eq!(refusals(&trace).iter().filter(|(what, _)| what == "clock").count(), 1, "the second clock read refuses: {trace}");
+}
+
+/// Each `romacs--world-reseed' form restates its pinned GNU source.
+#[test]
+fn reseed_forms_restate_their_gnu_sources() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let bootstrap = std::fs::read_to_string(root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
+    for (file, source, restated) in [
+        ("emacs-lisp/cl-extra.el", "(defvar cl--random-state (cl--make-random-state (cl--random-time)))",
+         "(setq cl--random-state (cl--make-random-state (cl--random-time)))"),
+        ("progmodes/project.el", "(defcustom project-list-file", "(custom-reevaluate-setting 'project-list-file)"),
+        ("emacs-lisp/find-func.el",
+         "(defvar find-function-C-source-directory\n  (let ((dir (expand-file-name \"src\" source-directory)))\n    (if (file-accessible-directory-p dir) dir))",
+         "(let ((dir (expand-file-name \"src\" source-directory)))\n             (if (file-accessible-directory-p dir) dir))"),
+        ("cus-start.el", "(put symbol 'standard-value (list standard))",
+         "(put 'exec-path 'standard-value (list (list 'quote (default-value 'exec-path))))"),
+    ] {
+        let gnu = std::fs::read_to_string(root.join("gnu-lisp").join(file)).unwrap();
+        assert!(gnu.contains(source), "{file} no longer has {source}");
+        assert!(bootstrap.contains(&format!("\"{file}\"")) && bootstrap.contains(restated), "the re-seed of {file}");
+    }
+}
+
 #[test]
 fn the_build_time_is_baked_at_its_one_site() {
     let dir = scratch("baked");
