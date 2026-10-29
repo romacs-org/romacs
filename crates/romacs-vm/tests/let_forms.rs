@@ -77,3 +77,26 @@ fn malformed_special_forms_signal_gnus_error_when_they_run() {
         assert_eq!(vm.eval_source(&source).map(|v| v.display().unwrap()), Ok(expected.to_owned()), "{form}");
     }
 }
+
+/// ROWS of (FORM EXPECTED): FORM run as `(eval 'FORM t)' with a watcher
+/// logging (OPERATION NEWVAL) for special variable ww-x; EXPECTED is
+/// pinned GNU's (RESULT-OR-ERROR LOG).
+fn watched(rows: &[(&str, &str)]) {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source("(progn (defvar ww-log nil) (defvar ww-x 0) (add-variable-watcher 'ww-x (lambda (_s n o _w) (setq ww-log (cons (list o n) ww-log)))))").unwrap();
+    for (form, expected) in rows {
+        let source = format!("(progn (setq ww-log nil) (list (condition-case e (eval '{form} t) (error e)) (reverse ww-log)))");
+        assert_eq!(vm.eval_source(&source).map(|v| v.display().unwrap()), Ok(expected.to_string()), "{form}");
+    }
+}
+
+/// xsignal conses its data afresh: a handler that mutates one error's data
+/// changes no later error from the same code.
+#[test]
+fn a_malformed_form_signals_fresh_error_data_each_time() {
+    for form in ["(let 1)", "(setq 1 2)", "(cond 1)"] {
+        watched(&[(&format!("(let ((f (lambda () {form}))) (let ((e1 (condition-case e (funcall f) (error e)))) (setcar (cdr e1) 'changed) (condition-case e (funcall f) (error e))))"),
+            if form == "(setq 1 2)" { "((wrong-type-argument symbolp 1) nil)" } else { "((wrong-type-argument listp 1) nil)" })]);
+    }
+}

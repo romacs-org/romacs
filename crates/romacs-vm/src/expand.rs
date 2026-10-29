@@ -299,8 +299,7 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
                     _ => match clause.list() {
                         Ok(items) => items,
                         Err(_) => {
-                            let data = Form::List(vec![s("listp"), clause.clone()]);
-                            tail = call("signal", vec![quote(s("wrong-type-argument")), quote(data)]);
+                            tail = crate::let_forms::signal("wrong-type-argument", vec![s("listp"), clause.clone()]);
                             continue;
                         }
                     },

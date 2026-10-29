@@ -3,14 +3,18 @@
 //! it, so a bad one signals only when it runs, after whatever GNU
 //! evaluates first. VM2 compiles ahead of time; a malformed form compiles
 //! to exactly those evaluations followed by GNU's signal, so a closure
-//! holding it can still be made.
+//! holding it can still be made. The signal builds its data afresh each
+//! time, as GNU's xsignal does, so a handler that mutates it changes no
+//! later error.
 use crate::Form;
 
 fn nil() -> Form { Form::Sym("nil".into()) }
 fn is_nil(form: &Form) -> bool { matches!(form, Form::Sym(s) if s == "nil") || matches!(form, Form::List(v) if v.is_empty()) }
 fn quote(form: Form) -> Form { Form::List(vec![Form::Sym("quote".into()), form]) }
-fn signal(condition: &str, data: Vec<Form>) -> Form {
-    Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym(condition.into())), quote(Form::List(data))])
+/// `(signal 'CONDITION (list 'DATUM...))'.
+pub(crate) fn signal(condition: &str, data: Vec<Form>) -> Form {
+    let data = [vec![Form::Sym("list".into())], data.into_iter().map(quote).collect()].concat();
+    Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym(condition.into())), Form::List(data)])
 }
 fn listp(object: &Form) -> Form { signal("wrong-type-argument", vec![Form::Sym("listp".into()), object.clone()]) }
 fn progn(forms: Vec<Form>) -> Form { Form::List([vec![Form::Sym("progn".into())], forms].concat()) }
