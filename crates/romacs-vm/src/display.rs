@@ -948,9 +948,11 @@ impl Vm {
         // two unchanged windows repainted the frame every time.
         let id = snapshot.id;
         if let Some(previous) = self.display_state.previous.get(&id) {
-            let mut comparable = previous.clone();
-            comparable.buffer_version = snapshot.buffer_version;
-            if comparable != snapshot {
+            // Compared with the version aside, not by copying the previous.
+            let version = std::mem::replace(&mut snapshot.buffer_version, previous.buffer_version);
+            let changed = *previous != snapshot;
+            snapshot.buffer_version = version;
+            if changed {
                 self.display_state.version += 1;
             }
         } else {
