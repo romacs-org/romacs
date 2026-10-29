@@ -224,7 +224,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region" | "base64-decode-region" => "r",
         "upcase-region" | "downcase-region" | "capitalize-region" | "upcase-initials-region" => "(list (region-beginning) (region-end) (region-noncontiguous-p))",
         "widen" | "garbage-collect" | "redraw-display" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
-        "erase-buffer" => "*",
+        "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" => "P",
         "search-forward" => "MSearch: ",
         "re-search-forward" => "sRE search: ",
         "re-search-backward" => "sRE search backward: ",

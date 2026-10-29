@@ -338,6 +338,29 @@ mod tests {
         h.eval("(setq header-line-format nil)");
     }
 
+    /// `recenter' and `scroll-up' move by the host's screen lines:
+    /// M->'s `(recenter -3)' paints point three lines up from the bottom
+    /// row, and `scroll-up' paints from the start it set, keeping
+    /// `next-screen-context-lines' of the old page.
+    #[test]
+    fn recenter_and_scroll_up_set_the_start_the_host_paints() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer) (dotimes (i 100) (insert (format "line %d\n" i))) (goto-char (point-max)) (recenter -3))"#);
+        let paint = h.paint();
+        let line = h.eval("(frame-char-height)").parse::<f32>().unwrap();
+        let rows = h.eval("(window-body-height)").parse::<f32>().unwrap();
+        let cursor = paint.cursor.expect("cursor");
+        assert_eq!(cursor.1, (rows - 3.0) * line, "point on the third row from the bottom");
+        let first: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).take_while(|g| g.2 == 0.0).map(|g| g.0).collect();
+        let start = h.eval("(save-excursion (goto-char (window-start)) (buffer-substring-no-properties (point) (line-end-position)))");
+        assert_eq!(format!("{first:?}"), start);
+        h.eval("(progn (goto-char 1) (set-window-start nil 1) (scroll-up))");
+        let paint = h.paint();
+        let first: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).take_while(|g| g.2 == 0.0).map(|g| g.0).collect();
+        let expected = h.eval("(format \"line %d\" (- (window-body-height) next-screen-context-lines))");
+        assert_eq!(format!("{first:?}"), expected, "scroll-up keeps the old page's last lines");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]
