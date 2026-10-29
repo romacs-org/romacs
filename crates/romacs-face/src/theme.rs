@@ -421,18 +421,29 @@ impl Theme {
         keyword: &str,
         value: &BoundedDatum,
     ) -> Result<Theme, FaceError> {
+        self.with_face_attributes([(face, keyword, value)])
+    }
+
+    /// [`Theme::with_face_attribute`] for each of EDITS in order, built once:
+    /// the theme the edits make one at a time when every one succeeds.
+    pub fn with_face_attributes<'e>(
+        &self,
+        edits: impl IntoIterator<Item = (&'e str, &'e str, &'e BoundedDatum)>,
+    ) -> Result<Theme, FaceError> {
         let mut inputs = self.0.inputs.clone();
         let mut overrides = (*inputs.overrides).clone();
-        let key: Arc<str> = self.canonical_name(face).into();
-        let entry = overrides.entry(key.clone()).or_default();
-        entry.push(Datum::symbol(keyword));
-        entry.push((**value).clone());
-        if !inputs.override_order.contains(&key) {
-            let mut order = (*inputs.override_order).clone();
-            order.push(key);
-            inputs.override_order = Arc::new(order);
+        let mut order = (*inputs.override_order).clone();
+        for (face, keyword, value) in edits {
+            let key: Arc<str> = self.canonical_name(face).into();
+            let entry = overrides.entry(key.clone()).or_default();
+            entry.push(Datum::symbol(keyword));
+            entry.push((**value).clone());
+            if !order.contains(&key) {
+                order.push(key);
+            }
         }
         inputs.overrides = Arc::new(overrides);
+        inputs.override_order = Arc::new(order);
         Theme::from_inputs(inputs)
     }
 

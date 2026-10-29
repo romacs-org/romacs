@@ -15,7 +15,13 @@ use romacs_face::{
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 
 pub(super) struct DisplayState {
-    theme: Theme,
+    /// The theme, without the face edits still pending: read it through
+    /// [`DisplayState::theme`].
+    theme: std::cell::RefCell<Theme>,
+    /// `internal-set-lisp-face-attribute` edits since the theme was last
+    /// read, in order. Recomputing a frame's faces sets each face's every
+    /// attribute; one build for them all replaces a build per attribute.
+    pending_faces: std::cell::RefCell<Vec<(String, String, BoundedDatum)>>,
     pub(super) font_selection_order: romacs_layout_input::FontSelectionState,
     font_alternatives: romacs_layout_input::FontAlternativeState,
     /// Last publication **per window**, keyed by the window's stable id. One
@@ -36,9 +42,30 @@ pub(super) struct DisplayState {
     pub(super) width: u32,
     pub(super) height: u32,
     building_band: bool,
-    diagnostics: Vec<String>,
+    diagnostics: std::cell::RefCell<Vec<String>>,
 }
 impl DisplayState {
+    /// The theme with every pending face edit applied: built once for them
+    /// all, or, when that fails, one edit at a time, so an edit the theme
+    /// rejects is reported and the rest apply, as each would have alone.
+    fn theme(&self) -> std::cell::Ref<'_, Theme> {
+        let edits = std::mem::take(&mut *self.pending_faces.borrow_mut());
+        if !edits.is_empty() {
+            let mut theme = self.theme.borrow_mut();
+            match theme.with_face_attributes(edits.iter().map(|(f, k, v)| (f.as_str(), k.as_str(), v))) {
+                Ok(next) => *theme = next,
+                Err(_) => {
+                    for (face, keyword, value) in &edits {
+                        match theme.with_face_attribute(face, keyword, value) {
+                            Ok(next) => *theme = next,
+                            Err(error) => self.diagnostics.borrow_mut().push(format!("face {face} {keyword}: {error}")),
+                        }
+                    }
+                }
+            }
+        }
+        self.theme.borrow()
+    }
     pub(super) fn set_font_alternative_families(&mut self, names: Vec<Vec<String>>) {
         self.font_alternatives.set_family_alist(names);
         self.previous.clear();
@@ -99,19 +126,20 @@ impl DisplayState {
             font_alternatives: romacs_layout_input::FontAlternativeState::default(),
             previous: std::collections::BTreeMap::new(),
             segments: std::collections::BTreeMap::new(),
-            theme: Theme::build(
+            theme: std::cell::RefCell::new(Theme::build(
                 Arc::new(defs),
                 None,
                 Background::Dark,
                 Base::new(attrs.build()).expect("absolute frame base"),
             )
-            .expect("default theme"),
+            .expect("default theme")),
+            pending_faces: Default::default(),
             version: 0,
             hosted: false,
             width: 0,
             height: 0,
             building_band: false,
-            diagnostics: vec![],
+            diagnostics: Default::default(),
         }
     }
 }
@@ -250,18 +278,17 @@ impl Vm {
         // realizes those as its base colours.
         let sentinel = self.str_view(value).is_some_and(|v| matches!(v.bytes(), b"unspecified-fg" | b"unspecified-bg"));
         let value = if sentinel { self.intern("unspecified") } else { value };
-        let next = BoundedDatum::from_graph(&Graph(self), value.0).map_err(|e| e.to_string())
-            .and_then(|datum| self.display_state.theme.with_face_attribute(face, keyword, &datum).map_err(|e| e.to_string()));
-        match next {
-            Ok(next) => {
-                self.display_state.theme = next;
+        match BoundedDatum::from_graph(&Graph(self), value.0) {
+            Ok(datum) => {
+                self.display_state.pending_faces.get_mut().push((face.to_owned(), keyword.to_owned(), datum));
                 self.display_state.free_realized_faces();
             }
-            Err(error) => self.display_state.diagnostics.push(format!("face {face} {keyword}: {error}")),
+            Err(error) => self.display_state.diagnostics.get_mut().push(format!("face {face} {keyword}: {error}")),
         }
     }
     pub fn take_display_diagnostics(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.display_state.diagnostics)
+        drop(self.display_state.theme());
+        std::mem::take(self.display_state.diagnostics.get_mut())
     }
     fn display_symbol(&mut self, name: &str) -> Value {
         Value::reference(self.slot(name) + 1, 7)
@@ -320,11 +347,11 @@ impl Vm {
                 .map_err(|e| e.to_string())?;
             let next = self
                 .display_state
-                .theme
+                .theme()
                 .with_defface(&face, &spec)
                 .map_err(|e| e.to_string())?;
             let definition = next.definition(&face).ok_or("missing declared face")?.clone();
-            self.display_state.theme = next;
+            *self.display_state.theme.get_mut() = next;
             self.display_state.version += 1;
             self.register_declared_face(name, definition)?;
             return Ok(name);
@@ -371,7 +398,7 @@ impl Vm {
                     }
                 };
                 if deferred {
-                    self.display_state.diagnostics.push(
+                    self.display_state.diagnostics.get_mut().push(
                         ":eval: deferred set-window-vscroll until after paint (D-ML1)".into(),
                     );
                 }
@@ -619,7 +646,7 @@ impl Vm {
         let face = BoundedDatum::from_graph(&graph, value.0).ok()
             .and_then(|datum| romacs_face::remap::parse_face_ref(&datum).ok())
             .and_then(|face_ref| {
-                let view = romacs_face::View::bind(&self.display_state.theme, &romacs_face::Remap::empty()).ok()?;
+                let view = romacs_face::View::bind(&self.display_state.theme(), &romacs_face::Remap::empty()).ok()?;
                 face_of_attrs(&view.realize_ref(&face_ref), "merged face").ok()
             });
         let handle = match face {
@@ -736,7 +763,7 @@ impl Vm {
             Form::Int(end as i64),
         ]);
         if let Err(error) = self.eval_form_raw(&call) {
-            self.display_state.diagnostics.push(format!("fontification: {error}"));
+            self.display_state.diagnostics.get_mut().push(format!("fontification: {error}"));
         }
         Ok(true)
     }
@@ -848,14 +875,14 @@ impl Vm {
         let slot = self.slot("mode-line-in-non-selected-windows");
         let distinguish = self.variable_value(slot)? != Value::NIL;
         let wanted = if selected || !distinguish { "mode-line-active" } else { "mode-line-inactive" };
-        let defined = self.display_state.theme.face_names().any(|n| n == wanted);
+        let defined = self.display_state.theme().face_names().any(|n| n == wanted);
         Ok(if defined { wanted } else { "mode-line" }.to_owned())
     }
     /// The face table a snapshot publishes: `default' first, then the
     /// theme's other faces.
     fn display_faces(&self) -> Result<(Vec<String>, Vec<Face>)> {
         let names: Vec<String> = std::iter::once("default")
-            .chain(self.display_state.theme.face_names().filter(|s| *s != "default"))
+            .chain(self.display_state.theme().face_names().filter(|s| *s != "default"))
             .map(str::to_owned)
             .collect();
         let faces = names.iter().map(|n| self.snapshot_face(n)).collect::<Result<Vec<_>>>()?;
@@ -965,7 +992,7 @@ impl Vm {
     fn snapshot_face(&self, name: &str) -> Result<Face> {
         let attrs = self
             .display_state
-            .theme
+            .theme()
             .realize(name)
             .ok_or("unknown face")?;
         face_of_attrs(&attrs, name)
