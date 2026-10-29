@@ -141,8 +141,8 @@ const RESEED: [(&str, &str, &str, Option<&str>); 4] = [
     ("/progmodes/project.el", "(defcustom project-list-file", "default-directory", Some("project-list-file")),
     ("/emacs-lisp/find-func.el", "(defvar find-function-C-source-directory", "default-directory",
      Some("find-function-C-source-directory")),
-    // Its output is exec-path's standard-value property, which no fence
-    // holds.
+    // It asks only whether exec-path is bound: its standard value is the
+    // expression cus-start gives, so nothing it sets needs re-seeding.
     ("/cus-start.el", "(let* ((quoter", "exec-path", None),
 ];
 
@@ -1248,17 +1248,26 @@ fn set_personality(unrandomized: bool) {
 }
 
 /// Run this executable again in place, without address randomization, with
-/// ARGS and ENV: a world process maps code where its image expects it.
-/// Returns only the error when the exec fails.
-pub fn exec_unrandomized(args: &[OsString], env: &[(OsString, OsString)]) -> io::Error {
-    use std::os::unix::process::CommandExt;
-    let mut command = Command::new("/proc/self/exe");
-    command.args(args).env_clear().envs(env.iter().map(|(n, v)| (n, v)));
-    if let Some(name) = std::env::args_os().next() {
-        command.arg0(name);
-    }
+/// this process's arguments and environment, in order, and NAME=VALUE
+/// last: a world process maps code where its image expects it, and its
+/// environment lists come out as the launcher's. Returns only the error
+/// when the exec fails.
+pub fn exec_unrandomized(name: &str, value: &OsStr) -> io::Error {
+    use std::ffi::CString;
+    let cstring = |bytes: &[u8]| CString::new(bytes).map_err(io::Error::other);
+    let prepared = (|| -> io::Result<(Vec<CString>, Vec<CString>)> {
+        let args = std::env::args_os().map(|a| cstring(a.as_bytes())).collect::<io::Result<Vec<_>>>()?;
+        let mut env = std::env::vars_os()
+            .map(|(n, v)| cstring(&[n.as_bytes(), b"=", v.as_bytes()].concat())).collect::<io::Result<Vec<_>>>()?;
+        env.push(cstring(&[name.as_bytes(), b"=", value.as_bytes()].concat())?);
+        Ok((args, env))
+    })();
+    let (args, env) = match prepared { Ok(prepared) => prepared, Err(e) => return e };
+    let pointers = |list: &[CString]| list.iter().map(|c| c.as_ptr()).chain([std::ptr::null()]).collect::<Vec<_>>();
+    let (argv, envp) = (pointers(&args), pointers(&env));
     set_personality(true);
-    let error = command.exec();
+    unsafe { libc::execve(c"/proc/self/exe".as_ptr(), argv.as_ptr(), envp.as_ptr()) };
+    let error = io::Error::last_os_error();
     set_personality(false);
     error
 }

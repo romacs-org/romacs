@@ -158,10 +158,7 @@ impl World {
         }
         match self.valid_manifest() {
             Ok(_) => {
-                let mut env = host::env_snapshot();
-                env.push((IMAGE_ENV.into(), self.file(".rwi").into_os_string()));
-                let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-                let error = host::exec_unrandomized(&args, &env);
+                let error = host::exec_unrandomized(IMAGE_ENV, self.file(".rwi").as_os_str());
                 Launch::Chain { reason: json!({"exec": error.to_string()}) }
             }
             Err(reason) => {
