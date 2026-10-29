@@ -192,7 +192,7 @@ impl Vm {
         if self.gc_threshold != usize::MAX
             && self.stack.is_empty()
             && (self.heap_objects() >= self.gc_threshold
-                || self.request_code.since_collection >= 1024)
+                || self.request_code.since_collection >= self.code_collection_threshold())
         {
             match &mut outcome {
                 Ok(value) => self.collect(std::slice::from_mut(value)),
@@ -200,6 +200,14 @@ impl Vm {
             }
         }
         outcome
+    }
+
+    /// How much request code a request boundary lets accumulate before it
+    /// collects: 1024 functions, or a quarter of the code installed, so that,
+    /// as with objects (`gc_threshold`), the collections a load pays grow
+    /// with what it adds rather than with what the heap already holds.
+    fn code_collection_threshold(&self) -> usize {
+        ((self.functions.len() - self.request_code.free.len()) / 4).max(1024)
     }
 
     pub(super) fn retire_code(&mut self, marks: &[bool]) {
