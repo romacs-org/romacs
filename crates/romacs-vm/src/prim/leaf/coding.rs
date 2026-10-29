@@ -69,8 +69,11 @@ impl Leaf<'_> {
         // setup_coding_system (coding.c:5706): an undecided type encodes
         // through encode_coding_raw_text; decoding it means detection.
         let raw = kind == self.intern("raw-text") || (encode && kind == self.intern("undecided"));
-        if !utf8 && !charset && !utf16 && !raw {
-            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, UTF-16, charset and raw-text)".into()));
+        // Shift-JIS and Big5 decode (coding.c decode_coding_sjis, _big5).
+        let sjis = !encode && kind == self.intern("shift-jis");
+        let big5 = !encode && kind == self.intern("big5");
+        if !utf8 && !charset && !utf16 && !raw && !sjis && !big5 {
+            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, UTF-16, charset, raw-text, and decoding Shift-JIS and Big5)".into()));
         }
         for index in [6, 7, 9, 10] {
             if self.vector_get(attrs, num(index))? != Value::NIL {
@@ -117,8 +120,9 @@ impl Leaf<'_> {
                     .into_iter().map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect()
             } else { tokens };
             let tokens = coding_decode_eol(tokens, mode);
-            let tokens = if charset {
-                let (tokens, found) = self.coding_decode_charset(attrs, &tokens)?;
+            let tokens = if charset || sjis || big5 {
+                let (tokens, found) = if charset { self.coding_decode_charset(attrs, &tokens)? }
+                    else { self.coding_decode_double(attrs, &tokens, sjis)? };
                 runs = found;
                 tokens
             } else { tokens };
@@ -259,6 +263,52 @@ impl Leaf<'_> {
                     at += dim;
                 }
                 None => { out.push(CodingToken::Byte(byte)); at += 1; }
+            }
+        }
+        if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
+        Ok((out, runs))
+    }
+    /// coding.c decode_coding_sjis (SJIS) or decode_coding_big5 over the
+    /// EOL-decoded bytes: the charset list is (ROMAN KANA KANJI [KANJI2]) or
+    /// (ROMAN BIG5); a byte that starts no valid code is a raw byte. Each
+    /// run of one non-ASCII charset is recorded for its `charset' property.
+    fn coding_decode_double(&mut self, attrs: Value, tokens: &[CodingToken], sjis: bool) -> std::result::Result<(Vec<CodingToken>, Vec<(usize, usize, usize)>), Fault> {
+        let list: Vec<usize> = self.coding_items(self.vector_get(attrs, num(4))?)?.iter().filter_map(|v| v.integer_value()).map(|n| n as usize).collect();
+        let ascii = self.named_charset_id("ascii")?;
+        let byte = |at: usize| match tokens.get(at) { Some(CodingToken::Byte(b)) => Some(*b), _ => None };
+        let (mut runs, mut last_id, mut last_offset) = (Vec::new(), ascii, 0);
+        let mut out = Vec::with_capacity(tokens.len());
+        let mut at = 0;
+        while at < tokens.len() {
+            let Some(c) = byte(at) else { out.push(tokens[at]); at += 1; continue };
+            let trail = |at: usize| byte(at + 1).filter(|&c1| if sjis { !(c1 < 0x40 || c1 == 0x7F || c1 > 0xFC) } else { !(c1 < 0x40 || (0x7F..0xA1).contains(&c1) || c1 > 0xFE) });
+            let decoded: Option<(usize, u32, usize)> = if c < 0x80 {
+                Some((list[0], u32::from(c), 1))
+            } else if sjis {
+                match c {
+                    0x80 | 0xA0 => None,
+                    0xA1..=0xDF => Some((list[1], u32::from(c & 0x7F), 1)),
+                    0x81..=0xEF => trail(at).map(|c1| (list[2], sjis_to_jis(u32::from(c) << 8 | u32::from(c1), false), 2)),
+                    0xF0..=0xFC if list.len() > 3 => trail(at).map(|c1| (list[3], sjis_to_jis(u32::from(c) << 8 | u32::from(c1), true), 2)),
+                    _ => None,
+                }
+            } else if (0xA1..=0xFE).contains(&c) {
+                trail(at).map(|c1| (list[1], u32::from(c) << 8 | u32::from(c1), 2))
+            } else { None };
+            let decoded = match decoded {
+                Some((id, code, width)) => self.charset_decode(self.vm.charsets.ids[id], code)?.map(|ch| (id, ch, width)),
+                None => None,
+            };
+            match decoded {
+                Some((id, ch, width)) => {
+                    if id != ascii && id != last_id {
+                        if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
+                        (last_id, last_offset) = (id, out.len());
+                    }
+                    out.push(if ch < 128 { CodingToken::Byte(ch as u8) } else { CodingToken::Character(ch) });
+                    at += width;
+                }
+                None => { out.push(CodingToken::Byte(c)); at += 1; }
             }
         }
         if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
@@ -1685,6 +1735,18 @@ fn detect_utf_16(bytes: &[u8], info: &mut DetectInfo) -> bool {
         }
     }
     false
+}
+
+/// coding.h SJIS_TO_JIS, or SJIS_TO_JIS2 for JIS X 0213 plane 2.
+fn sjis_to_jis(code: u32, plane2: bool) -> u32 {
+    let (s1, s2) = (code >> 8, code & 0xFF);
+    let j1 = if !plane2 {
+        if s2 >= 0x9F { s1 * 2 - if s1 >= 0xE0 { 0x160 } else { 0xE0 } } else { s1 * 2 - if s1 >= 0xE0 { 0x161 } else { 0xE1 } }
+    } else if s2 >= 0x9F {
+        match s1 { 0xF0 => 0x28, 0xF1 => 0x24, 0xF2 => 0x2C, 0xF3 => 0x2E, _ => 0x6E + (s1 - 0xF4) * 2 }
+    } else if s1 <= 0xF2 { 0x21 + (s1 - 0xF0) * 2 } else if s1 <= 0xF4 { 0x2D + (s1 - 0xF3) * 2 } else { 0x6F + (s1 - 0xF5) * 2 };
+    let j2 = if s2 >= 0x9F { s2 - 0x7E } else { s2 - if s2 >= 0x7F { 0x20 } else { 0x1F } };
+    j1 << 8 | j2
 }
 
 /// coding.c detect_coding_sjis; MAX_FIRST is 0xEF for a system of at most

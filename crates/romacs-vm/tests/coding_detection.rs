@@ -3,7 +3,7 @@
 //! emacs-mule detectors and the priority walk, compared with pinned GNU
 //! live. A full case compares the decision, the decoded characters and the
 //! `charset' property; a decision case, for a coding type VM2 has no
-//! decoder for (ISO-2022, emacs-mule, Shift-JIS, Big5), compares only the base coding system
+//! decoder for (ISO-2022, emacs-mule), compares only the base coding system
 //! the walk chose, which VM2's refusal names (GNU settles its EOL variant
 //! while decoding).
 use romacs_vm::Vm;
@@ -48,8 +48,8 @@ fn insert_file_contents_detects_coding_systems_as_gnu() {
     ];
     for (name, bytes) in files { std::fs::write(dir.join(name), bytes).unwrap(); }
     let cases = [
-        (FULL, "latin", "progn"), (DECISION, "sjis", "progn"), (DECISION, "big5", "with-coding-priority '(chinese-big5)"),
-        (DECISION, "sjis", "with-coding-priority '(japanese-shift-jis)"), (FULL, "u16le", "progn"), (FULL, "u16be", "progn"),
+        (FULL, "latin", "progn"), (FULL, "sjis", "progn"), (FULL, "big5", "with-coding-priority '(chinese-big5)"),
+        (FULL, "sjis", "with-coding-priority '(japanese-shift-jis)"), (FULL, "u16le", "progn"), (FULL, "u16be", "progn"),
         (FULL, "nul", "progn"), (FULL, "euc", "progn"),
         (DECISION, "iso7", "progn"), (DECISION, "mule", "with-coding-priority '(emacs-mule)"),
         (DECISION, "euc", "with-coding-priority '(chinese-iso-8bit)"), (DECISION, "ss2", "with-coding-priority '(iso-2022-8bit-ss2)"),
