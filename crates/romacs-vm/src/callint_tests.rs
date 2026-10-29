@@ -76,3 +76,16 @@ fn a_live_interactive_closure_keeps_its_spec_across_compaction() {
     assert!(bytes >= 4000, "the payload was live only through the table: {bytes} bytes released");
     assert_eq!(table_entries(&vm), 0, "the dead closure's entry is gone");
 }
+
+/// A function alias chain is bounded by the symbols that can form it, not by
+/// the cons arena, which a collection can leave empty.
+#[test]
+fn interactive_form_follows_aliases_with_an_empty_cons_arena() {
+    let mut vm = Vm::new();
+    // Every Lisp entry collects, so the reader's dead conses are gone when
+    // the primitive walks the chain.
+    vm.set_gc_stress(1);
+    assert_eq!(show(&mut vm, "(interactive-form t)"), "nil");
+    assert_eq!(show(&mut vm, "(interactive-form 'forward-char)"), "(interactive \"^p\")");
+    assert!(vm.conses.len() <= 2, "the fixture empties the cons arena");
+}

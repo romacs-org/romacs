@@ -95,14 +95,67 @@ fn collecting_read_callback_propagates_throw_and_signal() {
 }
 
 #[test]
-fn callback_preserves_existing_compiler_collection_inhibition() {
+fn callback_preserves_an_open_builders_collection_hold() {
     let mut vm = Vm::new();
-    vm.eval_source_raw("(defun inhibited-reader () (garbage-collect) 32)")
+    vm.eval_source_raw("(defun inhibited-reader () (garbage-collect))")
         .unwrap();
     let callback = vm.intern("inhibited-reader");
-    vm.gc_threshold = usize::MAX;
+    // A compiler builder expanding a macro holds collection (`Vm::function').
+    vm.gc_holds += 1;
     let before = vm.heap_stats().collections;
-    vm.reader_call(callback, &[]).unwrap();
+    let result = vm.reader_call(callback, &[]).unwrap();
+    assert_eq!(result, Value::NIL, "garbage-collect returns nil while inhibited");
     assert_eq!(vm.heap_stats().collections, before);
-    assert_eq!(vm.gc_threshold, usize::MAX);
+    assert_eq!(vm.gc_holds, 1);
+}
+
+#[test]
+fn a_collection_drops_idle_programs_code_and_nested_runs_relower_it() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(defun spare-callee (x) (list x (cons x 'tail)))").unwrap();
+    let callee = vm.intern("spare-callee");
+    let first = vm.reader_call(callee, &[Value::integer(1).unwrap()]).unwrap();
+    assert_eq!(vm.display(first).unwrap(), "(1 (1 . tail))");
+    assert!(vm.spare_programs.iter().any(|p| p.code_len() > 0), "a nested run leaves its program idle");
+    vm.collect(&mut []);
+    assert!(vm.spare_programs.iter().all(|p| p.code_len() == 0), "a collection drops idle lowered code");
+    let again = vm.reader_call(callee, &[Value::integer(2).unwrap()]).unwrap();
+    assert_eq!(vm.display(again).unwrap(), "(2 (2 . tail))");
+}
+
+struct PanickingHost;
+impl crate::HostInput for PanickingHost {
+    fn input_pending(&mut self) -> bool { false }
+    fn redisplay(&mut self, _: crate::HostFrame) -> std::result::Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<crate::HostEvent, String> {
+        panic!("host failure while Lisp waits")
+    }
+}
+
+/// A panic out of a host wait, with engines suspended by `eval' and the
+/// prompt, leaves no suspension state behind once caught: a collection
+/// then traces only live engines, and Lisp runs and collects again.
+#[test]
+fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
+    let mut vm = Vm::new();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    let probe = vm.eval_source_raw("(condition-case e (read-string \"\") (error (car e)))").unwrap();
+    assert_eq!(vm.display(probe).unwrap(), "end-of-file");
+    vm.set_host_input(Some(Box::new(PanickingHost)));
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        vm.eval_source_raw("(let ((keep (list 1 2))) (eval '(read-from-minibuffer \"P: \")) keep)")
+    }));
+    assert!(caught.is_err(), "the host panic propagates");
+    assert!(vm.suspended_code.is_empty(), "no suspended engine outlives the panic");
+    assert!(vm.suspended_stacks.is_empty() && vm.stack.is_empty());
+    assert!(vm.external_roots.is_empty());
+    assert_eq!((vm.running_engines, vm.gc_holds, vm.rooted_write), (0, 0, false));
+    assert!(vm.signal_handlers.is_empty());
+    vm.set_host_input(None);
+    vm.collect(&mut []);
+    vm.set_gc_stress(1);
+    let before = vm.heap_stats().collections;
+    let value = vm.eval_source_raw("(let ((x (list (quote after) (copy-sequence \"aa\")))) (garbage-collect) x)").unwrap();
+    assert_eq!(vm.display(value).unwrap(), "(after \"aa\")");
+    assert!(vm.heap_stats().collections > before);
 }

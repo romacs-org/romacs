@@ -134,8 +134,8 @@ pub enum Form {
     /// Compiler-only: a heap object with no source spelling (a closure, a
     /// buffer, ...) carried by a macro expansion or an `eval` datum, exactly
     /// as GNU's evaluator carries it (src/eval.c eval_sub). Produced only by
-    /// `Vm::expansion_form`, and only while collection is inhibited or the
-    /// object is otherwise rooted; it must not outlive the compilation that
+    /// `Vm::expansion_form`; the object is rooted while the form lives
+    /// (`FormObject`), and it must not outlive the compilation that
     /// consumes it, which moves it into a traced `Op::Const`.
     #[doc(hidden)]
     Object(handle::FormObject),
@@ -1157,8 +1157,24 @@ pub struct Vm {
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
     gc_retained: usize,
-    gc_threshold: usize,
-    gc_floor: usize,
+    /// Compiled code units (IR ops, lowered instructions) the last
+    /// collection traced: with `gc_retained', what a collection traverses.
+    gc_code: usize,
+    /// An embedder's pacing floor (`set_collection_floor'), which replaces
+    /// the Lisp pacing variables while set.
+    gc_floor: Option<usize>,
+    /// Open frames that keep heap Values in untraced Rust storage across a
+    /// call that can run Lisp: compiler builders and watcher notifications
+    /// from native writers (`gc.rs`, `Vm::may_collect`).
+    gc_holds: usize,
+    /// Engines between entry and exit, suspended or not; those not in
+    /// `suspended_code` hold untraced registers and code.
+    running_engines: usize,
+    /// The writer notifying watchers is an engine write suspended for it,
+    /// whose own Values the write roots (`threaded::watched_write`).
+    rooted_write: bool,
+    /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
+    gc_stress: gc::Stress,
     names: NameMap<String, usize>,
     /// By slot, whether `names' maps the slot's name to it: membership of
     /// the initial obarray, answered without hashing the name.
@@ -1201,6 +1217,9 @@ pub struct Vm {
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
+    /// Register stacks of engines suspended across a nested run, traced and
+    /// forwarded in place: their frames keep raw pointers into them.
+    suspended_stacks: Vec<Vec<Value>>,
     /// Suspended engines' code and entry caches, traced and forwarded in place.
     suspended_code: Vec<threaded::SuspendedCode>,
     /// Menu-item `:filter' results for the keymap walk in progress, as
@@ -1220,11 +1239,13 @@ impl Default for Vm {
     }
 }
 impl Vm {
-    /// Soft object-count pacing floor, checked only at strand wait points.
-    /// Live heaps grow geometrically; this is not a hard memory limit.
+    /// Embedder pacing in place of `gc-cons-threshold' and
+    /// `gc-cons-percentage': collect once the heap holds at least OBJECTS and
+    /// twice what the last collection retained. Hosts and tests use it to
+    /// force or defer collection. Checked only at strand wait points; not a
+    /// hard memory limit.
     pub fn set_collection_floor(&mut self, objects: usize) {
-        self.gc_floor = objects.max(1);
-        self.gc_threshold = self.gc_retained.saturating_mul(2).max(self.gc_floor);
+        self.gc_floor = Some(objects.max(1));
     }
     pub fn heap_objects(&self) -> usize {
         self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
@@ -1302,8 +1323,12 @@ impl Vm {
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_retained: 0,
-            gc_threshold: 16384,
-            gc_floor: 16384,
+            gc_code: 0,
+            gc_floor: None,
+            gc_holds: 0,
+            running_engines: 0,
+            rooted_write: false,
+            gc_stress: gc::Stress::from_env(),
             names: NameMap::default(),
             initial_obarray: Vec::new(),
             symbol_names: vec![],
@@ -1333,6 +1358,7 @@ impl Vm {
             caches: vec![],
             stack: vec![],
             external_roots: vec![],
+            suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),
             keymap_pending_filter: None,
@@ -1574,10 +1600,24 @@ impl Vm {
         result
     }
     fn install_function(&mut self, function: Function) -> usize {
-        self.register_width = self.register_width.max(function.regs);
         self.install_code(function)
     }
+    /// Compile one function. Its builder keeps constants in untraced Rust
+    /// storage while macro expansion runs Lisp, so it holds collection.
     fn function(
+        &mut self,
+        args: &[Form],
+        body: &[Form],
+        outer: &NameMap<Name, Binding>,
+        local_specials: &NameSet<String>,
+    ) -> Result<(usize, Vec<Name>)> {
+        let _unwind = self.unwind_mark();
+        self.gc_holds += 1;
+        let result = self.build_function(args, body, outer, local_specials);
+        self.gc_holds -= 1;
+        result
+    }
+    fn build_function(
         &mut self,
         args: &[Form],
         body: &[Form],
@@ -1833,8 +1873,8 @@ impl Vm {
     }
     /// Expand and compile a lazily held body in place, keeping its function
     /// ID and capture layout so every closure already made from it, and every
-    /// cache naming it, now runs the compiled code. The caller must have
-    /// inhibited collection: builders hold unrooted Values. On failure the
+    /// cache naming it, now runs the compiled code. Its Lisp (macro
+    /// expansion) runs inside the builder, which holds collection. On failure the
     /// body stays lazy, so the next call expands again, as GNU does.
     pub(crate) fn force_lazy(&mut self, id: usize) -> Result<()> {
         let Some(lazy) = self.functions.get(id).and_then(|f| f.lazy.clone()) else {
@@ -2493,10 +2533,12 @@ impl Vm {
         if f.arity != 0 || f.captures != 0 {
             return Err("entry function needs arguments or captures".into());
         }
-        self.external_roots.extend_from_slice(roots);
+        let frame = self.root_frame(roots);
         let outcome = threaded::execute(self, function);
-        roots.copy_from_slice(&self.external_roots);
-        self.external_roots.clear();
+        for (i, root) in roots.iter_mut().enumerate() {
+            *root = self.rooted(&frame, i);
+        }
+        self.drop_frame(frame);
         outcome
     }
     /// Declare that this embedder renders the echo area: printing to `t`
@@ -2556,29 +2598,56 @@ impl Vm {
         // A local let restores the owner's current local binding, if it
         // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
         // may have been killed and made again inside the let.
+        // The popped value and owner are no longer traced as a binding: a
+        // watcher sees them from a root frame, and the restore reads them back.
+        // GNU do_one_unbind (SPECPDL_LET_LOCAL, eval.c:3871-3882) restores
+        // only if OWNER still has its local binding.
         if let Some(base) = base && self.local_binding_slots.contains(&slot) {
-            if self.live_buffer_value(owner) {
-                let table = self.slots[base].local;
-                if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
-                    if self.variable_trapped(base) { self.notify_watchers_at(base, value, "unlet", Some(owner))?; }
-                    // set-buffer-local-toplevel-value may have saved any object.
-                    let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
-                    self.slots[local.index(7).expect("private binding") - 1].value = value;
-                }
+            if self.owner_local_binding(base, owner).is_none() {
+                return Ok(());
             }
+            let (mut value, mut owner) = (value, owner);
+            if self.variable_trapped(base) {
+                let frame = self.root_frame(&[value, owner]);
+                let notified = self.notify_watchers_at(base, value, "unlet", Some(owner));
+                [value, owner] = self.release_frame(frame);
+                notified?;
+            }
+            // set_internal finds OWNER's binding after the watchers (data.c:
+            // 1730-1760): one may have killed it, made another or let its
+            // private slot be reused. With none left the default takes it.
+            let target = self.owner_local_binding(base, owner).unwrap_or(base);
+            // set-buffer-local-toplevel-value may have saved any object.
+            let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
+            self.slots[target].value = value;
             return Ok(());
         }
         if let Some(fwd) = self.native_forwarding(slot) {
             return self.unbind_forwarded(slot, fwd, value, owner, let_default);
         }
+        let mut value = value;
         if let Some(base) = base && self.variable_trapped(base) {
-            if self.local_table(base)?.is_some() { self.notify_watchers_at(base, value, "set", Some(Value::NIL))?; }
-            else { self.notify_watchers(base, value, "unlet")?; }
+            let frame = self.root_frame(&[value]);
+            let notified = if self.local_table(base)?.is_some() { self.notify_watchers_at(base, value, "set", Some(Value::NIL)) }
+                else { self.notify_watchers(base, value, "unlet") };
+            [value] = self.release_frame(frame);
+            notified?;
         }
         if slot != self.buffer_slot || value == Value::NIL || self.live_buffer_value(value) {
             self.slots[slot].value = value;
         }
         Ok(())
+    }
+    /// The private slot of OWNER's local binding of BASE, if OWNER is live
+    /// and still has one.
+    fn owner_local_binding(&mut self, base: usize, owner: Value) -> Option<usize> {
+        if !self.live_buffer_value(owner) {
+            return None;
+        }
+        // A watcher may have dropped the whole table: no local binding then.
+        let table = self.slots[base].local;
+        let local = self.declaration_hash_get(table, owner).ok()??;
+        Some(local.index(7).expect("private binding") - 1)
     }
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
