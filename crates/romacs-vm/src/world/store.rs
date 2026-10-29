@@ -268,6 +268,7 @@ impl World {
         let publish = |suffix: &str, bytes: &[u8]| -> std::io::Result<()> {
             let temporary = self.file(&format!("{suffix}.new"));
             host::write(&temporary, bytes)?;
+            read_only(&temporary)?;
             host::rename(&temporary, self.file(suffix))
         };
         if trace["refusals"].as_array().is_some_and(|r| !r.is_empty()) {
@@ -282,10 +283,18 @@ impl World {
             .map_err(|e| e.to_string())?;
         let len = image::capture(vm, carry, &file, self.key)?;
         file.sync_all().map_err(|e| e.to_string())?;
+        read_only(&temporary).map_err(|e| e.to_string())?;
         host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string())?;
         publish(".json", &text).map_err(|e| e.to_string())?;
         Ok(len)
     }
+}
+
+/// Make the file at PATH readable by its owner only, as a published world's
+/// files are (§9.2).
+fn read_only(path: &Path) -> std::io::Result<()> {
+    let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(std::io::Error::other)?;
+    host::chmod(&path, 0o400, false)
 }
 
 /// The builder's environment: INVOKING without its per-process names, which
