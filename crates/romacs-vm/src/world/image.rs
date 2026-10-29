@@ -137,5 +137,16 @@ mod tests {
         assert!(refusal(|vm| vm.running_engines = 1).contains("running_engines"));
         assert!(refusal(|vm| vm.gc_holds = 1).contains("gc_holds"));
         assert!(refusal(|vm| vm.rooted_write = true).contains("rooted_write"));
+        // A cache slot a builder reserved that no installed code owns.
+        assert!(refusal(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
+    }
+
+    #[test]
+    fn a_collection_reclaims_an_unclaimed_cache_and_the_vm_is_at_rest_again() {
+        let mut vm = Vm::new();
+        vm.install_cache();
+        assert!(vm.world_quiescent().unwrap_err().contains("unclaimed_caches"));
+        vm.collect(&mut []);
+        assert_eq!(vm.world_quiescent(), Ok(()));
     }
 }
