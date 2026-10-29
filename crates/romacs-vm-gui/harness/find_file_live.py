@@ -449,6 +449,15 @@ def main():
                 keys("-k", "Return")
                 wait_visible("Completion sentinel λ")
                 capture("switch-second-buffer")
+                # Switching to the buffer already shown changes nothing but
+                # the prompt; the prompt must still leave the screen.
+                switch_prompt()
+                keys("comp")
+                keys("-k", "Tab")
+                keys("-k", "Return")
+                fio.wait(lambda: not visible("Switch to buffer"), args.timeout, "prompt gone after switching to the shown buffer", proc)
+                assert fio.document_rows(trace(), clip) == ["Completion sentinel λ"], "switch to the shown buffer changed document"
+                capture("switch-same-buffer")
                 switch_prompt()
                 keys("cancelled buffer")
                 control("g")

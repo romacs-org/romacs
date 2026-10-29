@@ -63,6 +63,22 @@ impl GuiFrameRenderState {
         true
     }
 
+    /// Key input restarts the blink, as GNU's blink-cursor does: the cursor
+    /// shows for a whole interval from NOW.  A key whose command changes
+    /// nothing gets no new frame, so this cannot wait for one; turning a
+    /// blinked-off cursor on asks for a cursor-only composite.
+    pub(in crate::render_thread) fn restart_cursor_blink(
+        &mut self,
+        now: romacs_display_protocol::frame_time::EventTime,
+    ) -> bool {
+        let was_off = !self.cursor.blink_on;
+        self.cursor.reset_blink(now);
+        if was_off {
+            self.compositor.cursor_dirty = true;
+        }
+        was_off
+    }
+
     pub(in crate::render_thread) fn force_cursor_blink_on(&mut self) -> bool {
         if !self.cursor.force_blink_on() {
             return false;

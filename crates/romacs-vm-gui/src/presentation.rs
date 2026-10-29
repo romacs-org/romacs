@@ -90,6 +90,9 @@ impl Presentation {
         Ok(vm.eval_source("romacs-gui-quit-requested")? != romacs_vm::Fixed::NIL)
     }
 
+    /// The frame matched the last one painted: nothing to present.
+    pub fn unchanged(&mut self) { self.dirty = false; }
+
     pub fn submitted(&mut self, presentation: u64, now: Instant) {
         self.dirty = false;
         self.in_flight = Some((presentation, now));
