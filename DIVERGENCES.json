@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "3513b2017417e38c0bb2b2fdeeb7d34d5f6d46fe23e7dfaa6fbae293c2df4a6d",
+  "input_hash": "d896df6539c8e6a781e6d749b024f90d3688a2136dc455a86fb1c95bf8f08ca8",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 275,
-  "symbols": 637,
+  "symbols": 640,
   "rows_without_symbols": 15
  },
  "by_symbol": {
@@ -133,13 +133,13 @@
    144
   ],
   "bidi-display-reordering": [
-   197
+   196
   ],
   "bidi-paragraph-separate-re": [
-   197
+   196
   ],
   "bidi-paragraph-start-re": [
-   197
+   196
   ],
   "bool-vector": [
    84,
@@ -185,7 +185,7 @@
    1
   ],
   "buffer-text-pixel-size": [
-   200
+   199
   ],
   "buffer-undo-list": [
    169
@@ -226,7 +226,7 @@
    167
   ],
   "ceiling": [
-   204
+   203
   ],
   "char-category-set": [
    229
@@ -344,7 +344,7 @@
    142
   ],
   "current-bidi-paragraph-direction": [
-   197
+   196
   ],
   "current-case-table": [
    55
@@ -703,10 +703,10 @@
    264
   ],
   "find-composition": [
-   202
+   201
   ],
   "find-composition-internal": [
-   202
+   201
   ],
   "find-file": [
    0,
@@ -720,7 +720,7 @@
    0
   ],
   "fit-window-to-buffer": [
-   200
+   199
   ],
   "float-output-format": [
    163
@@ -732,10 +732,10 @@
    52
   ],
   "floor": [
-   204
+   203
   ],
   "fontification-functions": [
-   196
+   195
   ],
   "force-mode-line-update": [
    160
@@ -801,10 +801,10 @@
   ],
   "frame-terminal": [
    190,
-   203
+   202
   ],
   "frame-visible-p": [
-   194
+   193
   ],
   "framep": [
    190
@@ -893,7 +893,7 @@
    187
   ],
   "iconify-frame": [
-   194
+   193
   ],
   "identity": [
    53
@@ -985,7 +985,7 @@
    207
   ],
   "jit-lock-function": [
-   196
+   195
   ],
   "kbd": [
    148
@@ -1068,10 +1068,10 @@
    170
   ],
   "line-move-visual": [
-   198
+   197
   ],
   "line-pixel-height": [
-   198
+   197
   ],
   "lisp-eval-depth-reserve": [
    91
@@ -1140,7 +1140,7 @@
    158
   ],
   "lower-frame": [
-   194
+   193
   ],
   "macroexp--pending-eager-loads": [
    241
@@ -1165,10 +1165,10 @@
    221
   ],
   "make-frame-invisible": [
-   194
+   193
   ],
   "make-frame-visible": [
-   194
+   193
   ],
   "make-hash-table": [
    134
@@ -1337,6 +1337,9 @@
   "move-to-column": [
    3
   ],
+  "move-to-window-line": [
+   206
+  ],
   "multibyte-string-p": [
    210
   ],
@@ -1347,7 +1350,7 @@
    52
   ],
   "next-line": [
-   198
+   197
   ],
   "next-overlay-change": [
    129
@@ -1421,19 +1424,19 @@
    131
   ],
   "pos-visible-in-window-p": [
-   199
+   198
   ],
   "position-symbol": [
    51
   ],
   "posn-at-point": [
-   199
+   198
   ],
   "prefix-numeric-value": [
    74
   ],
   "previous-line": [
-   198
+   197
   ],
   "previous-overlay-change": [
    129
@@ -1442,7 +1445,7 @@
    161,
    162,
    163,
-   203,
+   202,
    252
   ],
   "prin1-to-string": [
@@ -1451,7 +1454,7 @@
    113,
    161,
    163,
-   203,
+   202,
    220,
    252
   ],
@@ -1527,7 +1530,7 @@
    67
   ],
   "raise-frame": [
-   194
+   193
   ],
   "re-search-backward": [
    156,
@@ -1594,7 +1597,7 @@
    66
   ],
   "recenter": [
-   193
+   206
   ],
   "record": [
    221
@@ -1607,7 +1610,7 @@
   ],
   "redisplay": [
    145,
-   195
+   194
   ],
   "redisplay-adhoc-scroll-in-resize-mini-windows": [
    258
@@ -1670,7 +1673,7 @@
    264
   ],
   "round": [
-   204
+   203
   ],
   "run-with-idle-timer": [
    175
@@ -1690,6 +1693,9 @@
   "scroll-conservatively": [
    150
   ],
+  "scroll-down": [
+   206
+  ],
   "scroll-down-aggressively": [
    168
   ],
@@ -1698,6 +1704,9 @@
   ],
   "scroll-step": [
    150
+  ],
+  "scroll-up": [
+   206
   ],
   "scroll-up-aggressively": [
    168
@@ -1720,7 +1729,7 @@
   "selected-frame": [
    152,
    190,
-   203
+   202
   ],
   "selected-window": [
    152
@@ -1798,7 +1807,7 @@
   ],
   "set-window-hscroll": [
    192,
-   201
+   200
   ],
   "set-window-new-total": [
    185
@@ -1811,7 +1820,7 @@
   ],
   "set-window-start": [
    150,
-   205
+   204
   ],
   "set-window-vscroll": [
    137,
@@ -1883,7 +1892,7 @@
    92
   ],
   "string-glyph-split": [
-   202
+   201
   ],
   "string-match": [
    156,
@@ -2004,7 +2013,7 @@
    171
   ],
   "truncate": [
-   204
+   203
   ],
   "truncate-lines": [
    160
@@ -2076,10 +2085,10 @@
    100
   ],
   "vertical-motion": [
-   198
+   197
   ],
   "visible-frame-list": [
-   194
+   193
   ],
   "visited-file-modtime": [
    94,
@@ -2101,14 +2110,14 @@
    184
   ],
   "window-end": [
-   206
+   205
   ],
   "window-header-line-height": [
    187
   ],
   "window-hscroll": [
    192,
-   201
+   200
   ],
   "window-list": [
    190
@@ -2154,7 +2163,7 @@
    187
   ],
   "window-text-pixel-size": [
-   200
+   199
   ],
   "window-total-height": [
    185
@@ -4679,8 +4688,8 @@
    "planned": false,
    "mechanism": "VM2 mode-line/vscroll subset",
    "gnu": "`src/xdisp.c:display_mode_element` (`:28458`) and `decode_mode_spec` (`:29429`): buffer-local formats per window, propertized strings with their own text properties, conditionals, field widths/precision, risk filtering, every percent escape over the C state (coding systems, frame name, recursion depth, processes, save point); `src/window.c:Fwindow_vscroll/Fset_window_vscroll` support character units, numeric scroll values and preserve-vscroll",
-   "romacs": "Tier B evaluates each window's format with that window's buffer current, its window point installed as buffer point (`redisplay_window`, `xdisp.c:20620-20641`), and the window temporarily selected (`display_mode_lines`, `xdisp.c:28114-28156`); the real selection is rooted across collecting `:eval` forms, and buffer point and selection are restored after evaluation, including error/throw/quit, before choosing the active/inactive face (same-buffer split oracle `crates/romacs-vm-gui/evidence/tierb/gnu/point-context.txt`): buffer-local formats, `:eval`/`:propertize` (face symbol or first face of a face list), conditionals, integer field widths and precisions, risky-variable filtering, `*too-deep*`/`*invalid*`, and `%b %f %* %+ %& %l %c %C %p %P %o %q %i %I %n %m %M %@ %- %%` exactly as GNU 32.0.50 formats them (oracle `crates/romacs-vm-gui/evidence/tierb/gnu/mode-line.txt`). Without the C state GNU reads: `%z` is `-` and `%Z` is `-` plus `eol-mnemonic-undecided` (GNU: the buffer's coding mnemonic, `UUU:` for utf-8-unix); `%F` is `Emacs` (GNU tty `F1`, GUI frame title); `%[ %]` are empty (no recursive edit); `%s` is `no process`; `%e` is empty, which is GNU's answer on a `SYSTEM_MALLOC` build such as glibc GNU/Linux even while `memory-full` is non-nil (`xdisp.c` `decode_mode_spec` `case 'e'`; oracle `crates/romacs-vm-gui/evidence/tierb/gnu/standard-head.txt`), where a gmalloc build shows `!MEM FULL! `; `save_modiff` stays 0 (no `set-buffer-modified-p`/save), so any edit shows `**` until the buffer dies; text-property changes (`put-text-property`, `remove-text-properties`) do not count as modifications, where GNU's `modify_text_properties` (textprop.c) bumps MODIFF when a property actually changes, so a buffer changed only in its properties shows `--` here and `**` in GNU; `mode-name` has no buffer.c default `\"Fundamental\"`. Assigned `%m`/`%f` values and `%Z`'s explicit EOL mnemonic accept both multibyte and unibyte strings; unibyte high bytes are projected to octal glyph text before field-width/precision handling (not GNU's raw-byte character counting). A string's own text properties and anonymous face plists are not projected onto the band. GNU stops producing band glyphs at the window's last visible column (`xdisp.c:30105`); VM2 builds band text up to four times the frame's columns and the painter clips it at the window edge, so the visible band is the same, and both keep evaluating `:eval` elements past the edge. Field widths and integer limits wrap to a C `int` as GNU's do (`xdisp.c:28663`, `:28879`; 32.0.50 transcript `crates/romacs-vm-gui/evidence/tierb/gnu/field-wrap.txt`: a limit of 2305843009213693951 is -1, a one-column precision, so the next element stays visible), then VM2 clamps them to 2^20 columns; the clamp only changes text beyond the band's four frame widths, which neither side shows. A format string's literal run is selected by columns (TAB `tab-width`, other control characters 2, GNU `c_string_width`) and then counts its characters toward precision and padding, as `store_mode_line_string` does; `%`-spec results and literal strings truncate and pad by characters (`crates/romacs-vm-gui/evidence/tierb/gnu/control-width.txt`). A control character that fits is painted `^X`; GNU's painted form of a TAB in a mode line has not been compared. Band faces follow GNU's `CURRENT_MODE_LINE_ACTIVE_FACE_ID`: the selected window draws `mode-line-active`, others `mode-line-inactive` while `mode-line-in-non-selected-windows` is non-nil; because faces.el (which defines `mode-line-active` inheriting `mode-line`) is not loaded, an undefined `mode-line-active`/`mode-line-inactive` falls back to `mode-line`. Vscroll requires explicit pixelwise non-nil and a nonnegative u32 integer; other units, floats, negative clamp and fourth setter argument are rejected. `format-mode-line` (`Fformat_mode_line`, `xdisp.c:29058`) runs the same engine for GNU's string targets (`MODE_LINE_STRING`, `MODE_LINE_NOPROP`, `src/display.rs` `format_mode_line`): GNU's argument checks, the empty unibyte answer for a nil FORMAT or in batch, WINDOW selected and BUFFER current while it runs, no clipping and no `^X` forms, `%-` as `--`, each piece's `mode-line-elt-no` (GNU's global element count, restarted by a nested call) and its face: the `:propertize` face with FACE appended, else FACE, where FACE t is the window's `mode-line-active`/`mode-line-inactive` and an integer drops all properties (oracle: `tests/format_mode_line.rs` against pinned GNU in batch and, recorded by `tests/fixtures/format-mode-line-tty.py`, on an 80x24 terminal frame). As in the band, a string element's own properties are not projected and `:propertize` contributes only its face (its `help-echo`, `mouse-face`, `local-map` and other properties are dropped). Batch is the Lisp variable `noninteractive` (GNU reads its C flag, which binding the variable does not change). Neighbouring pieces with equal properties share one interval, where GNU's concatenation keeps them apart; `equal-including-properties` cannot tell",
-   "why": "**Package-observable**: `%z`/`%Z`/`%F`/`%m` text, the modified flag after a save, and band faces from string properties differ; `format-mode-line` strings lack the non-face properties above. Escapes, constructs and per-window evaluation follow GNU within the restrictions above",
+   "romacs": "Tier B evaluates each window's format with that window's buffer current, its window point installed as buffer point (`redisplay_window`, `xdisp.c:20620-20641`), and the window temporarily selected (`display_mode_lines`, `xdisp.c:28114-28156`); the real selection is rooted across collecting `:eval` forms, and buffer point and selection are restored after evaluation, including error/throw/quit, before choosing the active/inactive face (same-buffer split oracle `crates/romacs-vm-gui/evidence/tierb/gnu/point-context.txt`): buffer-local formats, `:eval`/`:propertize` (face symbol or first face of a face list), conditionals, integer field widths and precisions, risky-variable filtering, `*too-deep*`/`*invalid*`, and `%b %f %* %+ %& %l %c %C %p %P %o %q %i %I %n %m %M %@ %- %%` exactly as GNU 32.0.50 formats them (oracle `crates/romacs-vm-gui/evidence/tierb/gnu/mode-line.txt`). Without the C state GNU reads: `%z` is `-` and `%Z` is `-` plus `eol-mnemonic-undecided` (GNU: the buffer's coding mnemonic, `UUU:` for utf-8-unix); `%F` is `Emacs` (GNU tty `F1`, GUI frame title); `%[ %]` are empty (no recursive edit); `%s` is `no process`; `%e` is empty, which is GNU's answer on a `SYSTEM_MALLOC` build such as glibc GNU/Linux even while `memory-full` is non-nil (`xdisp.c` `decode_mode_spec` `case 'e'`; oracle `crates/romacs-vm-gui/evidence/tierb/gnu/standard-head.txt`), where a gmalloc build shows `!MEM FULL! `; `save_modiff` stays 0 (no `set-buffer-modified-p`/save), so any edit shows `**` until the buffer dies; text-property changes (`put-text-property`, `remove-text-properties`) do not count as modifications, where GNU's `modify_text_properties` (textprop.c) bumps MODIFF when a property actually changes, so a buffer changed only in its properties shows `--` here and `**` in GNU; `mode-name` has no buffer.c default `\"Fundamental\"`. Assigned `%m`/`%f` values and `%Z`'s explicit EOL mnemonic accept both multibyte and unibyte strings; unibyte high bytes are projected to octal glyph text before field-width/precision handling (not GNU's raw-byte character counting). A string element's own `face` (a symbol, or a face list's first symbol) shows where its `:propertize` gives none, as GNU merges PROPS onto a non-risky string's properties; its other properties and anonymous face plists are not projected onto the band. GNU stops producing band glyphs at the window's last visible column (`xdisp.c:30105`); VM2 builds band text up to four times the frame's columns and the painter clips it at the window edge, so the visible band is the same, and both keep evaluating `:eval` elements past the edge. Field widths and integer limits wrap to a C `int` as GNU's do (`xdisp.c:28663`, `:28879`; 32.0.50 transcript `crates/romacs-vm-gui/evidence/tierb/gnu/field-wrap.txt`: a limit of 2305843009213693951 is -1, a one-column precision, so the next element stays visible), then VM2 clamps them to 2^20 columns; the clamp only changes text beyond the band's four frame widths, which neither side shows. A format string's literal run is selected by columns (TAB `tab-width`, other control characters 2, GNU `c_string_width`) and then counts its characters toward precision and padding, as `store_mode_line_string` does; `%`-spec results and literal strings truncate and pad by characters (`crates/romacs-vm-gui/evidence/tierb/gnu/control-width.txt`). A control character that fits is painted `^X`; GNU's painted form of a TAB in a mode line has not been compared. Band faces follow GNU's `CURRENT_MODE_LINE_ACTIVE_FACE_ID`: the selected window draws `mode-line-active`, others `mode-line-inactive` while `mode-line-in-non-selected-windows` is non-nil; because faces.el (which defines `mode-line-active` inheriting `mode-line`) is not loaded, an undefined `mode-line-active`/`mode-line-inactive` falls back to `mode-line`. Vscroll requires explicit pixelwise non-nil and a nonnegative u32 integer; other units, floats, negative clamp and fourth setter argument are rejected. `format-mode-line` (`Fformat_mode_line`, `xdisp.c:29058`) runs the same engine for GNU's string targets (`MODE_LINE_STRING`, `MODE_LINE_NOPROP`, `src/display.rs` `format_mode_line`): GNU's argument checks, the empty unibyte answer for a nil FORMAT or in batch, WINDOW selected and BUFFER current while it runs, no clipping and no `^X` forms, `%-` as `--`, each piece's `mode-line-elt-no` (GNU's global element count, restarted by a nested call) and its face: the `:propertize` face with FACE appended, else FACE, where FACE t is the window's `mode-line-active`/`mode-line-inactive` and an integer drops all properties (oracle: `tests/format_mode_line.rs` against pinned GNU in batch and, recorded by `tests/fixtures/format-mode-line-tty.py`, on an 80x24 terminal frame). As in the band, a string element contributes only its own `face` and `:propertize` only its face (its `help-echo`, `mouse-face`, `local-map` and other properties are dropped). Batch is the Lisp variable `noninteractive` (GNU reads its C flag, which binding the variable does not change). Neighbouring pieces with equal properties share one interval, where GNU's concatenation keeps them apart; `equal-including-properties` cannot tell",
+   "why": "**Package-observable**: `%z`/`%Z`/`%F`/`%m` text, the modified flag after a save, and band faces from a string's anonymous face plists differ; `format-mode-line` strings lack the non-face properties above. Escapes, constructs and per-window evaluation follow GNU within the restrictions above",
    "symbols": [
     "mode-line-format",
     "set-window-vscroll",
@@ -5496,21 +5505,6 @@
    "symbols_derived": false
   },
   {
-   "id": "VM2-FRAME-RECENTER",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "Visual recentering is unsupported",
-   "gnu": "GNU `recenter` (`src/window.c:7219`) uses visual motion, window start, vscroll and redisplay",
-   "romacs": "Unregistered: direct calls and funcall signal `(void-function recenter)`",
-   "why": "Package-observable refusal, not a successful no-op or newline approximation",
-   "symbols": [
-    "recenter"
-   ],
-   "symbols_derived": false
-  },
-  {
    "id": "VM2-FRAME-VIS",
    "source": "DIVERGENCES.md",
    "section": "Observable by a package",
@@ -5728,6 +5722,24 @@
    "why": "!w->window_end_valid",
    "symbols": [
     "window-end"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-SCROLL1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`recenter`, `scroll-up`, `scroll-down`, `move-to-window-line`",
+   "gnu": "GNU `Frecenter` (`src/window.c:7219`), `scroll_command` and `Fmove_to_window_line` (`src/window.c:7502`) move by screen lines on a terminal frame (`window_scroll_line_based`, `vmotion`) and by pixels on a window-system frame (`window_scroll_pixel_based`, `move_it_vertically_backward`), honouring `scroll-margin`, `next-screen-context-lines` and `scroll-preserve-screen-position`",
+   "romacs": "VM2 runs GNU's line-based paths on every frame, as Lisp over `vertical-motion` (`rlisp/vm/window-scroll.el`, entered from `src/prims/window_scroll.rs`), which moves over the host's layout once a host lays the frame out; the pixel paths give the same window start where a window's rows share the frame's line height. vscroll is reset in pixels (VM2 keeps it in pixels only); `recenter-redisplay` `tty` redraws nothing, a window-system frame being no tty",
+   "why": "**Package-observable** only for rows of differing heights (a taller face or image row), where GNU's pixel arithmetic and VM2's line counts can choose different starts; `window-old-point` is not adjusted. `tests/window_scroll.rs` compares the four commands, their errors, `scroll-margin` and `scroll-preserve-screen-position` with pinned GNU in batch; `romacs-vm-gui` `measure.rs` checks M->'s `(recenter -3)` and `scroll-up` against the paint",
+   "symbols": [
+    "recenter",
+    "scroll-up",
+    "scroll-down",
+    "move-to-window-line"
    ],
    "symbols_derived": false
   },

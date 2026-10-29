@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "ed4b31baee9c53510dd282571d78b254820afa809d9b37253abff9f2515fca60",
+  "source_fingerprint": "95d98775fd3fe78161c703e7c69fd37273419f9a2b10cd791b0310345df93102",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1028,
-  "parsed_vm2_only": 1028
+  "parsed_total": 1032,
+  "parsed_vm2_only": 1032
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2890,6 +2890,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/indent.rs:75"
   },
+  "move-to-window-line": {
+   "name": "move-to-window-line",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:44"
+  },
   "multibyte-char-to-unibyte": {
    "name": "multibyte-char-to-unibyte",
    "implementation": "vm2",
@@ -3459,6 +3464,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/keymap.rs:155"
   },
+  "recenter": {
+   "name": "recenter",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:29"
+  },
   "record": {
    "name": "record",
    "implementation": "vm2",
@@ -4012,6 +4022,16 @@
    "name": "scan-sexps",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:43"
+  },
+  "scroll-down": {
+   "name": "scroll-down",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:39"
+  },
+  "scroll-up": {
+   "name": "scroll-up",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:34"
   },
   "search-backward": {
    "name": "search-backward",
