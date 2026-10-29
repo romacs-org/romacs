@@ -18,6 +18,7 @@ static ALLOCATOR: Arena = Arena;
 const ROLE: &str = "ROMACS_WORLD_IMAGE_TEST";
 const NAME: &str = "a_world_restores_randomized_and_refuses_a_damaged_image";
 const INTERRUPTED: &str = "an_interrupted_build_leaves_nothing_in_the_way";
+const PAGES: &str = "capture_reads_no_heap_byte_so_a_page_zeroed_by_a_store_is_data";
 
 /// Test NAME in a process of its own, in ROLE, with STORE.
 fn child_of(name: &str, role: &str, store: &Path) -> Command {
@@ -37,6 +38,7 @@ fn act_in_role() -> bool {
     match std::env::var(ROLE).as_deref() {
         Ok("launch") => launch(&store.unwrap()),
         Ok("probe") => probe(),
+        Ok("pages") => pages(&store.unwrap()),
         _ => return false,
     }
     true
@@ -177,6 +179,44 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     assert_eq!(probe_file(&store, &short), r#"{"restore":"Format"}"#);
     assert_eq!(probe_file(&store, &other), r#"{"restore":"Format"}"#);
     assert_eq!(probe_file(&store, &whole), r#"{"restore":"Mapped"}"#);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// A builder's capture of three pages of one block: the first stored to
+/// with a zero, the second with bytes, the third never. Where each is in
+/// the image, and whether it holds data there.
+fn pages(scratch: &Path) {
+    const PAGE: usize = 4096;
+    // A page run, not a slab block: page-aligned.
+    let mut block = vec![0u8; 16 * PAGE];
+    unsafe { std::ptr::write_volatile(block.as_mut_ptr(), 0) };
+    block[PAGE..2 * PAGE].fill(0xab);
+    let out = std::fs::File::create(scratch.join("pages.rwi")).unwrap();
+    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32] };
+    let len = unsafe { arena::write_image(&out, fields) }.unwrap();
+    let bytes = std::fs::read(scratch.join("pages.rwi")).unwrap();
+    assert_eq!(bytes.len(), len);
+    let second = (0..len / PAGE).map(|p| p * PAGE).find(|&at| bytes[at..at + PAGE].iter().all(|&b| b == 0xab)).unwrap();
+    use std::os::fd::AsRawFd;
+    let data_from = |at: usize| unsafe { libc::lseek(out.as_raw_fd(), at as i64, libc::SEEK_DATA) };
+    println!("WORLD-IMAGE {}", json!({"first": data_from(second - PAGE) == (second - PAGE) as i64,
+                                       "second": data_from(second) == second as i64,
+                                       "third": data_from(second + PAGE) == (second + PAGE) as i64}));
+    drop(block);
+}
+
+#[test]
+fn capture_reads_no_heap_byte_so_a_page_zeroed_by_a_store_is_data() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(PAGES);
+    let mut command = child_of(PAGES, "pages", &scratch);
+    command.env("ROMACS_WORLD_BUILD", &scratch);
+    // The page a store touched is data although all of it is zero: capture
+    // no longer looks at a page's bytes, which may be padding no value
+    // initialized. The untouched page is a hole.
+    assert_eq!(outcome(&mut command), json!({"first": true, "second": true, "third": false}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

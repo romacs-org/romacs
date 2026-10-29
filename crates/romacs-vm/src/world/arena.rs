@@ -6,7 +6,9 @@
 //! (`adopt`). Nothing is decoded and nothing is relocated: every pointer
 //! in the image is valid again where it was. The process allocates from
 //! the image from then on; what it allocated before stays in its first
-//! arena, which keeps serving those blocks' frees.
+//! arena, which keeps serving those blocks' frees. A builder's arena is a
+//! shared mapping of an unlinked memory file, and its image is copied from
+//! that file by the kernel, so capture never reads heap bytes (`write_image`).
 //!
 //! The range's address is random, chosen by each process that starts a
 //! fresh arena, so each world has its own. Everything else a world process
@@ -29,7 +31,7 @@
 //! its range cannot be reserved it hands every request to the system
 //! allocator.
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
 /// Where an arena may start: a GiB-aligned address in this window, far from
 /// the executable, its heap, the libraries and the stack.
@@ -100,6 +102,9 @@ static RESTORE: AtomicU8 = AtomicU8::new(Restore::None as u8);
 static BASE: AtomicUsize = AtomicUsize::new(0);
 /// Where the process's first arena starts, once an image replaced it.
 static FORMER: AtomicUsize = AtomicUsize::new(0);
+/// A builder's arena is a shared mapping of this unlinked file, and an
+/// image is copied from the file (`write_image`); -1 elsewhere.
+static BACKING: AtomicI32 = AtomicI32::new(-1);
 /// The digest of the libraries mapped as the arena started (`libraries`).
 static mut LIBRARIES: Option<[u8; 32]> = None;
 
@@ -239,7 +244,7 @@ unsafe fn give_pages(h: &mut Header, at: usize, pages: usize) {
         return;
     }
     if pages >= RELEASE_PAGES {
-        unsafe { libc::madvise((at + PAGE) as *mut libc::c_void, (pages - 1) * PAGE, libc::MADV_DONTNEED) };
+        unsafe { release(at + PAGE, (pages - 1) * PAGE) };
     }
     unsafe { push_run(h, at, pages) };
 }
@@ -298,9 +303,12 @@ fn state() -> u8 {
 /// Reserve a fresh range at a random address in the window.
 unsafe fn start() -> u8 {
     unsafe { LIBRARIES = libraries_digest() };
-    SCRUB.store(!unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null(), Ordering::Relaxed);
+    let building = !unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null();
+    SCRUB.store(building, Ordering::Relaxed);
     let Some(reserve) = (unsafe { reserve() }) else { return SYSTEM };
-    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
+    let backing = if building { unsafe { backing_file(reserve) } } else { -1 };
+    let flags = libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE
+        | if backing >= 0 { libc::MAP_SHARED } else { libc::MAP_PRIVATE | libc::MAP_ANONYMOUS };
     for _ in 0..8 {
         let mut random = 0usize;
         let read = unsafe { libc::getrandom((&raw mut random).cast(), size_of::<usize>(), 0) };
@@ -308,8 +316,9 @@ unsafe fn start() -> u8 {
             break;
         }
         let base = WINDOW.0 + random % ((WINDOW.1 - WINDOW.0 - reserve) / ALIGN) * ALIGN;
-        let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
+        let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags, backing, 0) };
         if at == base as *mut libc::c_void {
+            BACKING.store(backing, Ordering::Relaxed);
             BASE.store(base, Ordering::Relaxed);
             let h = unsafe { &mut *header() };
             h.magic = MAGIC;
@@ -324,6 +333,40 @@ unsafe fn start() -> u8 {
         }
     }
     SYSTEM
+}
+
+/// A builder's backing file: unlinked, in memory, RESERVE bytes long and
+/// sparse, so only pages the arena touched hold blocks. -1 when there is
+/// none: a builder without one cannot publish (`write_image`).
+unsafe fn backing_file(reserve: usize) -> i32 {
+    let fd = unsafe { libc::open(c"/dev/shm".as_ptr(), libc::O_TMPFILE | libc::O_RDWR | libc::O_CLOEXEC, 0o600) };
+    if fd < 0 {
+        return -1;
+    }
+    if unsafe { libc::ftruncate(fd, reserve as i64) } != 0 {
+        unsafe { libc::close(fd) };
+        return -1;
+    }
+    fd
+}
+
+/// Give the pages from AT, LEN bytes, back to the system. Their content is
+/// the allocator's no longer: memory below the zero mark is zeroed when a
+/// zeroed block is asked for.
+unsafe fn release(at: usize, len: usize) {
+    let backing = BACKING.load(Ordering::Relaxed);
+    if backing >= 0 && in_backing(at) {
+        let offset = (at - BASE.load(Ordering::Relaxed)) as i64;
+        unsafe { libc::fallocate(backing, libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE, offset, len as i64) };
+    } else {
+        unsafe { libc::madvise(at as *mut libc::c_void, len, libc::MADV_DONTNEED) };
+    }
+}
+
+/// Whether AT is in the arena the backing file maps: a builder's only one.
+fn in_backing(at: usize) -> bool {
+    let base = BASE.load(Ordering::Relaxed);
+    FORMER.load(Ordering::Relaxed) == 0 && base != 0 && (base..base + unsafe { (*(base as *const Header)).reserve }).contains(&at)
 }
 
 /// How much address space an arena of this process reserves: RESERVE, or
@@ -638,8 +681,19 @@ pub fn mapped_image() -> Option<ImageFields> {
 }
 
 /// Write the arena to FILE as an image with FIELDS (its length is set
-/// here), leaving holes for untouched and zero pages. The caller allocates
-/// nothing meanwhile on any thread: the allocator is locked throughout.
+/// here), with holes where the arena never touched a page. The caller
+/// allocates nothing meanwhile on any thread: the allocator is locked
+/// throughout. Only a builder writes images: its arena is a shared mapping
+/// of a backing file.
+///
+/// The image is the backing file's bytes, copied by the kernel. Nothing
+/// here loads heap memory as Rust values: the heap holds padding and
+/// unused capacity no Rust value initialized, and reading those bytes,
+/// even to test them for zero, would be undefined behaviour. The file's
+/// extents (SEEK_DATA) say which pages hold data, and copy_file_range,
+/// or pread into a buffer this function owns, moves it. The allocator's
+/// own loads here are of words it stored: the free-list links and run
+/// heads `scrub` follows.
 ///
 /// # Safety
 /// FIELDS.root must be the address of a live allocation the image's reader
@@ -649,20 +703,25 @@ pub unsafe fn write_image(file: &std::fs::File, mut fields: ImageFields) -> std:
     if !active() {
         return Err(std::io::Error::other("the arena is not this process's heap"));
     }
+    let backing = BACKING.load(Ordering::Relaxed);
+    if backing < 0 || FORMER.load(Ordering::Relaxed) != 0 {
+        return Err(std::io::Error::other("only a builder's file-backed arena can be written as an image"));
+    }
     lock();
     let h = unsafe { &mut *header() };
     unsafe { scrub(h) };
     fields.len = h.top - base();
     let saved = h.image;
     h.image = fields;
-    let result = unsafe { write_pages(file.as_raw_fd(), fields.len) };
+    let result = unsafe { copy_extents(backing, file.as_raw_fd(), fields.len) };
     h.image = saved;
     unlock();
     result.map(|()| fields.len)
 }
 
-/// Zero what free blocks and runs still hold, but for their links: freed
-/// bytes are no part of a world, and zero pages are holes in its file.
+/// Zero what free blocks still hold, but for their links, and give free
+/// runs' pages back: freed bytes are no part of a world, and a released
+/// page is a hole in its file.
 unsafe fn scrub(h: &mut Header) {
     for class in 0..CLASSES {
         let size = class_size(class);
@@ -678,41 +737,74 @@ unsafe fn scrub(h: &mut Header) {
             let run = unsafe { &*(at as *const Run) };
             unsafe { std::ptr::write_bytes((at + size_of::<Run>()) as *mut u8, 0, PAGE - size_of::<Run>()) };
             if run.pages > 1 {
-                unsafe { libc::madvise((at + PAGE) as *mut libc::c_void, (run.pages - 1) * PAGE, libc::MADV_DONTNEED) };
+                unsafe { release(at + PAGE, (run.pages - 1) * PAGE) };
             }
             at = run.next;
         }
     }
 }
 
-unsafe fn write_pages(fd: i32, len: usize) -> std::io::Result<()> {
-    let base = base();
-    let zero = unsafe { (*header()).zero }.min(base + len);
-    let mut at = base;
-    while at < base + len {
-        // Untouched and all-zero pages stay holes.
-        if at >= zero || unsafe { std::slice::from_raw_parts(at as *const u8, PAGE) }.iter().all(|&b| b == 0) {
-            at += PAGE;
-            continue;
-        }
-        let mut end = at + PAGE;
-        while end < zero.min(base + len) && end - at < (1 << 24)
-            && unsafe { std::slice::from_raw_parts(end as *const u8, PAGE) }.iter().any(|&b| b != 0)
-        {
-            end += PAGE;
-        }
-        let mut done = 0;
-        while at + done < end {
-            let n = unsafe { libc::pwrite(fd, (at + done) as *const libc::c_void, end - at - done, (at + done - base) as i64) };
-            if n < 0 {
-                return Err(std::io::Error::last_os_error());
+/// Copy the data extents of FROM's first LEN bytes to the same offsets
+/// of TO, and make TO LEN bytes long: its holes stay holes.
+unsafe fn copy_extents(from: i32, to: i32, len: usize) -> std::io::Result<()> {
+    let last = || std::io::Error::last_os_error();
+    let mut at = 0i64;
+    while (at as usize) < len {
+        let data = unsafe { libc::lseek(from, at, libc::SEEK_DATA) };
+        if data < 0 {
+            if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENXIO) {
+                break;
             }
-            done += n as usize;
+            return Err(last());
         }
+        if data as usize >= len {
+            break;
+        }
+        let hole = unsafe { libc::lseek(from, data, libc::SEEK_HOLE) };
+        if hole < 0 {
+            return Err(last());
+        }
+        let end = (hole as usize).min(len) as i64;
+        unsafe { copy_range(from, to, data, end) }?;
         at = end;
     }
-    if unsafe { libc::ftruncate(fd, len as i64) } != 0 {
-        return Err(std::io::Error::last_os_error());
+    if unsafe { libc::ftruncate(to, len as i64) } != 0 {
+        return Err(last());
+    }
+    Ok(())
+}
+
+/// Bytes START..END of FROM to the same offsets of TO: by the kernel, or
+/// through a buffer of this module's where it cannot copy between them.
+unsafe fn copy_range(from: i32, to: i32, start: i64, end: i64) -> std::io::Result<()> {
+    static mut BUFFER: [u8; 1 << 20] = [0; 1 << 20];
+    let mut at = start;
+    while at < end {
+        let (mut input, mut output) = (at, at);
+        let n = unsafe { libc::copy_file_range(from, &mut input, to, &mut output, (end - at) as usize, 0) };
+        if n > 0 {
+            at += n as isize as i64;
+            continue;
+        }
+        let error = std::io::Error::last_os_error();
+        if n == 0 || !matches!(error.raw_os_error(), Some(libc::EXDEV | libc::EINVAL | libc::ENOSYS | libc::EOPNOTSUPP)) {
+            return Err(if n == 0 { std::io::Error::other("the backing file ended early") } else { error });
+        }
+        let buffer = unsafe { &mut *std::ptr::addr_of_mut!(BUFFER) };
+        let want = buffer.len().min((end - at) as usize);
+        let read = unsafe { libc::pread(from, buffer.as_mut_ptr().cast(), want, at) };
+        if read <= 0 {
+            return Err(if read == 0 { std::io::Error::other("the backing file ended early") } else { std::io::Error::last_os_error() });
+        }
+        let mut done = 0;
+        while done < read as usize {
+            let wrote = unsafe { libc::pwrite(to, buffer[done..].as_ptr().cast(), read as usize - done, at + done as i64) };
+            if wrote < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            done += wrote as usize;
+        }
+        at += read as i64;
     }
     Ok(())
 }
