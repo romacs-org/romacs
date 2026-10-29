@@ -311,6 +311,41 @@ mod tests {
         assert!(scrolled, "the window scrolled");
     }
 
+    /// A mode line enabled while point is on the window's bottom whole row
+    /// takes that row: redisplay scrolls so point shows above the band, as
+    /// pinned GNU does (start 1 -> 8 at its geometry). Removing the band, or
+    /// adding a header line, which Romacs does not paint, keeps the cursor
+    /// on a whole row.
+    #[test]
+    fn a_mode_line_enabled_over_points_row_scrolls_the_window() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq mode-line-format nil) (erase-buffer)
+          (let ((i 0)) (while (< i 100) (insert (format "line %d\n" i)) (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        h.paint();
+        // Point to the last whole row.
+        h.eval("(while (let ((v (pos-visible-in-window-p (line-beginning-position 2) nil t))) (and v (= (length v) 2))) (forward-line 1))");
+        let paint = h.paint();
+        assert_eq!(h.eval("(window-start)"), "1", "point on the bottom whole row keeps the start");
+        let (_, y, _, height) = paint.cursor.expect("cursor on the bottom row");
+        assert!(y + height <= paint.window_height as f32 && y + 2.0 * height > paint.window_height as f32, "point is on the bottom row: {y}+{height}");
+        let cursor_in_text = |h: &mut Hosted, what: &str| {
+            let paint = h.paint();
+            let bottom = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map_or(paint.window_height as f32, |g| g.2);
+            let (_, y, _, height) = paint.cursor.unwrap_or_else(|| panic!("{what}: the cursor is clipped"));
+            assert!(y + height <= bottom, "{what}: cursor at {y}+{height} past {bottom}");
+        };
+        h.eval("(setq mode-line-format '(\"%b\"))");
+        cursor_in_text(&mut h, "mode line enabled");
+        assert_ne!(h.eval("(window-start)"), "1", "the band took point's row: the window scrolls");
+        h.eval("(setq mode-line-format nil)");
+        cursor_in_text(&mut h, "mode line removed");
+        h.eval("(setq header-line-format \"header\")");
+        cursor_in_text(&mut h, "header line set");
+        h.eval("(setq mode-line-format '(\"%b\"))");
+        cursor_in_text(&mut h, "mode line again, with a header line");
+    }
+
     /// A window that starts on a continuation row: the host's glyphs and
     /// the VM's answers agree there, TABs stopping as from the line start.
     #[test]

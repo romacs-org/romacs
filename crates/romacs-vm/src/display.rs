@@ -29,7 +29,10 @@ impl FaceTable {
 /// What a window's rows depend on, besides the buffer it shows (a window
 /// that shows another buffer forgets its rows): its buffer's text and
 /// properties (MODIFF), narrowing, start, size, vertical scroll, the faces'
-/// fonts and the buffer's line layout variables.
+/// fonts, the buffer's line layout variables, and whether a mode line
+/// takes the window's bottom (the only band painting reserves: it draws no
+/// header or tab line). A band's own height counts as the last painted
+/// one's, GNU's CURRENT_MODE_LINE_HEIGHT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct RowsKey {
     modiff: u64,
@@ -40,6 +43,7 @@ pub(super) struct RowsKey {
     faces: u64,
     tab_width: u32,
     wrap: romacs_layout_input::LineWrap,
+    band: bool,
 }
 
 /// What laying a window out from its start established, in its buffer's
@@ -684,7 +688,18 @@ impl Vm {
         let accessible = b.accessible();
         Ok(RowsKey { modiff, accessible: (accessible.start.0, accessible.end.0), start, size, vscroll,
             faces: self.display_state.face_revision, tab_width: self.buffer_tab_width(buffer)?,
-            wrap: self.window_line_wrap(window, buffer)? })
+            wrap: self.window_line_wrap(window, buffer)?, band: self.window_has_mode_line(window, buffer)? })
+    }
+    /// WINDOW, showing BUFFER, paints a mode line: it is no mini-window and
+    /// BUFFER's `mode-line-format' is non-nil (redisplay_window_inner).
+    fn window_has_mode_line(&mut self, window: Value, buffer: Value) -> Result<bool> {
+        if self.window(window)?.mini { return Ok(false); }
+        let saved = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let slot = self.slot("mode-line-format");
+        let format = self.variable_value(slot);
+        self.slots[self.buffer_slot].value = saved;
+        Ok(!matches!(format?, Value::NIL | Value::UNBOUND))
     }
     /// WINDOW laid out from its start as painting will, with the mode line
     /// it last showed (GNU's CURRENT_MODE_LINE_HEIGHT): from the last paint
@@ -698,7 +713,18 @@ impl Vm {
         if let Some((known, laid)) = known && known == key { return Ok(Some(laid)); }
         let Some(shown) = self.display_state.previous.get(&id)
             .filter(|_| known.is_some_and(|(known, _)| known.faces == key.faces) && self.has_layout_host()) else { return Ok(None) };
-        let (mode_line, mode_line_face) = (shown.mode_line.clone(), shown.mode_line_face);
+        let (shown_band, shown_face) = (shown.mode_line.clone(), shown.mode_line_face);
+        // The band the window paints now: the last painted one's height
+        // while it still has one, else one row of its mode-line face.
+        let (mode_line, mode_line_face) = match (key.band, shown_band) {
+            (false, _) => (None, shown_face),
+            (true, Some(band)) => (Some(band), shown_face),
+            (true, None) => {
+                let name = self.mode_line_face_name(window)?;
+                let face = self.display_faces()?.handle(&name).ok_or("mode-line face required")?;
+                (Some(TextSlice { utf8: " ".into(), face_runs: vec![] }), face)
+            }
+        };
         let (width, height) = self.window_body_size(window)?;
         let ShownText { text, start_byte, point_byte, faces, base, at_zv, .. } = self.window_text(window, height, None)?;
         let len = text.utf8.len();
