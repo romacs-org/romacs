@@ -1248,6 +1248,17 @@ pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
     File::open(path)
 }
 
+/// A world store's marker file, opened without following a symlink: with
+/// CREATE, made where none is (O_CREAT|O_EXCL), readable and writable by
+/// its owner only; else opened to read.
+pub fn open_store_marker(path: impl AsRef<Path>, create: bool) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = OpenOptions::new();
+    options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
+    if create { options.write(true).create_new(true); } else { options.read(true); }
+    options.open(path)
+}
+
 /// Remove NAME from this process's environment, before any other thread
 /// starts: world processes take their own markers out of it.
 pub fn unset_env(name: &str) {

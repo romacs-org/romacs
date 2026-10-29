@@ -181,24 +181,55 @@ const MARKER: &str = ".romacs-world-store";
 const STORE_LOCK: &str = "store.lock";
 const MARKER_TEXT: &str = "romacs-world-store 1\n";
 
-/// The store directory: made private and marked when new, and refused
-/// unless this user owns it, no one else may enter (§9.2), it is no
-/// symlink, and it is not $HOME or `/`. A store an earlier Romacs made has
-/// no marker; it is adopted when everything in it is a store's.
+/// The store directory: made, private and marked, where no directory is
+/// or an empty one is; any other is refused unless it holds a valid marker
+/// (`marker_error`). It must be owned by this user, private to them (§9.2),
+/// no symlink, and neither $HOME nor `/` (`owned_store`).
 fn private_store(store: &Path) -> std::io::Result<()> {
-    if host::symlink_metadata(store).is_err() {
-        host::create_dir_all(store)?;
-        let path = std::ffi::CString::new(store.as_os_str().as_encoded_bytes()).map_err(std::io::Error::other)?;
-        host::chmod(&path, 0o700, false)?;
-    }
-    owned_store(store, host::getenv("HOME").map(PathBuf::from).as_deref())?;
-    if !marked(store) {
-        if let Some(name) = foreign_entry(store)? {
-            return Err(std::io::Error::other(format!("{} is no world store: it holds {name}", store.display())));
+    let home = host::getenv("HOME").map(PathBuf::from);
+    match host::symlink_metadata(store) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = store.parent() { host::create_dir_all(parent)?; }
+            host::create_dir(store, 0o700)?;
+            owned_store(store, home.as_deref())?;
+            return write_marker(store);
         }
-        host::write(store.join(MARKER), MARKER_TEXT)?;
+        Err(e) => return Err(e),
+        Ok(_) => owned_store(store, home.as_deref())?,
     }
-    Ok(())
+    if host::read_dir(store)?.next().is_none() {
+        return write_marker(store);
+    }
+    match marker_error(store) {
+        None => Ok(()),
+        Some(why) => Err(std::io::Error::other(format!("{} is no world store: {why}", store.display()))),
+    }
+}
+
+/// Mark STORE as a world store: a new marker, never through a symlink.
+fn write_marker(store: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+    host::open_store_marker(store.join(MARKER), true)?.write_all(MARKER_TEXT.as_bytes())
+}
+
+/// Why STORE's marker is no valid one, or None when it is: opened without
+/// following a symlink, a regular file this user owns, of this format.
+fn marker_error(store: &Path) -> Option<String> {
+    use std::io::Read;
+    use std::os::unix::fs::MetadataExt;
+    let mut file = match host::open_store_marker(store.join(MARKER), false) {
+        Ok(file) => file,
+        Err(e) => return Some(format!("its {MARKER} cannot be opened as a file of its own: {e}")),
+    };
+    let meta = match host::file_metadata(&file) { Ok(meta) => meta, Err(e) => return Some(e.to_string()) };
+    if !meta.file_type().is_file() || meta.uid() != host::euid() {
+        return Some(format!("its {MARKER} is not a regular file of this user's"));
+    }
+    let mut text = String::new();
+    if file.by_ref().take(256).read_to_string(&mut text).is_err() || text != MARKER_TEXT {
+        return Some(format!("its {MARKER} is not of this format ({})", MARKER_TEXT.trim()));
+    }
+    None
 }
 
 /// Refuse STORE unless it is a directory, no symlink, that this user owns
@@ -220,31 +251,14 @@ fn owned_store(store: &Path, home: Option<&Path>) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Whether STORE holds Romacs's marker, a regular file with its format.
-fn marked(store: &Path) -> bool {
-    host::symlink_metadata(store.join(MARKER)).is_ok_and(|m| m.file_type().is_file())
-        && host::read_to_string(store.join(MARKER)).is_ok_and(|t| t == MARKER_TEXT)
-}
-
-/// The first entry of STORE no store has, if any.
-fn foreign_entry(store: &Path) -> std::io::Result<Option<String>> {
-    for entry in host::read_dir(store)? {
-        let name = entry?.file_name().to_string_lossy().into_owned();
-        if world_file(&name).is_none() && !["ids", "p", MARKER, STORE_LOCK].contains(&name.as_str()) {
-            return Ok(Some(name));
-        }
-    }
-    Ok(None)
-}
-
 /// STORE, checked as `reset` and `prune` need it: owned, private, no
 /// symlink, not HOME or `/` (`owned_store`), and marked as a store.
 fn checked_store(store: &Path, home: Option<&Path>) -> std::io::Result<()> {
     owned_store(store, home)?;
-    if !marked(store) {
-        return Err(std::io::Error::other(format!("{} has no {MARKER}: not touched", store.display())));
+    match marker_error(store) {
+        None => Ok(()),
+        Some(why) => Err(std::io::Error::other(format!("{} is not touched: {why}", store.display()))),
     }
-    Ok(())
 }
 
 /// Whether PATH is a regular file, its own and not a symlink's target.
@@ -1054,20 +1068,60 @@ mod tests {
     }
 
     #[test]
-    fn a_store_an_earlier_romacs_made_is_adopted_and_a_foreign_directory_refused() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("romacs-store-{}-adopt", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("ids")).unwrap();
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        std::fs::write(dir.join(format!("{}.json", "c".repeat(64))), "{}").unwrap();
-        private_store(&dir).unwrap();
-        assert!(marked(&dir));
-        std::fs::remove_file(dir.join(MARKER)).unwrap();
-        std::fs::write(dir.join("notes.txt"), "mine").unwrap();
-        assert!(private_store(&dir).is_err(), "a directory with other files is no store");
-        assert!(!marked(&dir));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn a_store_is_made_only_where_nothing_is_and_kept_only_with_a_valid_marker() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let dir = |name: &str| {
+            let dir = std::env::temp_dir().join(format!("romacs-store-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            dir
+        };
+        let private = |dir: &Path| {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        };
+        // Nothing there, or an empty directory: made a store.
+        let fresh = dir("fresh");
+        private_store(&fresh).unwrap();
+        assert_eq!(std::fs::read_to_string(fresh.join(MARKER)).unwrap(), MARKER_TEXT);
+        let empty = dir("empty");
+        private(&empty);
+        private_store(&empty).unwrap();
+        assert!(marker_error(&empty).is_none());
+        // A directory holding anything without the marker, even only names
+        // a store would have: refused, untouched.
+        let unmarked = dir("unmarked");
+        private(&unmarked);
+        std::fs::write(unmarked.join(format!("{}.notes", "a".repeat(64))), "mine").unwrap();
+        assert!(private_store(&unmarked).is_err());
+        assert!(!unmarked.join(MARKER).exists());
+        assert!(reset_in(&unmarked, true, None).is_err());
+        // A marker of another format: refused.
+        let old = dir("version");
+        private(&old);
+        std::fs::write(old.join(MARKER), "romacs-world-store 0\n").unwrap();
+        assert!(private_store(&old).unwrap_err().to_string().contains("format"));
+        assert!(reset_in(&old, true, None).is_err());
+        // A marker that is a symlink: refused, and its target never written.
+        let linked = dir("symlinked");
+        private(&linked);
+        let target = dir("marker-target");
+        std::fs::write(&target, MARKER_TEXT).unwrap();
+        symlink(&target, linked.join(MARKER)).unwrap();
+        assert!(private_store(&linked).is_err());
+        assert!(reset_in(&linked, true, None).is_err());
+        assert!(World { store: linked.clone(), key: [0; 32], recipe: vec![] }.prune_in(None).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), MARKER_TEXT);
+        // A dangling one: never created through.
+        let dangling = dir("dangling");
+        private(&dangling);
+        let nowhere = dir("nowhere");
+        symlink(&nowhere, dangling.join(MARKER)).unwrap();
+        assert!(private_store(&dangling).is_err());
+        assert!(!nowhere.exists());
+        for d in [fresh, empty, unmarked, old, linked, dangling] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+        let _ = std::fs::remove_file(target);
     }
 
     fn stored(key: &str, days_ago: u64, mib: u64, busy: bool) -> Stored {

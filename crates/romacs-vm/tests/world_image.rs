@@ -23,6 +23,7 @@ const INTERRUPTED: &str = "an_interrupted_build_leaves_nothing_in_the_way";
 const FAILED: &str = "a_failed_build_is_retried_after_a_backoff";
 const PUBLISH: &str = "a_build_that_fails_to_publish_records_its_failure";
 const REFUSED: &str = "a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset";
+const FOREIGN: &str = "a_launch_on_a_directory_that_is_no_store_boots_from_source_and_says_why";
 const PAUSED: &str = "pruning_waits_for_a_launcher_between_opening_and_locking";
 const PAUSED_BUILDER: &str = "pruning_waits_for_a_builder_between_opening_and_locking";
 const CONCURRENT: &str = "concurrent_first_launches_share_one_builder_and_say_they_wait";
@@ -94,7 +95,13 @@ fn world(store: &Path) -> World {
 }
 
 fn launch(store: &Path) {
-    let world = world(store);
+    let world = match World::new(store.to_owned(), vec!["consumer world-image-test".into()]) {
+        Ok(world) => world,
+        Err(error) => {
+            println!("WORLD-IMAGE {}", json!({"mode": "source", "reason": error.to_string()}));
+            return;
+        }
+    };
     match world.launch::<u64>(|| std::env::args_os().skip(1).collect(), true, || println!("WAITING-FOR-BUILD")) {
         Launch::Restored { mut vm, carry, .. } => {
             vm.world_reinit();
@@ -524,5 +531,21 @@ fn pruning_waits_for_a_builder_between_opening_and_locking() {
     assert!(!pruner.join().unwrap().contains(&key));
     // What it built is the world's: a launch boots from it.
     assert_eq!(outcome(&mut child_of(PAUSED_BUILDER, "launch", &store)), restored());
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn a_launch_on_a_directory_that_is_no_store_boots_from_source_and_says_why() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(FOREIGN);
+    let store = scratch.join("store");
+    std::fs::create_dir_all(&store).unwrap();
+    std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(store.join("letter.txt"), "mine").unwrap();
+    let said = outcome(&mut child_of(FOREIGN, "launch", &store));
+    assert!(said.contains(r#""mode":"source""#) && said.contains("is no world store"), "{said}");
+    assert_eq!(std::fs::read_dir(&store).unwrap().count(), 1, "nothing written in it");
     let _ = std::fs::remove_dir_all(&scratch);
 }
