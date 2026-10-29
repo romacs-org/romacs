@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "010ef356083036ad7433ac19f130760b83051d1dfe11f7a7631250a92f7706b3",
+  "input_hash": "711425abb36f155e25c0b90a453687c679e9b85ea074d47febbbe7a2bb6f0675",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -6709,7 +6709,7 @@
    "mechanism": "Where a process booted from a world keeps its heap",
    "gnu": "GNU restores its dump at any address: pdumper relocates every pointer.",
    "romacs": "A world image is the heap of the process that built it, mapped back at its own addresses (`world::arena`): the arena's address is random per world, not per process. Everything else a world process maps keeps address randomization, the executable too. The image addresses only read-only data of the builder's executable (literals, constant tables, vtables); a restored process maps a read-only copy of those segments where the builder had them and leaves the rest of that range inaccessible, so an image holds no code address that could be followed.",
-   "why": "Not package-observable. Someone who can read the world store learns where a world process keeps its heap; `ROMACS_WORLD=off` boots from source, with a heap at a per-process random address.",
+   "why": "Not package-observable. Someone who can read the world store learns where a world process keeps its heap; `ROMACS_WORLD=off` boots from source, with a heap at a per-process random address. The store defends against accidental change, not against a writer with the user's own permissions: a world is refused and rebuilt after a truncated or partly written image, an interrupted build, an upgraded binary or library (keyed by content and by each library's build-id and mapped constant bytes), and corruption that changes a file's identity or times. It deliberately does not detect a same-user writer, who can already edit the user's init file, the store's images and the binaries themselves (one can, say, record an old digest under a damaged image's metadata); bit rot that leaves size and times unchanged, since the image and executable digests are cached by file identity; or writes to a mapped image or library after it was checked.",
    "symbols": [],
    "symbols_derived": false
   },
