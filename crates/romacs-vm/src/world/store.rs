@@ -559,16 +559,22 @@ impl World {
         use std::os::fd::{AsRawFd, FromRawFd};
         let handed = host::getenv(LOCK_ENV).and_then(|fd| fd.to_str()?.parse::<i32>().ok());
         host::unset_env(LOCK_ENV);
+        // Without one, the world's lock is opened and locked under the
+        // store's, held until the flock is: `prune` cannot unlink it between.
+        let mut store = None;
         let lock = match handed {
             Some(fd) => unsafe { std::fs::File::from_raw_fd(fd) },
             None => {
-                let _store = self.store_lock(libc::LOCK_SH)?;
-                host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?
+                store = Some(self.store_lock(libc::LOCK_SH)?);
+                let lock = host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?;
+                pause_for_test();
+                lock
             }
         };
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(std::io::Error::other("another builder holds the lock"));
         }
+        drop(store);
         unsafe { libc::fcntl(lock.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
         std::mem::forget(lock);
         self.remove_abandoned()?;
