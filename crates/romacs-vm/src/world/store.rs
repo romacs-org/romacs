@@ -1236,12 +1236,20 @@ mod tests {
         for suffix in ["json", "lock", "use", "failed", "rwi", "log"] {
             fifo(&world.file(&format!(".{suffix}")));
         }
-        std::fs::create_dir_all(dir.join("ids")).unwrap();
-        fifo(&dir.join("ids/1-2-3-4.5-6.7"));
         let w = world.clone();
         assert!(bounded("the manifest", move || w.valid_manifest()).is_err());
         let w = world.clone();
-        assert!(bounded("the image", move || w.usable()).is_err());
+        assert!(bounded("the image", move || w.checked_image(&json!({"image": "00"}))).is_err());
+        // As the digest cache's entry for a real file: not read, and the
+        // digest made from the file itself.
+        let input = dir.join("input");
+        std::fs::write(&input, "bytes").unwrap();
+        let meta = std::fs::metadata(&input).unwrap();
+        std::fs::create_dir_all(dir.join("ids")).unwrap();
+        fifo(&dir.join("ids").join(identity_name(&meta)));
+        let store = dir.clone();
+        let digest = bounded("the digest cache", move || file_digest(&store, &std::fs::File::open(input).unwrap())).unwrap();
+        assert_eq!(digest, sha256(b"bytes"));
         let w = world.clone();
         assert!(bounded("the world's lock", move || w.try_lock()).is_err());
         let w = world.clone();
