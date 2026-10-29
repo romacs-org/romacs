@@ -133,8 +133,13 @@ runs no timers."
                 (setq c (romacs--read-host-event
                          (if (and delay left) (min delay left) (or delay left))
                          (and shown (not dispatched) (= shown ran)))
-                      shown ran
-                      waiting (null c))))))
+                      shown ran)
+                ;; read_char: an event `special-event-map' binds (focus) runs
+                ;; its binding at once and is never input; the read goes on.
+                (when (and (consp c) (lookup-key special-event-map (vector (car c))))
+                  (romacs--special-event c)
+                  (setq c nil))
+                (setq waiting (null c))))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 

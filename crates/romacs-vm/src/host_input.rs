@@ -36,6 +36,9 @@ pub enum HostEvent {
     Background,
     /// The read's time limit passed first.
     Timeout,
+    /// The frame gained (true) or lost focus: keyboard.c's FOCUS_IN_EVENT
+    /// and FOCUS_OUT_EVENT, read as GNU's special events.
+    Focus(bool),
 }
 
 /// The embedder's keyboard, screen, and optional native clipboard.
@@ -108,6 +111,12 @@ impl Vm {
             HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c),
             HostEvent::Key(CommandEvent::Named(name)) => Ok(self.intern(&name)),
             HostEvent::Timeout => Ok(Value::NIL),
+            // make_lispy_focus_in / make_lispy_focus_out: (focus-in FRAME).
+            HostEvent::Focus(focused) => {
+                let kind = self.intern(if focused { "focus-in" } else { "focus-out" });
+                let frame = self.frame_value_peek();
+                Ok(self.list_value(&[kind, frame]))
+            }
             HostEvent::Resize { .. } | HostEvent::Background => unreachable!("background events are consumed by the wait"),
             HostEvent::Closed => {
                 let quit = self.intern("quit");
