@@ -5,7 +5,7 @@ mod redisplay;
 #[path = "window_config.rs"]
 mod config;
 pub(crate) use config::WindowConfiguration;
-const ROOT: &str = "#:vm2-root-window";
+pub(crate) const ROOT: &str = "#:vm2-root-window";
 const MINI: &str = "#:vm2-minibuffer-window";
 const SELECTED: &str = "#:vm2-selected-window";
 #[derive(Clone)]
@@ -148,6 +148,8 @@ pub(super) struct WindowState {
     pub height: u32,
     pub line: u32,
     pub column: u32,
+    /// The mini-window's height in lines (xdisp.c resize_mini_window).
+    pub mini_lines: u32,
 }
 impl Default for WindowState {
     fn default() -> Self {
@@ -158,6 +160,7 @@ impl Default for WindowState {
             height: 480,
             line: 20,
             column: 10,
+            mini_lines: 1,
         }
     }
 }
@@ -197,7 +200,7 @@ impl Vm {
     }
     /// The root/selected/minibuffer window, read without interning: the
     /// slot exists once `ensure_windows` has run.
-    fn window_root_peek(&self, name: &str) -> Value {
+    pub(crate) fn window_root_peek(&self, name: &str) -> Value {
         let Ok(f) = self.frame(self.frame_value_peek()) else { return Value::UNBOUND; };
         match name { ROOT => f.root, SELECTED => f.selected, MINI => f.minibuffer, _ => unreachable!() }
     }
@@ -390,7 +393,7 @@ impl Vm {
     }
     /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time
     /// even when V is already selected (`record_and_return`).
-    fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
+    pub(crate) fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
         if record {
             self.window_state.select_count += 1;
             let count = self.window_state.select_count;
@@ -789,6 +792,10 @@ impl Vm {
         self.window_leaf_ids(root, &mut ids)?;
         let mini = self.window_root(MINI);
         ids.push(self.window(mini)?.id);
+        // Redisplay sizes the mini-window to its display before laying out.
+        if self.resize_mini_window(mini)? {
+            self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column)?;
+        }
         let live = |vm: &Self, id| {
             vm.objects.iter().enumerate().find_map(|(i, o)| match o {
                 Object::Window(w) if w.id == id && w.live() => Some(Value::reference(i + 1, 0)),
@@ -850,19 +857,22 @@ impl Vm {
         }
         self.ensure_windows()?;
         let root = self.window_root(ROOT);
+        // A mini-window the root windows cannot make room for keeps one
+        // line (window.c grow_mini_window, bug#69140).
+        let mini_height = self.window_state.mini_lines.saturating_mul(line_height).min(height - line_height);
         let mut geometry = vec![];
-        self.plan_window_geometry(
-            root,
-            0,
-            0,
-            width,
-            height - line_height,
-            line_height,
-            column_width,
-            &mut geometry,
-        )?;
+        let planned = self.plan_window_geometry(root, 0, 0, width, height - mini_height, line_height, column_width, &mut geometry);
+        let mini_height = if planned.is_err() && mini_height > line_height {
+            self.window_state.mini_lines = 1;
+            geometry.clear();
+            self.plan_window_geometry(root, 0, 0, width, height - line_height, line_height, column_width, &mut geometry)?;
+            line_height
+        } else {
+            planned?;
+            mini_height
+        };
         let mini = self.window_root(MINI);
-        geometry.push((mini, 0, height - line_height, width, line_height));
+        geometry.push((mini, 0, height - mini_height, width, mini_height));
         for (v, x, y, w, h) in geometry {
             let window = self.window_mut(v)?;
             if (window.x, window.y, window.width, window.height) != (x, y, w, h) {
@@ -936,6 +946,9 @@ impl Vm {
             let Object::Buffer(b) = self.object(w.buffer)? else {
                 return Err("buffer required".into());
             };
+            // A display with overlay strings ends at a display byte.
+            let end = self.display_state.segments(id)
+                .map_or(end, |segments| crate::display::buffer_of(segments, end, b.len_bytes()));
             let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
             changes.push((index, b.len_chars() - end_char));
         }
@@ -1523,6 +1536,23 @@ impl<'a> Windows<'a> {
             vscroll: i64::from(x.vscroll_px),
         })
     }
+    /// window.c:1017/1029: WINDOW's left column or top line, its pixel
+    /// edge in the frame's characters.
+    pub(crate) fn window_char_edge(&mut self, window: Value, top: bool) -> Out {
+        let w = self.valid(window)?;
+        let x = self.get(w)?;
+        let (column, line) = (self.vm.window_state.column.max(1), self.vm.window_state.line.max(1));
+        Value::integer(i64::from(if top { x.y / line } else { x.x / column })).map_err(internal)
+    }
+    /// window.c Fwindow_scroll_bars: VM2 windows take the frame's scroll
+    /// bars, and VM2 frames draw none, so every live window answers GNU's
+    /// (WIDTH COLS VERTICAL-TYPE HEIGHT LINES HORIZONTAL-TYPE PERSISTENT)
+    /// for that: (nil 0 t nil 0 t nil).
+    pub(crate) fn window_scroll_bars(&mut self, window: Value) -> Out {
+        self.live(window)?;
+        let zero = Value::integer(0).map_err(internal)?;
+        Ok(self.vm.list_value(&[Value::NIL, zero, Value::TRUE, Value::NIL, zero, Value::TRUE, Value::NIL]))
+    }
     pub(crate) fn window_pixel_edge(&mut self, window: Value, top: bool) -> Out {
         let w = self.valid(window)?;
         let x = self.get(w)?;
@@ -1576,8 +1606,9 @@ impl<'a> Windows<'a> {
         let unit = if horizontal { self.vm.window_state.column } else { self.vm.window_state.line };
         Self::int(i64::from(unit))
     }
-    /// frame.c:4531/4538: VM2 frames have no dividers.
-    pub(crate) fn frame_divider_width(&mut self, frame: Value) -> Out {
+    /// frame.c:4524/4531/4538: VM2 frames draw no window dividers and no
+    /// internal border.
+    pub(crate) fn frame_absent_width(&mut self, frame: Value) -> Out {
         self.any_frame(frame)?;
         Ok(Value::integer(0).unwrap())
     }

@@ -10,18 +10,22 @@ fn downcase(cx, value: Value) { cx.case_convert(value, true) }}
 fn flag(b: bool) -> Value { if b { Value::TRUE } else { Value::NIL } }
 fn fixnum(n: i64) -> Value { Value::integer(n).expect("buffer position") }
 
+/// The region commands and the case each applies, by register code.
+const REGION_CASES: [(&str, RegionCase); 4] = [("upcase-region", RegionCase::Up), ("downcase-region", RegionCase::Down),
+    ("capitalize-region", RegionCase::Capitalize), ("upcase-initials-region", RegionCase::InitialsUp)];
+
 fn region_case(code: Value) -> RegionCase {
-    if code == Value::NIL { RegionCase::Up } else { RegionCase::InitialsUp }
+    REGION_CASES[code.integer_value().expect("region case code") as usize].1
 }
 
 // casify_pnc_region and casify_region (casefiddle.c:529): validate_region,
 // modify_text's bracket over the region, each character cased in place,
 // and one after-change over what changed. Registers between the steps:
 //   [START, END, CASE, INHIBITED]
-// CASE is nil for upcase and t for upcase-initials.
+// CASE is the fixnum index of the command in REGION_CASES.
 fn casify_region(cx: &mut Leaf<'_>, case: Value, beg: Value, end: Value, noncontiguous: Value) -> Next {
     if noncontiguous != Value::NIL {
-        let function = cx.intern(if case == Value::NIL { "upcase-region" } else { "upcase-initials-region" });
+        let function = cx.intern(REGION_CASES[case.integer_value().expect("region case code") as usize].0);
         if super::insdel::half_missing(cx)? {
             return super::insdel::install_half(cx, casify_restart, vec![case, beg, end, noncontiguous]);
         }
@@ -64,12 +68,22 @@ fn casified(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
 
 defsubr! { name = "upcase-region", gnu = "casefiddle.c:609", effect = Global,
 fn upcase_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
-    casify_region(cx, Value::NIL, beg, end, region_noncontiguous_p)
+    casify_region(cx, fixnum(0), beg, end, region_noncontiguous_p)
+}}
+
+defsubr! { name = "downcase-region", gnu = "casefiddle.c:621", effect = Global,
+fn downcase_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
+    casify_region(cx, fixnum(1), beg, end, region_noncontiguous_p)
+}}
+
+defsubr! { name = "capitalize-region", gnu = "casefiddle.c:632", effect = Global,
+fn capitalize_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
+    casify_region(cx, fixnum(2), beg, end, region_noncontiguous_p)
 }}
 
 defsubr! { name = "upcase-initials-region", gnu = "casefiddle.c:646", effect = Global,
 fn upcase_initials_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
-    casify_region(cx, Value::TRUE, beg, end, region_noncontiguous_p)
+    casify_region(cx, fixnum(3), beg, end, region_noncontiguous_p)
 }}
 
 #[cfg(test)]
@@ -117,11 +131,10 @@ mod tests {
     #[test]
     fn native_case_buffer_overrides_and_identity() {
         // Special casing precedes the case table, as in GNU. `A', which the
-        // table has no entry for, takes the Unicode default; GNU leaves it
-        // as it is and gives "Aς".
+        // table has no entry for, stays itself, as GNU's "Aς".
         check(
             "(let ((d (make-char-table 'case-table)) (u (make-char-table 'case-table))) (aset d 931 120) (aset u 223 223) (aset u 233 81) (set-char-table-extra-slot d 0 u) (set-char-table-extra-slot d 1 (make-char-table 'case-table)) (set-case-table d) (list (upcase 223) (upcase \"ßéﬃ\") (downcase \"AΣ\") (with-temp-buffer (upcase \"ßé\"))))",
-            "(223 \"SSQFFI\" \"aς\" \"SSÉ\")",
+            "(223 \"SSQFFI\" \"Aς\" \"SSÉ\")",
         );
         check(
             "(let ((d (copy-sequence (standard-case-table)))) (aset d 304 304) (set-case-table d) (list (downcase 304) (downcase \"İA\")))",
@@ -157,7 +170,7 @@ mod tests {
     fn native_case_parent_default_and_empty() {
         check(
             "(let* ((p (make-char-table 'case-table)) (d (make-char-table 'case-table))) (aset p 931 931) (set-char-table-parent d p) (set-case-table d) (list (downcase 931) (downcase \"AΣ\") (downcase \"İ\")))",
-            "(931 \"aΣ\" \"i̇\")",
+            "(931 \"AΣ\" \"i̇\")",
         );
         check(
             "(let ((s (string))) (list (eq s (upcase s)) (condition-case e (upcase) (wrong-number-of-arguments (car e))) (condition-case e (downcase 1 2) (wrong-number-of-arguments (car e)))))",

@@ -127,6 +127,11 @@ fn execute_kbd_macro(cx, macro_: Value; optional count: Value, loopfunc: Value) 
 defsubr! { name = "recursive-edit", gnu = "keyboard.c:781", effect = Global,
 fn recursive_edit(cx) -> Step { enter(cx, "romacs--recursive-edit", vec![], DONE) }}
 
+// command_loop_2 one command at a time, for an embedder's loop (the GUI):
+// `romacs--host-command' of the Lisp half, which says what ran.
+defsubr! { name = "romacs--run-host-command", gnu = "keyboard.c:1158", effect = Global,
+fn run_host_command(cx) -> Step { enter(cx, "romacs--host-command", vec![], DONE) }}
+
 defsubr! { name = "top-level", gnu = "keyboard.c:1199", effect = Global,
 fn top_level(cx) -> Step { enter(cx, "romacs--top-level", vec![], DONE) }}
 

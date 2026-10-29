@@ -246,6 +246,7 @@ impl Vm {
                 self.autoload_do_load(arg(0), arg(1), arg(2))
             }
             Primitive::ReadHostEvent => self.read_host_event(args),
+            Primitive::FormatModeLine => self.format_mode_line(args),
             _ => unreachable!(),
         }
     }
@@ -299,8 +300,16 @@ impl Vm {
             && let [Form::Sym(head), Form::Sym(name)] = items.as_slice()
             && head == "defvar"
             && !matches!(name.as_str(), "nil" | "t")
+            && self.file_specials.insert(name.clone())
         {
-            self.file_specials.insert(name.clone());
+            // macroexpand--all-toplevel records the declaration in the
+            // file's `macroexp--dynvars' (macroexp.el), which macros such as
+            // eval-and-compile hand to `eval' as its lexical environment.
+            let symbol = self.intern(name);
+            let dynvars = self.slot("macroexp--dynvars");
+            let declared = self.variable_value(dynvars)?;
+            let declared = self.keymap_cons(symbol, declared);
+            self.set_variable_value(dynvars, declared)?;
         }
         result
     }
@@ -344,6 +353,10 @@ impl Vm {
         // after-load forms) and file names, then readevalloop's. GNU's
         // bindings of the reading buffer (standard-input, eval-buffer-list,
         // lexical-binding) have no counterpart: VM2 reads the file's bytes.
+        let shorthands = self.file_shorthands(&source)?;
+        // The source cache keys a form by its text; shorthands read that
+        // text to other symbols, so such a file's forms are compiled afresh.
+        let cacheable = shorthands == Value::NIL;
         let file = self.literal(&Form::String(named.clone()))?;
         let history_slot = self.slot("current-load-list");
         let outer = self.dynamic.len();
@@ -357,7 +370,7 @@ impl Vm {
             let dynvars = self.variable_value(dynvars)?;
             let history = self.list_value(&[file]);
             self.bind_named(&[("inhibit-file-name-operation", Value::NIL), ("load-file-name", file), ("load-true-file-name", file),
-                ("macroexp--dynvars", dynvars), ("current-load-list", history)])
+                ("read-symbol-shorthands", shorthands), ("macroexp--dynvars", dynvars), ("current-load-list", history)])
         });
         if let Err(error) = bound {
             self.unwind(self.dynamic.len() - outer);
@@ -405,7 +418,7 @@ impl Vm {
                 ordinal += 1;
                 // A form holding characters outside Unicode has no exact
                 // &str text: it is reported lossily and not compile-cached.
-                let exact = std::str::from_utf8(&source[at + begin..at + used]).ok();
+                let exact = std::str::from_utf8(&source[at + begin..at + used]).ok().filter(|_| cacheable);
                 let form_source = String::from_utf8_lossy(&source[at + begin..at + used]);
                 let form = self.source_form(value, 0)?;
                 line += source[counted..at + begin].iter().filter(|b| **b == b'\n').count();
@@ -460,6 +473,24 @@ impl Vm {
         let result = self.unbind_after(self.dynamic.len() - outer, result);
         self.loader.active.pop();
         result
+    }
+    /// load-with-code-conversion's `read-symbol-shorthands' for SOURCE (mule.el):
+    /// what `hack-read-symbol-shorthands-function' finds with the file's text
+    /// in a temporary buffer, nil while that function is unset. A file that
+    /// never names the variable has none, so it is not copied into a buffer.
+    fn file_shorthands(&mut self, source: &[u8]) -> Result<Value> {
+        let slot = self.slot("hack-read-symbol-shorthands-function");
+        let function = self.variable_value(slot).unwrap_or(Value::NIL);
+        if matches!(function, Value::NIL | Value::UNBOUND) || !source.windows(22).any(|w| w == b"read-symbol-shorthands") {
+            return Ok(Value::NIL);
+        }
+        let text = self.make_lisp_string(source.to_vec(), true);
+        let text = handle::FormObject::new(self, text);
+        let reader = self.eval_source_raw("(lambda (source function) (let ((buffer (get-buffer-create (generate-new-buffer-name \" *load-shorthands*\") t))) (unwind-protect (save-current-buffer (set-buffer buffer) (insert source) (funcall function)) (kill-buffer buffer))))")?;
+        // Compiling may move heap values: read the function and text after it.
+        let function = self.variable_value(slot)?;
+        let text = text.value(self)?;
+        self.reader_call(reader, &[text, function])
     }
     /// Bind each (NAME VALUE) in order as `let' does. A watcher's signal
     /// leaves the bindings made so far for the caller to unwind.

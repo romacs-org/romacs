@@ -38,6 +38,18 @@ impl Trace {
         self.in_flight = Some((presentation, std::mem::take(&mut self.pending), paint, snapshot_start, snapshot_ns));
     }
 
+    /// The keys since the last submission changed nothing shown, so no paint
+    /// will present them: report each as complete, with no render time.
+    pub fn unchanged(&mut self) -> Vec<serde_json::Value> {
+        std::mem::take(&mut self.pending).into_iter().map(|key| {
+            let origin = key.received.unwrap_or(key.start);
+            serde_json::json!({"diagnostic":"latency-key","key_sequence":key.sequence,"presentation":null,
+                "unchanged":true,"units":"ns","command_ns":key.command_ns,
+                "key_to_command_complete_ns":key.start.duration_since(origin).as_nanos()+key.command_ns,
+                "key_to_render_observed_ns":null})
+        }).collect()
+    }
+
     pub fn completed(&mut self, presentation: u64, observed: Instant) -> Vec<serde_json::Value> {
         if !self.in_flight.as_ref().is_some_and(|batch| batch.0 == presentation) { return Vec::new(); }
         let (_, keys, paint, snapshot_start, snapshot_ns) = self.in_flight.take().unwrap();
@@ -97,5 +109,25 @@ mod tests {
         let samples = trace.completed(8, now);
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0]["key_sequence"], 3);
+    }
+
+    #[test]
+    fn keys_that_change_nothing_are_not_charged_to_a_later_paint() {
+        let now = Instant::now();
+        let mut trace = Trace::default();
+        let key = |sequence| Key { sequence, received: Some(now), start: now, ready: now,
+            command_ns: 2, diagnostic_ns: 0, reply_ns: 0 };
+        let first = trace.sequence();
+        trace.push(key(first));
+        let unchanged = trace.unchanged();
+        assert_eq!(unchanged.len(), 1);
+        assert_eq!(unchanged[0]["unchanged"], true);
+        assert!(unchanged[0]["key_to_render_observed_ns"].is_null());
+        let second = trace.sequence();
+        trace.push(key(second));
+        trace.submitted(9, Paint { submitted: now, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 }, now, 0);
+        let samples = trace.completed(9, now);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0]["key_sequence"], 2);
     }
 }

@@ -146,9 +146,16 @@ mod tests {
 
 /// The syntax-table text properties of one search subject, by byte offset,
 /// and the table the search reads.
+#[derive(Clone)]
 pub(crate) struct SyntaxSource {
     table: Value,
     properties: BTreeMap<usize, SyntaxClass>,
+}
+impl SyntaxSource {
+    /// The syntax table the search reads.
+    pub(crate) fn table(&self) -> Value {
+        self.table
+    }
 }
 
 pub(crate) struct VmSyntax<'a> {
@@ -469,6 +476,8 @@ impl Vm {
                 Ok(args[0])
             }
             ModifySyntaxEntry => {
+                // Compiled patterns may have read the old classes.
+                self.clear_regexp_cache(false);
                 let (from, to) = if args[0].tag() == 3 {
                     let (a, b) = self.cons_pair(args[0])?;
                     (self.regexp_int(a)?, self.regexp_int(b)?)

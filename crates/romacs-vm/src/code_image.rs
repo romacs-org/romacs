@@ -214,6 +214,7 @@ impl Vm {
             names[i] = name.clone();
         }
         vm.names.clear();
+        vm.initial_obarray.clear();
         vm.symbol_names.clear();
         vm.slots.clear();
         // Keep intrinsic specials, including lazy annotation variables that may
@@ -238,6 +239,8 @@ impl Vm {
                 vm.generated_slots.insert(i, id);
             } else if vm.names.insert(name.into(), i).is_some() {
                 return Err("duplicate image symbol".into());
+            } else {
+                vm.set_initial_obarray(i, true);
             }
             vm.symbol_names.push(name.into());
             let (v, f) = (value(&s[1])?, value(&s[2])?);

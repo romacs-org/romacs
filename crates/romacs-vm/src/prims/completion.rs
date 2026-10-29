@@ -248,6 +248,17 @@ fn candidate_name(
     }
 }
 
+/// The `completion-regexp-list' regexps, through FOR_EACH_TAIL.
+fn regexp_patterns(cx: &mut Leaf<'_>) -> std::result::Result<Vec<Value>, Fault> {
+    let mut tail = variable(cx, "completion-regexp-list")?;
+    let (mut slow, mut steps, mut patterns) = (tail, 0, vec![]);
+    while let Some((pattern, _)) = cx.pair(tail) {
+        patterns.push(pattern);
+        (tail, slow, steps) = super::fns_equal::for_each_tail_step(cx, tail, slow, steps)?;
+    }
+    Ok(patterns)
+}
+
 fn matches_regexps(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<bool, Fault> {
     let mut tail = variable(cx, "completion-regexp-list")?;
     let (mut slow, mut steps) = (tail, 0);
@@ -262,20 +273,29 @@ fn matches_regexps(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<bool, 
 }
 
 fn walk(cx: &mut Leaf<'_>, mut state: State) -> Next {
+    // No Lisp runs until the next predicate call, after which the walk
+    // starts again: what the candidates are matched against holds till then.
+    let length = cx.string_view(state.input)?.chars;
+    let fold = fold_case(cx)?;
+    let regexps = variable(cx, "completion-regexp-list")? != Value::NIL;
+    // Compiled at the first candidate that reaches them, as GNU checks them.
+    let mut matcher = None;
+    let commandp = cx.intern("commandp");
     while let Some((candidate, associated)) = state.next(cx)? {
         let name = candidate_name(cx, state.collection, candidate)?;
         if !matches!(cx.kind(name), Kind::String | Kind::Bytes) {
             continue;
         }
-        let length = cx.string_view(state.input)?.chars;
-        let name_len = cx.string_view(name)?.chars;
-        if name_len < length || (state.mode == Mode::Test && name_len != length) {
-            continue;
-        }
-        let fold = fold_case(cx)?;
-        if super::string_compare::prefix(cx, name, state.input, length, fold)?.0 != Ordering::Equal
-        {
-            continue;
+        // Every name begins with the empty input.
+        if length > 0 || state.mode == Mode::Test {
+            let name_len = cx.string_view(name)?.chars;
+            if name_len < length || (state.mode == Mode::Test && name_len != length) {
+                continue;
+            }
+            if super::string_compare::prefix(cx, name, state.input, length, fold)?.0 != Ordering::Equal
+            {
+                continue;
+            }
         }
         state.name = name;
         if state.mode == Mode::Test {
@@ -284,11 +304,20 @@ fn walk(cx: &mut Leaf<'_>, mut state: State) -> Next {
             }
             return test_found(cx, state, candidate, associated);
         }
-        if !matches_regexps(cx, name)? {
-            continue;
+        if regexps {
+            if matcher.is_none() {
+                let patterns = regexp_patterns(cx)?;
+                matcher = Some(cx.completion_matcher(&patterns, fold, false)?);
+            }
+            let compiled = matcher.as_mut().unwrap();
+            let matched = match compiled {
+                Some(compiled) => cx.completion_matches(compiled, name)?,
+                None => matches_regexps(cx, name)?,
+            };
+            if !matched { continue; }
         }
         if state.predicate != Value::NIL {
-            if state.predicate == cx.intern("commandp") {
+            if state.predicate == commandp {
                 return super::callint::command_predicate(
                     cx,
                     candidate,
@@ -429,4 +458,93 @@ fn test_found(cx: &mut Leaf<'_>, state: State, candidate: Value, associated: Val
         then: delegated,
         saved: vec![],
     })
+}
+
+defsubr! { name = "completion--flex-cost-gotoh", gnu = "minibuf.c:2345", effect = Reads,
+fn completion_flex_cost_gotoh(cx, pat: Value, str: Value) {
+    let pattern = cx.string_view(pat)?;
+    let candidate = cx.string_view(str)?;
+    let width = candidate.chars + 1;
+    // GNU's statically allocated matrices bound the work.
+    if pattern.chars == 0 || candidate.chars == 0 || (pattern.chars + 1) * width > 128 * 512 {
+        return Ok(Value::NIL);
+    }
+    let fold = fold_case(cx)?;
+    // A pattern that is not a subsequence cannot match; GNU checks this on
+    // the bytes, before the quadratic pass, only when case matters.
+    if !fold && !is_subsequence(&pattern.bytes, &candidate.bytes) {
+        return Ok(Value::NIL);
+    }
+    let folded = |cx: &mut Leaf<'_>, chars: Vec<u32>| -> std::result::Result<Vec<u32>, Fault> {
+        if fold { chars.into_iter().map(|c| cx.case_mapping_character(c, true)).collect() } else { Ok(chars) }
+    };
+    let pattern = folded(cx, pattern.chars().collect())?;
+    let candidate = folded(cx, candidate.chars().collect())?;
+    match gotoh(&pattern, &candidate) {
+        None => Ok(Value::NIL),
+        Some((cost, positions)) => {
+            let mut matches = Value::NIL;
+            for &position in positions.iter().rev() {
+                matches = cx.cons(Value::integer(position).unwrap(), matches);
+            }
+            Ok(cx.cons(Value::integer(cost).unwrap(), matches))
+        }
+    }
+}}
+
+fn is_subsequence(needle: &[u8], haystack: &[u8]) -> bool {
+    let mut rest = needle.iter().peekable();
+    for byte in haystack {
+        if rest.peek() == Some(&byte) { rest.next(); }
+    }
+    rest.peek().is_none()
+}
+
+/// minibuf.c's modified Gotoh alignment of PATTERN against CANDIDATE, both
+/// already case-folded: the cheapest cost of matching every pattern
+/// character in order, opening a gap costing 10 and extending one 1, and
+/// the candidate index each pattern character matched; None without a match.
+/// Row and column -1 hold the costs before any match, as GNU's MAT macro.
+fn gotoh(pattern: &[u32], candidate: &[u32]) -> Option<(i64, Vec<i64>)> {
+    const GAP_OPEN: i32 = 10;
+    const GAP_EXTEND: i32 = 1;
+    const INFINITE: i32 = i32::MAX / 2;
+    let width = candidate.len() + 1;
+    let at = |i: isize, j: isize| ((i + 1) as usize) * width + (j + 1) as usize;
+    let mut m = vec![INFINITE; (pattern.len() + 1) * width];
+    let mut d = vec![INFINITE; m.len()];
+    // Leading gaps cost half an opening; D[-1,-1] promotes a match at the start.
+    d[..width].fill(GAP_OPEN / 2);
+    d[0] = 0;
+    // The first match of the previous row: no earlier column can match now.
+    let mut start = 0;
+    for (i, &p) in pattern.iter().enumerate() {
+        let i = i as isize;
+        let mut seen = false;
+        for j in start..candidate.len() {
+            let j = j as isize;
+            if candidate[j as usize] == p {
+                if !seen { seen = true; start = j as usize; }
+                m[at(i, j)] = m[at(i - 1, j - 1)].min(d[at(i - 1, j - 1)]);
+            }
+            d[at(i, j)] = (m[at(i, j - 1)] + GAP_OPEN).min(d[at(i, j - 1)] + GAP_EXTEND);
+        }
+    }
+    let last = pattern.len() as isize - 1;
+    // The first cheapest match of the last pattern character.
+    let (column, cost) = (0..candidate.len() as isize).map(|j| (j, m[at(last, j)]))
+        .fold((-1, INFINITE), |best, (j, cost)| if cost < best.1 { (j, cost) } else { best });
+    if column < 0 { return None; }
+    // Walk back: each earlier character matched where a match beat a gap.
+    let mut positions = vec![column as i64];
+    let mut l = column;
+    for i in (0..last).rev() {
+        loop {
+            l -= 1;
+            if !(l >= 0 && m[at(i, l)] >= d[at(i, l)]) { break; }
+        }
+        positions.push(l as i64);
+    }
+    positions.reverse();
+    Some((i64::from(cost), positions))
 }

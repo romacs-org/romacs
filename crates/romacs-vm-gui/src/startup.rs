@@ -9,7 +9,8 @@ use romacs_vm::Vm;
 pub enum Launch {
     /// `--loadup`: the batch package runner's GNU-loadup chain
     /// ([`drive_loadup`]), the bundled packages' autoloads, the interactive
-    /// session (rlisp/romacs-gui-loadup.el), then a romacs stand-in for each
+    /// session (rlisp/romacs-gui-loadup.el), Romacs's completion defaults
+    /// (rlisp/romacs-completion-defaults.el), then a romacs stand-in for each
     /// journey key whose GNU command the chain did not define, then the Rum
     /// workspace. Not the default: see main.rs.
     Loadup,
@@ -353,8 +354,9 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
     policy(vm, root, "romacs-find-file.el", include_str!("../../../rlisp/romacs-find-file.el"))?;
     policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
-    policy(vm, root, "romacs-extended-command.el", include_str!("../../../rlisp/romacs-extended-command.el"))?;
     initialize_editing_from_sources(vm, root)?;
+    // No GNU minibuffer.el here: the workspace's own readers.
+    policy(vm, root, "romacs-workspace-completion.el", include_str!("../../../rlisp/romacs-workspace-completion.el"))?;
     initialize_coding(vm, root)?;
     policy(vm, root, "romacs-dired.el", include_str!("../../../rlisp/romacs-dired.el"))?;
     policy(vm, root, "romacs-term.el", include_str!("../../../rlisp/romacs-term.el"))?;
@@ -413,9 +415,13 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
         if let Some(autoloads) = bundled_autoloads(dir)? {
             vm.load_file(&autoloads).map_err(|e| format!("{}: {e}", autoloads.display()))?;
         }
-        // What an interactive session on this display adds to the batch chain.
-        let session = loadup_bootstrap(dir).with_file_name("romacs-gui-loadup.el");
-        vm.load_file(&session).map_err(|e| format!("{}: {e}", session.display()))?;
+        // What an interactive session on this display adds to the batch
+        // chain, then Romacs's defaults for GNU's minibuffer completion,
+        // which the user's init may override.
+        for name in ["romacs-gui-loadup.el", "romacs-completion-defaults.el"] {
+            let file = loadup_bootstrap(dir).with_file_name(name);
+            vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        }
     }
     let gnu_mode_line = vm.eval_source("(default-boundp 'mode-line-format)")? != romacs_vm::Fixed::NIL;
     if launch == Launch::GnuOnly {
@@ -434,7 +440,6 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-find-file.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-extended-command.el"))?;
     initialize_editing(vm)?;
     vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
@@ -457,7 +462,7 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
     policy(vm, root, "romacs-editing.el", include_str!("../../../rlisp/romacs-editing.el"))?;
     for (source, names) in [
         (include_str!("../../../gnu-lisp/subr.el"), &[
-            "plusp", "add-to-history", "ignore", "string=",
+            "plusp", "add-to-history", "ignore", "string=", "undefined",
         ][..]),
         (include_str!("../../../gnu-lisp/files.el"), &[
             "files--ensure-directory", "make-directory",
@@ -1538,6 +1543,8 @@ mod tests {
         for (file, text) in files { std::fs::write(gnu.join(file), text).unwrap(); }
         std::fs::write(loadup_bootstrap(&gnu), bootstrap).unwrap();
         std::fs::write(root.join("rlisp/romacs-gui-loadup.el"), "(setq noninteractive nil)\n").unwrap();
+        // A scratch chain has no minibuffer.el or icomplete.el to configure.
+        std::fs::write(root.join("rlisp/romacs-completion-defaults.el"), "(provide 'romacs-completion-defaults)\n").unwrap();
         gnu
     }
 

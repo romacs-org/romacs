@@ -1,6 +1,6 @@
-//! GNU src/minibuf.c `read-from-minibuffer' (minibuf.c:1309) and `read-string'
-//! (minibuf.c:1420), the queries over the active minibuffers that GNU's
-//! minibuffer.el makes, and fns.c `yes-or-no-p', which prompts through them.
+//! GNU src/minibuf.c `read-from-minibuffer' (minibuf.c:1309), `read-string'
+//! (minibuf.c:1420), `read-buffer' and its table, the queries over the active
+//! minibuffers that GNU's minibuffer.el makes, and fns.c `yes-or-no-p'.
 //!
 //! Tier: T2 (PRIMITIVE-DOCTRINE section 3). GNU's `read_minibuf' runs a
 //! recursive command loop, i.e. it calls Lisp once per key, so the loop is Lisp
@@ -189,6 +189,17 @@ fn minibuffer_contents(cx) -> Step { enter(cx, "romacs--minibuffer-contents", ve
 defsubr! { name = "minibuffer-contents-no-properties", gnu = "minibuf.c:537", effect = Global,
 fn minibuffer_contents_no_properties(cx) -> Step {
     enter(cx, "romacs--minibuffer-contents", vec![Value::NIL], DONE)
+}}
+
+// Fread_buffer binds `completion-ignore-case' around the reader, so it is Lisp.
+defsubr! { name = "read-buffer", gnu = "minibuf.c:1522", effect = Global,
+fn read_buffer(cx, prompt: Value; optional def: Value, require_match: Value, predicate: Value) -> Step {
+    enter(cx, "romacs--read-buffer", vec![prompt, def, require_match, predicate], DONE)
+}}
+
+defsubr! { name = "internal-complete-buffer", gnu = "minibuf.c:2156", effect = Global,
+fn internal_complete_buffer(cx, string: Value, predicate: Value, flag: Value) -> Step {
+    enter(cx, "romacs--internal-complete-buffer", vec![string, predicate, flag], DONE)
 }}
 
 defsubr! { name = "yes-or-no-p", gnu = "fns.c:3612", effect = Global,

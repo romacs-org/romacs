@@ -9,6 +9,7 @@ use super::display_motion::{Elem, Elements, Method, Shape, Slot, R};
 use crate::coordinates::{ByteOffset, CharOffset};
 use crate::data::Object;
 use romacs_regex_engine::emacs_char::{cat_eq, UnicodeCategory as Category};
+use crate::overlay_order::{display_order, OverlayEntry};
 
 /// What a window shows of its buffer, fixed for one measurement.
 pub(super) struct View {
@@ -71,10 +72,6 @@ fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixe
 /// A margin's string or space shows outside the text area.
 #[derive(Clone, Copy)]
 enum Replacement { String(Value, bool), Space(Value, bool), Nothing }
-
-/// An overlay string recorded by load_overlay_strings.
-#[derive(Clone, Copy)]
-struct OverlayEntry { overlay: Value, string: Value, priority: i64, after: bool, start: i64 }
 
 /// One character of a buffer or string, before classification.
 #[derive(Clone, Copy)]
@@ -324,7 +321,7 @@ impl<'l, 'a> Source<'l, 'a> {
         if entries.iter().any(|a| entries.iter().any(|b| a.overlay != b.overlay && a.start == b.start)) {
             return Err(unsupported("of strings from overlays that share a start"));
         }
-        Ok(merge_sort(entries, &compare_overlay_entries).into_iter().map(|e| e.string).collect())
+        Ok(display_order(entries))
     }
     fn nonempty_string(&self, v: Value) -> bool {
         self.leaf.vm.str_view(v).is_some_and(|s| s.chars > 0)
@@ -740,34 +737,6 @@ fn composition_refusal(property: Value) -> R<()> {
     if property == Value::NIL { Ok(()) } else { Err(unsupported("of composed text (the `composition' property)")) }
 }
 
-/// compare_overlay_entries: after-strings before before-strings, except
-/// within one overlay; after-strings by decreasing and before-strings by
-/// increasing priority. Not a total order across overlays.
-fn compare_overlay_entries(a: &OverlayEntry, b: &OverlayEntry) -> std::cmp::Ordering {
-    use std::cmp::Ordering::{Equal, Greater, Less};
-    if a.after != b.after {
-        let first = if a.overlay == b.overlay { !a.after } else { a.after };
-        if first { Less } else { Greater }
-    } else if a.priority == b.priority { Equal }
-    else if a.after { b.priority.cmp(&a.priority) }
-    else { a.priority.cmp(&b.priority) }
-}
-
-/// glibc's qsort, a top-down merge sort, so that a comparator which is
-/// not a total order yields GNU's sequence.
-fn merge_sort<T: Copy>(mut items: Vec<T>, compare: &impl Fn(&T, &T) -> std::cmp::Ordering) -> Vec<T> {
-    if items.len() <= 1 { return items; }
-    let right = merge_sort(items.split_off(items.len() / 2), compare);
-    let left = merge_sort(items, compare);
-    let (mut out, mut i, mut j) = (Vec::with_capacity(left.len() + right.len()), 0, 0);
-    while i < left.len() && j < right.len() {
-        if compare(&left[i], &right[j]).is_le() { out.push(left[i]); i += 1; } else { out.push(right[j]); j += 1; }
-    }
-    out.extend_from_slice(&left[i..]);
-    out.extend_from_slice(&right[j..]);
-    out
-}
-
 /// printablep (character.c): not a control, surrogate or unassigned
 /// character. Codes beyond Unicode have no category.
 fn printable(category: Option<i64>) -> bool {
@@ -852,4 +821,10 @@ impl Leaf<'_> {
     fn number_value(&self, v: Value) -> Option<f64> {
         v.integer_value().map(|n| n as f64).or_else(|| self.float_value(v).ok())
     }
+}
+
+impl super::display_motion::Lines for Source<'_, '_> {
+    fn reseat(&mut self, start: i64) -> R<()> { self.reset(start) }
+    fn line_start_before(&mut self, pos: i64) -> R<i64> { self.visible_line_start(pos) }
+    fn begv(&self) -> i64 { self.view.begv }
 }

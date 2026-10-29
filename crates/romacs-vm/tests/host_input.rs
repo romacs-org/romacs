@@ -218,7 +218,7 @@ fn every_call_path_reads_through_the_reentrant_primitive() {
     );
     assert_eq!(seen.borrow().reads, 3);
     assert_eq!(
-        eval(&mut vm, "(condition-case e (romacs--read-host-event 1 2) (error (car e)))"),
+        eval(&mut vm, "(condition-case e (romacs--read-host-event 1 nil 3) (error (car e)))"),
         "wrong-number-of-arguments"
     );
 }

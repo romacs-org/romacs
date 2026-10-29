@@ -126,6 +126,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "composition-function-table", gnu: "composite.c:2270", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "current-iso639-language", gnu: "charset.c:2430", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "current-key-remap-sequence", gnu: "keyboard.c:14482", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "ctags-program-name", gnu: "callproc.c:2167", kind: Kind::Lisp(Init::Str("ctags")) },
     CVariable { name: "cursor-in-echo-area", gnu: "dispnew.c:7538", kind: Kind::Bool(false) },
     CVariable { name: "debug-on-event", gnu: "keyboard.c:14381", kind: Kind::Lisp(Init::Symbol("sigusr2")) },
     CVariable { name: "debug-on-next-call", gnu: "eval.c:4515", kind: Kind::Bool(false) },
@@ -160,8 +161,11 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "double-click-time", gnu: "keyboard.c:13899", kind: Kind::Lisp(Init::Fixnum(500)) },
     CVariable { name: "echo-keystrokes", gnu: "keyboard.c:13880", kind: Kind::Lisp(Init::Fixnum(1)) },
     CVariable { name: "echo-keystrokes-help", gnu: "keyboard.c:13886", kind: Kind::Bool(true) },
+    CVariable { name: "ebrowse-program-name", gnu: "callproc.c:2218", kind: Kind::Lisp(Init::Str("ebrowse")) },
+    CVariable { name: "emacsclient-program-name", gnu: "callproc.c:2193", kind: Kind::Lisp(Init::Str("emacsclient")) },
     CVariable { name: "enable-character-translation", gnu: "coding.c:12111", kind: Kind::Lisp(Init::True) },
     CVariable { name: "enable-disabled-menus-and-buttons", gnu: "keyboard.c:14342", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "etags-program-name", gnu: "callproc.c:2173", kind: Kind::Lisp(Init::Str("etags")) },
     CVariable { name: "eol-mnemonic-dos", gnu: "coding.c:12096", kind: Kind::Lisp(Init::Str("\\")) },
     CVariable { name: "eol-mnemonic-mac", gnu: "coding.c:12101", kind: Kind::Lisp(Init::Str("/")) },
     CVariable { name: "expose-hidden-buffer", gnu: "frame.c:7750", kind: Kind::Lisp(Init::Nil) },
@@ -184,6 +188,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "glyph-table", gnu: "dispnew.c:7549", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "glyphless-char-display", gnu: "xdisp.c:39349", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: Some("glyphless-char-display"), extras: &[Init::Symbol("empty-box")], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "help-form", gnu: "keyboard.c:13962", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "hexl-program-name", gnu: "callproc.c:2183", kind: Kind::Lisp(Init::Str("hexl")) },
     CVariable { name: "highlight-nonselected-windows", gnu: "xdisp.c:38819", kind: Kind::Bool(false) },
     CVariable { name: "hourglass-delay", gnu: "xdisp.c:39318", kind: Kind::Lisp(Init::Fixnum(1)) },
     CVariable { name: "hscroll-margin", gnu: "xdisp.c:39085", kind: Kind::Int(5) },
@@ -233,6 +238,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "messages-buffer-name", gnu: "xdisp.c:38597", kind: Kind::Lisp(Init::Str("*Messages*")) },
     CVariable { name: "minibuffer-auto-raise", gnu: "minibuf.c:2665", kind: Kind::Bool(false) },
     CVariable { name: "minibuffer-completing-file-name", gnu: "minibuf.c:2641", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "minibuffer-exit-hook", gnu: "minibuf.c:2568", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "minibuffer-history-position", gnu: "minibuf.c:2661", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "minibuffer-history-variable", gnu: "minibuf.c:2650", kind: Kind::Lisp(Init::Fixnum(0)) },
     CVariable { name: "minibuffer-completion-confirm", gnu: "minibuf.c:2630", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "minibuffer-completion-predicate", gnu: "minibuf.c:2626", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "minibuffer-completion-table", gnu: "minibuf.c:2611", kind: Kind::Lisp(Init::Nil) },
@@ -265,6 +273,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "overline-margin", gnu: "xdisp.c:39296", kind: Kind::Int(2) },
     CVariable { name: "overriding-terminal-local-map", gnu: "keyboard.c:14128", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "parse-sexp-ignore-comments", gnu: "syntax.c:3769", kind: Kind::Bool(false) },
+    CVariable { name: "path-separator", gnu: "emacs.c:3548", kind: Kind::Lisp(Init::Str(":")) },
     CVariable { name: "pgtk-lost-selection-functions", gnu: "pgtkselect.c:1919", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "pgtk-use-im-context-on-new-connection", gnu: "pgtkim.c:306", kind: Kind::Lisp(Init::True) },
     CVariable { name: "polling-period", gnu: "keyboard.c:13892", kind: Kind::Lisp(Init::Float(2.0)) },
@@ -279,6 +288,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "process-prioritize-lower-fds", gnu: "process.c:8960", kind: Kind::Bool(false) },
     CVariable { name: "pure-bytes-used", gnu: "alloc.c:7462", kind: Kind::Int(0) },
     CVariable { name: "quit-flag", gnu: "eval.c:4440", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "rcs2log-program-name", gnu: "callproc.c:2229", kind: Kind::Lisp(Init::Str("rcs2log")) },
     CVariable { name: "read-buffer-completion-ignore-case", gnu: "minibuf.c:2559", kind: Kind::Bool(false) },
     CVariable { name: "read-buffer-function", gnu: "minibuf.c:2544", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "read-circle", gnu: "lread.c:5566", kind: Kind::Lisp(Init::True) },
@@ -289,6 +299,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "read-symbol-shorthands", gnu: "lread.c:5884", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "recenter-redisplay", gnu: "window.c:9484", kind: Kind::Lisp(Init::Symbol("tty")) },
     CVariable { name: "record-all-keys", gnu: "keyboard.c:14462", kind: Kind::Bool(false) },
+    CVariable { name: "redisplay-adhoc-scroll-in-resize-mini-windows", gnu: "xdisp.c:39491", kind: Kind::Bool(true) },
     CVariable { name: "report-emacs-bug-address", gnu: "emacs.c:3613", kind: Kind::Lisp(Init::Str("bug-gnu-emacs@gnu.org")) },
     CVariable { name: "resize-mini-frames", gnu: "frame.c:7566", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "resize-mini-windows", gnu: "xdisp.c:39045", kind: Kind::Lisp(Init::Nil) },
@@ -345,6 +356,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "unibyte-display-via-language-environment", gnu: "xdisp.c:39025", kind: Kind::Bool(false) },
     CVariable { name: "unicode-category-table", gnu: "character.c:1159", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "unread-post-input-method-events", gnu: "keyboard.c:13786", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "unread-input-method-events", gnu: "keyboard.c:13792", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "use-dialog-box", gnu: "fns.c:6843", kind: Kind::Bool(true) },
     CVariable { name: "use-file-dialog", gnu: "fns.c:6852", kind: Kind::Bool(true) },
     CVariable { name: "use-short-answers", gnu: "fns.c:6860", kind: Kind::Bool(false) },
@@ -402,9 +414,10 @@ pub(crate) enum Init {
     List(&'static [Init]),
     /// make_nil_vector (N).
     NilVector(usize),
-    /// The runtime's etc/ directory: ROMACS_RUNTIME_ROOT/etc, else this
-    /// checkout's (GNU's installation-relative data-directory).
-    EtcDirectory,
+    /// A file name under the runtime root: ROMACS_RUNTIME_ROOT, else this
+    /// checkout (GNU's installation-relative directories). The flag adds a
+    /// final slash, as file-name-as-directory does.
+    RuntimeFile(&'static str, bool),
     /// init_cmdargs: the running executable's file name (true) or its
     /// directory, with a final slash (false).
     Invocation(bool),
@@ -567,6 +580,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // char-width and string-width read it (indent.c buffer_display_table).
     CVariable { name: "buffer-display-table", gnu: "buffer.c:5502", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "bidi-paragraph-direction", gnu: "buffer.c:5383", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "bidi-display-reordering", gnu: "buffer.c:5332", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "bidi-paragraph-start-re", gnu: "buffer.c:5340", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "bidi-paragraph-separate-re", gnu: "buffer.c:5362", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "word-wrap", gnu: "buffer.c:5408", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "selective-display-ellipses", gnu: "buffer.c:5487", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     CVariable { name: "indicate-empty-lines", gnu: "buffer.c:5612", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
@@ -607,14 +623,21 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
     // Heap-valued C variables materialize lazily on first read.
+    // A build without GnuTLS (VM2-TLS1).
+    CVariable { name: "libgnutls-version", gnu: "gnutls.c:3021", kind: Kind::Lisp(Init::Fixnum(-1)) },
     CVariable { name: "latin-extra-code-table", gnu: "coding.c:12140", kind: Kind::Lisp(Init::NilVector(256)) },
     CVariable { name: "user-full-name", gnu: "editfns.c:4862", kind: Kind::Lisp(Init::UserIdentity("user-full-name")) },
     CVariable { name: "user-login-name", gnu: "editfns.c:4865", kind: Kind::Lisp(Init::UserIdentity("user-login-name")) },
     CVariable { name: "user-real-login-name", gnu: "editfns.c:4869", kind: Kind::Lisp(Init::UserIdentity("user-real-login-name")) },
-    CVariable { name: "data-directory", gnu: "callproc.c:2119", kind: Kind::Lisp(Init::EtcDirectory) },
+    CVariable { name: "data-directory", gnu: "callproc.c:2119", kind: Kind::Lisp(Init::RuntimeFile("etc", true)) },
+    // GNU's is its libexec directory (init_callproc_1); the helper programs
+    // VM2 runs live beside its own executable (VM2-EXECDIR1).
+    CVariable { name: "exec-directory", gnu: "callproc.c:2114", kind: Kind::Lisp(Init::Invocation(false)) },
+    // GNU's build-time PATH_INFO; VM2's is under its runtime root.
+    CVariable { name: "configure-info-directory", gnu: "callproc.c:2127", kind: Kind::Lisp(Init::RuntimeFile("info", false)) },
     CVariable { name: "invocation-name", gnu: "emacs.c:3556", kind: Kind::Lisp(Init::Invocation(true)) },
     CVariable { name: "invocation-directory", gnu: "emacs.c:3560", kind: Kind::Lisp(Init::Invocation(false)) },
-    CVariable { name: "doc-directory", gnu: "callproc.c:2123", kind: Kind::Lisp(Init::EtcDirectory) },
+    CVariable { name: "doc-directory", gnu: "callproc.c:2123", kind: Kind::Lisp(Init::RuntimeFile("etc", true)) },
     CVariable { name: "internal-doc-file-name", gnu: "doc.c:691", kind: Kind::Lisp(Init::Str("DOC")) },
     CVariable { name: "eol-mnemonic-undecided", gnu: "coding.c:12106", kind: Kind::Lisp(Init::Str(":")) },
     CVariable { name: "eol-mnemonic-unix", gnu: "coding.c:12091", kind: Kind::Lisp(Init::Str(":")) },
@@ -880,10 +903,10 @@ impl Vm {
                 let values: Vec<Value> = items.iter().map(|&i| self.materialize(i)).collect();
                 self.list_value(&values)
             }
-            Init::EtcDirectory => {
+            Init::RuntimeFile(name, slash) => {
                 let root = std::env::var_os("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
                     .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
-                let text = format!("{}/", root.join("etc").display());
+                let text = format!("{}{}", root.join(name).display(), if slash { "/" } else { "" });
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::Invocation(name) => {

@@ -10,7 +10,7 @@ use winit::keyboard::PhysicalKey;
 use winit::window::WindowId;
 
 impl RenderApp {
-    fn send_native_key(
+    pub(super) fn send_native_key(
         &mut self,
         window: WindowId,
         key: PhysicalKey,
@@ -23,6 +23,8 @@ impl RenderApp {
         let result = self.comms.send_key_input_with_receipt(event);
         if pressed {
             self.key_repeats.queued(window, key, result.0.clone());
+            self.frame_windows
+                .restart_top_level_cursor_blinks(romacs_display_protocol::frame_time::observe_platform_now());
         }
         (result.1, result.2)
     }
