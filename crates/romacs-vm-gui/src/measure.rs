@@ -208,6 +208,28 @@ mod tests {
         assert_eq!(z.1 as i64, 110);
     }
 
+    /// Redisplay fontifies the rows a window shows as the host continues
+    /// them: lines several screen rows long fill the window before as many
+    /// logical lines as it has rows, and those past its end stay unfontified.
+    #[test]
+    fn redisplay_fontifies_the_screen_rows_a_window_shows() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
+          (let ((i 0)) (while (< i 40) (insert (make-string 200 ?x) "\n") (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1)
+          (setq hosted-fontified nil)
+          (setq fontification-functions
+                (list (lambda (pos)
+                        (setq hosted-fontified (cons pos hosted-fontified))
+                        (put-text-property pos (save-excursion (goto-char pos) (forward-line 1) (point)) 'fontified t)))))"#);
+        h.paint();
+        let called = h.eval("(reverse hosted-fontified)");
+        let shown = h.eval("(let ((p 1) starts) (while (< p (window-end)) (setq starts (cons p starts) p (+ p 201))) (reverse starts))");
+        assert_eq!(called, shown, "fontified line starts against the window's end");
+        let rows = h.eval("(window-body-height)").parse::<usize>().unwrap();
+        assert!(called.split(' ').count() < rows, "{called}: fewer lines than the window's {rows} rows");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]
