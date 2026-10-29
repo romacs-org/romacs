@@ -158,7 +158,7 @@ impl PropertySchema {
 /// A `PROPERTIES` table for a config struct the `effect_config!` macro does not
 /// declare.
 ///
-/// The behavioural slots — the window-animation four, cursor blink and motion,
+/// The behavioural slots — the window-animation four, cursor motion,
 /// the buffer and scroll transitions — are hand-written because their defaults
 /// differ per instance (`window-open` is an easing, `window-resize` a spring)
 /// and the macro derives one `Default` from the field list. They still have to
@@ -1960,7 +1960,6 @@ macro_rules! effect_schema_table {
                 $(stringify!($field) => Some(<$ty>::PROPERTIES),)*
                 // The behavioural slots are not fields of `EffectsConfig`; they
                 // sit beside it on `VisualConfig`.
-                "cursor_blink" => Some(crate::visual_config::CursorBlinkConfig::PROPERTIES),
                 "cursor_motion" => Some(crate::visual_config::CursorMotionConfig::PROPERTIES),
                 "cursor_size_transition" => {
                     Some(crate::visual_config::CursorSizeTransitionConfig::PROPERTIES)

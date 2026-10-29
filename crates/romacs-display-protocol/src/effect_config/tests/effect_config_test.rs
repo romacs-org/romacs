@@ -183,7 +183,7 @@ fn variable_length_color_properties_do_not_depend_on_their_current_length() {
 }
 
 #[test]
-fn one_registry_configures_motion_blink_and_window_transitions() {
+fn one_registry_configures_motion_and_window_transitions() {
     let configured = VisualConfig::default()
         .apply_effects(&[
             EffectOperation::set(
@@ -195,7 +195,6 @@ fn one_registry_configures_motion_blink_and_window_transitions() {
                     ("duration", EffectValue::Number(0.2)),
                 ],
             ),
-            EffectOperation::set("cursor-blink", [("interval", EffectValue::Number(0.35))]),
             EffectOperation::set(
                 "scroll-transition",
                 [
@@ -219,7 +218,6 @@ fn one_registry_configures_motion_blink_and_window_transitions() {
         configured.cursor_motion.duration,
         Duration::from_millis(200)
     );
-    assert_eq!(configured.cursor_blink.interval, Duration::from_millis(350));
     assert_eq!(
         configured.scroll_transition.effect,
         TransitionEffect::PageCurl
@@ -2785,10 +2783,6 @@ fn every_effect_publishes_a_schema_for_every_property_it_accepts() {
         (
             "window-animations",
             crate::window_animation::WindowAnimationsConfig::PROPERTIES,
-        ),
-        (
-            "cursor-blink",
-            crate::visual_config::CursorBlinkConfig::PROPERTIES,
         ),
         (
             "cursor-motion",

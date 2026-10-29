@@ -657,6 +657,9 @@ impl Vm {
         if (p as usize) < MakeMarker as usize {
             return self.text_annotation_primitive(p, start, n);
         }
+        if matches!(p, MakeOverlay | MoveOverlay | DeleteOverlay | OverlayPut | RemoveOverlays) {
+            self.display_state.overlays += 1;
+        }
         let mut fixed = [Value::NIL; 5];
         let variable = if p == InsertBeforeMarkers && n > 5 {
             Some(self.stack[start..start + n].to_vec())

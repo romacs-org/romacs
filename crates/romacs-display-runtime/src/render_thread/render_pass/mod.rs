@@ -421,7 +421,6 @@ fn render_frame_window_contents_reserved(
     let old_height = renderer.height();
     renderer.set_scale_factor(native.scale_factor as f32);
     renderer.resize(native.content_size().0, native.content_size().1);
-    let cursor_visible = render.cursor.blink_on;
     composition_targets::report_unpooled_gpu_textures(renderer, render);
 
     let inputs = FrameDrawInputs {
@@ -455,7 +454,6 @@ fn render_frame_window_contents_reserved(
             &composition_view,
             &frame,
             &inputs,
-            cursor_visible,
             hovered_scroll_bar,
         );
         let models = match draw_result {
@@ -530,7 +528,6 @@ fn render_frame_window_contents_reserved(
             &composition_view,
             &mut frame,
             &inputs,
-            cursor_visible,
             feature_plan.accept_derived_effects,
             &pane_blits,
         ),
@@ -542,7 +539,6 @@ fn render_frame_window_contents_reserved(
             &composition_view,
             &mut frame,
             &inputs,
-            cursor_visible,
             feature_plan.accept_derived_effects,
         ),
     };

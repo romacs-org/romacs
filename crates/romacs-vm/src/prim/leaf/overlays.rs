@@ -43,6 +43,8 @@ impl Leaf<'_> {
 
     pub fn delete_all_overlays(&mut self, buffer: Value) -> std::result::Result<Value, Fault> {
         let buffer = self.decode_buffer(buffer)?;
+        // Overlays are display state no buffer modification tick counts.
+        self.vm.display_state.overlays += 1;
         let overlays = match self
             .vm
             .object(buffer)

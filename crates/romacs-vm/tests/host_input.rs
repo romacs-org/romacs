@@ -236,3 +236,33 @@ fn host_characters_go_through_keyboard_translate_table() {
     let (mut vm, _) = vm_with(vec![key('x'), RET], false);
     assert_eq!(eval(&mut vm, "(let ((keyboard-translate-table \"\\0z\")) (read-string \"T: \"))"), "\"x\"");
 }
+
+/// keyboard.c read_char: a focus change arriving while Lisp reads (M-x, any
+/// minibuffer prompt) runs its `special-event-map' binding at once, with the
+/// event as `last-input-event', and is never returned as input; the read
+/// goes on to the next key.
+#[test]
+fn focus_events_during_a_read_run_their_binding_and_are_not_input() {
+    let (mut vm, _) = vm_with(vec![HostEvent::Focus(false), HostEvent::Focus(true), key('a'), RET], false);
+    eval(&mut vm, "(progn (setq focus-log nil)
+                     (defun handle-focus-in (event) (interactive \"e\")
+                       (setq focus-log (cons (list (car event) (framep (car (cdr event))) (eq last-input-event event)) focus-log)))
+                     (defun handle-focus-out (event) (interactive \"e\")
+                       (setq focus-log (cons (list (car event) (framep (car (cdr event)))) focus-log))))");
+    assert_eq!(eval(&mut vm, "(read-string \"P: \")"), "\"a\"");
+    assert_eq!(eval(&mut vm, "(reverse focus-log)"), "((focus-out t) (focus-in t t))");
+}
+
+/// What a special event's binding changes is painted before the read blocks
+/// again: focus-out stops the blink timers and shows the cursor, and that
+/// state must reach the screen while Emacs waits for the next key.
+#[test]
+fn a_special_events_binding_is_redisplayed_before_the_next_wait() {
+    let (mut vm, seen) = vm_with(vec![HostEvent::Focus(false), key('a'), RET], false);
+    eval(&mut vm, "(progn (defvar mode-line-format nil) (setq mode-line-format \"before\")
+                     (defun handle-focus-out (event) (interactive \"e\") (setq mode-line-format \"after\")))");
+    assert_eq!(eval(&mut vm, "(read-string \"P: \")"), "\"a\"");
+    let seen = seen.borrow();
+    assert_eq!(seen.mini, ["P: ", "P: ", "P: a"], "one redisplay after the focus binding, before the key");
+    assert_eq!(seen.mode_lines[..2], ["before", "after"]);
+}

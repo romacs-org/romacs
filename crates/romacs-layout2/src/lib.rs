@@ -23,18 +23,44 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
     WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![] }, mode_line: None,
-        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), faces: vec![face.clone()],
+        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face.clone()],
     }
 }
 
-/// Stateful font discovery cache. Contains only owned font data, never VM values.
-pub struct LayoutEngine { resolver: FontResolver }
+/// Stateful font discovery cache and the last frame laid out. Contains only
+/// owned font and glyph data, never VM values.
+pub struct LayoutEngine { resolver: FontResolver, last: Option<Laid> }
+
+/// A frame laid out with every cursor, as if none were turned off.
+struct Laid {
+    snapshot: FrameSnapshot,
+    cursor: Option<(u64, Color)>,
+    frame: FrameGlyphBuffer,
+    ends: Vec<WindowEnd>,
+}
 impl LayoutEngine {
     pub fn new() -> Result<Self, String> {
-        Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())? })
+        Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?, last: None })
     }
+    /// SNAPSHOT laid out at PRESENTATION. A frame that differs from the last
+    /// one only in which cursors are off (GNU's blink, `internal-show-cursor')
+    /// is not laid out again: the last layout shows it, less those cursors.
     pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
-        layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)
+        let reusable = self.last.as_ref().is_some_and(|last| last.cursor == cursor && last.snapshot.lays_out_like(snapshot));
+        if !reusable {
+            let (frame, ends) = layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)?;
+            self.last = Some(Laid { snapshot: snapshot.clone(), cursor, frame, ends });
+        }
+        let last = self.last.as_ref().expect("laid out above");
+        let mut frame = last.frame.clone();
+        stamp(&mut frame, presentation)?;
+        hide_cursors_off(&mut frame, snapshot);
+        Ok((frame, last.ends.clone()))
+    }
+    /// What laying SNAPSHOT out reports, presenting nothing and leaving the
+    /// last painted frame, which a cursor-only repaint reuses, in place.
+    pub fn lay_out(&mut self, snapshot: &FrameSnapshot) -> Result<Vec<WindowEnd>, String> {
+        layout_frame_inner(snapshot, 1, None, &mut self.resolver).map(|(_, ends)| ends)
     }
     /// The host layout hook: INPUT's geometry as painting would lay it out.
     pub fn measure(&mut self, input: &MeasureInput) -> Result<Measured, String> {
@@ -69,6 +95,14 @@ pub fn layout_frame_with_cursors(snapshot: &FrameSnapshot, presentation: u64, se
     LayoutEngine::new()?.layout_frame(snapshot, presentation, Some((selected, cursor_color)))
 }
 
+/// No cursor in a window of SNAPSHOT whose cursor `internal-show-cursor'
+/// turned off.
+fn hide_cursors_off(frame: &mut FrameGlyphBuffer, snapshot: &FrameSnapshot) {
+    let off: Vec<i64> = snapshot.windows.iter().filter(|w| w.snapshot.cursor_off).map(|w| w.snapshot.id as i64).collect();
+    frame.window_cursors.retain(|c| !off.contains(&c.window_id.get()));
+}
+
+/// SNAPSHOT laid out with every cursor its windows own, on or off.
 fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>, resolver: &mut FontResolver) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
     resolver.set_selection_state(snapshot.font_selection);
     resolver.set_alternative_state(snapshot.font_alternatives.clone());
@@ -97,20 +131,28 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         }
         // Windows with a mode line always own a cursor; the minibuffer (no mode
         // line) only while it is the selected window, i.e. a prompt is active.
-        ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id).map(|(id, color)| (id == placed.snapshot.id, color)))?);
+        let owns = |&(id, _): &(u64, Color)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id;
+        ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
     Ok((frame, ends))
 }
 
 fn new_frame(width: u32, height: u32, presentation: u64) -> Result<FrameGlyphBuffer, String> {
-    if width == 0 || height == 0 || presentation == 0 { return Err("invalid frame extent or presentation".into()); }
+    if width == 0 || height == 0 { return Err("invalid frame extent or presentation".into()); }
     let mut frame = FrameGlyphBuffer::with_size(width as f32, height as f32);
+    stamp(&mut frame, presentation)?;
+    Ok(frame)
+}
+
+/// FRAME as presentation PRESENTATION.
+fn stamp(frame: &mut FrameGlyphBuffer, presentation: u64) -> Result<(), String> {
+    if presentation == 0 { return Err("invalid frame extent or presentation".into()); }
     frame.presentation_id = PresentationId::new(presentation);
     frame.frame_placement = PresentedFramePlacement::new(
         DisplayFrameId::new(1), frame.presentation_id, None,
         ParentFrameRect::new(0.0, 0.0, frame.width, frame.height).map_err(|e| e.to_string())?, 0,
     );
-    Ok(frame)
+    Ok(())
 }
 
 fn validate_runs(slice: &TextSlice, face_count: usize) -> Result<(), String> {

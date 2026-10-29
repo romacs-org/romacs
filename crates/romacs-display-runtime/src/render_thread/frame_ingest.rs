@@ -506,9 +506,6 @@ impl RenderApp {
         if frame.frame_chrome.band(FrameChromeKind::TabBar).is_none() {
             render.chrome.interaction.clear_tab_bar();
         }
-        render
-            .cursor
-            .reset_blink(romacs_display_protocol::frame_time::observe_platform_now());
         let presentation = render.set_current_frame(
             Some(frame),
             Some(row_damage),

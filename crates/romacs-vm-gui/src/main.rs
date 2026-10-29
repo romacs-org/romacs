@@ -303,12 +303,7 @@ impl PartialEq for Frame {
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
-    // Exhaustive, so a new field must be placed on one side or the other.
-    let romacs_layout_input::WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-        text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap } = a;
-    (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px, *tab_width)
-        == (b.id, b.width, b.height, b.start_byte, b.point_byte, b.mode_line_face, b.vscroll_px, b.tab_width)
-        && *wrap == b.wrap && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
+    a.lays_out_like(b) && a.cursor_off == b.cursor_off
 }
 
 /// What the live loop last painted: the frame, the window ends its layout
@@ -881,6 +876,15 @@ fn evaluate(
                         if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
                         live_presentation.changed();
                     }
+                    continue;
+                }
+                if live && let InputEvent::WindowFocus { focused, .. } = event {
+                    // keyboard.c's FOCUS_IN_EVENT and FOCUS_OUT_EVENT: special
+                    // events (frame.el handle-focus-in), which blink-cursor-mode
+                    // and other focus state follow.
+                    let event = if focused { "(list 'focus-in (selected-frame))" } else { "(list 'focus-out (selected-frame))" };
+                    if let Err(error) = vm.eval_source(&format!("(romacs--run-special-event {event})")) { echo::show(&mut vm, &error)?; }
+                    live_presentation.changed();
                     continue;
                 }
                 if live && let Some((session, input)) = vm.selected_terminal()? {

@@ -50,6 +50,7 @@ fn classify(event: &InputEvent) -> Option<HostEvent> {
     match event {
         InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => classify(event),
         InputEvent::WindowClose { .. } => Some(HostEvent::Closed),
+        &InputEvent::WindowFocus { focused, .. } => Some(HostEvent::Focus(focused)),
         &InputEvent::WindowResize { width, height, .. } if width > 0 && height > 0 => {
             Some(HostEvent::Resize { width, height })
         }
@@ -97,7 +98,7 @@ impl GuiHost {
         match *event {
             HostEvent::Closed => shared.closed = true,
             HostEvent::Resize { width, height } => shared.size = Some((width, height)),
-            HostEvent::Key(_) | HostEvent::Background | HostEvent::Timeout => {}
+            HostEvent::Key(_) | HostEvent::Background | HostEvent::Timeout | HostEvent::Focus(_) => {}
         }
     }
 }
@@ -196,5 +197,15 @@ mod tests {
         }
         assert_eq!(shared.pending.len(), 1, "nothing more is consumed once closed");
         assert!(matches!(next_queued(&mut Shared::default()), Next::Wait));
+    }
+
+    /// A focus change during a Lisp read reaches the read as GNU's special
+    /// event instead of being dropped (keyboard.el runs its binding).
+    #[test]
+    fn focus_changes_reach_a_lisp_read() {
+        for focused in [true, false] {
+            let event = InputEvent::WindowFocus { focused, emacs_frame_id: 0 };
+            assert_eq!(classify(&event), Some(HostEvent::Focus(focused)));
+        }
     }
 }

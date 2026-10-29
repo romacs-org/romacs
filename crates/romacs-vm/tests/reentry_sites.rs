@@ -9,7 +9,7 @@ use std::path::Path;
 
 /// Calls that can run Lisp (and so collect) or collect directly.
 const ENTRIES: &[&str] = &[
-    "execute_raw", "execute_rooted", "execute_args", "execute", "reader_call", "eval_form_raw", "eval_form_cached",
+    "execute_raw", "execute_rooted", "execute_args", "execute", "reader_call", "eval_form_raw",
     "eval_source_raw", "load_file_raw", "autoload_do_load", "invoke_prepared_raw",
     "call_macro_expander", "expand_macro", "notify_watchers", "notify_watchers_at",
     "call_lisp_at_write", "safe_call", "set_variable_value", "bind_variable", "unbind_one", "unwind", "unbind",
@@ -20,6 +20,7 @@ const ENTRIES: &[&str] = &[
     "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request", "cached_source_form",
     "finish_request", "poll_collect", "collect_garbage", "watched_write", "call_suspended",
     "load_source_named", "variable_set", "notify", "prepared_function",
+    "prepare_source", "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];
