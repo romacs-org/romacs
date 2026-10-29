@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "83025a51ad630911eacecda10b1acd033a1f1f276bfc0942a64d523d8753003f",
+  "source_fingerprint": "99c677d094ba24d399f2643a26b1825f6ddcbc8726f3cbad07e01bbd073a3a3a",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1032,
-  "parsed_vm2_only": 1032
+  "parsed_total": 1033,
+  "parsed_vm2_only": 1033
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3197,6 +3197,11 @@
    "name": "previous-single-property-change",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:164"
+  },
+  "previous-window": {
+   "name": "previous-window",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:454"
   },
   "prin1": {
    "name": "prin1",
