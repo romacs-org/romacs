@@ -167,8 +167,9 @@ pub(crate) fn reseed_output() -> Option<&'static str> {
     reseed_entry().and_then(|(_, output)| output)
 }
 
-/// The one site that may switch the startup phase.
-const STARTUP: &str = "/rlisp/romacs-loadup-bootstrap.el";
+/// The sites that may switch the startup phase, in order: the chain's batch
+/// steps, then an interactive session's, which supersede them.
+const STARTUP: [&str; 2] = ["/rlisp/romacs-loadup-bootstrap.el", "/rlisp/romacs-gui-loadup.el"];
 
 pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
@@ -229,20 +230,25 @@ pub fn begin_recipe() {
     with_build(|b| b.phase = Phase::Recipe);
 }
 
+/// How many startup runs a build has begun.
+pub(crate) fn startups() -> usize {
+    with_build(|b| b.startups).unwrap_or(0)
+}
+
 /// Whether the startup function is running in a build.
 pub(crate) fn in_startup() -> bool {
     with_build(|b| b.phase == Phase::Startup).unwrap_or(false)
 }
 
-/// `romacs--startup-phase`: enter or leave startup. Only the bootstrap's
-/// single run may switch; any other switch refuses and changes nothing.
-/// True when the phase changed.
+/// `romacs--startup-phase`: enter or leave startup. The bootstrap's single
+/// run may switch, then once an interactive session's file; any other
+/// switch refuses and changes nothing. True when the phase changed.
 pub(crate) fn switch_startup(on: bool) -> bool {
     with_build(|b| {
         let from = match on { true => Phase::Recipe, false => Phase::Startup };
+        let run = if on { b.startups } else { b.startups.saturating_sub(1) };
         let allowed = b.phase == from
-            && b.site.as_ref().is_some_and(|s| s.file.ends_with(STARTUP))
-            && (!on || b.startups == 0);
+            && b.site.as_ref().is_some_and(|s| STARTUP.get(run).is_some_and(|file| s.file.ends_with(file)));
         if allowed {
             b.phase = if on { Phase::Startup } else { Phase::Recipe };
             b.startups += usize::from(on);

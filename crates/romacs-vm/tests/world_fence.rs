@@ -149,6 +149,34 @@ fn a_let_of_a_watched_root_refuses() {
     ]);
 }
 
+/// An interactive session's own startup run supersedes the chain's: it may
+/// write what the first run read and compute the delayed variables again,
+/// which it fences anew, and its own inputs refuse writes after it. A third
+/// run, or a second from any other file, refuses.
+#[test]
+fn a_session_startup_supersedes_the_chain_startup() {
+    let dir = scratch("session");
+    let session = write(&dir.join("rlisp/romacs-gui-loadup.el"), "\
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (setq fence-input \"/session/\")
+           (setq fence-a (concat fence-input \"s\") fence-b nil))
+  (romacs--startup-phase nil))
+");
+    let other = write(&dir.join("other.el"), "(romacs--startup-phase t)\n");
+    let preload = format!("(load {:?} nil t t)\n(defvar seen fence-a)\n(setq fence-input \"/later/\")\n(load {:?} nil t t)\n",
+                          session.display().to_string(), other.display().to_string());
+    let (mut vm, trace) = run_with("session", BOOTSTRAP, &preload, true);
+    let trace = trace.unwrap();
+    let found = fences(&trace);
+    assert!(found.contains(&(2, 3, "read".into(), "fence-a".into())), "{found:?}");
+    assert!(found.contains(&(3, 6, "write".into(), "fence-input".into())), "{found:?}");
+    assert!(!found.iter().any(|(line, ..)| *line == 1), "the session's run refused: {found:?}");
+    let switches: Vec<_> = trace["refusals"].as_array().unwrap().iter().filter(|r| r["kind"] == "startup").collect();
+    assert_eq!(switches.len(), 1, "{trace}");
+    assert_eq!(vm.eval_source("(equal fence-a \"/session/s\")").and_then(|v| v.display()).unwrap(), "t");
+}
+
 #[test]
 fn lets_buffers_and_startup_pass() {
     let preload = "\

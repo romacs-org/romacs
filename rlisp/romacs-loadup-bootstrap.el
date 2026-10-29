@@ -173,6 +173,10 @@ and `after-init-time' its clock."
         ;; startup.el command-line (startup.el:1717): initialization is over.
         (setq after-init-time (current-time)))
     (romacs--startup-phase nil)))
+(defvar romacs-startup-function #'romacs-batch-startup
+  "The per-process startup steps this session took last.
+A session that takes its own after the chain's sets it to them
+\(rlisp/romacs-gui-loadup.el); `romacs-world-restart' takes them again.")
 (romacs-batch-startup)
 ;; startup.el normal-top-level (startup.el:843): the initial frame's faces
 ;; for its background mode and display type.  It reads no per-process fact
@@ -198,9 +202,10 @@ Each entry is (FEATURE FILE FORM REASON): FILE's FORM, which
 
 (defun romacs-world-restart ()
   "Make a VM restored from a world what a fresh process makes at this point.
-Run the per-process startup steps again, then each `romacs--world-reseed'
+Take the session's last per-process startup steps again
+\(`romacs-startup-function'), then evaluate each `romacs--world-reseed'
 form whose feature is loaded."
-  (romacs-batch-startup)
+  (funcall romacs-startup-function)
   (dolist (entry romacs--world-reseed)
     (when (featurep (car entry))
       (eval (nth 2 entry) t))))

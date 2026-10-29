@@ -73,6 +73,9 @@ pub(crate) struct Fence {
     random: bool,
     /// The delayed list as startup began.
     delayed: Vec<usize>,
+    /// The delayed list of the last startup run, which a later one computes
+    /// again.
+    superseded: Vec<usize>,
     /// Startup is running: variables are wrapped and reads are inputs.
     observing: bool,
     /// The inputs in first-read order, each once.
@@ -149,6 +152,12 @@ impl Vm {
             return;
         }
         if on {
+            // A later run supersedes the earlier: it computes the delayed
+            // variables again and reads its own inputs, and restore takes
+            // only it (`romacs-startup-function').
+            if host::startups() > 1 {
+                self.supersede_startup();
+            }
             let slot = self.slot("custom-delayed-init-variables");
             let mut tail = self.variable_value(slot).unwrap_or(Value::NIL);
             let mut delayed = Vec::new();
@@ -157,6 +166,11 @@ impl Vm {
                     delayed.push(self.indirect_variable(slot));
                 }
                 tail = rest;
+            }
+            // Once the first run ends the list is t: a later run computes
+            // the first run's variables.
+            if delayed.is_empty() {
+                delayed = self.fence_mut().superseded.clone();
             }
             self.fence_mut().delayed = delayed;
             self.fence_mut().observing = true;
@@ -168,6 +182,22 @@ impl Vm {
             self.backtrace.observe();
         } else {
             self.end_startup();
+        }
+    }
+
+    /// A later startup run begins: the earlier run's delayed variables and
+    /// inputs leave the fence, which the later run fences again as it ends.
+    fn supersede_startup(&mut self) {
+        let fence = self.fence_mut();
+        let earlier: Vec<usize> = fence.cells.iter()
+            .filter(|(_, cell)| matches!(cell.root, Root::Delayed | Root::Input)).map(|(&slot, _)| slot).collect();
+        fence.inputs.clear();
+        fence.seen.clear();
+        fence.digests.clear();
+        for slot in earlier {
+            if let Some(cell) = self.fence_mut().cells.remove(&slot) {
+                self.variable_redirects[slot] = cell.redirect;
+            }
         }
     }
 
@@ -184,6 +214,7 @@ impl Vm {
             self.observe_function(slot);
         }
         let delayed = std::mem::take(&mut self.fence_mut().delayed);
+        self.fence_mut().superseded = delayed.clone();
         let names: Vec<&str> = delayed.iter().map(|&slot| self.symbol_names[slot].as_str()).collect();
         host::record("delayed", json!({"symbols": names}));
         for slot in delayed {
