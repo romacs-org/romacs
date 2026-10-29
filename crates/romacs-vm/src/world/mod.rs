@@ -71,6 +71,8 @@ enum Input {
 pub(crate) struct Fence {
     cells: rustc_hash::FxHashMap<usize, Cell>,
     random: bool,
+    /// The roots not interned when the build began, fenced as they are.
+    pending: Vec<(&'static str, Root)>,
     /// The delayed list as startup began.
     delayed: Vec<usize>,
     /// The delayed list of the last startup run, which a later one computes
@@ -103,12 +105,17 @@ impl Vm {
     pub fn world_begin(&mut self) {
         if host::mode() == host::Mode::Build {
             self.fence = Some(Box::default());
-            for name in ["process-environment", "initial-environment", "exec-path"] {
-                let slot = self.slot(name);
-                self.fence_variable(slot, Root::Environment);
+            let roots = [("process-environment", Root::Environment), ("initial-environment", Root::Environment),
+                         ("exec-path", Root::Environment), ("default-directory", Root::Directory)];
+            for (name, root) in roots {
+                // A build interns nothing a source boot does not, or symbols
+                // would number differently: a root not interned yet is
+                // fenced as it is (`observe_new_variable`).
+                match self.names.get(name) {
+                    Some(&slot) => self.fence_variable(slot, root),
+                    None => self.fence_mut().pending.push((name, root)),
+                }
             }
-            let slot = self.slot("default-directory");
-            self.fence_variable(slot, Root::Directory);
             self.fence_mut().random = true;
         }
         host::begin_recipe();
@@ -269,7 +276,11 @@ impl Vm {
     /// While startup runs, a variable whose redirect is first resolved is
     /// observed too.
     pub(crate) fn observe_new_variable(&mut self, slot: usize) {
-        if self.fence.as_ref().is_some_and(|fence| fence.observing) {
+        let pending = self.fence.as_ref().and_then(|fence| fence.pending.iter().position(|(name, _)| *name == self.symbol_names[slot]));
+        if let Some(at) = pending {
+            let (_, root) = self.fence_mut().pending.swap_remove(at);
+            self.fence_variable(slot, root);
+        } else if self.fence.as_ref().is_some_and(|fence| fence.observing) {
             self.fence_variable(slot, Root::Observed);
         }
     }
