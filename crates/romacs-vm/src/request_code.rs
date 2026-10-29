@@ -160,6 +160,20 @@ impl Vm {
         self.finish_request(outcome)
     }
 
+    /// Evaluate FORM, a datum evaluated again and again (a mode-line
+    /// `:eval'), through its cached code (`cached_datum'). One with no
+    /// structural key is compiled for this use alone, as `eval_form_raw'.
+    pub(crate) fn eval_datum_raw(&mut self, form: &Form) -> Result<Value> {
+        match self.cached_datum(form) {
+            Ok(Some(function)) => {
+                let outcome = self.execute_raw(function);
+                self.finish_request(outcome)
+            }
+            Ok(None) => self.eval_form_raw(form),
+            Err(error) => self.finish_request(Err(error)),
+        }
+    }
+
     pub(super) fn release_request_entry(&mut self, id: usize) {
         for op in &self.functions[id].code {
             if let Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) = *op {
@@ -290,6 +304,41 @@ mod tests {
         );
         let live = vm.compile(&form(r#"["+",20,22]"#)).unwrap();
         assert_eq!(vm.execute_raw(live).unwrap().as_integer().unwrap(), 42);
+    }
+    /// A mode-line `:eval' form compiles once, not at every redisplay, and
+    /// again only when a macro it expanded is redefined.
+    #[test]
+    fn repeated_mode_line_eval_forms_compile_once() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(80, 25, 1, 1).unwrap();
+        vm.eval_source_raw("(defmacro ml-probe () \"one\") (setq ml-format '(:eval (concat (ml-probe) \"!\")))").unwrap();
+        let shown = |vm: &mut Vm| {
+            let value = vm.eval_source_raw("(format-mode-line ml-format)").unwrap();
+            vm.display(value).unwrap()
+        };
+        assert_eq!(shown(&mut vm), "\"one!\"");
+        let compiled = (vm.request_code.since_collection, vm.heap_stats().collections);
+        for _ in 0..50 {
+            assert_eq!(shown(&mut vm), "\"one!\"");
+        }
+        let now = (vm.request_code.since_collection, vm.heap_stats().collections);
+        assert_eq!(now, compiled, "a redisplay compiled the :eval form again");
+        vm.eval_source_raw("(defmacro ml-probe () \"two\")").unwrap();
+        assert_eq!(shown(&mut vm), "\"two!\"");
+    }
+    /// A native caller's prepared call is made once and reused.
+    #[test]
+    fn prepared_source_calls_are_made_once() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defun prepared-probe (a b) (+ a b))").unwrap();
+        let call = "(lambda (a b) (prepared-probe a b))";
+        let args = |n| [Value::integer(n).unwrap(), Value::integer(2).unwrap()];
+        assert_eq!(vm.call_prepared_source_raw(call, &args(0)).unwrap().as_integer().unwrap(), 2);
+        let (functions, requests) = (vm.functions.len(), vm.request_code.since_collection);
+        for n in 1..100 {
+            assert_eq!(vm.call_prepared_source_raw(call, &args(n)).unwrap().as_integer().unwrap(), n + 2);
+        }
+        assert_eq!((vm.functions.len(), vm.request_code.since_collection), (functions, requests), "a call compiled code");
     }
     #[test]
     fn short_distinct_requests_collect_and_reuse_code_slots() {

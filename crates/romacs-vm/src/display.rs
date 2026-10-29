@@ -765,12 +765,9 @@ impl Vm {
         if self.variable_value(functions)? == Value::NIL {
             return Ok(false);
         }
-        let call = Form::List(vec![
-            Form::Sym("romacs--redisplay-fontify".into()),
-            Form::Int(start as i64),
-            Form::Int(end as i64),
-        ]);
-        if let Err(error) = self.eval_form_raw(&call) {
+        let args = [Value::integer(start as i64)?, Value::integer(end as i64)?];
+        let call = "(lambda (start end) (romacs--redisplay-fontify start end))";
+        if let Err(error) = self.call_prepared_source_raw(call, &args) {
             self.display_state.diagnostics.push(format!("fontification: {error}"));
         }
         Ok(true)

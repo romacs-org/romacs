@@ -121,13 +121,8 @@ impl Vm {
     /// rlisp/vm/keyboard.el's `romacs--wait-state' prints it: empty before
     /// the Lisp half is installed.
     fn host_wait_state(&mut self) -> Result<String> {
-        let probe = crate::Form::List(vec![
-            crate::Form::Sym("and".into()),
-            crate::Form::List(vec![crate::Form::Sym("fboundp".into()),
-                crate::Form::List(vec![crate::Form::Sym("quote".into()), crate::Form::Sym("romacs--wait-state".into())])]),
-            crate::Form::List(vec![crate::Form::Sym("romacs--wait-state".into())]),
-        ]);
-        let state = self.eval_form_raw(&probe)?;
+        let probe = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
+        let state = self.call_prepared_source_raw(probe, &[])?;
         self.display(state)
     }
 
