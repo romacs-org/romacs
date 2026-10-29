@@ -243,7 +243,7 @@ fn run() -> Result<(), String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()),
-            "--batch" => return batch::run(args.collect()),
+            "--batch" => return batch::run(args.collect(), !load_user_init),
             "--" => {
                 startup::visit_at_startup("--");
                 for file in args.by_ref() { startup::visit_at_startup(&file); }

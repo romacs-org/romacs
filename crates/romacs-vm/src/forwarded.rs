@@ -306,6 +306,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "ring-bell-function", gnu: "terminal.c:695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "saved-region-selection", gnu: "keyboard.c:14363", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "scalable-fonts-allowed", gnu: "xfaces.c:7692", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "face-font-rescale-alist", gnu: "xfaces.c:7784", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "script-representative-chars", gnu: "character.c:1149", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "scroll-bar-adjust-thumb-portion", gnu: "frame.c:7467", kind: Kind::Bool(true) },
     CVariable { name: "scroll-conservatively", gnu: "xdisp.c:38731", kind: Kind::Int(0) },

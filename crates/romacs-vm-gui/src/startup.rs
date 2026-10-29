@@ -746,7 +746,7 @@ fn key_label(key: &str) -> String {
     }).collect::<Vec<_>>().join(" ")
 }
 
-fn lisp_string(text: &str) -> String {
+pub(crate) fn lisp_string(text: &str) -> String {
     format!(
         "\"{}\"",
         text.replace('\\', "\\\\")
