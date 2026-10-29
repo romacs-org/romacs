@@ -154,6 +154,9 @@
 (load "emacs-lisp/rmc.el" nil t t)
 (load "leim/leim-list.el" nil t t)
 
+;; startup.el command-line (startup.el:1300): initialization begins.
+(setq before-init-time (current-time) after-init-time nil
+      command-line-default-directory default-directory)
 ;; startup.el command-line (startup.el:1479): variables whose standard value
 ;; depends on the runtime (user-mail-address and friends) get it once the
 ;; preloaded files are in.  Romacs does not run command-line in this

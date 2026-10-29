@@ -29,6 +29,8 @@ fn cases(lib: &Path) -> Vec<Case> {
         case(&["-Q", "--batch", "-L", "lib", "--eval", "(progn (require 't-batch) (princ (featurep 't-batch)))"], false),
         case(&["--batch", "-Q", "--eval", "(error \"boom %d\" 1)"], true),
         case(&["-Q", "--batch"], false),
+        // command-line's timestamps, which kill-emacs-hook functions read.
+        case(&["-Q", "--batch", "--eval", "(princ (list (consp before-init-time) (time-less-p before-init-time after-init-time)))"], false),
     ]
 }
 
