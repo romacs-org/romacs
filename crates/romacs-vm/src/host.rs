@@ -1279,31 +1279,28 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
 
 /// A world store's directory at PATH, opened, and with CREATE made with
 /// every missing directory on the way, each 0700 whatever the umask. The
-/// walk starts at the deepest of ROOTS (the user's own directories) that
-/// holds PATH, or else at `/`, and opens one component at a time relative
-/// to the last (openat, O_DIRECTORY|O_NOFOLLOW), making a missing one
-/// there (mkdirat, then fchmod): nothing is resolved again by path, and no
-/// symlink is followed. Each directory from the root down must be owned
-/// by this user or root, and writable by no one else unless sticky, or
-/// another user could swap what lies below it.
-pub fn open_store_dir(path: &Path, roots: &[PathBuf], create: bool) -> io::Result<std::os::fd::OwnedFd> {
+/// walk starts at `/` and opens one component at a time relative to the
+/// last (openat, O_DIRECTORY|O_NOFOLLOW), making a missing one there
+/// (mkdirat, then fchmod): nothing is resolved again by path, and no
+/// symlink is followed, not even as HOME. Each directory from `/` down
+/// must be owned by this user or root, and writable by no one else unless
+/// sticky, or another user could swap what lies below it.
+pub fn open_store_dir(path: &Path, create: bool) -> io::Result<std::os::fd::OwnedFd> {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::os::unix::ffi::OsStrExt;
     let refuse = |why: String| io::Error::new(io::ErrorKind::PermissionDenied, why);
     if !path.is_absolute() {
         return Err(refuse(format!("{} is not absolute", path.display())));
     }
-    let root = roots.iter().filter(|r| r.is_absolute() && path.starts_with(r) && r.is_dir())
-        .max_by_key(|r| r.components().count()).cloned().unwrap_or_else(|| PathBuf::from("/"));
+    let root = PathBuf::from("/");
     let open = |at: Option<i32>, name: &std::ffi::CStr| -> i32 {
-        let flags = libc::O_DIRECTORY | libc::O_RDONLY | libc::O_CLOEXEC;
+        let flags = libc::O_DIRECTORY | libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
         match at {
-            Some(dir) => unsafe { libc::openat(dir, name.as_ptr(), flags | libc::O_NOFOLLOW) },
+            Some(dir) => unsafe { libc::openat(dir, name.as_ptr(), flags) },
             None => unsafe { libc::open(name.as_ptr(), flags) },
         }
     };
-    let root_name = std::ffi::CString::new(root.as_os_str().as_bytes()).map_err(io::Error::other)?;
-    let fd = open(None, &root_name);
+    let fd = open(None, c"/");
     if fd < 0 {
         return Err(io::Error::last_os_error());
     }

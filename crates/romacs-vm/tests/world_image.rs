@@ -28,6 +28,7 @@ const PAUSED: &str = "pruning_waits_for_a_launcher_between_opening_and_locking";
 const PAUSED_BUILDER: &str = "pruning_waits_for_a_builder_between_opening_and_locking";
 const CONCURRENT: &str = "concurrent_first_launches_share_one_builder_and_say_they_wait";
 const PAGES: &str = "capture_reads_no_heap_byte_so_a_page_zeroed_by_a_store_is_data";
+const ANCESTORS: &str = "a_store_is_refused_under_a_home_or_cache_others_could_replace";
 const UMASK: &str = "a_store_made_under_umask_000_is_private_all_the_way_down";
 
 /// Test NAME in a process of its own, in ROLE, with STORE.
@@ -586,5 +587,54 @@ fn a_store_made_under_umask_000_is_private_all_the_way_down() {
         }
     }
     assert!(seen > 3, "a built store: {seen} entries");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn a_store_is_refused_under_a_home_or_cache_others_could_replace() {
+    if act_in_role() {
+        return;
+    }
+    use std::os::unix::fs::symlink;
+    let scratch = scratch(ANCESTORS);
+    let mode = |dir: &Path, mode: u32| std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
+    let dirs = |dirs: &[&Path]| for dir in dirs {
+        std::fs::create_dir_all(dir).unwrap();
+        mode(dir, 0o700);
+    };
+    // A launch whose HOME and XDG_CACHE_HOME are HOME and CACHE, with its
+    // store in CACHE: it boots from source, saying why, and makes nothing.
+    let refused = |home: &Path, cache: &Path, why: &str| {
+        let store = cache.join("romacs/worlds");
+        let said = outcome(child_of(ANCESTORS, "launch", &store).env("HOME", home).env("XDG_CACHE_HOME", cache));
+        assert!(said.contains(r#""mode":"source""#) && said.contains(why), "{said}");
+        assert!(!store.exists() && !cache.join("romacs").exists(), "nothing made in {}", cache.display());
+    };
+    // A HOME others may write, under a private cache of its own.
+    let home = scratch.join("open-home");
+    let cache = home.join("cache");
+    dirs(&[&home, &cache]);
+    mode(&home, 0o770);
+    refused(&home, &cache, "open-home is writable by others");
+    // A symlinked HOME, and a symlinked cache under a real one.
+    let real = scratch.join("real-home");
+    dirs(&[&real, &real.join("cache")]);
+    symlink(&real, scratch.join("linked-home")).unwrap();
+    refused(&scratch.join("linked-home"), &scratch.join("linked-home/cache"), "a symlink");
+    let elsewhere = scratch.join("elsewhere");
+    dirs(&[&elsewhere]);
+    symlink(&elsewhere, real.join("linked-cache")).unwrap();
+    refused(&real, &real.join("linked-cache"), "a symlink");
+    assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
+    // A private HOME and cache under an ancestor others may write.
+    let shared = scratch.join("shared");
+    let home = shared.join("home");
+    dirs(&[&shared, &home, &home.join("cache")]);
+    mode(&shared, 0o777);
+    refused(&home, &home.join("cache"), "shared is writable by others");
+    // The same HOME and cache, once nothing above them is open: a store.
+    mode(&shared, 0o700);
+    let store = home.join("cache/romacs/worlds");
+    assert_eq!(outcome(child_of(ANCESTORS, "launch", &store).env("HOME", &home).env("XDG_CACHE_HOME", home.join("cache"))), restored());
     let _ = std::fs::remove_dir_all(&scratch);
 }

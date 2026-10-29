@@ -199,7 +199,7 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     let home = host::getenv("HOME").map(PathBuf::from);
     // Made, with whatever is missing on the way, relative to directories
     // checked on the way down.
-    let dir = host::open_store_dir(store, &trusted_roots(), true)?;
+    let dir = host::open_store_dir(store, true)?;
     owned_store(&dir, store, home.as_deref())?;
     if host::store_dir_is_empty(dir.as_fd())? {
         return write_marker(&dir);
@@ -225,12 +225,6 @@ fn store_path(store: &Path) -> std::io::Result<PathBuf> {
         }
         path
     }))
-}
-
-/// Where a store's path is walked from (`host::open_store_dir`): the
-/// user's own directories.
-fn trusted_roots() -> Vec<PathBuf> {
-    ["XDG_CACHE_HOME", "HOME"].iter().filter_map(|name| host::getenv(name)).map(PathBuf::from).filter(|p| p.is_absolute()).collect()
 }
 
 /// Mark the store DIR as a world store: a new marker, made in DIR itself,
@@ -284,7 +278,7 @@ fn owned_store(dir: &std::os::fd::OwnedFd, store: &Path, home: Option<&Path>) ->
 /// `host::open_store_dir` without making anything, owned, private, not
 /// HOME or `/` (`owned_store`), and marked as a store.
 fn checked_store(store: &Path, home: Option<&Path>) -> std::io::Result<()> {
-    let dir = host::open_store_dir(store, &trusted_roots(), false)?;
+    let dir = host::open_store_dir(store, false)?;
     owned_store(&dir, store, home)?;
     match marker_error(&dir) {
         None => Ok(()),
