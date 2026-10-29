@@ -55,10 +55,13 @@ fn value_form(elt: &Form) -> Result<Form, Form> {
     car(&rest)
 }
 
+/// ELT's variable: ELT itself or its car.
+fn variable(elt: &Form) -> Option<Form> { if symbol(elt) { Some(elt.clone()) } else { car(elt).ok() } }
+
 /// The signal binding ELT's variable raises: CHECK_TYPE (symbolp), then
 /// specbind of a constant (nil, t, a keyword).
 fn binding_error(elt: &Form) -> Option<Form> {
-    let var = if symbol(elt) { elt.clone() } else { car(elt).ok()? };
+    let var = variable(elt)?;
     match &var {
         Form::Sym(s) if s == "nil" || s == "t" || s.starts_with(':') => Some(signal("setting-constant", vec![var.clone()])),
         _ if symbol(&var) => None,
@@ -81,7 +84,9 @@ fn elements(varlist: &Form) -> (Vec<Form>, Option<Form>) {
 pub(crate) fn malformed_let(star: bool, varlist: &Form) -> Option<Form> {
     let (elts, tail) = elements(varlist);
     if !star {
-        // Flet: list_length, every value form, then every binding.
+        // Flet: list_length, every value form into a temporary, then each
+        // binding in turn; the bindings before the bad one are made, and
+        // unwound by the signal.
         if tail.is_some() { return Some(listp(varlist)) }
         let mut evaluated = Vec::with_capacity(elts.len() + 1);
         for elt in &elts {
@@ -90,9 +95,13 @@ pub(crate) fn malformed_let(star: bool, varlist: &Form) -> Option<Form> {
                 Err(raise) => { evaluated.push(raise); return Some(progn(evaluated)) }
             }
         }
-        let raise = elts.iter().find_map(binding_error)?;
-        evaluated.push(raise);
-        return Some(progn(evaluated));
+        let k = elts.iter().position(|elt| binding_error(elt).is_some())?;
+        let temps: Vec<Form> = evaluated.iter().map(|_| Form::Generated(crate::expand::generated_id())).collect();
+        let pair = |a: Form, b: &Form| Form::List(vec![a, b.clone()]);
+        let inits = temps.iter().zip(&evaluated).map(|(temp, form)| pair(temp.clone(), form)).collect();
+        let prefix = elts[..k].iter().zip(&temps).filter_map(|(elt, temp)| Some(pair(variable(elt)?, temp))).collect();
+        let bind = Form::List(vec![Form::Sym("let".into()), Form::List(prefix), binding_error(&elts[k])?]);
+        return Some(Form::List(vec![Form::Sym("let".into()), Form::List(inits), bind]));
     }
     // FletX: each element's value form and binding in turn, then
     // CHECK_LIST_END with the whole varlist.

@@ -100,3 +100,17 @@ fn a_malformed_form_signals_fresh_error_data_each_time() {
             if form == "(setq 1 2)" { "((wrong-type-argument symbolp 1) nil)" } else { "((wrong-type-argument listp 1) nil)" })]);
     }
 }
+
+/// Flet evaluates every value form, then binds in turn: the bindings before
+/// a bad variable are made, and unwound by its signal; FletX binds as it
+/// goes.
+#[test]
+fn a_malformed_let_makes_and_unwinds_the_bindings_before_it() {
+    watched(&[
+        ("(let ((ww-x 1) (nil 2)) 3)", "((setting-constant nil) ((let 1) (unlet 0)))"),
+        ("(let ((ww-x 1) (2 3)) 4)", "((wrong-type-argument symbolp 2) ((let 1) (unlet 0)))"),
+        ("(let ((ww-x (progn (setq ww-log (cons 'init ww-log)) 1)) (nil (setq ww-log (cons 'init2 ww-log)))) 3)", "((setting-constant nil) (init init2 (let 1) (unlet 0)))"),
+        ("(let* ((ww-x 1) (nil 2)) 3)", "((setting-constant nil) ((let 1) (unlet 0)))"),
+        ("(let ((:k 1)) :k)", "((setting-constant :k) nil)"),
+    ]);
+}
