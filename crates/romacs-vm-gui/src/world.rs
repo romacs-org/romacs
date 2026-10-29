@@ -105,7 +105,7 @@ pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option
 /// whose build was refused or failed on these very inputs boots from
 /// source until they change. A builder process builds and exits here.
 pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>) -> Option<(Box<Vm>, Carry)> {
-    match world.launch::<Carry>(|| builder_args(world, width, height, floor), true) {
+    match world.launch::<Carry>(|| builder_args(world, width, height, floor), true, || {}) {
         Launch::Restored { vm, carry, manifest } => {
             eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"]}));
             Some((vm, carry))

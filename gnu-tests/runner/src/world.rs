@@ -143,7 +143,7 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
         let cwd = host::current_dir().unwrap_or_default();
         absolute_args(&std::env::args_os().skip(1).collect::<Vec<_>>(), &cwd)
     };
-    match world.launch::<()>(builder_args, false) {
+    match world.launch::<()>(builder_args, false, || {}) {
         Launch::Restored { vm, manifest, .. } => {
             let mut vm = *vm;
             vm.world_reinit();

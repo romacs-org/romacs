@@ -15,10 +15,25 @@
 //! - the launcher, with its world valid, maps the image and allocates from
 //!   it from then on (`arena::adopt`), and takes the VM
 //!   (`Launch::Restored`);
-//! - with no valid world, the launcher boots from source and starts a
-//!   builder beside itself, in the pinned environment, unless one runs
-//!   (`Launch::Chain`). The builder runs the recipe in build mode
-//!   (`Launch::Build`), then `finish_build` publishes the world.
+//! - with no valid world, the launcher starts a builder in the pinned
+//!   environment, holding the world's lock from its check through the
+//!   spawn and handing it on, or waits for the one that runs. A waiting
+//!   launch boots from the world it built (`wait`); one that does not wait
+//!   boots from source beside it (`Launch::Chain`). The builder runs the
+//!   recipe in build mode (`Launch::Build`), then `finish_build` publishes
+//!   the world.
+//!
+//! A build that fails is recorded, and how depends on why. A deterministic
+//! refusal, the fence's or a capture's (a resource of the builder, a VM not
+//! at rest), is a manifest bound to the records the build read: launches
+//! boot from source until one of those changes. Any other failure (an I/O
+//! error, a full disk, a builder killed or timed out) is transient:
+//! `KEY.failed` counts the attempts, and a launch retries one minute after
+//! the first, ten after the second, an hour after the third and a day
+//! after any later one. `reset` forgets both.
+//!
+//! A restored process holds `KEY.use` shared for its life and stamps it
+//! with the time: what `prune` keeps beside the current world.
 use super::{arena, image};
 use crate::{Vm, host};
 use serde_json::{Value as Json, json};
@@ -28,6 +43,14 @@ use std::path::{Path, PathBuf};
 pub const FORMAT: &str = "romacs-world 2";
 /// Set in a builder: the store it publishes to.
 const BUILD_ENV: &str = "ROMACS_WORLD_BUILD";
+/// Set in a builder: the descriptor of the world's lock, which its
+/// launcher took and handed on.
+const LOCK_ENV: &str = "ROMACS_WORLD_LOCK_FD";
+/// How long a launch waits for a builder before it boots from source and
+/// counts the build as failed.
+const BUILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+/// How long after the Nth transient failure a launch builds again.
+const BACKOFF: [u64; 4] = [60, 600, 3600, 86400];
 
 /// Whether worlds are off for this process: ROMACS_WORLD=off.
 pub fn disabled() -> bool {
@@ -77,11 +100,8 @@ fn sha256(data: &[u8]) -> [u8; 32] {
 fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> {
     use sha2::Digest;
     use std::io::Read;
-    use std::os::unix::fs::MetadataExt;
     let meta = host::file_metadata(file)?;
-    let name = format!("{}-{}-{}-{}.{}-{}.{}", meta.dev(), meta.ino(), meta.size(),
-                       meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec());
-    let cached = store.join("ids").join(name);
+    let cached = store.join("ids").join(identity_name(&meta));
     if let Ok(text) = host::read_to_string(&cached)
         && let Some(digest) = (0..32).map(|i| u8::from_str_radix(text.get(2 * i..2 * i + 2)?, 16).ok()).collect::<Option<Vec<u8>>>()
     {
@@ -99,6 +119,13 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
     let digest: [u8; 32] = digest.finalize().into();
     let _ = host::create_dir_all(store.join("ids")).and_then(|()| host::write(&cached, hex(&digest)));
     Ok(digest)
+}
+
+/// A file's identity and change times, as the digest cache names it.
+fn identity_name(meta: &std::fs::Metadata) -> String {
+    use std::os::unix::fs::MetadataExt;
+    format!("{}-{}-{}-{}.{}-{}.{}", meta.dev(), meta.ino(), meta.size(), meta.mtime(), meta.mtime_nsec(),
+            meta.ctime(), meta.ctime_nsec())
 }
 
 /// xxh3-128 of SEGMENTS, each with its file offset and length, so no two
@@ -212,8 +239,11 @@ impl World {
     /// What this process does: see the module documentation. BUILDER_ARGS
     /// are this process's arguments as a builder, which runs elsewhere, needs
     /// them: every path absolute. With WAIT a missing or stale world is
-    /// built first, and the launch then boots from it.
-    pub fn launch<T: super::safe::SnapshotSafe + 'static>(&self, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool) -> Launch<T> {
+    /// built first, or the running build waited for, and the launch then
+    /// boots from it; ON_WAIT runs once before the launch blocks for that,
+    /// so its embedder can say so.
+    pub fn launch<T: super::safe::SnapshotSafe + 'static>(&self, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool,
+                                                          on_wait: impl FnOnce()) -> Launch<T> {
         if building() {
             host::unset_env(BUILD_ENV);
             return Launch::Build;
@@ -224,69 +254,186 @@ impl World {
         if !arena::active() {
             return Launch::Chain { reason: json!("no arena") };
         }
-        let mut builder_args = Some(builder_args);
-        let mut args = move || builder_args.take().map(|f| f()).unwrap_or_default();
-        let mut valid = self.valid_manifest();
-        // A build refused or failed on these very inputs would only fail
-        // again: boot from source until one of them changes.
-        if let Err(reason) = &valid && reason.get("refused").is_some() {
-            return Launch::Chain { reason: json!({"world": reason}) };
-        }
-        if let (Err(_), true) = (&valid, wait) {
-            let built = self.start_builder(args()).and_then(|mut child| child.wait());
-            valid = match built {
-                Ok(status) if status.success() => self.valid_manifest(),
-                Ok(status) => Err(json!({"builder": status.to_string()})),
-                Err(e) => Err(json!({"builder": e.to_string()})),
-            };
-            if let Err(reason) = valid {
-                return Launch::Chain { reason: json!({"world": reason}) };
-            }
-        }
-        match valid.and_then(|manifest| Ok((self.checked_image(&manifest)?, manifest))) {
-            Ok((image, manifest)) => match arena::adopt(&image) {
-                arena::Restore::Mapped => match image::restore::<T>(&self.key) {
-                    Some((vm, carry)) => Launch::Restored { vm: Box::new(vm), carry, manifest },
-                    None => Launch::Chain { reason: json!({"image": "made for another key"}) },
-                },
-                refused => Launch::Chain { reason: json!({"image": format!("{refused:?}")}) },
+        let usable = match self.usable() {
+            Ok(usable) => usable,
+            Err(reason) => match self.build_for(reason, builder_args, wait, on_wait) {
+                Ok(usable) => usable,
+                Err(reason) => return Launch::Chain { reason },
             },
-            Err(reason) => {
-                let started = self.start_builder(args()).map(|child| {
-                    let pid = child.id();
-                    // Reap it, whoever outlives whom.
-                    std::thread::spawn(move || { let mut child = child; let _ = child.wait(); });
-                    pid
-                });
-                Launch::Chain { reason: json!({"world": reason, "builder": started.map_err(|e| e.to_string()).ok()}) }
+        };
+        let (image, manifest) = usable;
+        match arena::adopt(&image) {
+            arena::Restore::Mapped => match image::restore::<T>(&self.key) {
+                Some((vm, carry)) => {
+                    self.mark_use();
+                    Launch::Restored { vm: Box::new(vm), carry, manifest }
+                }
+                None => Launch::Chain { reason: json!({"image": "made for another key"}) },
+            },
+            refused => Launch::Chain { reason: json!({"image": format!("{refused:?}")}) },
+        }
+    }
+
+    /// The world's image, opened, and its manifest, when both hold: every
+    /// record and the image's content.
+    fn usable(&self) -> Result<(std::fs::File, Json), Json> {
+        let manifest = self.valid_manifest()?;
+        Ok((self.checked_image(&manifest)?, manifest))
+    }
+
+    /// The world's image and manifest once a build made them usable, for a
+    /// launch that found them not for REASON: built here, holding the lock from its
+    /// check through the spawn; or waited for while another builds. Without
+    /// WAIT a builder is started, and the launch boots from source. The
+    /// reason to boot from source otherwise: a refusal on these inputs, a
+    /// transient failure not yet due a retry, or a failed or timed-out
+    /// build.
+    fn build_for(&self, reason: Json, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool,
+                 on_wait: impl FnOnce()) -> Result<(std::fs::File, Json), Json> {
+        let mut on_wait = Some(on_wait);
+        let mut announce = || if let Some(f) = on_wait.take() { f() };
+        let mut reason = reason;
+        let lock = loop {
+            if reason.get("refused").is_some() {
+                return Err(json!({"world": reason}));
+            }
+            if let Some(seconds) = self.retry_in() {
+                return Err(json!({"world": reason, "retry_in": seconds}));
+            }
+            match self.try_lock() {
+                Ok(Some(lock)) => break lock,
+                Ok(None) if wait => {
+                    // Another launch's builder runs: wait for it, then look
+                    // at what it left.
+                    announce();
+                    if !self.wait_unlocked(BUILD_TIMEOUT) {
+                        return Err(json!({"world": reason, "builder": "another builder still runs"}));
+                    }
+                    match self.usable() {
+                        Ok(usable) => return Ok(usable),
+                        Err(now) => reason = now,
+                    }
+                }
+                Ok(None) => return Err(json!({"world": reason, "builder": "a builder runs"})),
+                Err(e) => return Err(json!({"world": reason, "builder": e.to_string()})),
+            }
+        };
+        // With the lock held, no builder runs: what one left is final.
+        if let Ok(usable) = self.usable() {
+            return Ok(usable);
+        }
+        let attempts = self.failures().map(|f| f.0);
+        if wait {
+            announce();
+        }
+        let child = match self.start_builder(builder_args(), lock) {
+            Ok(child) => child,
+            Err(e) => return Err(json!({"world": reason, "builder": e.to_string()})),
+        };
+        if !wait {
+            let pid = child.id();
+            let world = self.clone();
+            // Reap it, whoever outlives whom, and count a failure it could
+            // not record itself.
+            std::thread::spawn(move || {
+                let mut child = child;
+                let status = child.wait();
+                world.note_builder_end(status.map(|s| s.to_string()).map_err(|e| e.to_string()), attempts);
+            });
+            return Err(json!({"world": reason, "builder": pid}));
+        }
+        let ended = wait_bounded(child, BUILD_TIMEOUT);
+        self.note_builder_end(ended.clone(), attempts);
+        self.usable().map_err(|now| json!({"world": now, "builder": ended.err().unwrap_or_else(|| "built".into())}))
+    }
+
+    /// After a builder ended (ENDED, its status or why there is none):
+    /// record a failure it could not record itself, unless it published or
+    /// recorded one since ATTEMPTS.
+    fn note_builder_end(&self, ended: Result<String, String>, attempts: Option<u64>) {
+        let recorded = self.failures().map(|f| f.0) != attempts || self.usable().is_ok()
+            || self.valid_manifest().is_err_and(|r| r.get("refused").is_some());
+        if !recorded {
+            let why = match ended { Ok(status) => format!("the builder ended: {status}"), Err(e) => e };
+            let _ = self.record_transient(&why);
+        }
+    }
+
+    /// The world's lock, if no builder holds it.
+    fn try_lock(&self) -> std::io::Result<Option<std::fs::File>> {
+        use std::os::fd::AsRawFd;
+        let file = host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?;
+        Ok((unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0).then_some(file))
+    }
+
+    /// Wait up to TIMEOUT for the builder holding the lock to end: whether
+    /// it did.
+    fn wait_unlocked(&self, timeout: std::time::Duration) -> bool {
+        let deadline = host::monotonic() + timeout;
+        loop {
+            match self.try_lock() {
+                Ok(Some(_)) => return true,
+                Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
+                _ => return false,
             }
         }
     }
 
-    /// Start a builder with ARGS unless one runs: detached, in the pinned
-    /// environment under the store, its output in `KEY.log`.
-    fn start_builder(&self, args: Vec<OsString>) -> std::io::Result<std::process::Child> {
+    /// Start a builder with ARGS, handing it LOCK: in the pinned environment
+    /// under the store, its output in `KEY.log`.
+    fn start_builder(&self, args: Vec<OsString>, lock: std::fs::File) -> std::io::Result<std::process::Child> {
+        use std::os::fd::AsRawFd;
         use std::os::unix::process::CommandExt;
-        if !self.lock()? {
-            return Err(std::io::Error::other("a builder runs"));
-        }
         let pinned = self.pinned_dir()?;
         let log = host::open_output(self.file(".log"), host::OpenOptions::new().write(true).create(true).truncate(true))?;
         let mut env = pinned_env(&host::env_snapshot(), &pinned);
         env.push((BUILD_ENV.into(), self.store.clone().into_os_string()));
-        host::command(host::current_exe()?)?
-            .args(args).env_clear().envs(env).current_dir(pinned.join("cwd"))
-            .stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log)
-            .process_group(0).spawn()
+        let fd = lock.as_raw_fd();
+        env.push((LOCK_ENV.into(), fd.to_string().into()));
+        let mut command = host::command(host::current_exe()?)?;
+        command.args(args).env_clear().envs(env).current_dir(pinned.join("cwd"))
+            .stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0);
+        // The lock's descriptor stays open across the exec: the builder holds
+        // the lock this process took, and this one's copy closes after.
+        unsafe { command.pre_exec(move || if libc::fcntl(fd, libc::F_SETFD, 0) == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }) };
+        let child = command.spawn();
+        drop(lock);
+        child
     }
 
-    /// Whether no builder holds this world's lock. A builder takes it for
-    /// its life (`hold_lock`).
-    fn lock(&self) -> std::io::Result<bool> {
-        let file = host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?;
+    /// The transient failures recorded since the last success: how many,
+    /// and when the last one was (seconds since the epoch).
+    fn failures(&self) -> Option<(u64, u64)> {
+        let text = host::read_to_string(self.file(".failed")).ok()?;
+        let record: Json = serde_json::from_str(&text).ok()?;
+        Some((record["attempts"].as_u64()?, record["at"].as_u64()?))
+    }
+
+    /// How many seconds until a transient failure is due a retry, if one is
+    /// recorded and not yet due.
+    fn retry_in(&self) -> Option<u64> {
+        let (attempts, at) = self.failures()?;
+        let wait = BACKOFF[(attempts.max(1) - 1).min(BACKOFF.len() as u64 - 1) as usize];
+        (at + wait).checked_sub(now_seconds()).filter(|&left| left > 0)
+    }
+
+    /// Count a transient failure, ERROR, after those recorded.
+    fn record_transient(&self, error: &str) -> std::io::Result<()> {
+        let attempts = self.failures().map_or(0, |f| f.0) + 1;
+        let record = json!({"kind": "transient", "error": error, "attempts": attempts, "at": now_seconds()});
+        self.publish(".failed", &serde_json::to_vec(&record).map_err(std::io::Error::other)?)
+    }
+
+    /// Hold `KEY.use` shared for this process's life, stamped with the time:
+    /// the world is in use, and was just now (`prune`).
+    fn mark_use(&self) {
         use std::os::fd::AsRawFd;
-        let free = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
-        Ok(free)
+        if let Ok(file) = host::open_output(self.file(".use"), host::OpenOptions::new().write(true).create(true)) {
+            let _ = file.set_modified(host::clock());
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0 {
+                std::mem::forget(file);
+            }
+        }
     }
 
     /// The pinned table's directories, `STORE/p/{cwd,tmp,bin}`, empty and
@@ -312,11 +459,19 @@ impl World {
     /// writing only in the store, and record in build mode. The lock is
     /// held until the process exits.
     pub fn begin_build(&self, roots: &[PathBuf]) -> std::io::Result<()> {
-        let lock = host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?;
-        use std::os::fd::AsRawFd;
+        // The launcher's lock, handed on; taking it again on the same open
+        // file only confirms it.
+        use std::os::fd::{AsRawFd, FromRawFd};
+        let handed = host::getenv(LOCK_ENV).and_then(|fd| fd.to_str()?.parse::<i32>().ok());
+        host::unset_env(LOCK_ENV);
+        let lock = match handed {
+            Some(fd) => unsafe { std::fs::File::from_raw_fd(fd) },
+            None => host::open_output(self.file(".lock"), host::OpenOptions::new().write(true).create(true))?,
+        };
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(std::io::Error::other("another builder holds the lock"));
         }
+        unsafe { libc::fcntl(lock.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
         std::mem::forget(lock);
         self.remove_abandoned()?;
         super::sandbox::confine_publishing(roots, &self.store)?;
@@ -342,20 +497,20 @@ impl World {
         host::rename(&temporary, self.file(suffix))
     }
 
-    /// A build that failed after `begin_build`, with ERROR: its manifest is
-    /// published with the failure as a refusal, bound to the records the
-    /// build read, so a launch does not build it again until one of them
-    /// changes (`launch`). ERROR, as the failure to report.
+    /// A build that failed after `begin_build`, with ERROR, outside the
+    /// fence and the capture: a transient failure, retried after a while
+    /// (`retry_in`). ERROR, as the failure to report.
     pub fn abandon_build(&self, error: String) -> String {
-        if let Some(trace) = host::leave_build() {
-            let mut refusals = trace["refusals"].as_array().cloned().unwrap_or_default();
-            refusals.push(json!({"kind": "build-failed", "error": error}));
-            let manifest = self.manifest(&trace, Json::Array(refusals), json!({}));
-            if let Ok(text) = serde_json::to_vec(&manifest) {
-                let _ = self.publish(".json", &text);
-            }
-        }
+        let _ = host::leave_build();
+        let _ = self.record_transient(&error);
         error
+    }
+
+    /// Record a build's refusal on its inputs, REFUSALS with the records of
+    /// TRACE: launches boot from source until a record changes.
+    fn record_refusal(&self, trace: &Json, refusals: Json) -> std::io::Result<()> {
+        let manifest = self.manifest(trace, refusals, json!({}));
+        self.publish(".json", &serde_json::to_vec(&manifest).map_err(std::io::Error::other)?)
     }
 
     /// A new file for what will be published as SUFFIX: a unique name, so
@@ -390,14 +545,34 @@ impl World {
     /// change. The image's length.
     pub fn finish_build<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
         vm.world_check_inputs();
+        // Kept to the end: whatever fails from here on is recorded with it.
         let trace = host::leave_build().ok_or("no world build was recording")?;
-        let manifest = self.manifest(&trace, trace["refusals"].clone(), events);
-        let publish = |suffix: &str, bytes: &[u8]| self.publish(suffix, bytes);
-        let text = |manifest: &Json| serde_json::to_vec(manifest).map_err(|e| e.to_string());
         if trace["refusals"].as_array().is_some_and(|r| !r.is_empty()) {
-            publish(".json", &text(&manifest)?).map_err(|e| e.to_string())?;
+            self.record_refusal(&trace, trace["refusals"].clone()).map_err(|e| e.to_string())?;
             return Err(format!("world build refused: {}", trace["refusals"]));
         }
+        match self.publish_world(vm, carry, &trace, events) {
+            Ok(len) => {
+                let _ = host::remove_file(self.file(".failed"));
+                Ok(len)
+            }
+            // A capture refusal is the VM's state, which the same inputs
+            // make again; anything else (a full disk, an I/O error) may pass.
+            Err(error) if error.starts_with("world capture refused") => {
+                let _ = self.record_refusal(&trace, json!([{"kind": "capture", "error": error}]));
+                Err(error)
+            }
+            Err(error) => {
+                let _ = self.record_transient(&error);
+                Err(error)
+            }
+        }
+    }
+
+    /// Capture VM and CARRY as this world's image and publish it with the
+    /// manifest of TRACE and EVENTS: the image's length.
+    fn publish_world<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, trace: &Json, events: Json) -> Result<usize, String> {
+        let mut manifest = self.manifest(trace, trace["refusals"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
         vm.collect_garbage();
@@ -409,10 +584,182 @@ impl World {
         // Hashed from the file as published, which also caches it.
         let image = host::open_world_file(self.file(".rwi")).map_err(|e| e.to_string())?;
         let digest = file_digest(&self.store, &image).map_err(|e| e.to_string())?;
-        let mut manifest = manifest;
         manifest["image"] = json!(hex(&digest));
-        publish(".json", &text(&manifest)?).map_err(|e| e.to_string())?;
+        self.publish(".json", &serde_json::to_vec(&manifest).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         Ok(len)
+    }
+}
+
+/// A world unused this long is pruned (`prune`).
+const UNUSED: u64 = 7 * 86400;
+/// The most worlds, and bytes on disk, a store keeps beside those in use.
+const MOST_WORLDS: usize = 3;
+const MOST_BYTES: u64 = 4 << 30;
+
+/// One world in a store, as `prune` sees it.
+#[derive(Clone, Debug, PartialEq)]
+struct Stored {
+    key: String,
+    /// When it was last used (seconds since the epoch).
+    used: u64,
+    /// Its files' size on disk.
+    bytes: u64,
+    /// A builder or a restored process holds it.
+    busy: bool,
+}
+
+/// The worlds of WORLDS to delete, CURRENT's kept: those a builder or a
+/// restored process holds are kept too, and the others, most recently used
+/// first, while they were used within `UNUSED` and the store stays within
+/// `MOST_WORLDS` worlds and `MOST_BYTES` bytes.
+fn prune_plan(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
+    let kept = |w: &&Stored| w.key == current || w.busy;
+    let (mut count, mut bytes) = worlds.iter().filter(kept).fold((0, 0), |(c, b), w| (c + 1, b + w.bytes));
+    let mut others: Vec<&Stored> = worlds.iter().filter(|w| !kept(w)).collect();
+    others.sort_by(|a, b| b.used.cmp(&a.used).then_with(|| a.key.cmp(&b.key)));
+    let mut delete = vec![];
+    for world in others {
+        if now.saturating_sub(world.used) <= UNUSED && count < MOST_WORLDS && bytes + world.bytes <= MOST_BYTES {
+            count += 1;
+            bytes += world.bytes;
+        } else {
+            delete.push(world.key.clone());
+        }
+    }
+    delete
+}
+
+/// Whether NAME is a world's file in a store: a key, a dot and a suffix.
+fn world_file(name: &str) -> Option<(&str, &str)> {
+    let (key, suffix) = name.split_at_checked(64)?;
+    (key.bytes().all(|b| b.is_ascii_hexdigit()) && suffix.starts_with('.')).then_some((key, &suffix[1..]))
+}
+
+/// Forget STORE's failure records: every world's transient failures and
+/// refused manifests, so its next launch builds again. With EVERYTHING,
+/// remove the store's own files and directories, and the store once it is
+/// empty: no file it does not know is touched. How many it removed.
+pub fn reset(store: &Path, everything: bool) -> std::io::Result<usize> {
+    let mut removed = 0;
+    if !host::probe(host::Probe::IsDir, store) {
+        return Ok(0);
+    }
+    for entry in host::read_dir(store)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let refused = |path: &Path| host::read_to_string(path).ok()
+            .and_then(|text| serde_json::from_str::<Json>(&text).ok())
+            .is_some_and(|m| m["refusals"].as_array().is_some_and(|r| !r.is_empty()));
+        let path = store.join(name);
+        match world_file(name) {
+            Some((_, suffix)) if everything || suffix == "failed" || (suffix == "json" && refused(&path)) => {
+                host::remove_file(&path)?;
+                removed += 1;
+            }
+            _ => {}
+        }
+    }
+    if everything {
+        for dir in ["ids", "p"] {
+            let dir = store.join(dir);
+            if host::probe(host::Probe::IsDir, &dir) {
+                for entry in host::read_dir(&dir)? {
+                    let path = entry?.path();
+                    if host::probe(host::Probe::IsDir, &path) { host::remove_dir(&path)?; } else { host::remove_file(&path)?; }
+                    removed += 1;
+                }
+                host::remove_dir(&dir)?;
+            }
+        }
+        if host::read_dir(store)?.next().is_none() {
+            host::remove_dir(store)?;
+        }
+    }
+    Ok(removed)
+}
+
+impl World {
+    /// Bound the store: delete the worlds `prune_plan` gives up, holding
+    /// each one's locks while its files go, and the digest cache's entries
+    /// for files no kept world or executable is, once they are a week old.
+    /// The worlds deleted.
+    pub fn prune(&self) -> std::io::Result<Vec<String>> {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::MetadataExt;
+        let mut files: std::collections::BTreeMap<String, Vec<(String, std::fs::Metadata)>> = Default::default();
+        for entry in host::read_dir(&self.store)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some((key, _)) = world_file(&name) && let Ok(meta) = host::symlink_metadata(entry.path()) {
+                files.entry(key.to_owned()).or_default().push((name, meta));
+            }
+        }
+        let held = |path: PathBuf| -> bool {
+            host::open_output(&path, host::OpenOptions::new().write(true))
+                .is_ok_and(|file| (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }) != 0)
+        };
+        let worlds: Vec<Stored> = files.iter().map(|(key, files)| Stored {
+            key: key.clone(),
+            used: files.iter().filter(|(n, _)| [".use", ".json", ".rwi"].iter().any(|s| n.ends_with(s))).map(|(_, m)| m.mtime().max(0) as u64).max().unwrap_or(0),
+            bytes: files.iter().map(|(_, m)| m.blocks() * 512).sum(),
+            busy: held(self.store.join(format!("{key}.lock"))) || held(self.store.join(format!("{key}.use"))),
+        }).collect();
+        let current = hex(&self.key);
+        let mut deleted = vec![];
+        for key in prune_plan(&worlds, &current, now_seconds()) {
+            // Taken now, these say no builder or restored process came since.
+            let locks: Vec<std::fs::File> = ["lock", "use"].iter()
+                .filter_map(|s| host::open_output(self.store.join(format!("{key}.{s}")), host::OpenOptions::new().write(true)).ok())
+                .collect();
+            if locks.iter().any(|f| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0) {
+                continue;
+            }
+            for (name, _) in &files[&key] {
+                host::remove_file(self.store.join(name))?;
+            }
+            deleted.push(key);
+        }
+        // The digest cache: the executable's entry, and each kept image's.
+        let mut referenced: std::collections::HashSet<String> = Default::default();
+        referenced.extend(host::metadata("/proc/self/exe").ok().map(|m| identity_name(&m)));
+        for key in files.keys().filter(|k| !deleted.contains(k)) {
+            referenced.extend(host::metadata(self.store.join(format!("{key}.rwi"))).ok().map(|m| identity_name(&m)));
+        }
+        if let Ok(entries) = host::read_dir(self.store.join("ids")) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let old = host::symlink_metadata(entry.path()).is_ok_and(|m| now_seconds().saturating_sub(m.mtime().max(0) as u64) > UNUSED);
+                if old && !referenced.contains(&name) {
+                    host::remove_file(entry.path())?;
+                }
+            }
+        }
+        Ok(deleted)
+    }
+}
+
+/// The clock, in seconds since the epoch.
+fn now_seconds() -> u64 {
+    host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// Wait for CHILD for up to TIMEOUT: its status, or why there is none, after
+/// killing it at the deadline.
+fn wait_bounded(mut child: std::process::Child, timeout: std::time::Duration) -> Result<String, String> {
+    let deadline = host::monotonic() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(status.to_string()),
+            Ok(Some(status)) => return Err(format!("the builder ended: {status}")),
+            Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("the builder ran past {} s and was killed", timeout.as_secs()));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
     }
 }
 
@@ -485,6 +832,59 @@ mod tests {
         let _ = library;
         segments_hash((0..count).map(headers).filter(|&(kind, flags, _, _)| kind == 1 && flags & 1 != 0)
             .map(|(_, _, offset, size)| (offset as u64, &file[offset..offset + size])))
+    }
+
+    fn stored(key: &str, days_ago: u64, mib: u64, busy: bool) -> Stored {
+        Stored { key: key.repeat(64 / key.len()), used: 100 * 86400 - days_ago * 86400, bytes: mib << 20, busy }
+    }
+
+    #[test]
+    fn pruning_keeps_the_current_and_the_held_and_bounds_the_rest() {
+        let now = 100 * 86400;
+        let key = |k: &str| k.repeat(64 / k.len());
+        // Unused for over a week: gone. Within it: the most recent kept, up
+        // to three worlds in all.
+        let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
+                      stored("d", 3, 300, false), stored("e", 8, 300, false)];
+        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("d"), key("e")]);
+        // The current world and held ones stay, whatever their age or the
+        // cap; they count toward it.
+        let worlds = [stored("a", 30, 300, false), stored("b", 20, 300, true), stored("c", 1, 300, false), stored("d", 0, 300, false)];
+        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("c")]);
+        // Four GiB at most: the older of two large worlds goes.
+        let worlds = [stored("a", 0, 1024, false), stored("b", 1, 2048, false), stored("c", 2, 2048, false)];
+        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("c")]);
+    }
+
+    #[test]
+    fn pruning_deletes_an_old_worlds_files_and_spares_one_in_use() {
+        use std::os::fd::AsRawFd;
+        let dir = std::env::temp_dir().join(format!("romacs-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("ids")).unwrap();
+        let current = World { store: dir.clone(), key: [0xaa; 32], recipe: vec![] };
+        let (old, held) = ("b".repeat(64), "c".repeat(64));
+        let week_ago = host::clock() - std::time::Duration::from_secs(8 * 86400);
+        for key in [hex(&current.key), old.clone(), held.clone()] {
+            for suffix in ["rwi", "json", "log", "lock", "use", "failed"] {
+                let file = std::fs::File::create(dir.join(format!("{key}.{suffix}"))).unwrap();
+                std::io::Write::write_all(&mut &file, &[1; 8192]).unwrap();
+                if key != hex(&current.key) { file.set_modified(week_ago).unwrap(); }
+            }
+        }
+        let stale_id = dir.join("ids/1-2-3-4.5-6.7");
+        std::fs::write(&stale_id, "00").unwrap();
+        std::fs::File::options().write(true).open(&stale_id).unwrap().set_modified(week_ago).unwrap();
+        // A restored process maps HELD: it holds its use lock shared.
+        let in_use = std::fs::File::open(dir.join(format!("{held}.use"))).unwrap();
+        assert_eq!(unsafe { libc::flock(in_use.as_raw_fd(), libc::LOCK_SH) }, 0);
+        assert_eq!(current.prune().unwrap(), [old.clone()]);
+        let names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        assert!(!names.iter().any(|n| n.starts_with(&old)), "{names:?}");
+        assert_eq!(names.iter().filter(|n| n.starts_with(&held)).count(), 6);
+        assert_eq!(names.iter().filter(|n| n.starts_with(&hex(&current.key))).count(), 6);
+        assert!(!stale_id.exists(), "an old identity entry no kept file has");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
