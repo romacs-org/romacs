@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "97955e90bbcc032414ae7e580db7f3bd89b3c02950821b12f4b44500a2fc9ff6",
+  "input_hash": "93146640408232af05a4eec22989699a25abf8f1cf4c5c15e4355493b534d1c3",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -2758,8 +2758,8 @@
    "planned": false,
    "mechanism": "`byte-compile` of a function value",
    "gnu": "`byte-compile` (`lisp/emacs-lisp/bytecomp.el:2959`) recovers an interpreted function's source through `byte-compile--reify-function` (`(aref fun 0..2)`), compiles it to byte-code and, for a symbol, `fset`s the result; a compiled function is returned with the message `Function %s is already compiled`. bytecomp.el itself byte-compiles seven of its functions when it is loaded from source",
-   "romacs": "Under the loadup bootstrap (`rlisp/romacs-bytecomp.el`, `:around` advice added before bytecomp.el loads) a VM2 closure, or a symbol whose definition is one, is returned unchanged and silently: VM2 compiled it when it was defined, and its closures are opaque (VM2-CLOSEQ1). A `(lambda ...)` list is evaluated in the dialect GNU would compile it in (a symbol's list definition dynamically, an argument in the caller's `lexical-binding`) and a symbol is `fset` to the closure. Other arguments and file compilation (`byte-compile-file`) reach GNU's code unchanged (`tests/bytecomp_function_value.rs`)",
-   "why": "**Package-observable:** the value is a VM2 closure, not byte-code: `byte-code-function-p` stays nil (VM2-BYTECODE1), so code that byte-compiles only when that predicate is nil (cc-defs.el:2517, cc-mode.el:490) calls `byte-compile` each time it is evaluated. `(advice-member-p #'romacs-bytecomp--function-value 'byte-compile)` is non-nil",
+   "romacs": "Under the loadup bootstrap (`rlisp/romacs-bytecomp.el`, `:around` advice added before bytecomp.el loads) a VM2 closure, or a symbol whose definition is one, is returned unchanged and silently: VM2 compiled it when it was defined, and its closures are opaque (VM2-CLOSEQ1). A `(lambda ...)` list first goes through bytecomp's own front end (`byte-compile-preprocess`: macroexpansion and closure conversion, inside GNU's `displaying-byte-compile-warnings`); when that signals, as for `(let 1)` or `(cond 1)`, the result is GNU's diagnostic string and nothing is `fset`. Otherwise the list is evaluated in the dialect GNU would compile it in (a symbol's list definition dynamically, an argument in the caller's `lexical-binding`) and a symbol is `fset` to the closure. Other arguments and file compilation (`byte-compile-file`) reach GNU's code unchanged (`tests/bytecomp_function_value.rs`)",
+   "why": "**Package-observable:** the value is a VM2 closure, not byte-code: `byte-code-function-p` stays nil (VM2-BYTECODE1), so code that byte-compiles only when that predicate is nil (cc-defs.el:2517, cc-mode.el:490) calls `byte-compile` each time it is evaluated. An error GNU raises only in code generation, past the front end, is not reported for a list, and a VM2 closure is returned even when GNU's recompilation of its source would fail. `(advice-member-p #'romacs-bytecomp--function-value 'byte-compile)` is non-nil",
    "symbols": [
     "byte-compile",
     "byte-code-function-p",
