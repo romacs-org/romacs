@@ -2101,6 +2101,28 @@ mod tests {
         assert!(ran.contains(&"eval-last-sexp".to_owned()), "{ran:?}");
     }
 
+    /// `--loadup`'s graphic session measures its one font, the frame's
+    /// canonical character: `window-font-width' and `window-font-height',
+    /// which read `font-info' on a multi-font display, are the frame's
+    /// character size as pinned GNU pgtk's are for its default font (10 and
+    /// 25 for Iosevka-14), a font that does not open has no information,
+    /// and isearch, which sizes its prompt by them, finds as GNU's does.
+    #[test]
+    fn loadup_measures_the_frame_font_for_isearch() {
+        let answer = on_evaluator(|| {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 25, 10).unwrap();
+            private_home(&mut vm, "font-info");
+            let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
+            printed(&mut vm, "(list (display-multi-font-p) (window-font-width) (window-font-height)
+                (aref (font-info (face-font 'default)) 11) (font-info \"-no-such-font-*\")
+                (with-temp-buffer (switch-to-buffer (current-buffer)) (insert \"abc steam def\") (goto-char 1)
+                  (isearch-mode t) (isearch-process-search-string \"steam\" \"steam\") (isearch-done) (point)))")
+        });
+        assert_eq!(answer, "(t 10 25 10 nil 10)");
+    }
+
     /// `--loadup` with no launch font: the default face keeps the frame's
     /// own size through the chain's headless faces and the graphical session,
     /// and the delayed settings are an interactive session's, under its user
