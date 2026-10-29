@@ -264,9 +264,35 @@ impl World {
             return Err(std::io::Error::other("another builder holds the lock"));
         }
         std::mem::forget(lock);
+        self.remove_abandoned()?;
         super::sandbox::confine_publishing(roots, &self.store)?;
         let seed = self.key[..4].try_into().expect("4 bytes");
         host::enter_build(host::Pinned { clock: host::clock(), pid: 4242, seed });
+        Ok(())
+    }
+
+    /// A new file for what will be published as SUFFIX: a unique name, so
+    /// no file a builder left behind stands in its way.
+    fn temporary(&self, suffix: &str) -> std::io::Result<(PathBuf, std::fs::File)> {
+        host::temp_file(&self.file(&format!("{suffix}.XXXXXX")))
+    }
+
+    /// Remove what interrupted builders of this world left unpublished: its
+    /// temporaries, read-only once they were written. Only the holder of
+    /// the lock runs this, so no builder is still writing one.
+    fn remove_abandoned(&self) -> std::io::Result<()> {
+        let prefix = format!("{}.", hex(&self.key));
+        for entry in host::read_dir(&self.store)? {
+            let name = entry?.file_name();
+            let Some(rest) = name.to_str().and_then(|n| n.strip_prefix(&prefix)) else { continue };
+            let temporary = match rest.split_once('.') {
+                Some(("rwi" | "json", tail)) => tail == "new" || (tail.len() == 6 && tail.bytes().all(|b| b.is_ascii_alphanumeric())),
+                _ => false,
+            };
+            if temporary {
+                host::remove_file(self.store.join(&name))?;
+            }
+        }
         Ok(())
     }
 
@@ -283,8 +309,9 @@ impl World {
                               "records": records, "refusals": trace["refusals"], "events": events,
                               "built": host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())});
         let publish = |suffix: &str, bytes: &[u8]| -> std::io::Result<()> {
-            let temporary = self.file(&format!("{suffix}.new"));
-            host::write(&temporary, bytes)?;
+            use std::io::Write;
+            let (temporary, mut file) = self.temporary(suffix)?;
+            file.write_all(bytes)?;
             read_only(&temporary)?;
             host::rename(&temporary, self.file(suffix))
         };
@@ -296,9 +323,7 @@ impl World {
         vm.world_lift();
         vm.world_normalize();
         vm.collect_garbage();
-        let temporary = self.file(".rwi.new");
-        let file = host::open_output(&temporary, host::OpenOptions::new().write(true).create(true).truncate(true))
-            .map_err(|e| e.to_string())?;
+        let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let len = image::capture(vm, carry, &file, self.key)?;
         file.sync_all().map_err(|e| e.to_string())?;
         read_only(&temporary).map_err(|e| e.to_string())?;

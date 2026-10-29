@@ -17,13 +17,41 @@ static ALLOCATOR: Arena = Arena;
 
 const ROLE: &str = "ROMACS_WORLD_IMAGE_TEST";
 const NAME: &str = "a_world_restores_randomized_and_refuses_a_damaged_image";
+const INTERRUPTED: &str = "an_interrupted_build_leaves_nothing_in_the_way";
 
-/// This test in a process of its own, in ROLE, with STORE.
-fn child(role: &str, store: &Path) -> Command {
+/// Test NAME in a process of its own, in ROLE, with STORE.
+fn child_of(name: &str, role: &str, store: &Path) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
-    command.args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+    command.args(["--exact", name, "--nocapture", "--test-threads=1"])
         .env(ROLE, role).env("ROMACS_WORLD_IMAGE_TEST_STORE", store);
     command
+}
+
+fn child(role: &str, store: &Path) -> Command {
+    child_of(NAME, role, store)
+}
+
+/// Act in the role a parent gave this process, if any: true when it did.
+fn act_in_role() -> bool {
+    let store = std::env::var_os("ROMACS_WORLD_IMAGE_TEST_STORE").map(PathBuf::from);
+    match std::env::var(ROLE).as_deref() {
+        Ok("launch") => launch(&store.unwrap()),
+        Ok("probe") => probe(),
+        _ => return false,
+    }
+    true
+}
+
+/// A fresh scratch directory for test NAME.
+fn scratch(name: &str) -> PathBuf {
+    let scratch = std::env::temp_dir().join(format!("romacs-world-image-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    scratch
+}
+
+fn restored() -> String {
+    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "moved": true}).to_string()
 }
 
 /// What a child printed of its outcome.
@@ -63,8 +91,12 @@ fn damage(store: &Path, edit: impl FnOnce(&mut std::fs::File, u64)) {
 }
 
 /// The launcher's side: restore, build or boot from source, and say which.
+fn world(store: &Path) -> World {
+    World::new(store.to_owned(), vec!["consumer world-image-test".into()]).unwrap()
+}
+
 fn launch(store: &Path) {
-    let world = World::new(store.to_owned(), vec!["consumer world-image-test".into()]).unwrap();
+    let world = world(store);
     match world.launch::<u64>(|| std::env::args_os().skip(1).collect(), true) {
         Launch::Restored { mut vm, carry, .. } => {
             vm.world_reinit();
@@ -102,16 +134,12 @@ fn probe_file(store: &Path, file: &Path) -> String {
 
 #[test]
 fn a_world_restores_randomized_and_refuses_a_damaged_image() {
-    let store = std::env::var_os("ROMACS_WORLD_IMAGE_TEST_STORE").map(PathBuf::from);
-    match std::env::var(ROLE).as_deref() {
-        Ok("launch") => return launch(&store.unwrap()),
-        Ok("probe") => return probe(),
-        _ => {}
+    if act_in_role() {
+        return;
     }
-    let scratch = std::env::temp_dir().join(format!("romacs-world-image-{}", std::process::id()));
-    std::fs::create_dir_all(&scratch).unwrap();
+    let scratch = scratch(NAME);
     let store = scratch.join("store");
-    let restored = json!({"mode": "restored", "carry": 42, "value": "(built 1)", "moved": true}).to_string();
+    let restored = restored();
 
     // A first launch builds its world, then boots from it.
     assert_eq!(outcome(&mut child("launch", &store)), restored);
@@ -149,5 +177,30 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     assert_eq!(probe_file(&store, &short), r#"{"restore":"Format"}"#);
     assert_eq!(probe_file(&store, &other), r#"{"restore":"Format"}"#);
     assert_eq!(probe_file(&store, &whole), r#"{"restore":"Mapped"}"#);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn an_interrupted_build_leaves_nothing_in_the_way() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(INTERRUPTED);
+    let store = scratch.join("store");
+    let key: String = world(&store).key.iter().map(|b| format!("{b:02x}")).collect();
+    // What a builder interrupted between writing and publishing leaves:
+    // its temporaries, read-only already.
+    let left = ["rwi.new", "json.new", "rwi.Ab12Cd", "json.x9Y8z7"].map(|t| store.join(format!("{key}.{t}")));
+    for path in &left {
+        std::fs::write(path, b"partial").unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o400)).unwrap();
+    }
+    assert_eq!(outcome(&mut child_of(INTERRUPTED, "launch", &store)), restored());
+    for path in &left {
+        assert!(!path.exists(), "{} is left", path.display());
+    }
+    let names: Vec<String> = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.starts_with(&key)).collect();
+    assert!(names.iter().all(|n| [".rwi", ".json", ".lock", ".log"].iter().any(|s| *n == format!("{key}{s}"))), "{names:?}");
     let _ = std::fs::remove_dir_all(&scratch);
 }
