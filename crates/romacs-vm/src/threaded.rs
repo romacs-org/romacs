@@ -2328,6 +2328,9 @@ unsafe fn invoke_full(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
+            if let Some(failure) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
+                return lambda_list_raise(e, failure);
+            }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_invoke_full(e, r, pc, closure, start, argc),
                 None => Value::UNBOUND,
@@ -2770,6 +2773,9 @@ unsafe fn t2_dispatch(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
+            if let Some(failure) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
+                return lambda_list_raise(e, failure);
+            }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_dispatch(e, r, pc, closure, start, argc),
                 None => Value::UNBOUND,
@@ -3280,6 +3286,91 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
     unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
 }
+/// specbind of SLOT to VALUE from compiled code or a call site: a protected
+/// variable (most-positive-fixnum, enable-multibyte-characters, ...) is
+/// setting-constant, else the binding is made; on failure a watcher's own
+/// signal or a forwarded store fault is left pending.
+fn bind_special(e: &mut Engine<'_>, slot: usize, value: Value) -> Result<()> {
+    if e.vm.protected_variable_slot(slot) {
+        raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
+        return Err("setting constant".into());
+    }
+    e.vm.bind_variable(slot, value).inspect_err(|error| {
+        if let Some(escape) = e.vm.propagated_escape.take() {
+            e.escape = Some(escape);
+        } else if let Some((condition, data)) = e.vm.forwarded_condition(error, value) {
+            e.escape = Some(Escape::Signal(condition, data));
+        }
+    })
+}
+/// A lambda list's failed walk: the bindings made before it failed,
+/// then the condition and its data.
+type LambdaListFailure = (Vec<(Value, Value)>, &'static str, Vec<Value>);
+/// eval.c funcall_lambda's argument walk for a `(lambda ARGS . BODY)'
+/// list called with ARGS. One parameter at a time it is checked, takes its
+/// argument and is bound (dynamically: a list function has no lexenv). A
+/// parameter that is not a symbol or a misplaced &optional or &rest is
+/// invalid-function, binding nil, t or a keyword is setting-constant, and
+/// a missing or excess argument is wrong-number-of-arguments, with the list
+/// itself as the function datum. Returns the walk's failure, if any.
+fn lambda_list_failure(vm: &mut Vm, list: Value, args: Vec<Value>) -> Option<LambdaListFailure> {
+    let symbol = |vm: &mut Vm, name: &str| Value::reference(vm.slot(name) + 1, 7);
+    let (and_rest, and_optional) = (symbol(vm, "&rest"), symbol(vm, "&optional"));
+    let constant = |vm: &Vm, param: Value| param == Value::NIL || param == Value::TRUE || {
+        let slot = param.index_if(7).map(|i| i - 1);
+        slot.is_some_and(|slot| vm.symbol_names[slot].starts_with(':') && vm.names.get(&vm.symbol_names[slot]) == Some(&slot))
+    };
+    let (_, tail) = vm.cons_pair(list).ok()?;
+    let (mut params, _) = vm.cons_pair(tail).ok()?;
+    let argc = args.len();
+    let invalid = Some(("invalid-function", vec![list]));
+    let arity = Some(("wrong-number-of-arguments", vec![list, Value::integer(argc as i64).unwrap()]));
+    let (mut bindings, mut optional, mut rest, mut previous_rest, mut i) = (vec![], false, false, false, 0);
+    let failure = loop {
+        let Ok((next, more)) = vm.cons_pair(params) else {
+            break if params != Value::NIL || previous_rest { invalid } else if i < argc { arity } else { None };
+        };
+        if next.tag() != 7 && next != Value::NIL && next != Value::TRUE { break invalid }
+        if next == and_rest {
+            if rest || previous_rest { break invalid }
+            (rest, previous_rest) = (true, true);
+        } else if next == and_optional {
+            if optional || rest || previous_rest { break invalid }
+            optional = true;
+        } else {
+            let arg = if rest { let all = vm.list_value(&args[i..]); i = argc; all }
+                else if i < argc { i += 1; args[i - 1] }
+                else if !optional { break arity }
+                else { Value::NIL };
+            if constant(vm, next) { break Some(("setting-constant", vec![next])) }
+            bindings.push((next, arg));
+            previous_rest = false;
+        }
+        params = more;
+    };
+    let (condition, data) = failure?;
+    Some((bindings, condition, data))
+}
+/// Make a failed walk's bindings, with the caller's own argument objects,
+/// then signal its condition; the handler's unwinding undoes the bindings,
+/// so their variable watchers see the let and the unlet. The values stay
+/// rooted (and are reread) while watchers run Lisp.
+fn lambda_list_raise(e: &mut Engine<'_>, (bindings, condition, data): LambdaListFailure) -> Value {
+    let roots = e.vm.external_roots.len();
+    e.vm.external_roots.extend(&data);
+    e.vm.external_roots.extend(bindings.iter().flat_map(|&(param, arg)| [param, arg]));
+    let base = roots + data.len();
+    for k in 0..bindings.len() {
+        let (param, arg) = (e.vm.external_roots[base + 2 * k], e.vm.external_roots[base + 2 * k + 1]);
+        if let Err(error) = bind_special(e, param.index_if(7).map_or(0, |i| i - 1), arg) {
+            e.vm.external_roots.truncate(roots);
+            if e.escape.is_none() { e.error = Some(error) }
+            return Value::UNBOUND;
+        }
+    }
+    let data: Vec<Value> = e.vm.external_roots.drain(roots..).take(data.len()).collect();
+    raise(e, condition, &data)
+}
 /// GNU `(lambda ...)' list functions: a list headed by `lambda' whose cdr
 /// is a cons (funcall_lambda signals `invalid-function' otherwise).
 fn lambda_list(e: &mut Engine<'_>, target: Value) -> bool {
@@ -3735,7 +3826,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                     }
                     *r.add(reg) = v;
                 }
-                Op::SetGlobal(slot, _) | Op::Bind(slot, _)
+                Op::SetGlobal(slot, _)
                     if e.vm.protected_variable_slot(slot) =>
                 {
                     raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
@@ -3753,19 +3844,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         return Err(error);
                     }
                 }
-                Op::Bind(slot, reg) => {
-                    let value = *r.add(reg);
-                    if let Err(error) = e.vm.bind_variable(slot, value) {
-                        if let Some(escape) = e.vm.propagated_escape.take() {
-                            e.escape = Some(escape);
-                            return Err(error);
-                        }
-                        if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
-                            e.escape = Some(Escape::Signal(condition, data));
-                        }
-                        return Err(error);
-                    }
-                }
+                Op::Bind(slot, reg) => bind_special(e, slot, *r.add(reg))?,
                 Op::Unbind(n) => {
                     if n > e.vm.dynamic.len() - e.dynamic {
                         return Err("invalid image dynamic binding depth".into());
