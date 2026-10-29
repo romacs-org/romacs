@@ -753,21 +753,18 @@ impl Vm {
         // using the real selection, not the temporary evaluation context.
         outcome
     }
-    /// GNU `handle_fontified_prop` (`xdisp.c:4667`) over the rows `window`
-    /// shows in the current buffer, its own. The walk over unfontified
+    /// GNU `handle_fontified_prop` (`xdisp.c:4667`) from START to END of
+    /// the current buffer, which a window shows. The walk over unfontified
     /// stretches and the calls are Lisp (`romacs--redisplay-fontify`,
     /// rlisp/vm/prelude.el), so nothing is held across them; a signal is
     /// logged there and never ends redisplay, and any other failure becomes
-    /// a display diagnostic. The end of the range walked, or None when no
-    /// Lisp ran.
-    fn fontify_displayed(&mut self, window: Value, text_height: u32) -> Result<Option<usize>> {
+    /// a display diagnostic. False when `fontification-functions` is nil,
+    /// so no Lisp ran.
+    fn fontify_range(&mut self, start: usize, end: usize) -> Result<bool> {
         let functions = self.slot("fontification-functions");
         if self.variable_value(functions)? == Value::NIL {
-            return Ok(None);
+            return Ok(false);
         }
-        let Some((start, end)) = self.displayed_range(window, text_height)? else {
-            return Ok(None);
-        };
         let call = Form::List(vec![
             Form::Sym("romacs--redisplay-fontify".into()),
             Form::Int(start as i64),
@@ -776,19 +773,27 @@ impl Vm {
         if let Err(error) = self.eval_form_raw(&call) {
             self.display_state.diagnostics.push(format!("fontification: {error}"));
         }
-        Ok(Some(end))
+        Ok(true)
     }
     /// Fontify the rows the window shows, then re-derive what that Lisp may
     /// have changed: the window's buffer, which becomes current again as GNU
     /// restores it after `fontification-functions`. Text or a window start
-    /// the Lisp changed can bring other rows into view, and so can faces it
-    /// changed (a smaller face shows text past the end walked), so fontify
-    /// again, a bounded number of times as GNU's redisplay retries. False if
-    /// Lisp deleted the window.
+    /// the Lisp changed can bring other rows into view, so the whole range
+    /// is fontified again, a bounded number of times as GNU's redisplay
+    /// retries. Faces alone it changed can show text past the end walked (a
+    /// smaller face): that text is fontified as GNU's iterator fontifies
+    /// what it reaches, while the end keeps growing, which point-max bounds.
+    /// False if Lisp deleted the window.
     fn redisplay_window_fontify(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<bool> {
-        for _ in 0..3 {
+        let functions = self.slot("fontification-functions");
+        if self.variable_value(functions)? == Value::NIL {
+            return Ok(true);
+        }
+        let mut range = self.displayed_range(self.slots[root].value, text_height)?;
+        let mut tries = 1;
+        while let Some((start, end)) = range {
             let shown = self.window_text_state(root)?;
-            let walked = self.fontify_displayed(self.slots[root].value, text_height)?;
+            let ran = self.fontify_range(start, end)?;
             let w = self.window(self.slots[root].value)?;
             if !w.live() {
                 return Ok(false);
@@ -796,17 +801,20 @@ impl Vm {
             let buffer = w.buffer;
             self.slots[buffer_slot].value = buffer;
             self.slots[self.buffer_slot].value = buffer;
-            let Some(walked) = walked else { break };
             let now = self.window_text_state(root)?;
-            if now == shown {
+            if !ran || now == shown {
                 break;
             }
-            // Only properties changed: again only if the rows now end later.
-            if (now.1, now.2) == (shown.1, shown.2)
-                && self.displayed_range(self.slots[root].value, text_height)?.is_none_or(|(_, end)| end <= walked)
-            {
-                break;
-            }
+            let next = self.displayed_range(self.slots[root].value, text_height)?;
+            range = if (now.1, now.2) == (shown.1, shown.2) {
+                // Only properties changed: the text now in view past END.
+                next.filter(|&(_, later)| later > end).map(|(_, later)| (end, later))
+            } else if tries < 3 {
+                tries += 1;
+                next
+            } else {
+                None
+            };
         }
         Ok(true)
     }

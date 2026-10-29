@@ -232,22 +232,49 @@ mod tests {
 
     /// Fontification that swaps a tall face for a small one shows more of a
     /// continued line than the walk measured with the tall face, so
-    /// redisplay walks again: every position it paints is fontified.
+    /// redisplay fontifies what comes into view, for as many passes as that
+    /// takes: every position it paints is fontified.
     #[test]
     fn redisplay_fontifies_what_a_shrinking_face_brings_into_view() {
+        let mut h = hosted();
+        for chunk in [300, 50] {
+            h.eval(&format!(r#"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
+              (insert (propertize (make-string 3000 ?x) 'face 'hosted-big))
+              (goto-char 1) (set-window-start nil 1)
+              (setq fontification-functions
+                    (list (lambda (pos)
+                            (let ((end (min (point-max) (+ pos {chunk}))))
+                              (remove-text-properties pos end '(face nil))
+                              (put-text-property pos end 'fontified t))))))"#));
+            h.paint();
+            let end = h.eval("(window-end)").parse::<i64>().unwrap();
+            // Past 300 characters: six 50-character chunks, more passes
+            // than the retry bound.
+            assert!(end > 301, "{chunk}: the window shows past 300 characters: {end}");
+            assert_eq!(h.eval("(text-property-not-all 1 (window-end) 'fontified t)"), "nil", "{chunk}: unfontified text before the window end {end}");
+        }
+    }
+
+    /// A function that shrinks faces but never sets `fontified': redisplay
+    /// walks only the text each pass brings into view, so it calls the
+    /// function at ever later positions and stops once the view stops
+    /// growing.
+    #[test]
+    fn redisplay_stops_when_a_shrinking_fontifier_never_fontifies() {
         let mut h = hosted();
         h.eval(r#"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
           (insert (propertize (make-string 3000 ?x) 'face 'hosted-big))
           (goto-char 1) (set-window-start nil 1)
+          (setq hosted-calls nil)
           (setq fontification-functions
                 (list (lambda (pos)
-                        (let ((end (min (point-max) (+ pos 300))))
-                          (remove-text-properties pos end '(face nil))
-                          (put-text-property pos end 'fontified t))))))"#);
+                        (setq hosted-calls (cons pos hosted-calls))
+                        (remove-text-properties pos (min (point-max) (+ pos 50)) '(face nil))))))"#);
         h.paint();
-        let end = h.eval("(window-end)").parse::<i64>().unwrap();
-        assert!(end > 301, "the window shows past the first fontified chunk: {end}");
-        assert_eq!(h.eval("(text-property-not-all 1 (window-end) 'fontified t)"), "nil", "unfontified text before the window end {end}");
+        let calls = h.eval("(reverse hosted-calls)");
+        let calls: Vec<i64> = calls.trim_matches(['(', ')']).split(' ').map(|n| n.parse().unwrap()).collect();
+        assert!(calls.len() > 1, "{calls:?}: a pass for the text the first one brought into view");
+        assert!(calls.windows(2).all(|w| w[0] < w[1]), "{calls:?}: each pass walks only text newly in view");
     }
 
     /// What the host does not lay out as GNU displays it refuses; its
