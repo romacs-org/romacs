@@ -145,10 +145,11 @@ impl Vm {
                 self.set_variable_value(slot, value)?;
                 Ok(value)
             }
-            ForceModeLineUpdate => {
-                self.update_mode_lines();
-                Ok(if n == 0 { Value::NIL } else { self.stack[start] })
-            }
+            ForceModeLineUpdate => Ok(if n == 0 {
+                Value::NIL
+            } else {
+                self.stack[start]
+            }),
             Daemonp => Ok(Value::NIL),
             DaemonInitialized => {
                 Err("This function can only be called if emacs is run as a daemon".into())

@@ -144,12 +144,15 @@ fn collections_during_fontification_keep_the_snapshot_intact() {
 
 /// GNU calls a function that leaves `fontified' nil at every iterator stop
 /// (property boundaries, at most 100 characters apart); Romacs once per nil
-/// stretch and redisplay (DIVERGENCES.md VM2-FONTIFY1). Either way it ends.
+/// stretch and full redisplay (DIVERGENCES.md VM2-FONTIFY1). Either way it
+/// ends. A redisplay of a window nothing changed in walks no text, in
+/// either (VM2-REDISPLAY1); `force-window-update' asks for a full one.
 #[test]
 fn a_function_that_never_fontifies_runs_once_per_stretch() {
     let mut vm = romacs_vm("(progn (put-text-property 250 260 'face 'romacs-fl-face) (put-text-property 300 320 'fontified t) (setq fontification-functions (list (lambda (pos) (romacs-fl-log pos)))))");
     vm.display_snapshot(400, 200).unwrap();
     assert_eq!(printed(&mut vm, "(reverse romacs-fl-log)"), "(196 320)");
+    vm.eval_source("(force-window-update)").unwrap();
     vm.display_snapshot(400, 200).unwrap();
     assert_eq!(printed(&mut vm, "(reverse romacs-fl-log)"), "(196 320 196 320)");
 }

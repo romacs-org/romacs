@@ -251,7 +251,6 @@ impl Vm {
     /// structurally, not inferred from error text; every outcome requests redraw.
     pub fn command_event(&mut self, event: CommandEvent) -> Result<CommandOutcome> {
         self.ensure_keymaps();
-        self.update_mode_lines();
         let event_form = match event {
             CommandEvent::Character(c) => {
                 if c < 0 {

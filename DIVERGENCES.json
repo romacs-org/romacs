@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "6e96ee2d1f7db5c30e6179feb660a242e6c72107b1ae28fbc33e17b9b269a4bf",
+  "input_hash": "6452e61faaaea1b8d5590459794070bc078ecbe23b36455b10b23090da243c6b",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 275,
-  "symbols": 631,
+  "symbols": 632,
   "rows_without_symbols": 15
  },
  "by_symbol": {
@@ -142,6 +142,7 @@
    196
   ],
   "blink-cursor-mode": [
+   194,
    233
   ],
   "bool-vector": [
@@ -741,6 +742,9 @@
    159,
    233
   ],
+  "force-window-update": [
+   194
+  ],
   "format": [
    70,
    74,
@@ -971,6 +975,7 @@
    104
   ],
   "internal-show-cursor": [
+   194,
    233,
    236
   ],
@@ -1592,8 +1597,7 @@
    65
   ],
   "redisplay": [
-   144,
-   194
+   144
   ],
   "redisplay-adhoc-scroll-in-resize-mini-windows": [
    258
@@ -5507,12 +5511,14 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`redisplay` does not redraw synchronously",
-   "gnu": "GNU `redisplay` (`src/dispnew.c:7020`) processes pending events and redraws before returning t (nil while a keyboard macro runs)",
-   "romacs": "VM2 returns the same values; the GUI host redraws only after the command finishes, and pending events are not swallowed",
-   "why": "**Package-observable** in the GUI: progress drawn by a long command appears when it ends",
+   "mechanism": "What tells redisplay that a window is unchanged",
+   "gnu": "GNU's mutators set `windows_or_buffers_changed`, `update_mode_lines` and per-buffer redisplay flags; a redisplay with none set and point still on screen only moves or redraws the cursor (blink-cursor-mode's toggles, `try_cursor_movement`)",
+   "romacs": "Each window's last full snapshot records a key (`ShownKey`, crates/romacs-vm/src/display.rs): its buffer and that buffer's modification tick (text and properties), an overlay-change count, start, geometry, selected window, mark, collection count and 17 buffer-local display variables (`DISPLAY_VARIABLES`); face and font changes and `force-window-update` drop the record. With the key unchanged and point unmoved, or moved two lines inside the last layout's end with no active region, no scroll margin and wrapped lines, the window keeps its text, faces and start, no text is walked or fontified, and only its mode line is evaluated again, at every redisplay as before",
+   "why": "**Package-observable limit:** a change that affects a window's text display through state outside the key, made with no buffer edit, overlay change, face change or `force-window-update`, shows at the next full redisplay of that window",
    "symbols": [
-    "redisplay"
+    "force-window-update",
+    "internal-show-cursor",
+    "blink-cursor-mode"
    ],
    "symbols_derived": false
   },

@@ -130,11 +130,7 @@ fn recursive_edit(cx) -> Step { enter(cx, "romacs--recursive-edit", vec![], DONE
 // command_loop_2 one command at a time, for an embedder's loop (the GUI):
 // `romacs--host-command' of the Lisp half, which says what ran.
 defsubr! { name = "romacs--run-host-command", gnu = "keyboard.c:1158", effect = Global,
-fn run_host_command(cx) -> Step {
-    // command_loop_1 redisplays after each command with its mode lines due.
-    cx.update_mode_lines();
-    enter(cx, "romacs--host-command", vec![], DONE)
-}}
+fn run_host_command(cx) -> Step { enter(cx, "romacs--host-command", vec![], DONE) }}
 
 // read_char's special events (focus-in, focus-out), for an embedder's loop:
 // `romacs--special-event' of the Lisp half runs the event's binding.

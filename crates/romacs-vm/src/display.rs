@@ -33,10 +33,6 @@ pub(super) struct DisplayState {
     /// Advanced by every overlay change: overlays are display state no
     /// buffer modification tick counts.
     pub(super) overlays: u64,
-    /// GNU's update_mode_lines: advanced by each command and by
-    /// `force-mode-line-update'. A window's mode line is evaluated again
-    /// only when this or what the window shows changed.
-    pub(super) mode_lines: u64,
     /// Per window id, how its last publication's display text maps to
     /// buffer text, when overlay strings were spliced in.
     segments: std::collections::BTreeMap<u64, Vec<mini_window::Segment>>,
@@ -116,7 +112,6 @@ impl DisplayState {
             previous: std::collections::BTreeMap::new(),
             shown: std::collections::BTreeMap::new(),
             overlays: 0,
-            mode_lines: 0,
             segments: std::collections::BTreeMap::new(),
             theme: Theme::build(
                 Arc::new(defs),
@@ -170,7 +165,6 @@ struct ShownKey {
 struct Shown {
     key: ShownKey,
     point: i64,
-    mode_lines: u64,
     /// The face names the snapshot's handles index, for a new mode line.
     names: Vec<String>,
 }
@@ -693,8 +687,7 @@ impl Vm {
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        let mode_lines = self.display_state.mode_lines;
-        self.display_state.shown.insert(id, Shown { key, point, mode_lines, names });
+        self.display_state.shown.insert(id, Shown { key, point, names });
         Ok(snapshot)
     }
     /// Record SNAPSHOT as its window's last publication.
@@ -753,12 +746,12 @@ impl Vm {
             variables,
         })
     }
-    /// GNU redisplay's shortcuts for the window in ROOT, when nothing it
-    /// shows changed since its last full snapshot (`ShownKey`). With point
-    /// where it was and no mode line due, only the cursor is drawn again,
-    /// as GNU's blink timer redraws only the cursor; with point moved inside
-    /// rows the last layout showed whole, only the mode line is computed
-    /// again (try_cursor_movement). None when a full redisplay is due.
+    /// GNU redisplay's shortcut for the window in ROOT when nothing it shows
+    /// changed since its last full snapshot (`ShownKey`) and point is where
+    /// it was or inside rows the last layout showed whole: its text, faces
+    /// and start stand, and only its mode line is evaluated again, so a
+    /// blink or a cursor motion draws only the cursor and the mode line
+    /// (try_cursor_movement). None when a full redisplay is due.
     fn reuse_shown(&mut self, root: usize, slot: usize, width: u32, height: u32) -> Result<Option<WindowSnapshot>> {
         let window = self.slots[root].value;
         let w = self.window(window)?;
@@ -767,7 +760,7 @@ impl Vm {
         if forced || !self.display_state.previous.contains_key(&id) {
             return Ok(None);
         }
-        let Some((shown_point, shown_mode_lines)) = self.display_state.shown.get(&id).map(|s| (s.point, s.mode_lines)) else {
+        let Some(shown_point) = self.display_state.shown.get(&id).map(|s| s.point) else {
             return Ok(None);
         };
         let key = self.shown_key(window, width, height)?;
@@ -777,23 +770,27 @@ impl Vm {
         let point = self.window_point_value(window)?.as_integer()?;
         let mut snapshot = self.display_state.previous[&id].clone();
         snapshot.cursor_off = cursor_off;
-        if point == shown_point && shown_mode_lines == self.display_state.mode_lines {
-            return Ok(Some(snapshot));
+        if mini {
+            // No mode line: a mini-window with point unmoved is as it was.
+            return Ok((point == shown_point).then_some(snapshot));
         }
-        let region = key.variables[MARK_ACTIVE] != Value::NIL && key.variables[TRANSIENT_MARK_MODE] != Value::NIL;
-        let margin = key.variables[SCROLL_MARGIN].integer_value().is_some_and(|m| m > 0);
-        if mini || region || margin || !end_valid || snapshot.wrap == romacs_layout_input::LineWrap::Truncate {
-            return Ok(None);
-        }
-        let Object::Buffer(b) = self.object(key.buffer)? else { return Ok(None) };
-        let end = b.byte_of_char(crate::coordinates::CharOffset(b.len_chars().saturating_sub(end_distance)))?.0;
-        let point_byte = b.byte_of_char(crate::coordinates::CharOffset((point - 1).max(0) as usize))?.0;
-        // Point's row is whole on screen while its line and one more end
-        // before the last layout's end.
-        let shown = snapshot.start_byte <= point_byte && point_byte <= end
-            && snapshot.text.utf8.as_bytes()[point_byte..end].iter().filter(|&&c| c == b'\n').count() >= 2;
-        if !shown {
-            return Ok(None);
+        if point != shown_point {
+            let region = key.variables[MARK_ACTIVE] != Value::NIL && key.variables[TRANSIENT_MARK_MODE] != Value::NIL;
+            let margin = key.variables[SCROLL_MARGIN].integer_value().is_some_and(|m| m > 0);
+            if region || margin || !end_valid || snapshot.wrap == romacs_layout_input::LineWrap::Truncate {
+                return Ok(None);
+            }
+            let Object::Buffer(b) = self.object(key.buffer)? else { return Ok(None) };
+            let end = b.byte_of_char(crate::coordinates::CharOffset(b.len_chars().saturating_sub(end_distance)))?.0;
+            let point_byte = b.byte_of_char(crate::coordinates::CharOffset((point - 1).max(0) as usize))?.0;
+            // Point's row is whole on screen while its line and one more
+            // end before the last layout's end.
+            let shown = snapshot.start_byte <= point_byte && point_byte <= end
+                && snapshot.text.utf8.as_bytes()[point_byte..end].iter().filter(|&&c| c == b'\n').count() >= 2;
+            if !shown {
+                return Ok(None);
+            }
+            snapshot.point_byte = point_byte;
         }
         let band = self.redisplay_and_build_mode_line(root, slot, height, false)?;
         // The band's Lisp may have changed what the window shows.
@@ -802,17 +799,10 @@ impl Vm {
         }
         let face = self.mode_line_face_name(window)?;
         let shown = self.display_state.shown.get_mut(&id).expect("checked above");
-        snapshot.point_byte = point_byte;
         snapshot.mode_line = band.map(|band| band_slice(&shown.names, band));
         snapshot.mode_line_face = FaceHandle(shown.names.iter().position(|n| *n == face).ok_or("mode-line face required")? as u32);
         shown.point = point;
-        shown.mode_lines = self.display_state.mode_lines;
         Ok(Some(snapshot))
-    }
-    /// GNU's update_mode_lines: every window's mode line is evaluated at
-    /// its next redisplay.
-    pub(crate) fn update_mode_lines(&mut self) {
-        self.display_state.mode_lines += 1;
     }
     /// The row of FACES for a `face' property VALUE: a face symbol's own
     /// row, and for a list of faces or an attribute list a row merged as
