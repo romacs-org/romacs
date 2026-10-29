@@ -10,6 +10,7 @@ pub(crate) struct Modification {
     pub save_modiff: u64,
     pub autosave_modiff: u64,
 }
+romacs_snapshot::snapshot_struct!(Modification { modiff, chars_modiff, save_modiff, autosave_modiff });
 
 impl Default for Modification {
     fn default() -> Self {

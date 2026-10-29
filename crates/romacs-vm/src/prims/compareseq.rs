@@ -3,14 +3,13 @@
 //! TOO_EXPENSIVE and big-snake heuristics, over character codes. The
 //! partition choices are GNU's, so the edit script, and with it which
 //! markers and properties survive a replacement, is GNU's.
-use std::time::Instant;
 
 /// diffseq.h SNAKE_LIMIT: snakes longer than this are "big".
 const SNAKE_LIMIT: isize = 20;
 
 /// The characters each sequence loses (A) and gains (B), or None when the
 /// comparison passed DEADLINE.
-pub(crate) fn compare(a: &[u32], b: &[u32], too_expensive: isize, deadline: Option<Instant>) -> Option<(Vec<bool>, Vec<bool>)> {
+pub(crate) fn compare(a: &[u32], b: &[u32], too_expensive: isize, deadline: Option<std::time::Instant>) -> Option<(Vec<bool>, Vec<bool>)> {
     let diags = a.len() + b.len() + 3;
     let mut fd = Vec::new();
     let mut bd = Vec::new();
@@ -55,7 +54,7 @@ struct Context<'a> {
     /// Index of diagonal 0 in FD and BD.
     offset: isize,
     too_expensive: isize,
-    deadline: Option<Instant>,
+    deadline: Option<std::time::Instant>,
     /// buffer_chars_equal's quit counter: the deadline is read when it wraps.
     quit: u16,
     aborted: bool,
@@ -67,7 +66,7 @@ struct Partition { xmid: isize, ymid: isize, lo_minimal: bool, hi_minimal: bool 
 
 impl Context<'_> {
     fn early_abort(&self) -> bool {
-        self.deadline.is_some_and(|d| d < Instant::now())
+        self.deadline.is_some_and(|d| d < crate::host::monotonic())
     }
 
     /// buffer_chars_equal: an abort found here unwinds the whole comparison,
@@ -282,6 +281,6 @@ mod tests {
     fn a_passed_deadline_abandons_the_comparison() {
         let a: Vec<u32> = (0..200_000).map(|i| i % 7).collect();
         let b: Vec<u32> = (0..200_000).map(|i| i % 11).collect();
-        assert!(compare(&a, &b, 1_000_000, Some(Instant::now())).is_none());
+        assert!(compare(&a, &b, 1_000_000, Some(crate::host::monotonic())).is_none());
     }
 }

@@ -4,6 +4,12 @@ use std::ops::Range;
 /// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FontSelectionAttribute { Width, Height, Weight, Slant }
+romacs_snapshot::snapshot_enum!(FontSelectionAttribute {
+    FontSelectionAttribute::Width => (),
+    FontSelectionAttribute::Height => (),
+    FontSelectionAttribute::Weight => (),
+    FontSelectionAttribute::Slant => (),
+});
 pub const DEFAULT_FONT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [
     FontSelectionAttribute::Width, FontSelectionAttribute::Height,
     FontSelectionAttribute::Weight, FontSelectionAttribute::Slant,
@@ -18,6 +24,7 @@ pub struct FontSelectionState {
     shifts: [u8; 4],
     revision: u64,
 }
+romacs_snapshot::snapshot_struct!(FontSelectionState { order, shifts, revision });
 
 impl Default for FontSelectionState {
     fn default() -> Self {
@@ -57,6 +64,7 @@ pub struct FontAlternativeState {
     family_alist: Vec<Vec<String>>,
     revision: u64,
 }
+romacs_snapshot::snapshot_struct!(FontAlternativeState { family_alist, revision });
 
 impl FontAlternativeState {
     pub fn family_alist(&self) -> &[Vec<String>] { &self.family_alist }
@@ -79,6 +87,18 @@ pub struct FrameSnapshot {
     pub windows: Vec<PlacedWindowSnapshot>,
 }
 
+impl FrameSnapshot {
+    /// Whether OTHER lays out to the same glyphs as this frame, cursors
+    /// aside: equal but for publication versions and cursor visibility.
+    pub fn lays_out_like(&self, other: &Self) -> bool {
+        (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
+            && self.font_alternatives == other.font_alternatives
+            && self.windows.len() == other.windows.len()
+            && self.windows.iter().zip(&other.windows)
+                .all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like(&b.snapshot))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedWindowSnapshot {
     pub x: u32,
@@ -88,6 +108,7 @@ pub struct PlacedWindowSnapshot {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaceHandle(pub u32);
+romacs_snapshot::snapshot_tuple!(FaceHandle(f0));
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Face {
@@ -96,18 +117,21 @@ pub struct Face {
     pub family: String,
     pub pixel_size: f32,
 }
+romacs_snapshot::snapshot_struct!(Face { foreground, background, family, pixel_size });
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FaceRun {
     pub bytes: Range<usize>,
     pub face: FaceHandle,
 }
+romacs_snapshot::snapshot_struct!(FaceRun { bytes, face });
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextSlice {
     pub utf8: String,
     pub face_runs: Vec<FaceRun>,
 }
+romacs_snapshot::snapshot_struct!(TextSlice { utf8, face_runs });
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowSnapshot {
@@ -130,6 +154,37 @@ pub struct WindowSnapshot {
     pub tab_width: u32,
     /// How a line wider than the window shows.
     pub wrap: LineWrap,
+    /// GNU's `w->cursor_off_p': `internal-show-cursor' hid this window's
+    /// cursor, as blink-cursor-mode's timer does every other blink.
+    pub cursor_off: bool,
+}
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off });
+
+/// What laying a window out established about the text it published, in
+/// byte offsets into that text: where its last displayed row ends (GNU's
+/// `window_end_pos') and how far its fully visible rows reach, which is
+/// where point can be without redisplay choosing another start.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowEnd {
+    pub id: u64,
+    /// The byte after the last displayed character.
+    pub end: usize,
+    /// Every position before this byte is on a fully visible row: one past
+    /// the text's length when its end position is on one too.
+    pub visible_end: usize,
+    /// The text area's height: the window's less its mode and header lines'.
+    pub body_height: f32,
+    /// The rows laid out from the window start, top to bottom, through the
+    /// first that reaches the text area's bottom.
+    pub rows: Vec<Row>,
+}
+
+/// One screen row: the byte it starts at, its top and its height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Row {
+    pub start: usize,
+    pub y: f32,
+    pub height: f32,
 }
 
 /// GNU's `it->line_wrap': `truncate-lines' (or a partial-width window
@@ -137,6 +192,25 @@ pub struct WindowSnapshot {
 /// continues at word boundaries, else lines continue at the window edge.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LineWrap { Truncate, #[default] Window, Word }
+romacs_snapshot::snapshot_enum!(LineWrap {
+    LineWrap::Truncate => (),
+    LineWrap::Window => (),
+    LineWrap::Word => (),
+});
+
+impl WindowSnapshot {
+    /// Whether OTHER lays out to the same glyphs, cursor aside: equal but
+    /// for `buffer_version' (the VM's conservative redraw signal, which also
+    /// moves when nothing shown changed) and `cursor_off'.
+    pub fn lays_out_like(&self, other: &Self) -> bool {
+        // Exhaustive, so a new field must be placed on one side or the other.
+        let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _ } = self;
+        (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *tab_width)
+            == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.tab_width)
+            && *wrap == other.wrap && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces
+    }
+}
 
 /// The stretch a TAB at X takes on a window-system frame (GNU xdisp.c
 /// `gui_produce_glyphs`): to the next multiple of TAB_WIDTH spaces of the
@@ -164,7 +238,8 @@ pub struct MeasureInput {
 /// The host's geometry for a `MeasureInput`, in whole pixels: each
 /// character's advance and the row height its face gives it, in text
 /// order (a newline advances 0, a TAB its face's space, from which
-/// `tab_advance` makes its stretch), and each face's row height.
+/// `tab_advance` makes its stretch), and each face's row height: the
+/// default face's and those the text uses (0 for any other).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Measured {
     pub glyphs: Vec<(u32, u32)>,

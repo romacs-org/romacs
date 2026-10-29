@@ -872,56 +872,22 @@ on, and every idle timer may run once more."
   "keyboard.c timer_stop_idle."
   (romacs--set-idle nil))
 
-(defun romacs--timer-time (timer)
-  "keyboard.c decode_timer: when TIMER fires, as a float, or nil."
-  (and (vectorp timer) (= (length timer) 10)
-       (null (aref timer 0))
-       (integerp (aref timer 2))
-       (float-time (list (aref timer 1) (aref timer 2) (aref timer 3) (aref timer 8)))))
-
 (defun romacs--timer-check-2 (timers idle-timers)
   "keyboard.c timer_check_2: of ordinary TIMERS and IDLE-TIMERS, run the
 next valid timer if ripe and return 0, else the seconds until it is, or nil
-if there is none.  An idle timer's time counts from the start of idleness."
-  (let* ((now (float-time))
-         (idle (current-idle-time))
-         (idleness (if idle (float-time idle) 0.0))
-         (result nil) (looking t))
-    (while (and looking (or timers idle-timers))
-      (let ((time (and timers (romacs--timer-time (car timers))))
-            (idle-time (and idle-timers (romacs--timer-time (car idle-timers)))))
-        (cond
-         ;; Skip invalid timers and timers already run.
-         ((and timers (null time)) (setq timers (cdr timers)))
-         ((and idle-timers (null idle-time)) (setq idle-timers (cdr idle-timers)))
-         (t
-          (setq looking nil)
-          (let* ((timer-ripe (and time (<= time now)))
-                 (idle-ripe (and idle-time (<= idle-time idleness)))
-                 (timer-difference (and time (abs (- now time))))
-                 (idle-difference (and idle-time (abs (- idleness idle-time))))
-                 ;; The ripe one, else the one ripe longest or soonest.
-                 (ordinary (and time
-                                (or (null idle-time)
-                                    (and timer-ripe (not idle-ripe))
-                                    (and (eq timer-ripe idle-ripe)
-                                         (if timer-ripe
-                                             (< idle-difference timer-difference)
-                                           (< timer-difference idle-difference))))))
-                 (chosen (if ordinary (car timers) (car idle-timers))))
-            (if (if ordinary timer-ripe idle-ripe)
-                (progn
-                  (if (null (aref chosen 0))
-                      (let ((old-deactivate-mark deactivate-mark))
-                        ;; Triggered, in case its Lisp fails to reschedule it.
-                        (aset chosen 0 t)
-                        (let ((inhibit-quit t))
-                          (funcall 'timer-event-handler chosen))
-                        (setq deactivate-mark old-deactivate-mark)
-                        (setq romacs--timers-run (1+ romacs--timers-run))))
-                  (setq result 0))
-              (setq result (if ordinary timer-difference idle-difference))))))))
-    result))
+if there is none (`romacs--timer-next' chooses).  An idle timer's time
+counts from the start of idleness."
+  (let ((chosen (romacs--timer-next timers idle-timers)))
+    (if (not (vectorp chosen))
+        chosen
+      (let ((old-deactivate-mark deactivate-mark))
+        ;; Triggered, in case its Lisp fails to reschedule it.
+        (aset chosen 0 t)
+        (let ((inhibit-quit t))
+          (funcall 'timer-event-handler chosen))
+        (setq deactivate-mark old-deactivate-mark)
+        (setq romacs--timers-run (1+ romacs--timers-run)))
+      0)))
 
 (defun romacs--timer-check ()
   "keyboard.c timer_check: run every ripe timer, idle timers only while
@@ -939,21 +905,8 @@ let a timer add itself again without running twice."
 0 when one is ripe, or nil if none: what `romacs--timer-check' answers,
 without running a timer, so it counts timers added since that check.  Idle
 timers count only while Emacs is idle, from the start of idleness."
-  (let* ((now (float-time))
-         (idle (current-idle-time))
-         (lists (list (cons now timer-list)
-                      (and idle (cons (float-time idle) timer-idle-list))))
-         (delay nil))
-    (while lists
-      (let ((clock (car (car lists))) (timers (cdr (car lists))))
-        (while timers
-          (let ((time (romacs--timer-time (car timers))))
-            (if time
-                (let ((left (max 0 (- time clock))))
-                  (if (or (null delay) (< left delay)) (setq delay left)))))
-          (setq timers (cdr timers))))
-      (setq lists (cdr lists)))
-    delay))
+  (let ((next (romacs--timer-next timer-list (and (current-idle-time) timer-idle-list))))
+    (if (vectorp next) 0 next)))
 
 (defun romacs--timer-check-idle ()
   "What keyboard.c read_char does before it blocks for a command key with

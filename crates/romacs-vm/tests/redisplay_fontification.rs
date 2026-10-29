@@ -137,19 +137,23 @@ fn collections_during_fontification_keep_the_snapshot_intact() {
     let before = vm.heap_stats().collections;
     let snapshot = vm.display_snapshot(400, 200).unwrap();
     assert!(vm.heap_stats().collections > before);
-    assert!(snapshot.text.utf8.starts_with("line 00 "));
+    // The window publishes from its start, line 05.
+    assert!(snapshot.text.utf8.starts_with("line 05 "));
     assert_eq!(printed(&mut vm, "(reverse romacs-fl-log)"), "(196 246 296 346 396 446 496 546)");
     assert_eq!(printed(&mut vm, "(buffer-name)"), "\"fl\"");
 }
 
 /// GNU calls a function that leaves `fontified' nil at every iterator stop
 /// (property boundaries, at most 100 characters apart); Romacs once per nil
-/// stretch and redisplay (DIVERGENCES.md VM2-FONTIFY1). Either way it ends.
+/// stretch and full redisplay (DIVERGENCES.md VM2-FONTIFY1). Either way it
+/// ends. A redisplay of a window nothing changed in walks no text, in
+/// either (VM2-REDISPLAY2); `force-window-update' asks for a full one.
 #[test]
 fn a_function_that_never_fontifies_runs_once_per_stretch() {
     let mut vm = romacs_vm("(progn (put-text-property 250 260 'face 'romacs-fl-face) (put-text-property 300 320 'fontified t) (setq fontification-functions (list (lambda (pos) (romacs-fl-log pos)))))");
     vm.display_snapshot(400, 200).unwrap();
     assert_eq!(printed(&mut vm, "(reverse romacs-fl-log)"), "(196 320)");
+    vm.eval_source("(force-window-update)").unwrap();
     vm.display_snapshot(400, 200).unwrap();
     assert_eq!(printed(&mut vm, "(reverse romacs-fl-log)"), "(196 320 196 320)");
 }
@@ -199,7 +203,7 @@ fn deleting_the_window_drops_it_from_the_frame() {
 fn a_failing_walk_is_a_diagnostic() {
     let mut vm = romacs_vm("(progn (setq fontification-functions (list 'ignore)) (fset 'romacs--redisplay-fontify (lambda (start end) (error \"walk %d %d\" start end))))");
     let snapshot = vm.display_snapshot(400, 200).unwrap();
-    assert!(snapshot.text.utf8.starts_with("line 00"));
+    assert!(snapshot.text.utf8.starts_with("line 05"));
     assert_eq!(vm.take_display_diagnostics(), ["fontification: walk 196 586"]);
 }
 

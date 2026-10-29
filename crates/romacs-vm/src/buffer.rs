@@ -798,7 +798,7 @@ impl Vm {
         } else if p == InsertFileBytes {
             let path = String::from_utf8(self.string_bytes(args[0])?)
                 .map_err(|_| "invalid filename")?;
-            std::fs::read(path).map_err(|e| e.to_string())?
+            crate::host::read_file(path).map_err(|e| e.to_string())?
         } else {
             vec![]
         };

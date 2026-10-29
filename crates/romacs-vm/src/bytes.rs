@@ -12,6 +12,7 @@ pub(crate) struct BufferState {
     /// when this buffer wrote it: GNU keeps one cache for the last buffer.
     pub(crate) defun_start: Option<(u64, crate::syntax_scan::DefunStart)>,
 }
+romacs_snapshot::snapshot_struct!(BufferState { name, live, inhibit_buffer_hooks, modification, defun_start });
 impl Default for BufferState {
     fn default() -> Self {
         Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None }
@@ -61,6 +62,7 @@ pub(crate) struct ByteBuffer {
     /// (fileio.c decide_coding_unwind); its anchors all stay at BEG.
     pub(crate) held: Option<Box<crate::annotations::AnnotatedBuffer>>,
 }
+romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, point, restriction, anchors, properties, had_intervals, per_buffer, held });
 impl ByteBuffer {
     /// An empty buffer's storage, with STATE.
     pub(crate) fn empty(state: BufferState, per_buffer: crate::forwarded::PerBuffer) -> Self {

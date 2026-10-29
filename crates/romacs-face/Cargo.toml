@@ -12,6 +12,7 @@ description = "Evaluator-free face and theme model for Romacs: immutable faces, 
 # dependency graph, not discipline, keeps Lisp objects out of resolved faces.
 
 [dependencies]
+romacs-snapshot = { path = "../romacs-snapshot" }
 rustc-hash.workspace = true
 thiserror.workspace = true
 

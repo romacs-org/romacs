@@ -311,7 +311,7 @@ fn internal_default_signal_process(cx, process: Value, sigcode: Value; optional 
         let name = cx.symbol_name(sigcode)?;
         crate::subprocess::signal_number(&name).ok_or_else(|| Fault::Error(format!("Undefined signal name {name}")))?
     };
-    let result = if crate::subprocess::kill(pid as i32, signo).is_ok() { 0 } else { -1 };
+    let result = if crate::host::kill(pid as i32, signo).is_ok() { 0 } else { -1 };
     Ok(Value::integer(result).map_err(Fault::Error)?)
 }}
 

@@ -45,7 +45,7 @@ fn unused_faces_do_not_multiply_unicode_bindings() {
     let snapshot = romacs_layout_input::WindowSnapshot {
         id: 1, width: 800, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: romacs_layout_input::TextSlice { utf8: "Καλημέρα Жизнь".into(), face_runs: vec![] },
-        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(),
+        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false,
         faces: vec![face; 24],
     };
     let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
@@ -77,4 +77,60 @@ fn selected_minibuffer_shows_the_active_cursor_at_point() {
     assert_eq!(cursor.x, 9.0 * col as f32, "after \"Name: abc\"");
     let main_cursor = frame.window_cursors.iter().find(|c| c.window_id.get() == main as i64).unwrap();
     assert_eq!(main_cursor.style, CursorStyle::Hollow);
+}
+
+/// `internal-show-cursor' (dispnew.c, GNU's blink-cursor-mode) turns one
+/// window's cursor off: the frame publishes none for it, the other window
+/// keeps its own, and turning it on publishes it again.
+#[test]
+fn a_cursor_shown_off_is_not_published() {
+    let mut vm = Vm::new();
+    let face = vm.display_default_face().unwrap();
+    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    vm.set_frame_geometry(800, 600, line, col).unwrap();
+    vm.eval_source("(setq a (selected-window)) (set-window-new-pixel a 400) (setq b (split-window-internal a 400 t 0.5)) (set-buffer (get-buffer-create \"blink\")) (insert \"abc\") (set-window-buffer a (current-buffer)) (set-window-buffer b (current-buffer)) (setq mode-line-format '(\"%b\")) (select-window a)").unwrap();
+    let rum = Color::from_pixel(0x9099d9);
+    let cursors = |vm: &mut Vm| {
+        let snap = vm.frame_snapshot(800, 600).unwrap();
+        let (selected, other) = (snap.windows[0].snapshot.id, snap.windows[1].snapshot.id);
+        let (frame, _) = romacs_layout2::layout_frame_with_cursors(&snap, 1, selected, rum).unwrap();
+        let ids: Vec<i64> = frame.window_cursors.iter().map(|c| c.window_id.get()).collect();
+        (ids, selected as i64, other as i64)
+    };
+    let (ids, selected, other) = cursors(&mut vm);
+    assert_eq!(ids, [selected, other]);
+    vm.eval_source("(internal-show-cursor nil nil)").unwrap();
+    assert_eq!(vm.eval_source("(internal-show-cursor-p)").unwrap().display().unwrap(), "nil");
+    assert_eq!(cursors(&mut vm).0, [other], "the selected window's cursor is off");
+    vm.eval_source("(internal-show-cursor nil t)").unwrap();
+    assert_eq!(cursors(&mut vm).0, [selected, other]);
+}
+
+/// A frame that differs from the last one only in which cursors are off is
+/// shown from the last layout, stamped with its own presentation; any other
+/// change is laid out again.
+#[test]
+fn a_cursor_only_change_reuses_the_last_layout() {
+    let mut vm = Vm::new();
+    let face = vm.display_default_face().unwrap();
+    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    vm.set_frame_geometry(800, 600, line, col).unwrap();
+    vm.eval_source("(set-buffer (get-buffer-create \"reuse\")) (insert \"abc\\ndef\") (set-window-buffer nil (current-buffer)) (setq mode-line-format '(\"%b\")) (goto-char 2)").unwrap();
+    let rum = Color::from_pixel(0x9099d9);
+    let mut snap = vm.frame_snapshot(800, 600).unwrap();
+    let id = snap.windows[0].snapshot.id;
+    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let (on, ends) = engine.layout_frame(&snap, 1, Some((id, rum))).unwrap();
+    snap.windows[0].snapshot.cursor_off = true;
+    snap.windows[0].snapshot.buffer_version += 1;
+    let (off, off_ends) = engine.layout_frame(&snap, 2, Some((id, rum))).unwrap();
+    assert_eq!((off.glyphs == on.glyphs, off_ends == ends), (true, true));
+    assert!(off.window_cursors.iter().all(|c| c.window_id.get() != id as i64), "the hidden cursor is not published");
+    assert_eq!(off.presentation_id.get(), 2);
+    snap.windows[0].snapshot.cursor_off = false;
+    let (again, _) = engine.layout_frame(&snap, 3, Some((id, rum))).unwrap();
+    assert_eq!(again.window_cursors.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>(), on.window_cursors.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>());
+    snap.windows[0].snapshot.point_byte = 5;
+    let (moved, _) = engine.layout_frame(&snap, 4, Some((id, rum))).unwrap();
+    assert_ne!(moved.active_cursor().unwrap().y, on.active_cursor().unwrap().y, "a moved point is laid out again");
 }

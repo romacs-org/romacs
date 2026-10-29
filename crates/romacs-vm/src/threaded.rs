@@ -576,6 +576,11 @@ impl Program {
             self.rest.activations.capacity(),
         )
     }
+    /// Whether it holds no lowered code: no instruction, whose handlers are
+    /// function pointers, and no entry cache, which points into the code.
+    pub(super) fn holds_nothing(&self) -> bool {
+        self.code.is_empty() && self.entries.is_empty()
+    }
     #[cfg(test)]
     pub(super) fn code_is_empty(&self) -> bool {
         self.code.iter().all(Vec::is_empty) && self.entries.is_empty()
@@ -695,6 +700,12 @@ pub(super) enum Escape {
     Signal(Value, Value),
     Error { condition: Value, object: Value, conditions: Value, target: Option<usize> },
 }
+romacs_snapshot::snapshot_enum!(Escape {
+    Escape::Normal(f0) => (f0),
+    Escape::Throw(f0, f1) => (f0, f1),
+    Escape::Signal(f0, f1) => (f0, f1),
+    Escape::Error { condition, object, conditions, target } => (condition, object, conditions, target),
+});
 impl Escape {
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         match self {

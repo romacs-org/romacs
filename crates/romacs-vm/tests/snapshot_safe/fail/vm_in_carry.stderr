@@ -1,0 +1,46 @@
+error[E0277]: the trait bound `Vm: SnapshotSafe` is not satisfied
+ --> tests/snapshot_safe/fail/vm_in_carry.rs:4:48
+  |
+4 |     let _ = romacs_vm::world::image::capture::<romacs_vm::Vm>;
+  |                                                ^^^^^^^^^^^^^ the trait `SnapshotSafe` is not implemented for `Vm`
+  |
+  = help: the following other types implement trait `SnapshotSafe`:
+            &'static str
+            ()
+            (A, B)
+            (A, B, C)
+            (A, B, C, D)
+            (A, B, C, D, E)
+            (A, B, C, D, E, F)
+            (A, B, C, D, E, F, G)
+          and $N others
+note: required by a bound in `capture`
+ --> src/world/image.rs
+  |
+  | pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, Strin...
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `capture`
+
+error[E0277]: the trait bound `Vm: SnapshotSafe` is not satisfied
+ --> tests/snapshot_safe/fail/vm_in_carry.rs:5:48
+  |
+5 |     let _ = romacs_vm::world::image::capture::<(u32, Box<romacs_vm::Vm>)>;
+  |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `SnapshotSafe` is not implemented for `Vm`
+  |
+  = help: the following other types implement trait `SnapshotSafe`:
+            &'static str
+            ()
+            (A, B)
+            (A, B, C)
+            (A, B, C, D)
+            (A, B, C, D, E)
+            (A, B, C, D, E, F)
+            (A, B, C, D, E, F, G)
+          and $N others
+  = note: required for `Box<Vm>` to implement `SnapshotSafe`
+  = note: 1 redundant requirement hidden
+  = note: required for `(u32, Box<Vm>)` to implement `SnapshotSafe`
+note: required by a bound in `capture`
+ --> src/world/image.rs
+  |
+  | pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, Strin...
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `capture`

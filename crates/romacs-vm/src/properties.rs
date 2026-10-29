@@ -16,6 +16,7 @@ struct Run {
     stamp: u32,
     value: Value,
 }
+romacs_snapshot::snapshot_struct!(Run { len, stamp, value });
 impl Run {
     fn same(self, other: Self) -> bool {
         self.stamp == other.stamp && self.value == other.value
@@ -32,6 +33,10 @@ enum Tree {
         height: u32,
     },
 }
+romacs_snapshot::snapshot_enum!(Tree {
+    Tree::Leaf(f0, f1, f2) => (f0, f1, f2),
+    Tree::Branch { left, right, len, present, height } => (left, right, len, present, height),
+});
 impl Tree {
     fn leaf(runs: Vec<Run>) -> Self {
         let len = runs.iter().map(|r| r.len as usize).sum();
@@ -477,6 +482,7 @@ pub(crate) struct Properties {
     layers: BTreeMap<String, Link>,
     stamp: u32,
 }
+romacs_snapshot::snapshot_struct!(Properties { layers, stamp });
 impl Properties {
     pub fn properties_keys(&self) -> Vec<String> {
         self.layers.keys().cloned().collect()

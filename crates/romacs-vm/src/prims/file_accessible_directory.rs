@@ -13,5 +13,5 @@ fn file_accessible_directory_p(cx, filename: Value) {
     // directory, enforcing search permission without requiring read access.
     // Keep this a string: Path::join/normalization must not discard the dot.
     let searchable = if path.ends_with('/') { format!("{path}./") } else { format!("{path}/./") };
-    Ok(if std::path::Path::new(&searchable).exists() { Value::TRUE } else { Value::NIL })
+    Ok(if crate::host::probe(crate::host::Probe::Exists, &searchable) { Value::TRUE } else { Value::NIL })
 }}

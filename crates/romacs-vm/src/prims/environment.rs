@@ -5,6 +5,7 @@ fn getenv_internal(cx, variable: Value; optional env: Value) {
     let variable = cx.string_view(variable)?.bytes().to_vec();
     let explicit = cx.pair(env).is_some();
     let environment = if explicit { env } else { environment_value(cx, "process-environment")? };
+    crate::host::lisp_env(if explicit { crate::host::EnvList::Explicit } else { crate::host::EnvList::Process }, &variable);
     if let Some(value) = lookup(cx, &variable, environment)? {
         return Ok(match value {
             Some(bytes) => environment_string(cx, bytes),
@@ -14,6 +15,7 @@ fn getenv_internal(cx, variable: Value; optional env: Value) {
     }
     if !explicit && variable.split(|&byte| byte == 0).next() == Some(b"DISPLAY") {
         let initial = environment_value(cx, "initial-environment")?;
+        crate::host::lisp_env(crate::host::EnvList::Initial, &variable);
         if let Some(Some(bytes)) = lookup(cx, &variable, initial)? {
             return Ok(environment_string(cx, bytes));
         }
@@ -29,12 +31,12 @@ fn environment_string(cx: &mut Leaf<'_>, bytes: Vec<u8>) -> Value {
 /// GNU egetenv: VARIABLE's value in `process-environment', None when unset.
 pub(super) fn egetenv(cx: &mut Leaf<'_>, variable: &str) -> std::result::Result<Option<Vec<u8>>, Fault> {
     let environment = environment_value(cx, "process-environment")?;
+    crate::host::lisp_env(crate::host::EnvList::Process, variable.as_bytes());
     Ok(lookup(cx, variable.as_bytes(), environment)?.flatten())
 }
 
 fn environment_value(cx: &mut Leaf<'_>, name: &str) -> Out {
-    let symbol = cx.intern(name);
-    cx.variable_value(symbol)?.ok_or(Fault::VoidVariable(symbol))
+    cx.environment_list(name)
 }
 
 fn lookup(cx: &Leaf<'_>, name: &[u8], mut tail: Value) -> std::result::Result<Option<Option<Vec<u8>>>, Fault> {

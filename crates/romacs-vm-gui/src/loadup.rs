@@ -62,6 +62,7 @@ pub struct Site {
     /// Byte offset of the `(` in loadup.el.
     pub byte: usize,
 }
+romacs_snapshot::snapshot_struct!(Site { index, name, line, form, byte });
 
 /// What became of one load site.
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +81,14 @@ pub enum Outcome {
     /// The site was never called. `why` names the loadup form's outcome.
     NotReached { why: String },
 }
+romacs_snapshot::snapshot_enum!(Outcome {
+    Outcome::Complete { forms } => (forms),
+    Outcome::Partial { forms, failed, line, source, error, total } => (forms, failed, line, source, error, total),
+    Outcome::Absent => (),
+    Outcome::Native => (),
+    Outcome::Missing { error } => (error),
+    Outcome::NotReached { why } => (why),
+});
 
 /// How many top-level forms the file has, by VM2's own reader.
 #[derive(Clone, Debug, PartialEq)]
@@ -88,6 +97,10 @@ pub enum Total {
     /// The reader stopped at this 1-based form; the file has at least that many.
     ReaderStopped { at: usize, error: String },
 }
+romacs_snapshot::snapshot_enum!(Total {
+    Total::Forms(f0) => (f0),
+    Total::ReaderStopped { at, error } => (at, error),
+});
 
 #[derive(Clone, Debug)]
 pub struct Row {
@@ -98,6 +111,7 @@ pub struct Row {
     /// form's `line N form K: error` if one failed.
     pub nested: Vec<(String, usize, Option<String>)>,
 }
+romacs_snapshot::snapshot_struct!(Row { site, outcome, nested });
 
 /// A top-level loadup.el form that signalled (it is not a load site's own
 /// failure: those are caught in the wrapper).
@@ -108,6 +122,7 @@ pub struct FormFailure {
     pub source: String,
     pub error: String,
 }
+romacs_snapshot::snapshot_struct!(FormFailure { form, line, source, error });
 
 #[derive(Clone, Debug)]
 pub struct Loadup {
@@ -132,6 +147,7 @@ pub struct Loadup {
     /// `load-path` when loadup.el reached `(eval top-level t)`, for [`drive`]'s subdirs step.
     before_startup: Option<Vec<String>>,
 }
+romacs_snapshot::snapshot_struct!(Loadup { loadup, forms, rows, form_failures, seconds, subdirs, subdirs_skipped, load_path_len, command_definitions, before_startup });
 
 impl Loadup {
     pub fn count(&self, pick: fn(&Outcome) -> bool) -> usize {
@@ -418,8 +434,9 @@ pub fn drive_bootstrap(vm: &mut Vm, bootstrap: &Path, load_path: &[PathBuf]) -> 
 /// Every top-level form of `file` in order, its load sites through the
 /// wrapper; each site's file is found on `search` as `load` finds it.
 fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Loadup, String> {
-    let loadup = file.canonicalize().map_err(|e| format!("{}: {e}", file.display()))?;
-    let source = std::fs::read_to_string(&loadup).map_err(|e| format!("{}: {e}", loadup.display()))?;
+    // Through the host boundary, so a world build records the file it ran.
+    let loadup = romacs_vm::host::canonicalize(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let source = romacs_vm::host::read_to_string(&loadup).map_err(|e| format!("{}: {e}", loadup.display()))?;
     let (spans, sites) = load_sites(&source)?;
     let file_name = loadup.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
@@ -439,7 +456,10 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
         let text = rewrite(&source[start..end], start, &inside);
         let from = steps_len(vm);
         let logged = log_len(vm)?;
+        // The form is the site of what it reads, as when the loader runs it.
+        let site = romacs_vm::host::form_site(&loadup, line, source[start..end].trim_start().lines().next().unwrap_or(""));
         let outcome = vm.eval_source(&text).map(|_| ());
+        drop(site);
         let to = steps_len(vm);
         let invoked = invoked_since(vm, logged)?;
         // Attribute this form's loader steps to the sites it invoked, in order.

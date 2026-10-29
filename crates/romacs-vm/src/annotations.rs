@@ -727,6 +727,9 @@ impl Vm {
     /// GNU `Fsetplist` (data.c:1029) after CHECK_SYMBOL: install NEWPLIST
     /// unchecked, exactly as given.
     pub(super) fn set_symbol_plist(&mut self, symbol: Value, plist: Value) -> Result<Value> {
+        if self.fence.is_some() {
+            self.fence_property(symbol, None, crate::world::Access::Write);
+        }
         let slot = self.plist_owner_mut(symbol)?;
         self.slots[slot].plist = plist;
         Ok(plist)
@@ -775,6 +778,9 @@ impl Vm {
         key: Value,
         value: Value,
     ) -> std::result::Result<Value, PlistFault> {
+        if self.fence.is_some() {
+            self.fence_property(symbol, Some(key), crate::world::Access::Write);
+        }
         let owner = self.plist_owner_mut(symbol).map_err(|_| PlistFault::Symbol(symbol))?;
         loop {
             let plist = self.slots[owner].plist;
@@ -1112,6 +1118,7 @@ pub(crate) struct AnnotatedBuffer {
     /// GNU's per-buffer variable slots (`struct buffer`, forwarded.rs).
     pub per_buffer: crate::forwarded::PerBuffer,
 }
+romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer });
 impl From<Text> for AnnotatedBuffer {
     fn from(text: Text) -> Self {
         let extent =
@@ -1270,6 +1277,7 @@ pub(crate) struct Marker {
     pub anchor: Option<Anchor>,
     pub bias: Bias,
 }
+romacs_snapshot::snapshot_struct!(Marker { buffer, anchor, bias });
 #[derive(Clone)]
 pub(crate) struct Overlay {
     pub buffer: Value,
@@ -1279,6 +1287,7 @@ pub(crate) struct Overlay {
     pub rear: Bias,
     pub properties: Vec<(Value, Value)>,
 }
+romacs_snapshot::snapshot_struct!(Overlay { buffer, start, end, front, rear, properties });
 const _: () = assert!(std::mem::offset_of!(AnnotatedBuffer, text) == 0);
 impl Marker {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {

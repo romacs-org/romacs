@@ -39,6 +39,9 @@ pub enum HostEvent {
     Process,
     /// The read's time limit passed first.
     Timeout,
+    /// The frame gained (true) or lost focus: keyboard.c's FOCUS_IN_EVENT
+    /// and FOCUS_OUT_EVENT, read as GNU's special events.
+    Focus(bool),
 }
 
 /// The embedder's keyboard, screen, and optional native clipboard.
@@ -48,7 +51,7 @@ pub trait HostInput {
     fn input_pending(&mut self) -> bool;
     /// Paint `frame`; return the layout's window ends to commit
     /// (`Vm::display_apply_layout').
-    fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<(u64, usize)>, String>;
+    fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String>;
     /// Block until the next event, or until TIMEOUT passes (`Timeout').
     fn next_event(&mut self, timeout: Option<std::time::Duration>) -> std::result::Result<HostEvent, String>;
 
@@ -101,7 +104,7 @@ impl Vm {
                     _ => return Err("romacs--read-host-event: SECONDS is not a number".into()),
                 };
                 let wait = std::time::Duration::try_from_secs_f64(seconds.clamp(0.0, 1e9)).unwrap_or_default();
-                Some(std::time::Instant::now() + wait)
+                Some(crate::host::monotonic() + wait)
             }
         };
         // Taken, not borrowed: the redisplay below needs `&mut self`, and a
@@ -117,6 +120,12 @@ impl Vm {
             HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c),
             HostEvent::Key(CommandEvent::Named(name)) => Ok(self.intern(&name)),
             HostEvent::Timeout => Ok(Value::NIL),
+            // make_lispy_focus_in / make_lispy_focus_out: (focus-in FRAME).
+            HostEvent::Focus(focused) => {
+                let kind = self.intern(if focused { "focus-in" } else { "focus-out" });
+                let frame = self.frame_value_peek();
+                Ok(self.list_value(&[kind, frame]))
+            }
             HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
             HostEvent::Closed => {
                 let quit = self.intern("quit");
@@ -130,13 +139,8 @@ impl Vm {
     /// rlisp/vm/keyboard.el's `romacs--wait-state' prints it: empty before
     /// the Lisp half is installed.
     fn host_wait_state(&mut self) -> Result<String> {
-        let probe = crate::Form::List(vec![
-            crate::Form::Sym("and".into()),
-            crate::Form::List(vec![crate::Form::Sym("fboundp".into()),
-                crate::Form::List(vec![crate::Form::Sym("quote".into()), crate::Form::Sym("romacs--wait-state".into())])]),
-            crate::Form::List(vec![crate::Form::Sym("romacs--wait-state".into())]),
-        ]);
-        let state = self.eval_form_raw(&probe)?;
+        let probe = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
+        let state = self.call_prepared_source_raw(probe, &[])?;
         self.display(state)
     }
 
@@ -168,7 +172,7 @@ impl Vm {
                 redraw = false;
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
             }
-            let timeout = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
+            let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
             host.watch_processes(&self.process_wait_fds());
             match host.next_event(timeout)? {
                 HostEvent::Resize { width, height } => {
@@ -196,7 +200,7 @@ mod tests {
     struct Keys(Vec<i64>);
     impl HostInput for Keys {
         fn input_pending(&mut self) -> bool { true }
-        fn redisplay(&mut self, _: HostFrame) -> std::result::Result<Vec<(u64, usize)>, String> { Ok(Vec::new()) }
+        fn redisplay(&mut self, _: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> { Ok(Vec::new()) }
         fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<HostEvent, String> {
             Ok(HostEvent::Key(CommandEvent::Character(self.0.remove(0))))
         }

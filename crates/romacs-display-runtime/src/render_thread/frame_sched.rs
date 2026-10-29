@@ -117,7 +117,7 @@ pub(crate) enum Cadence {
     NextPresentation,
     /// At most this many frames per second, phase-anchored per reason.
     MaxRate(NonZeroU16),
-    /// At a specific deadline (blink timers, scheduled recovery).
+    /// At a specific deadline (scheduled recovery).
     At(EventTime),
 }
 
@@ -148,7 +148,7 @@ pub(crate) enum DemandReason {
     CursorAnimation,
     /// Infinite ambient compositor-only demand: the cursor color cycle
     /// (Stage 3 tracer bullet). Distinct from CursorAnimation so its MaxRate
-    /// phase anchor cannot collide with the blink deadline.
+    /// phase anchor cannot collide with a cursor animation's.
     CursorColorCycle,
     FiniteEffect,
     Transition,
@@ -179,7 +179,7 @@ pub(crate) enum DemandReason {
     /// deliver.
     PlatformRedraw,
     DebugCapture,
-    /// New editor content or blink toggle needing a repaint.
+    /// New editor content needing a repaint.
     Redisplay,
     /// Render-effect families (Stage 6). Each names the group animating so
     /// diagnostics can answer "why is this window still rendering?" without

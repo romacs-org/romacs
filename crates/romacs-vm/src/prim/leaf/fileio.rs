@@ -87,9 +87,9 @@ impl Leaf<'_> {
     pub fn fileio_write_output(&self, file: &mut std::fs::File, mut bytes: &[u8]) -> std::io::Result<()> {
         use std::io::Write as _;
         use std::os::fd::AsRawFd as _;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let deadline = crate::host::monotonic() + std::time::Duration::from_secs(1);
         while !bytes.is_empty() {
-            if std::time::Instant::now() >= deadline {
+            if crate::host::monotonic() >= deadline {
                 return Err(std::io::Error::from_raw_os_error(libc::ETIMEDOUT));
             }
             match file.write(bytes) {
@@ -97,7 +97,7 @@ impl Leaf<'_> {
                 Ok(n) => bytes = &bytes[n..],
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                    let remaining = deadline.saturating_duration_since(crate::host::monotonic());
                     let timeout = remaining.as_millis().clamp(1, 100) as i32;
                     let mut pollfd = libc::pollfd { fd: file.as_raw_fd(), events: libc::POLLOUT, revents: 0 };
                     if unsafe { libc::poll(&mut pollfd, 1, timeout) } < 0 {

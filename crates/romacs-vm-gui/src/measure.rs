@@ -14,6 +14,10 @@ impl romacs_vm::LayoutHost for Host {
         let mut engine = self.engine.try_borrow_mut().map_err(|_| "the layout engine is painting".to_owned())?;
         engine.measure(input)
     }
+    fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
+        let mut engine = self.engine.try_borrow_mut().map_err(|_| "the layout engine is painting".to_owned())?;
+        engine.lay_out(frame)
+    }
 }
 
 #[cfg(test)]
@@ -189,6 +193,157 @@ mod tests {
         let line = h.eval("(frame-char-height)").parse::<i64>().unwrap();
         let tall = h.eval("(cdr (window-text-pixel-size nil 4 5))").parse::<i64>().unwrap();
         assert!(tall > line, "{tall} > {line}");
+    }
+
+    /// Redisplay keeps the window start exactly when point is on a row the
+    /// start shows whole, as the iterator measures it over the host's
+    /// layout (`pos-visible-in-window-p'), whether point moved or text
+    /// changed; every paint then shows the cursor on a whole row.
+    #[test]
+    fn the_start_stays_exactly_while_point_shows_on_a_whole_row() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
+          (let ((i 0))
+            (while (< i 50)
+              (insert (format "line %d " i) (make-string (* 13 (% i 5)) ?x)
+                      (if (= (% i 7) 3) (propertize "BIG" 'face 'hosted-big) "") "\n")
+              (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        let first = h.paint();
+        let band = first.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map(|g| g.2).unwrap();
+        let steps = ["(forward-char 1)", "(forward-char 1)", "(forward-line 1)", "(insert \"abc\")",
+                     "(insert \"\\n\")", "(delete-char -1)", "(insert (make-string 40 ?y))", "(backward-char 3)"];
+        let (mut kept, mut moved) = (0, 0);
+        for step in 0..400 {
+            let form = steps[step % steps.len()];
+            let start = h.eval(&format!("(progn (if (eobp) (goto-char 1) {form}) (window-start))"));
+            let visible = h.eval("(pos-visible-in-window-p (point) nil t)");
+            let whole = visible != "nil" && visible.split(' ').count() == 2;
+            let paint = h.paint();
+            let (_, y, _, height) = paint.cursor.expect("the selected window's cursor");
+            assert!(y >= 0.0 && y + height <= band, "step {step} {form}: cursor at {y}+{height} past the text area {band}");
+            let after = h.eval("(window-start)");
+            assert_eq!(after == start, whole, "step {step} {form}: start {start} -> {after}, point visible {visible}");
+            if whole { kept += 1 } else { moved += 1 }
+        }
+        assert!(kept > 300 && moved > 3, "kept {kept}, moved {moved}");
+    }
+
+    /// A start redisplay chooses from the painted rows puts point where
+    /// GNU's do, as the display iterator measures them: with
+    /// `scroll-conservatively' 101 on the last whole row going down and the
+    /// first going up, and one row more would not show it whole; with 0,
+    /// on the row GNU's recentring moves back to.
+    #[test]
+    fn a_new_start_puts_point_where_gnus_rules_do() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
+          (let ((i 0))
+            (while (< i 120)
+              (insert (format "line %d " i) (make-string (* 17 (% i 4)) ?x)
+                      (if (= (% i 9) 4) (propertize "BIG" 'face 'hosted-big) "") "\n")
+              (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        h.paint();
+        let whole = |h: &mut Hosted, form: &str| {
+            let visible = h.eval(&format!("(pos-visible-in-window-p {form} nil t)"));
+            visible != "nil" && visible.split(' ').count() == 2
+        };
+        let line = h.eval("(frame-char-height)").parse::<u32>().unwrap();
+        let body = h.eval("(window-body-height nil t)").parse::<u32>().unwrap();
+        let back = { let dy = body / 2; let mut back = (dy / line).max(1);
+            if dy > back * line && dy - back * line > body.min(line * 2 / 3) { back += 1; } back };
+        let mut scrolls = 0;
+        for (conservative, step) in [(101, "(forward-line 1)"), (101, "(forward-line -1)"), (0, "(forward-line 7)"), (0, "(forward-line -9)")] {
+            h.eval(&format!("(setq scroll-conservatively {conservative})"));
+            for _ in 0..60 {
+                let start = h.eval(&format!("(progn {step} (window-start))"));
+                h.paint();
+                if h.eval("(window-start)") == start { continue; }
+                scrolls += 1;
+                assert!(whole(&mut h, "(point)"), "{step}: point shows whole after the scroll");
+                let row = h.eval("(save-excursion (vertical-motion 0) (point))");
+                if conservative == 0 {
+                    // Recentring: point's row is BACK rows below the start, or the buffer starts sooner.
+                    let down = h.eval(&format!("(save-excursion (goto-char (window-start)) (vertical-motion {back}) (point))"));
+                    assert!(down == row || h.eval("(window-start)") == "1", "{step}: row {row}, {back} rows down {down}");
+                } else if step.contains(" -") {
+                    assert_eq!(h.eval("(window-start)"), row, "{step}: point on the first row");
+                } else {
+                    // One row more above would not show point whole.
+                    let up = h.eval("(save-excursion (goto-char (window-start)) (vertical-motion -1) (point))");
+                    let shown = h.eval(&format!("(let ((s (window-start))) (set-window-start nil {up} t) (prog1 (pos-visible-in-window-p (point) nil t) (set-window-start nil s t)))"));
+                    assert!(shown == "nil" || shown.split(' ').count() != 2, "{step}: start {up} shows point too: {shown}");
+                }
+            }
+        }
+        assert!(scrolls > 20, "{scrolls} scrolls");
+    }
+
+    /// A default face shrunk live, with no frame resize, makes rows shorter
+    /// than the frame's line: the window still fills with text, and point
+    /// moved below its last whole row still scrolls it, the text it has
+    /// not shown being no end of the buffer.
+    #[test]
+    fn a_shrunk_default_face_fills_and_scrolls_the_window() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer)
+          (let ((i 0)) (while (< i 300) (insert (format "line %d\n" i)) (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        h.paint();
+        h.eval("(internal-set-lisp-face-attribute 'default :height 60 (selected-frame))");
+        let paint = h.paint();
+        let band = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map(|g| g.2).unwrap();
+        let text = || paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text);
+        let row = text().map(|g| g.4).fold(f32::MAX, f32::min);
+        let bottom = text().map(|g| g.2 + g.4).fold(0.0, f32::max);
+        assert!(row < h.eval("(frame-char-height)").parse::<f32>().unwrap(), "rows of {row}px are shorter than the frame's line");
+        assert!(bottom + row > band, "text fills the window: its last row ends at {bottom}, the band starts at {band}");
+        // Down a line at a time: the start moves once point passes the last whole row.
+        let mut scrolled = false;
+        for step in 0..((band / row) as usize + 5) {
+            h.eval("(forward-line 1)");
+            let paint = h.paint();
+            let (_, y, _, height) = paint.cursor.unwrap_or_else(|| panic!("step {step}: no cursor on a whole row"));
+            assert!(y + height <= band, "step {step}: cursor at {y}+{height} past {band}");
+            scrolled |= h.eval("(window-start)") != "1";
+        }
+        assert!(scrolled, "the window scrolled");
+    }
+
+    /// A mode line enabled while point is on the window's bottom whole row
+    /// takes that row: redisplay scrolls so point shows above the band, as
+    /// pinned GNU does (start 1 -> 8 at its geometry). Removing the band, or
+    /// adding a header line, which Romacs does not paint, keeps the cursor
+    /// on a whole row.
+    #[test]
+    fn a_mode_line_enabled_over_points_row_scrolls_the_window() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq mode-line-format nil) (erase-buffer)
+          (let ((i 0)) (while (< i 100) (insert (format "line %d\n" i)) (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        h.paint();
+        // Point to the last whole row.
+        h.eval("(while (let ((v (pos-visible-in-window-p (line-beginning-position 2) nil t))) (and v (= (length v) 2))) (forward-line 1))");
+        let paint = h.paint();
+        assert_eq!(h.eval("(window-start)"), "1", "point on the bottom whole row keeps the start");
+        let (_, y, _, height) = paint.cursor.expect("cursor on the bottom row");
+        assert!(y + height <= paint.window_height as f32 && y + 2.0 * height > paint.window_height as f32, "point is on the bottom row: {y}+{height}");
+        let cursor_in_text = |h: &mut Hosted, what: &str| {
+            let paint = h.paint();
+            let bottom = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map_or(paint.window_height as f32, |g| g.2);
+            let (_, y, _, height) = paint.cursor.unwrap_or_else(|| panic!("{what}: the cursor is clipped"));
+            assert!(y + height <= bottom, "{what}: cursor at {y}+{height} past {bottom}");
+        };
+        h.eval("(setq mode-line-format '(\"%b\"))");
+        cursor_in_text(&mut h, "mode line enabled");
+        assert_eq!(h.eval("(window-start)"), "8", "the band took point's row: the window scrolls as GNU does");
+        h.eval("(setq mode-line-format nil)");
+        cursor_in_text(&mut h, "mode line removed");
+        h.eval("(setq header-line-format \"header\")");
+        cursor_in_text(&mut h, "header line set");
+        h.eval("(setq mode-line-format '(\"%b\"))");
+        cursor_in_text(&mut h, "mode line again, with a header line");
     }
 
     /// A window that starts on a continuation row: the host's glyphs and

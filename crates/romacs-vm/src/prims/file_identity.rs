@@ -23,14 +23,14 @@ fn find_buffer_visiting(cx, filename: Value) {
     }
     refuse_handler(cx, expanded, "file-truename")?;
     // GNU files.el checks the saved truename before the inode fallback.
-    let truename = std::fs::canonicalize(&path).ok()
+    let truename = crate::host::canonicalize(&path).ok()
         .and_then(|p| p.to_str().map(str::to_owned)).unwrap_or_else(|| path.clone());
     let true_value = cx.string(&truename);
     refuse_handler(cx, true_value, "file-truename")?;
     refuse_handler(cx, true_value, "abbreviate-file-name")?;
     if let Some((buffer, _, _, _)) = visits.iter().find(|(_, name, _, saved)| {
         saved.as_ref() == Some(&truename)
-            && std::fs::canonicalize(name).ok().and_then(|p| p.to_str().map(str::to_owned))
+            && crate::host::canonicalize(name).ok().and_then(|p| p.to_str().map(str::to_owned))
                 .unwrap_or_else(|| name.clone()) == truename
     }) {
         return Ok(*buffer);

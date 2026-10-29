@@ -451,12 +451,6 @@ impl RenderApp {
 
         self.pump_glib();
 
-        self.frame_windows.tick_top_level_cursor_blinks(
-            now,
-            self.effects.cursor_wake.enabled,
-            self.renderer.as_ref(),
-        );
-
         self.frame_windows.tick_top_level_cursor_animations(now);
 
         self.frame_windows
@@ -799,8 +793,8 @@ impl RenderApp {
             // cursor exists in a committed frame. Its configured cadence is
             // non-zero in the control-plane type and capped to the display rate
             // at this scheduling boundary; the draw path no longer latches
-            // continuation. Policy (Stage 7): unfocused windows and blinked-off
-            // cursors pause ambient demand, while hollow cursor visuals do not
+            // continuation. Policy (Stage 7): unfocused windows pause ambient
+            // demand, while hollow cursor visuals do not
             // contribute to the aggregate rate because the cycle cannot change
             // their pixels. Color remains a function of elapsed presentation
             // time, not the number of ticks.
@@ -815,14 +809,13 @@ impl RenderApp {
                 cycle_frame,
                 &self.effects,
                 dynamic_animation_rate,
-                window_state.render.cursor.blink_on,
                 now,
             );
             if cycle_action == PacingAction::RequestRedraw {
                 action = PacingAction::RequestRedraw;
             }
 
-            // A blink toggle that already happened needs its frame now. It
+            // A cursor-layer change (a motion step) needs its frame now. It
             // changes only the cursor layer, so it asks for a composite of the
             // retained scene; a content repaint owed on the same pass has
             // already submitted the stronger Redisplay demand above and wins
@@ -841,26 +834,6 @@ impl RenderApp {
                 );
                 if cursor_action == PacingAction::RequestRedraw {
                     action = PacingAction::RequestRedraw;
-                }
-            }
-
-            match window_state.render.cursor.next_blink_deadline() {
-                Some(blink) => {
-                    self.frame_coordinator.submit_demand(
-                        id,
-                        FrameDemand {
-                            invalidation: Invalidation::CompositeOnly {
-                                layers: LayerMask::CURSOR_EFFECTS,
-                            },
-                            cadence: Cadence::At(blink),
-                            reason: DemandReason::CursorAnimation,
-                        },
-                        now,
-                    );
-                }
-                None => {
-                    self.frame_coordinator
-                        .retract(id, DemandReason::CursorAnimation);
                 }
             }
 
@@ -931,11 +904,7 @@ impl RenderApp {
         frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
-        cursor_visible: bool,
     ) -> Option<std::num::NonZeroU16> {
-        if !cursor_visible {
-            return None;
-        }
         frame
             .window_cursors
             .iter()
@@ -959,7 +928,6 @@ impl RenderApp {
         frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
-        cursor_visible: bool,
         window_focused: bool,
     ) -> Option<super::frame_sched::FrameDemand> {
         use super::frame_sched::{Cadence, DemandReason, FrameDemand, Invalidation, LayerMask};
@@ -971,7 +939,6 @@ impl RenderApp {
             frame,
             global_effects,
             display_max_rate,
-            cursor_visible,
         )?;
         Some(FrameDemand {
             invalidation: Invalidation::CompositeOnly {
@@ -984,7 +951,7 @@ impl RenderApp {
 
     /// Atomically reconcile the cursor-cycle producer's standing demand with
     /// the generic coordinator. This is the runtime integration seam: absent,
-    /// blinked-off, hollow, disabled, or unfocused cursor state withdraws the
+    /// hollow, disabled, or unfocused cursor state withdraws the
     /// producer; visible cycling state submits its exact typed demand.
     pub(super) fn reconcile_cursor_color_cycle_demand(
         coordinator: &mut super::frame_sched::FrameCoordinator,
@@ -992,7 +959,6 @@ impl RenderApp {
         frame: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
-        cursor_visible: bool,
         now: EventTime,
     ) -> super::frame_sched::PacingAction {
         use super::frame_sched::{DemandReason, PacingAction};
@@ -1002,7 +968,6 @@ impl RenderApp {
                 frame,
                 global_effects,
                 display_max_rate,
-                cursor_visible,
                 coordinator.is_focused(id),
             )
         });

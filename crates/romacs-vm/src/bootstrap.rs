@@ -217,7 +217,7 @@ impl Vm {
             }
             ExpandFileName => self.expand_file_name_legacy(a[0], a.get(1).copied().unwrap_or(Value::NIL)),
             FileDirectoryP => Ok(
-                if std::path::Path::new(self.source_string(a[0])?).is_dir() {
+                if crate::host::probe(crate::host::Probe::IsDir, self.source_string(a[0])?) {
                     Value::TRUE
                 } else {
                     Value::NIL

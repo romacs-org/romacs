@@ -20,6 +20,7 @@ const ENTRIES: &[&str] = &[
     "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request", "cached_source_form",
     "finish_request", "poll_collect", "collect_garbage", "watched_write", "call_suspended",
     "load_source_named", "variable_set", "notify", "prepared_function",
+    "prepare_source", "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];

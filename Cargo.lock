@@ -4241,6 +4241,7 @@ dependencies = [
 name = "romacs-face"
 version = "0.0.19"
 dependencies = [
+ "romacs-snapshot",
  "rustc-hash 2.1.3",
  "thiserror 2.0.21",
  "trybuild",
@@ -4366,6 +4367,9 @@ dependencies = [
 [[package]]
 name = "romacs-layout-input"
 version = "0.0.19"
+dependencies = [
+ "romacs-snapshot",
+]
 
 [[package]]
 name = "romacs-layout2"
@@ -4453,6 +4457,7 @@ dependencies = [
  "memchr",
  "num_enum",
  "regex-automata",
+ "romacs-snapshot",
  "rustc-hash 2.1.3",
  "smallvec",
  "static_assertions",
@@ -4505,6 +4510,17 @@ name = "romacs-retired-vm-contract"
 version = "0.1.0"
 dependencies = [
  "romacs-vm",
+]
+
+[[package]]
+name = "romacs-snapshot"
+version = "0.0.19"
+dependencies = [
+ "foldhash",
+ "num-bigint",
+ "ropey",
+ "rustc-hash 2.1.3",
+ "serde_json",
 ]
 
 [[package]]
@@ -4610,6 +4626,8 @@ dependencies = [
  "romacs-layout-input",
  "romacs-layout2",
  "romacs-regex-engine",
+ "romacs-snapshot",
+ "romacs-vm",
  "ropey",
  "rustc-hash 2.1.3",
  "serde_json",
@@ -4618,6 +4636,7 @@ dependencies = [
  "stacker",
  "str_indices",
  "trybuild",
+ "twox-hash",
  "unicode-bidi",
  "unicode-segmentation",
  "unicode-width",
@@ -4636,6 +4655,7 @@ dependencies = [
  "romacs-layout-input",
  "romacs-layout2",
  "romacs-renderer-wgpu",
+ "romacs-snapshot",
  "romacs-vm",
  "serde_json",
  "wgpu",
@@ -5777,6 +5797,12 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
 ]
+
+[[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "typed-path"

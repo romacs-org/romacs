@@ -15,6 +15,7 @@ struct ChunkCursor {
     middle_byte: usize,
     middle_char: usize,
 }
+romacs_snapshot::snapshot_struct!(ChunkCursor { text, byte, scalar, chars, middle_byte, middle_char });
 impl ChunkCursor {
     fn fill(&mut self, text: &str, byte: usize, scalar: usize) {
         self.text.clear();
@@ -68,6 +69,7 @@ pub struct Text {
     #[cfg(test)]
     property_edit_visits: usize,
 }
+romacs_snapshot::snapshot_struct!(Text { rope, bytes_len, chars_len, tail, tail_chars, flat, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, restriction, properties, state, point, syntax_table, category_table, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits });
 impl Text {
     pub fn new(bytes: &[u8]) -> Result<Self> {
         let s = std::str::from_utf8(bytes).map_err(|_| "invalid Unicode text")?;

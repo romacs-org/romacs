@@ -16,8 +16,10 @@ fn a_narrowed_window_shows_and_ends_in_its_accessible_region() {
                              (set-window-start nil 1) (narrow-to-region 20 60) (goto-char (point-min)))"#).unwrap();
     let snapshot = vm.frame_snapshot(column * 80, line * 24).unwrap();
     let window = &snapshot.windows[0].snapshot;
-    // ASCII text: BEGV 20 and ZV 60 are bytes 19 and 59.
-    assert_eq!((window.start_byte, window.text.utf8.len()), (19, 59), "start clipped to BEGV, text ends at ZV");
+    // ASCII text: BEGV 20 and ZV 60 are bytes 19 and 59; the published
+    // text starts at the buffer byte `published_base' names.
+    let base = vm.published_base(window.id);
+    assert_eq!((base + window.start_byte, base + window.text.utf8.len()), (19, 59), "start clipped to BEGV, text ends at ZV");
     let (_, ends) = romacs_layout2::layout_frame(&snapshot, 1).unwrap();
     vm.display_apply_layout(&ends).unwrap();
     assert_eq!(vm.eval_source("(list (window-end) (point-max))").unwrap().display().unwrap(), "(60 60)");

@@ -25,6 +25,7 @@ use crate::spec::{Background, Collapsed, FaceDef, FaceError};
 /// [`crate::Remap`]) is constructed; never reused, never bumped by hand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Generation(NonZeroU64);
+romacs_snapshot::snapshot_tuple!(Generation(f0));
 
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -46,6 +47,7 @@ pub struct Deffaces {
     order: Vec<Arc<str>>,
     specs: FxHashMap<Arc<str>, Collapsed>,
 }
+romacs_snapshot::snapshot_struct!(Deffaces { aliases, order, specs });
 
 impl Deffaces {
     /// Register a face-alias at the boundary, before the immutable theme is built.
@@ -106,6 +108,7 @@ pub struct ThemeSpec {
     name: Arc<str>,
     faces: FxHashMap<Arc<str>, Collapsed>,
 }
+romacs_snapshot::snapshot_struct!(ThemeSpec { name, faces });
 
 impl ThemeSpec {
     pub fn new(name: &str) -> ThemeSpec {
@@ -131,6 +134,7 @@ impl ThemeSpec {
 pub struct UserOverrides {
     faces: FxHashMap<Arc<str>, FaceDef>,
 }
+romacs_snapshot::snapshot_struct!(UserOverrides { faces });
 
 impl UserOverrides {
     /// Read explicit `((FACE . PLIST) ...)` preferences; no Custom forms.
@@ -177,6 +181,7 @@ impl UserOverrides {
 /// (it is absent from `face-attribute-name-alist`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Base(Attrs);
+romacs_snapshot::snapshot_tuple!(Base(f0));
 
 impl Base {
     pub fn new(attrs: Attrs) -> Result<Base, FaceError> {
@@ -216,6 +221,7 @@ pub(crate) struct Face {
     /// The face's own attributes merged along its inheritance, resolved once.
     pub(crate) inherited: Attrs,
 }
+romacs_snapshot::snapshot_struct!(Face { def, inherited });
 
 #[derive(Clone, Debug)]
 struct Inputs {
@@ -227,6 +233,7 @@ struct Inputs {
     background: Background,
     base: Arc<Base>,
 }
+romacs_snapshot::snapshot_struct!(Inputs { deffaces, spec, overrides, override_order, user, background, base });
 
 #[derive(Debug)]
 struct ThemeInner {
@@ -236,10 +243,12 @@ struct ThemeInner {
     faces: FxHashMap<Arc<str>, Face>,
     default_realized: Attrs,
 }
+romacs_snapshot::snapshot_struct!(ThemeInner { generation, inputs, order, faces, default_realized });
 
 /// An immutable face table and C merge context. Cheap to clone and switch.
 #[derive(Clone, Debug)]
 pub struct Theme(Arc<ThemeInner>);
+romacs_snapshot::snapshot_tuple!(Theme(f0));
 
 impl Theme {
     /// Build a theme. Fails, before anything is published, if any spec is
@@ -421,18 +430,29 @@ impl Theme {
         keyword: &str,
         value: &BoundedDatum,
     ) -> Result<Theme, FaceError> {
+        self.with_face_attributes([(face, keyword, value)])
+    }
+
+    /// [`Theme::with_face_attribute`] for each of EDITS in order, built once:
+    /// the theme the edits make one at a time when every one succeeds.
+    pub fn with_face_attributes<'e>(
+        &self,
+        edits: impl IntoIterator<Item = (&'e str, &'e str, &'e BoundedDatum)>,
+    ) -> Result<Theme, FaceError> {
         let mut inputs = self.0.inputs.clone();
         let mut overrides = (*inputs.overrides).clone();
-        let key: Arc<str> = self.canonical_name(face).into();
-        let entry = overrides.entry(key.clone()).or_default();
-        entry.push(Datum::symbol(keyword));
-        entry.push((**value).clone());
-        if !inputs.override_order.contains(&key) {
-            let mut order = (*inputs.override_order).clone();
-            order.push(key);
-            inputs.override_order = Arc::new(order);
+        let mut order = (*inputs.override_order).clone();
+        for (face, keyword, value) in edits {
+            let key: Arc<str> = self.canonical_name(face).into();
+            let entry = overrides.entry(key.clone()).or_default();
+            entry.push(Datum::symbol(keyword));
+            entry.push((**value).clone());
+            if !order.contains(&key) {
+                order.push(key);
+            }
         }
         inputs.overrides = Arc::new(overrides);
+        inputs.override_order = Arc::new(order);
         Theme::from_inputs(inputs)
     }
 

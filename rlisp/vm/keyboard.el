@@ -92,7 +92,7 @@ timer) ends the wait, so the deadline is computed again (host_input.rs)."
     (while lists
       (let ((timers (car lists)))
         (while timers
-          (setq times (cons (and (fboundp 'romacs--timer-time) (romacs--timer-time (car timers))) times)
+          (setq times (cons (romacs--timer-time (car timers)) times)
                 timers (cdr timers))))
       (setq times (cons 'idle times) lists (cdr lists)))
     (cons (romacs--unread-p) times)))
@@ -136,8 +136,14 @@ runs no timers."
                 (setq c (romacs--read-host-event
                          (if (and delay left) (min delay left) (or delay left))
                          (and shown (not dispatched) (= shown ran)))
-                      shown ran
-                      waiting (null c))))))
+                      shown ran)
+                ;; read_char: an event `special-event-map' binds (focus) runs
+                ;; its binding at once and is never input; the read goes on,
+                ;; and redisplays first what the binding changed.
+                (when (and (consp c) (lookup-key special-event-map (vector (car c))))
+                  (romacs--special-event c)
+                  (setq c nil shown nil))
+                (setq waiting (null c))))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 
@@ -555,6 +561,17 @@ Return nil at the end of an executing keyboard macro."
   (romacs--command-loop-resume)
   (while (romacs--command-loop-step))
   nil)
+
+(defun romacs--special-event (event)
+  "keyboard.c read_char for a special EVENT such as (focus-in FRAME): run
+its `special-event-map' binding at once, outside any key sequence, with
+EVENT as its keys.  Value: whether EVENT ran a command.  A VM without
+GNU's preloaded Lisp has the bindings but not frame.el's handlers."
+  (let ((command (lookup-key special-event-map (vector (car-safe event)))))
+    (when (commandp command)
+      (setq last-input-event event)
+      (command-execute command nil (vector event) t)
+      t)))
 
 (defun romacs--host-command ()
   "keyboard.c command_loop_2 one command at a time, for a host whose own

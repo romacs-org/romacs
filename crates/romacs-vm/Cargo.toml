@@ -11,12 +11,15 @@ romacs-layout-input = { path = "../romacs-layout-input" }
 romacs-display-protocol = { path = "../romacs-display-protocol" }
 romacs-face = { path = "../romacs-face" }
 romacs-regex-engine = { path = "../romacs-regex-engine" }
+romacs-snapshot = { path = "../romacs-snapshot" }
 str_indices = "=0.4.4"
 serde_json = "1"
 num-bigint = "0.4"
 stacker.workspace = true
 libc.workspace = true
 sha2 = "0.11"
+# xxh3: the fast content hash of mapped library segments (world::arena).
+twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_128", "std"] }
 # fns.c secure-hash: MD5 and SHA-1 (SHA-3 is crate::digest).
 md-5 = "0.11"
 sha1 = "0.11"
@@ -38,7 +41,14 @@ libsqlite3-sys = { version = "0.38", features = ["bundled"] }
 [build-dependencies]
 sha2 = "0.11"
 
+[features]
+# Test-only hooks of the world store (world::store::pause_for_test). Only
+# test targets enable it, through the dev-dependency on this crate below.
+world-test-hooks = []
+
 [dev-dependencies]
+# This crate with its test hooks, for its own tests.
+romacs-vm = { path = ".", features = ["world-test-hooks"] }
 romacs-coordinate-contract = { path = "../../tests/coordinate-contract" }
 # For tests that must drive the REAL producer chain: VM to frame_snapshot to
 # layout_frame to display_apply_layout to (window-end). A dev-dependency keeps

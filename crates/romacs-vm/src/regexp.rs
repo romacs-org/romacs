@@ -12,6 +12,7 @@ pub(super) struct MatchState {
     pub(crate) groups: Vec<Option<(usize, usize)>>,
     pub(crate) succeeded: bool,
 }
+romacs_snapshot::snapshot_struct!(MatchState { groups, succeeded });
 
 pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
     matches!(
@@ -92,12 +93,22 @@ type SearchResult<T> = std::result::Result<T, Fault>;
 /// or the completion translation over a buffer's case-canon table.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Translation { None, Standard, Completion(Value) }
+romacs_snapshot::snapshot_enum!(Translation {
+    Translation::None => (),
+    Translation::Standard => (),
+    Translation::Completion(f0) => (f0),
+});
 
 /// search.c's searchbufs: the most recently used compiled patterns, so a
 /// pattern searched again is not compiled again (compile_pattern). A
 /// pattern whose compilation read the syntax table is kept for that table.
 #[derive(Default)]
 pub(crate) struct PatternCache(Vec<CachedPattern>);
+impl PatternCache {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 struct CachedPattern {
     source: Vec<u8>,

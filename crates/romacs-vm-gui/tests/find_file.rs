@@ -69,7 +69,7 @@ impl HostInput for Keys {
     fn input_pending(&mut self) -> bool {
         false
     }
-    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
+    fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         self.seen.borrow_mut().push(
             frame
                 .frame

@@ -57,7 +57,10 @@ impl Leaf<'_> {
     }
     pub(crate) fn bury_buffer_model(&mut self, buffer: Value) { self.vm.bury_buffer_model(buffer); }
     /// get_random: 62 random bits from the VM's generator.
-    pub(crate) fn random_bits(&mut self) -> u64 { self.vm.random.bits() }
+    pub(crate) fn random_bits(&mut self) -> u64 {
+        self.vm.fence_random();
+        self.vm.random.bits()
+    }
     pub fn lifecycle_killable(&self, buffer: Value) -> bool {
         self.lifecycle_live_p(buffer)
             && !self

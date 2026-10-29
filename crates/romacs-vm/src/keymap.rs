@@ -66,6 +66,12 @@ impl Vm {
         let global = self.slots[self.names["global-map"]].value;
         self.declare_special_raw("#:vm2-global-keymap", global);
         self.declare_special_raw("meta-prefix-char", Value::integer(27).unwrap());
+        // keyboard.c keys_of_keyboard: the focus events' special bindings.
+        let special = self.slots[self.names["special-event-map"]].value;
+        for (event, command) in [("focus-in", "handle-focus-in"), ("focus-out", "handle-focus-out")] {
+            let (event, command) = (self.intern(event), self.intern(command));
+            self.keymap_store(special, event, command, false).unwrap();
+        }
         self.initialize_command_bindings(global);
     }
     /// One `lookup-key' walk with FILTERS as the known menu-filter results:

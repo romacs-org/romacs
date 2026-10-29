@@ -52,11 +52,17 @@ fn kill_buffer(cx; optional arg: Value) -> Step {
     let buffer = if arg == Value::NIL { cx.decode_buffer(arg)? }
         else { cx.lifecycle_buffer(arg, false, false)?.0 };
     if !cx.lifecycle_killable(buffer) { return Ok(Step::Done(Value::NIL)); }
+    let inhibit = if cx.buffer_state(buffer).unwrap().inhibit_buffer_hooks { Value::TRUE } else { Value::NIL };
+    // The Lisp half is defined by the first kill, as GNU's C is there
+    // from the start; later kills call it.
+    let helper = cx.intern("romacs--kill-buffer");
+    if cx.fboundp(helper) {
+        return Ok(Step::Call { f: helper, args: vec![buffer, inhibit], then: return_result, saved: vec![] });
+    }
     let source = cx.string(include_str!("../../../../rlisp/vm/buffer_lifecycle.el"));
     let parsed = cx.read_from_string(source, Value::NIL, Value::NIL)?;
     let form = cx.pair(parsed).expect("reader result").0;
     let f = cx.intern("eval");
-    let inhibit = if cx.buffer_state(buffer).unwrap().inhibit_buffer_hooks { Value::TRUE } else { Value::NIL };
     Ok(Step::Call { f, args: vec![form, Value::TRUE], then: kill_helper, saved: vec![buffer, inhibit] })
 }}
 fn kill_helper(_: &mut Leaf<'_>, helper: Value, saved: &[Value]) -> Next {

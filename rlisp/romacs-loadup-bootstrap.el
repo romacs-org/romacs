@@ -38,14 +38,6 @@
 ;; loadup.el: mini-windows can resize now, so the variable takes its
 ;; advertised default (xdisp.c starts it as nil).
 (setq resize-mini-windows 'grow-only)
-;; cus-start.el's Linux standard value for this C variable, applied before
-;; files.el reads it.  GNU reaches it through custom-initialize-delay at
-;; startup, after cus-start preloads.
-(unless (bound-and-true-p temporary-file-directory)
-  (setq temporary-file-directory
-        (file-name-as-directory
-         (or (getenv-internal "TMPDIR") (getenv-internal "TMP")
-             (getenv-internal "TEMP") "/tmp"))))
 (load "files.el" nil t t)
 (load "emacs-lisp/macroexp.el" nil t t)
 (load "cus-face.el" nil t t)
@@ -167,28 +159,6 @@
 (load "emacs-lisp/rmc.el" nil t t)
 (load "leim/leim-list.el" nil t t)
 
-;; startup.el normal-top-level (startup.el:585-592), before command-line:
-;; the per-user directory, which `locate-user-emacs-file' and the delayed
-;; standard values below build on.  A GUI session then names its own
-;; (rlisp/romacs-gui-loadup.el).
-(setq startup--xdg-config-home-emacs
-      (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
-        (if xdg-config-home
-            (concat xdg-config-home "/emacs/")
-          startup--xdg-config-default)))
-(setq user-emacs-directory
-      (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
-
-;; startup.el normal-top-level (startup.el:639-668): Unix's end-of-line
-;; mnemonics, then the locale's language environment and coding systems,
-;; from this process's LANG and LC_* (set-locale-environment).
-(setq eol-mnemonic-dos "(DOS)"
-      eol-mnemonic-mac "(Mac)")
-(set-locale-environment nil)
-
-;; startup.el command-line (startup.el:1300): initialization begins.
-(setq before-init-time (current-time) after-init-time nil
-      command-line-default-directory default-directory)
 ;; startup.el command-line (startup.el:1479): variables whose standard value
 ;; depends on the runtime (user-mail-address and friends) get it once the
 ;; preloaded files are in.  Romacs does not run command-line in this
@@ -199,14 +169,90 @@
   (and (listp custom-delayed-init-variables) (reverse custom-delayed-init-variables))
   "The preloaded variables whose standard value depends on the runtime, in load order.
 These are `custom-delayed-init-variables' as the preloaded files left it.")
-(let ((user-emacs-directory-warning nil))
-  (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
-(setq custom-delayed-init-variables t)
-;; startup.el command-line (startup.el:843): the initial frame's faces for
-;; its background mode and display type.
+;; The per-process steps startup.el takes before the init file, in batch
+;; and in an interactive session alike.
+(defun romacs--startup-environment ()
+  "Take the per-process steps startup.el takes before the init file.
+`normal-top-level' (startup.el:639-668) sets Unix's end-of-line
+mnemonics, then the language environment and coding systems from this
+process's LANG and LC_* (`set-locale-environment'); `command-line'
+\(startup.el:1300) then begins initialization, in the directory the
+process started in."
+  (setq eol-mnemonic-dos "(DOS)"
+        eol-mnemonic-mac "(Mac)")
+  (set-locale-environment nil)
+  (setq before-init-time (current-time) after-init-time nil
+        command-line-default-directory default-directory))
+;; The steps of startup.el's `command-line' a batch session takes in each
+;; process.  `romacs--startup-phase' marks their extent: a world build may
+;; read per-process host facts only inside it, and a VM restored from a
+;; world runs them again (`romacs-world-restart').
+(defun romacs-batch-startup ()
+  "Take the per-process steps of startup.el's `command-line', as batch does.
+The per-user directory is found as `normal-top-level' finds it, then the
+locale and the start of initialization (`romacs--startup-environment'),
+the delayed variables get their standard values in this process's context,
+and `after-init-time' its clock."
+  (unwind-protect
+      (progn
+        (romacs--startup-phase t)
+        ;; startup.el normal-top-level (startup.el:585-592), before
+        ;; command-line: the per-user directory, which
+        ;; `locate-user-emacs-file' and the delayed standard values build on.
+        ;; A GUI session then names its own (rlisp/romacs-gui-loadup.el).
+        (setq startup--xdg-config-home-emacs
+              (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
+                (if xdg-config-home
+                    (concat xdg-config-home "/emacs/")
+                  startup--xdg-config-default)))
+        (setq user-emacs-directory
+              (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
+        (romacs--startup-environment)
+        (let ((user-emacs-directory-warning nil))
+          (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
+        (setq custom-delayed-init-variables t)
+        ;; startup.el command-line (startup.el:1717): initialization is over.
+        (setq after-init-time (current-time)))
+    (romacs--startup-phase nil)))
+(defvar romacs-startup-function #'romacs-batch-startup
+  "The per-process startup steps this session took last.
+A session that takes its own after the chain's sets it to them
+\(rlisp/romacs-gui-loadup.el); `romacs-world-restart' takes them again.")
+(romacs-batch-startup)
+;; startup.el normal-top-level (startup.el:843): the initial frame's faces
+;; for its background mode and display type.  It reads no per-process fact
+;; in batch, and GNU calls it idempotent, so it is loadup's, not startup's:
+;; a world keeps its result.
 (frame-set-background-mode (selected-frame))
-;; startup.el command-line (startup.el:1717): initialization is over.
-(setq after-init-time (current-time))
+
+(defconst romacs--world-reseed
+  '((cl-extra "emacs-lisp/cl-extra.el"
+     (setq cl--random-state (cl--make-random-state (cl--random-time)))
+     "GNU dumps no cl- library but cl-preloaded, so each process seeds the state from its clock when cl-extra loads")
+    (project "progmodes/project.el"
+     ;; As loadup loads it: before startup names the per-user directory,
+     ;; which is still subr.el's nil, so the file is the working directory's.
+     (let ((user-emacs-directory nil))
+       (custom-reevaluate-setting 'project-list-file))
+     "GNU dumps no project.el; loadup loads it (flymake-log's eager expansion), so each process computes the file against its own working directory")
+    (find-func "emacs-lisp/find-func.el"
+     (setq find-function-C-source-directory
+           (let ((dir (expand-file-name "src" source-directory)))
+             (if (file-accessible-directory-p dir) dir)))
+     "GNU dumps no find-func.el, so each process computes the directory, against its default-directory, when find-func loads"))
+  "Load-time forms outside startup that read a per-process fact.
+Each entry is (FEATURE FILE FORM REASON): FILE's FORM, which
+`romacs-world-restart' evaluates again when FEATURE is loaded.")
+
+(defun romacs-world-restart ()
+  "Make a VM restored from a world what a fresh process makes at this point.
+Take the session's last per-process startup steps again
+\(`romacs-startup-function'), then evaluate each `romacs--world-reseed'
+form whose feature is loaded."
+  (funcall romacs-startup-function)
+  (dolist (entry romacs--world-reseed)
+    (when (featurep (car entry))
+      (eval (nth 2 entry) t))))
 
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

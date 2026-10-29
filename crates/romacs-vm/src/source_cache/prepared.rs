@@ -8,6 +8,7 @@ pub(super) struct Prepared {
     pub(super) function: usize,
     guard: Option<Entry>,
 }
+romacs_snapshot::snapshot_struct!(Prepared { source, function, guard });
 impl Vm {
     fn prepared_function(&mut self, source: &str) -> Result<Prepared> {
         let (value, used) = self.read_source_raw(source)?.ok_or("lambda required")?;
@@ -87,6 +88,20 @@ impl Vm {
         }
         let outcome = threaded::execute_args(self, function, args);
         self.finish_request(outcome)
+    }
+    /// Call the fixed-arity lambda SOURCE with ARGS: a native caller's direct
+    /// path into Lisp. Its prepared handle is made on the first call, so no
+    /// call compiles a request.
+    pub(crate) fn call_prepared_source_raw(&mut self, source: &str, args: &[Value]) -> Result<Value> {
+        if let Some(index) = self.source_cache.prepared.iter().position(|p| p.source == source) {
+            return self.invoke_prepared_raw(PreparedHandle(index), args);
+        }
+        // Preparing runs Lisp, which may collect: ARGS wait in a frame.
+        let frame = self.root_frame(args);
+        let handle = self.prepare_source(source);
+        let args: Vec<Value> = (0..args.len()).map(|i| self.rooted(&frame, i)).collect();
+        self.drop_frame(frame);
+        self.invoke_prepared_raw(handle?, &args)
     }
     pub fn prepared_ir(&self, handle: PreparedHandle) -> Result<String> {
         let p = self

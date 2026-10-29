@@ -25,8 +25,6 @@ fn make_target(x: f32, y: f32, w: f32, h: f32, style: CursorStyle) -> CursorTarg
 #[test]
 fn config_snapshot_copies_settings_and_stops_disabled_animations() {
     let mut source = CursorState::new(t0());
-    source.blink_enabled = false;
-    source.blink_interval = Duration::from_millis(275);
     source.anim_enabled = false;
     source.anim_speed = 8.5;
     source.anim_style = CursorAnimStyle::Linear;
@@ -40,8 +38,6 @@ fn config_snapshot_copies_settings_and_stops_disabled_animations() {
     target.size_animating = true;
     target.apply_config(source.config_snapshot());
 
-    assert_eq!(target.blink_enabled, source.blink_enabled);
-    assert_eq!(target.blink_interval, source.blink_interval);
     assert_eq!(target.anim_enabled, source.anim_enabled);
     assert_eq!(target.anim_speed, source.anim_speed);
     assert_eq!(target.anim_style, source.anim_style);
@@ -238,14 +234,6 @@ fn easing_all_output_range_zero_to_one() {
 // ---------------------------------------------------------------
 
 #[test]
-fn default_state_blink_is_on() {
-    let state = CursorState::new(t0());
-    assert!(state.blink_on);
-    assert!(state.blink_enabled);
-    assert_eq!(state.blink_interval, Duration::from_millis(500));
-}
-
-#[test]
 fn default_state_animation_enabled() {
     let state = CursorState::new(t0());
     assert!(state.anim_enabled);
@@ -387,8 +375,6 @@ fn default_state_size_transition_disabled() {
 fn visual_config_updates_every_cursor_policy_as_one_snapshot() {
     let mut state = CursorState::new(t0());
     let mut config = romacs_display_protocol::VisualConfig::default();
-    config.cursor_blink.enabled = false;
-    config.cursor_blink.interval = Duration::from_millis(275);
     config.cursor_motion.enabled = false;
     config.cursor_motion.speed = 19.0;
     config.cursor_motion.style = CursorAnimStyle::Linear;
@@ -399,9 +385,6 @@ fn visual_config_updates_every_cursor_policy_as_one_snapshot() {
 
     state.apply_visual_config(&config);
 
-    assert!(!state.blink_enabled);
-    assert!(state.blink_on);
-    assert_eq!(state.blink_interval, Duration::from_millis(275));
     assert!(!state.anim_enabled);
     assert_eq!(state.anim_speed, 19.0);
     assert_eq!(state.anim_style, CursorAnimStyle::Linear);
@@ -617,38 +600,6 @@ fn tick_animation_completing_off_the_spring_path_still_rests_the_springs() {
 // ---------------------------------------------------------------
 // reset_blink
 // ---------------------------------------------------------------
-
-#[test]
-fn reset_blink_sets_visible() {
-    let base = t0();
-    let mut state = CursorState::new(base);
-    state.blink_on = false;
-    let reset_at = base.plus(Duration::from_millis(10));
-    state.reset_blink(reset_at);
-
-    assert!(state.blink_on);
-    assert_eq!(state.last_blink_toggle, reset_at);
-}
-
-#[test]
-fn reset_blink_already_visible_stays_visible() {
-    let base = t0();
-    let mut state = CursorState::new(base);
-    assert!(state.blink_on); // default is true
-    state.reset_blink(base);
-    assert!(state.blink_on);
-}
-
-#[test]
-fn reset_blink_updates_timestamp() {
-    let base = t0();
-    let mut state = CursorState::new(base);
-    let old_time = state.last_blink_toggle;
-    let reset_at = base.plus(Duration::from_millis(2));
-    state.reset_blink(reset_at);
-    assert!(state.last_blink_toggle > old_time);
-    assert_eq!(state.last_blink_toggle, reset_at);
-}
 
 // ---------------------------------------------------------------
 // tick_animation: returns false when disabled or not animating
@@ -1535,32 +1486,6 @@ fn tick_size_animation_converges() {
 // ---------------------------------------------------------------
 // Blink toggle timing behavior
 // ---------------------------------------------------------------
-
-#[test]
-fn blink_state_tracks_enabled_and_interval() {
-    let mut state = CursorState::new(t0());
-    state.blink_enabled = true;
-    state.blink_interval = Duration::from_millis(250);
-    assert!(state.blink_enabled);
-    assert_eq!(state.blink_interval, Duration::from_millis(250));
-}
-
-#[test]
-fn blink_disabled_does_not_affect_blink_on() {
-    let mut state = CursorState::new(t0());
-    state.blink_enabled = false;
-    state.blink_on = true;
-    // blink_enabled being false doesn't change blink_on by itself;
-    // the render loop checks blink_enabled before toggling
-    assert!(state.blink_on);
-}
-
-#[test]
-fn blink_interval_zero_is_valid() {
-    let mut state = CursorState::new(t0());
-    state.blink_interval = Duration::from_millis(0);
-    assert_eq!(state.blink_interval, Duration::ZERO);
-}
 
 // ---------------------------------------------------------------
 // CornerSpring: basic state

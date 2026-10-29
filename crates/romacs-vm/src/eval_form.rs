@@ -124,13 +124,17 @@ impl Vm {
                 .collect::<Result<Vec<_>>>()?;
             form = Form::List(vec![Form::Sym("let".into()), Form::List(bindings), form]);
         }
+        // Request code: the entry is released on return and the closures the
+        // form made are retired once unreachable, as for any request. Code
+        // compiled per call and never retired grew every collection's walk.
         let saved = std::mem::replace(&mut self.dynamic_scope, lexical == Value::NIL);
-        let compiled = self.compile(&form);
+        let compiled = self.compile_request(&form);
         self.dynamic_scope = saved;
-        let function = compiled?;
+        let (function, _) = compiled?;
         self.propagate_next = true;
         let result = self.execute_raw(function);
         self.propagate_next = false;
+        self.release_request_entry(function);
         result
     }
 }
@@ -138,6 +142,26 @@ impl Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each `eval' compiles its form; that code must die with its last
+    /// reference, or every collection walks all code ever evaluated.
+    #[test]
+    fn evaluated_code_is_retired_once_unreachable() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defun eval-probe (n) (eval (list '+ n 2)))").unwrap();
+        vm.eval_source_raw("(setq keeper (eval '(let ((x 40)) (lambda () (+ x 2))) t))").unwrap();
+        // The source cache roots each request text's own code.
+        vm.clear_source_cache();
+        vm.collect(&mut []);
+        let live = |vm: &Vm| vm.request_code.live.iter().filter(|&&live| live).count();
+        let before = live(&vm);
+        vm.eval_source_raw("(dotimes (i 5000) (eval-probe i) (eval `(lambda () ,i) t))").unwrap();
+        vm.clear_source_cache();
+        vm.collect(&mut []);
+        assert!(live(&vm) <= before, "evaluated code retained: {} live functions, {before} before", live(&vm));
+        assert_eq!(vm.eval_source_raw("(funcall keeper)").unwrap().as_integer().unwrap(), 42);
+        assert_eq!(vm.eval_source_raw("(eval-probe 40)").unwrap().as_integer().unwrap(), 42);
+    }
 
     // The escape an `eval` engine hands to its caller holds heap Values. It is
     // a collector root while present: garbage allocated before it is reclaimed,
