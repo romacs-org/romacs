@@ -806,7 +806,12 @@ impl Vm {
             snapshot.point_byte = point_byte;
         }
         let band = self.redisplay_and_build_mode_line(root, slot, height, false)?;
-        // The band's Lisp may have changed what the window shows.
+        // The band's Lisp may have changed what the window shows, or
+        // collected and moved the window: only ROOT's traced copy is current.
+        if self.gc_stats.collections != key.collections {
+            return Ok(None);
+        }
+        let window = self.slots[root].value;
         if self.shown_key(window, width, height)? != key {
             return Ok(None);
         }

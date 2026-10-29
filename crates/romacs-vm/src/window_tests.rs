@@ -755,3 +755,32 @@ fn unchanged_windows_redisplay_only_their_cursor_and_mode_line() {
     snapshot(&mut vm);
     assert_eq!(counts(&mut vm).0, walks, "and then nothing changed");
 }
+
+/// A mode line whose `:eval' collects during a redisplay that reuses the
+/// window's snapshot moves the window: the redisplay goes on with the
+/// window's traced handle, not the one it read before the Lisp ran.
+#[test]
+fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
+    let mut vm = Vm::new();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    // Garbage below the window the redisplay reuses, so a collection moves it.
+    run(&mut vm, r#"(progn (setq junk (list (make-string 9 ?j) (make-vector 9 0) (make-string 9 ?k)))
+                          (set-window-new-pixel (selected-window) 288)
+                          (setq lower (split-window-internal (selected-window) 288 nil 0.5))
+                          ;; Strings just above it: where the window's old index points after the move.
+                          (setq keep (let (l) (dotimes (_ 20) (push (make-string 1 ?z) l)) l))
+                          (select-window lower)
+                          (set-buffer (get-buffer-create "moved")) (insert "a\nb\nc\n") (set-window-buffer nil (current-buffer))
+                          (setq collect nil)
+                          (set (make-local-variable 'mode-line-format) '((:eval (progn (if collect (garbage-collect)) "m")))))"#);
+    let frame = vm.frame_snapshot(800, 576).unwrap();
+    let ends: Vec<_> = frame.windows.iter().map(|w| (w.snapshot.id, w.snapshot.text.utf8.len())).collect();
+    vm.display_apply_layout(&ends).unwrap();
+    vm.frame_snapshot(800, 576).unwrap();
+    // Dead only now: the reused redisplay's collection moves the window down.
+    run(&mut vm, "(setq junk nil collect t)");
+    let before = vm.heap_stats().collections;
+    let again = vm.frame_snapshot(800, 576).expect("a redisplay that collected");
+    assert!(vm.heap_stats().collections > before, "the mode line collected");
+    assert!(again.windows.iter().any(|w| w.snapshot.text.utf8 == "a\nb\nc\n"));
+}
