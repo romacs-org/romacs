@@ -1,5 +1,5 @@
 //! Binary edge storage is not text and never validates or decodes UTF-8.
-use crate::{Result, Value, coordinates::ByteOffset};
+use crate::{Result, Value, anchors::AnchorTree, coordinates::ByteOffset};
 use std::{collections::BTreeMap, ops::Range};
 /// Non-Lisp buffer identity and modification state; contains no moving Values.
 #[derive(Clone, Debug)]
@@ -48,13 +48,9 @@ pub(crate) struct ByteBuffer {
     pub(crate) case_tables: [Value; 4],
     pub point: ByteOffset,
     pub restriction: Range<ByteOffset>,
-    /// Restrictions saved by save-restriction, by id. A unibyte buffer holds
-    /// no markers, so it keeps each saved BEGV and ZV itself and moves them as
-    /// a left- and a right-biased marker (editfns.c save_restriction_save_1).
-    pub(crate) saved_restrictions: Vec<(u32, Range<ByteOffset>)>,
-    /// Points saved by save-excursion, by id, each moved as GNU's
-    /// left-biased excursion marker would move (editfns.c save_excursion_save).
-    pub(crate) saved_points: Vec<(u32, ByteOffset)>,
+    /// The markers in this buffer, at byte offsets, which here are its
+    /// characters (insdel.c adjust_markers_for_*); as a text buffer's.
+    pub anchors: AnchorTree,
     pub properties: BTreeMap<ByteOffset, BTreeMap<String, Value>>,
     /// GNU keeps a buffer's interval tree once it had a property.
     pub had_intervals: bool,
@@ -65,20 +61,21 @@ pub(crate) struct ByteBuffer {
     /// (fileio.c decide_coding_unwind); its anchors all stay at BEG.
     pub(crate) held: Option<Box<crate::annotations::AnnotatedBuffer>>,
 }
-/// insdel.c adjust_markers_for_{insert,delete,replace}: where a marker at P
-/// lands when R is replaced by INSERTED bytes. RIGHT is its insertion type,
-/// which matters only for a pure insertion at P.
-fn moved(p: ByteOffset, r: &Range<ByteOffset>, inserted: usize, right: bool) -> ByteOffset {
-    if p < r.start || (p == r.start && !(right && r.is_empty())) {
-        p
-    } else if p >= r.end {
-        ByteOffset(p.0 - (r.end.0 - r.start.0) + inserted)
-    } else {
-        r.start
-    }
-}
 impl ByteBuffer {
+    /// An empty buffer's storage, with STATE.
+    pub(crate) fn empty(state: BufferState, per_buffer: crate::forwarded::PerBuffer) -> Self {
+        ByteBuffer {
+            state, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, case_tables: [Value::NIL; 4],
+            point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0), anchors: AnchorTree::new(0),
+            properties: Default::default(), had_intervals: false, per_buffer, held: None,
+        }
+    }
     pub fn replace(&mut self, r: Range<ByteOffset>, inserted: &[u8]) -> Result<()> {
+        self.replace_with_bias(r, inserted, false)
+    }
+    /// Replace R with INSERTED; with BEFORE_MARKERS an insertion leaves
+    /// every marker at it after the new bytes, as insert-before-markers does.
+    fn replace_with_bias(&mut self, r: Range<ByteOffset>, inserted: &[u8], before_markers: bool) -> Result<()> {
         if r.start > r.end || r.end.0 > self.bytes.len() {
             return Err("index out of range".into());
         }
@@ -88,6 +85,9 @@ impl ByteBuffer {
         let changed_bytes = (r.end.0 - r.start.0)
             .checked_add(inserted.len())
             .ok_or("buffer too large")?;
+        let (a, b) = (u32::try_from(r.start.0).map_err(|_| "buffer too large")?, u32::try_from(r.end.0).map_err(|_| "buffer too large")?);
+        let len = u32::try_from(inserted.len()).map_err(|_| "buffer too large")?;
+        self.anchors.extent().checked_sub(b - a).and_then(|n| n.checked_add(len)).ok_or("buffer too large")?;
         let shift = |p: ByteOffset| {
             ByteOffset(if p < r.start {
                 p.0
@@ -121,37 +121,28 @@ impl ByteBuffer {
         } else {
             shift(old.start)
         })..shift(old.end);
-        for (_, saved) in &mut self.saved_restrictions {
-            *saved = moved(saved.start, &r, inserted.len(), false)..moved(saved.end, &r, inserted.len(), true);
-        }
-        for (_, saved) in &mut self.saved_points {
-            *saved = moved(*saved, &r, inserted.len(), false);
-        }
         self.bytes
             .splice(r.start.0..r.end.0, inserted.iter().copied());
+        // adjust_markers_for_insert for an insertion; for a replacement,
+        // adjust_markers_for_replace: a marker at its end follows the new
+        // text and one inside it goes to its start, as inserting before the
+        // markers at its end and then deleting it moves them.
+        if a == b {
+            assert!(self.anchors.insert(a, len, before_markers));
+        } else {
+            assert!(self.anchors.insert(b, len, true));
+            assert!(self.anchors.delete(a, b));
+        }
         if r.start != r.end || !inserted.is_empty() {
             self.state.record_text_change(changed_bytes);
         }
         Ok(())
     }
-    /// insert_before_markers: INSERTED at point, after the saved points
-    /// and bounds there, as adjust_markers_for_insert moves every marker at
-    /// point when BEFORE_MARKERS.
+    /// insert_before_markers: INSERTED at point, after every marker there
+    /// (adjust_markers_for_insert with BEFORE_MARKERS).
     pub fn insert_before_markers(&mut self, inserted: &[u8]) -> Result<()> {
         let at = self.point;
-        self.replace(at..at, inserted)?;
-        let end = ByteOffset(at.0 + inserted.len());
-        for (_, saved) in &mut self.saved_restrictions {
-            if saved.start == at {
-                saved.start = end;
-            }
-        }
-        for (_, saved) in &mut self.saved_points {
-            if *saved == at {
-                *saved = end;
-            }
-        }
-        Ok(())
+        self.replace_with_bias(at..at, inserted, true)
     }
     pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.syntax_table);
@@ -166,7 +157,7 @@ impl ByteBuffer {
         }
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
-        self.state.storage_bytes(capacity) + (if capacity {
+        self.state.storage_bytes(capacity) + self.anchors.storage_bytes(capacity) + (if capacity {
             self.bytes.capacity()
         } else {
             self.bytes.len()

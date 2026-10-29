@@ -330,10 +330,7 @@ impl Vm {
         !Self::image_value(v) && (matches!(v.tag(), 3..=5) || v.tag() == 0 && v != Value::NIL)
     }
     fn anchor_byte(&self, buffer: Value, anchor: anchors::Anchor) -> Option<u32> {
-        match self.object_if(buffer)? {
-            data::Object::Buffer(b) => b.anchors.resolve(anchor),
-            _ => None,
-        }
+        self.marker_anchors(buffer).ok()?.resolve(anchor)
     }
     fn shape(&self, v: Value) -> Shape<'_> {
         match v.tag() {

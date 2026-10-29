@@ -27,10 +27,8 @@ impl Leaf<'_> {
         let marker_byte = match self.vm.object_if(position) {
             Some(data::Object::Marker(marker)) => {
                 let anchor = marker.anchor.ok_or_else(|| Fault::Error("Marker does not point anywhere".into()))?;
-                let Some(data::Object::Buffer(buffer)) = self.vm.object_if(marker.buffer) else {
-                    return Err(Fault::Error("Marker does not point anywhere".into()));
-                };
-                Some(buffer.anchors.resolve(anchor).ok_or_else(|| Fault::Error("Marker does not point anywhere".into()))? as usize)
+                let buffer = self.vm.marker_anchors(marker.buffer).map_err(|_| Fault::Error("Marker does not point anywhere".into()))?;
+                Some(buffer.resolve(anchor).ok_or_else(|| Fault::Error("Marker does not point anywhere".into()))? as usize)
             }
             _ => None,
         };

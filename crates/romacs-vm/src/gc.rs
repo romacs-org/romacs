@@ -799,9 +799,7 @@ impl Vm {
             let Ok(index) = buffer.index(0) else { continue };
             match self.objects.get_mut(index.saturating_sub(1)) {
                 Some(data::Object::Buffer(b)) => { b.anchors.remove(anchor); }
-                Some(data::Object::ByteBuffer(b)) => {
-                    if let Some(held) = &mut b.held { held.anchors.remove(anchor); }
-                }
+                Some(data::Object::ByteBuffer(b)) => { b.anchors.remove(anchor); }
                 _ => {}
             }
         }

@@ -115,8 +115,7 @@ impl Text {
             case_tables: [Value::NIL; 4],
             point: self.point,
             restriction: self.restriction.clone(),
-            saved_restrictions: Vec::new(),
-            saved_points: Vec::new(),
+            anchors: crate::anchors::AnchorTree::new(u32::try_from(self.len_bytes()).expect("buffer exceeds anchor coordinate limit")),
             properties: self
                 .properties
                 .to_map()
