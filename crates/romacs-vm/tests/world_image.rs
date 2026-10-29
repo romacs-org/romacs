@@ -146,6 +146,10 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     // A first launch builds its world, then boots from it.
     assert_eq!(outcome(&mut child("launch", &store)), restored);
     assert_eq!(outcome(&mut child("launch", &store)), restored);
+    // The libraries were hashed as mapped at each launch: nothing of
+    // theirs is kept in the store to stand in for that.
+    let kept: Vec<String> = std::fs::read_dir(store.join("ids")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    assert!(kept.iter().all(|name| !name.starts_with("library-")), "{kept:?}");
 
     // A byte changed in place: the content is not the one the manifest
     // binds. The launch boots from source and a builder replaces it.

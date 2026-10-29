@@ -108,74 +108,31 @@ fn segments_hash<'a>(segments: impl Iterator<Item = (u64, &'a [u8])>) -> u128 {
     hash.finish_128()
 }
 
-/// The inode of the file /proc/self/maps lists as mapped at ADDRESS, from
-/// MAPS, its text.
-fn mapped_inode(maps: &str, address: usize) -> Option<u64> {
-    maps.lines().find_map(|line| {
-        let mut fields = line.split_whitespace();
-        let (start, end) = fields.next()?.split_once('-')?;
-        let (start, end) = (usize::from_str_radix(start, 16).ok()?, usize::from_str_radix(end, 16).ok()?);
-        (start..end).contains(&address).then(|| fields.nth(3)?.parse().ok()).flatten()
-    })
-}
-
-/// What identifies LIBRARY's code and constants: its build-id, when it has
-/// one, and the hash of its constant segments as mapped
-/// (`arena::Library::constant_segments`). A build-id alone does not: a
-/// file patched after linking keeps its note. The hash is cached in STORE
-/// by the identity of the file at the library's path, written only when
-/// that file hashes as the mapping does, and used only when the mapped
-/// inode (MAPS, /proc/self/maps) is that file's and the build-id is the
-/// cached one; otherwise the mapping is hashed again. An error when a
-/// segment cannot be read.
-fn library_identity(store: &Path, library: &arena::Library, maps: &str) -> Result<String, String> {
-    let (build_id, hash) = library_content(store, library, maps)?;
-    Ok(format!("{} {build_id} {hash}", String::from_utf8_lossy(library.name)))
-}
-
-/// LIBRARY's build-id, or "-", and the hash of its constant segments:
-/// what `library_identity` binds of it beside its name.
-fn library_content(store: &Path, library: &arena::Library, maps: &str) -> Result<(String, String), String> {
-    use std::os::unix::fs::MetadataExt;
-    let name = String::from_utf8_lossy(library.name);
+/// What identifies LIBRARY's code and constants, beside its name: its
+/// build-id, when it has one, and the hash of its constant segments as
+/// mapped (`arena::Library::constant_segments`). A build-id alone does not:
+/// a file patched after linking keeps its note. The mapping is hashed at
+/// every launch, from memory already resident: no cache could vouch for a
+/// file without reading it. A library whose loader patched its read-only
+/// segments (text relocations) hashes differently at each address, so a
+/// world keyed on it is never found again, and its launches boot from
+/// source. An error when a segment cannot be read.
+fn library_content(library: &arena::Library) -> Result<(String, String), String> {
     let build_id = library.build_id().map_or("-".to_owned(), hex);
-    let segments = library.constant_segments().ok_or_else(|| format!("{name}: a constant segment is unreadable"))?;
-    let file = host::metadata(<std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(library.name)).ok();
-    let mapped = mapped_inode(maps, library.address());
-    let cached = file.as_ref().filter(|meta| mapped == Some(meta.ino())).map(|meta| {
-        let id = format!("{name}\0{}-{}-{}-{}.{}-{}.{}", meta.dev(), meta.ino(), meta.size(), meta.mtime(), meta.mtime_nsec(),
-                         meta.ctime(), meta.ctime_nsec());
-        store.join("ids").join(format!("library-{}", hex(&sha256(id.as_bytes()))))
-    });
-    if let Some(cached) = &cached
-        && let Ok(text) = host::read_to_string(cached)
-        && let Some((id, hash)) = text.trim().split_once(' ')
-        && id == build_id
-    {
-        return Ok((build_id, hash.to_owned()));
-    }
-    let hash = format!("{:032x}", segments_hash(segments.iter().copied()));
-    // Cached only for the file the mapping is: the same bytes on disk.
-    if let Some(cached) = &cached
-        && let Ok(bytes) = host::read_file(<std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(library.name))
-        && let Some(on_disk) = segments.iter()
-            .map(|&(offset, m)| Some((offset, bytes.get(offset as usize..offset as usize + m.len())?)))
-            .collect::<Option<Vec<_>>>()
-        && format!("{:032x}", segments_hash(on_disk.into_iter())) == hash
-    {
-        let _ = host::create_dir_all(store.join("ids")).and_then(|()| host::write(cached, format!("{build_id} {hash}")));
-    }
-    Ok((build_id, hash))
+    let segments = library.constant_segments()
+        .ok_or_else(|| format!("{}: a constant segment is unreadable", String::from_utf8_lossy(library.name)))?;
+    Ok((build_id, format!("{:032x}", segments_hash(segments.into_iter()))))
 }
 
 /// The digest of the libraries this process loaded before its first
-/// allocation, each by its name and `library_identity`, in no order, since
+/// allocation, each by its name and `library_content`, in no order, since
 /// where each loaded is random. An error when one cannot be identified, or
 /// more were loaded than the inventory holds.
-fn libraries_digest(store: &Path) -> Result<[u8; 32], String> {
+fn libraries_digest() -> Result<[u8; 32], String> {
     let libraries = arena::libraries().ok_or("more libraries are loaded than the inventory holds")?;
-    let maps = host::read_to_string("/proc/self/maps").map_err(|e| e.to_string())?;
-    let mut entries = libraries.iter().map(|l| library_identity(store, l, &maps)).collect::<Result<Vec<_>, _>>()?;
+    let mut entries = libraries.iter()
+        .map(|l| library_content(l).map(|(id, hash)| format!("{} {id} {hash}", String::from_utf8_lossy(l.name))))
+        .collect::<Result<Vec<_>, _>>()?;
     entries.sort();
     entries.dedup();
     Ok(sha256(entries.join("\n").as_bytes()))
@@ -202,7 +159,7 @@ impl World {
     pub fn new(store: PathBuf, recipe: Vec<String>) -> std::io::Result<World> {
         private_store(&store)?;
         let executable = file_digest(&store, &host::open_world_file("/proc/self/exe")?)?;
-        let libraries = libraries_digest(&store)
+        let libraries = libraries_digest()
             .map_err(|e| std::io::Error::other(format!("the libraries this process loaded cannot all be identified: {e}")))?;
         let mut text = format!("{FORMAT}\nexecutable {}\nlibraries {}\n", hex(&executable), hex(&libraries));
         for line in &recipe {
@@ -496,6 +453,28 @@ mod tests {
             .map(|(_, _, offset, size)| (offset as u64, &file[offset..offset + size])))
     }
 
+    #[test]
+    fn a_library_the_loader_patched_is_known_by_where_it_loaded() {
+        let dir = std::env::temp_dir().join(format!("romacs-library-textrel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A pointer in read-only data: the loader relocates it in place.
+        let asm = dir.join("textrel.s");
+        std::fs::write(&asm, "\t.section .rodata,\"a\"\n\t.globl romacs_table\n\t.p2align 3\nromacs_table:\n\t.quad romacs_string\nromacs_string:\n\t.asciz \"one\"\n").unwrap();
+        let first = dir.join("textrel-one.so");
+        let status = std::process::Command::new("cc").args(["-shared", "-fPIC", "-Wl,-z,notext", "-o"]).arg(&first).arg(&asm).status().unwrap();
+        assert!(status.success());
+        let second = dir.join("textrel-two.so");
+        std::fs::copy(&first, &second).unwrap();
+        let (a, b) = (load(&first), load(&second));
+        assert!(a.text_relocations() && b.text_relocations());
+        assert!(!load(&build(&dir, "plain", SOURCE, &["-DCONSTANT=\"PLAIN\""])).text_relocations());
+        // The same file, loaded at two addresses, hashes differently: a
+        // world keyed on it is not found again, and launches boot from source.
+        assert_ne!(library_content(&a).unwrap(), library_content(&b).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     const SOURCE: &str = "const char romacs_constant[] = CONSTANT;\nconst char *romacs_value(void) { return romacs_constant; }\n";
 
     #[test]
@@ -503,8 +482,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("romacs-library-identity-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let store = dir.join("store");
-        let maps = || host::read_to_string("/proc/self/maps").unwrap();
 
         // One build, and a copy whose constant was patched after linking:
         // the build-id note is the same.
@@ -517,7 +494,7 @@ mod tests {
         let (a, b) = (load(&original), load(&patched));
         assert!(a.build_id().is_some());
         assert_eq!(a.build_id(), b.build_id(), "the note survives the patch");
-        let (ca, cb) = (library_content(&store, &a, &maps()).unwrap(), library_content(&store, &b, &maps()).unwrap());
+        let (ca, cb) = (library_content(&a).unwrap(), library_content(&b).unwrap());
         assert_eq!(ca.0, cb.0);
         assert_ne!(ca.1, cb.1, "the constants differ");
 
@@ -527,19 +504,10 @@ mod tests {
         let (p1, p2) = (load(&one), load(&two));
         assert!(p1.build_id().is_none() && p2.build_id().is_none());
         assert_eq!(code_only(&p1, &one), code_only(&p2, &two), "their code is the same");
-        assert_ne!(library_content(&store, &p1, &maps()).unwrap(), library_content(&store, &p2, &maps()).unwrap());
+        assert_ne!(library_content(&p1).unwrap(), library_content(&p2).unwrap());
 
-        // Known again from the cache, as it was, and the cache is keyed by
-        // the file: an entry claiming another build-id is not used.
-        let entries = || std::fs::read_dir(store.join("ids")).map_or(0, |d| d.count());
-        assert_eq!(entries(), 4);
-        assert_eq!(library_content(&store, &a, &maps()).unwrap(), ca);
-        for entry in std::fs::read_dir(store.join("ids")).unwrap() {
-            let path = entry.unwrap().path();
-            let text = std::fs::read_to_string(&path).unwrap();
-            std::fs::write(&path, format!("00ff {}", text.split_once(' ').unwrap().1)).unwrap();
-        }
-        assert_eq!(library_content(&store, &a, &maps()).unwrap(), ca);
+        // Hashed again, alike: the mapping, not a record of it.
+        assert_eq!(library_content(&a).unwrap(), ca);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

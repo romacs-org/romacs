@@ -615,6 +615,23 @@ impl Library {
         self.headers.iter().find(|h| h.p_type == libc::PT_LOAD).map_or(self.base, |h| self.base + h.p_vaddr as usize)
     }
 
+    /// Whether the loader writes its read-only segments: its dynamic
+    /// section has DT_TEXTREL, or DF_TEXTREL in DT_FLAGS.
+    pub fn text_relocations(&self) -> bool {
+        const DT_TEXTREL: i64 = 22;
+        const DT_FLAGS: i64 = 30;
+        const DF_TEXTREL: u64 = 0x4;
+        /// Elf64_Dyn: a tag and its value.
+        #[repr(C)]
+        struct Dynamic { tag: i64, value: u64 }
+        self.headers.iter().filter(|h| h.p_type == libc::PT_DYNAMIC).any(|h| {
+            let count = h.p_memsz as usize / size_of::<Dynamic>();
+            let dynamic = unsafe { std::slice::from_raw_parts((self.base + h.p_vaddr as usize) as *const Dynamic, count) };
+            dynamic.iter().take_while(|d| d.tag != 0)
+                .any(|d| d.tag == DT_TEXTREL || (d.tag == DT_FLAGS && d.value & DF_TEXTREL != 0))
+        })
+    }
+
     /// What the loader leaves as the file has it: each non-writable
     /// PT_LOAD segment's bytes, code and read-only data, as mapped, but for
     /// the RELRO range the loader writes, each with the file offset it maps.
