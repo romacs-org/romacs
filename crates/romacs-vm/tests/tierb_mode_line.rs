@@ -548,6 +548,20 @@ fn reviewed_generated_symbols_keep_identity_and_risk() {
     assert_eq!(band(&mut vm, "reviewed-format"), "<SAFE>", "risk property belongs to generated symbol");
 }
 
+/// Two `(:eval SYMBOL)' forms whose uninterned symbols share a name are two
+/// forms: each evaluates its own symbol. GNU shows "<one|two>"; a cache
+/// keyed by spelling alone ran the first symbol's lookup for both.
+#[test]
+fn reviewed_eval_of_distinct_uninterned_symbols_keeps_each_value() {
+    let mut vm = probe();
+    eval(&mut vm, r#"(setq a (make-symbol "ml-same") b (make-symbol "ml-same")) (set a "one") (set b "two")
+                     (put 'reviewed-format 'risky-local-variable t)
+                     (setq reviewed-format (list "<" (list :eval a) "|" (list :eval b) ">"))"#);
+    assert_eq!(band(&mut vm, "reviewed-format"), "<one|two>");
+    eval(&mut vm, r#"(set b "three")"#);
+    assert_eq!(current_band(&mut vm), "<one|three>");
+}
+
 #[test]
 fn reviewed_nul_terminates_only_nonliteral_strings() {
     let mut vm = probe();

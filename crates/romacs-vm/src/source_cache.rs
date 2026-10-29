@@ -210,9 +210,10 @@ impl Vm {
     /// `:eval' form): compiled once and cached by its structure while its
     /// guard holds. GNU evaluates the same object each time, so its
     /// constants are shared across evaluations as GNU's are. A datum
-    /// holding an object with no spelling has no structural key: None.
+    /// holding an uninterned symbol or an object with no spelling has no
+    /// structural key (the stamp writes neither): None.
     pub(super) fn cached_datum(&mut self, form: &Form) -> Result<Option<usize>> {
-        if contains_local_object(form) {
+        if contains_identity(form) {
             return Ok(None);
         }
         // NUL never starts source text, so datum keys stay apart from it.
@@ -430,6 +431,16 @@ impl Vm {
             slot = f.payload() as usize - 1;
         }
         slot
+    }
+}
+/// Whether FORM names something by identity rather than by spelling: an
+/// uninterned symbol or an object with no source spelling.
+fn contains_identity(form: &Form) -> bool {
+    match form {
+        Form::Object(_) | Form::Generated(_) => true,
+        Form::List(items) | Form::Vector(items) => items.iter().any(contains_identity),
+        Form::Dotted(items, tail) => items.iter().any(contains_identity) || contains_identity(tail),
+        _ => false,
     }
 }
 fn contains_local_object(form: &Form) -> bool {
