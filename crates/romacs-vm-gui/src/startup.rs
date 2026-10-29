@@ -158,6 +158,9 @@ pub struct Started {
     /// false when each workspace buffer shows the labelled
     /// [`STAND_IN_MODE_LINE`] (or, under --gnu-lisp, no mode line at all).
     pub gnu_mode_line: bool,
+    /// --loadup's file arguments, which [`finish_loadup`] visits once the
+    /// user's init has run, where startup.el `command-line-1' visits them.
+    pub files: Vec<std::path::PathBuf>,
 }
 
 impl Started {
@@ -366,7 +369,7 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     policy(vm, root, "romacs-install-command.el", include_str!("../../../rlisp/romacs-install-command.el"))?;
     crate::eval_last_sexp::define(vm)?;
     let bindings = bind_journey_keys(vm, false)?;
-    let started = Started { launch: Launch::Workspace, loadup: None, bindings, gnu_mode_line: false };
+    let started = Started { launch: Launch::Workspace, loadup: None, bindings, gnu_mode_line: false, files: vec![] };
     workspace(vm, &started, files.is_empty())?;
     visit_files(vm, files)?;
     load_gui_extensions(vm, &lisp_dir())?;
@@ -428,7 +431,7 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
         if !files.is_empty() {
             return Err("FILE arguments need romacs's visiting command, which --gnu-lisp does not install".into());
         }
-        let started = Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line };
+        let started = Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line, files: vec![] };
         vm.eval_source(&format!(
             "(progn (set-buffer (get-buffer-create \"*scratch*\")) (erase-buffer)
                     (insert {} \"\\n\\n\" {} \"\\n\\nNo romacs stand-ins (--gnu-lisp). Close the window to quit.\\n\\n\")
@@ -447,11 +450,26 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     let bindings = bind_journey_keys(vm, true)?;
-    let started = Started { launch, loadup: Some(loadup), bindings, gnu_mode_line };
-    workspace(vm, &started, files.is_empty())?;
-    visit_files(vm, &files)?;
     load_gui_extensions(vm, dir)?;
-    Ok(started)
+    // The workspace and the files wait for the user's init (finish_loadup).
+    Ok(Started { launch, loadup: Some(loadup), bindings, gnu_mode_line, files })
+}
+
+/// --loadup's startup once the user's init has loaded, in startup.el's
+/// order (rlisp/romacs-gui-loadup.el): `command-line's end with
+/// `after-init-hook', `command-line-1' visiting the file arguments and then
+/// showing the startup screen, which here is the Romacs workspace, and
+/// `normal-top-level's startup hooks.  An init that inhibits the startup
+/// screen never sees the workspace inserted.
+pub fn finish_loadup(vm: &mut Vm, started: &Started) -> Result<(), String> {
+    vm.eval_source("(romacs-gui-loadup-after-init)")?;
+    visit_files(vm, &started.files)?;
+    let files = if started.files.is_empty() { "nil" } else { "t" };
+    if vm.eval_source(&format!("(romacs-gui-loadup-command-line-1 {files})"))? != romacs_vm::Fixed::NIL {
+        workspace(vm, started, true)?;
+    }
+    vm.eval_source("(romacs-gui-loadup-normal-top-level)")?;
+    Ok(())
 }
 
 fn initialize_editing(vm: &mut Vm) -> Result<(), String> {
@@ -1534,7 +1552,8 @@ mod tests {
 
     /// A runtime root for `--loadup`: `gnu-lisp/` holding FILES and, beside
     /// it, `rlisp/` holding BOOTSTRAP as the shared chain and an interactive
-    /// session file that only clears `noninteractive`. Returns `gnu-lisp/`.
+    /// session file that clears `noninteractive` and stands in for the
+    /// startup sequence. Returns `gnu-lisp/`.
     fn scratch_runtime(name: &str, bootstrap: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
         let root = scratch_lisp(name, &[]);
         let gnu = root.join("gnu-lisp");
@@ -1542,7 +1561,12 @@ mod tests {
         std::fs::create_dir_all(root.join("rlisp")).unwrap();
         for (file, text) in files { std::fs::write(gnu.join(file), text).unwrap(); }
         std::fs::write(loadup_bootstrap(&gnu), bootstrap).unwrap();
-        std::fs::write(root.join("rlisp/romacs-gui-loadup.el"), "(setq noninteractive nil)\n").unwrap();
+        // A scratch chain has no startup.el: its session file clears
+        // `noninteractive' and shows the workspace when no file is given.
+        std::fs::write(root.join("rlisp/romacs-gui-loadup.el"), "(setq noninteractive nil)
+(defun romacs-gui-loadup-after-init () nil)
+(defun romacs-gui-loadup-command-line-1 (files) (not files))
+(defun romacs-gui-loadup-normal-top-level () nil)\n").unwrap();
         // A scratch chain has no minibuffer.el or icomplete.el to configure.
         std::fs::write(root.join("rlisp/romacs-completion-defaults.el"), "(provide 'romacs-completion-defaults)\n").unwrap();
         gnu
@@ -1691,7 +1715,8 @@ mod tests {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             private_home(&mut vm, "autoloads");
-            initialize_loadup_from(&mut vm, Launch::Loadup, None, &in_vm).unwrap();
+            let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &in_vm).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
             let loadup = [("gnosis-dashboard", "gnosis/gnosis-dashboard.el"), ("hermes", "hermes/hermes.el")].map(|(name, file)| {
                 let file = lisp_string(&owned.join("rlisp").join(file).to_string_lossy());
                 query(&mut vm, &format!("(list (nth 1 (symbol-function '{name})) (commandp '{name}) (featurep '{name})
@@ -1772,6 +1797,7 @@ mod tests {
             // functions under GNU's names): loadup does not touch it.
             vm.eval_source("(defun other-window () (interactive) 'vm2-native)").unwrap();
             let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
             let bound = |vm: &mut Vm, key: &str| { let v = vm.eval_source(&format!("(key-binding {key})")).unwrap(); v.display().unwrap() };
             let keys: Vec<String> = ["[14]", "[down]", "[16]", "[24 50]", "[24 111]", "[24 5]"].iter().map(|k| bound(&mut vm, k)).collect();
             vm.collect_garbage();
@@ -1796,6 +1822,7 @@ mod tests {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
             let snapshot = vm.frame_snapshot(1200, 800).unwrap();
             let bands = snapshot.windows.iter().take(2)
                 .map(|w| w.snapshot.mode_line.as_ref().map_or(String::new(), |b| b.utf8.clone())).collect();
@@ -1844,6 +1871,7 @@ mod tests {
                 let mut vm = Vm::new();
                 vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
                 let started = initialize_loadup_from(&mut vm, Launch::Loadup, Some(&setup), &dir).unwrap();
+                finish_loadup(&mut vm, &started).unwrap();
                 assert!(started.gnu_mode_line, "an unchanged bound default must not be mistaken for an unset default: {initial}");
                 assert_eq!(printed(&mut vm, "(eq (default-value 'mode-line-format) romacs-test-mode-line)"), "t");
                 for buffer in ["*scratch*", "*VM evaluations*"] {
@@ -1873,6 +1901,38 @@ mod tests {
         assert!(bands.iter().all(|b| !b.contains("stand-in")), "{bands:?}");
     }
 
+    /// What --loadup does after the user's init, in startup.el's order,
+    /// against pinned GNU on a terminal (fixtures/startup-order-tty.py):
+    /// a file argument is visited after `after-init-hook', so a hook that
+    /// switches buffers does not hide it, and the later hooks see it; an
+    /// init that inhibits the startup screen keeps the *scratch* text it
+    /// wrote, with its modified flag, and no workspace is inserted.
+    #[test]
+    fn startup_after_the_init_runs_in_gnus_order() {
+        on_evaluator(|| {
+            let fixture = include_str!("../tests/fixtures/startup-order-tty.txt");
+            let lines: Vec<&str> = fixture.lines().filter(|line| !line.starts_with(";;")).collect();
+            for case in lines.chunks(4) {
+                let (name, with_file, init, expected) = (case[0], case[1] == "t", case[2], case[3]);
+                let mut vm = Vm::new();
+                vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+                let mut started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+                let dir = std::env::temp_dir().join(format!("romacs-startup-order-{name}-{}", std::process::id()));
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("visited.txt"), "visited\n").unwrap();
+                if with_file { started.files = vec![dir.join("visited.txt")]; }
+                // Where the GUI loads the user's init.
+                printed(&mut vm, &format!("(progn {init} t)"));
+                finish_loadup(&mut vm, &started).unwrap();
+                let log = printed(&mut vm, "(let ((print-escape-newlines t)) (prin1-to-string startup-order-log))");
+                let log: String = serde_json::from_str(&log).unwrap();
+                assert_eq!(log, expected, "{name}");
+                assert_eq!(printed(&mut vm, "(get-buffer \"*VM evaluations*\")"), "nil", "{name}: no workspace");
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+        });
+    }
+
     /// `--loadup` on this tree: it runs the batch package runner's chain,
     /// every load site of rlisp/romacs-loadup-bootstrap.el in order and each
     /// complete, then the interactive session; the window keeps a mode line
@@ -1885,6 +1945,7 @@ mod tests {
             vm.set_echo_area_host(true);
             private_home(&mut vm, "shared-chain");
             let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
             let loadup = started.loadup.as_ref().unwrap();
             let rows: Vec<String> = loadup.rows.iter().map(|r| r.site.name.clone()).collect();
             let complete = (loadup.complete(), loadup.form_failures.len(), printed(&mut vm, "(list noninteractive (featurep 'romacs-loadup-bootstrap) (display-graphic-p))"));
@@ -1949,7 +2010,8 @@ mod tests {
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             let home = private_home(&mut vm, "session");
             let launch = vm.display_default_face().unwrap();
-            initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
             let session = vm.display_default_face().unwrap();
             let config = lisp_string(&format!("{}/config/romacs/", home.display()));
             let settings = printed(&mut vm, &format!(
@@ -1975,7 +2037,8 @@ mod tests {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             private_home(&mut vm, "jit-lock");
-            initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
             let lines: Vec<&str> = include_str!("../../../gnu-lisp/subr.el").lines().take(2000).collect();
             let dir = scratch_lisp("jit-lock-visit", &[("sample.el", &(lines.join("\n") + "\n"))]);
             visit_files(&mut vm, &[dir.join("sample.el")]).unwrap();

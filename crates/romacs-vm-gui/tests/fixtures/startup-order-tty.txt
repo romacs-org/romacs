@@ -1,0 +1,9 @@
+;; Pinned GNU on an 80x24 terminal, by startup-order-tty.py; do not edit.
+hook-then-file
+t
+(defvar startup-order-log nil) (defun startup-order-note (hook) (push (list hook (buffer-name (window-buffer (selected-window)))) startup-order-log)) (add-hook (quote emacs-startup-hook) (lambda () (startup-order-note (quote emacs-startup)))) (add-hook (quote window-setup-hook) (lambda () (startup-order-note (quote window-setup)) (push (with-current-buffer "*scratch*" (list (buffer-substring-no-properties (point-min) (point-max)) (buffer-modified-p) major-mode)) startup-order-log) (setq startup-order-log (nreverse startup-order-log)))) (add-hook (quote after-init-hook) (lambda () (startup-order-note (quote after-init)) (switch-to-buffer (get-buffer-create "*hooked*"))))
+((after-init "*scratch*") (emacs-startup "visited.txt") (window-setup "visited.txt") (";; This buffer is for text that is not saved, and for Lisp evaluation.\n;; To create a file, visit it with ‘C-x C-f’ and enter text in its buffer.\n\n" nil lisp-interaction-mode))
+own-scratch
+nil
+(defvar startup-order-log nil) (defun startup-order-note (hook) (push (list hook (buffer-name (window-buffer (selected-window)))) startup-order-log)) (add-hook (quote emacs-startup-hook) (lambda () (startup-order-note (quote emacs-startup)))) (add-hook (quote window-setup-hook) (lambda () (startup-order-note (quote window-setup)) (push (with-current-buffer "*scratch*" (list (buffer-substring-no-properties (point-min) (point-max)) (buffer-modified-p) major-mode)) startup-order-log) (setq startup-order-log (nreverse startup-order-log)))) (setq inhibit-startup-screen t) (with-current-buffer "*scratch*" (erase-buffer) (insert "mine\n")) (add-hook (quote after-init-hook) (lambda () (startup-order-note (quote after-init))))
+((after-init "*scratch*") (emacs-startup "*scratch*") (window-setup "*scratch*") ("mine\n" t lisp-interaction-mode))
