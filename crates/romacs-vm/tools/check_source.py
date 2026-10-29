@@ -86,8 +86,8 @@ def main():
         if kind == 'value':
             passed = process.returncode == 0 and actual == romacs_expected
         else:
-            condition = {'void-variable':'unbound variable', 'no-catch':'unhandled signal no-catch'}[expected]
-            passed = process.returncode == 1 and process.stderr.strip() == 'vm2: ' + condition
+            condition = {'void-variable':'unbound variable', 'no-catch':'(no-catch '}[expected]
+            passed = process.returncode == 1 and process.stderr.strip().startswith('vm2: ' + condition)
         rows.append({'source': source, 'gnu_kind': kind, 'gnu': expected, 'romacs_expected': romacs_expected, 'divergence': divergence, 'vm2': actual, 'vm2_error': process.stderr.strip(), 'pass': passed})
     Path(args.output).write_text(json.dumps({'gnu':version,'rows':rows}, ensure_ascii=False, indent=2) + '\n')
     failures = [r for r in rows if not r['pass']]

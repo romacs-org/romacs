@@ -199,6 +199,10 @@ mod leaf {
             self.vm.slots[slot].value = raw;
             self.vm.display_state.free_realized_faces();
         }
+        /// xdisp.c safe_calln (see `Vm::safe_call').
+        pub(crate) fn safe_call(&mut self, function: Value, args: &[Value]) -> Value {
+            self.vm.safe_call(function, args)
+        }
         pub(crate) fn theme_face_attribute(&mut self, face: &str, keyword: &str, value: Value) {
             self.vm.theme_face_attribute(face, keyword, value);
         }
@@ -243,8 +247,23 @@ mod leaf {
                 _ => Fault::Error(text),
             }
         }
+        /// A VM-owned Lisp value kept in the internal symbol NAME's value
+        /// cell ("#:vm2-..."), rooted like every symbol value; None unset.
+        pub(crate) fn internal_value(&mut self, name: &str) -> Option<Value> {
+            let slot = self.vm.slot(name);
+            Some(self.vm.slots[slot].value).filter(|&v| v != Value::UNBOUND)
+        }
+        pub(crate) fn set_internal_value(&mut self, name: &str, value: Value) {
+            let slot = self.vm.slot(name);
+            self.vm.slots[slot].value = value;
+        }
         pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
             self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
+        }
+        /// Findirect_variable: the end of SYMBOL's variable alias chain.
+        pub(crate) fn indirect_variable_symbol(&self, symbol: Value) -> std::result::Result<Value, Fault> {
+            let slot = self.symbol_slot(symbol)?;
+            Ok(Value::reference(self.vm.indirect_variable(slot) + 1, 7))
         }
         pub(crate) fn trapped_variable(&self, symbol: Value) -> std::result::Result<bool, Fault> {
             let slot = self.symbol_slot(symbol)?;
@@ -1311,25 +1330,27 @@ mod leaf {
         }
         pub fn resolve_obarray(&mut self, value: Value) -> super::Out { self.vm.resolve_obarray(value) }
         pub fn intern_in(&mut self, table: Value, name: Value) -> super::Out { self.vm.obarray_intern(table, name) }
+        /// The Lisp name NAME looks a symbol up by: a string itself, or a
+        /// symbol's `symbol-name' (decoded from its key, symkey.rs).
+        fn lookup_name(&mut self, name: Value) -> std::result::Result<Value, Fault> {
+            if self.kind(name) == Kind::Symbol { self.symbol_name_value(name) }
+            else if self.vm.str_view(name).is_some() { Ok(name) }
+            else { Err(Fault::Wrong("stringp", name)) }
+        }
         pub fn lookup_in(&mut self, table: Value, name: Value) -> super::Out {
             let symbol = self.kind(name) == Kind::Symbol;
-            let text;
-            let (bytes, chars) = if symbol {
-                text = self.symbol_name(name)?;
-                (text.as_bytes(), text.chars().count())
-            } else {
-                let view = self.vm.str_view(name).ok_or(Fault::Wrong("stringp", name))?;
-                (view.bytes, view.chars)
-            };
-            let found = self.vm.obarray_lookup_value(table, bytes, chars);
+            let text = self.lookup_name(name)?;
+            let view = self.vm.str_view(text).expect("lookup name is a string");
+            let found = self.vm.obarray_lookup_value(table, view.bytes, view.chars);
             Ok(found.filter(|&v| !symbol || v == name).unwrap_or(Value::NIL))
         }
         pub fn unintern_in(&mut self, table: Value, name: Value) -> super::Out {
             let found = self.lookup_in(table, name)?;
             // nil is both a legitimate interned symbol and the missing sentinel.
             if found == Value::NIL {
-                let text = if self.kind(name) == Kind::Symbol { self.symbol_name(name)? } else { self.string_text(name)? };
-                if text != "nil" || self.vm.obarray_lookup_value(table, b"nil", 3) != Some(Value::NIL) { return Ok(Value::NIL); }
+                let text = self.lookup_name(name)?;
+                let is_nil = self.vm.str_view(text).is_some_and(|view| view.bytes == b"nil");
+                if !is_nil || self.vm.obarray_lookup_value(table, b"nil", 3) != Some(Value::NIL) { return Ok(Value::NIL); }
             }
             Ok(if self.vm.obarray_unintern(table, found) { Value::TRUE } else { Value::NIL })
         }
@@ -1342,7 +1363,11 @@ mod leaf {
                 if let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
             }
             let name = self.symbol_name(symbol)?;
-            let value = if name.is_ascii() { self.byte_string(name.as_bytes()) } else { self.string(&name) };
+            let value = match crate::symkey::to_internal(&name) {
+                Some(internal) => self.make_string(internal, true),
+                None if name.is_ascii() => self.byte_string(name.as_bytes()),
+                None => self.string(&name),
+            };
             self.vm.permanent_symbol_names.insert(symbol.0, value);
             Ok(value)
         }
@@ -1585,6 +1610,10 @@ mod leaf {
         pub fn list_limit(&self) -> usize {
             self.vm.list_limit()
         }
+        /// More links than an alias chain of distinct symbols can have.
+        pub fn symbol_limit(&self) -> usize {
+            self.vm.slots.len()
+        }
         /// Characters FROM..TO of STRING as a fresh string of the same
         /// multibyteness, carrying STRING's text properties for that range
         /// (GNU fns.c Fsubstring: make_specified_string + copy_text_properties).
@@ -1669,10 +1698,25 @@ mod leaf {
     mod display_elements;
     mod display_hosted;
     mod text_pixel_size;
+    mod bidi;
     pub(crate) use text_pixel_size::TextSizeArgs;
     mod session;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
+
+/// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
+pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {
+    Leaf::new(vm).hosted_window_start(window, start, point, minimal, back).map_err(|fault| match fault {
+        Fault::Error(text) => text,
+        _ => "the host's layout cannot choose this window start".into(),
+    })
+}
+
+/// Where the screen lines a window shows end over the host's layout
+/// (Leaf::hosted_rows_end).
+pub(crate) fn hosted_rows_end(vm: &mut Vm, window: Value, start: i64, rows: i64) -> std::result::Result<i64, Fault> {
+    Leaf::new(vm).hosted_rows_end(window, start, rows)
+}
 
 /// Realize C-initialized coding variables before their first Lisp observation.
 /// Like the charset slot hook, this preserves allocation-free VM construction.
@@ -1906,6 +1950,42 @@ impl Vm {
                 Err("expand-file-name signalled".into())
             }
         }
+    }
+    /// load-with-code-conversion for a source without a coding cookie that
+    /// is not UTF-8: the detection walk over the coding priority, as
+    /// `insert-file-contents' decides, then the chosen system's decoding,
+    /// as internal multibyte text (raw-text's bytes as raw-byte characters).
+    /// `last-coding-system-used' is left as it was.
+    pub(crate) fn detected_source(&mut self, bytes: &[u8]) -> crate::Result<Vec<u8>> {
+        let decoded = no_collection(self, |vm| {
+            let mut cx = Leaf::new(vm);
+            let undecided = cx.intern("undecided");
+            let spec = cx.coding_spec(undecided)?;
+            if spec == Value::NIL { return Err(Fault::Error("no undecided coding system to detect with".into())) }
+            let attrs = cx.vector_get(spec, Value::integer(0).unwrap())?;
+            let found = cx.coding_detect(bytes, attrs)?.0.unwrap_or(undecided);
+            let last = cx.intern("last-coding-system-used");
+            let previous = cx.variable_value(last)?.unwrap_or(Value::NIL);
+            let string = cx.make_string(bytes.to_vec(), false);
+            let decoded = cx.coding_convert_string(string, found, Value::NIL, Value::NIL, false);
+            cx.variable_set(last, previous)?;
+            let view = cx.string_view(decoded?)?;
+            if view.is_multibyte() { return Ok(view.bytes().to_vec()) }
+            let mut out = Vec::with_capacity(view.bytes().len());
+            for &byte in view.bytes() {
+                let mut encoded = [0; 5];
+                let code = if byte < 128 { u32::from(byte) } else { crate::lstring::BYTE8_OFFSET + u32::from(byte) };
+                let n = crate::lstring::char_string(code, &mut encoded);
+                out.extend_from_slice(&encoded[..n]);
+            }
+            Ok(out)
+        });
+        decoded.map_err(|fault| {
+            let (condition, data) = self.fault(fault);
+            let text = format!("source coding detection signalled {}", self.display(condition).unwrap_or_default());
+            self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+            text
+        })
     }
     /// Legacy fset shares the checked Leaf cell writer without exposing Vm to leaves.
     pub(crate) fn set_function_leaf(

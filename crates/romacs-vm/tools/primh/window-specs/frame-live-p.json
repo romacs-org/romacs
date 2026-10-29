@@ -9,7 +9,7 @@
   "frame.c"
  ],
  "gnu_def": "frame.c:326",
- "rust": "src/prims/window.rs:182",
+ "rust": "src/prims/window.rs:192",
  "args": [
   "none"
  ],

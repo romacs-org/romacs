@@ -233,12 +233,18 @@ fn insert_file_contents_refuses_unsupported_decoding_intact() {
     let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-insert-refuse-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let cases: [(&[u8], &str); 4] = [
-        // GNU's detection reaches the ISO-2022 and charset detectors.
-        (b"caf\xe9\n", "coding detection of the iso-7 category"),
-        (b"a\x1b$Bb\n", "coding detection of ISO-2022 escape and shift codes"),
-        (b"\xe9\0\xff\0", "coding detection of the utf-16-auto category"),
-        // A raw byte GNU keeps as an eight-bit character.
+    // A cookie-less Latin-1 file reads as in pinned GNU: GNU's walk rejects
+    // the ISO-2022 categories and finds iso-latin-1 (VM2-FILEIO1).
+    let latin = dir.join("latin.txt");
+    std::fs::write(&latin, b"caf\xe9\n").unwrap();
+    let probe = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (cadr (insert-file-contents {:?})) (buffer-substring-no-properties 1 (point-max)) (point) last-coding-system-used (get-text-property 3 'charset)))", latin.to_str().unwrap());
+    assert_eq!(vm.eval_source(&probe).unwrap().display().unwrap(), "(5 \"kecafé\\nep\" 3 iso-latin-1-unix iso-8859-1)");
+    let cases: [(&[u8], &str); 3] = [
+        // GNU's walk finds iso-2022-7bit, which VM2 cannot decode yet.
+        (b"a\x1b$Bb\n", "insert-file-contents decoding with iso-2022-7bit"),
+        // GNU decodes these as no-conversion and utf-8, keeping raw bytes as
+        // eight-bit characters a VM2 buffer cannot hold.
+        (b"\xe9\0\xff\0", "insert-file-contents of raw bytes into a multibyte buffer"),
         (b"\xc3", "insert-file-contents of raw bytes into a multibyte buffer"),
     ];
     for (index, (bytes, refusal)) in cases.into_iter().enumerate() {

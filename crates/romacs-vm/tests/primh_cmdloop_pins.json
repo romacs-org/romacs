@@ -281,12 +281,6 @@
     "expected": "(ok (1 2 1 2 . #2))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))"
   },
-  "interactive-form/0110": {
-    "accepted": "(sig (error \"defalias: a list function descriptor such as (lambda ...) is not supported in VM2 yet\"))",
-    "class": "SIGNAL-VS-VALUE",
-    "expected": "(ok (interactive \"P\"))",
-    "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-j '(lambda (x) (interactive \"P\") x)) (interactive-form 'cl-j))) (error (list 'sig e))))"
-  },
   "interactive-form/0123": {
     "accepted": "(sig (void-function advice-add))",
     "class": "MISSING",

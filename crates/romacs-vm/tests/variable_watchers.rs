@@ -35,6 +35,8 @@ const CASES: &str = r###"
 (progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'fill-column 'wv-log) (with-temp-buffer (rename-buffer "wv-4") (let ((fill-column 40)) (setq fill-column 41) fill-column)) (list (nreverse log) (condition-case e (makunbound 'fill-column) (error e)) (default-value 'fill-column)))
 (progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'wv-v 'wv-log) (let ((wv-v 1)) wv-v) (list (nreverse log) (boundp 'wv-v)))
 (progn (setq log nil) (defvar wv-w 1) (fset 'wv-log LOG) (add-variable-watcher 'wv-w 'wv-log) (with-temp-buffer (rename-buffer "wv-5") (make-local-variable 'wv-w) (setq wv-w 2) (let ((wv-w 3)) (kill-local-variable 'wv-w) (make-local-variable 'wv-w) (setq wv-w 9))) (list (nreverse log) wv-w))
+(progn (defvar wv-y 1) (defvar wv-yz 0) (with-temp-buffer (make-local-variable 'wv-y) (setq wv-y 2) (add-variable-watcher 'wv-y (lambda (s n o w) (when (eq o 'unlet) (kill-local-variable 'wv-y) (garbage-collect) (make-local-variable 'wv-yz) (setq wv-yz 'sentinel)))) (list (let ((wv-y 3)) wv-y) wv-y wv-yz (local-variable-p 'wv-y) (default-value 'wv-y))))
+(progn (defvar wv-x2 1) (with-temp-buffer (make-local-variable 'wv-x2) (setq wv-x2 2) (add-variable-watcher 'wv-x2 (lambda (s n o w) (when (eq o 'unlet) (kill-local-variable 'wv-x2) (garbage-collect) (make-local-variable 'wv-x2) (setq wv-x2 9)))) (list (let ((wv-x2 3)) wv-x2) wv-x2 (default-value 'wv-x2))))
 "###;
 
 const LOG: &str = "(lambda (s n o w) (setq log (cons (list s n o (if (bufferp w) (buffer-name w) w) (if (boundp s) (symbol-value s) 'void)) log)))";

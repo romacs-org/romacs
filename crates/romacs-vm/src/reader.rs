@@ -233,19 +233,17 @@ impl Reader<'_, '_> {
     /// A symbol token from FIRST up to a delimiter, backslash escapes
     /// taken literally; true when any character was escaped.
     fn symbol_token(&mut self, first: u32) -> Result<(String, bool)> {
+        // Raw-byte and non-Unicode characters keep their codes (symkey.rs).
         let mut token = String::new();
         let mut escaped = first == 92;
-        token.push(
-            char::from_u32(if escaped { self.next()? } else { first })
-                .ok_or("non-Unicode symbol name is not supported")?,
-        );
+        crate::symkey::push_char(&mut token, if escaped { self.next()? } else { first });
         while self.peek().is_some_and(|c| !Self::delimiter(c)) {
             let c = self.next()?;
             if c == 92 {
                 escaped = true;
-                token.push(char::from_u32(self.next()?).ok_or("non-Unicode symbol name is not supported")?);
+                crate::symkey::push_char(&mut token, self.next()?);
             } else {
-                token.push(char::from_u32(c).ok_or("non-Unicode symbol name is not supported")?);
+                crate::symkey::push_char(&mut token, c);
             }
         }
         self.unread_lookahead()?;
@@ -1119,6 +1117,7 @@ impl Vm {
         &mut self,
         input: Input<'_>,
     ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
+        let _unwind = self.unwind_mark();
         let roots = self.external_roots.len();
         let initial_byte = match &input { Input::String { byte, .. } => *byte, _ => 0 };
         let mut reader = Reader {
@@ -1428,22 +1427,30 @@ impl Vm {
         let outcome = self.eval_source_inner(source);
         self.finish_request(outcome)
     }
-    fn eval_source_inner(&mut self, mut source: &str) -> Result<Value> {
+    fn eval_source_inner(&mut self, source: &str) -> Result<Value> {
         if let Some(f) = self.cached_submission(source) {
             return self.execute_raw(f);
         }
-        let mut result = Value::NIL;
+        // The last form's value is rooted across reading the next one, which
+        // can call Lisp (a `\N{NAME}' character).
+        let last = self.root_frame(&[Value::NIL]);
+        let outcome = self.eval_source_forms(source, &last);
+        let [value] = self.release_frame(last);
+        outcome.map(|()| value)
+    }
+    fn eval_source_forms(&mut self, mut source: &str, last: &crate::gc::RootFrame) -> Result<()> {
         while let Some((value, used)) = self.read_source_raw(source)? {
             let form = self.source_form(value, 0)?;
-            result = if let Some(result) = self.direct_form(&form) {
+            let result = if let Some(result) = self.direct_form(&form) {
                 result?
             } else {
                 let function = self.cached_source_form(&source[..used], &form)?;
                 self.execute_raw(function)?
             };
+            self.set_rooted(last, 0, result);
             source = &source[used..];
         }
-        Ok(result)
+        Ok(())
     }
 }
 

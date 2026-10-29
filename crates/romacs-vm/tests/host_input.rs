@@ -218,7 +218,21 @@ fn every_call_path_reads_through_the_reentrant_primitive() {
     );
     assert_eq!(seen.borrow().reads, 3);
     assert_eq!(
-        eval(&mut vm, "(condition-case e (romacs--read-host-event 1 2) (error (car e)))"),
+        eval(&mut vm, "(condition-case e (romacs--read-host-event 1 nil 3) (error (car e)))"),
         "wrong-number-of-arguments"
     );
+}
+
+/// keyboard.c read_char: a host character goes through
+/// `keyboard-translate-table' (a char-table, or a string or vector it is
+/// shorter than), a nil entry meaning no translation; macro and unread
+/// events do not.
+#[test]
+fn host_characters_go_through_keyboard_translate_table() {
+    let (mut vm, _) = vm_with(vec![key('x'), key('q'), RET], false);
+    assert_eq!(eval(&mut vm, "(let ((keyboard-translate-table (make-char-table 'keyboard-translate-table))) (aset keyboard-translate-table ?x ?y) (read-string \"T: \"))"), "\"yq\"");
+    let (mut vm, _) = vm_with(vec![key('a'), RET], false);
+    assert_eq!(eval(&mut vm, "(let ((keyboard-translate-table (make-char-table 'keyboard-translate-table))) (aset keyboard-translate-table ?a ?b) (setq unread-command-events (list ?a)) (read-string \"T: \"))"), "\"ab\"");
+    let (mut vm, _) = vm_with(vec![key('x'), RET], false);
+    assert_eq!(eval(&mut vm, "(let ((keyboard-translate-table \"\\0z\")) (read-string \"T: \"))"), "\"x\"");
 }

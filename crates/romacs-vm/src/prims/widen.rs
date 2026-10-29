@@ -18,8 +18,8 @@ fn use_global_map(cx, map: Value) {
 
 defsubr! { name = "make-symbol", gnu = "alloc.c:3708", effect = Pure,
 fn make_symbol(cx, name: Value) {
-    let name = cx.string_text(name)?;
-    Ok(cx.make_symbol(&name))
+    let key = cx.string_view(name).map_err(|_| Fault::Wrong("stringp", name)).map(|v| crate::obarray::symbol_key(v.bytes(), v.len()))?;
+    Ok(cx.make_symbol(&key.ok_or(Fault::NotUnicode(name))?))
 }}
 
 defsubr! { name = "listp", gnu = "data.c:332", effect = Pure,

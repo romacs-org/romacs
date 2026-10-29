@@ -580,6 +580,17 @@ impl Program {
     pub(super) fn code_is_empty(&self) -> bool {
         self.code.iter().all(Vec::is_empty) && self.entries.is_empty()
     }
+    /// Drop the lowered code an idle program caches; it is lowered again on
+    /// first use. Nothing points into it: no engine runs this program.
+    pub(super) fn forget_code(&mut self) {
+        self.code.clear();
+        self.entries.clear();
+        self.inline_bodies.clear();
+        self.free_entries.clear();
+    }
+    pub(super) fn code_len(&self) -> usize {
+        self.code.iter().map(Vec::len).sum()
+    }
     pub(super) fn trace_function(
         &self,
         id: usize,
@@ -612,6 +623,10 @@ impl Program {
         }
     }
     pub(super) fn retire_code(&mut self, marks: &[bool]) {
+        // Nothing to drop or compact: keep the entry table as it is.
+        if self.free_entries.is_empty() && self.code.iter().enumerate().all(|(id, code)| code.is_empty() || marks[id]) {
+            return;
+        }
         let old = std::mem::take(&mut self.entries);
         let old_inline = std::mem::take(&mut self.inline_bodies);
         self.free_entries.clear();
@@ -643,6 +658,10 @@ pub(super) struct SuspendedCode {
     entries: *mut Vec<EntryCache>,
 }
 impl SuspendedCode {
+    /// SAFETY: as for `visit_values`.
+    pub(super) unsafe fn code_len(&self) -> usize {
+        unsafe { (*self.code).iter().map(Vec::len).sum() }
+    }
     /// SAFETY: the engine owning both vectors stays suspended, neither moved
     /// nor touched, until this reference is popped.
     pub(super) unsafe fn visit_values(&self, visit: &mut impl FnMut(&mut Value)) {
@@ -718,13 +737,55 @@ impl Control {
 /// Unbind N bindings; the first whose restore signals (a watcher, or an
 /// integer forwarding given a non-integer by set-default-toplevel-value)
 /// is consumed and its escape returned, like unbind_to's pop.
+/// A restore can run unlet watchers, so the engine is suspended for them.
 fn checked_unbind(e: &mut Engine<'_>, n: usize) -> Option<Escape> {
-    for _ in 0..n {
-        if e.vm.unbind_one().is_err() {
-            return e.vm.propagated_escape.take();
+    let trapped = n > 0 && !e.vm.trapped.is_empty();
+    watched_write(e, trapped, |vm| {
+        for _ in 0..n {
+            if vm.unbind_one().is_err() {
+                return vm.propagated_escape.take();
+            }
         }
+        None
+    })
+}
+/// Perform a variable write (`set_variable_value', `bind_variable',
+/// `unbind_one') that can run watchers. With WATCHED, this engine is
+/// suspended first, so a watcher may collect: the engine's state, code and
+/// registers are traced, and the write roots its own Values. The caller
+/// keeps nothing else in Rust locals across it.
+fn watched_write<T>(e: &mut Engine<'_>, watched: bool, write: impl FnOnce(&mut Vm) -> T) -> T {
+    if !watched {
+        return write(e.vm);
     }
-    None
+    let roots = e.suspend_code();
+    let rooted = std::mem::replace(&mut e.vm.rooted_write, true);
+    let out = write(e.vm);
+    e.vm.rooted_write = rooted;
+    e.resume_code(roots);
+    out
+}
+/// Suspend this engine across a native call that runs Lisp (eval, load, an
+/// autoload, a lazy body's expansion, `signal-hook-function'): its state and
+/// code are traced in place (`suspend_code`), its register stack set aside
+/// still traced, so the nested run gets fresh registers and every frame
+/// pointer stays valid. Returns CALL's result and the caller's registers
+/// rebased, as the call can widen them (None when that overflows).
+unsafe fn call_suspended<T>(e: &mut Engine<'_>, r: *mut Value, call: impl FnOnce(&mut Vm) -> T) -> (T, Option<*mut Value>) {
+    let roots = e.suspend_code();
+    e.vm.suspend_stack();
+    let out = call(e.vm);
+    e.vm.resume_stack();
+    e.resume_code(roots);
+    e.vm.end_nested_execution();
+    e.code.resize_with(e.vm.functions.len(), Vec::new);
+    // The stack is back in place; grow it only if the call widened the
+    // registers past what the current frames fit, as `frame_room` does.
+    let fits = (e.frames.len() + 3).max(MIN_FRAMES).checked_mul(e.vm.register_width)
+        .and_then(|n| n.checked_add(e.vm.spread_reserve)).is_some_and(|n| n <= e.vm.stack.len());
+    let r = if fits { Some(r) } else { unsafe { widen_registers(e, r, e.vm.register_width) } };
+    if let Some(r) = r { e.regs = r; }
+    (out, r)
 }
 
 /// GNU signal_or_quit: call the edebug hook before unwinding, borrowing at
@@ -737,9 +798,6 @@ fn signal_hook(e: &mut Engine<'_>, condition: Value, data: Value, failed_depth: 
     let hook = e.vm.variable_value(slot).ok()?;
     if hook == Value::NIL || hook == Value::UNBOUND { return None; }
     let r = e.regs;
-    let threshold = std::mem::replace(&mut e.vm.gc_threshold, usize::MAX);
-    let stack = std::mem::take(&mut e.vm.stack);
-    let external = std::mem::take(&mut e.vm.external_roots);
     let saved_depth = e.vm.eval_depth;
     // A refused activation has already incremented GNU's depth, even though
     // no register frame was installed for it.
@@ -749,28 +807,27 @@ fn signal_hook(e: &mut Engine<'_>, condition: Value, data: Value, failed_depth: 
     e.vm.propagated_escape = None;
     e.vm.propagated_eval_depth = None;
     e.vm.propagated_escape_hooked = false;
-    let result = (|| {
-        let form = {
-            let vm: &Vm = e.vm;
-            let quote = |v| Form::List(vec![Form::Sym("quote".into()), Form::Object(handle::FormObject::new(vm, v))]);
-            Form::List(vec![Form::Sym("funcall".into()), quote(hook), quote(condition), quote(data)])
-        };
-        let function = e.vm.compile(&form)?;
-        e.vm.propagate_next = true;
-        e.vm.execute_raw(function)
-    })();
-    e.vm.propagate_next = false;
+    // The quoted objects are rooted; CONDITION and DATA are also the pending
+    // escape, which the suspended engine traces.
+    let form = {
+        let vm: &Vm = e.vm;
+        let quote = |v| Form::List(vec![Form::Sym("quote".into()), Form::Object(handle::FormObject::new(vm, v))]);
+        Form::List(vec![Form::Sym("funcall".into()), quote(hook), quote(condition), quote(data)])
+    };
+    // Compiling the hook can widen the registers; the rebase follows them.
+    let (result, rebased) = unsafe {
+        call_suspended(e, r, |vm| {
+            let function = vm.compile(&form)?;
+            vm.propagate_next = true;
+            let result = vm.execute_raw(function);
+            vm.propagate_next = false;
+            result
+        })
+    };
     let replacement = e.vm.propagated_escape.take();
     if let Some(old) = token { e.vm.restore_stack_limits(old); }
     e.vm.eval_depth = saved_depth;
-    e.vm.gc_threshold = threshold;
-    e.vm.stack = stack;
-    e.vm.external_roots = external;
-    e.vm.end_nested_execution();
-    e.code.resize_with(e.vm.functions.len(), Vec::new);
-    // Rebase from the suspended allocation, which may now need a larger
-    // width because compiling the hook introduced a wider function.
-    if unsafe { widen_registers(e, r, e.vm.register_width) }.is_none() {
+    if rebased.is_none() {
         e.error = Some("register storage exhausted".into());
     }
     match (result, replacement) {
@@ -847,17 +904,22 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
     if let Some(mark) = e.apply_mark.take() { e.vm.backtrace.leave(mark); }
     loop {
         while e.controls.len() > e.controls_base {
-            let control = e.controls.pop().unwrap();
             // Unwind while each intervening handler is still live: restoring
-            // a saved integer forwarding can replace the pending escape.
-            if let Some(signal) = checked_unbind(e, e.vm.dynamic.len() - control.dynamic) {
-                e.controls.push(control);
+            // a saved integer forwarding can replace the pending escape. The
+            // exit and this control stay engine state, traced, while the
+            // restores run watchers.
+            let depth = e.controls.last().unwrap().dynamic;
+            e.escape = Some(escape);
+            let signal = checked_unbind(e, e.vm.dynamic.len() - depth);
+            escape = e.escape.take().unwrap();
+            if let Some(signal) = signal {
                 e.escape = Some(signal);
                 prepare_signal(e, false, None);
                 escape = e.escape.take().unwrap();
                 original = None;
                 continue;
             }
+            let control = e.controls.pop().unwrap();
             let matches = match (&control.kind, &escape) {
                 (ControlKind::Protect { .. }, _) => true,
                 (ControlKind::Catch(tag), Escape::Throw(wanted, _)) => {
@@ -917,7 +979,10 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
             e.error = Some("invalid image protect depth".into());
             return None;
         }
-        if let Some(signal) = checked_unbind(e, e.vm.dynamic.len() - e.dynamic) {
+        e.escape = Some(escape);
+        let signal = checked_unbind(e, e.vm.dynamic.len() - e.dynamic);
+        escape = e.escape.take().unwrap();
+        if let Some(signal) = signal {
             e.escape = Some(signal);
             prepare_signal(e, false, None);
             escape = e.escape.take().unwrap();
@@ -938,9 +1003,10 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                 if name == "excessive-lisp-nesting" {
                     original = Some(format!("Lisp nesting exceeds `max-lisp-eval-depth': {}", e.vm.display(data).unwrap_or_default()));
                 }
-                // GNU's printed error, (CONDITION . DATA): an eval caller's
-                // message names the real signal; void-* always do.
-                if matches!(name.as_str(), "void-function" | "void-variable") || (original.is_none() && e.propagate) {
+                // GNU's printed error, (CONDITION . DATA), whenever no
+                // message was recorded: a condition re-raised across a
+                // nested load (`require') keeps its data. void-* always do.
+                if matches!(name.as_str(), "void-function" | "void-variable") || original.is_none() {
                     let values = e.vm.display(data).unwrap_or_default();
                     original = Some(format!("({name}{})", values.strip_prefix('(').and_then(|s| s.strip_suffix(')')).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default()));
                 }
@@ -1158,12 +1224,13 @@ pub(super) fn assert_opaque_rest_compaction() {
 }
 
 impl Vm {
+    /// Call FUNCTION with ARGS from native code, the caller's register stack
+    /// set aside (traced, its allocation unmoved for suspended engines' raw
+    /// pointers). FUNCTION and ARGS are rooted as quoted objects; the caller
+    /// keeps nothing else across the call unless it is rooted.
     pub(crate) fn reader_call(&mut self, function: Value, args: &[Value]) -> Result<Value> {
-        let mut stack = std::mem::take(&mut self.stack);
-        let roots = self.external_roots.len();
-        self.external_roots.extend_from_slice(&stack);
-        self.external_roots.push(function);
-        self.external_roots.extend_from_slice(args);
+        let _unwind = self.unwind_mark();
+        self.suspend_stack();
         self.propagated_escape = None;
         self.propagated_escape_hooked = false;
         self.propagated_eval_depth = None;
@@ -1183,11 +1250,7 @@ impl Vm {
             result
         })();
         self.propagate_next = false;
-        // Preserve the allocation: suspended engines retain raw register pointers.
-        let stack_end = roots + stack.len();
-        stack.copy_from_slice(&self.external_roots[roots..stack_end]);
-        self.stack = stack;
-        self.external_roots.truncate(roots);
+        self.resume_stack();
         self.end_nested_execution();
         result
     }
@@ -1219,6 +1282,7 @@ pub(super) fn execute(vm: &mut Vm, function: usize) -> Result<Value> {
     execute_args(vm, function, &[])
 }
 pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Value> {
+    let _unwind = vm.unwind_mark();
     // Native reentry (eval/load/macro expansion) shares the Lisp budget, but
     // receives another native stack segment before Rust can exhaust it.
     stacker::maybe_grow(256 * 1024, 2 * 1024 * 1024, || {
@@ -1242,19 +1306,18 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     vm.execution_fatal = false;
     vm.require_live_function(function)?;
     if vm.functions[function].lazy.is_some() {
-        // No engine is suspended here; nested macro calls get their own and
-        // must not consume this execution's propagation request.
-        let threshold = std::mem::replace(&mut vm.gc_threshold, usize::MAX);
+        // Nested macro calls get their own engines and must not consume this
+        // execution's propagation request. The open builder holds collection.
         let propagate = std::mem::take(&mut vm.propagate_next);
         let forced = vm.force_lazy(function);
         vm.propagate_next = propagate;
-        vm.gc_threshold = threshold;
         forced?;
     }
     if let Err(error) = vm.materialize_image_function(function) {
         vm.execution_fatal = true;
         return Err(error);
     }
+    debug_assert!(vm.stack.is_empty(), "a nested run's caller set its registers aside");
     let mut program = std::mem::take(&mut vm.execution);
     if program.registers.is_empty() {
         if let Some(spare) = vm.spare_programs.pop() {
@@ -1320,6 +1383,13 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         #[cfg(debug_assertions)]
         resume: None,
     };
+    // This engine holds collection until it suspends; a writer's rooted
+    // watcher notification does not extend into it.
+    engine.vm.running_engines += 1;
+    let rooted_write = std::mem::take(&mut engine.vm.rooted_write);
+    if engine.vm.stress_due() && engine.vm.may_collect(1) {
+        poll_collect(&mut engine);
+    }
     // SAFETY: storage and lowered code satisfy the module invariants above.
     let mut value = unsafe { next(&mut engine, regs, std::ptr::null()) };
     // Unoptimized Rust does not perform sibling-call elimination. Drive the
@@ -1361,6 +1431,8 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         registers: std::mem::take(&mut engine.vm.stack),
     };
     engine.vm.execution_fatal = engine.fatal_image_failure;
+    engine.vm.rooted_write = rooted_write;
+    engine.vm.running_engines -= 1;
     match engine.error {
         Some(error) => Err(error),
         None => Ok(value),
@@ -1665,11 +1737,9 @@ fn closure_arity_error(e: &mut Engine<'_>, function: usize, argc: usize) -> Valu
 }
 /// GNU eval.c funcall_general: a function cell that resolves to nothing is
 /// `void-function'; any other non-function object (a string, a number, a
-/// vector, a malformed `(lambda)') is `invalid-function'.  A well-formed
-/// `(lambda ...)' list is called (lambda_list_then) where the engine reaches
-/// a value; a function cell cannot hold one (VM2-ALIAS1).
+/// vector, a cons that is not a lambda list) is `invalid-function'.
 #[cold]
-fn uncallable_condition(_: &mut Engine<'_>, target: Value) -> &'static str {
+fn uncallable_condition(_e: &mut Engine<'_>, target: Value) -> &'static str {
     if target == Value::UNBOUND || target == Value::NIL || target == Value::TRUE {
         return "void-function";
     }
@@ -1693,7 +1763,7 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
-    if e.vm.heap_objects() >= e.vm.gc_threshold {
+    if e.vm.collection_due() && e.vm.may_collect(1) {
         poll_collect(e);
     }
     unsafe { next(e, r, pc) }
@@ -1704,6 +1774,7 @@ fn poll_collect(e: &mut Engine<'_>) {
     // Forward in place without moving instruction buffers: suspended PCs and
     // entry pointers stay valid.
     let roots = e.suspend_code();
+    debug_assert!(e.vm.may_collect(0), "collecting while a frame holds untraced Values");
     e.vm.collect(&mut []);
     e.resume_code(roots);
 }
@@ -1837,7 +1908,7 @@ unsafe fn resolve_head(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Va
                 None => Value::UNBOUND,
             };
         }
-        if !matches!(target.tag(), 4 | 6) {
+        if !matches!(target.tag(), 4 | 6) && !lambda_list(e, target) {
             let condition = uncallable_condition(e, target);
             return raise(e, condition, &[function]);
         }
@@ -2027,7 +2098,7 @@ unsafe fn direct_generic(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> 
             return raise(e, "void-function", &[Value::reference(i.b + 1, 7)]);
         }
         // An autoload cell is resolved from its symbol, which it must name.
-        if target.tag() == 7 || target.tag() == 3 && e.vm.autoload_object(target) {
+        if target.tag() == 7 || target.tag() == 3 && (e.vm.autoload_object(target) || lambda_list(e, target)) {
             return invoke_full(e, r, pc, Value::reference(i.b + 1, 7), i.d, i.e);
         }
         // GNU eval.c:3158-3160 names the called SYMBOL, not its cell's value.
@@ -2150,7 +2221,7 @@ unsafe fn resolve_entry(
             };
             let function = closure.function;
             if e.vm.functions[function].lazy.is_some() {
-                // Collection stays inhibited throughout, so `target` and the
+                // No collection runs in it (`force_lazy`), so `target` and the
                 // argument registers keep their indices; only `r` is rebased.
                 match force_lazy(e, r, function) {
                     Some(rebased) => r = rebased,
@@ -2231,6 +2302,7 @@ unsafe fn resolve_entry(
                     | Primitive::Macroexpand
                     | Primitive::AutoloadDoLoad
                     | Primitive::ReadHostEvent
+                    | Primitive::FormatModeLine
                     | Primitive::MakeInterpretedClosure
             ) {
                 let call = primitive_target(p);
@@ -2311,6 +2383,7 @@ unsafe fn invoke_full(
                 || target == Value::reference(Primitive::Macroexpand as usize, 6)
                 || target == Value::reference(Primitive::AutoloadDoLoad as usize, 6)
                 || target == Value::reference(Primitive::ReadHostEvent as usize, 6)
+                || target == Value::reference(Primitive::FormatModeLine as usize, 6)
             {
                 return primitive(e, r, pc, target, start, argc);
             }
@@ -2327,6 +2400,9 @@ unsafe fn invoke_full(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
+            if let Some(failure) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
+                return lambda_list_raise(e, failure);
+            }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_invoke_full(e, r, pc, closure, start, argc),
                 None => Value::UNBOUND,
@@ -2583,13 +2659,13 @@ unsafe fn take_step(
             }
             Ok(prim::Step::Collect) => {
                 leave_native(e);
-                if e.vm.gc_threshold == usize::MAX {
-                    // Nested compilation/load owns unforwarded Rust locals.
-                    // Match GNU's garbage_collection_inhibited early return.
-                    *r.add((*pc).a) = Value::NIL;
-                } else {
+                if e.vm.may_collect(1) {
                     poll_collect(e);
                     *r.add((*pc).a) = e.vm.garbage_collect_statistics();
+                } else {
+                    // A frame below holds untraced Values (`Vm::may_collect`):
+                    // GNU's garbage_collection_inhibited early return.
+                    *r.add((*pc).a) = Value::NIL;
                 }
                 return Continue::At(r, pc.add(1));
             }
@@ -2767,18 +2843,21 @@ unsafe fn t2_dispatch(
                 None => Value::UNBOUND,
             };
         }
+        if lambda_list(e, target) {
+            enter_native(e, r, pc, target, start, argc);
+            if let Some(failure) = lambda_list_failure(e.vm, target, std::slice::from_raw_parts(r.add(start), argc).to_vec()) {
+                return lambda_list_raise(e, failure);
+            }
+            return match lambda_list_then(e, r, target) {
+                Some((r, closure)) => t2_dispatch(e, r, pc, closure, start, argc),
+                None => Value::UNBOUND,
+            };
+        }
         if target.tag() == 4 {
             return t2_enter_closure(e, r, pc, target, start, argc);
         }
         if prim::generated(target).is_some() {
             return enter_generated(e, r, pc, target, start, argc);
-        }
-        if lambda_list(e, target) {
-            enter_native(e, r, pc, target, start, argc);
-            return match lambda_list_then(e, r, target) {
-                Some((r, closure)) => t2_dispatch(e, r, pc, closure, start, argc),
-                None => Value::UNBOUND,
-            };
         }
         if target.tag() != 6 {
             return {
@@ -2800,7 +2879,7 @@ unsafe fn t2_dispatch(
                 t2_dispatch(e, r, pc, target, offset - base, count)
             }
             // These use neither the site caches nor the caller's width.
-            Primitive::Throw | Primitive::Signal | Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::MakeInterpretedClosure => {
+            Primitive::Throw | Primitive::Signal | Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::FormatModeLine | Primitive::MakeInterpretedClosure => {
                 t2_invoke_full(e, r, pc, target, start, argc)
             }
             _ => {
@@ -3009,7 +3088,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::traversal_primitive
         }
         Message => Vm::primitive,
-        Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent => |vm, p, start, n| {
+        Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |vm, p, start, n| {
             let args = vm.stack[start..start + n].to_vec();
             vm.loader_primitive(p, &args)
         },
@@ -3101,8 +3180,9 @@ fn primitive_value(
     match call(e.vm, p, start, argc) {
         Ok(value) => Some(value),
         Err(error) => {
-            // A variable watcher's own signal travels behind the write's text.
-            if matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault) && let Some(escape) = e.vm.propagated_escape.take() {
+            // A variable watcher's or `defalias-fset-function''s own signal
+            // travels behind the write's text.
+            if matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault | Primitive::Defalias) && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
                 e.failed_eval_depth = e.vm.propagated_eval_depth.take();
@@ -3151,7 +3231,7 @@ unsafe fn primitive(
         enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
-        if matches!(p, Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::MakeInterpretedClosure) {
+        if matches!(p, Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::FormatModeLine | Primitive::MakeInterpretedClosure) {
             return reentrant_load(e, r, pc, p, base + start, argc);
         }
         let mut signal = None;
@@ -3206,54 +3286,29 @@ unsafe fn widen_registers(e: &mut Engine<'_>, r: *mut Value, width: usize) -> Op
     }
 }
 /// R215: expand and compile a lazily held body before its first frame entry.
-/// Exactly `reentrant_load`'s discipline: macro expansion runs Lisp, so the
-/// suspended register stack is taken out of the collector's view, collection
-/// is inhibited while compiler builders hold unrooted Values, and every frame
-/// pointer is rebased afterwards because compiling can widen the registers.
-/// Returns the rebased caller registers, or None with the expansion's own
-/// condition pending (GNU signals it when the call reaches the body).
+/// Macro expansion runs Lisp, so this engine is suspended (`call_suspended`).
+/// That Lisp runs only inside the compiler builder, which holds collection,
+/// so callers may keep the callee and argument indices across this. Returns
+/// the rebased caller registers, or None with the expansion's own condition
+/// pending (GNU signals it when the call reaches the body).
 #[cold]
 #[inline(never)]
 unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Option<*mut Value> {
     unsafe {
-        let old_base = e.vm.stack.as_ptr();
-        let current = r.offset_from(old_base) as usize;
-        let frames: Vec<_> = e
-            .frames
-            .iter()
-            .map(|frame| frame.regs.offset_from(old_base) as usize)
-            .collect();
-        let stack = std::mem::take(&mut e.vm.stack);
-        let external = std::mem::take(&mut e.vm.external_roots);
-        let threshold = e.vm.gc_threshold;
-        e.vm.gc_threshold = usize::MAX;
         e.vm.execution_fatal = false;
         e.vm.propagated_escape = None;
         e.vm.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
-        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.force_lazy(function));
+        let collections = e.vm.gc_stats.collections;
+        let (result, r) = call_suspended(e, r, |vm| stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || vm.force_lazy(function)));
+        debug_assert_eq!(e.vm.gc_stats.collections, collections, "a lazy body's expansion collected");
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        e.vm.gc_threshold = threshold;
-        e.vm.stack = stack;
-        e.vm.external_roots = external;
-        e.vm.end_nested_execution();
-        e.code.resize_with(e.vm.functions.len(), Vec::new);
-        let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(e.vm.spread_reserve)) else {
+        let Some(r) = r else {
             fail(e, "register storage overflow");
             return None;
         };
-        if e.vm.stack.len() < size {
-            e.vm.stack.resize(size, Value::NIL);
-        }
-        let base = e.vm.stack.as_mut_ptr();
-        for (i, offset) in frames.into_iter().enumerate() {
-            e.frames[i].regs = base.add(offset);
-        }
-        let r = base.add(current);
-        e.regs = r;
         match result {
             Ok(()) => Some(r),
             Err(error) => {
@@ -3275,74 +3330,145 @@ unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Opti
         }
     }
 }
-/// eval.c `Fautoload_do_load (FUNDEF, FUNCTION, Qnil)` for a call site:
-/// `force_lazy`'s discipline (the suspended register stack leaves the
-/// collector's view, collection is inhibited, every frame pointer is rebased
-/// because the load can widen the registers). Returns the rebased caller
-/// registers, or None with the load's own condition pending.
+/// eval.c `Fautoload_do_load (FUNDEF, FUNCTION, Qnil)` for a call site,
+/// with this engine suspended (`call_suspended`); the load roots FUNDEF in
+/// its own binding. Returns the rebased caller registers, or None with the
+/// load's own condition pending.
 #[cold]
 #[inline(never)]
 unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fundef: Value) -> Option<*mut Value> {
-    unsafe { nested_then(e, r, |vm| vm.autoload_do_load(fundef, function, Value::NIL)) }.map(|(r, _)| r)
+    unsafe { nested_then(e, r, |vm| vm.autoload_do_load(fundef, function, Value::NIL)).map(|(r, _)| r) }
 }
-/// eval.c funcall_lambda on a list headed by `lambda': call it as a
-/// dynamically scoped interpreted function.  The closure is made in a nested
-/// execution, as an autoload's file is loaded; the rebased registers and the
-/// closure come back.  A malformed list keeps `invalid-function'.
+/// eval.c funcall_lambda of a `(lambda ARGS . BODY)' list: GNU interprets
+/// it with dynamic binding (lexenv nil). VM2 evaluates the list in that
+/// dialect, as `(function LIST)', and calls the closure; the list itself
+/// stays the function. Returns the rebased caller registers and the
+/// closure, or None with the condition pending.
 #[cold]
 #[inline(never)]
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
-    unsafe { nested_then(e, r, |vm| vm.lambda_list_closure(list)) }
+    unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
 }
+/// specbind of SLOT to VALUE from compiled code or a call site: a protected
+/// variable (most-positive-fixnum, enable-multibyte-characters, ...) is
+/// setting-constant, else the binding is made; on failure a watcher's own
+/// signal or a forwarded store fault is left pending. A trapped variable's
+/// watchers may collect (`watched_write`), so VALUE is rooted across them
+/// for the fault's data.
+fn bind_special(e: &mut Engine<'_>, slot: usize, value: Value) -> Result<()> {
+    if e.vm.protected_variable_slot(slot) {
+        raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
+        return Err("setting constant".into());
+    }
+    let watched = e.vm.variable_trapped(e.vm.indirect_variable(slot));
+    let frame = watched.then(|| e.vm.root_frame(&[value]));
+    let result = watched_write(e, watched, |vm| vm.bind_variable(slot, value));
+    let value = frame.map_or(value, |frame| { let [value] = e.vm.release_frame(frame); value });
+    result.inspect_err(|error| {
+        if let Some(escape) = e.vm.propagated_escape.take() {
+            e.escape = Some(escape);
+        } else if let Some((condition, data)) = e.vm.forwarded_condition(error, value) {
+            e.escape = Some(Escape::Signal(condition, data));
+        }
+    })
+}
+/// A lambda list's failed walk: the bindings made before it failed,
+/// then the condition and its data.
+type LambdaListFailure = (Vec<(Value, Value)>, &'static str, Vec<Value>);
+/// eval.c funcall_lambda's argument walk for a `(lambda ARGS . BODY)'
+/// list called with ARGS. One parameter at a time it is checked, takes its
+/// argument and is bound (dynamically: a list function has no lexenv). A
+/// parameter that is not a symbol or a misplaced &optional or &rest is
+/// invalid-function, binding nil, t or a keyword is setting-constant, and
+/// a missing or excess argument is wrong-number-of-arguments, with the list
+/// itself as the function datum. Returns the walk's failure, if any.
+fn lambda_list_failure(vm: &mut Vm, list: Value, args: Vec<Value>) -> Option<LambdaListFailure> {
+    let symbol = |vm: &mut Vm, name: &str| Value::reference(vm.slot(name) + 1, 7);
+    let (and_rest, and_optional) = (symbol(vm, "&rest"), symbol(vm, "&optional"));
+    let constant = |vm: &Vm, param: Value| param == Value::NIL || param == Value::TRUE || {
+        let slot = param.index_if(7).map(|i| i - 1);
+        slot.is_some_and(|slot| vm.symbol_names[slot].starts_with(':') && vm.names.get(&vm.symbol_names[slot]) == Some(&slot))
+    };
+    let (_, tail) = vm.cons_pair(list).ok()?;
+    let (mut params, _) = vm.cons_pair(tail).ok()?;
+    let argc = args.len();
+    let invalid = Some(("invalid-function", vec![list]));
+    let arity = Some(("wrong-number-of-arguments", vec![list, Value::integer(argc as i64).unwrap()]));
+    let (mut bindings, mut optional, mut rest, mut previous_rest, mut i) = (vec![], false, false, false, 0);
+    let failure = loop {
+        let Ok((next, more)) = vm.cons_pair(params) else {
+            break if params != Value::NIL || previous_rest { invalid } else if i < argc { arity } else { None };
+        };
+        if next.tag() != 7 && next != Value::NIL && next != Value::TRUE { break invalid }
+        if next == and_rest {
+            if rest || previous_rest { break invalid }
+            (rest, previous_rest) = (true, true);
+        } else if next == and_optional {
+            if optional || rest || previous_rest { break invalid }
+            optional = true;
+        } else {
+            let arg = if rest { let all = vm.list_value(&args[i..]); i = argc; all }
+                else if i < argc { i += 1; args[i - 1] }
+                else if !optional { break arity }
+                else { Value::NIL };
+            if constant(vm, next) { break Some(("setting-constant", vec![next])) }
+            bindings.push((next, arg));
+            previous_rest = false;
+        }
+        params = more;
+    };
+    let (condition, data) = failure?;
+    Some((bindings, condition, data))
+}
+/// Make a failed walk's bindings, with the caller's own argument objects,
+/// then signal its condition; the handler's unwinding undoes the bindings,
+/// so their variable watchers see the let and the unlet. The values stay
+/// rooted (and are reread) while watchers run Lisp.
+fn lambda_list_raise(e: &mut Engine<'_>, (bindings, condition, data): LambdaListFailure) -> Value {
+    let roots = e.vm.external_roots.len();
+    e.vm.external_roots.extend(&data);
+    e.vm.external_roots.extend(bindings.iter().flat_map(|&(param, arg)| [param, arg]));
+    let base = roots + data.len();
+    for k in 0..bindings.len() {
+        let (param, arg) = (e.vm.external_roots[base + 2 * k], e.vm.external_roots[base + 2 * k + 1]);
+        if let Err(error) = bind_special(e, param.index_if(7).map_or(0, |i| i - 1), arg) {
+            e.vm.external_roots.truncate(roots);
+            if e.escape.is_none() { e.error = Some(error) }
+            return Value::UNBOUND;
+        }
+    }
+    let data: Vec<Value> = e.vm.external_roots.drain(roots..).take(data.len()).collect();
+    raise(e, condition, &data)
+}
+/// GNU `(lambda ...)' list functions: a list headed by `lambda' whose cdr
+/// is a cons (funcall_lambda signals `invalid-function' otherwise).
 fn lambda_list(e: &mut Engine<'_>, target: Value) -> bool {
-    let lambda = Value::reference(e.vm.slot("lambda") + 1, 7);
-    target.tag() == 3 && e.vm.cons_pair(target).is_ok_and(|(head, rest)| head == lambda && rest.tag() == 3)
+    target.tag() == 3 && {
+        let lambda = Value::reference(e.vm.slot("lambda") + 1, 7);
+        e.vm.cons_pair(target).is_ok_and(|(head, tail)| head == lambda && tail.tag() == 3)
+    }
 }
-/// Run RUN, which may compile and execute Lisp, while this engine's frames
-/// are suspended: the register stack leaves the collector's view, collection
-/// is inhibited, and every frame pointer is rebased afterwards.
+/// Run RUN, which may load and compile Lisp, from a call site with this
+/// engine suspended (`call_suspended`): RUN may collect, and every frame
+/// pointer is rebased because the nested code can widen the registers.
+/// Returns the rebased caller registers and RUN's value, or None with its
+/// condition pending.
 unsafe fn nested_then(e: &mut Engine<'_>, r: *mut Value, run: impl FnOnce(&mut Vm) -> Result<Value>) -> Option<(*mut Value, Value)> {
     unsafe {
-        let old_base = e.vm.stack.as_ptr();
-        let current = r.offset_from(old_base) as usize;
-        let frames: Vec<_> = e
-            .frames
-            .iter()
-            .map(|frame| frame.regs.offset_from(old_base) as usize)
-            .collect();
-        let stack = std::mem::take(&mut e.vm.stack);
-        let external = std::mem::take(&mut e.vm.external_roots);
-        let threshold = e.vm.gc_threshold;
-        e.vm.gc_threshold = usize::MAX;
         e.vm.execution_fatal = false;
         e.vm.propagated_escape = None;
         e.vm.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
         e.vm.loader.propagate += 1;
-        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || run(e.vm));
+        let (result, r) = call_suspended(e, r, |vm| stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || run(vm)));
         e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        e.vm.gc_threshold = threshold;
-        e.vm.stack = stack;
-        e.vm.external_roots = external;
-        e.vm.end_nested_execution();
-        e.code.resize_with(e.vm.functions.len(), Vec::new);
-        let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(e.vm.spread_reserve)) else {
+        let Some(r) = r else {
             fail(e, "register storage overflow");
             return None;
         };
-        if e.vm.stack.len() < size {
-            e.vm.stack.resize(size, Value::NIL);
-        }
-        let base = e.vm.stack.as_mut_ptr();
-        for (i, offset) in frames.into_iter().enumerate() {
-            e.frames[i].regs = base.add(offset);
-        }
-        let r = base.add(current);
-        e.regs = r;
         match result {
             Ok(value) => Some((r, value)),
             Err(error) => {
@@ -3358,9 +3484,9 @@ unsafe fn nested_then(e: &mut Engine<'_>, r: *mut Value, run: impl FnOnce(&mut V
         }
     }
 }
-// A load can compile and run new functions while an outer frame is suspended.
-// Retain that frame's allocation, inhibit compaction, then rebase every pointer
-// if the newly compiled register width requires a larger outer stack.
+// eval, load, require, macroexpand, autoload-do-load and the host read run
+// Lisp with this frame suspended (`call_suspended`). ARGS are a copy taken
+// before the call; the primitive roots whatever it keeps across Lisp.
 #[cold]
 unsafe fn reentrant_load(
     e: &mut Engine<'_>,
@@ -3371,18 +3497,7 @@ unsafe fn reentrant_load(
     argc: usize,
 ) -> Value {
     unsafe {
-        let old_base = e.vm.stack.as_ptr();
-        let current = r.offset_from(old_base) as usize;
-        let frames: Vec<_> = e
-            .frames
-            .iter()
-            .map(|frame| frame.regs.offset_from(old_base) as usize)
-            .collect();
         let args = e.vm.stack[start..start + argc].to_vec();
-        let stack = std::mem::take(&mut e.vm.stack);
-        let external = std::mem::take(&mut e.vm.external_roots);
-        let threshold = e.vm.gc_threshold;
-        e.vm.gc_threshold = usize::MAX;
         e.vm.execution_fatal = false;
         // Only an escape produced by THIS operation may be re-raised below.
         e.vm.propagated_escape = None;
@@ -3390,26 +3505,15 @@ unsafe fn reentrant_load(
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
         e.vm.loader.propagate += 1;
-        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.loader_primitive(p, &args));
+        let (result, r) = call_suspended(e, r, |vm| {
+            stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || vm.loader_primitive(p, &args))
+        });
         e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        e.vm.gc_threshold = threshold;
-        e.vm.stack = stack;
-        e.vm.external_roots = external;
-        e.vm.end_nested_execution();
-        e.code.resize_with(e.vm.functions.len(), Vec::new);
-        let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(e.vm.spread_reserve)) else {
+        let Some(r) = r else {
             return fail(e, "register storage overflow");
         };
-        if e.vm.stack.len() < size { e.vm.stack.resize(size, Value::NIL); }
-        let base = e.vm.stack.as_mut_ptr();
-        for (i, offset) in frames.into_iter().enumerate() {
-            e.frames[i].regs = base.add(offset);
-        }
-        let r = base.add(current);
-        e.regs = r;
         match result {
             Ok(value) => {
                 leave_native(e);
@@ -3743,37 +3847,27 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                     }
                     *r.add(reg) = v;
                 }
-                Op::SetGlobal(slot, _) | Op::Bind(slot, _)
+                Op::SetGlobal(slot, _)
                     if e.vm.protected_variable_slot(slot) =>
                 {
                     raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
                     return Err("setting constant".into());
                 }
+                // The value is read again from its register after a write
+                // whose watchers may have collected.
                 Op::SetGlobal(slot, reg) => {
-                    let value = *r.add(reg);
-                    if let Err(error) = e.vm.set_variable_value(slot, value) {
+                    let watched = e.vm.variable_trapped(e.vm.indirect_variable(slot));
+                    if let Err(error) = watched_write(e, watched, |vm| vm.set_variable_value(slot, *r.add(reg))) {
                         // A variable watcher's own signal, else a forwarded store fault.
                         if let Some(escape) = e.vm.propagated_escape.take() {
                             e.escape = Some(escape);
-                        } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
+                        } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, *r.add(reg)) {
                             e.escape = Some(Escape::Signal(condition, data));
                         }
                         return Err(error);
                     }
                 }
-                Op::Bind(slot, reg) => {
-                    let value = *r.add(reg);
-                    if let Err(error) = e.vm.bind_variable(slot, value) {
-                        if let Some(escape) = e.vm.propagated_escape.take() {
-                            e.escape = Some(escape);
-                            return Err(error);
-                        }
-                        if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
-                            e.escape = Some(Escape::Signal(condition, data));
-                        }
-                        return Err(error);
-                    }
-                }
+                Op::Bind(slot, reg) => bind_special(e, slot, *r.add(reg))?,
                 Op::Unbind(n) => {
                     if n > e.vm.dynamic.len() - e.dynamic {
                         return Err("invalid image dynamic binding depth".into());

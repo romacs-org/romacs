@@ -25,7 +25,9 @@ fn mail_entrypoints_are_real_interactive_commands() {
 #[test]
 fn search_rows_preserve_exact_thread_identity_and_sanitize_display() {
     let mut vm = setup();
-    assert_eq!(printed(&mut vm, "(list (lookup-key romacs-mail-search-map [10]) (lookup-key romacs-mail-search-map [13]))"), "(romacs-mail-open-tree romacs-mail-open-tree)", "NATIVE_RETURN_AND_CARRIAGE_RETURN_OPEN_MAIL");
+    // Return arrives as `return', which `local-function-key-map' makes RET;
+    // C-j is C-j, which the search map leaves to the global map.
+    assert_eq!(printed(&mut vm, "(list (lookup-key romacs-mail-search-map [13]) (lookup-key romacs-mail-search-map [10]) (lookup-key local-function-key-map [return]))"), "(romacs-mail-open-tree nil [13])", "NATIVE_RETURN_OPENS_MAIL");
     assert_eq!(printed(&mut vm,r#"(equal (romacs-mail-clean "a\tb\nc\177\205" t) "a b c  ")"#),"t","MAIL_CONTROLS_CANNOT_REACH_LAYOUT");
     assert_eq!(printed(&mut vm,r#"(substring-no-properties (romacs-mail-search-line (romacs-notmuch--summary 'fixture (romacs-json-read "{\"thread\":\"abc\",\"date_relative\":\"Today\",\"timestamp\":1,\"matched\":1,\"total\":2,\"authors\":\"Alice\",\"subject\":\"Hello λ\",\"tags\":[\"inbox\"]}"))))"#),"\"Today         [1/2] Alice                    Hello λ (inbox)\\n\"");
 }

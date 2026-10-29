@@ -72,7 +72,7 @@ impl Leaf<'_> {
             buffer.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer));
         if let Some(current) = current { self.vm.slots[self.vm.buffer_slot].value = current; }
         let text = text.map_err(Fault::Error)?;
-        Ok(self.string(&text))
+        Ok(self.vm.printed_value(&text))
     }
 
     fn print_buffer(&self, stream: Value) -> std::result::Result<Option<Value>, Fault> {
@@ -100,7 +100,7 @@ impl Leaf<'_> {
         }
         if !self.string_view(object)?.is_multibyte() && self.print_buffer(stream)?.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer) {
             let text = self.vm.print_plain_string(object).map_err(Fault::Error)?;
-            return Ok(self.string(&text));
+            return Ok(self.vm.printed_value(&text));
         }
         Ok(object)
     }

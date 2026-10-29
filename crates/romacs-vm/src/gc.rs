@@ -11,6 +11,132 @@ pub struct HeapStats {
     pub capacity_bytes: usize,
 }
 
+/// Values a native frame keeps across a call that can run Lisp: a span of
+/// `external_roots`, pushed before the call and read back by index after it,
+/// so only the forwarded copy is used. Frames nest; release each in reverse
+/// order on every exit, the failing ones included. A panic unwinding the
+/// owning frame drops the span.
+#[must_use = "a root frame is released on every exit"]
+pub(crate) struct RootFrame {
+    base: usize,
+    len: usize,
+    vm: *mut Vm,
+}
+
+impl Drop for RootFrame {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            // SAFETY: as for `UnwindMark`.
+            unsafe { (*self.vm).external_roots.truncate(self.base) };
+        }
+    }
+}
+
+/// Test mode: every Nth Lisp entry (`threaded::execute_args`) collects and
+/// moves every live object, so a heap Value a native frame kept in a Rust
+/// local across the call becomes a wrong object. Enabled by
+/// `ROMACS_GC_STRESS=N` or [`Vm::set_gc_stress`]; off (0) by default.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Stress {
+    every: u32,
+    entries: u32,
+    /// Dead fillers the last collection left at the front of each arena.
+    pads: usize,
+    /// The collection about to run is a forced one.
+    shift: bool,
+}
+
+/// The state nested Lisp runs push and pop on the VM: suspended engines and
+/// their register stacks, root frames, collection holds, the running-engine
+/// count, handler and backtrace marks. A panic unwinding a frame that took
+/// this mark restores it, so no entry outlives the engine or frame it
+/// describes (a suspended engine's code pointers would dangle) and the VM
+/// stays usable once the panic is caught. Dynamic bindings stay as the
+/// panic left them.
+#[must_use = "the mark restores on unwinding only while it lives"]
+pub(crate) struct UnwindMark {
+    vm: *mut Vm,
+    code: usize,
+    stacks: usize,
+    roots: usize,
+    engines: usize,
+    holds: usize,
+    rooted_write: bool,
+    stack_empty: bool,
+    handlers: usize,
+    backtrace: usize,
+    eval_depth: usize,
+}
+
+impl Drop for UnwindMark {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        // SAFETY: the mark lives in a frame of the borrow it was taken from,
+        // and an unwinding frame no longer uses that borrow.
+        let vm = unsafe { &mut *self.vm };
+        vm.suspended_code.truncate(self.code);
+        vm.suspended_stacks.truncate(self.stacks);
+        vm.external_roots.truncate(self.roots);
+        vm.running_engines = self.engines;
+        vm.gc_holds = self.holds;
+        vm.rooted_write = self.rooted_write;
+        if self.stack_empty {
+            vm.stack = Vec::new();
+        }
+        vm.signal_handlers.truncate(self.handlers);
+        vm.backtrace.leave(self.backtrace);
+        vm.eval_depth = self.eval_depth;
+    }
+}
+
+/// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
+const CONS_BYTES: i64 = 16;
+/// GNU's floor under `gc-cons-threshold' (alloc.c:5747, GC_DEFAULT_THRESHOLD / 10).
+const MIN_CONS_THRESHOLD: i64 = 80_000;
+/// A Romacs collection moves objects and walks compiled code, so it costs
+/// more per traced unit than GNU's: `gc-cons-percentage' is scaled by this
+/// before use, making GNU's 0.1 collect after about six traced heaps.
+const PERCENTAGE_SCALE: f64 = 15.0;
+/// The scaled percentage's ceiling. GNU's formula never collects at 2 (it
+/// counts half the allocation since as live); 1.8 holds a large setting at
+/// 18 traced heaps, three times the default's deferral.
+const MAX_SCALED_PERCENTAGE: f64 = 1.8;
+
+/// `gc-cons-percentage' P as the collector uses it: P times
+/// PERCENTAGE_SCALE, at most MAX_SCALED_PERCENTAGE; a negative or NaN P
+/// leaves only the threshold, as GNU's does.
+pub(crate) fn scaled_percentage(p: f64) -> f64 {
+    if p.is_nan() { 0.0 } else { (p * PERCENTAGE_SCALE).clamp(0.0, MAX_SCALED_PERCENTAGE) }
+}
+
+impl Stress {
+    pub(crate) fn from_env() -> Self {
+        let every = std::env::var("ROMACS_GC_STRESS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
+        Self { every, ..Self::default() }
+    }
+    /// Count one Lisp entry; true when this one must collect.
+    pub(crate) fn due(&mut self) -> bool {
+        if self.every == 0 {
+            return false;
+        }
+        self.entries += 1;
+        self.entries % self.every == 0
+    }
+    /// Fillers for the next collection: a forced one changes the count from
+    /// the last, so every object with no other garbage below it moves.
+    fn take_pads(&mut self) -> usize {
+        let pads = match std::mem::take(&mut self.shift) {
+            false => 0,
+            true if self.pads == 1 => 2,
+            true => 1,
+        };
+        self.pads = pads;
+        pads
+    }
+}
+
 /// What a retention probe measured at each workload size.
 #[derive(Clone, Debug, Default)]
 pub struct RetentionReport {
@@ -91,6 +217,113 @@ pub fn assert_no_retention_growth(
 }
 
 impl Vm {
+    /// Mark the nested-run state for restoration should a panic unwind the
+    /// caller's frame ([`UnwindMark`]).
+    pub(crate) fn unwind_mark(&mut self) -> UnwindMark {
+        UnwindMark {
+            code: self.suspended_code.len(),
+            stacks: self.suspended_stacks.len(),
+            roots: self.external_roots.len(),
+            engines: self.running_engines,
+            holds: self.gc_holds,
+            rooted_write: self.rooted_write,
+            stack_empty: self.stack.is_empty(),
+            handlers: self.signal_handlers.len(),
+            backtrace: self.backtrace.frames.len(),
+            eval_depth: self.eval_depth,
+            vm: self,
+        }
+    }
+    pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
+        let base = self.external_roots.len();
+        self.external_roots.extend_from_slice(values);
+        RootFrame { base, len: values.len(), vm: self }
+    }
+    pub(crate) fn rooted(&self, frame: &RootFrame, i: usize) -> Value {
+        assert!(i < frame.len, "root frame index");
+        self.external_roots[frame.base + i]
+    }
+    pub(crate) fn set_rooted(&mut self, frame: &RootFrame, i: usize, value: Value) {
+        assert!(i < frame.len, "root frame index");
+        self.external_roots[frame.base + i] = value;
+    }
+    /// Release FRAME, returning its forwarded values.
+    pub(crate) fn release_frame<const N: usize>(&mut self, frame: RootFrame) -> [Value; N] {
+        assert_eq!(frame.len, N, "root frames are released whole");
+        let values = std::array::from_fn(|i| self.rooted(&frame, i));
+        self.drop_frame(frame);
+        values
+    }
+    pub(crate) fn drop_frame(&mut self, frame: RootFrame) {
+        assert_eq!(self.external_roots.len(), frame.base + frame.len, "root frames are released in reverse order");
+        self.external_roots.truncate(frame.base);
+    }
+    /// GNU's `garbage_collection_inhibited`, derived from its owners: a
+    /// collection may run only when no frame keeps heap Values in untraced
+    /// Rust storage. Those are OWN unsuspended engines (the caller's own),
+    /// no other running engine outside `suspended_code`, no open compiler
+    /// builder and no watcher notification from an unrooted native writer.
+    /// Every other native frame on the stack holds its Values in traced
+    /// storage: a binding, a `#:` slot or a [`RootFrame`]
+    /// (tests/fixtures/reentry-sites.txt lists each call site).
+    pub(crate) fn may_collect(&self, own: usize) -> bool {
+        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended_code.len()) == own
+    }
+    /// Set the suspended engine's register stack aside for a nested run,
+    /// still traced, its allocation unmoved for the frames' raw pointers.
+    pub(crate) fn suspend_stack(&mut self) {
+        let stack = std::mem::take(&mut self.stack);
+        self.suspended_stacks.push(stack);
+    }
+    pub(crate) fn resume_stack(&mut self) {
+        debug_assert!(self.stack.is_empty(), "a nested run returned its registers");
+        self.stack = self.suspended_stacks.pop().expect("a suspended register stack");
+    }
+    /// SLOTS as a dense membership table over every symbol slot.
+    fn slot_set<'a>(&self, slots: impl Iterator<Item = &'a usize>) -> Vec<bool> {
+        let mut set = vec![false; self.slots.len()];
+        for &slot in slots {
+            set[slot] = true;
+        }
+        set
+    }
+    /// [`Stress`]: collect at every Nth Lisp entry; 0 turns it off.
+    pub fn set_gc_stress(&mut self, every: u32) {
+        self.gc_stress = Stress { every, ..Stress::default() };
+    }
+    /// GNU `maybe_garbage_collect' (alloc.c:5740-5809): collect once the
+    /// allocation since the last collection reaches `gc-cons-threshold'
+    /// (at least 80000 bytes) or, when `gc-cons-percentage' is a float, that
+    /// fraction (scaled, PERCENTAGE_SCALE, and clamped, MAX_SCALED_PERCENTAGE)
+    /// of the live heap plus half the allocation since. Allocation is counted
+    /// in objects charged CONS_BYTES each; the live heap is what a collection
+    /// traverses, retained objects and compiled code units. Both variables
+    /// are read live, so binding them takes effect at once.
+    pub(crate) fn collection_due(&self) -> bool {
+        // An embedder's floor overrides, as GNU's memory-full state does.
+        if let Some(floor) = self.gc_floor {
+            return self.heap_objects() >= self.gc_retained.saturating_mul(2).max(floor);
+        }
+        let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64;
+        let threshold = self.forwarded.gc_cons_threshold().max(MIN_CONS_THRESHOLD) as f64 / CONS_BYTES as f64;
+        let percentage = match self.forwarded.gc_cons_percentage() {
+            Ok(value) => match self.object_if(value) {
+                Some(data::Object::Float(f)) => Some(*f),
+                _ => None,
+            },
+            Err(initial) => Some(initial),
+        };
+        let proportional = percentage.map_or(0.0, |p| {
+            scaled_percentage(p) * ((self.gc_retained + self.gc_code) as f64 + allocated / 2.0)
+        });
+        allocated >= threshold.max(proportional)
+    }
+    /// A forced stress collection is due at this Lisp entry.
+    pub(crate) fn stress_due(&mut self) -> bool {
+        let due = self.gc_stress.due();
+        self.gc_stress.shift |= due;
+        due
+    }
     /// Snapshot before constructing the result, just as GNU snapshots gcstat.
     /// Object arenas share spare storage: no typed free string/float/buffer pools.
     pub(crate) fn garbage_collect_statistics(&mut self) -> Value {
@@ -305,15 +538,22 @@ impl Vm {
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);
         let before = self.heap_objects();
-        self.gc_stats.allocations += (before - self.gc_retained) as u64;
+        self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
         let mut marks = [
             vec![false; self.conses.len()],
             vec![false; self.closures.len()],
             vec![false; self.cells.len()],
             vec![false; self.objects.len()],
         ];
+        // Finished nested runs' programs are caches: relowering what is used
+        // again costs less than tracing, retiring and forwarding every copy.
+        for program in &mut self.spare_programs {
+            program.forget_code();
+        }
+        let pads = self.gc_stress.take_pads();
         let mut pending = roots.to_vec();
         pending.extend_from_slice(&self.stack);
+        pending.extend(self.suspended_stacks.iter().flatten().copied());
         pending.extend_from_slice(&self.external_roots);
         for code in &self.suspended_code {
             // SAFETY: each entry's engine is suspended in a nested call.
@@ -330,8 +570,11 @@ impl Vm {
         self.backtrace.visit_values(&mut |v| pending.push(*v));
         let mut local_live = HashSet::default();
         let mut obarray_symbols_live = HashSet::default();
+        // Membership by slot, tested for every symbol and slot visited below.
+        let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
+        let local_binding = self.slot_set(self.local_binding_slots.iter());
         for (slot, s) in self.slots.iter().enumerate() {
-            if self.obarray_symbol_names.contains_key(&slot) { continue; }
+            if in_obarray[slot] { continue; }
             if let Some(Some(VariableRedirect::Alias(target))) = self.variable_redirects.get(slot) {
                 pending.push(Value::reference(target + 1, 7));
             }
@@ -341,7 +584,7 @@ impl Vm {
             // buffer-local table are roots for every slot, interned or not.
             pending.push(s.plist);
             pending.push(s.local);
-            if !self.local_binding_slots.contains(&slot) {
+            if !local_binding[slot] {
                 pending.push(s.value);
             }
         }
@@ -355,12 +598,12 @@ impl Vm {
             // Both saved and active values stay roots even if Lisp switches
             // away from their buffer during the dynamic extent.
             pending.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
-            if self.local_binding_slots.contains(&slot) {
+            if local_binding[slot] {
                 local_live.insert(slot);
             }
         }
         let mut code_marks = vec![false; self.functions.len()];
-        let active = !self.stack.is_empty();
+        let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
         let mut code_pending: Vec<_> = self
             .request_code
             .live
@@ -414,12 +657,15 @@ impl Vm {
                 for op in &self.functions[id].code {
                     let mut op = *op;
                     op.visit_values(&mut |v| pending.push(*v));
+                    // Only a symbol interned in an obarray of its own can die.
+                    let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
                     match op {
                         Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _) | Op::DeclareSpecial(slot)
-                        | Op::Define(slot, _) | Op::DefineMacro(slot, _) | Op::ResolveHead(_, slot) => pending.push(Value::reference(slot + 1, 7)),
+                        | Op::Define(slot, _) | Op::DefineMacro(slot, _) | Op::ResolveHead(_, slot) => pending.extend(symbol(slot)),
                         Op::Closure(_, child, _) => code_pending.push(child),
                         Op::Direct(_, slot, cache, _, _) | Op::Prepared(_, _, slot, cache, _, _) => {
-                            pending.extend([Value::reference(slot + 1, 7), self.caches[cache].target]);
+                            pending.extend(symbol(slot));
+                            pending.push(self.caches[cache].target);
                         }
                         _ => {}
                     }
@@ -446,7 +692,7 @@ impl Vm {
             let tag = v.tag();
             if tag == 7 && v != Value::UNBOUND {
                 let slot = v.payload() as usize - 1;
-                if let Some(&name) = self.obarray_symbol_names.get(&slot) {
+                if in_obarray.get(slot).copied().unwrap_or(false) && let Some(&name) = self.obarray_symbol_names.get(&slot) {
                     if obarray_symbols_live.insert(slot) {
                         let s = &self.slots[slot];
                         pending.extend([name, s.value, s.function, s.plist, s.local]);
@@ -572,17 +818,29 @@ impl Vm {
             }
         }
         self.retire_code(&code_marks);
+        // The code this collection traced, for the next one's pacing.
+        self.gc_code = code_marks.iter().zip(&self.functions).filter(|&(&live, _)| live).map(|(_, f)| f.code.len()).sum::<usize>()
+            + self.execution.code_len()
+            // SAFETY: as in the mark phase.
+            + self.suspended_code.iter().map(|code| unsafe { code.code_len() }).sum::<usize>();
+        // Only a collection with no request running retires live request
+        // code; one inside an engine must not postpone the next of those.
+        if !active {
+            self.request_code.since_collection = 0;
+        }
         // A completely live arena needs no forwarding table or rewrite pass.
-        if marked == before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
+        if pads == 0 && marked == before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
             self.gc_retained = before;
             self.gc_stats.collections += 1;
-            self.gc_threshold = before.saturating_mul(2).max(self.gc_floor);
             return;
         }
+        // Stress fillers go only where live objects would move past them.
+        let fill: Vec<usize> = marks.iter().map(|m| if m.contains(&true) { pads } else { 0 }).collect();
         let maps: Vec<Vec<usize>> = marks
             .iter()
-            .map(|m| {
-                let mut next = 0;
+            .zip(&fill)
+            .map(|(m, &fill)| {
+                let mut next = fill;
                 m.iter()
                     .map(|&live| {
                         if live {
@@ -653,6 +911,7 @@ impl Vm {
         for v in roots
             .iter_mut()
             .chain(self.stack.iter_mut())
+            .chain(self.suspended_stacks.iter_mut().flatten())
             .chain(self.external_roots.iter_mut())
             .chain(self.terminal_bindings.iter_mut().map(|binding| &mut binding.buffer))
         {
@@ -763,6 +1022,15 @@ impl Vm {
             unsafe { code.visit_values(&mut |v| rewrite(v)) };
         }
         self.conditions.visit_values(&mut |v| rewrite(v));
+        // Stress fillers: unreachable, so the next collection drops them.
+        self.conses.splice(0..0, std::iter::repeat_n((Value::NIL, Value::NIL), fill[0]));
+        self.closures.splice(0..0, std::iter::repeat_with(|| Closure {
+            function: 0, captures: vec![], metadata: vec![], document: Value::NIL,
+        }).take(fill[1]));
+        self.cells.splice(0..0, std::iter::repeat_n(Value::NIL, fill[2]));
+        self.objects.splice(0..0, std::iter::repeat_with(|| {
+            data::Object::String(Box::new(data::LispString::from_bytes(vec![], true)))
+        }).take(fill[3]));
         self.objects
             .shrink_to(self.objects.len().saturating_mul(2).max(1024));
         // Release grossly oversized arenas, but retain modest slack for allocation.
@@ -773,15 +1041,26 @@ impl Vm {
         self.closures
             .shrink_to(self.closures.len().saturating_mul(2).max(1024));
         self.gc_retained = self.heap_objects();
-        self.gc_stats.reclaimed += (before - self.gc_retained) as u64;
+        self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
-        self.gc_threshold = self.gc_retained.saturating_mul(2).max(self.gc_floor);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gc_cons_percentage_is_scaled_and_clamped_without_a_cliff() {
+        assert_eq!(scaled_percentage(0.1), 1.5, "GNU's default is six traced heaps");
+        assert_eq!(scaled_percentage(0.05), 0.75);
+        for large in [0.2, 0.6, 1.0, 2.0, 1e300, f64::INFINITY] {
+            assert_eq!(scaled_percentage(large), MAX_SCALED_PERCENTAGE, "{large}");
+        }
+        assert!(MAX_SCALED_PERCENTAGE < 2.0, "below GNU's never-collect point");
+        assert_eq!(scaled_percentage(-0.5), 0.0);
+        assert_eq!(scaled_percentage(f64::NAN), 0.0);
+    }
 
     #[test]
     fn shared_native_nodes_count_once_and_forward_once() {

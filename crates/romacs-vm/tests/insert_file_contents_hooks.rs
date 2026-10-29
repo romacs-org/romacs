@@ -64,3 +64,113 @@ fn insert_file_contents_runs_change_hooks_as_gnu() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// REPLACE (fileio.c:4684-4880, restore_window_points): only the text
+// between the common head and tail changes, as a deletion and an insertion
+// with their hooks; markers in the unchanged parts stay, point inside the
+// replaced text is spread over the new text, and a file that is the
+// buffer's head truncates it. Narrowing limits the replaced region.
+const REPLACE_CASES: &str = r##"
+(progn (insert TEXT) (goto-char PT) (let ((mb (copy-marker 2)) (md (copy-marker 7))) (setq-local after-change-functions (list (lambda (b e l) (ifc-log 'a b e l)))) (setq-local before-change-functions (list (lambda (b e) (ifc-log 'b b e)))) NARROW (let ((ret (insert-file-contents FILE nil nil nil t))) (widen) (list (buffer-string) (point) (marker-position mb) (marker-position md) (cadr ret) (reverse log)))))
+"##;
+
+#[test]
+fn insert_file_contents_replace_matches_gnu() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-replace-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let files = [("f1", &b"abc12def"[..]), ("f2", b"abc"), ("f3", "\u{3bb}b".as_bytes()), ("f4", b"xbcy"), ("f5", b"")];
+    for (name, bytes) in files { std::fs::write(dir.join(name), bytes).unwrap(); }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let cases = [("abcXYZdef", "f1", "(point-max)", "nil"), ("abcdef", "f2", "(point-max)", "nil"),
+                 ("\u{3bb}a", "f3", "(point-max)", "nil"), ("abcXYZdef", "f1", "5", "nil"),
+                 ("abcd", "f4", "(point-max)", "(narrow-to-region 2 4)"), ("abc", "f5", "2", "nil"),
+                 ("abc", "f2", "2", "nil")];
+    let failures: Vec<String> = cases.iter().map(|(text, file, point, narrow)| {
+            REPLACE_CASES.trim().replace("TEXT", &serde_json::to_string(text).unwrap()).replace("FILE", &lisp(&dir.join(file)))
+                .replace("PT", point).replace("NARROW", narrow)
+        })
+        .filter_map(|expression| {
+            let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
+            (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
+        })
+        .collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// Undo records of a read (insert_from_gap's record_insert): REPLACE records
+// the deleted old middle and the inserted new one, so one undo restores the
+// buffer; a plain read records its insertion; a visit records it when the
+// undo list was not empty (and empties a list that was).
+const UNDO_CASES: &str = r##"
+(progn (set-buffer (generate-new-buffer "ifc-undo")) (buffer-enable-undo) (setq buffer-undo-list nil) (insert "abcXYZdef") (undo-boundary) (insert-file-contents F1 nil nil nil t) (list (buffer-string) buffer-undo-list (progn (primitive-undo 1 buffer-undo-list) (buffer-string))))
+(progn (set-buffer (generate-new-buffer "ifc-undo")) (buffer-enable-undo) (setq buffer-undo-list nil) (insert "ab") (undo-boundary) (goto-char 2) (insert-file-contents F2) (list (buffer-string) buffer-undo-list (progn (primitive-undo 1 buffer-undo-list) (buffer-string))))
+(progn (set-buffer (generate-new-buffer "ifc-undo")) (buffer-enable-undo) (setq buffer-undo-list (list 'foo)) (insert-file-contents F2 t) (setq buffer-file-name nil) buffer-undo-list)
+(progn (set-buffer (generate-new-buffer "ifc-undo")) (buffer-enable-undo) (setq buffer-undo-list nil) (insert-file-contents F2 t) (setq buffer-file-name nil) buffer-undo-list)
+"##;
+
+#[test]
+fn insert_file_contents_records_undo_as_gnu() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-undo-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f1"), b"abc12def").unwrap();
+    std::fs::write(dir.join("f2"), b"XY").unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let failures: Vec<String> = UNDO_CASES.lines().filter(|line| !line.is_empty())
+        .map(|line| line.replace("F1", &lisp(&dir.join("f1"))).replace("F2", &lisp(&dir.join("f2"))))
+        .filter_map(|expression| {
+            let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
+            (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
+        })
+        .collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// A REPLACE whose new middle holds a raw-byte character cannot be put in a
+// VM2 buffer (Unicode text, VM2-FILEIO1). It is refused before anything
+// changes: text, point and undo list stay as they were. Pinned GNU, whose
+// buffers hold raw bytes, gives (("…/f" 2) "abcλ\377def" 9 nil).
+#[test]
+fn an_unrepresentable_replace_changes_nothing() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-raw-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f"), b"abc\xce\xbb\xffdef").unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let expression = format!("(progn (set-buffer (generate-new-buffer \"ifc-raw\")) (buffer-enable-undo) (insert \"abcXYZdef\") (undo-boundary)
+      (let ((before (copy-tree buffer-undo-list)) (coding-system-for-read 'utf-8))
+        (list (condition-case e (insert-file-contents {} nil nil nil t) (error e)) (buffer-string) (point) (equal buffer-undo-list before))))",
+        lisp(&dir.join("f")));
+    let got = romacs(&mut vm, &expression);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(got, "\"((error \\\"VM2 insert-file-contents of raw bytes into a multibyte buffer is unsupported\\\") \\\"abcXYZdef\\\" 10 t)\"");
+}
+
+// REPLACE's read-only checks are those of the ranges it changes: the
+// deleted middle (delete-region) and the insertion point after it, not
+// the original point. Point at 2 under read-only text changes nothing.
+const READ_ONLY_CASES: &str = r##"
+(progn (set-buffer (generate-new-buffer "ifc-ro")) (insert "abcXYZdef") (let ((inhibit-read-only t)) (put-text-property RO 'read-only t)) (goto-char 2) (list (condition-case e (cadr (insert-file-contents FILE nil nil nil t)) (error e)) (buffer-substring-no-properties 1 (point-max)) (point)))
+"##;
+
+#[test]
+fn insert_file_contents_replace_checks_the_ranges_it_changes() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-ro-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f1"), b"abc12def").unwrap();
+    std::fs::write(dir.join("same"), b"abcXYZdef").unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let failures: Vec<String> = [("1 3", "f1"), ("1 3", "same"), ("4 7", "f1"), ("3 4", "f1")].iter()
+        .map(|(ro, file)| READ_ONLY_CASES.trim().replace("RO", ro).replace("FILE", &lisp(&dir.join(file))))
+        .filter_map(|expression| {
+            let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
+            (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
+        })
+        .collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

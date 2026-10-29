@@ -3,7 +3,7 @@
 
 ;;; Commentary:
 ;; The files GNU's loadup.el preloads on GNU/Linux, as source, in loadup's
-;; order (of its window-system block, fringe.el so far), then the steps of
+;; order (of its window-system blocks, fringe.el and the PGTK one), then the steps of
 ;; startup.el's `command-line' a batch session depends on.  Romacs's own display and
 ;; keymap layers load where GNU's C would already be in place.  Each Romacs
 ;; adaptation is commented where it happens.
@@ -102,6 +102,9 @@
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)
 (load "emacs-lisp/nadvice.el" nil t t)
+;; VM2 code is compiled when defined: `byte-compile' of a function value
+;; returns it (VM2-BYTECOMP1).
+(require 'romacs-bytecomp)
 (load "minibuffer.el" nil t t)
 (load "frame.el" nil t t)
 (load "startup.el" nil t t)
@@ -137,6 +140,16 @@
 ;; loadup.el's window-system block: Romacs is a graphical machine, and
 ;; pinned GNU, a graphical build, preloads fringe.el in batch too.
 (load "fringe.el" nil t t)
+;; loadup.el's PGTK block (loadup.el:357).  GNU's C provides `pgtk' in a
+;; pure-GTK build (pgtkterm.c:7550), which pinned GNU is; Romacs's
+;; Wayland-native display stands where that window system would.  Its
+;; display queries are Romacs's own and `window-system' stays nil, so no
+;; pgtk- primitive is reached (VM2-WINSYS1).
+(provide 'pgtk)
+(load "pgtk-dnd.el" nil t t)
+(load "touch-screen.el" nil t t)
+(load "term/common-win.el" nil t t)
+(load "term/pgtk-win.el" nil t t)
 (load "progmodes/elisp-mode.el" nil t t)
 (load "emacs-lisp/float-sup.el" nil t t)
 (load "vc/vc-hooks.el" nil t t)
@@ -153,6 +166,18 @@
 (load "international/iso-transl.el" nil t t)
 (load "emacs-lisp/rmc.el" nil t t)
 (load "leim/leim-list.el" nil t t)
+
+;; startup.el normal-top-level (startup.el:585-592), before command-line:
+;; the per-user directory, which `locate-user-emacs-file' and the delayed
+;; standard values below build on.  A GUI session then names its own
+;; (rlisp/romacs-gui-loadup.el).
+(setq startup--xdg-config-home-emacs
+      (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
+        (if xdg-config-home
+            (concat xdg-config-home "/emacs/")
+          startup--xdg-config-default)))
+(setq user-emacs-directory
+      (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
 
 ;; startup.el command-line (startup.el:1300): initialization begins.
 (setq before-init-time (current-time) after-init-time nil

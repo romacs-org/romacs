@@ -256,16 +256,6 @@ impl Vm {
         result
     }
 
-    /// `(lambda ARGS . BODY)' as the dynamically scoped interpreted closure
-    /// GNU's funcall_lambda runs it as: (make-interpreted-closure ARGS BODY nil).
-    pub(crate) fn lambda_list_closure(&mut self, list: Value) -> Result<Value> {
-        let (args, body) = self.cons_pair(self.cons_pair(list)?.1)?;
-        let start = self.stack.len();
-        self.stack.extend_from_slice(&[args, body, Value::NIL, Value::NIL, Value::NIL]);
-        let closure = self.interpreted_closure_primitive(Primitive::MakeInterpretedClosure, start, 5);
-        self.stack.truncate(start);
-        closure
-    }
     pub(super) fn interpreted_closure_primitive(
         &mut self,
         p: Primitive,

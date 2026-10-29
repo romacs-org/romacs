@@ -12,8 +12,7 @@ use super::Fault;
 
 pub(super) type R<T> = std::result::Result<T, Fault>;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Wrap { Truncate, Window, Word }
+pub(super) use romacs_layout_input::LineWrap as Wrap;
 
 /// How the iterator delivers the element (`it->method`, and whether
 /// `it->object` is the buffer).
@@ -28,6 +27,10 @@ pub(super) enum Shape {
     /// row at least HEIGHT pixels tall; a newline is zero wide.
     Pixel { c: u32, width: i64, height: i64 },
     Tab,
+    /// A TAB the host lays out as a stretch to the next tab stop in its
+    /// pixels, SPACE being its face's space width, in a row at least
+    /// HEIGHT pixels tall (romacs_layout_input::tab_advance).
+    PixelTab { space: i64, height: i64 },
     Stretch { width: i64, zero_ok: bool },
     /// `:align-to', TARGET columns from the text area's left edge.
     Align { target: i64 },
@@ -184,6 +187,7 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
         Shape::Pixel { c, width, height: h } => { height = h; if c == 10 { (0, 0) } else { (width, 1) } }
         Shape::Glyph { width, .. } | Shape::Glyphless { width } => (width, width),
         Shape::Tab => { let spaces = tab_spaces(cx, it); (spaces, spaces) }
+        Shape::PixelTab { space, height: h } => { height = h; (pixel_tab(cx, it, space), 1) }
         Shape::TabStretch { factor } => stretch(cx, it, e, (factor * tab_spaces(cx, it) as f64) as i64, false),
         Shape::Stretch { width, zero_ok } => stretch(cx, it, e, width, zero_ok),
         Shape::Align { target } => {
@@ -203,10 +207,22 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
 
 /// The spaces a TAB at the iterator's x takes to the next tab stop.
 fn tab_spaces(cx: &Ctx, it: &It) -> i64 {
-    let continued = if it.prefix.is_some() || it.continuation_lines_width == 0 { 0 }
-        else { it.continuation_lines_width - it.wrap_prefix_width };
-    let x = it.current_x + continued;
+    let x = it.current_x + continued_width(it);
     (x + cx.tab_width) / cx.tab_width * cx.tab_width - x
+}
+
+/// The pixels a host's TAB at the iterator's x stretches, SPACE being its
+/// face's space width.
+pub(super) fn pixel_tab(cx: &Ctx, it: &It, space: i64) -> i64 {
+    let x = it.current_x + continued_width(it);
+    romacs_layout_input::tab_advance(x as f64, space as f64, cx.tab_width as u32) as i64
+}
+
+/// The width of the screen lines before this one that a TAB's stop counts
+/// from, less a wrap prefix's.
+fn continued_width(it: &It) -> i64 {
+    if it.prefix.is_some() || it.continuation_lines_width == 0 { 0 }
+    else { it.continuation_lines_width - it.wrap_prefix_width }
 }
 
 fn stretch(cx: &Ctx, it: &It, e: &Elem, width: i64, zero_ok: bool) -> (i64, i64) {
@@ -475,7 +491,7 @@ pub(super) fn move_to<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: i64, 
             }
             Move::LineContinued => {
                 max_x = cx.last_visible_x;
-                if element(src, it)?.is_some_and(|e| e.shape == Shape::Tab) {
+                if element(src, it)?.is_some_and(|e| matches!(e.shape, Shape::Tab | Shape::PixelTab { .. })) {
                     it.continuation_lines_width += cx.last_visible_x;
                     if it.current_x != cx.last_visible_x && op.vpos && !op.x && !op.pos {
                         line_start_x = it.current_x + it.pixel_width - cx.last_visible_x;
@@ -638,11 +654,111 @@ pub(super) fn text_size<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, m: &Meas
     Ok((x, start_x, y))
 }
 
-/// Fwindow_end's motion (window.c:1782) from the origin, a window's start:
+/// Elements the iterator can deliver again from another line start, as
+/// reseat does, for motion backwards.
+pub(super) trait Lines: Elements {
+    /// Deliver from START, a line start.
+    fn reseat(&mut self, start: i64) -> R<()>;
+    /// back_to_previous_visible_line_start: the start of the visible line
+    /// holding POS - 1.
+    fn line_start_before(&mut self, pos: i64) -> R<i64>;
+    fn begv(&self) -> i64;
+}
+
+/// move_it_by_lines with DVPOS > 0 from IT: the start of the screen line
+/// DVPOS below, or where the elements end.
+fn lines_down<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, dvpos: i64) -> R<()> {
+    let row = it.vpos + dvpos;
+    move_to(src, cx, it, -1, -1, -1, row, Op { vpos: true, ..Op::default() })?;
+    let (valid, display) = valid_after_move(src, it)?;
+    if !valid {
+        let at = charpos(src, it)? + i64::from(display);
+        move_to(src, cx, it, at, -1, -1, -1, POS)?;
+    }
+    Ok(())
+}
+
+/// move_it_by_lines with DVPOS < 0 from POS: back over visible lines until
+/// DVPOS screen lines lie between the line start reached and the screen
+/// line showing POS, or BEGV is reached; the elements then deliver from
+/// that line start and the iterator stands at the screen line's start,
+/// its vpos the (negative) count of screen lines moved.
+pub(super) fn lines_up<E: Lines>(src: &mut E, cx: &Ctx, pos: i64, dvpos: i64) -> R<It> {
+    let begv = src.begv();
+    let mut origin = src.line_start_before(pos)?;
+    src.reseat(origin)?;
+    let mut rows = screen_row(src, cx, pos)?;
+    while rows < -dvpos && origin > begv {
+        origin = src.line_start_before(origin)?;
+        src.reseat(origin)?;
+        rows = screen_row(src, cx, pos)?;
+    }
+    let moved = rows.min(-dvpos);
+    let mut it = row_start(src, cx, rows - moved)?;
+    it.vpos = -moved;
+    Ok(it)
+}
+
+/// Fvertical_motion (indent.c:2207) on a displayed window, from point PT:
+/// the position LINES screen lines down (up when negative), at x TO_X of
+/// that line when given, and the screen lines moved. The elements deliver
+/// from whatever line start the motion needed; a window that does not
+/// start at PT's line start makes no difference here.
+pub(super) fn vertical_motion<E: Lines>(src: &mut E, cx: &Ctx, pt: i64, lines: i64, to_x: Option<i64>) -> R<(i64, i64)> {
+    // reseat_at_previous_visible_line_start, then on to PT.
+    let origin = src.line_start_before(pt)?;
+    src.reseat(origin)?;
+    let mut it = It::default();
+    move_to(src, cx, &mut it, pt, -1, -1, -1, POS)?;
+    let mut overshot = false;
+    if charpos(src, &it)? > pt {
+        // Past PT, as on a truncated line whose PT lies beyond the right
+        // margin: back a line unless still on PT's own screen line.
+        if it.vpos > 0 || it.current_x >= cx.last_visible_x {
+            let at = charpos(src, &it)?;
+            it = lines_up(src, cx, at, -1)?;
+        }
+        overshot = true;
+    }
+    if lines <= 0 {
+        it.vpos = 0;
+        it.current_y = 0;
+        if lines < 0 && charpos(src, &it)? > src.begv() {
+            let at = charpos(src, &it)?;
+            it = lines_up(src, cx, at, lines)?;
+        } else if lines == 0 {
+            let at = charpos(src, &it)?;
+            it = lines_up(src, cx, at, 0)?;
+        }
+    } else if overshot {
+        it.vpos = 0;
+        it.current_y = 0;
+        lines_down(src, cx, &mut it, lines)?;
+    } else if pt < cx.zv {
+        if charpos(src, &it)? < pt {
+            (it.vpos, it.current_y) = (0, 0);
+            lines_down(src, cx, &mut it, 1)?;
+        }
+        while charpos(src, &it)? == pt {
+            (it.vpos, it.current_y) = (0, 0);
+            lines_down(src, cx, &mut it, 1)?;
+        }
+        if lines > 1 { lines_down(src, cx, &mut it, lines - 1)?; }
+    } else {
+        (it.vpos, it.current_y) = (0, 0);
+        lines_down(src, cx, &mut it, lines)?;
+        if charpos(src, &it)? == pt { it.vpos = 0; }
+    }
+    if let Some(x) = to_x {
+        move_in_line(src, cx, &mut it, cx.zv, x, Op { x: true, ..Op::default() })?;
+    }
+    Ok((charpos(src, &it)?, it.vpos))
+}
+
+/// Fwindow_end's motion (window.c:1782) from IT at a window's start:
 /// move_it_vertically down the text area's height DY, then, when the row
 /// reached starts inside the window, move_it_past_eol over it.
-pub(super) fn window_end<E: Elements>(src: &mut E, cx: &Ctx, dy: i64) -> R<i64> {
-    let mut it = It::default();
+pub(super) fn window_end<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, dy: i64) -> R<i64> {
     move_to(src, cx, &mut it, cx.zv, -1, dy, -1, Op { pos: true, y: true, ..Op::default() })?;
     let at = charpos(src, &it)?;
     // At ZV, move_it_by_lines (IT, 0) and the move past its line's end

@@ -69,8 +69,11 @@ impl Leaf<'_> {
         // setup_coding_system (coding.c:5706): an undecided type encodes
         // through encode_coding_raw_text; decoding it means detection.
         let raw = kind == self.intern("raw-text") || (encode && kind == self.intern("undecided"));
-        if !utf8 && !charset && !utf16 && !raw {
-            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, UTF-16, charset and raw-text)".into()));
+        // Shift-JIS and Big5 decode (coding.c decode_coding_sjis, _big5).
+        let sjis = !encode && kind == self.intern("shift-jis");
+        let big5 = !encode && kind == self.intern("big5");
+        if !utf8 && !charset && !utf16 && !raw && !sjis && !big5 {
+            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, UTF-16, charset, raw-text, and decoding Shift-JIS and Big5)".into()));
         }
         for index in [6, 7, 9, 10] {
             if self.vector_get(attrs, num(index))? != Value::NIL {
@@ -117,8 +120,9 @@ impl Leaf<'_> {
                     .into_iter().map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect()
             } else { tokens };
             let tokens = coding_decode_eol(tokens, mode);
-            let tokens = if charset {
-                let (tokens, found) = self.coding_decode_charset(attrs, &tokens)?;
+            let tokens = if charset || sjis || big5 {
+                let (tokens, found) = if charset { self.coding_decode_charset(attrs, &tokens)? }
+                    else { self.coding_decode_double(attrs, &tokens, sjis)? };
                 runs = found;
                 tokens
             } else { tokens };
@@ -259,6 +263,52 @@ impl Leaf<'_> {
                     at += dim;
                 }
                 None => { out.push(CodingToken::Byte(byte)); at += 1; }
+            }
+        }
+        if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
+        Ok((out, runs))
+    }
+    /// coding.c decode_coding_sjis (SJIS) or decode_coding_big5 over the
+    /// EOL-decoded bytes: the charset list is (ROMAN KANA KANJI [KANJI2]) or
+    /// (ROMAN BIG5); a byte that starts no valid code is a raw byte. Each
+    /// run of one non-ASCII charset is recorded for its `charset' property.
+    fn coding_decode_double(&mut self, attrs: Value, tokens: &[CodingToken], sjis: bool) -> std::result::Result<(Vec<CodingToken>, Vec<(usize, usize, usize)>), Fault> {
+        let list: Vec<usize> = self.coding_items(self.vector_get(attrs, num(4))?)?.iter().filter_map(|v| v.integer_value()).map(|n| n as usize).collect();
+        let ascii = self.named_charset_id("ascii")?;
+        let byte = |at: usize| match tokens.get(at) { Some(CodingToken::Byte(b)) => Some(*b), _ => None };
+        let (mut runs, mut last_id, mut last_offset) = (Vec::new(), ascii, 0);
+        let mut out = Vec::with_capacity(tokens.len());
+        let mut at = 0;
+        while at < tokens.len() {
+            let Some(c) = byte(at) else { out.push(tokens[at]); at += 1; continue };
+            let trail = |at: usize| byte(at + 1).filter(|&c1| if sjis { !(c1 < 0x40 || c1 == 0x7F || c1 > 0xFC) } else { !(c1 < 0x40 || (0x7F..0xA1).contains(&c1) || c1 > 0xFE) });
+            let decoded: Option<(usize, u32, usize)> = if c < 0x80 {
+                Some((list[0], u32::from(c), 1))
+            } else if sjis {
+                match c {
+                    0x80 | 0xA0 => None,
+                    0xA1..=0xDF => Some((list[1], u32::from(c & 0x7F), 1)),
+                    0x81..=0xEF => trail(at).map(|c1| (list[2], sjis_to_jis(u32::from(c) << 8 | u32::from(c1), false), 2)),
+                    0xF0..=0xFC if list.len() > 3 => trail(at).map(|c1| (list[3], sjis_to_jis(u32::from(c) << 8 | u32::from(c1), true), 2)),
+                    _ => None,
+                }
+            } else if (0xA1..=0xFE).contains(&c) {
+                trail(at).map(|c1| (list[1], u32::from(c) << 8 | u32::from(c1), 2))
+            } else { None };
+            let decoded = match decoded {
+                Some((id, code, width)) => self.charset_decode(self.vm.charsets.ids[id], code)?.map(|ch| (id, ch, width)),
+                None => None,
+            };
+            match decoded {
+                Some((id, ch, width)) => {
+                    if id != ascii && id != last_id {
+                        if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
+                        (last_id, last_offset) = (id, out.len());
+                    }
+                    out.push(if ch < 128 { CodingToken::Byte(ch as u8) } else { CodingToken::Character(ch) });
+                    at += width;
+                }
+                None => { out.push(CodingToken::Byte(c)); at += 1; }
             }
         }
         if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
@@ -1465,14 +1515,329 @@ fn eol_index(seen: u8) -> Option<usize> {
     if seen & EOL_SEEN_LF != 0 { Some(0) } else if seen & EOL_SEEN_CRLF != 0 { Some(1) }
     else if seen & EOL_SEEN_CR != 0 { Some(2) } else { None }
 }
+const CATEGORY_ISO_7: usize = 0;
+const CATEGORY_ISO_7_TIGHT: usize = 1;
+const CATEGORY_ISO_8_1: usize = 2;
+const CATEGORY_ISO_8_2: usize = 3;
+const CATEGORY_ISO_7_ELSE: usize = 4;
+const CATEGORY_ISO_8_ELSE: usize = 5;
 const CATEGORY_UTF_8_AUTO: usize = 6;
 const CATEGORY_UTF_8_NOSIG: usize = 7;
 const CATEGORY_UTF_8_SIG: usize = 8;
+const CATEGORY_UTF_16_AUTO: usize = 9;
+const CATEGORY_UTF_16_BE: usize = 10;
+const CATEGORY_UTF_16_LE: usize = 11;
+const CATEGORY_UTF_16_BE_NOSIG: usize = 12;
+const CATEGORY_UTF_16_LE_NOSIG: usize = 13;
 const CATEGORY_CHARSET: usize = 14;
+const CATEGORY_SJIS: usize = 15;
+const CATEGORY_BIG5: usize = 16;
+const CATEGORY_EMACS_MULE: usize = 18;
 const CATEGORY_RAW_TEXT: usize = 19;
 const MASK_UTF_8: u32 = 1 << CATEGORY_UTF_8_AUTO | 1 << CATEGORY_UTF_8_NOSIG | 1 << CATEGORY_UTF_8_SIG;
 const MASK_UTF_16: u32 = 0b11111 << 9;
-const MASK_ANY: u32 = (1 << CATEGORIES.len()) - 1;
+const MASK_ISO_7BIT: u32 = 1 << CATEGORY_ISO_7 | 1 << CATEGORY_ISO_7_TIGHT;
+const MASK_ISO_8BIT: u32 = 1 << CATEGORY_ISO_8_1 | 1 << CATEGORY_ISO_8_2;
+const MASK_ISO_7_ELSE: u32 = 1 << CATEGORY_ISO_7_ELSE;
+const MASK_ISO_8_ELSE: u32 = 1 << CATEGORY_ISO_8_ELSE;
+const MASK_ISO: u32 = MASK_ISO_7BIT | MASK_ISO_8BIT | MASK_ISO_7_ELSE | MASK_ISO_8_ELSE;
+const MASK_ISO_ESCAPE: u32 = MASK_ISO_7BIT | MASK_ISO_7_ELSE | MASK_ISO_8_ELSE;
+/// coding.c CATEGORY_MASK_ANY: every detecting category, raw-text and
+/// undecided excluded.
+const MASK_ANY: u32 = (1 << CATEGORY_RAW_TEXT) - 1;
+/// coding.c CODING_ISO_FLAG_SINGLE_SHIFT, _LATIN_EXTRA, _FULL_SUPPORT.
+const ISO_FLAG_SINGLE_SHIFT: i64 = 0x20;
+const ISO_FLAG_LATIN_EXTRA: i64 = 0x1000;
+const ISO_FLAG_FULL_SUPPORT: i64 = 0x10_0000;
+const MAX_COMPOSITION_COMPONENTS: i64 = 16;
+
+/// What detect_coding_iso_2022 reads of the ISO categories' coding
+/// systems and the charset registry.
+struct IsoContext {
+    /// Per ISO category (iso-7 .. iso-8-else): its system's safe-charsets
+    /// (coding_attr_safe_charsets, 255 for unsafe) and ISO flags; None
+    /// when the category has no system.
+    systems: [Option<(Vec<u8>, i64)>; 6],
+    /// iso_charset_table: (DIMENSION, CHARS-96, FINAL) to charset id.
+    iso: Vec<((i64, bool, i64), usize)>,
+    /// Vlatin_extra_code_table's non-nil entries, when it is a vector.
+    latin_extra: Option<Vec<bool>>,
+    inhibit_ied: bool,
+}
+
+impl IsoContext {
+    fn flags(&self, category: usize) -> i64 { self.systems[category].as_ref().map_or(0, |(_, f)| *f) }
+    /// SAFE_CHARSET_P.
+    fn safe(&self, category: usize, id: usize) -> bool {
+        self.systems[category].as_ref().is_some_and(|(safe, _)| safe.get(id).is_some_and(|&r| r != 255))
+    }
+    fn charset(&self, dimension: i64, chars96: bool, final_char: u8) -> Option<usize> {
+        self.iso.iter().find(|(k, _)| *k == (dimension, chars96, i64::from(final_char))).map(|(_, id)| *id)
+    }
+}
+
+/// coding.c detect_coding_iso_2022 over BYTES from HEAD_ASCII.
+fn detect_iso_2022(bytes: &[u8], head_ascii: usize, cx: &IsoContext, info: &mut DetectInfo) -> bool {
+    info.checked |= MASK_ISO;
+    let (mut at, mut single_shifting, mut rejected, mut found) = (head_ascii, false, 0u32, 0u32);
+    let mut composition_count: i64 = -1;
+    let next = |at: &mut usize| { let c = bytes.get(*at).copied(); *at += usize::from(c.is_some()); c };
+    let complete = 'scan: loop {
+        if rejected == MASK_ISO { break false }
+        let Some(c) = next(&mut at) else { break true };
+        let mut extra_latin = false;
+        match c {
+            0x1B => {
+                if cx.inhibit_ied { continue }
+                single_shifting = false;
+                let Some(c) = next(&mut at) else { break true };
+                if c == b'N' || c == b'O' {
+                    single_shifting = true;
+                    rejected |= MASK_ISO_7BIT | MASK_ISO_8BIT;
+                } else if c == b'1' {
+                    if (0..=MAX_COMPOSITION_COMPONENTS).contains(&composition_count) {
+                        composition_count = -1;
+                        found |= MASK_ISO;
+                    }
+                } else if (b'0'..=b'4').contains(&c) {
+                    composition_count = 0;
+                } else {
+                    let invalid = |c: u8, rejected: &mut u32| if c >= 0x80 { *rejected |= MASK_ISO_7BIT | MASK_ISO_7_ELSE };
+                    let id = if (b'('..=b'/').contains(&c) {
+                        let Some(c1) = next(&mut at) else { break true };
+                        match (c1 >= b' ' && c1 < 0x80).then(|| cx.charset(1, c >= b',', c1)).flatten() {
+                            Some(id) => id,
+                            None => { invalid(c1, &mut rejected); continue }
+                        }
+                    } else if c == b'$' {
+                        let Some(c) = next(&mut at) else { break true };
+                        if (b'@'..=b'B').contains(&c) {
+                            match cx.charset(2, false, c) { Some(id) => id, None => continue }
+                        } else if (b'('..=b'/').contains(&c) {
+                            let Some(c1) = next(&mut at) else { break true };
+                            match (c1 >= b' ' && c1 < 0x80).then(|| cx.charset(2, c >= b',', c1)).flatten() {
+                                Some(id) => id,
+                                None => { invalid(c1, &mut rejected); continue }
+                            }
+                        } else { invalid(c, &mut rejected); continue }
+                    } else { invalid(c, &mut rejected); continue };
+                    // A valid designation sequence.
+                    rejected |= MASK_ISO_8BIT;
+                    for category in [CATEGORY_ISO_7, CATEGORY_ISO_7_TIGHT, CATEGORY_ISO_7_ELSE, CATEGORY_ISO_8_ELSE] {
+                        if cx.safe(category, id) { found |= 1 << category } else { rejected |= 1 << category }
+                    }
+                }
+            }
+            0x0E | 0x0F => {
+                if cx.inhibit_ied { continue }
+                single_shifting = false;
+                rejected |= MASK_ISO_7BIT | MASK_ISO_8BIT;
+            }
+            0x9B => {
+                single_shifting = false;
+                rejected |= MASK_ISO_7BIT | MASK_ISO_7_ELSE;
+                found |= MASK_ISO_8_ELSE;
+                extra_latin = true;
+            }
+            0x8E | 0x8F => {
+                if cx.inhibit_ied { continue }
+                single_shifting = false;
+                rejected |= MASK_ISO_7BIT | MASK_ISO_7_ELSE;
+                for category in [CATEGORY_ISO_8_1, CATEGORY_ISO_8_2] {
+                    if cx.flags(category) & ISO_FLAG_SINGLE_SHIFT != 0 { found |= 1 << category; single_shifting = true; }
+                }
+                extra_latin = !single_shifting;
+            }
+            c if c < 0x80 => {
+                if composition_count >= 0 { composition_count += 1 }
+                single_shifting = false;
+            }
+            c => {
+                rejected |= MASK_ISO_7BIT | MASK_ISO_7_ELSE;
+                if c >= 0xA0 {
+                    found |= 1 << CATEGORY_ISO_8_1;
+                    // An even run of 0xA0..0xFF codes may be ISO-8-2.
+                    if !single_shifting && rejected & 1 << CATEGORY_ISO_8_2 == 0 {
+                        let mut len = 1i64;
+                        while let Some(&c) = bytes.get(at) {
+                            if c < 0xA0 { break }
+                            at += 1;
+                            len += 1;
+                        }
+                        if len & 1 == 1 && at < bytes.len() {
+                            rejected |= 1 << CATEGORY_ISO_8_2;
+                            if composition_count >= 0 { composition_count += len }
+                        } else {
+                            found |= 1 << CATEGORY_ISO_8_2;
+                            if composition_count >= 0 { composition_count += len / 2 }
+                        }
+                    }
+                } else {
+                    extra_latin = true;
+                }
+            }
+        }
+        if extra_latin {
+            // check_extra_latin
+            if !cx.latin_extra.as_ref().is_some_and(|table| table[usize::from(c)]) {
+                rejected = MASK_ISO;
+                continue 'scan;
+            }
+            if cx.flags(CATEGORY_ISO_8_1) & ISO_FLAG_LATIN_EXTRA != 0 { found |= 1 << CATEGORY_ISO_8_1 }
+            else { rejected |= 1 << CATEGORY_ISO_8_1 }
+            rejected |= 1 << CATEGORY_ISO_8_2;
+        }
+    };
+    if !complete {
+        info.rejected |= MASK_ISO;
+        return false;
+    }
+    info.rejected |= rejected;
+    info.found |= found & !rejected;
+    true
+}
+
+/// coding.c detect_coding_utf_16 (the decoder's detection, without
+/// CODING_MODE_LAST_BLOCK): a BOM finds a signature category; otherwise
+/// the even and odd byte dispersion rejects the no-signature ones.
+fn detect_utf_16(bytes: &[u8], info: &mut DetectInfo) -> bool {
+    info.checked |= MASK_UTF_16;
+    let mut pairs = bytes.chunks_exact(2).map(|p| (p[0], p[1]));
+    let Some((c1, c2)) = pairs.next() else { return true };
+    let (le, be) = (1 << CATEGORY_UTF_16_LE, 1 << CATEGORY_UTF_16_BE);
+    let (be_nosig, le_nosig) = (1 << CATEGORY_UTF_16_BE_NOSIG, 1 << CATEGORY_UTF_16_LE_NOSIG);
+    if (c1, c2) == (0xFF, 0xFE) {
+        info.found |= le | 1 << CATEGORY_UTF_16_AUTO;
+        info.rejected |= be | be_nosig | le_nosig;
+        return true;
+    }
+    if (c1, c2) == (0xFE, 0xFF) {
+        info.found |= be | 1 << CATEGORY_UTF_16_AUTO;
+        info.rejected |= le | be_nosig | le_nosig;
+        return true;
+    }
+    let (mut e, mut o) = ([false; 256], [false; 256]);
+    let (mut e_num, mut o_num) = (1, 1);
+    e[usize::from(c1)] = true;
+    o[usize::from(c2)] = true;
+    info.rejected |= 1 << CATEGORY_UTF_16_AUTO | be | le;
+    while info.rejected & MASK_UTF_16 != MASK_UTF_16 {
+        let Some((c1, c2)) = pairs.next() else { return true };
+        if !e[usize::from(c1)] {
+            e[usize::from(c1)] = true;
+            e_num += 1;
+            if e_num >= 128 { info.rejected |= be_nosig }
+        }
+        if !o[usize::from(c2)] {
+            o[usize::from(c2)] = true;
+            o_num += 1;
+            if o_num >= 128 { info.rejected |= le_nosig }
+        }
+    }
+    false
+}
+
+/// coding.h SJIS_TO_JIS, or SJIS_TO_JIS2 for JIS X 0213 plane 2.
+fn sjis_to_jis(code: u32, plane2: bool) -> u32 {
+    let (s1, s2) = (code >> 8, code & 0xFF);
+    let j1 = if !plane2 {
+        if s2 >= 0x9F { s1 * 2 - if s1 >= 0xE0 { 0x160 } else { 0xE0 } } else { s1 * 2 - if s1 >= 0xE0 { 0x161 } else { 0xE1 } }
+    } else if s2 >= 0x9F {
+        match s1 { 0xF0 => 0x28, 0xF1 => 0x24, 0xF2 => 0x2C, 0xF3 => 0x2E, _ => 0x6E + (s1 - 0xF4) * 2 }
+    } else if s1 <= 0xF2 { 0x21 + (s1 - 0xF0) * 2 } else if s1 <= 0xF4 { 0x2D + (s1 - 0xF3) * 2 } else { 0x6F + (s1 - 0xF5) * 2 };
+    let j2 = if s2 >= 0x9F { s2 - 0x7E } else { s2 - if s2 >= 0x7F { 0x20 } else { 0x1F } };
+    j1 << 8 | j2
+}
+
+/// coding.c detect_coding_sjis; MAX_FIRST is 0xEF for a system of at most
+/// three charsets, else 0xFC.
+fn detect_sjis(bytes: &[u8], head_ascii: usize, max_first: u8, info: &mut DetectInfo) -> bool {
+    info.checked |= 1 << CATEGORY_SJIS;
+    let mut found = 0;
+    let mut at = head_ascii;
+    while let Some(&c) = bytes.get(at) {
+        at += 1;
+        if c < 0x80 { continue }
+        if (0x81..=0x9F).contains(&c) || (0xE0..=max_first).contains(&c) {
+            let Some(&c) = bytes.get(at) else { break };
+            at += 1;
+            if c < 0x40 || c == 0x7F || c > 0xFC { info.rejected |= 1 << CATEGORY_SJIS; return false }
+            found = 1 << CATEGORY_SJIS;
+        } else if (0xA0..0xE0).contains(&c) {
+            found = 1 << CATEGORY_SJIS;
+        } else {
+            info.rejected |= 1 << CATEGORY_SJIS;
+            return false;
+        }
+    }
+    info.found |= found;
+    true
+}
+
+/// coding.c detect_coding_big5. As GNU's, a bad second byte returns
+/// without rejecting the category.
+fn detect_big5(bytes: &[u8], head_ascii: usize, info: &mut DetectInfo) -> bool {
+    info.checked |= 1 << CATEGORY_BIG5;
+    let mut found = 0;
+    let mut at = head_ascii;
+    while let Some(&c) = bytes.get(at) {
+        at += 1;
+        if c < 0x80 { continue }
+        if c >= 0xA1 {
+            let Some(&c) = bytes.get(at) else { break };
+            at += 1;
+            if c < 0x40 || (0x7F..=0xA0).contains(&c) { return false }
+            found = 1 << CATEGORY_BIG5;
+        } else {
+            info.rejected |= 1 << CATEGORY_BIG5;
+            return false;
+        }
+    }
+    info.found |= found;
+    true
+}
+
+/// coding.c detect_coding_emacs_mule; MULE_BYTES is emacs_mule_bytes.
+fn detect_emacs_mule(bytes: &[u8], head_ascii: usize, mule_bytes: &[u8; 256], info: &mut DetectInfo) -> bool {
+    info.checked |= 1 << CATEGORY_EMACS_MULE;
+    let mut found = 0;
+    let mut at = head_ascii;
+    let reject = |info: &mut DetectInfo| { info.rejected |= 1 << CATEGORY_EMACS_MULE; false };
+    'scan: while let Some(&c) = bytes.get(at) {
+        at += 1;
+        let mut c = c;
+        if c == 0x80 {
+            // A composite character: skip its 0xA0.. bytes, needing more than 4.
+            loop {
+                let start = at;
+                loop {
+                    let Some(&b) = bytes.get(at) else { break 'scan };
+                    at += 1;
+                    c = b;
+                    if c < 0xA0 { break }
+                }
+                if at - start <= 4 { return reject(info) }
+                found = 1 << CATEGORY_EMACS_MULE;
+                if c != 0x80 { break }
+            }
+        }
+        if c < 0x80 {
+            if c < 0x20 && matches!(c, 0x1B | 0x0E | 0x0F) { return reject(info) }
+        } else {
+            let mut more = i32::from(mule_bytes[usize::from(c)]) - 1;
+            while more > 0 {
+                let Some(&b) = bytes.get(at) else { break 'scan };
+                at += 1;
+                if b < 0xA0 { at -= 1; break }
+                more -= 1;
+            }
+            if more != 0 { return reject(info) }
+            found = 1 << CATEGORY_EMACS_MULE;
+        }
+    }
+    info.found |= found;
+    true
+}
 
 /// coding.c coding_detection_info.
 #[derive(Default)]
@@ -1554,11 +1919,9 @@ impl Leaf<'_> {
 
     /// coding.c detect_coding for a coding system with attribute vector ATTRS
     /// over BYTES: the system found, if any, and the EOL subsidiary index
-    /// (adjust_coding_eol_type) its scan saw.
-    /// Only the undecided type and the utf-8-auto category detect; the
-    /// detectors VM2 implements are UTF-8's and the charset category's, and
-    /// reaching any other (ISO-2022 escapes, UTF-16 for text with NUL and
-    /// 8-bit bytes, CCL and CJK categories) refuses rather than guess.
+    /// (adjust_coding_eol_type) its scan saw. Only the undecided type and
+    /// the utf-8-auto category detect. Every category's detector is GNU's
+    /// except CCL's, which a defined CCL-category system refuses.
     pub(crate) fn coding_detect(&mut self, bytes: &[u8], attrs: Value) -> std::result::Result<(Option<Value>, Option<usize>), Fault> {
         let refuse = |what: &str| Fault::Error(format!("VM2 coding detection of {what} is unsupported"));
         let kind = self.vector_get(attrs, num(3))?;
@@ -1585,6 +1948,18 @@ impl Leaf<'_> {
         let inhibit_ied = inhibit(self, 28, "inhibit-iso-escape-detection")?;
         let prefer_utf_8 = self.vector_get(attrs, num(29))? != Value::NIL;
         let scan_eol = !self.flag_variable("disable-ascii-optimization")? && !self.flag_variable("inhibit-eol-conversion")?;
+        let systems = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let priorities = self.coding_category_state(PRIORITIES)?;
+        let mut order = Vec::with_capacity(CATEGORY_RAW_TEXT);
+        for i in 0..CATEGORY_RAW_TEXT {
+            let category = self.vector_get(priorities, num(i as i64))?.integer_value().unwrap_or(0) as usize;
+            order.push((category, self.vector_get(systems, num(category as i64))?));
+        }
+        // detect_coding_iso_2022 reads the global variable itself; the
+        // system's attribute only gates the initial escape scan.
+        let iso_inhibit = self.flag_variable("inhibit-iso-escape-detection")?;
+        let iso = self.iso_context(systems, iso_inhibit)?;
+        let mut info = DetectInfo::default();
         let (mut head_ascii, mut null_byte, mut eight_bit, mut eol_seen) = (0, false, false, 0u8);
         let mut at = 0;
         while at < bytes.len() {
@@ -1593,8 +1968,13 @@ impl Leaf<'_> {
                 eight_bit = true;
                 if null_byte { break }
             } else if c < 0x20 {
-                if matches!(c, 0x1B | 0x0E | 0x0F) && !inhibit_ied {
-                    return Err(refuse("ISO-2022 escape and shift codes"));
+                if matches!(c, 0x1B | 0x0E | 0x0F) && !inhibit_ied && info.checked == 0 {
+                    if detect_iso_2022(bytes, head_ascii, &iso, &mut info) {
+                        // The whole text scanned: with no 8-bit code it is all ISO-2022.
+                        if info.rejected & MASK_ISO_7_ELSE == 0 { head_ascii = bytes.len(); }
+                        info.rejected |= !MASK_ISO_ESCAPE;
+                        break;
+                    }
                 } else if c == 0 && !inhibit_nbd {
                     null_byte = true;
                     if eight_bit { break }
@@ -1617,21 +1997,14 @@ impl Leaf<'_> {
             }
             at += 1;
         }
-        if !null_byte && !eight_bit && head_ascii >= bytes.len() {
+        if !null_byte && !eight_bit && head_ascii >= bytes.len() && info.found == 0 {
             return Ok((None, eol_index(eol_seen)));
         }
-        let systems = self.coding_category_state(CATEGORY_SYSTEMS)?;
-        let priorities = self.coding_category_state(PRIORITIES)?;
-        let mut order = Vec::with_capacity(CATEGORY_RAW_TEXT);
-        for i in 0..CATEGORY_RAW_TEXT {
-            let category = self.vector_get(priorities, num(i as i64))?.integer_value().unwrap_or(0) as usize;
-            order.push((category, self.vector_get(systems, num(category as i64))?));
-        }
-        let mut info = DetectInfo::default();
         let mut chosen = None;
-        // With every byte 7-bit only ISO-2022 could be found, and its
-        // escapes already refused, so the walk finds nothing.
-        if head_ascii < bytes.len() {
+        if head_ascii >= bytes.len() {
+            // All bytes 7-bit: only an ISO-2022 category can have been found.
+            chosen = order.iter().copied().find(|&(category, _)| info.found & 1 << category != 0);
+        } else {
             if null_byte {
                 info.checked |= !MASK_UTF_16;
                 info.rejected |= !MASK_UTF_16;
@@ -1643,26 +2016,42 @@ impl Leaf<'_> {
                 let bit = 1u32 << category;
                 if system == Value::NIL {
                     info.rejected |= bit;
+                    continue;
                 } else if category >= CATEGORY_RAW_TEXT {
                     continue;
                 } else if info.checked & bit != 0 {
                     if info.found & bit != 0 { chosen = Some((category, system)); break }
-                } else if (CATEGORY_UTF_8_AUTO..=CATEGORY_UTF_8_SIG).contains(&category) {
-                    if detect_utf_8(bytes, head_ascii, &mut info) && info.found & bit != 0 { chosen = Some((category, system)); break }
-                } else if category == CATEGORY_CHARSET {
-                    if self.detect_charset(system, bytes, head_ascii, &mut info)? && info.found & bit != 0 { chosen = Some((category, system)); break }
-                } else {
-                    return Err(refuse(&format!("the {} category", CATEGORIES[category])));
+                    continue;
                 }
+                let complete = match category {
+                    CATEGORY_ISO_7..=CATEGORY_ISO_8_ELSE => detect_iso_2022(bytes, head_ascii, &iso, &mut info),
+                    CATEGORY_UTF_8_AUTO..=CATEGORY_UTF_8_SIG => detect_utf_8(bytes, head_ascii, &mut info),
+                    CATEGORY_UTF_16_AUTO..=CATEGORY_UTF_16_LE_NOSIG => detect_utf_16(bytes, &mut info),
+                    CATEGORY_CHARSET => self.detect_charset(system, bytes, head_ascii, &mut info)?,
+                    CATEGORY_SJIS => {
+                        let spec = self.coding_required(system)?;
+                        let attrs = self.vector_get(spec, num(0))?;
+                        let charsets = self.coding_items(self.vector_get(attrs, num(4))?)?.len();
+                        detect_sjis(bytes, head_ascii, if charsets <= 3 { 0xEF } else { 0xFC }, &mut info)
+                    }
+                    CATEGORY_BIG5 => detect_big5(bytes, head_ascii, &mut info),
+                    CATEGORY_EMACS_MULE => detect_emacs_mule(bytes, head_ascii, &self.emacs_mule_bytes(), &mut info),
+                    _ => return Err(refuse(&format!("the {} category", CATEGORIES[category]))),
+                };
+                if complete && info.found & bit != 0 { chosen = Some((category, system)); break }
             }
         }
         let found = if let Some((category, system)) = chosen {
-            if category == CATEGORY_UTF_8_AUTO {
+            if category == CATEGORY_UTF_8_AUTO || category == CATEGORY_UTF_16_AUTO {
                 let attrs = self.coding_required(system)?;
                 let attrs = self.vector_get(attrs, num(0))?;
                 let systems = self.vector_get(attrs, num(24))?;
                 match self.pair(systems) {
-                    Some((sig, nosig)) => if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig },
+                    Some((sig, nosig)) if category == CATEGORY_UTF_8_AUTO => if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig },
+                    // coding.c: little-endian is the car, big-endian the cdr.
+                    Some((le, be)) => if info.found & 1 << CATEGORY_UTF_16_LE != 0 { le }
+                        else if info.found & 1 << CATEGORY_UTF_16_BE != 0 { be }
+                        else { return Ok((None, eol_index(eol_seen))) },
                     None => system,
                 }
             } else {
@@ -1681,6 +2070,74 @@ impl Leaf<'_> {
             return Ok((None, eol_index(eol_seen)));
         };
         Ok((Some(found), eol_index(eol_seen)))
+    }
+
+    /// The ISO categories' systems, as detect_coding_iso_2022 sets them
+    /// up (setup_iso_safe_charsets for a full-support system), and the
+    /// registry's ISO charset table.
+    fn iso_context(&mut self, systems: Value, inhibit_ied: bool) -> std::result::Result<IsoContext, Fault> {
+        let mut found: [Option<(Vec<u8>, i64)>; 6] = Default::default();
+        for (category, slot) in found.iter_mut().enumerate() {
+            let system = self.vector_get(systems, num(category as i64))?;
+            if system == Value::NIL { continue }
+            let spec = self.coding_required(system)?;
+            let attrs = self.vector_get(spec, num(0))?;
+            let flags = self.vector_get(attrs, num(23))?.integer_value().unwrap_or(0);
+            let safe = self.vector_get(attrs, num(15))?;
+            let safe = if flags & ISO_FLAG_FULL_SUPPORT == 0 && matches!(self.kind(safe), Kind::String | Kind::Bytes) {
+                self.string_view(safe)?.bytes().to_vec()
+            } else {
+                self.iso_safe_charsets(attrs, flags)?
+            };
+            *slot = Some((safe, flags));
+        }
+        let latin = self.intern("latin-extra-code-table");
+        let latin_extra = match self.variable_value(latin)?.filter(|&table| self.kind(table) == Kind::Vector) {
+            Some(table) => Some((0..256).map(|i| self.vector_get(table, num(i)).map(|v| v != Value::NIL)).collect::<std::result::Result<Vec<_>, _>>()?),
+            None => None,
+        };
+        Ok(IsoContext { systems: found, iso: self.vm.charsets.iso.clone(), latin_extra, inhibit_ied })
+    }
+
+    /// coding.c setup_iso_safe_charsets: the register each charset of the
+    /// system's list (every ISO charset for a full-support system) is
+    /// designated to, 255 where none.
+    fn iso_safe_charsets(&mut self, attrs: Value, flags: i64) -> std::result::Result<Vec<u8>, Fault> {
+        let ids: Vec<usize> = if flags & ISO_FLAG_FULL_SUPPORT != 0 {
+            self.vm.charsets.iso.iter().map(|(_, id)| *id).collect()
+        } else {
+            self.coding_items(self.vector_get(attrs, num(4))?)?.iter().filter_map(|v| v.integer_value()).map(|n| n as usize).collect()
+        };
+        let mut safe = vec![255u8; ids.iter().max().map_or(0, |m| m + 1)];
+        let request = self.vector_get(attrs, num(22))?;
+        let usage = self.vector_get(attrs, num(21))?;
+        let (reg94, reg96) = self.pair(usage).map_or((4, 4), |(a, b)| (a.integer_value().unwrap_or(4), b.integer_value().unwrap_or(4)));
+        for id in ids {
+            let mut reg = None;
+            let mut tail = request;
+            while let Some((entry, rest)) = self.pair(tail) {
+                if let Some((key, value)) = self.pair(entry) && key.integer_value() == Some(id as i64) { reg = value.integer_value(); break }
+                tail = rest;
+            }
+            let chars96 = { let r = &self.vm.charsets.records[self.vm.charsets.ids[id]]; r.space[1] - r.space[0] + 1 == 96 };
+            let reg = reg.or_else(|| { let r = if chars96 { reg96 } else { reg94 }; (r < 4).then_some(r) });
+            if let Some(reg) = reg { safe[id] = reg as u8; }
+        }
+        Ok(safe)
+    }
+
+    /// coding.c emacs_mule_bytes: 1 by default, the private leading codes,
+    /// and each charset with an emacs-mule id (charset.c:1171).
+    fn emacs_mule_bytes(&self) -> [u8; 256] {
+        let mut bytes = [1u8; 256];
+        bytes[0x9A] = 3; bytes[0x9B] = 3; bytes[0x9C] = 4; bytes[0x9D] = 4;
+        for &i in &self.vm.charsets.ids {
+            let record = &self.vm.charsets.records[i];
+            if (0..256).contains(&record.mule_id) {
+                bytes[record.mule_id as usize] = (record.dimension + if record.mule_id < 0xA0 { 1 } else { 2 }) as u8;
+            }
+        }
+        bytes
     }
 
     /// coding.c detect_coding_charset over BYTES for SYSTEM, the system set

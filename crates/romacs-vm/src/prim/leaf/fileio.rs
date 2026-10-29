@@ -242,10 +242,13 @@ impl Leaf<'_> {
     /// PT and never moves PT). BYTES are internal multibyte text when
     /// MULTIBYTE, else octets; a multibyte buffer takes octets above 127 as
     /// raw-byte characters, a unibyte buffer takes octets only. Markers follow
-    /// their insertion type. Returns the number of characters inserted.
+    /// their insertion type. The insertion is recorded for undo
+    /// (insert_from_gap's record_insert). Returns the number of characters
+    /// inserted.
     pub fn insert_before_point(&mut self, bytes: &[u8], multibyte: bool) -> std::result::Result<usize, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let inserted = match &mut self.vm.objects[index] {
+        let unmodified = !self.vm.buffer_state(Value::reference(index + 1, 0)).map_err(Fault::Error)?.modified();
+        let (inserted, at) = match &mut self.vm.objects[index] {
             data::Object::Buffer(t) => {
                 let internal;
                 let bytes = if multibyte { bytes } else {
@@ -260,19 +263,20 @@ impl Leaf<'_> {
                 let before = t.len_chars();
                 t.replace(at..at, bytes).map_err(Fault::Error)?;
                 t.point = at;
-                t.len_chars() - before
+                (t.len_chars() - before, t.char_of_byte(at).map_err(Fault::Error)?.0 as i64 + 1)
             }
             data::Object::ByteBuffer(b) => {
                 if multibyte { return Err(Fault::Error("multibyte text for a unibyte buffer".into())); }
                 let at = b.point;
                 b.replace(at..at, bytes).map_err(Fault::Error)?;
                 b.point = at;
-                bytes.len()
+                (bytes.len(), at.0 as i64 + 1)
             }
             _ => return Err(Fault::Error("buffer required".into())),
         };
         if inserted > 0 {
             self.vm.display_state.version += 1;
+            self.vm.record_insert(index, at, inserted as i64, unmodified).map_err(Fault::Error)?;
         }
         Ok(inserted)
     }

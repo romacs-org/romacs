@@ -22,6 +22,8 @@ md-5 = "0.11"
 sha1 = "0.11"
 unicode-segmentation = "1.13.2"
 unicode-width = "0.2.2"
+# UAX#9 bidi classes for current-bidi-paragraph-direction.
+unicode-bidi = "0.3.18"
 # Narrow ICU4X casing provider: simple scalar + contextual full-string Unicode.
 icu_casemap = "=2.3.0"
 icu_locale_core = "=2.3.0"

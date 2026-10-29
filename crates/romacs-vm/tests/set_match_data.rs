@@ -11,6 +11,9 @@ fn set_match_data_retains_buffer_across_moving_collection() {
         vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
     }
     vm.set_collection_floor(usize::MAX);
+    // Retire the loads' request code now, so the request below, whose garbage
+    // the collection measures, does not collect at its end.
+    vm.collect_garbage();
     vm.eval_source("(dotimes (i 80) (copy-sequence \"dead allocation\")) (set-buffer (generate-new-buffer \"match-retained\")) (insert \"abc\") (set-match-data (list 1 3 (current-buffer))) (set-buffer (get-buffer-create \"other\"))").unwrap();
     let before = vm.heap_stats();
     vm.collect_garbage();

@@ -9,7 +9,7 @@
   "minibuf.c"
  ],
  "gnu_def": "minibuf.c:215",
- "rust": "src/prims/window.rs:207",
+ "rust": "src/prims/window.rs:217",
  "args": [],
  "probes": [
   "(active-minibuffer-window)",

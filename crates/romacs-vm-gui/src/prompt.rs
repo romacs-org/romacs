@@ -122,13 +122,13 @@ impl HostInput for GuiHost {
     }
 
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
-        // GNU's redisplay draws nothing when nothing changed: a timer run
-        // in a prompt that left the frame as this prompt last painted it,
-        // with nothing presented since, submits no frame.
+        // As the loop's changed_frame: a timer run in a prompt that left the
+        // frame as this prompt last painted it, with nothing presented
+        // since, submits no frame and answers that paint's row ends.
         if let Some((painted, selected, presentation, ends)) = &self.shared.borrow().painted {
             let shared = self.shared.borrow();
             if *presentation == shared.presentation && shared.in_flight.is_none()
-                && *selected == frame.selected && *painted == frame.frame {
+                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame) {
                 return Ok(ends.clone());
             }
         }

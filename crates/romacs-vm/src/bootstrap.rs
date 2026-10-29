@@ -37,6 +37,15 @@ impl Vm {
             _ => false,
         })
     }
+    /// data.c:1021: a non-nil DOCSTRING becomes SYMBOL's
+    /// `function-documentation'.
+    fn defalias_documentation(&mut self, args: &[Value]) -> Result<()> {
+        if let Some(&doc) = args.get(2) && doc != Value::NIL {
+            let property = self.intern("function-documentation");
+            self.put_symbol_property(args[0], property, doc)?;
+        }
+        Ok(())
+    }
     pub(super) fn bootstrap_primitive(
         &mut self,
         p: Primitive,
@@ -81,15 +90,26 @@ impl Vm {
                 if slot >= self.slots.len() {
                     return Err("invalid symbol".into());
                 }
+                // data.c:993 automatic advice activation: a symbol's
+                // `defalias-fset-function' stores the definition instead of
+                // Ffset (nadvice keeps an autoloaded function's advice so).
+                let property = self.intern("defalias-fset-function");
+                let hook = self.symbol_property(a[0], property)?;
+                if hook != Value::NIL {
+                    self.autoload_note_defalias(slot);
+                    self.call_lisp_at_write(hook, &[a[0], a[1]])?;
+                    self.defalias_documentation(&a)?;
+                    return Ok(a[0]);
+                }
                 let mut definition = a[1];
                 let mut is_macro = false;
                 if definition.tag() == 3 && self.resolve_keymap(definition).is_none() {
                     let (head, tail) = self.cons_pair(definition)?;
+                    // Ffset (data.c:928) stores any other list as given: a
+                    // `(lambda ...)' or `(autoload ...)' descriptor.
                     if head.tag() == 7 && self.symbol_names.get(head.index(7)?.saturating_sub(1)).is_some_and(|name| name == "macro") {
                         definition = tail;
                         is_macro = true;
-                    } else {
-                        return Err("list function descriptors are not yet supported".into());
                     }
                 }
                 self.autoload_note_defalias(slot);
@@ -118,6 +138,7 @@ impl Vm {
                 let old = self.variable_value(history)?;
                 self.conses.push((entry, old));
                 self.set_variable_value(history, Value::reference(self.conses.len() - 1, 3))?;
+                self.defalias_documentation(&a)?;
                 Ok(a[0])
             }
             Boundp => {

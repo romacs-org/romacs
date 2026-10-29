@@ -137,8 +137,8 @@ fn deleting_the_calling_window_does_not_poison_later_prompts() {
 #[test]
 fn first_prompt_on_a_fresh_vm_reaches_the_lisp_half() {
     for (source, expected) in [
-        ("(read-from-minibuffer \"P: \")", "VM-ERROR unhandled signal end-of-file"),
-        ("(read-string \"P: \")", "VM-ERROR unhandled signal end-of-file"),
+        ("(read-from-minibuffer \"P: \")", "VM-ERROR (end-of-file \"Error reading from stdin\")"),
+        ("(read-string \"P: \")", "VM-ERROR (end-of-file \"Error reading from stdin\")"),
         ("(let ((executing-kbd-macro t)) (read-from-minibuffer \"P: \"))", "\"\""),
         ("(let ((executing-kbd-macro t)) (read-string \"P: \"))", "\"\""),
     ] {

@@ -1,6 +1,10 @@
-//! Native key-sequence accumulation. VM2 still resolves every binding and runs
-//! every command through command_event; only owned event spellings live here.
-use romacs_vm::{CommandEvent, CommandOutcome, Fixed, Vm};
+//! The GUI's commands run through the Lisp command loop
+//! (rlisp/vm/keyboard.el `romacs--host-command'): its reader takes the
+//! unread queues, a keyboard macro, then the host keyboard, and applies
+//! the translation maps, as GNU's read_key_sequence does.
+use romacs_vm::{CommandEvent, CommandOutcome, CommandSignal, Vm};
+#[cfg(test)]
+use romacs_vm::Fixed;
 use romacs_display_runtime::thread_comm::InputEvent;
 
 pub fn unwrap_event(event: InputEvent) -> InputEvent {
@@ -10,6 +14,29 @@ pub fn unwrap_event(event: InputEvent) -> InputEvent {
     }
 }
 
+/// Whether read_char has an event queued in Lisp: in
+/// `unread-post-input-method-events', `unread-command-events' or
+/// `unread-input-method-events'.
+pub fn unread_pending(vm: &mut Vm) -> Result<bool, String> {
+    Ok(!vm.eval_source("(or unread-post-input-method-events unread-command-events unread-input-method-events)")?.is_nil())
+}
+
+/// Run one command through the Lisp command loop, which reads its whole
+/// key sequence: what ran and what it signalled.
+pub fn run(vm: &mut Vm) -> Result<CommandOutcome, String> {
+    let (command, error) = vm.eval_source("(romacs--run-host-command)")?.cons_pair()?;
+    let command = if command.is_nil() { None } else { Some(command.display()?) };
+    let signal = if error.is_nil() { None } else {
+        let (condition, data) = error.cons_pair()?;
+        Some(CommandSignal { condition: condition.display()?, data: data.display()? })
+    };
+    let message = signal.as_ref().map(|s| format!("{}: {}", s.condition, s.data));
+    Ok(CommandOutcome { command, bell: signal.is_some(), signal, message, redisplay: true })
+}
+
+/// Keys one at a time, for tests without a host keyboard: a prefix waits
+/// for the rest of its sequence, which then reaches `run' as the unread
+/// events (t . EVENT) that host keys would be.
 #[derive(Default)]
 pub struct Commands { pending: Vec<String> }
 impl Commands {
@@ -26,26 +53,195 @@ impl Commands {
         };
         self.pending.push(form);
         let sequence = format!("[{}]", self.pending.join(" "));
-        let prefix = vm.eval_source(&format!("(keymapp (key-binding {sequence}))"))? != Fixed::NIL;
-        if prefix {
-            vm.record_recent_event(&event);
-            return Ok(None);
-        }
-        let multi = self.pending.len() > 1;
-        self.pending.clear();
-        if !multi { return vm.command_event(event).map(Some); }
-        vm.record_recent_event(&event);
-        // command_event currently consumes complete single events. A private
-        // named transport event projects the already resolved full key sequence
-        // into that existing command path, without retaining a heap index.
-        vm.eval_source(&format!("(define-key (current-global-map) [romacs-gui-sequence] (key-binding {sequence} nil t))"))?;
-        vm.command_event(CommandEvent::Named("romacs-gui-sequence".into())).map(Some)
+        if !vm.eval_source(&format!("(keymapp (key-binding {sequence}))"))?.is_nil() { return Ok(None); }
+        let events: String = std::mem::take(&mut self.pending).iter().map(|e| format!(" (t . {e})")).collect();
+        vm.eval_source(&format!("(setq unread-command-events (append '({events}) unread-command-events))"))?;
+        run(vm).map(Some)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A host keyboard holding KEYS, then nothing.
+    struct Keys(std::collections::VecDeque<CommandEvent>);
+    impl romacs_vm::HostInput for Keys {
+        fn input_pending(&mut self) -> bool { !self.0.is_empty() }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
+            self.0.pop_front().map(romacs_vm::HostEvent::Key).ok_or_else(|| "keys exhausted".into())
+        }
+    }
+
+    /// A host keyboard giving these keys, None standing for a pause in
+    /// which a background command can finish, then a wake as a completion
+    /// gives.
+    struct Scripted(std::collections::VecDeque<Option<CommandEvent>>);
+    impl romacs_vm::HostInput for Scripted {
+        fn input_pending(&mut self) -> bool { false }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
+            match self.0.pop_front().ok_or("keys exhausted")? {
+                Some(key) => Ok(romacs_vm::HostEvent::Key(key)),
+                None => { std::thread::sleep(std::time::Duration::from_millis(500)); Ok(romacs_vm::HostEvent::Background) }
+            }
+        }
+    }
+
+    /// The workspace in a fundamental-mode buffer that logs, from
+    /// `pre-command-hook' and `post-command-hook', each command with its
+    /// event, keys and `recent-keys'.
+    fn logged() -> Vm {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1600, 1000, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        // The workspace has no subr.el `add-hook'.
+        vm.eval_source("(erase-buffer) (setq log nil)
+            (setq pre-command-hook (list (lambda () (setq log (cons (list 'pre this-command) log)))))
+            (setq post-command-hook (list (lambda () (setq log (cons (list 'post this-command last-command-event (this-command-keys-vector)) log)))))").unwrap();
+        vm
+    }
+    fn printed(vm: &mut Vm, source: &str) -> String { vm.eval_source(source).unwrap().display().unwrap() }
+
+    /// Host keys go through `input-decode-map', `local-function-key-map'
+    /// and `key-translation-map' as GNU's read_key_sequence takes them, a
+    /// translation's prefix waiting for its next key. Pinned GNU, batch,
+    /// fundamental-mode, the same keys unread: ((10 [10]) (98 [98])), "\nb".
+    #[test]
+    fn host_keys_pass_the_translation_maps_as_gnus_reader_does() {
+        let mut vm = logged();
+        vm.eval_source("(define-key key-translation-map [13] [10]) (define-key key-translation-map [f9 97] [98])").unwrap();
+        vm.set_host_input(Some(Box::new(Keys([CommandEvent::Named("return".into()), CommandEvent::Named("f9".into()), CommandEvent::Character(97)].into()))));
+        for _ in 0..2 { assert!(run(&mut vm).unwrap().signal.is_none()); }
+        assert_eq!(printed(&mut vm, "(list (delq nil (mapcar (lambda (e) (and (eq (car e) 'post) (nthcdr 2 e))) (reverse log))) (buffer-string))"),
+                   "(((10 [10]) (98 [98])) \"\\nb\")");
+        // The adapter feeds the same reader: physical Return reads as C-j.
+        let mut keys = Commands::default();
+        let out = keys.dispatch(&mut vm, CommandEvent::Named("return".into())).unwrap().unwrap();
+        assert_eq!((out.command.as_deref(), printed(&mut vm, "last-command-event")), (Some("self-insert-command"), "10".into()));
+    }
+
+    /// A command the active selection's deletion supersedes still consumes
+    /// the prefix argument (delsel.el makes it `ignore'). Pinned GNU, batch,
+    /// delete-selection-mode, "hello" with 2..4 selected, C-u C-d a: "halo".
+    #[test]
+    fn a_superseded_command_consumes_the_prefix_argument() {
+        let mut vm = logged();
+        vm.eval_source("(setq transient-mark-mode t delete-selection-mode t) (insert \"hello\") (set-mark 2) (goto-char 4)").unwrap();
+        vm.set_host_input(Some(Box::new(Keys([CommandEvent::Character(21), CommandEvent::Character(4), CommandEvent::Character(97)].into()))));
+        for _ in 0..3 { assert!(run(&mut vm).unwrap().signal.is_none()); }
+        assert_eq!(printed(&mut vm, "(list (buffer-string) prefix-arg mark-active)"), "(\"halo\" nil nil)");
+    }
+
+    /// Point before a command reaches the undo list when the command's
+    /// first change is elsewhere (record_point). Pinned GNU, batch: after
+    /// an insertion at 1 from point 5, (1 . 2) then 5.
+    #[test]
+    fn undo_records_the_point_the_command_started_from() {
+        let mut vm = logged();
+        vm.eval_source("(buffer-enable-undo) (insert \"abcdefgh\") (undo-boundary) (goto-char 5)
+            (global-set-key [f9] (lambda () (interactive) (save-excursion (goto-char 1) (insert \"X\"))))").unwrap();
+        vm.set_host_input(Some(Box::new(Keys([CommandEvent::Named("f9".into())].into()))));
+        assert!(run(&mut vm).unwrap().signal.is_none());
+        assert_eq!(printed(&mut vm, "(let ((l (delq nil (copy-sequence buffer-undo-list)))) (list (point) (car l) (car (cdr l))))"), "(6 (1 . 2) 5)");
+    }
+
+    /// A background command that completes while a prefix key waits for
+    /// the next one has its callback run then, before that key; one that
+    /// completes during a minibuffer read waits for the commands to end.
+    #[test]
+    fn a_background_completion_runs_while_a_prefix_waits() {
+        let mut vm = logged();
+        let start = "(romacs-process-start (list \"true\") \"\" default-directory 10
+            (lambda (result) (setq log (cons (list 'callback (car result)) log)) nil))";
+        vm.eval_source(start).unwrap();
+        vm.set_host_input(Some(Box::new(Scripted([Some(CommandEvent::Character(24)), None, Some(CommandEvent::Character(104))].into()))));
+        let out = run(&mut vm).unwrap();
+        assert_eq!(out.command.as_deref(), Some("mark-whole-buffer"), "{out:?}");
+        assert_eq!(printed(&mut vm, "(mapcar #'car (reverse log))"), "(callback pre post)");
+        // Started by the command, the job can finish only during its read.
+        vm.eval_source(&format!("(setq log nil) (global-set-key [f9] (lambda () (interactive) {start} (setq got (read-string \"x: \"))))")).unwrap();
+        vm.set_host_input(Some(Box::new(Scripted([Some(CommandEvent::Named("f9".into())), None, Some(CommandEvent::Character(97)), Some(CommandEvent::Character(13))].into()))));
+        assert!(run(&mut vm).unwrap().signal.is_none());
+        assert_eq!(printed(&mut vm, "(list got (mapcar #'car (reverse log)) (romacs--process-pending-p))"), "(\"a\" (pre post pre post pre post) t)", "the minibuffer's own commands run too, no callback");
+    }
+
+    /// A completion whose wake came during a minibuffer read runs before
+    /// the next command's keys though no further wake comes: RET ends the
+    /// read and C-x h follows at once.
+    #[test]
+    fn a_completion_held_by_a_minibuffer_read_runs_before_the_next_keys() {
+        let mut vm = logged();
+        // Started by the command, the job can finish only during its read.
+        vm.eval_source("(global-set-key [f9] (lambda () (interactive)
+            (romacs-process-start (list \"true\") \"\" default-directory 10
+              (lambda (result) (setq log (cons (list 'callback (car result)) log)) nil))
+            (setq got (read-string \"x: \"))))").unwrap();
+        vm.set_host_input(Some(Box::new(Scripted([Some(CommandEvent::Named("f9".into())), None, Some(CommandEvent::Character(97)),
+            Some(CommandEvent::Character(13)), Some(CommandEvent::Character(24)), Some(CommandEvent::Character(104))].into()))));
+        assert!(run(&mut vm).unwrap().signal.is_none());
+        assert_eq!(printed(&mut vm, "(list got (assq 'callback log))"), "(\"a\" nil)", "held during the read");
+        vm.eval_source("(setq log nil)").unwrap();
+        assert_eq!(run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
+        assert_eq!(printed(&mut vm, "(list (mapcar #'car (reverse log)) (romacs--process-pending-p))"), "((callback pre post) nil)");
+    }
+
+    /// pre-command-hook runs before each command and post-command-hook
+    /// after it, also after a command that signalled (command_loop_1
+    /// runs it when it resumes).
+    #[test]
+    fn command_hooks_run_around_each_command() {
+        let mut vm = logged();
+        let mut keys = Commands::default();
+        keys.dispatch(&mut vm, CommandEvent::Character(97)).unwrap();
+        keys.dispatch(&mut vm, CommandEvent::Character(2)).unwrap();
+        let failed = keys.dispatch(&mut vm, CommandEvent::Character(2)).unwrap().unwrap();
+        assert_eq!(failed.signal.map(|s| s.condition), Some("beginning-of-buffer".into()));
+        assert_eq!(printed(&mut vm, "(mapcar (lambda (e) (list (car e) (car (cdr e)))) (reverse log))"),
+                   "((pre self-insert-command) (post self-insert-command) (pre backward-char) (post backward-char) (pre backward-char) (post backward-char))");
+    }
+
+    /// read_char's unread queues: (no-record . EVENT) runs EVENT and keys it
+    /// for the command but leaves it out of `recent-keys' (pinned GNU:
+    /// [120] and no 120 in recent-keys; (t . 120) and 120 are recorded), and
+    /// the queues are read post-input-method, command, input-method (pinned
+    /// GNU: 97 98 99).
+    #[test]
+    fn unread_queues_run_with_gnus_recording_and_order() {
+        let mut vm = logged();
+        let recent = |vm: &mut Vm| printed(vm, "(length (recent-keys))");
+        let before = recent(&mut vm);
+        vm.eval_source("(setq unread-command-events (list '(no-record . 120)))").unwrap();
+        assert!(unread_pending(&mut vm).unwrap());
+        assert_eq!(run(&mut vm).unwrap().command.as_deref(), Some("self-insert-command"));
+        assert_eq!((printed(&mut vm, "(nthcdr 2 (car log))"), recent(&mut vm)), ("(120 [120])".into(), before.clone()));
+        vm.eval_source("(setq unread-command-events (list '(t . 120)))").unwrap();
+        run(&mut vm).unwrap();
+        assert_ne!(recent(&mut vm), before, "(t . EVENT) is recorded");
+        vm.eval_source("(erase-buffer) (setq unread-input-method-events (list ?c) unread-command-events (list ?b) unread-post-input-method-events (list ?a))").unwrap();
+        while unread_pending(&mut vm).unwrap() { run(&mut vm).unwrap(); }
+        assert_eq!(printed(&mut vm, "(buffer-string)"), "\"abc\"");
+    }
+    /// The host's `return' is RET through `local-function-key-map' unless
+    /// bound itself; C-j stays C-j.
+    #[test]
+    fn return_reads_as_ret_unless_bound_and_c_j_stays() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1600, 1000, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        vm.eval_source("(erase-buffer)").unwrap();
+        let mut keys = Commands::default();
+        let mut run = |vm: &mut Vm, event| {
+            let out = keys.dispatch(vm, event).unwrap().unwrap();
+            assert!(out.signal.is_none(), "{out:?}");
+            (out.command.unwrap(), vm.eval_source("(list last-command-event (buffer-string))").unwrap().display().unwrap())
+        };
+        assert_eq!(run(&mut vm, CommandEvent::Named("return".into())), ("romacs-newline".into(), "(13 \"\\n\")".into()));
+        assert_eq!(run(&mut vm, CommandEvent::Character(10)), ("self-insert-command".into(), "(10 \"\\n\\n\")".into()));
+        vm.eval_source("(global-set-key [return] 'beginning-of-line)").unwrap();
+        assert_eq!(run(&mut vm, CommandEvent::Named("return".into())).0, "beginning-of-line");
+    }
     #[test]
     fn vertical_goal_column_and_boundaries() {
         let mut vm = Vm::new();

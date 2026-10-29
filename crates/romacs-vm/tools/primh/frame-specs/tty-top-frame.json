@@ -28,5 +28,5 @@
   "(tty-top-frame (frame-terminal))",
   "(funcall #'tty-top-frame nil)"
  ],
- "rust": "src/prims/frame.rs:16"
+ "rust": "src/prims/frame.rs:68"
 }

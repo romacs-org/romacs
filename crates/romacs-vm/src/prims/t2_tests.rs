@@ -277,23 +277,21 @@ fn run_hooks_walk_state_is_forwarded_by_collections_inside_hooks() {
 
 // GNU run_hook_with_args calls a FUNCTIONP value whole, calls a
 // lambda-headed global value whole, and walks any other list, calling each
-// element (here a lambda list) whole.  Walking a lambda list instead would
-// call the symbol `lambda' and signal; each lambda records that it ran.
-// Answers are pinned GNU 32.0.50's.
+// element (here a lambda list) whole. Each call is logged, so these say
+// WHICH object `run-hooks' handed to `funcall'.
 #[test]
 fn run_hooks_calls_lambda_lists_whole() {
     let mut vm = Vm::new();
-    vm.eval_source("(defvar rh-ran nil)").unwrap();
     for (source, expected) in [
-        ("(progn (setq rh-ran nil) (set 'rh-h '(lambda () (setq rh-ran (cons 1 rh-ran))))
-                 (list (condition-case e (run-hooks 'rh-h) (error e)) rh-ran))",
+        ("(progn (set 'rh-log nil) (set 'rh-h '(lambda () (set 'rh-log (cons 1 rh-log))))
+                 (list (run-hooks 'rh-h) rh-log))",
          "(nil (1))"),
-        ("(progn (setq rh-ran nil) (set 'rh-g '(lambda () (setq rh-ran (cons 2 rh-ran))))
+        ("(progn (set 'rh-log nil) (set 'rh-g '(lambda () (set 'rh-log (cons 2 rh-log))))
                  (with-temp-buffer (make-local-variable 'rh-g) (set 'rh-g (list t))
-                   (list (condition-case e (run-hooks 'rh-g) (error e)) rh-ran)))",
+                   (list (run-hooks 'rh-g) rh-log)))",
          "(nil (2))"),
-        ("(progn (setq rh-ran nil) (set 'rh-l (list '(lambda () (setq rh-ran (cons 3 rh-ran)))))
-                 (list (condition-case e (run-hooks 'rh-l) (error e)) rh-ran))",
+        ("(progn (set 'rh-log nil) (set 'rh-l (list '(lambda () (set 'rh-log (cons 3 rh-log)))))
+                 (list (run-hooks 'rh-l) rh-log))",
          "(nil (3))"),
     ] {
         assert_eq!(eval(&mut vm, source), Ok(expected.into()), "{source}");

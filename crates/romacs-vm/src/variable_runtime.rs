@@ -300,16 +300,13 @@ impl Vm {
     }
     pub(super) fn set_variable_value(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);
+        let mut value = value;
         if self.variable_trapped(base) {
-            if value == Value::UNBOUND { self.notify_watchers_at(base, value, "makunbound", Some(Value::NIL))?; }
-            else {
-                self.notify_watchers(base, value, "set")?;
-                // set_internal's set_default_internal reports again.
-                if let Some(forwarded::Fwd::Buffer(i)) = self.forwarding(base) {
-                    let buffer = self.buffer_index()?;
-                    if self.sets_shadowed_default(base, i, buffer) { self.notify_watchers_at(base, value, "set", Some(Value::NIL))?; }
-                }
-            }
+            // The value is rooted across its watchers and read back.
+            let frame = self.root_frame(&[value]);
+            let notified = self.notify_set(base, &frame);
+            [value] = self.release_frame(frame);
+            notified?;
         }
         if let Some(fwd) = self.native_forwarding(base) {
             if value == Value::UNBOUND {
@@ -324,6 +321,19 @@ impl Vm {
         }
         let local = self.variable_binding_slot(slot, true)?;
         self.slots[local].value = value;
+        Ok(())
+    }
+    /// `set_variable_value's notifications of the value in FRAME.
+    fn notify_set(&mut self, base: usize, frame: &crate::gc::RootFrame) -> Result<()> {
+        if self.rooted(frame, 0) == Value::UNBOUND {
+            return self.notify_watchers_at(base, Value::UNBOUND, "makunbound", Some(Value::NIL));
+        }
+        self.notify_watchers(base, self.rooted(frame, 0), "set")?;
+        // set_internal's set_default_internal reports again.
+        if let Some(forwarded::Fwd::Buffer(i)) = self.forwarding(base) {
+            let buffer = self.buffer_index()?;
+            if self.sets_shadowed_default(base, i, buffer) { self.notify_watchers_at(base, self.rooted(frame, 0), "set", Some(Value::NIL))?; }
+        }
         Ok(())
     }
     pub(super) fn promote_boolean_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
@@ -354,12 +364,17 @@ impl Vm {
         }
         self.dynamic.push(binding);
         let mut local = local;
+        let mut value = value;
         if self.variable_trapped(base) {
-            if matches!(forwarded, Some(forwarded::Fwd::Buffer(_))) && binding.3 {
-                self.notify_watchers_at(base, value, "set", Some(Value::NIL))?;
+            // The value is rooted across its watchers and read back.
+            let frame = self.root_frame(&[value]);
+            let notified = if matches!(forwarded, Some(forwarded::Fwd::Buffer(_))) && binding.3 {
+                self.notify_watchers_at(base, value, "set", Some(Value::NIL))
             } else {
-                self.notify_watchers(base, value, "let")?;
-            }
+                self.notify_watchers(base, value, "let")
+            };
+            [value] = self.release_frame(frame);
+            notified?;
             // set_internal finds the binding to store into after the watchers.
             local = self.variable_binding_slot(base, false)?;
         }

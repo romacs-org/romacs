@@ -31,7 +31,7 @@ pub(crate) fn reports_subr_arity(p: Primitive) -> bool {
     use Primitive::*;
     matches!(
         p,
-        Car | Cdr | Cons | Length | Nreverse | Null | Stringp | Eq | Memq | Nth | DeepEqual
+        Car | Cdr | Cons | Length | Nreverse | Null | Stringp | Eq | Memq | Nth | DeepEqual | FormatModeLine
     )
 }
 
