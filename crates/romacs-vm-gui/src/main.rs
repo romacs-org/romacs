@@ -315,7 +315,7 @@ fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input
 /// reported, and the presentation that showed it.
 struct Shown {
     frame: Frame,
-    ends: Vec<(u64, usize)>,
+    ends: Vec<romacs_vm::WindowEnd>,
     presentation: u64,
 }
 
@@ -553,7 +553,8 @@ fn paint(
     };
     eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
-        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":w.snapshot.point_byte})).collect::<Vec<_>>() }));
+        // Point as a buffer byte: a window publishes its text from a base byte.
+        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_base(w.snapshot.id) + w.snapshot.point_byte})).collect::<Vec<_>>() }));
     let glyphs: Vec<_> = frame.glyphs.iter().filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).filter_map(|glyph| {
         if let romacs_display_protocol::FrameGlyph::Char { char, row_role, face_id, x, y, clip_rect, .. } = glyph {
             let face = &frame.faces[face_id];
@@ -620,7 +621,7 @@ fn paint_prompt(
     sender: &PaintSender,
     presentation: u64,
     frame: &romacs_vm::HostFrame,
-) -> Result<(usize, Vec<(u64, usize)>), String> {
+) -> Result<(usize, Vec<romacs_vm::WindowEnd>), String> {
     let cursor = Some((frame.selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
     let (mut glyphs, ends) = engine.layout_frame(&frame.frame, presentation, cursor)?;
     let mut effects = romacs_display_protocol::EffectsConfig::default();

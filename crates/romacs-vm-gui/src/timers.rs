@@ -229,7 +229,7 @@ mod tests {
 
     impl romacs_vm::HostInput for Paced {
         fn input_pending(&mut self) -> bool { false }
-        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
         fn next_event(&mut self, timeout: Option<Duration>) -> Result<romacs_vm::HostEvent, String> {
             match self.0.pop_front().ok_or("paced keys exhausted")? {
                 Step::Key(c) => Ok(romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))),

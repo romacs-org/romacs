@@ -142,6 +142,33 @@ pub struct WindowSnapshot {
 }
 romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap });
 
+/// What laying a window out established about the text it published, in
+/// byte offsets into that text: where its last displayed row ends (GNU's
+/// `window_end_pos') and how far its fully visible rows reach, which is
+/// where point can be without redisplay choosing another start.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowEnd {
+    pub id: u64,
+    /// The byte after the last displayed character.
+    pub end: usize,
+    /// Every position before this byte is on a fully visible row: one past
+    /// the text's length when its end position is on one too.
+    pub visible_end: usize,
+    /// The text area's height: the window's less its mode line's.
+    pub body_height: f32,
+    /// The rows laid out from the window start, top to bottom, through the
+    /// first that reaches the text area's bottom.
+    pub rows: Vec<Row>,
+}
+
+/// One screen row: the byte it starts at, its top and its height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Row {
+    pub start: usize,
+    pub y: f32,
+    pub height: f32,
+}
+
 /// GNU's `it->line_wrap': `truncate-lines' (or a partial-width window
 /// under `truncate-partial-width-windows') truncates, `word-wrap'
 /// continues at word boundaries, else lines continue at the window edge.
@@ -179,7 +206,8 @@ pub struct MeasureInput {
 /// The host's geometry for a `MeasureInput`, in whole pixels: each
 /// character's advance and the row height its face gives it, in text
 /// order (a newline advances 0, a TAB its face's space, from which
-/// `tab_advance` makes its stretch), and each face's row height.
+/// `tab_advance` makes its stretch), and each face's row height: the
+/// default face's and those the text uses (0 for any other).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Measured {
     pub glyphs: Vec<(u32, u32)>,

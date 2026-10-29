@@ -207,6 +207,18 @@ impl Vm {
         self.finish_request(outcome)
     }
 
+    /// `eval_form_raw' for a FORM evaluated over and over, such as a mode
+    /// line's `:eval': one with a source spelling compiles once into the
+    /// source cache, which revalidates it as it does read source, rather
+    /// than into a fresh request each time (each counting toward the
+    /// collection compiled requests force).
+    pub(crate) fn eval_form_cached(&mut self, form: &Form) -> Result<Value> {
+        if !spelled(form) { return self.eval_form_raw(form); }
+        let key = format!("\0form {form:?}");
+        let outcome = self.cached_source_form(&key, form).and_then(|function| self.execute_raw(function));
+        self.finish_request(outcome)
+    }
+
     pub(super) fn release_request_entry(&mut self, id: usize) {
         for op in &self.functions[id].code {
             if let Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) = *op {
@@ -579,5 +591,15 @@ mod tests {
         assert!(roots.len() <= 256);
         assert!(vm.functions.len() <= 1280);
         assert!(vm.heap_stats().collections > 0);
+    }
+}
+
+/// FORM has a source spelling: no heap object or generated name in it.
+fn spelled(form: &Form) -> bool {
+    match form {
+        Form::Object(_) | Form::Generated(_) => false,
+        Form::List(items) | Form::Vector(items) => items.iter().all(spelled),
+        Form::Dotted(items, tail) => items.iter().all(spelled) && spelled(tail),
+        _ => true,
     }
 }

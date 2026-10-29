@@ -126,7 +126,7 @@ fn a_collection_drops_idle_programs_code_and_nested_runs_relower_it() {
 struct PanickingHost;
 impl crate::HostInput for PanickingHost {
     fn input_pending(&mut self) -> bool { false }
-    fn redisplay(&mut self, _: crate::HostFrame) -> std::result::Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+    fn redisplay(&mut self, _: crate::HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> { Ok(vec![]) }
     fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<crate::HostEvent, String> {
         panic!("host failure while Lisp waits")
     }

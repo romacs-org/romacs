@@ -10,7 +10,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, LineWrap, tab_advance};
+use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, LineWrap, Row, WindowEnd, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -33,7 +33,7 @@ impl LayoutEngine {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())? })
     }
-    pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
+    pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
         layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)
     }
     /// The host layout hook: INPUT's geometry as painting would lay it out.
@@ -59,17 +59,17 @@ impl LayoutEngine {
 
 /// Stateless convenience for fixtures; interactive hosts retain a LayoutEngine.
 /// One publication for every VM-produced leaf. Commit ends only after paint.
-pub fn layout_frame(snapshot: &FrameSnapshot, presentation: u64) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
+pub fn layout_frame(snapshot: &FrameSnapshot, presentation: u64) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
     LayoutEngine::new()?.layout_frame(snapshot, presentation, None)
 }
 
 /// Publish point using the same shaped advances and row metrics as text.
 /// Selection and color are evaluator-owned policy; this pass owns geometry.
-pub fn layout_frame_with_cursors(snapshot: &FrameSnapshot, presentation: u64, selected: u64, cursor_color: Color) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
+pub fn layout_frame_with_cursors(snapshot: &FrameSnapshot, presentation: u64, selected: u64, cursor_color: Color) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
     LayoutEngine::new()?.layout_frame(snapshot, presentation, Some((selected, cursor_color)))
 }
 
-fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>, resolver: &mut FontResolver) -> Result<(FrameGlyphBuffer, Vec<(u64, usize)>), String> {
+fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>, resolver: &mut FontResolver) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
     resolver.set_selection_state(snapshot.font_selection);
     resolver.set_alternative_state(snapshot.font_alternatives.clone());
     let first = snapshot.windows.first().ok_or("empty frame")?;
@@ -97,8 +97,7 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         }
         // Windows with a mode line always own a cursor; the minibuffer (no mode
         // line) only while it is the selected window, i.e. a prompt is active.
-        let end = append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id).map(|(id, color)| (id == placed.snapshot.id, color)))?;
-        ends.push((placed.snapshot.id, end));
+        ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
     Ok((frame, ends))
 }
@@ -144,7 +143,8 @@ pub fn layout(snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyph
     Ok(frame)
 }
 
-fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>) -> Result<usize, String> {
+/// Paint SNAPSHOT's window at OX, OY, and report its rows (`WindowEnd`).
+fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>) -> Result<WindowEnd, String> {
     let text = &snapshot.text.utf8;
     if snapshot.height == 0
         || snapshot.faces.is_empty()
@@ -170,7 +170,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // repaired to prevent. A window whose *total* geometry does not fit its
     // parent is still rejected, by layout_frame's placement check.
     if snapshot.width == 0 {
-        return Ok(snapshot.start_byte);
+        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![] });
     }
     validate_runs(&snapshot.text, snapshot.faces.len())?;
     if let Some(band) = &snapshot.mode_line {
@@ -181,11 +181,14 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             return Err("invalid mode-line face or control character".into());
         }
     }
-    let face_base = u32::try_from(frame.faces.len()).map_err(|e| e.to_string())?;
+    // Above every face id an earlier window took, its band's copies included.
+    let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
     let mut slices = vec![(&snapshot.text, 0)];
     if let Some(band) = &snapshot.mode_line { slices.push((band, snapshot.mode_line_face.0 as usize)); }
     let face_text = face_text(snapshot.faces.len(), &slices);
-    let metrics = realize_faces(&snapshot.faces, &face_text, frame, resolver, face_base)?;
+    // The band's own face sets its height even where no character uses it.
+    let band_face = snapshot.mode_line.as_ref().map(|_| snapshot.mode_line_face.0 as usize);
+    let metrics = realize_faces(&snapshot.faces, &face_text, |index| Some(index) == band_face, frame, resolver, face_base)?;
     if face_base == 0 { frame.char_height = metrics[0].1; frame.char_width = metrics[0].2; }
     let band_height = snapshot.mode_line.as_ref().map_or(0.0, |band| {
         std::iter::once(snapshot.mode_line_face.0 as usize)
@@ -219,6 +222,13 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // on this row; past the truncation glyph, the rest of the line is hidden.
     let (mut continued, mut hpos, mut hidden) = (0.0f32, 0usize, false);
     let mut drawing = line_start == snapshot.start_byte;
+    // The first byte of the row being built, and the end of the rows
+    // above it that show whole: a row is fully visible when it lies
+    // within the text area (GNU's cursor_row_fully_visible_p).
+    let (mut row_start, mut visible_end) = (snapshot.start_byte, snapshot.start_byte);
+    let fully_visible = |y: f32, height: f32| y >= 0.0 && y + height <= body_height;
+    // Each drawn row as it ends; the last, as the text ends.
+    let mut rows: Vec<Row> = vec![];
     for (byte, ch) in text[line_start..].char_indices().map(|(at, ch)| (line_start + at, ch)) {
         // The window start begins a row: at a line start, or where the row
         // before it breaks, which the character there decides below, so
@@ -234,6 +244,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let at_point = (drawing || starting) && byte == snapshot.point_byte;
         if at_point { point_rect = (!hidden).then_some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         if ch == '\n' {
+            if drawing {
+                if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte + 1; }
+                rows.push(Row { start: row_start, y, height: row_height });
+                row_start = byte + 1;
+            }
             x = 0.0;
             y += row_height;
             row_height = metrics[0].1;
@@ -252,6 +267,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let mut advance_px = width(frame, x + continued);
         if !truncate && hpos > 0 && x + advance_px > last_x {
             if drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
+            if drawing {
+                if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
+                rows.push(Row { start: row_start, y, height: row_height });
+                row_start = byte;
+            }
             // A TAB that does not fit continues from the text area's edge.
             continued += if matches!(shown, Shown::Tab) { last_x } else { x };
             (x, y, row_height, hpos) = (0.0, y + row_height, metrics[0].1, 0);
@@ -283,12 +303,14 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 advance_px.min(metrics[0].2)
             }
             Shown::Glyphs(glyphs) => {
-                let mut at = x;
+                let (mut at, mut first) = (x, None);
                 for c in glyphs.chars() {
-                    if visible && at < snapshot.width as f32 { glyph(frame, c, ox + at, oy + y, (ascent, height, cell, space), id)?; }
-                    at += advance(frame, id, c, cell);
+                    let width = advance(frame, id, c, cell);
+                    if visible && at < snapshot.width as f32 { glyph_of(frame, c, ox + at, oy + y, width, (ascent, height), id)?; }
+                    first.get_or_insert(width);
+                    at += width;
                 }
-                advance(frame, id, glyphs.chars().next().unwrap_or(ch), cell)
+                first.unwrap_or(cell)
             }
         };
         if at_point { point_rect = Some((x, y, cursor, row_height, ascent)); }
@@ -298,6 +320,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     if snapshot.point_byte == text.len() && end_byte == text.len() {
         point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0));
     }
+    // The last row holds the text's end position too, when layout reached it.
+    if end_byte == text.len() && visible_end == row_start && fully_visible(y, row_height) {
+        visible_end = text.len() + 1;
+    }
+    if end_byte == text.len() && y < body_height { rows.push(Row { start: row_start, y, height: row_height }); }
     if let (Some((active, color)), Some((x, y, width, height, ascent))) = (cursor, point_rect) {
         // No cursor may bleed into the mode line or another window.
         if x >= 0.0 && x < snapshot.width as f32 && y >= 0.0 && y + height <= body_height {
@@ -323,7 +350,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         for index in 0..snapshot.faces.len() {
             let source = FaceId::new(face_base + index as u32);
             let target = FaceId::new(face_base.checked_add(offset).and_then(|v| v.checked_add(index as u32)).ok_or("too many faces")?);
-            let mut face = frame.faces[&source].clone();
+            let Some(face) = frame.faces.get(&source) else { continue };
+            let mut face = face.clone();
             face.id = target;
             face.background = background;
             frame.faces.insert(target, face);
@@ -348,7 +376,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             x += advance;
         }
     }
-    Ok(end_byte)
+    Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows })
 }
 
 /// Draw CH at X, Y in face ID, whose ascent, height and nominal advance
@@ -356,6 +384,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
 fn glyph(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, metrics: (f32, f32, f32, f32), id: FaceId) -> Result<(), String> {
     let (ascent, height, cell, _) = metrics;
     let width = advance(frame, id, ch, cell);
+    glyph_of(frame, ch, x, y, width, (ascent, height), id)
+}
+
+/// Draw CH, WIDTH wide, at X, Y in face ID of ASCENT and HEIGHT.
+fn glyph_of(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, width: f32, (ascent, height): (f32, f32), id: FaceId) -> Result<(), String> {
     frame.add_char(ch, x, y, width, height, ascent, false);
     *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing character face")? = id;
     Ok(())
@@ -364,20 +397,37 @@ fn glyph(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, metrics: (f32, 
 /// How a buffer character other than newline is drawn: a TAB as a
 /// stretch, another control character as GNU's escape (`^X`, or `\NNN`
 /// for one beyond ASCII), anything else as itself.
-enum Shown { Tab, Glyphs(String) }
+enum Shown { Tab, Glyphs(Glyphs) }
+
+/// At most four glyphs, the longest escape (`\NNN`), held without
+/// allocating.
+#[derive(Clone, Copy)]
+struct Glyphs { chars: [char; 4], len: usize }
+impl Glyphs {
+    fn of(chars: &[char]) -> Self {
+        let mut held = ['\0'; 4];
+        held[..chars.len()].copy_from_slice(chars);
+        Glyphs { chars: held, len: chars.len() }
+    }
+    fn chars(&self) -> impl Iterator<Item = char> + '_ { self.chars[..self.len].iter().copied() }
+}
 
 fn shown(ch: char) -> Shown {
+    let digit = |shift: u32| char::from_digit((ch as u32 >> shift) & 7, 8).unwrap_or('0');
     match ch {
         '\t' => Shown::Tab,
-        '\u{0}'..='\u{1f}' | '\u{7f}' => Shown::Glyphs(format!("^{}", char::from((ch as u8) ^ 0x40))),
-        _ if ch.is_control() => Shown::Glyphs(format!("\\{:03o}", ch as u32)),
-        _ => Shown::Glyphs(ch.to_string()),
+        '\u{0}'..='\u{1f}' | '\u{7f}' => Shown::Glyphs(Glyphs::of(&['^', char::from((ch as u8) ^ 0x40)])),
+        // GNU's three octal digits: the code's low nine bits.
+        _ if ch.is_control() => Shown::Glyphs(Glyphs::of(&['\\', digit(6), digit(3), digit(0)])),
+        _ => Shown::Glyphs(Glyphs::of(&[ch])),
     }
 }
 
 /// The face table index painting SLICE's character at BYTE.
 fn face_at(slice: &TextSlice, byte: usize, default: usize) -> usize {
-    slice.face_runs.iter().find(|run| run.bytes.contains(&byte)).map_or(default, |run| run.face.0 as usize)
+    // Runs are ordered and disjoint (`validate_runs`).
+    let at = slice.face_runs.partition_point(|run| run.bytes.end <= byte);
+    slice.face_runs.get(at).filter(|run| run.bytes.contains(&byte)).map_or(default, |run| run.face.0 as usize)
 }
 
 /// Each face's painted characters. Publishing the whole window for every
@@ -392,22 +442,28 @@ fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
             let face = &mut text[face_at(slice, byte, *default)];
             match shown(ch) {
                 Shown::Tab => face.push(' '),
-                Shown::Glyphs(glyphs) => face.push_str(&glyphs),
+                Shown::Glyphs(glyphs) => face.extend(glyphs.chars()),
             }
         }
     }
     text
 }
 
-/// Publish FACES into FRAME from FACE_BASE on and resolve the fonts their
-/// characters need: each face's ascent, row height, nominal advance and
-/// space width.
-fn realize_faces(faces: &[Face], face_text: &[String], frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, face_base: u32) -> Result<Vec<(f32, f32, f32, f32)>, String> {
+/// Publish the FACES something paints into FRAME from FACE_BASE on and
+/// resolve the fonts their characters need: each face's ascent, row
+/// height, nominal advance and space width. A face no character uses is
+/// not published, except the default and those KEEP accepts; its metrics
+/// are unused.
+fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> bool, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, face_base: u32) -> Result<Vec<(f32, f32, f32, f32)>, String> {
     let policy = FontsetPolicy::new();
     let mut metrics = Vec::new();
     for (index, face) in faces.iter().enumerate() {
         if face.family.is_empty() || !face.pixel_size.is_finite() || face.pixel_size <= 0.0 {
             return Err("invalid font request".into());
+        }
+        if index != 0 && !keep(index) && face_text[index].is_empty() {
+            metrics.push((0.0, 0.0, 0.0, 0.0));
+            continue;
         }
         let id = FaceId::new(face_base.checked_add(u32::try_from(index).map_err(|e| e.to_string())?).ok_or("too many faces")?);
         frame.set_face_with_font(
@@ -481,7 +537,8 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
     validate_runs(&input.text, input.faces.len())?;
     let mut frame = new_frame(1, 1, 1)?;
     let face_text = face_text(input.faces.len(), &[(&input.text, 0)]);
-    let metrics = realize_faces(&input.faces, &face_text, &mut frame, resolver, 0)?;
+    // A face no character uses answers no row height (0).
+    let metrics = realize_faces(&input.faces, &face_text, |_| false, &mut frame, resolver, 0)?;
     let pixels = |value: f32| if value.fract() == 0.0 && value >= 0.0 && value <= u32::MAX as f32 { Ok(value as u32) }
         else { Err(format!("fractional or negative advance {value}")) };
     let face_heights = metrics.iter().map(|m| pixels(m.1)).collect::<Result<Vec<_>, _>>()?;

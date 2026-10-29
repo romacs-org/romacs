@@ -85,7 +85,7 @@ fn actual_notmuch_search_show_and_hidden_callback_preserve_the_editor() {
 struct Confirm(std::collections::VecDeque<romacs_vm::HostEvent>);
 impl romacs_vm::HostInput for Confirm {
     fn input_pending(&mut self) -> bool { false }
-    fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64,usize)>,String> { Ok(vec![]) }
+    fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>,String> { Ok(vec![]) }
     fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent,String> { self.0.pop_front().ok_or_else(|| "confirmation exhausted".into()) }
 }
 #[test]

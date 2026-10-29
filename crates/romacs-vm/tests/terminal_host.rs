@@ -65,7 +65,7 @@ fn terminal_output_is_applied_while_a_real_minibuffer_waits() {
     struct Keyboard { state: Rc<RefCell<State>>, reads: usize, seen: Rc<RefCell<Vec<String>>> }
     impl HostInput for Keyboard {
         fn input_pending(&mut self) -> bool { false }
-        fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
+        fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
             self.seen.borrow_mut().push(frame.frame.windows[0].snapshot.text.utf8.clone()); Ok(vec![])
         }
         fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {

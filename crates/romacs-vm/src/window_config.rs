@@ -197,6 +197,9 @@ impl Vm {
         let w = self.window_mut(window)?;
         w.buffer = buffer;
         w.start = start_marker;
+        let id = w.id;
+        self.display_state.forget_rows(id);
+        let w = self.window_mut(window)?;
         w.point = point_marker;
         Ok(())
     }
