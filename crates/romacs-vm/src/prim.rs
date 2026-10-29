@@ -1670,6 +1670,7 @@ mod leaf {
     mod display_hosted;
     mod text_pixel_size;
     pub(crate) use text_pixel_size::TextSizeArgs;
+    mod session;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
 
