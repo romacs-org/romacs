@@ -455,3 +455,11 @@ defsubr! { name = "previous-window", gnu = "window.c:2980", effect = Reads,
 fn previous_window(cx; optional window: Value, minibuf: Value, all_frames: Value) {
     cx.windows().next_window(window, minibuf, all_frames, false)
 }}
+
+defsubr! { name = "redraw-frame", gnu = "dispnew.c:3243", effect = Global,
+fn redraw_frame(cx; optional frame: Value) {
+    // decode_live_frame, then redraw_frame: the one frame VM2 has, as
+    // redraw-display redraws it.
+    cx.windows().check_live_frame(frame)?;
+    cx.windows().redraw_display()
+}}

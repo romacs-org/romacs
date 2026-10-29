@@ -329,3 +329,18 @@ fn input_pending_p(cx; optional check_timers: Value) {
     let unread = cx.intern("unread-command-events");
     Ok(if cx.variable_value(unread)?.unwrap_or(Value::NIL) != Value::NIL { Value::TRUE } else { Value::NIL })
 }}
+
+defsubr! { name = "current-input-mode", gnu = "keyboard.c:12967", effect = Reads,
+fn current_input_mode(cx) {
+    // A frame that is not a tty's, as every VM2 frame is (VM2-WIN5):
+    // interrupt-driven input, no flow control, 8-bit Meta, C-g to quit.
+    let items = [Value::TRUE, Value::NIL, Value::TRUE, Value::integer(7).map_err(Fault::Error)?];
+    Ok(items.iter().rev().fold(Value::NIL, |tail, &v| cx.cons(v, tail)))
+}}
+
+defsubr! { name = "set-input-meta-mode", gnu = "keyboard.c:12852", effect = Reads,
+fn set_input_meta_mode(_cx, meta: Value; optional terminal: Value) {
+    // decode_tty_terminal finds no tty in VM2, so nothing changes.
+    let _ = (meta, terminal);
+    Ok(Value::NIL)
+}}

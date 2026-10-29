@@ -32,6 +32,7 @@ mod environment;
 mod watchers;
 mod user_db;
 mod processors;
+mod locale_info;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use layout_host::LayoutHost;

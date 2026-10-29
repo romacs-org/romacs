@@ -179,6 +179,13 @@
 (setq user-emacs-directory
       (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
 
+;; startup.el normal-top-level (startup.el:639-668): Unix's end-of-line
+;; mnemonics, then the locale's language environment and coding systems,
+;; from this process's LANG and LC_* (set-locale-environment).
+(setq eol-mnemonic-dos "(DOS)"
+      eol-mnemonic-mac "(Mac)")
+(set-locale-environment nil)
+
 ;; startup.el command-line (startup.el:1300): initialization begins.
 (setq before-init-time (current-time) after-init-time nil
       command-line-default-directory default-directory)
