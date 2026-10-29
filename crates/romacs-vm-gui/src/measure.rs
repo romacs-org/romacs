@@ -280,6 +280,37 @@ mod tests {
         assert!(scrolls > 20, "{scrolls} scrolls");
     }
 
+    /// A default face shrunk live, with no frame resize, makes rows shorter
+    /// than the frame's line: the window still fills with text, and point
+    /// moved below its last whole row still scrolls it, the text it has
+    /// not shown being no end of the buffer.
+    #[test]
+    fn a_shrunk_default_face_fills_and_scrolls_the_window() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer)
+          (let ((i 0)) (while (< i 300) (insert (format "line %d\n" i)) (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        h.paint();
+        h.eval("(internal-set-lisp-face-attribute 'default :height 60 (selected-frame))");
+        let paint = h.paint();
+        let band = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map(|g| g.2).unwrap();
+        let text = || paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text);
+        let row = text().map(|g| g.4).fold(f32::MAX, f32::min);
+        let bottom = text().map(|g| g.2 + g.4).fold(0.0, f32::max);
+        assert!(row < h.eval("(frame-char-height)").parse::<f32>().unwrap(), "rows of {row}px are shorter than the frame's line");
+        assert!(bottom + row > band, "text fills the window: its last row ends at {bottom}, the band starts at {band}");
+        // Down a line at a time: the start moves once point passes the last whole row.
+        let mut scrolled = false;
+        for step in 0..((band / row) as usize + 5) {
+            h.eval("(forward-line 1)");
+            let paint = h.paint();
+            let (_, y, _, height) = paint.cursor.unwrap_or_else(|| panic!("step {step}: no cursor on a whole row"));
+            assert!(y + height <= band, "step {step}: cursor at {y}+{height} past {band}");
+            scrolled |= h.eval("(window-start)") != "1";
+        }
+        assert!(scrolled, "the window scrolled");
+    }
+
     /// A window that starts on a continuation row: the host's glyphs and
     /// the VM's answers agree there, TABs stopping as from the line start.
     #[test]

@@ -60,6 +60,9 @@ struct ShownText {
     point_byte: usize,
     faces: Vec<Face>,
     base: usize,
+    /// TEXT reaches the end of the accessible text, not only the last row
+    /// the window can show.
+    at_zv: bool,
     table: std::rc::Rc<FaceTable>,
     /// The merged face rows FACES gained, by `face' value.
     merged: std::collections::HashMap<u64, FaceHandle>,
@@ -87,12 +90,14 @@ pub(super) struct DisplayState {
     bases: std::collections::BTreeMap<u64, usize>,
     /// Per window id, what its last publication's rows depend on and the
     /// length of the text it published, until a paint reports the rows.
-    published_rows: std::collections::BTreeMap<u64, (RowsKey, usize)>,
+    published_rows: std::collections::BTreeMap<u64, (RowsKey, usize, bool)>,
     /// Per window id, its layout from its start (`Laid`), as painting that
     /// geometry reported.
     rows: std::collections::BTreeMap<u64, (RowsKey, Laid)>,
     /// Advances when what fonts faces realize may change.
     face_revision: u64,
+    /// The least height a painted row has, for a face revision.
+    row_floor: Option<(u64, u32)>,
     pub version: u64,
     /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
     pub(super) hosted: bool,
@@ -153,8 +158,8 @@ impl DisplayState {
     }
     /// Window END.id's last publication was painted as END reports.
     pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd) {
-        if let Some(&(key, len)) = self.published_rows.get(&end.id) {
-            let laid = laid(end, self.base(end.id), len);
+        if let Some(&(key, len, at_zv)) = self.published_rows.get(&end.id) {
+            let laid = laid(end, self.base(end.id), len, at_zv);
             self.rows.insert(end.id, (key, laid));
         }
     }
@@ -197,6 +202,7 @@ impl DisplayState {
             published_rows: std::collections::BTreeMap::new(),
             rows: std::collections::BTreeMap::new(),
             face_revision: 0,
+            row_floor: None,
             theme: Theme::build(
                 Arc::new(defs),
                 None,
@@ -591,7 +597,7 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, mut faces, base, table, mut merged }
+        let ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged }
             = self.window_text(window, height, None)?;
         self.display_state.bases.insert(id, base);
         // No version bump here: this runs once per WINDOW, and
@@ -662,7 +668,7 @@ impl Vm {
         }
         snapshot.buffer_version = self.display_state.version;
         match rows_key {
-            Some(key) => { self.display_state.published_rows.insert(id, (key, snapshot.text.utf8.len())); }
+            Some(key) => { self.display_state.published_rows.insert(id, (key, snapshot.text.utf8.len(), at_zv)); }
             None => { self.display_state.published_rows.remove(&id); }
         }
         self.display_state.previous.insert(id, snapshot.clone());
@@ -694,12 +700,12 @@ impl Vm {
             .filter(|_| known.is_some_and(|(known, _)| known.faces == key.faces) && self.has_layout_host()) else { return Ok(None) };
         let (mode_line, mode_line_face) = (shown.mode_line.clone(), shown.mode_line_face);
         let (width, height) = self.window_body_size(window)?;
-        let ShownText { text, start_byte, point_byte, faces, base, .. } = self.window_text(window, height, None)?;
+        let ShownText { text, start_byte, point_byte, faces, base, at_zv, .. } = self.window_text(window, height, None)?;
         let len = text.utf8.len();
         let snapshot = WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: 0, text, mode_line,
             mode_line_face, vscroll_px: key.vscroll, faces, tab_width: key.tab_width, wrap: key.wrap };
         let end = self.lay_out_alone(snapshot)?;
-        let laid = laid(&end, base, len);
+        let laid = laid(&end, base, len, at_zv);
         self.display_state.rows.insert(id, (key, laid));
         Ok(Some(laid))
     }
@@ -731,6 +737,19 @@ impl Vm {
             windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
+    /// The least height a painted row can have: the default face's row
+    /// height as the host realizes it, which every row reaches (the frame's
+    /// line, set only at a resize, can be taller after the default face
+    /// shrinks), else the frame's line. Kept per face revision.
+    pub(crate) fn min_row_height(&mut self) -> u32 {
+        let line = self.window_state.line.max(1);
+        if !self.has_layout_host() { return line; }
+        let revision = self.display_state.face_revision;
+        if let Some((known, height)) = self.display_state.row_floor && known == revision { return height; }
+        let height = self.host_default_advance(' ').map_or(line, |(_, height)| height.clamp(1, line));
+        self.display_state.row_floor = Some((revision, height));
+        height
+    }
     /// WINDOW's text width less its margins, and its height, as a frame's
     /// snapshot gives them.
     fn window_body_size(&self, window: Value) -> Result<(u32, u32)> {
@@ -753,6 +772,7 @@ impl Vm {
         let point = self.window_point_value(window)?.as_integer()?;
         let region = self.snapshot_region(window, buffer, point)?;
         let table = self.display_faces()?;
+        let floor = self.min_row_height();
         let Object::Buffer(b) = self.object(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
@@ -767,10 +787,11 @@ impl Vm {
         // frame costs what the window shows, not what its buffer holds.
         let accessible = b.accessible();
         let shown = if let Some(span) = span { span.start.max(accessible.start.0)..span.end.min(accessible.end.0) } else if mini { 0..b.as_str().len() } else {
-            let rows = height.saturating_add(vscroll).div_ceil(self.window_state.line.max(1)) as usize;
+            let rows = height.saturating_add(vscroll).div_ceil(floor) as usize;
             crate::window::shown_bytes(b.as_str(), accessible.start.0..accessible.end.0, start_byte, rows)
         };
         let base = shown.start;
+        let at_zv = shown.end >= accessible.end.0;
         let utf8 = b.as_str()[shown.clone()].to_owned();
         let start_byte = start_byte.clamp(shown.start, shown.end) - base;
         // Point outside the published bytes is not shown: no glyph is at it.
@@ -838,7 +859,7 @@ impl Vm {
                 })
             }
         }
-        Ok(ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, faces, base, table, merged })
+        Ok(ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, faces, base, at_zv, table, merged })
     }
     /// The row of FACES for a `face' property VALUE: a face symbol's own
     /// row, and for a list of faces or an attribute list a row merged as
@@ -1370,8 +1391,10 @@ fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
 }
 
 /// The `Laid' painting reported in END for text published from buffer
-/// byte BASE, LEN bytes long.
-fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize) -> Laid {
-    let visible_end = if end.visible_end > len { usize::MAX } else { base + end.visible_end };
+/// byte BASE, LEN bytes long, through ZV when AT_ZV. Text that ran out
+/// short of ZV leaves its end position unknown: its last fully visible
+/// row ends there, never past.
+fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize, at_zv: bool) -> Laid {
+    let visible_end = match end.visible_end > len { true if at_zv => usize::MAX, true => base + len, false => base + end.visible_end };
     Laid { end: base + end.end, visible_end, body_height: end.body_height }
 }

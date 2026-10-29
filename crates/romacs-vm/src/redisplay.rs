@@ -233,7 +233,7 @@ impl Vm {
         let Some(laid) = self.window_layout(window)? else { return Ok(None) };
         // Every row is at least a frame line tall: this many lines above
         // point's fill the text area.
-        let lines = (laid.body_height / self.window_state.line.max(1) as f32).ceil() as i64 + 1;
+        let lines = (laid.body_height / self.min_row_height() as f32).ceil() as i64 + 1;
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let accessible = b.accessible();
         let from = crate::prim::line_beginning(b.as_str().as_bytes(), accessible.start.0, accessible.end.0, point_byte, -lines);
