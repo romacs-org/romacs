@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "55dafa188a25c960cbf215f6955c560a029eeaf51807e37cdc0c1ba052f8f443",
+  "source_fingerprint": "2ff947734f2a4c02856776b9b5cf8911ed2cec45aea14f2280d3418b2d6ecdb3",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -3685,7 +3685,7 @@
   "romacs--kill-buffer-finish": {
    "name": "romacs--kill-buffer-finish",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:66"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:72"
   },
   "romacs--local-toplevel-cell": {
    "name": "romacs--local-toplevel-cell",
