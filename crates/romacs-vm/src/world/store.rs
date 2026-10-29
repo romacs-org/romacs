@@ -210,6 +210,23 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     }
 }
 
+/// STORE as a world knows it: absolute against this process's directory,
+/// with `.` and `..` taken by name, as `expand-file-name` takes them. The
+/// walk (`host::open_store_dir`) then meets no `..`, and every later open
+/// names the directory it checked.
+fn store_path(store: &Path) -> std::io::Result<PathBuf> {
+    use std::path::Component;
+    let absolute = if store.is_absolute() { store.to_owned() } else { host::current_dir()?.join(store) };
+    Ok(absolute.components().fold(PathBuf::new(), |mut path, component| {
+        match component {
+            Component::ParentDir => { path.pop(); }
+            Component::CurDir => {}
+            other => path.push(other),
+        }
+        path
+    }))
+}
+
 /// Where a store's path is walked from (`host::open_store_dir`): the
 /// user's own directories.
 fn trusted_roots() -> Vec<PathBuf> {
@@ -296,6 +313,7 @@ fn identity_entry(name: &str) -> bool {
 impl World {
     /// RECIPE's world in STORE: the key of this executable and RECIPE.
     pub fn new(store: PathBuf, recipe: Vec<String>) -> std::io::Result<World> {
+        let store = store_path(&store)?;
         private_store(&store)?;
         let executable = file_digest(&store, &host::open_world_file("/proc/self/exe")?)?;
         let libraries = libraries_digest()
@@ -787,6 +805,7 @@ pub fn reset(store: &Path, everything: bool) -> std::io::Result<usize> {
 }
 
 fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Result<usize> {
+    let store = &store_path(store)?;
     if host::symlink_metadata(store).is_err() {
         return Ok(0);
     }
@@ -1079,6 +1098,16 @@ mod tests {
             let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    #[test]
+    fn a_store_path_is_absolute_and_takes_dot_and_dot_dot_by_name() {
+        let cwd = host::current_dir().unwrap();
+        assert_eq!(store_path(Path::new("/a/./b/../c/")).unwrap(), Path::new("/a/c"));
+        assert_eq!(store_path(Path::new("/../a")).unwrap(), Path::new("/a"));
+        assert_eq!(store_path(Path::new("worlds")).unwrap(), cwd.join("worlds"));
+        let up: PathBuf = cwd.components().skip(1).map(|_| "..").collect();
+        assert_eq!(store_path(&up.join("x/y")).unwrap(), Path::new("/x/y"));
     }
 
     #[test]

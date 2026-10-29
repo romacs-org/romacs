@@ -48,9 +48,8 @@ pub fn launch_font() -> Result<Option<(String, u32)>, String> {
 pub const INTERPROGRAM: &str = "(defvar interprogram-cut-function 'romacs-clipboard-select-text) (defvar interprogram-paste-function 'romacs-clipboard-selection-value)";
 
 /// The world of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR, in
-/// STORE, resolved against this process's directory.
+/// STORE, resolved against this process's directory (`World::new`).
 pub fn open(store: PathBuf, width: u32, height: u32, floor: Option<usize>) -> Result<World, String> {
-    let store = std::path::absolute(store).map_err(|e| e.to_string())?;
     let font = launch_font()?.map_or("font default".to_owned(), |(source, _)| format!("font {source}"));
     let dir = startup::lisp_root(&startup::lisp_dir())?;
     let recipe = vec![
