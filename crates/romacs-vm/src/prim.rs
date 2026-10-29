@@ -302,57 +302,23 @@ mod leaf {
                 }
             };
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
-            let (chars, point, low, high) = match &self.vm.objects[index] {
-                data::Object::Buffer(b) => {
-                    let range = b.accessible();
-                    (b.as_str().chars().collect::<Vec<_>>(),
-                     b.char_of_byte(b.point).map_err(|e| Fault::Error(e.to_string()))?.0,
-                     b.char_of_byte(range.start).map_err(|e| Fault::Error(e.to_string()))?.0,
-                     b.char_of_byte(range.end).map_err(|e| Fault::Error(e.to_string()))?.0)
-                },
-                data::Object::ByteBuffer(b) => (b.bytes.iter().map(|&b| b as char).collect(), b.point.0, b.restriction.start.0, b.restriction.end.0),
+            let error = |e: String| Fault::Error(e);
+            // Byte scans: a newline byte is never part of another character.
+            let (text, point, low, high): (&[u8], usize, usize, usize) = match &self.vm.objects[index] {
+                data::Object::Buffer(b) => { let range = b.accessible(); (b.as_str().as_bytes(), b.point.0, range.start.0, range.end.0) }
+                data::Object::ByteBuffer(b) => (&b.bytes, b.point.0, b.restriction.start.0, b.restriction.end.0),
                 _ => unreachable!(),
             };
-            if end {
-                // editfns.c eol: find_before_next_newline (PT, 0, N - (N <= 0)):
-                // the COUNTth newline from point, or the accessible end
-                // when there are fewer.
-                let count = count - i64::from(count <= 0);
-                let mut pos = point;
-                if count > 0 {
-                    for _ in 0..count {
-                        match (pos..high).find(|&at| chars[at] == '\n') {
-                            Some(at) => pos = at + 1,
-                            None => return Ok(Value::integer(high as i64 + 1).unwrap()),
-                        }
-                    }
-                    return Ok(Value::integer(pos as i64).unwrap());
-                }
-                for _ in count..0 {
-                    match (low..pos).rev().find(|&at| chars[at] == '\n') {
-                        Some(at) => pos = at,
-                        None => return Ok(Value::integer(low as i64 + 1).unwrap()),
-                    }
-                }
-                return Ok(Value::integer(pos as i64 + 1).unwrap());
-            }
-            let mut pos = point;
-            while pos > low && chars[pos-1] != '\n' { pos -= 1; }
-            let lines = count.saturating_sub(1);
-            if lines >= 0 {
-                for _ in 0..lines {
-                    while pos < high && chars[pos] != '\n' { pos += 1; }
-                    if pos == high { break; }
-                    pos += 1;
-                }
-            } else {
-                for _ in lines..0 {
-                    if pos == low { break; }
-                    pos -= 1;
-                    while pos > low && chars[pos-1] != '\n' { pos -= 1; }
-                }
-            }
-            Ok(Value::integer(pos as i64 + 1).unwrap())
+            // editfns.c eol: find_before_next_newline (PT, 0, N - (N <= 0)):
+            // the COUNTth newline from point, or the accessible end when
+            // there are fewer; bol: the start of the line COUNT - 1 lines on.
+            let byte = if end { crate::prim::line_end_after(text, low, high, point, count - i64::from(count <= 0)) }
+                else { crate::prim::line_beginning(text, low, high, point, count.saturating_sub(1)) };
+            let position = match &self.vm.objects[index] {
+                data::Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte)).map_err(error)?.0,
+                _ => byte,
+            };
+            Ok(Value::integer(position as i64 + 1).unwrap())
         }
         /// Point of the current buffer as a 1-based character position.
         pub(crate) fn point(&mut self) -> std::result::Result<i64, Fault> {
@@ -2415,4 +2381,49 @@ mod tests {
         let v = no_collection(&mut vm, |vm| Leaf::new(vm).cons(Value::NIL, Value::NIL));
         assert_eq!(vm.display(v).unwrap(), "(nil)");
     }
+}
+
+/// The start of the line LINES lines from the one holding byte POINT of
+/// TEXT, within LOW..HIGH (`forward-line' from that line's start): at LOW
+/// or HIGH when there are fewer lines.
+pub(crate) fn line_beginning(text: &[u8], low: usize, high: usize, point: usize, lines: i64) -> usize {
+    let start_of = |at: usize| text[low..at].iter().rposition(|&c| c == b'\n').map_or(low, |i| low + i + 1);
+    let mut pos = start_of(point);
+    if lines >= 0 {
+        for _ in 0..lines {
+            match text[pos..high].iter().position(|&c| c == b'\n') {
+                Some(i) => pos += i + 1,
+                None => return high,
+            }
+        }
+    } else {
+        for _ in lines..0 {
+            if pos == low { break; }
+            pos = start_of(pos - 1);
+        }
+    }
+    pos
+}
+
+/// GNU find_before_next_newline from byte POINT of TEXT within LOW..HIGH:
+/// for COUNT > 0 the COUNTth newline on, else the -COUNTth newline back;
+/// with fewer newlines, HIGH or LOW.
+pub(crate) fn line_end_after(text: &[u8], low: usize, high: usize, point: usize, count: i64) -> usize {
+    let mut pos = point;
+    if count > 0 {
+        for _ in 0..count {
+            match text[pos..high].iter().position(|&c| c == b'\n') {
+                Some(i) => pos += i + 1,
+                None => return high,
+            }
+        }
+        return pos - 1;
+    }
+    for _ in count..0 {
+        match text[low..pos].iter().rposition(|&c| c == b'\n') {
+            Some(i) => pos = low + i,
+            None => return low,
+        }
+    }
+    pos
 }
