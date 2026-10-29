@@ -2049,7 +2049,10 @@ impl Vm {
                         b.code[protect] = Op::Protect(dest, cleanup, b.code.len());
                         Ok(dest)
                     }
-                    "condition-case" if rest.len() >= 2 => self.condition_case(b, rest),
+                    "condition-case" if rest.len() >= 2 => match let_forms::malformed_condition_case(&rest[0], &rest[2..]) {
+                        Some(form) => self.expr(b, &form),
+                        None => self.condition_case(b, rest),
+                    },
                     "quote" if rest.len() == 1 => {
                         let value = self.literal(&rest[0])?;
                         let r = b.reg();
@@ -2075,6 +2078,9 @@ impl Vm {
                     },
                     "defvar-local" | "defcustom" | "defgroup" | "defvar-keymap" => self.variable_definition(b, head, rest),
                     "defvar" | "defconst" if !rest.is_empty() && rest.len() <= 3 => {
+                        if let Some(form) = let_forms::malformed_definition(&rest[0]) {
+                            return self.expr(b, &form);
+                        }
                         let name = rest[0].sym()?;
                         if matches!(name, "nil" | "t") {
                             return Err("cannot declare a constant".into());
@@ -2147,6 +2153,9 @@ impl Vm {
                     }
                     "interactive" => self.expr(b, &Form::Sym("nil".into())),
                     "setq" if rest.len().is_multiple_of(2) => {
+                        if let Some(form) = let_forms::malformed_setq(rest) {
+                            return self.expr(b, &form);
+                        }
                         let mut r = b.reg();
                         b.emit(Op::Const(r, Value::NIL));
                         for pair in rest.chunks_exact(2) {
@@ -2330,8 +2339,9 @@ impl Vm {
         let mut success = None;
         for clause in &rest[2..] {
             let clause = clause.list()?;
+            // internal_lisp_condition_case ignores a nil handler.
             if clause.is_empty() {
-                return Err("empty condition handler".into());
+                continue;
             }
             if matches!(&clause[0], Form::Sym(name) if name == ":success") {
                 success.get_or_insert(clause);

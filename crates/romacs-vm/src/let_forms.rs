@@ -1,8 +1,9 @@
-//! eval.c Flet and FletX for a malformed VARLIST. GNU checks the varlist
-//! as it evaluates the form, so a bad binding signals only when the `let'
-//! runs, after the value forms evaluated before it. VM2 compiles a `let'
-//! ahead of time; a malformed one compiles to exactly those evaluations
-//! followed by GNU's signal, so a closure holding it can still be made.
+//! Malformed special forms (eval.c Flet, FletX, Fsetq, Fcondition_case,
+//! Fdefvar, Fdefconst). GNU checks a special form's shape as it evaluates
+//! it, so a bad one signals only when it runs, after whatever GNU
+//! evaluates first. VM2 compiles ahead of time; a malformed form compiles
+//! to exactly those evaluations followed by GNU's signal, so a closure
+//! holding it can still be made.
 use crate::Form;
 
 fn nil() -> Form { Form::Sym("nil".into()) }
@@ -100,4 +101,46 @@ pub(crate) fn malformed_let(star: bool, varlist: &Form) -> Option<Form> {
         if let Some(body) = failure { return Some(Form::List(vec![Form::Sym("let*".into()), prefix(k), body])) }
     }
     tail.map(|_| Form::List(vec![Form::Sym("let*".into()), prefix(elts.len()), listp(varlist)]))
+}
+
+/// Fsetq: each value form, then Fset of its variable, pair by pair. The
+/// first variable that is not a symbol (symbolp), is nil or t, or is a
+/// keyword (set_internal lets a keyword be set only to itself) signals
+/// after its value form, the earlier pairs set.
+pub(crate) fn malformed_setq(pairs: &[Form]) -> Option<Form> {
+    let keyword = |form: &Form| matches!(form, Form::Sym(s) if s.starts_with(':'));
+    let k = pairs.chunks_exact(2).position(|pair| !symbol(&pair[0]) || is_nil(&pair[0]) || matches!(&pair[0], Form::Sym(s) if s == "t") || keyword(&pair[0]))?;
+    let (var, value, rest) = (&pairs[2 * k], &pairs[2 * k + 1], &pairs[2 * k + 2..]);
+    let setq = |pairs: &[Form]| Form::List([vec![Form::Sym("setq".into())], pairs.to_vec()].concat());
+    let mut forms = Vec::new();
+    if k > 0 { forms.push(setq(&pairs[..2 * k])) }
+    if !symbol(var) {
+        forms.extend([value.clone(), signal("wrong-type-argument", vec![Form::Sym("symbolp".into()), var.clone()])]);
+    } else if keyword(var) {
+        let same = Form::List(vec![Form::Sym("eq".into()), value.clone(), quote(var.clone())]);
+        forms.push(Form::List(vec![Form::Sym("or".into()), same, signal("setting-constant", vec![var.clone()])]));
+        forms.push(if rest.is_empty() { quote(var.clone()) } else { setq(rest) });
+    } else {
+        forms.extend([value.clone(), signal("setting-constant", vec![var.clone()])]);
+    }
+    Some(progn(forms))
+}
+
+/// internal_lisp_condition_case's checks before the body runs: VAR a
+/// symbol, then each handler nil or a list whose car is a symbol or a list
+/// (`error' "Invalid condition handler: HANDLER", printed as princ does).
+pub(crate) fn malformed_condition_case(var: &Form, handlers: &[Form]) -> Option<Form> {
+    if !symbol(var) { return Some(signal("wrong-type-argument", vec![Form::Sym("symbolp".into()), var.clone()])) }
+    let valid = |handler: &Form| is_nil(handler) || match handler {
+        Form::List(v) | Form::Dotted(v, _) => symbol(&v[0]) || matches!(v[0], Form::List(_) | Form::Dotted(..)),
+        _ => false,
+    };
+    let bad = handlers.iter().find(|handler| !valid(handler))?;
+    let message = Form::List(vec![Form::Sym("format".into()), Form::String("Invalid condition handler: %s".into()), quote(bad.clone())]);
+    Some(Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("error".into())), Form::List(vec![Form::Sym("list".into()), message])]))
+}
+
+/// Fdefvar and Fdefconst: CHECK_SYMBOL on the name before anything runs.
+pub(crate) fn malformed_definition(name: &Form) -> Option<Form> {
+    (!symbol(name)).then(|| signal("wrong-type-argument", vec![Form::Sym("symbolp".into()), name.clone()]))
 }

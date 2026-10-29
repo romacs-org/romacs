@@ -287,9 +287,24 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
             }
         }
         "cond" => {
+            // eval.c Fcond: Fcar of a clause that is not a list signals
+            // listp when it is reached; a dotted clause's body is Fprogn of
+            // its list part (a bare (TEST . X) gives nil).
             let mut tail = s("nil");
             for clause in args.iter().rev() {
-                let items = clause.list()?;
+                let dotted;
+                let items = match clause {
+                    Form::Dotted(items, _) if items.len() == 1 => { dotted = vec![items[0].clone(), s("nil")]; &dotted[..] }
+                    Form::Dotted(items, _) => &items[..],
+                    _ => match clause.list() {
+                        Ok(items) => items,
+                        Err(_) => {
+                            let data = Form::List(vec![s("listp"), clause.clone()]);
+                            tail = call("signal", vec![quote(s("wrong-type-argument")), quote(data)]);
+                            continue;
+                        }
+                    },
+                };
                 if items.is_empty() {
                     continue;
                 }

@@ -1,7 +1,8 @@
-//! eval.c Flet and FletX check a `let' varlist as the form runs: a
-//! malformed binding signals GNU's error then, after the value forms GNU
-//! evaluates before it, never when the enclosing closure is made
-//! (let_forms.rs). Pinned GNU 32.0.50 answers (lexical-binding t).
+//! GNU checks a special form's shape as the form runs (eval.c Flet, FletX,
+//! Fsetq, Fcond, Fcondition_case, Fdefvar, Fdefconst): a malformed one
+//! signals GNU's error then, after what GNU evaluates before it, never
+//! when the enclosing closure is made (let_forms.rs). Pinned GNU 32.0.50
+//! answers (lexical-binding t).
 use romacs_vm::Vm;
 
 #[test]
@@ -21,4 +22,58 @@ fn a_closure_holding_a_malformed_let_can_be_made() {
     vm.install_lisp_prelude().unwrap();
     assert_eq!(vm.eval_source("(progn (defalias 'lf-bad (lambda () (let 1))) (list (functionp 'lf-bad) (condition-case e (lf-bad) (error e))))").unwrap().display().unwrap(),
         "(t (wrong-type-argument listp 1))");
+}
+
+/// Each FORM as the body of a closure that is made, then called.
+#[test]
+fn malformed_special_forms_signal_gnus_error_when_they_run() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    for (form, expected) in [
+        (r#"(condition-case (a b) 1 (error 2))"#, r#"(wrong-type-argument symbolp (a b))"#),
+        (r#"(setq a)"#, r#"(wrong-number-of-arguments setq 1)"#),
+        (r#"(setq 1 2)"#, r#"(wrong-type-argument symbolp 1)"#),
+        (r#"(setq a 1 b)"#, r#"(wrong-number-of-arguments setq 3)"#),
+        (r#"(cond 1)"#, r#"(wrong-type-argument listp 1)"#),
+        (r#"(cond (1 . 2))"#, r#"nil"#),
+        (r#"(if)"#, r#"(wrong-number-of-arguments if 0)"#),
+        (r#"(while)"#, r#"(wrong-number-of-arguments while 0)"#),
+        (r#"(catch)"#, r#"(wrong-number-of-arguments catch 0)"#),
+        (r#"(unwind-protect)"#, r#"(wrong-number-of-arguments unwind-protect 0)"#),
+        (r#"(quote 1 2)"#, r#"(wrong-number-of-arguments quote 2)"#),
+        (r#"(function 1 2)"#, r#"(wrong-number-of-arguments function 2)"#),
+        (r#"(prog1)"#, r#"(wrong-number-of-arguments prog1 0)"#),
+        (r#"(let)"#, r#"(wrong-number-of-arguments let 0)"#),
+        (r#"(let*)"#, r#"(wrong-number-of-arguments let* 0)"#),
+        (r#"(condition-case e 1 (2 3))"#, r#"(error "Invalid condition handler: (2 3)")"#),
+        (r#"(condition-case e 1 . 2)"#, r#"(wrong-type-argument listp 2)"#),
+        (r#"(defvar)"#, r#"(wrong-number-of-arguments defvar 0)"#),
+        (r#"(defvar 1 2)"#, r#"(wrong-type-argument symbolp 1)"#),
+        (r#"(defconst a)"#, r#"(wrong-number-of-arguments defconst 1)"#),
+        (r#"(and . 1)"#, r#"(wrong-type-argument listp 1)"#),
+        (r#"(or 1 . 2)"#, r#"(wrong-type-argument listp 2)"#),
+        (r#"(progn . 3)"#, r#"(wrong-type-argument listp 3)"#),
+        (r#"(save-excursion . 1)"#, r#"(wrong-type-argument listp 1)"#),
+        (r#"(setq t 1)"#, r#"(setting-constant t)"#),
+        (r#"(setq nil 2)"#, r#"(setting-constant nil)"#),
+        (r#"(let ((a 1)) (setq a))"#, r#"(wrong-number-of-arguments setq 1)"#),
+        (r#"(cond (1 2) . 3)"#, r#"(wrong-type-argument listp 3)"#),
+        (r#"(defconst 1 2)"#, r#"(wrong-type-argument symbolp 1)"#),
+        (r#"(defvar 1)"#, r#"(wrong-type-argument symbolp 1)"#),
+        (r#"(defvar "a" 1)"#, r#"(wrong-type-argument symbolp "a")"#),
+        (r#"(setq :k 1)"#, r#"(setting-constant :k)"#),
+        (r#"(setq :k :k)"#, r#":k"#),
+        (r#"(setq a 1 :k :k b 2)"#, r#"2"#),
+        (r#"(setq a 1 2 3)"#, r#"(wrong-type-argument symbolp 2)"#),
+        (r#"(cond (1 2 . 3))"#, r#"2"#),
+        (r#"(cond (nil 1) 5 (t 2))"#, r#"(wrong-type-argument listp 5)"#),
+        (r#"(condition-case e 1 nil (error 2))"#, r#"1"#),
+        (r#"(condition-case e 1 3)"#, r#"(error "Invalid condition handler: 3")"#),
+        (r#"(condition-case e 1 ("x" 2))"#, r#"(error "Invalid condition handler: (x 2)")"#),
+        (r#"(condition-case e 1 ((error) 2))"#, r#"1"#),
+        (r#"(condition-case 5 1)"#, r#"(wrong-type-argument symbolp 5)"#),
+    ] {
+        let source = format!("(condition-case e (funcall (eval (list 'lambda nil '{form}) t)) (error e))");
+        assert_eq!(vm.eval_source(&source).map(|v| v.display().unwrap()), Ok(expected.to_owned()), "{form}");
+    }
 }
