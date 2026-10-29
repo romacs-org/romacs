@@ -3,6 +3,7 @@ use super::*;
 
 defsubr! { name = "delete-all-overlays", gnu = "buffer.c:3847", effect = Global,
 fn delete_all_overlays(cx; optional buffer: Value) {
+    cx.overlays_changed();
     cx.delete_all_overlays(buffer)
 }}
 

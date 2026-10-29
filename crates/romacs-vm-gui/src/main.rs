@@ -297,12 +297,7 @@ impl PartialEq for Frame {
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
-    // Exhaustive, so a new field must be placed on one side or the other.
-    let romacs_layout_input::WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-        text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap, cursor_off } = a;
-    (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px, *tab_width, *cursor_off)
-        == (b.id, b.width, b.height, b.start_byte, b.point_byte, b.mode_line_face, b.vscroll_px, b.tab_width, b.cursor_off)
-        && *wrap == b.wrap && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
+    a.lays_out_like(b) && a.cursor_off == b.cursor_off
 }
 
 /// What the live loop last painted: the frame, the window ends its layout

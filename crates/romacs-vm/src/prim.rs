@@ -218,6 +218,8 @@ mod leaf {
         }
         pub(crate) fn mktime_offset(&self) -> i64 { self.vm.mktime_offset }
         pub(crate) fn idle_since(&self) -> Option<std::time::Instant> { self.vm.idle_since }
+        pub(crate) fn update_mode_lines(&mut self) { self.vm.update_mode_lines() }
+        pub(crate) fn overlays_changed(&mut self) { self.vm.display_state.overlays += 1 }
         pub(crate) fn set_idle_since(&mut self, since: Option<std::time::Instant>) { self.vm.idle_since = since; }
         pub(crate) fn set_mktime_offset(&mut self, offset: i64) { self.vm.mktime_offset = offset; }
         pub(crate) fn tz_rule_dstoff(&self) -> i64 { self.vm.tz_rule_dstoff }

@@ -105,3 +105,32 @@ fn a_cursor_shown_off_is_not_published() {
     vm.eval_source("(internal-show-cursor nil t)").unwrap();
     assert_eq!(cursors(&mut vm).0, [selected, other]);
 }
+
+/// A frame that differs from the last one only in which cursors are off is
+/// shown from the last layout, stamped with its own presentation; any other
+/// change is laid out again.
+#[test]
+fn a_cursor_only_change_reuses_the_last_layout() {
+    let mut vm = Vm::new();
+    let face = vm.display_default_face().unwrap();
+    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    vm.set_frame_geometry(800, 600, line, col).unwrap();
+    vm.eval_source("(set-buffer (get-buffer-create \"reuse\")) (insert \"abc\\ndef\") (set-window-buffer nil (current-buffer)) (setq mode-line-format '(\"%b\")) (goto-char 2)").unwrap();
+    let rum = Color::from_pixel(0x9099d9);
+    let mut snap = vm.frame_snapshot(800, 600).unwrap();
+    let id = snap.windows[0].snapshot.id;
+    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let (on, ends) = engine.layout_frame(&snap, 1, Some((id, rum))).unwrap();
+    snap.windows[0].snapshot.cursor_off = true;
+    snap.windows[0].snapshot.buffer_version += 1;
+    let (off, off_ends) = engine.layout_frame(&snap, 2, Some((id, rum))).unwrap();
+    assert_eq!((off.glyphs == on.glyphs, off_ends == ends), (true, true));
+    assert!(off.window_cursors.iter().all(|c| c.window_id.get() != id as i64), "the hidden cursor is not published");
+    assert_eq!(off.presentation_id.get(), 2);
+    snap.windows[0].snapshot.cursor_off = false;
+    let (again, _) = engine.layout_frame(&snap, 3, Some((id, rum))).unwrap();
+    assert_eq!(again.window_cursors.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>(), on.window_cursors.iter().map(|c| (c.x, c.y)).collect::<Vec<_>>());
+    snap.windows[0].snapshot.point_byte = 5;
+    let (moved, _) = engine.layout_frame(&snap, 4, Some((id, rum))).unwrap();
+    assert_ne!(moved.active_cursor().unwrap().y, on.active_cursor().unwrap().y, "a moved point is laid out again");
+}

@@ -692,3 +692,60 @@ fn g3a_vscroll_is_owned_by_each_window_not_shared_across_the_frame() {
     assert_eq!(vscroll_of(&mut vm, "a"), Ok(7), "scrolling B must not disturb A");
     assert_eq!(vscroll_of(&mut vm, "b"), Ok(3), "B keeps its own value");
 }
+
+/// GNU redisplay's shortcuts for a window nothing it shows changed in: a
+/// frame where only its cursor was turned off reuses its last snapshot
+/// without evaluating the mode line (GNU's blink redraws the cursor only); a
+/// point moved within the rows the last layout showed evaluates the mode line
+/// again but keeps the text and start (try_cursor_movement); a command,
+/// `force-mode-line-update', an edit or an overlay change redisplays fully.
+#[test]
+fn unchanged_windows_redisplay_only_their_cursor_or_mode_line() {
+    let mut vm = Vm::new();
+    // A collection counts as a change (`ShownKey'): no forced ones.
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (setq evals 0) (set-buffer (get-buffer-create "shown")) (dotimes (i 10) (insert (format "line %d\n" i)))
+                          (set-window-buffer nil (current-buffer)) (goto-char 1)
+                          (setq mode-line-format '("%l " (:eval (progn (setq evals (1+ evals)) "x")))))"#);
+    let snapshot = |vm: &mut Vm| vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    let evals = |vm: &mut Vm| run(vm, "evals").as_integer().unwrap();
+    let first = snapshot(&mut vm);
+    // The host showed the whole buffer; the first hosted redisplay is full.
+    vm.display_apply_layout(&[(first.id, first.text.utf8.len())]).unwrap();
+    snapshot(&mut vm);
+    let shown = evals(&mut vm);
+
+    run(&mut vm, "(internal-show-cursor nil nil)");
+    let blinked = snapshot(&mut vm);
+    assert!(blinked.cursor_off && blinked.lays_out_like(&first), "only the cursor changed");
+    assert_eq!(evals(&mut vm), shown, "a blink evaluated the mode line");
+    run(&mut vm, "(internal-show-cursor nil t)");
+    assert!(!snapshot(&mut vm).cursor_off);
+    assert_eq!(evals(&mut vm), shown);
+
+    run(&mut vm, "(forward-line 3)");
+    let moved = snapshot(&mut vm);
+    assert_eq!(evals(&mut vm), shown + 1, "a moved point evaluates the mode line again");
+    assert_eq!((moved.start_byte, &moved.text), (first.start_byte, &first.text));
+    assert_eq!(moved.point_byte, first.text.utf8.find("line 3").unwrap());
+    assert_eq!(moved.mode_line.as_ref().unwrap().utf8, "4 x");
+
+    run(&mut vm, "(force-mode-line-update)");
+    snapshot(&mut vm);
+    assert_eq!(evals(&mut vm), shown + 2, "force-mode-line-update");
+    vm.update_mode_lines();
+    snapshot(&mut vm);
+    assert_eq!(evals(&mut vm), shown + 3, "a command");
+
+    run(&mut vm, "(insert \"new \")");
+    let edited = snapshot(&mut vm);
+    assert!(edited.text.utf8.contains("new line 3"), "an edit redisplays the text");
+    assert_eq!(evals(&mut vm), shown + 4);
+    vm.display_apply_layout(&[(edited.id, edited.text.utf8.len())]).unwrap();
+    run(&mut vm, "(overlay-put (make-overlay 1 3) 'face 'bold)");
+    snapshot(&mut vm);
+    assert_eq!(evals(&mut vm), shown + 5, "an overlay change redisplays");
+    snapshot(&mut vm);
+    assert_eq!(evals(&mut vm), shown + 5, "and then nothing changed");
+}
