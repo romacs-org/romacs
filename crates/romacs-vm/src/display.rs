@@ -483,6 +483,11 @@ impl Vm {
     pub fn published_window_count(&self) -> usize {
         self.display_state.previous.len()
     }
+    /// Read-only: the buffer byte window ID's last published text starts at;
+    /// the snapshot's byte offsets count from it.
+    pub fn published_base(&self, id: u64) -> usize {
+        self.display_state.base(id)
+    }
     /// Read-only: the display version a renderer uses to decide whether to repaint.
     pub fn display_version(&self) -> u64 {
         self.display_state.version

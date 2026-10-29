@@ -532,7 +532,8 @@ fn paint(
     };
     eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
-        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":w.snapshot.point_byte})).collect::<Vec<_>>() }));
+        // Point as a buffer byte: a window publishes its text from a base byte.
+        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_base(w.snapshot.id) + w.snapshot.point_byte})).collect::<Vec<_>>() }));
     let glyphs: Vec<_> = frame.glyphs.iter().filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).filter_map(|glyph| {
         if let romacs_display_protocol::FrameGlyph::Char { char, row_role, face_id, x, y, clip_rect, .. } = glyph {
             let face = &frame.faces[face_id];
