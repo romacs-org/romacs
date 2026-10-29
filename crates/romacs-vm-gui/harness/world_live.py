@@ -3,10 +3,13 @@
 
 With no world flag, a live --loadup launch keeps its world in
 $XDG_CACHE_HOME/romacs/worlds. The first launch in a fresh HOME finds none,
-builds it and boots from it; a later launch restores it without building;
-one with ROMACS_WORLD=off boots from source and leaves the store alone. Each
-launch must reach its first frame. The binary's own line says which:
-`romacs-world: {"mode": ...}`.
+says so and paints "Preparing Romacs (first start)…" before it waits,
+builds the world and boots from it. A later launch restores it without
+building, and after its first frame prunes a week-old world planted beside
+it. One with ROMACS_WORLD=off boots from source and leaves the store alone.
+Each launch must reach its first frame. The binary's own lines say which:
+`romacs-world: {"mode": ...}`, `{"event": "preparing"...}`, `{"event":
+"pruned"...}`.
 
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY; DISPLAY is never set. labwc and wlr-randr come from
@@ -25,6 +28,12 @@ import time
 import fileio_live as fio
 import find_file_live as ff
 import live_oracle as live
+
+
+def events(text, event):
+    """The binary's world events named EVENT."""
+    return [json.loads(line.split(': ', 1)[1]) for line in text.splitlines()
+            if line.startswith('romacs-world: {') and f'"event":"{event}"' in line]
 
 
 def world_line(text):
@@ -101,9 +110,17 @@ def main():
                                                    env={**env, **extra_env}, cwd=work,
                                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log)
                         try:
+                            if name == 'first':
+                                # The window while the world builds, for review.
+                                fio.wait(lambda: '"event":"preparing-frame"' in log_path.read_text(errors='replace'),
+                                         args.timeout, f'{name}: preparing', process)
+                                time.sleep(1.5)
+                                fio.shot(output / 'preparing.png', env, report)
                             fio.wait(lambda: ff.current_rows(log_path.read_text(errors='replace')),
                                      args.timeout, f'{name}: first frame', process)
                             seconds = time.monotonic() - started
+                            # Pruning follows the first frame, off its path.
+                            time.sleep(1.5)
                         finally:
                             process.terminate()
                             try:
@@ -111,8 +128,9 @@ def main():
                             except subprocess.TimeoutExpired:
                                 process.kill()
                                 process.wait()
-                    world = world_line(log_path.read_text(errors='replace'))
-                    entry = {'launch': name, 'seconds': round(seconds, 3), 'world': world}
+                    text = log_path.read_text(errors='replace')
+                    entry = {'launch': name, 'seconds': round(seconds, 3), 'world': world_line(text),
+                             'preparing': events(text, 'preparing-frame'), 'pruned': events(text, 'pruned')}
                     report['launches'].append(entry)
                     return entry
 
@@ -123,14 +141,33 @@ def main():
                       and any(n.endswith('.rwi') for n in built) and any(n.endswith('.json') for n in built), first)
                 check('the default store is private', store.exists() and store.stat().st_mode & 0o777 == 0o700,
                       oct(store.stat().st_mode & 0o777) if store.exists() else None)
+                check('a first launch says it prepares, and paints that, before it waits',
+                      [p['painted'] for p in first['preparing']] == [True], first['preparing'])
+                # A world of another build, unused for a week.
+                old = 'e' * 64
+                week_ago = time.time() - 8 * 86400
+                for suffix in ('rwi', 'json', 'log', 'lock'):
+                    path = store / f'{old}.{suffix}'
+                    path.write_text('old')
+                    os.utime(path, (week_ago, week_ago))
+                built = store_state(store)
                 later = launch('later', {})
-                check('a later launch restores the world without building', (later['world'] or {}).get('mode') == 'restored'
-                      and store_state(store) == built, {'launch': later, 'store_unchanged': store_state(store) == built})
+                after = store_state(store)
+                check('a later launch restores the world without building, and says nothing of preparing',
+                      (later['world'] or {}).get('mode') == 'restored' and not later['preparing']
+                      and {k: v for k, v in after.items() if k in built and not k.startswith(old)}
+                      == {k: v for k, v in built.items() if not k.startswith(old) and not k.endswith('.use')} | {k: after[k] for k in after if k.endswith('.use')},
+                      {'launch': later})
+                check('after its first frame, a launch prunes a world unused for a week',
+                      not any(k.startswith(old) for k in after) and later['pruned'] == [{'event': 'pruned', 'worlds': [old]}],
+                      {'store': sorted(after), 'pruned': later['pruned']})
+                built = after
                 check('a later launch is faster than the first', later['seconds'] < first['seconds'],
                       [first['seconds'], later['seconds']])
                 off = launch('off', {'ROMACS_WORLD': 'off'})
                 check('ROMACS_WORLD=off boots from source and leaves the store alone',
-                      off['world'] == {'mode': 'source', 'reason': 'ROMACS_WORLD=off'} and store_state(store) == built, off)
+                      off['world'] == {'mode': 'source', 'reason': 'ROMACS_WORLD=off'} and store_state(store) == built
+                      and not off['preparing'], off)
         report['status'] = 'PASS' if not report['failures'] else 'FAIL'
     except Exception as error:  # noqa: BLE001 - the report carries it
         report['error'] = repr(error)

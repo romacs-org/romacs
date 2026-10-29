@@ -100,12 +100,14 @@ pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option
 }
 
 /// This launch with WORLD: the restored VM and its carry, or None to boot
-/// from source. A missing or stale world is built first, which costs about
-/// what a boot from source does, and the launch then boots from it; one
-/// whose build was refused or failed on these very inputs boots from
-/// source until they change. A builder process builds and exits here.
-pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>) -> Option<(Box<Vm>, Carry)> {
-    match world.launch::<Carry>(|| builder_args(world, width, height, floor), true, || {}) {
+/// from source. A missing or stale world is built first, or the build
+/// another launch runs waited for, which costs about what a boot from
+/// source does, and the launch then boots from it; ON_WAIT runs before it
+/// blocks for that. One whose build was refused on these very inputs, or
+/// failed lately (`romacs_vm::world::store`), boots from source. A builder
+/// process builds and exits here.
+pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_wait: impl FnOnce()) -> Option<(Box<Vm>, Carry)> {
+    match world.launch::<Carry>(|| builder_args(world, width, height, floor), true, on_wait) {
         Launch::Restored { vm, carry, manifest } => {
             eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"]}));
             Some((vm, carry))

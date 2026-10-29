@@ -12,7 +12,9 @@
 #                  It boots from its world in $XDG_CACHE_HOME/romacs/worlds:
 #                  the first launch after a build or an input change builds
 #                  it, about a boot from source, and later launches restore it
-#                  in well under a second. ROMACS_WORLD=off boots from source.
+#                  in well under a second. ROMACS_WORLD=off boots from source;
+#                  romacs-vm-gui --world-reset forgets failed builds, and
+#                  --world-reset=all removes the store.
 #   --gnu-lisp     loadup.el alone: no stand-ins, no Rum workspace.
 #
 # Builds romacs-vm-gui in RELEASE (debug is 10-50x slower and makes typing
