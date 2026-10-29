@@ -188,7 +188,8 @@ pub struct MeasureInput {
 /// The host's geometry for a `MeasureInput`, in whole pixels: each
 /// character's advance and the row height its face gives it, in text
 /// order (a newline advances 0, a TAB its face's space, from which
-/// `tab_advance` makes its stretch), and each face's row height.
+/// `tab_advance` makes its stretch), and each face's row height: the
+/// default face's and those the text uses (0 for any other).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Measured {
     pub glyphs: Vec<(u32, u32)>,

@@ -500,8 +500,8 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
     validate_runs(&input.text, input.faces.len())?;
     let mut frame = new_frame(1, 1, 1)?;
     let face_text = face_text(input.faces.len(), &[(&input.text, 0)]);
-    // Every face's row height is part of the answer.
-    let metrics = realize_faces(&input.faces, &face_text, |_| true, &mut frame, resolver, 0)?;
+    // A face no character uses answers no row height (0).
+    let metrics = realize_faces(&input.faces, &face_text, |_| false, &mut frame, resolver, 0)?;
     let pixels = |value: f32| if value.fract() == 0.0 && value >= 0.0 && value <= u32::MAX as f32 { Ok(value as u32) }
         else { Err(format!("fractional or negative advance {value}")) };
     let face_heights = metrics.iter().map(|m| pixels(m.1)).collect::<Result<Vec<_>, _>>()?;

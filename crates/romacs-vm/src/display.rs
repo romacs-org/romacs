@@ -1319,11 +1319,16 @@ impl Vm {
                 (table.faces.clone(), vec![index])
             }
         };
+        // A space in each face asks the host for that face's row height.
+        let mut runs = runs;
+        runs.sort_unstable();
+        runs.dedup();
+        let face_runs = runs.iter().enumerate().map(|(at, &face)| FaceRun { bytes: at..at + 1, face: FaceHandle(face as u32) }).collect();
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces,
-            text: TextSlice { utf8: String::new(), face_runs: vec![] },
+            text: TextSlice { utf8: " ".repeat(runs.len()), face_runs },
         };
         let heights = self.host_layout(&input)?.face_heights;
         Ok(runs.into_iter().map(|i| heights[i]).max().unwrap_or(0))
