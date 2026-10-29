@@ -211,7 +211,7 @@ class Session:
                'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'),
                'TMPDIR': str(self.root), 'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman',
                'WLR_HEADLESS_OUTPUTS': '1', 'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop'}
-        for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_GNU_SOURCE'):
+        for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD', 'ROMACS_GNU_SOURCE'):
             if key in os.environ:
                 env[key] = os.environ[key]
         if 'ROMACS_GATE_FONTCONFIG' in os.environ:

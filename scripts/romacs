@@ -9,8 +9,12 @@
 #                  the VM can reach; then, for each journey key whose GNU
 #                  command did not load, a romacs stand-in named romacs-...
 #                  The log lists every load site's outcome (romacs-loadup:).
-#                  Not the default: ~1s to start (0.13s default), and today it gains no
-#                  journey step (crates/romacs-vm-gui/evidence/loadup/LOADUP.md).
+#                  It boots from its world in $XDG_CACHE_HOME/romacs/worlds:
+#                  the first launch after a build or an input change builds
+#                  it, about a boot from source, and later launches restore it
+#                  in well under a second. ROMACS_WORLD=off boots from source;
+#                  romacs-vm-gui --world-reset forgets failed builds, and
+#                  --world-reset=all removes the store.
 #   --gnu-lisp     loadup.el alone: no stand-ins, no Rum workspace.
 #
 # Builds romacs-vm-gui in RELEASE (debug is 10-50x slower and makes typing

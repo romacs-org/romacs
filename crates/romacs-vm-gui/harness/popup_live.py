@@ -173,7 +173,7 @@ def main():
                    'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
                    'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
                    'ROMACS_GUI_FONT': args.font, 'ROMACS_GUI_FONT_SIZE': args.font_size}
-            for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_GATE_FONTCONFIG'):
+            for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD', 'ROMACS_GATE_FONTCONFIG'):
                 if key in os.environ:
                     env[key] = os.environ[key]
             if 'ROMACS_GATE_FONTCONFIG' in env:

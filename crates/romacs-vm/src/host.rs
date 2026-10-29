@@ -1248,6 +1248,188 @@ pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
     File::open(path)
 }
 
+/// How `open_store_file` opens a world store's file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreOpen {
+    /// To read it.
+    Read,
+    /// To write it: made if missing (CREATE, readable and writable by its
+    /// owner only), emptied with TRUNCATE.
+    Write { create: bool, truncate: bool },
+    /// To make it where none is (O_CREAT|O_EXCL), and write it.
+    New,
+}
+
+/// A world store's file at PATH, opened as HOW: never through a symlink,
+/// never blocking on what is no file (a FIFO opens at once, and is then
+/// refused), and only when it is a regular file; truncated only then. The
+/// store's own, never a fact of a build.
+pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = OpenOptions::new();
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).mode(0o600);
+    match how {
+        StoreOpen::Read => { options.read(true); }
+        StoreOpen::Write { create, .. } => { options.write(true).create(create); }
+        StoreOpen::New => { options.write(true).create_new(true); }
+    }
+    let file = options.open(path.as_ref())?;
+    regular_and_blocking(file, path.as_ref().display(), how)
+}
+
+/// A world store's directory at PATH, opened, and with CREATE made with
+/// every missing directory on the way, each 0700 whatever the umask. The
+/// walk starts at `/` and opens one component at a time relative to the
+/// last (openat, O_DIRECTORY|O_NOFOLLOW), making a missing one there
+/// (mkdirat, then fchmod): nothing is resolved again by path, and no
+/// symlink is followed, not even as HOME. Each directory from `/` down
+/// must be owned by this user or root, and writable by no one else unless
+/// sticky, or another user could swap what lies below it.
+pub fn open_store_dir(path: &Path, create: bool) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    let refuse = |why: String| io::Error::new(io::ErrorKind::PermissionDenied, why);
+    if !path.is_absolute() {
+        return Err(refuse(format!("{} is not absolute", path.display())));
+    }
+    let root = PathBuf::from("/");
+    let open = |at: Option<i32>, name: &std::ffi::CStr| -> i32 {
+        let flags = libc::O_DIRECTORY | libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+        match at {
+            Some(dir) => unsafe { libc::openat(dir, name.as_ptr(), flags) },
+            None => unsafe { libc::open(name.as_ptr(), flags) },
+        }
+    };
+    let fd = open(None, c"/");
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut dir = unsafe { OwnedFd::from_raw_fd(fd) };
+    let unshared = |dir: &OwnedFd, walked: &Path| -> io::Result<()> {
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(dir.as_raw_fd(), &mut stat) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if stat.st_uid != euid() && stat.st_uid != 0 {
+            return Err(refuse(format!("{} is owned by another user", walked.display())));
+        }
+        if stat.st_mode & (libc::S_IWGRP | libc::S_IWOTH) != 0 && stat.st_mode & libc::S_ISVTX == 0 {
+            return Err(refuse(format!("{} is writable by others and not sticky", walked.display())));
+        }
+        Ok(())
+    };
+    unshared(&dir, &root)?;
+    let mut walked = root.clone();
+    for component in path.strip_prefix(&root).map_err(io::Error::other)?.components() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(refuse(format!("{} has a component that is no name", path.display())));
+        };
+        walked.push(name);
+        let name = std::ffi::CString::new(name.as_bytes()).map_err(io::Error::other)?;
+        let mut made = false;
+        let mut fd = open(Some(dir.as_raw_fd()), &name);
+        if fd < 0 && create && io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT) {
+            effect(|| format!("make directory {}", walked.display()))?;
+            made = unsafe { libc::mkdirat(dir.as_raw_fd(), name.as_ptr(), 0o700) } == 0;
+            fd = open(Some(dir.as_raw_fd()), &name);
+        }
+        if fd < 0 {
+            let error = io::Error::last_os_error();
+            return Err(if error.raw_os_error() == Some(libc::ELOOP) || error.raw_os_error() == Some(libc::ENOTDIR) {
+                refuse(format!("{} is no directory of its own (a symlink?)", walked.display()))
+            } else { error });
+        }
+        let next = unsafe { OwnedFd::from_raw_fd(fd) };
+        if made && unsafe { libc::fchmod(next.as_raw_fd(), 0o700) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        unshared(&next, &walked)?;
+        dir = next;
+    }
+    Ok(dir)
+}
+
+/// Whether the directory DIR holds nothing.
+pub fn store_dir_is_empty(dir: std::os::fd::BorrowedFd<'_>) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    let copy = unsafe { libc::fcntl(dir.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
+    if copy < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let stream = unsafe { libc::fdopendir(copy) };
+    if stream.is_null() {
+        unsafe { libc::close(copy) };
+        return Err(io::Error::last_os_error());
+    }
+    let mut empty = true;
+    loop {
+        let entry = unsafe { libc::readdir(stream) };
+        if entry.is_null() {
+            break;
+        }
+        let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+        if name != b"." && name != b".." {
+            empty = false;
+            break;
+        }
+    }
+    unsafe { libc::closedir(stream) };
+    Ok(empty)
+}
+
+/// `open_store_file` for NAME in the directory DIR: opened relative to it
+/// (openat), so nothing above is resolved again.
+pub fn open_store_file_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: StoreOpen) -> io::Result<File> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let mut flags = libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
+    flags |= match how {
+        StoreOpen::Read => libc::O_RDONLY,
+        StoreOpen::Write { create: true, .. } => libc::O_WRONLY | libc::O_CREAT,
+        StoreOpen::Write { create: false, .. } => libc::O_WRONLY,
+        StoreOpen::New => libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+    };
+    let cname = std::ffi::CString::new(name).map_err(io::Error::other)?;
+    let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags, 0o600 as libc::c_uint) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let file = unsafe { File::from_raw_fd(fd) };
+    regular_and_blocking(file, name, how)
+}
+
+/// FILE, once it is a regular file, with O_NONBLOCK cleared and, for a
+/// truncating write, emptied.
+fn regular_and_blocking(file: File, name: impl std::fmt::Display, how: StoreOpen) -> io::Result<File> {
+    use std::os::fd::AsRawFd;
+    if !file.metadata()?.file_type().is_file() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{name} is not a regular file")));
+    }
+    let fd = file.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if let StoreOpen::Write { truncate: true, .. } = how {
+        file.set_len(0)?;
+    }
+    Ok(file)
+}
+
+/// A world store's regular file at PATH, read whole (`open_store_file`).
+pub fn read_store_file(path: impl AsRef<Path>) -> io::Result<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    open_store_file(path, StoreOpen::Read)?.read_to_string(&mut text)?;
+    Ok(text)
+}
+
+/// Write BYTES as the world store's regular file at PATH, made or
+/// emptied first (`open_store_file`).
+pub fn write_store_file(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
+    use std::io::Write;
+    open_store_file(path, StoreOpen::Write { create: true, truncate: true })?.write_all(bytes.as_ref())
+}
+
 /// Remove NAME from this process's environment, before any other thread
 /// starts: world processes take their own markers out of it.
 pub fn unset_env(name: &str) {

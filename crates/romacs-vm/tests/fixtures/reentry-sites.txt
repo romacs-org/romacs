@@ -202,4 +202,4 @@ watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a fra
 watchers.rs notify_watchers notify_watchers_at 1 clean  # a tail call
 watchers.rs notify_watchers_at call_lisp_at_write 1 rooted  # the list, value and place are a frame, read back after each watcher
 watchers.rs safe_call reader_call 1 held  # called from leaves, whose engine is not suspended
-world/store.rs finish_build collect_garbage 1 collector  # a build's end: no engine runs, and the VM is all the image holds
+world/store.rs publish_world collect_garbage 1 collector  # a build's end: no engine runs, and the VM is all the image holds
