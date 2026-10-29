@@ -16,10 +16,11 @@
 ;; coding priorities and the match data.
 ;;
 ;; Values print with `print-circle', so sharing and cycles are part of
-;; the text, and with every length and level limit off.  A timer's due
-;; time is the clock's, not the state's: it prints as
+;; the text, and with every length and level limit off.  An ordinary
+;; timer's due time is the clock's, not the state's: it prints as
 ;; `world-digest--time', and the rest of the timer, its function,
-;; arguments, repeat and idle delay, as it is.  The last line counts the
+;; arguments and repeat, as it is.  An idle timer's time fields hold its
+;; delay, not a clock reading, and print as they are.  The last line counts the
 ;; ones before it, so a digest cut short is no digest.
 
 ;;; Code:
@@ -60,8 +61,9 @@ picoseconds and integral multiple."
              (setq ok nil))))))
 
 (defun world-digest--timeless (value)
-  "VALUE with the due time of each timer it is, or lists, replaced."
-  (cond ((world-digest--timer-p value)
+  "VALUE with the due time of each ordinary timer it is, or lists,
+replaced.  An idle timer, its idle slot set, keeps its delay there."
+  (cond ((and (world-digest--timer-p value) (null (aref value 7)))
          (let ((copy (copy-sequence value)))
            (dolist (slot '(1 2 3 8) copy)
              (aset copy slot 'world-digest--time))))
