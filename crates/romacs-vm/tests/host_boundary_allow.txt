@@ -29,9 +29,9 @@ crates/romacs-vm/src/display.rs:491 delayed-variable reads through variable_valu
 crates/romacs-vm/src/forwarded.rs:640 delayed-variable declares the variable; reads no slot
 crates/romacs-vm/src/forwarded.rs:1252 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/forwarded.rs:1442 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/gc.rs:118 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
-crates/romacs-vm/src/gc.rs:605 dynamic:saved collector: marks the saved values
-crates/romacs-vm/src/gc.rs:962 dynamic:saved collector: forwards the saved values
+crates/romacs-vm/src/gc.rs:119 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
+crates/romacs-vm/src/gc.rs:606 dynamic:saved collector: marks the saved values
+crates/romacs-vm/src/gc.rs:963 dynamic:saved collector: forwards the saved values
 crates/romacs-vm/src/hash.rs:801 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/image.rs:65 metadata the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:173 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
