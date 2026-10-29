@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "a18ceb415bb189bca6a0ad02792528b8872649a2b40a4d287682ce8a41f78c9b",
+    "input_hash": "22c56e028d1f048701f7ea0741506f80adbc086434f5b5cda9500e2a3f81befa",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4732
+    "vm2_universe": 4754
   },
   "schema": 2,
   "vm2": {
-    "count": 1033,
+    "count": 1037,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -429,6 +429,7 @@
       "internal-copy-lisp-face",
       "internal-default-signal-process",
       "internal-get-lisp-face-attribute",
+      "internal-handle-focus-in",
       "internal-lisp-face-attribute-values",
       "internal-lisp-face-p",
       "internal-make-lisp-face",
@@ -754,6 +755,7 @@
       "romacs--restore-excursion",
       "romacs--restore-restriction",
       "romacs--run-host-command",
+      "romacs--run-special-event",
       "romacs--save-excursion",
       "romacs--save-restriction",
       "romacs--secure-hash",
@@ -766,6 +768,8 @@
       "romacs--term-follow",
       "romacs--term-running-p",
       "romacs--term-send",
+      "romacs--timer-next",
+      "romacs--timer-time",
       "romacs--validate-region",
       "romacs--wait-status",
       "romacs--write-region-body",

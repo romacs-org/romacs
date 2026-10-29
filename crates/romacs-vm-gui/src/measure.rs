@@ -16,7 +16,7 @@ impl romacs_vm::LayoutHost for Host {
     }
     fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         let mut engine = self.engine.try_borrow_mut().map_err(|_| "the layout engine is painting".to_owned())?;
-        engine.layout_frame(frame, 1, None).map(|(_, ends)| ends)
+        engine.lay_out(frame)
     }
 }
 

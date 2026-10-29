@@ -27,7 +27,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
                 },
                 mode_line: None,
                 mode_line_face: FaceHandle(0),
-                vscroll_px: 0, tab_width: 8, wrap: Default::default(),
+                vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false,
                 faces: vec![Face {
                     foreground: [255; 3],
                     background: [0; 3],

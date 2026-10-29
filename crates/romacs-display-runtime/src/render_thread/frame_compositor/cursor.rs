@@ -1,6 +1,6 @@
 //! Cursor visuals owned by the compositor.
 //!
-//! Blink, motion, size transitions and the click halo are renderer-owned
+//! Motion, size transitions and the click halo are renderer-owned
 //! visual state layered over the immutable editor scene; none of them changes
 //! the cursor position the evaluator committed.
 //!
@@ -26,65 +26,6 @@ impl GuiFrameRenderState {
             self.compositor.dirty = true;
         }
         dirty
-    }
-
-    pub(in crate::render_thread) fn tick_cursor_blink(
-        &mut self,
-        now: romacs_display_protocol::frame_time::EventTime,
-        cursor_wake_enabled: bool,
-        renderer: Option<&WgpuRenderer>,
-    ) -> bool {
-        if !self.cursor.blink_enabled || self.cursor.target_cloned().is_none() {
-            return false;
-        }
-        if now.saturating_since(self.cursor.last_blink_toggle) < self.cursor.blink_interval {
-            return false;
-        }
-        let was_off = !self.cursor.blink_on;
-        self.cursor.blink_on = !self.cursor.blink_on;
-        self.cursor.last_blink_toggle = now;
-        if was_off
-            && self.cursor.blink_on
-            && cursor_wake_enabled
-            && let Some(renderer) = renderer
-        {
-            renderer.trigger_transient_cursor_wake(
-                &mut self.compositor.renderer_effects,
-                now.into_instant(),
-            );
-        }
-        // A blink changes the cursor layer and nothing else, so it asks for a
-        // composite of the retained scene rather than a repaint. When the
-        // toggle also triggers the cursor-wake effect above, that effect marks
-        // the window dirty through mark_active_visuals_dirty on this same
-        // about_to_wait pass, which outranks this and forces the full render
-        // it needs.
-        self.compositor.cursor_dirty = true;
-        true
-    }
-
-    /// Key input restarts the blink, as GNU's blink-cursor does: the cursor
-    /// shows for a whole interval from NOW.  A key whose command changes
-    /// nothing gets no new frame, so this cannot wait for one; turning a
-    /// blinked-off cursor on asks for a cursor-only composite.
-    pub(in crate::render_thread) fn restart_cursor_blink(
-        &mut self,
-        now: romacs_display_protocol::frame_time::EventTime,
-    ) -> bool {
-        let was_off = !self.cursor.blink_on;
-        self.cursor.reset_blink(now);
-        if was_off {
-            self.compositor.cursor_dirty = true;
-        }
-        was_off
-    }
-
-    pub(in crate::render_thread) fn force_cursor_blink_on(&mut self) -> bool {
-        if !self.cursor.force_blink_on() {
-            return false;
-        }
-        self.compositor.cursor_dirty = true;
-        true
     }
 
     pub(in crate::render_thread) fn mark_active_visuals_dirty(&mut self) -> bool {

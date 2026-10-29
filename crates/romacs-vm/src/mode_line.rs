@@ -436,7 +436,7 @@ impl Vm {
                             if let Some((expression, _)) = split(cdr) {
                                 // GNU `dsafe_eval`: an error displays as nil.
                                 self.ml_elt_restarted();
-                                let spec = match self.eval_form_cached(&expression) {
+                                let spec = match self.eval_datum_raw(&expression) {
                                     Ok(value) => self.mode_line_form(value),
                                     Err(error) => {
                                         self.display_state.diagnostics.get_mut().push(format!(":eval: {error}"));
@@ -593,7 +593,7 @@ impl Vm {
                     Form::List(vec![Form::Sym("fboundp".into()), Form::List(vec![Form::Sym("quote".into()), Form::Sym("file-remote-p".into())])]),
                     Form::List(vec![Form::Sym("file-remote-p".into()), Form::Sym("default-directory".into())]),
                 ]);
-                if self.eval_form_raw(&form).is_ok_and(|v| v != Value::NIL) { "@" } else { "-" }.into()
+                if self.eval_datum_raw(&form).is_ok_and(|v| v != Value::NIL) { "@" } else { "-" }.into()
             }
             // No coding systems in VM2: GNU's "not yet decided" mnemonics
             // (`decode_mode_spec_coding`, `xdisp.c:29346`).

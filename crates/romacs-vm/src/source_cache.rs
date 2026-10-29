@@ -146,14 +146,10 @@ impl Vm {
             None
         }
     }
-    pub(super) fn cached_source_form(&mut self, source: &str, form: &Form) -> Result<usize> {
-        if let Some(f) = self.cached_submission(source) {
-            return Ok(f);
-        }
-        let k = key(source);
-        if let Some(f) = self.load_source_ir(&k, form)? {
-            return Ok(f);
-        }
+    /// Compile FORM as request code with the guard that says when a cached
+    /// copy of it is stale: the macros it expanded, the special-ness of the
+    /// symbols it names, and which of its calls are macro calls.
+    fn compile_guarded(&mut self, form: &Form) -> Result<(usize, Vec<usize>, Entry)> {
         self.expanded_macros.clear();
         self.expanded_symbols.clear();
         let (function, compiled) = self.compile_request(form)?;
@@ -211,6 +207,37 @@ impl Vm {
             specials,
             calls,
         };
+        Ok((function, compiled, e))
+    }
+    /// Code for FORM, a datum evaluated again and again (a mode-line
+    /// `:eval' form): compiled once and cached by its structure while its
+    /// guard holds. GNU evaluates the same object each time, so its
+    /// constants are shared across evaluations as GNU's are. A datum
+    /// holding an uninterned symbol or an object with no spelling has no
+    /// structural key (the stamp writes neither): None.
+    pub(super) fn cached_datum(&mut self, form: &Form) -> Result<Option<usize>> {
+        if contains_identity(form) {
+            return Ok(None);
+        }
+        // NUL never starts source text, so datum keys stay apart from it.
+        let source = format!("\0datum\0{}", persistent::form_stamp(std::slice::from_ref(form)));
+        if let Some(f) = self.cached_submission(&source) {
+            return Ok(Some(f));
+        }
+        let (function, _, e) = self.compile_guarded(form)?;
+        self.trim_source_cache();
+        self.source_cache.entries.insert(key(&source), e);
+        Ok(Some(function))
+    }
+    pub(super) fn cached_source_form(&mut self, source: &str, form: &Form) -> Result<usize> {
+        if let Some(f) = self.cached_submission(source) {
+            return Ok(f);
+        }
+        let k = key(source);
+        if let Some(f) = self.load_source_ir(&k, form)? {
+            return Ok(f);
+        }
+        let (function, compiled, e) = self.compile_guarded(form)?;
         self.source_cache.last_guard = Some(e.clone());
         // Arbitrary macro code can read mutable state: only constant expansions
         // are reusable until a complete expansion-effect tracker exists.
@@ -407,6 +434,16 @@ impl Vm {
             slot = f.payload() as usize - 1;
         }
         slot
+    }
+}
+/// Whether FORM names something by identity rather than by spelling: an
+/// uninterned symbol or an object with no source spelling.
+fn contains_identity(form: &Form) -> bool {
+    match form {
+        Form::Object(_) | Form::Generated(_) => true,
+        Form::List(items) | Form::Vector(items) => items.iter().any(contains_identity),
+        Form::Dotted(items, tail) => items.iter().any(contains_identity) || contains_identity(tail),
+        _ => false,
     }
 }
 fn contains_local_object(form: &Form) -> bool {

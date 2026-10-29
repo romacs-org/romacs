@@ -20,21 +20,6 @@ use crate::{
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CursorBlinkConfig {
-    pub enabled: bool,
-    pub interval: Duration,
-}
-
-impl Default for CursorBlinkConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            interval: Duration::from_millis(500),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CursorMotionConfig {
     pub enabled: bool,
     pub speed: f32,
@@ -137,7 +122,6 @@ pub struct VisualConfig {
     /// flattening exposes it beside the behavioral configs in the registry.
     #[serde(flatten)]
     pub effects: EffectsConfig,
-    pub cursor_blink: CursorBlinkConfig,
     pub cursor_motion: CursorMotionConfig,
     pub cursor_size_transition: CursorSizeTransitionConfig,
     pub buffer_transition: BufferTransitionConfig,
@@ -183,7 +167,6 @@ impl Default for VisualConfig {
     fn default() -> Self {
         Self {
             effects: EffectsConfig::default(),
-            cursor_blink: CursorBlinkConfig::default(),
             cursor_motion: CursorMotionConfig::default(),
             cursor_size_transition: CursorSizeTransitionConfig::default(),
             buffer_transition: BufferTransitionConfig::default(),
@@ -205,10 +188,6 @@ impl Default for VisualConfig {
 // The behavioural slots publish their schema too. Hand-written rather than
 // macro-declared because their defaults differ per instance, but a widget needs
 // the same description of them either way.
-crate::effect_schema!(CursorBlinkConfig {
-    enabled: bool,
-    interval: Duration
-});
 crate::effect_schema!(CursorMotionConfig {
     enabled: bool,
     speed: f32,

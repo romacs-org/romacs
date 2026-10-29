@@ -303,12 +303,7 @@ impl PartialEq for Frame {
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
-    // Exhaustive, so a new field must be placed on one side or the other.
-    let romacs_layout_input::WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-        text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap } = a;
-    (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px, *tab_width)
-        == (b.id, b.width, b.height, b.start_byte, b.point_byte, b.mode_line_face, b.vscroll_px, b.tab_width)
-        && *wrap == b.wrap && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
+    a.lays_out_like(b) && a.cursor_off == b.cursor_off
 }
 
 /// What the live loop last painted: the frame, the window ends its layout
@@ -374,7 +369,7 @@ fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), 
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { utf8: PREPARING.into(), face_runs: vec![] }, mode_line: None,
-            mode_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), faces: vec![face],
+            mode_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face],
         } }],
     };
     let (frame, _) = romacs_layout2::LayoutEngine::new()?.layout_frame(&snapshot, 1, None)?;
@@ -881,6 +876,15 @@ fn evaluate(
                         if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
                         live_presentation.changed();
                     }
+                    continue;
+                }
+                if live && let InputEvent::WindowFocus { focused, .. } = event {
+                    // keyboard.c's FOCUS_IN_EVENT and FOCUS_OUT_EVENT: special
+                    // events (frame.el handle-focus-in), which blink-cursor-mode
+                    // and other focus state follow.
+                    let event = if focused { "(list 'focus-in (selected-frame))" } else { "(list 'focus-out (selected-frame))" };
+                    if let Err(error) = vm.eval_source(&format!("(romacs--run-special-event {event})")) { echo::show(&mut vm, &error)?; }
+                    live_presentation.changed();
                     continue;
                 }
                 if live && let Some((session, input)) = vm.selected_terminal()? {

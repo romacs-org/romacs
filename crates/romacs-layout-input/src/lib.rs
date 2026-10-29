@@ -87,6 +87,18 @@ pub struct FrameSnapshot {
     pub windows: Vec<PlacedWindowSnapshot>,
 }
 
+impl FrameSnapshot {
+    /// Whether OTHER lays out to the same glyphs as this frame, cursors
+    /// aside: equal but for publication versions and cursor visibility.
+    pub fn lays_out_like(&self, other: &Self) -> bool {
+        (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
+            && self.font_alternatives == other.font_alternatives
+            && self.windows.len() == other.windows.len()
+            && self.windows.iter().zip(&other.windows)
+                .all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like(&b.snapshot))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedWindowSnapshot {
     pub x: u32,
@@ -139,8 +151,11 @@ pub struct WindowSnapshot {
     pub tab_width: u32,
     /// How a line wider than the window shows.
     pub wrap: LineWrap,
+    /// GNU's `w->cursor_off_p': `internal-show-cursor' hid this window's
+    /// cursor, as blink-cursor-mode's timer does every other blink.
+    pub cursor_off: bool,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap, cursor_off });
 
 /// What laying a window out established about the text it published, in
 /// byte offsets into that text: where its last displayed row ends (GNU's
@@ -179,6 +194,20 @@ romacs_snapshot::snapshot_enum!(LineWrap {
     LineWrap::Window => (),
     LineWrap::Word => (),
 });
+
+impl WindowSnapshot {
+    /// Whether OTHER lays out to the same glyphs, cursor aside: equal but
+    /// for `buffer_version' (the VM's conservative redraw signal, which also
+    /// moves when nothing shown changed) and `cursor_off'.
+    pub fn lays_out_like(&self, other: &Self) -> bool {
+        // Exhaustive, so a new field must be placed on one side or the other.
+        let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
+            text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _ } = self;
+        (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px, *tab_width)
+            == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.vscroll_px, other.tab_width)
+            && *wrap == other.wrap && *text == other.text && *mode_line == other.mode_line && *faces == other.faces
+    }
+}
 
 /// The stretch a TAB at X takes on a window-system frame (GNU xdisp.c
 /// `gui_produce_glyphs`): to the next multiple of TAB_WIDTH spaces of the

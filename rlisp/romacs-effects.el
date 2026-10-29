@@ -45,7 +45,8 @@ visible than the motion itself."
   :prefix "romacs-window-")
 
 (defgroup romacs-cursor nil
-  "Cursor blinking, motion and size transitions."
+  "Cursor motion and size transitions.
+Blinking is GNU's `blink-cursor-mode'."
   :group 'romacs
   :prefix "romacs-cursor-")
 
@@ -385,27 +386,6 @@ lengthen by hand."
 
 ;;;; Cursor
 
-(defcustom romacs-cursor-blink-enabled t
-  "Whether the cursor blinks.
-
-Normally you want `blink-cursor-mode' instead: Romacs mirrors that variable
-into the renderer, so this follows it.  Setting this directly overrides the
-mirror until `blink-cursor-mode' next changes."
-  :type 'boolean
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-blink :enabled value)))
-
-(defcustom romacs-cursor-blink-interval 0.5
-  "Seconds between cursor blinks.
-Mirrors `blink-cursor-interval'; see `romacs-cursor-blink-enabled'."
-  :type 'number
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-blink :interval value)))
-
 (defcustom romacs-cursor-motion-enabled t
   "Whether the cursor slides between positions instead of jumping.
 When nil the cursor is drawn at its new position on the next frame."
@@ -674,7 +654,7 @@ The behavioural options are written by hand, so a property renamed or removed
 in Rust would leave an option that silently does nothing.  This compares the
 two and reports the difference rather than letting it rot."
   (dolist (effect (list 'window-open 'window-close 'window-resize
-                        'window-movement 'window-animations 'cursor-blink
+                        'window-movement 'window-animations
                         'cursor-motion 'cursor-size-transition
                         'buffer-transition 'scroll-transition
                         'child-frame-open 'child-frame-close

@@ -692,3 +692,163 @@ fn g3a_vscroll_is_owned_by_each_window_not_shared_across_the_frame() {
     assert_eq!(vscroll_of(&mut vm, "a"), Ok(7), "scrolling B must not disturb A");
     assert_eq!(vscroll_of(&mut vm, "b"), Ok(3), "B keeps its own value");
 }
+
+/// GNU redisplay's shortcut for a window nothing it shows changed in: a
+/// redisplay where only its cursor was turned off, or its point moved within
+/// the rows the last layout showed, keeps its text, faces and start, walks
+/// and fontifies no text (try_cursor_movement), and evaluates only its mode
+/// line; an edit or an overlay change redisplays it fully.
+#[test]
+fn unchanged_windows_redisplay_only_their_cursor_and_mode_line() {
+    let mut vm = Vm::new();
+    // A collection counts as a change (`ShownKey'): no forced ones.
+    vm.set_gc_stress(0);
+    // `romacs--redisplay-fontify', the walk over unfontified text.
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (setq walks 0 evals 0) (set-buffer (get-buffer-create "shown"))
+                          (dotimes (i 10) (insert (format "line %d\n" i)))
+                          (set-window-buffer nil (current-buffer)) (goto-char 1)
+                          ;; Never marks text fontified: called by every full redisplay.
+                          (setq fontification-functions (list (lambda (_) (setq walks (1+ walks)))))
+                          (setq mode-line-format '("%l " (:eval (progn (setq evals (1+ evals)) "x")))))"#);
+    let snapshot = |vm: &mut Vm| vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    let counts = |vm: &mut Vm| (run(vm, "walks").as_integer().unwrap(), run(vm, "evals").as_integer().unwrap());
+    let first = snapshot(&mut vm);
+    // The host showed the whole buffer; the first hosted redisplay is full.
+    vm.display_apply_layout(&[whole(&first)]).unwrap();
+    // As the GUI does after each paint: the rows reuse rests on.
+    let full = snapshot(&mut vm);
+    vm.display_apply_layout(&[whole(&full)]).unwrap();
+    let (walks, evals) = counts(&mut vm);
+    assert!(walks > 0);
+
+    run(&mut vm, "(internal-show-cursor nil nil)");
+    let blinked = snapshot(&mut vm);
+    assert!(blinked.cursor_off && blinked.lays_out_like(&first), "only the cursor changed");
+    assert_eq!(counts(&mut vm), (walks, evals + 1), "a blink walked the text");
+    run(&mut vm, "(internal-show-cursor nil t)");
+    assert!(!snapshot(&mut vm).cursor_off);
+
+    run(&mut vm, "(forward-line 3)");
+    let moved = snapshot(&mut vm);
+    assert_eq!(counts(&mut vm), (walks, evals + 3), "a moved point walked the text");
+    assert_eq!((moved.start_byte, &moved.text), (first.start_byte, &first.text));
+    assert_eq!(moved.point_byte, first.text.utf8.find("line 3").unwrap());
+    assert_eq!(moved.mode_line.as_ref().unwrap().utf8, "4 x");
+
+    run(&mut vm, "(insert \"new \")");
+    let edited = snapshot(&mut vm);
+    assert!(edited.text.utf8.contains("new line 3"), "an edit redisplays the text");
+    assert!(counts(&mut vm).0 > walks, "an edit walks the text");
+    vm.display_apply_layout(&[whole(&edited)]).unwrap();
+    snapshot(&mut vm);
+    let (walks, _) = counts(&mut vm);
+    run(&mut vm, "(overlay-put (make-overlay 1 3) 'face 'bold)");
+    snapshot(&mut vm);
+    assert!(counts(&mut vm).0 > walks, "an overlay change walks the text");
+    let (walks, _) = counts(&mut vm);
+    run(&mut vm, "(narrow-to-region 1 20)");
+    snapshot(&mut vm);
+    assert!(counts(&mut vm).0 > walks, "narrowing walks the text");
+    run(&mut vm, "(widen)");
+    snapshot(&mut vm);
+    let (walks, _) = counts(&mut vm);
+    snapshot(&mut vm);
+    assert_eq!(counts(&mut vm).0, walks, "and then nothing changed");
+}
+
+/// A mode line whose `:eval' collects during a redisplay that reuses the
+/// window's snapshot moves the window: the redisplay goes on with the
+/// window's traced handle, not the one it read before the Lisp ran.
+#[test]
+fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
+    let mut vm = Vm::new();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    // Garbage below the window the redisplay reuses, so a collection moves it.
+    run(&mut vm, r#"(progn (setq junk (list (make-string 9 ?j) (make-vector 9 0) (make-string 9 ?k)))
+                          (set-window-new-pixel (selected-window) 288)
+                          (setq lower (split-window-internal (selected-window) 288 nil 0.5))
+                          ;; Strings just above it: where the window's old index points after the move.
+                          (setq keep (let (l) (dotimes (_ 20) (push (make-string 1 ?z) l)) l))
+                          (select-window lower)
+                          (set-buffer (get-buffer-create "moved")) (insert "a\nb\nc\n") (set-window-buffer nil (current-buffer))
+                          (setq collect nil)
+                          (set (make-local-variable 'mode-line-format) '((:eval (progn (if collect (garbage-collect)) "m")))))"#);
+    let frame = vm.frame_snapshot(800, 576).unwrap();
+    let ends: Vec<_> = frame.windows.iter().map(|w| whole(&w.snapshot)).collect();
+    vm.display_apply_layout(&ends).unwrap();
+    vm.frame_snapshot(800, 576).unwrap();
+    // Dead only now: the reused redisplay's collection moves the window down.
+    run(&mut vm, "(setq junk nil collect t)");
+    let before = vm.heap_stats().collections;
+    let again = vm.frame_snapshot(800, 576).expect("a redisplay that collected");
+    assert!(vm.heap_stats().collections > before, "the mode line collected");
+    assert!(again.windows.iter().any(|w| w.snapshot.text.utf8 == "a\nb\nc\n"));
+}
+
+/// Lisp a reused window's mode line runs can change faces: a face setter
+/// drops every window's last publication and a new face drops the reuse
+/// records. Either makes that redisplay a full one, which publishes the
+/// changed faces, instead of the reused snapshot's old ones or a panic.
+#[test]
+fn face_changes_in_a_reused_windows_mode_line_redisplay_it_fully() {
+    for (change, color) in [("(internal-set-lisp-face-attribute 'reuse-face :foreground \"#ff0000\" nil)", [255, 0, 0]),
+                            ("(defface reuse-new '((t (:foreground \"#00ff00\"))) \"n\")", [0, 255, 0])] {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+        run(&mut vm, &format!(r##"(progn (defface reuse-face '((t (:foreground "#0000ff"))) "r")
+                                       (set-buffer (get-buffer-create "faces")) (insert (propertize "abc" 'face 'reuse-face) "\nd\ne\n")
+                                       (set-window-buffer nil (current-buffer)) (setq change nil)
+                                       (setq mode-line-format '((:eval (progn (when change (setq change nil) {change}) "m")))))"##));
+        let first = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+        vm.display_apply_layout(&[whole(&first)]).unwrap();
+        vm.frame_snapshot(800, 576).unwrap();
+        run(&mut vm, "(setq change t)");
+        let changed = vm.frame_snapshot(800, 576).expect(change).windows[0].snapshot.clone();
+        assert!(changed.faces.iter().any(|face| face.foreground == color), "{change} did not reach the published faces");
+    }
+}
+
+/// The layout journal of a host that showed all of SNAPSHOT's text on
+/// whole rows.
+fn whole(snapshot: &romacs_layout_input::WindowSnapshot) -> crate::WindowEnd {
+    let len = snapshot.text.utf8.len();
+    crate::WindowEnd { id: snapshot.id, end: len, visible_end: len + 1, body_height: snapshot.height as f32, rows: vec![] }
+}
+
+/// Overlay calls that change nothing a window may show leave its record
+/// standing, as GNU's buffer.c calls no modify_overlay for them: a new
+/// overlay (no properties yet), deleting a detached one, and `overlay-put'
+/// of a value `eq' to the one there. A real change still redisplays fully.
+#[test]
+fn overlay_calls_that_change_nothing_keep_the_window() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (setq walks 0) (set-buffer (get-buffer-create "kept"))
+                          (dotimes (i 10) (insert (format "line %d\n" i)))
+                          (set-window-buffer nil (current-buffer)) (goto-char 1)
+                          (setq fontification-functions (list (lambda (_) (setq walks (1+ walks)))))
+                          (setq mode-line-format '("%l")))"#);
+    // Each frame painted, as the GUI does: the record cursor moves reuse.
+    let mut frame = |vm: &mut Vm| {
+        let snapshot = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+        vm.display_apply_layout(&[whole(&snapshot)]).unwrap();
+    };
+    let walks = |vm: &mut Vm| run(vm, "walks").as_integer().unwrap();
+    frame(&mut vm);
+    frame(&mut vm);
+    let before = walks(&mut vm);
+    for (form, changes) in [("(setq o (make-overlay 1 3))", false), ("(overlay-put o 'face nil)", false),
+                            ("(forward-char 1)", false), ("(overlay-put o 'face 'bold)", true),
+                            ("(delete-overlay o)", true), ("(delete-overlay o)", false)] {
+        let before = walks(&mut vm);
+        run(&mut vm, form);
+        frame(&mut vm);
+        assert_eq!(walks(&mut vm) > before, changes, "{form}");
+    }
+    assert!(walks(&mut vm) > before);
+}

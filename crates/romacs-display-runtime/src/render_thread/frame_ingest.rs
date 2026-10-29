@@ -506,9 +506,6 @@ impl RenderApp {
         if frame.frame_chrome.band(FrameChromeKind::TabBar).is_none() {
             render.chrome.interaction.clear_tab_bar();
         }
-        render
-            .cursor
-            .reset_blink(romacs_display_protocol::frame_time::observe_platform_now());
         let presentation = render.set_current_frame(
             Some(frame),
             Some(row_damage),
@@ -585,6 +582,9 @@ impl RenderApp {
                 target_moved,
                 old_cursor_rect,
             })
+        } else if Self::cursor_blinked_off(render) {
+            // The cursor's paint is off; its target stays the IME's anchor.
+            None
         } else {
             render.cursor.clear_target();
             render.clear_ime_preedit();
@@ -592,12 +592,18 @@ impl RenderApp {
         }
     }
 
+    /// RENDER's frame has its active cursor blinked off, not gone: IME
+    /// state stands (`FrameGlyphBuffer::cursor_blinked_off`).
+    pub(super) fn cursor_blinked_off(render: &GuiFrameRenderState) -> bool {
+        render.compositor.current_frame.as_ref().is_some_and(|frame| frame.cursor_blinked_off)
+    }
+
     fn sync_frame_window_cursor(
         window_state: &mut GuiFrameWindowState,
         cursor_config: CursorConfigSnapshot,
     ) -> Option<CursorSyncOutcome> {
         let cursor_sync = Self::sync_render_cursor(&mut window_state.render, cursor_config);
-        if window_state.render.cursor.target_cloned().is_none() {
+        if window_state.render.cursor.target_cloned().is_none() && !Self::cursor_blinked_off(&window_state.render) {
             window_state.reset_ime_cursor_area();
         }
         cursor_sync
@@ -934,7 +940,7 @@ impl RenderApp {
                                 cursor_trail_fade_enabled,
                                 update_transient_effects,
                             );
-                        } else {
+                        } else if !Self::cursor_blinked_off(&window_state.render) {
                             window_state.reset_ime_cursor_area();
                         }
                         if let Some(transition) = outcome.presentation {
@@ -1170,9 +1176,10 @@ impl RenderApp {
                 |cursor| cursor.apply_config(cursor_config),
                 romacs_display_protocol::frame_time::observe_platform_now(),
             );
+            let blinked_off = Self::cursor_blinked_off(primary_frame);
             if let Some(cursor_sync) = cursor_sync {
                 self.update_ime_cursor_area_if_needed(&cursor_sync.target);
-            } else {
+            } else if !blinked_off {
                 if let Some(window_state) = self.frame_windows.primary_window_mut() {
                     window_state.reset_ime_cursor_area()
                 };

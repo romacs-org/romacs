@@ -382,10 +382,7 @@ impl Vm {
         }
         self.discard_buffer_from_window(buffer, v)?;
         let w = self.window_mut(v)?;
-        let id = w.id;
         w.buffer = buffer;
-        self.display_state.forget_rows(id);
-        let w = self.window_mut(v)?;
         w.end_distance = 0;
         w.end_valid = false;
         // GNU resets margins when KEEP-MARGINS is nil

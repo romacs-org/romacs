@@ -37,7 +37,6 @@ pub(super) fn through_composition_ring(
     composition_view: &wgpu::TextureView,
     frame: &mut crate::core::frame_glyphs::FrameGlyphBuffer,
     inputs: &FrameDrawInputs<'_>,
-    cursor_visible: bool,
     accept_derived_effects: bool,
     pane_blits: &[PaneBlit],
 ) -> Result<(), super::surface::FrameRenderFailure> {
@@ -48,7 +47,7 @@ pub(super) fn through_composition_ring(
         composition.view(),
         frame,
         inputs,
-        cursor_visible,
+        true,
         false,
     )?;
 
@@ -107,7 +106,7 @@ pub(super) fn through_composition_ring(
         render,
         composition_view,
         frame,
-        cursor_visible,
+        true,
         inputs.animated_cursor,
         inputs.child_frame_style,
         inputs.scroll_indicators_enabled,
@@ -160,7 +159,6 @@ pub(super) fn onto_target(
     composition_view: &wgpu::TextureView,
     frame: &mut crate::core::frame_glyphs::FrameGlyphBuffer,
     inputs: &FrameDrawInputs<'_>,
-    cursor_visible: bool,
     accept_derived_effects: bool,
 ) -> Result<(), super::surface::FrameRenderFailure> {
     super::render_frame_window_contents(
@@ -170,7 +168,7 @@ pub(super) fn onto_target(
         composition_view,
         frame,
         inputs,
-        cursor_visible,
+        true,
         true,
     )?;
     let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
