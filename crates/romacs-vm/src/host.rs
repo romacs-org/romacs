@@ -286,6 +286,16 @@ fn confined(path: &Path, error: &io::Error) {
     }
 }
 
+/// Whether a query of PATH is keyed. A relative PATH resolves against the
+/// working directory, so its query is a P read instead.
+fn keyed_path(path: &Path, kind: &str) -> bool {
+    if path.is_relative() {
+        p_read(Fact::CurrentDir, format!("working directory, for {kind} {}", bytes(path)));
+        return false;
+    }
+    true
+}
+
 /// Record a K fact: KIND with FIELDS and the current site.
 pub(crate) fn record(kind: &str, fields: Json) {
     with_build(|b| {
@@ -365,11 +375,15 @@ fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
             errno(e)
         }
     };
-    record("file-read", json!({"path": path_json(path), "result": result}));
+    if keyed_path(path, "read") {
+        record("file-read", json!({"path": path_json(path), "result": result}));
+    }
 }
 
 fn probed(kind: &str, path: &Path, result: Json) {
-    record("probe", json!({"probe": kind, "path": path_json(path), "result": result}));
+    if keyed_path(path, kind) {
+        record("probe", json!({"probe": kind, "path": path_json(path), "result": result}));
+    }
 }
 
 /// The facts of a stat that Lisp can observe.
@@ -538,7 +552,9 @@ pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
         }
         Err(e) => {
             confined(path, &e);
-            record("file-read", json!({"path": path_json(path), "result": errno(&e)}));
+            if keyed_path(path, "read") {
+                record("file-read", json!({"path": path_json(path), "result": errno(&e)}));
+            }
             Err(e)
         }
     }
@@ -638,10 +654,13 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
     }
     let path = path.as_ref();
     match result {
-        Ok(entries) => Ok(ReadDir(entries, Some(Listing { path: path_json(path), names: Vec::new(), end: None }))),
+        Ok(entries) if keyed_path(path, "listing") => Ok(ReadDir(entries, Some(Listing { path: path_json(path), names: Vec::new(), end: None }))),
+        Ok(entries) => Ok(ReadDir(entries, None)),
         Err(e) => {
             confined(path, &e);
-            record("dir-list", json!({"path": path_json(path), "open": errno(&e)}));
+            if keyed_path(path, "listing") {
+                record("dir-list", json!({"path": path_json(path), "open": errno(&e)}));
+            }
             Err(e)
         }
     }
@@ -711,7 +730,9 @@ pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let result = std::fs::canonicalize(&path);
     if building() {
         let observed = match &result { Ok(p) => path_json(p), Err(e) => errno(e) };
-        record("canon", json!({"path": path_json(path.as_ref()), "result": observed}));
+        if keyed_path(path.as_ref(), "canonicalize") {
+            record("canon", json!({"path": path_json(path.as_ref()), "result": observed}));
+        }
     }
     result
 }
@@ -775,8 +796,116 @@ pub fn case_insensitive(path: &Path, classify: fn(&Path) -> Result<bool, &'stati
     let result = classify(path);
     MODE.with(|m| m.set(Mode::Build));
     let observed = match result { Ok(answer) => json!(answer), Err(reason) => json!({"error": reason}) };
-    record("case", json!({"path": path_json(path), "result": observed}));
+    if keyed_path(path, "case probe") {
+        record("case", json!({"path": path_json(path), "result": observed}));
+    }
     result
+}
+
+// Replay.
+
+/// The bytes a record's `encoded` field holds.
+fn decoded(field: &Json) -> Option<Vec<u8>> {
+    if let Some(text) = field.as_str() {
+        return Some(text.as_bytes().to_vec());
+    }
+    let hex = field["hex"].as_str()?;
+    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// The record a keyed RECORD's query makes now, its site aside: the host's
+/// present answer to the same question, asked the same way (§6.4). None for
+/// a record that asks the host nothing. CASE answers a case probe.
+pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> Option<Json> {
+    let kind = record["kind"].as_str()?;
+    let path = || decoded(&record["path"]).map(|bytes| PathBuf::from(OsString::from_vec(bytes)));
+    use std::os::unix::ffi::OsStringExt;
+    let saved = (mode(), BUILD.with(|b| b.borrow_mut().take()));
+    enter_build(Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] });
+    begin_recipe();
+    let asked = (|| -> Option<()> {
+        match kind {
+            "file-read" => { let _ = read_file(path()?); }
+            "probe" => match record["probe"].as_str()? {
+                "Exists" => { probe(Probe::Exists, path()?); }
+                "IsFile" => { probe(Probe::IsFile, path()?); }
+                "IsDir" => { probe(Probe::IsDir, path()?); }
+                "stat" => { let _ = metadata(path()?); }
+                "lstat" => { let _ = symlink_metadata(path()?); }
+                "fstat" | "open" => { if let Ok(input) = open_input(path()?, 0) { let _ = input.stat(); } }
+                "readlink" => { let _ = read_link(path()?); }
+                "entry-type" => {
+                    let path = path()?;
+                    let observed = match std::fs::symlink_metadata(&path) {
+                        Ok(m) => json!(if m.is_symlink() { "symlink" } else if m.is_dir() { "dir" } else if m.is_file() { "file" } else { "other" }),
+                        Err(e) => errno(&e),
+                    };
+                    probed("entry-type", &path, observed);
+                }
+                "statvfs" => { let _ = statvfs(&std::ffi::CString::new(path()?.into_os_string().into_vec()).ok()?); }
+                access => {
+                    let mut words = access.strip_prefix("access ")?.split(' ');
+                    let mode = words.next()?.parse().ok()?;
+                    let ids = match words.next()? { "Effective" => Ids::Effective, "Real" => Ids::Real, _ => return None };
+                    let _ = self::access(&std::ffi::CString::new(path()?.into_os_string().into_vec()).ok()?, mode, ids);
+                }
+            },
+            "dir-list" => {
+                if let Ok(entries) = read_dir(path()?) {
+                    let read = if record["terminal"] == "stopped" { record["names"].as_array()?.len() } else { usize::MAX };
+                    entries.take(read).for_each(drop);
+                }
+            }
+            "canon" => { let _ = canonicalize(path()?); }
+            "env" => {
+                let name = decoded(&record["name"])?;
+                match record["form"].as_str()? {
+                    "host" => { getenv(std::str::from_utf8(&name).ok()?); }
+                    "process" => lisp_env(EnvList::Process, &name),
+                    "initial" => lisp_env(EnvList::Initial, &name),
+                    "explicit" => lisp_env(EnvList::Explicit, &name),
+                    _ => return None,
+                }
+            }
+            "host" => match record["fact"].as_str()? {
+                "exe" => { let _ = current_exe(); }
+                "uid" => { uid(); }
+                "euid" => { euid(); }
+                "system-name" => { let _ = system_name(); }
+                "processors Current" => { processors(Processors::Current); }
+                "processors Online" => { processors(Processors::Online); }
+                "processors All" => { processors(Processors::All); }
+                _ => return None,
+            },
+            "user-db" => {
+                let key = &record["key"];
+                if let Some(uid) = key["uid"].as_u64() {
+                    let _ = user_by_uid(uid as u32, 1 << 16);
+                } else if let Some(gid) = key["gid"].as_u64() {
+                    let _ = group_by_gid(gid as u32, 1 << 16);
+                } else {
+                    let _ = user_by_name(&std::ffi::CString::new(decoded(&key["name"])?).ok()?, 1 << 16);
+                }
+            }
+            "case" => { let _ = case_insensitive(&path()?, case); }
+            _ => return None,
+        }
+        Some(())
+    })();
+    let trace = leave_build();
+    MODE.with(|m| m.set(saved.0));
+    BUILD.with(|b| *b.borrow_mut() = saved.1);
+    asked?;
+    let mut answer = trace?["records"].as_array()?.iter()
+        .find(|r| r["kind"] == record["kind"] && r["probe"] == record["probe"] && r["fact"] == record["fact"])?.clone();
+    answer.as_object_mut()?.remove("site");
+    Some(answer)
+}
+
+/// Whether RECORD is a keyed query restore must ask again: the other kinds
+/// say what the build did, not what the host answered.
+pub fn keyed(record: &Json) -> bool {
+    matches!(record["kind"].as_str(), Some("file-read" | "probe" | "dir-list" | "canon" | "env" | "host" | "user-db" | "case"))
 }
 
 // Process facts.
@@ -1088,10 +1217,68 @@ pub fn temp_file(template: &Path) -> io::Result<(PathBuf, File)> {
 // calls elsewhere (read, write, poll, fcntl, ioctl, the termios calls, fsync,
 // close, waitpid, shutdown, accept) act only on what these returned.
 
-/// Every child process starts from a Command made here.
+/// Every child process starts from a Command made here. A world process
+/// runs without address randomization; its children run with it again.
 pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     effect(|| format!("run {}", String::from_utf8_lossy(program.as_ref().as_bytes())))?;
-    Ok(Command::new(program))
+    let mut command = Command::new(program);
+    if unrandomized() {
+        use std::os::unix::process::CommandExt;
+        // personality(2) only: safe between fork and exec.
+        unsafe { command.pre_exec(|| { set_personality(false); Ok(()) }) };
+    }
+    Ok(command)
+}
+
+const ADDR_NO_RANDOMIZE: libc::c_ulong = 0x0040000;
+
+/// Whether this process runs without address-space randomization.
+pub fn unrandomized() -> bool {
+    let persona = unsafe { libc::personality(0xffff_ffff) };
+    persona >= 0 && (persona as libc::c_ulong & ADDR_NO_RANDOMIZE) != 0
+}
+
+fn set_personality(unrandomized: bool) {
+    let persona = unsafe { libc::personality(0xffff_ffff) };
+    if persona >= 0 {
+        let persona = persona as libc::c_ulong;
+        let wanted = if unrandomized { persona | ADDR_NO_RANDOMIZE } else { persona & !ADDR_NO_RANDOMIZE };
+        unsafe { libc::personality(wanted) };
+    }
+}
+
+/// Run this executable again in place, without address randomization, with
+/// ARGS and ENV: a world process maps code where its image expects it.
+/// Returns only the error when the exec fails.
+pub fn exec_unrandomized(args: &[OsString], env: &[(OsString, OsString)]) -> io::Error {
+    use std::os::unix::process::CommandExt;
+    let mut command = Command::new("/proc/self/exe");
+    command.args(args).env_clear().envs(env.iter().map(|(n, v)| (n, v)));
+    if let Some(name) = std::env::args_os().next() {
+        command.arg0(name);
+    }
+    set_personality(true);
+    let error = command.exec();
+    set_personality(false);
+    error
+}
+
+/// A command that starts without address randomization, as a world builder
+/// must, whatever this process runs with.
+pub fn unrandomized_command(program: impl AsRef<OsStr>) -> io::Result<Command> {
+    use std::os::unix::process::CommandExt;
+    effect(|| format!("run {}", String::from_utf8_lossy(program.as_ref().as_bytes())))?;
+    let mut command = Command::new(program);
+    unsafe { command.pre_exec(|| { set_personality(true); Ok(()) }) };
+    Ok(command)
+}
+
+/// Remove NAME from this process's environment, before any other thread
+/// starts: world processes take their own markers out of it.
+pub fn unset_env(name: &str) {
+    // The world markers are read and removed while the process is single
+    // threaded, at the start of main.
+    unsafe { std::env::remove_var(name) };
 }
 
 /// kill(2): SIGNAL to PID, a process group when negative. Signal 0 asks

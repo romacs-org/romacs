@@ -43,6 +43,11 @@ pub struct Jobs {
 }
 
 impl Jobs {
+    /// No job and no worker: nothing of this process's threads.
+    pub(crate) fn is_idle(&self) -> bool {
+        self.jobs.is_empty() && self.workers.is_empty() && self.wake.is_none()
+    }
+
     /// Wake the embedder's wait when a job completes, so it need not poll.
     pub fn set_wake(&mut self, wake: Wake) { self.wake = Some(wake); }
 

@@ -126,6 +126,10 @@ pub(crate) struct Table {
 }
 
 impl Table {
+    /// No channel and no child left to reap.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.channels.is_empty() && self.deleted.is_empty()
+    }
     pub(crate) fn insert(&mut self, channel: Channel) -> u64 {
         self.next += 1;
         self.channels.insert(self.next, channel);

@@ -15,6 +15,8 @@ const EXECUTE: u64 = 1 << 0;
 const WRITE_FILE: u64 = 1 << 1;
 const READ_FILE: u64 = 1 << 2;
 const READ_DIR: u64 = 1 << 3;
+const REMOVE_FILE: u64 = 1 << 5;
+const MAKE_REG: u64 = 1 << 8;
 const TRUNCATE: u64 = 1 << 14;
 
 #[repr(C)]
@@ -39,6 +41,16 @@ fn handled(abi: i64) -> u64 {
 /// each of `list_roots`, write each file of WRITE, nothing else. A root that
 /// does not exist is skipped.
 pub fn confine(read: &[PathBuf], write: &[PathBuf]) -> io::Result<()> {
+    restrict(read, write, None)
+}
+
+/// [`confine`] for a world builder: it may also create, replace and remove
+/// files directly in STORE, where it publishes.
+pub fn confine_publishing(read: &[PathBuf], store: &Path) -> io::Result<()> {
+    restrict(read, &[], Some(store))
+}
+
+fn restrict(read: &[PathBuf], write: &[PathBuf], store: Option<&Path>) -> io::Result<()> {
     let abi = unsafe { libc::syscall(libc::SYS_landlock_create_ruleset, std::ptr::null::<RulesetAttr>(), 0, CREATE_RULESET_VERSION) };
     if abi < 1 {
         return Err(io::Error::last_os_error());
@@ -58,6 +70,9 @@ pub fn confine(read: &[PathBuf], write: &[PathBuf]) -> io::Result<()> {
     }
     for path in write {
         allow(&ruleset, path, WRITE_FILE | (handled & TRUNCATE))?;
+    }
+    if let Some(store) = store {
+        allow(&ruleset, store, READ_FILE | READ_DIR | WRITE_FILE | REMOVE_FILE | MAKE_REG | (handled & TRUNCATE))?;
     }
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
         return Err(io::Error::last_os_error());

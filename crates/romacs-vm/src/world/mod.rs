@@ -24,6 +24,8 @@
 //! unfenced variable changes. Calls are observed through the backtrace's
 //! token counter (`Backtrace::observe`).
 pub mod arena;
+pub mod image;
+pub mod store;
 pub mod sandbox;
 
 use crate::data::Object;
@@ -107,6 +109,26 @@ impl Vm {
             self.fence_mut().random = true;
         }
         host::begin_recipe();
+    }
+
+    /// Lift the fence once the build has checked it (§5 step 4): every
+    /// fenced variable gets back the redirect the fence kept, so no build
+    /// redirect is ever captured.
+    pub fn world_lift(&mut self) {
+        let Some(fence) = self.fence.take() else { return };
+        for (slot, cell) in fence.cells {
+            self.variable_redirects[slot] = cell.redirect;
+        }
+    }
+
+    /// Drop the values restore rebuilds before the capture collection
+    /// (§5 step 5): the environment lists, with the strings they share.
+    pub fn world_normalize(&mut self) {
+        for name in ["process-environment", "initial-environment", "exec-path"] {
+            let slot = self.slot(name);
+            self.slots[slot].value = Value::NIL;
+        }
+        self.environment_snapshot = None;
     }
 
     /// A top-level form of a loaded file ends: a re-seed form's variable is

@@ -284,6 +284,13 @@ pub(crate) struct RootSet {
     slots: RefCell<Vec<Weak<AtomicU64>>>,
 }
 
+impl RootSet {
+    /// No embedder handle is live.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.slots.borrow().iter().all(|slot| slot.strong_count() == 0)
+    }
+}
+
 impl Default for RootSet {
     fn default() -> Self {
         Self {
