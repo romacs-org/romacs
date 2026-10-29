@@ -41,6 +41,7 @@ use super::{arena, image};
 use crate::{Vm, host};
 use serde_json::{Value as Json, json};
 use std::ffi::OsString;
+use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
 
 pub const FORMAT: &str = "romacs-world 2";
@@ -120,8 +121,17 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
         }
     }
     let digest: [u8; 32] = digest.finalize().into();
-    let _ = host::create_dir_all(store.join("ids")).and_then(|()| host::write_store_file(&cached, hex(&digest)));
+    let _ = store_subdir(&store.join("ids")).and_then(|()| host::write_store_file(&cached, hex(&digest)));
     Ok(digest)
+}
+
+/// A directory DIR of the store's own, made 0700 if missing: private
+/// whatever the umask, as the store is.
+fn store_subdir(dir: &Path) -> std::io::Result<()> {
+    match host::create_dir(dir, 0o700) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        made => made,
+    }
 }
 
 /// A file's identity and change times, as the digest cache names it.
@@ -187,37 +197,39 @@ const MARKER_TEXT: &str = "romacs-world-store 1\n";
 /// no symlink, and neither $HOME nor `/` (`owned_store`).
 fn private_store(store: &Path) -> std::io::Result<()> {
     let home = host::getenv("HOME").map(PathBuf::from);
-    match host::symlink_metadata(store) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if let Some(parent) = store.parent() { host::create_dir_all(parent)?; }
-            host::create_dir(store, 0o700)?;
-            owned_store(store, home.as_deref())?;
-            return write_marker(store);
-        }
-        Err(e) => return Err(e),
-        Ok(_) => owned_store(store, home.as_deref())?,
+    // Made, with whatever is missing on the way, relative to directories
+    // checked on the way down.
+    let dir = host::open_store_dir(store, &trusted_roots(), true)?;
+    owned_store(&dir, store, home.as_deref())?;
+    if host::store_dir_is_empty(dir.as_fd())? {
+        return write_marker(&dir);
     }
-    if host::read_dir(store)?.next().is_none() {
-        return write_marker(store);
-    }
-    match marker_error(store) {
+    match marker_error(&dir) {
         None => Ok(()),
         Some(why) => Err(std::io::Error::other(format!("{} is no world store: {why}", store.display()))),
     }
 }
 
-/// Mark STORE as a world store: a new marker, never through a symlink.
-fn write_marker(store: &Path) -> std::io::Result<()> {
-    use std::io::Write;
-    host::open_store_file(store.join(MARKER), host::StoreOpen::New)?.write_all(MARKER_TEXT.as_bytes())
+/// Where a store's path is walked from (`host::open_store_dir`): the
+/// user's own directories.
+fn trusted_roots() -> Vec<PathBuf> {
+    ["XDG_CACHE_HOME", "HOME"].iter().filter_map(|name| host::getenv(name)).map(PathBuf::from).filter(|p| p.is_absolute()).collect()
 }
 
-/// Why STORE's marker is no valid one, or None when it is: opened without
-/// following a symlink, a regular file this user owns, of this format.
-fn marker_error(store: &Path) -> Option<String> {
+/// Mark the store DIR as a world store: a new marker, made in DIR itself,
+/// never through a symlink.
+fn write_marker(dir: &std::os::fd::OwnedFd) -> std::io::Result<()> {
+    use std::io::Write;
+    host::open_store_file_at(dir.as_fd(), MARKER, host::StoreOpen::New)?.write_all(MARKER_TEXT.as_bytes())
+}
+
+/// Why the store DIR's marker is no valid one, or None when it is: opened
+/// in DIR without following a symlink, a regular file this user owns, of
+/// this format.
+fn marker_error(dir: &std::os::fd::OwnedFd) -> Option<String> {
     use std::io::Read;
     use std::os::unix::fs::MetadataExt;
-    let mut file = match host::open_store_file(store.join(MARKER), host::StoreOpen::Read) {
+    let mut file = match host::open_store_file_at(dir.as_fd(), MARKER, host::StoreOpen::Read) {
         Ok(file) => file,
         Err(e) => return Some(format!("its {MARKER} cannot be opened as a file of its own: {e}")),
     };
@@ -232,30 +244,32 @@ fn marker_error(store: &Path) -> Option<String> {
     None
 }
 
-/// Refuse STORE unless it is a directory, no symlink, that this user owns
-/// and no one else may enter, and neither HOME nor `/`.
-fn owned_store(store: &Path, home: Option<&Path>) -> std::io::Result<()> {
+/// Refuse the store DIR, at STORE, unless this user owns it and no one
+/// else may enter, and it is neither HOME nor `/`.
+fn owned_store(dir: &std::os::fd::OwnedFd, store: &Path, home: Option<&Path>) -> std::io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let refuse = |why: &str| Err(std::io::Error::other(format!("world store {}: {why}", store.display())));
-    let meta = host::symlink_metadata(store)?;
+    let meta = host::file_metadata(&std::fs::File::from(dir.try_clone()?))?;
     if !meta.file_type().is_dir() {
         return refuse("not a directory");
     }
     if meta.uid() != host::euid() || meta.permissions().mode() & 0o777 != 0o700 {
         return refuse("not private to this user (0700)");
     }
-    let canonical = host::canonicalize(store)?;
-    if canonical == Path::new("/") || home.and_then(|h| host::canonicalize(h).ok()).is_some_and(|h| h == canonical) {
+    let same = |other: &Path| host::metadata(other).is_ok_and(|m| (m.dev(), m.ino()) == (meta.dev(), meta.ino()));
+    if same(Path::new("/")) || home.is_some_and(same) {
         return refuse("the home or root directory");
     }
     Ok(())
 }
 
-/// STORE, checked as `reset` and `prune` need it: owned, private, no
-/// symlink, not HOME or `/` (`owned_store`), and marked as a store.
+/// STORE, checked as `reset` and `prune` need it: reached by
+/// `host::open_store_dir` without making anything, owned, private, not
+/// HOME or `/` (`owned_store`), and marked as a store.
 fn checked_store(store: &Path, home: Option<&Path>) -> std::io::Result<()> {
-    owned_store(store, home)?;
-    match marker_error(store) {
+    let dir = host::open_store_dir(store, &trusted_roots(), false)?;
+    owned_store(&dir, store, home)?;
+    match marker_error(&dir) {
         None => Ok(()),
         Some(why) => Err(std::io::Error::other(format!("{} is not touched: {why}", store.display()))),
     }
@@ -549,7 +563,7 @@ impl World {
     /// read-only (§5 step 1). They persist, so a record naming them holds.
     fn pinned_dir(&self) -> std::io::Result<PathBuf> {
         let p = self.store.join("p");
-        host::create_dir_all(&p)?;
+        store_subdir(&p)?;
         for name in ["cwd", "tmp", "bin"] {
             if !host::probe(host::Probe::IsDir, p.join(name)) {
                 host::create_dir(p.join(name), 0o500)?;
@@ -1068,6 +1082,53 @@ mod tests {
     }
 
     #[test]
+    fn a_store_is_reached_only_through_directories_no_one_else_may_replace() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root = std::env::temp_dir().join(format!("romacs-store-{}-ancestors", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mode = |dir: &Path, mode: u32| std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        mode(&root, 0o700);
+        // Missing parents are made private, whatever the umask allows.
+        let made = root.join("made/a/b/store");
+        private_store(&made).unwrap();
+        for dir in [root.join("made"), root.join("made/a"), root.join("made/a/b"), made.clone()] {
+            assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o7777, 0o700, "{}", dir.display());
+        }
+        // An ancestor others may write, and not sticky: refused, nothing made.
+        let shared = root.join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        mode(&shared, 0o770);
+        let error = private_store(&shared.join("store")).unwrap_err().to_string();
+        assert!(error.contains("writable by others"), "{error}");
+        assert!(!shared.join("store").exists());
+        mode(&shared, 0o702);
+        assert!(private_store(&shared.join("store")).is_err());
+        assert!(!shared.join("store").exists());
+        // A sticky one, as /tmp is: others may not replace what is ours.
+        let sticky = root.join("sticky");
+        std::fs::create_dir(&sticky).unwrap();
+        mode(&sticky, 0o1777);
+        private_store(&sticky.join("store")).unwrap();
+        assert!(checked_store(&sticky.join("store"), None).is_ok());
+        // A symlinked ancestor: refused, and nothing made at its target.
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        mode(&elsewhere, 0o700);
+        symlink(&elsewhere, root.join("linked")).unwrap();
+        let error = private_store(&root.join("linked/store")).unwrap_err().to_string();
+        assert!(error.contains("symlink"), "{error}");
+        assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
+        // Nor are reset and prune led through one to a real store.
+        private_store(&elsewhere.join("store")).unwrap();
+        assert!(reset_in(&root.join("linked/store"), true, None).is_err());
+        assert!(World { store: root.join("linked/store"), key: [0; 32], recipe: vec![] }.prune_in(None).is_err());
+        assert!(elsewhere.join("store").join(MARKER).exists());
+        mode(&shared, 0o700);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn a_store_is_made_only_where_nothing_is_and_kept_only_with_a_valid_marker() {
         use std::os::unix::fs::{PermissionsExt, symlink};
         let dir = |name: &str| {
@@ -1086,7 +1147,7 @@ mod tests {
         let empty = dir("empty");
         private(&empty);
         private_store(&empty).unwrap();
-        assert!(marker_error(&empty).is_none());
+        assert!(checked_store(&empty, None).is_ok());
         // A directory holding anything without the marker, even only names
         // a store would have: refused, untouched.
         let unmarked = dir("unmarked");

@@ -28,6 +28,7 @@ const PAUSED: &str = "pruning_waits_for_a_launcher_between_opening_and_locking";
 const PAUSED_BUILDER: &str = "pruning_waits_for_a_builder_between_opening_and_locking";
 const CONCURRENT: &str = "concurrent_first_launches_share_one_builder_and_say_they_wait";
 const PAGES: &str = "capture_reads_no_heap_byte_so_a_page_zeroed_by_a_store_is_data";
+const UMASK: &str = "a_store_made_under_umask_000_is_private_all_the_way_down";
 
 /// Test NAME in a process of its own, in ROLE, with STORE.
 fn child_of(name: &str, role: &str, store: &Path) -> Command {
@@ -46,6 +47,12 @@ fn act_in_role() -> bool {
     let store = std::env::var_os("ROMACS_WORLD_IMAGE_TEST_STORE").map(PathBuf::from);
     match std::env::var(ROLE).as_deref() {
         Ok("launch") => launch(&store.unwrap()),
+        Ok("open-launch") => {
+            // As a user whose umask lets everyone write: the builder this
+            // spawns inherits it.
+            unsafe { libc::umask(0) };
+            launch(&store.unwrap())
+        }
         Ok("probe") => probe(),
         Ok("pages") => pages(&store.unwrap()),
         _ => return false,
@@ -547,5 +554,37 @@ fn a_launch_on_a_directory_that_is_no_store_boots_from_source_and_says_why() {
     let said = outcome(&mut child_of(FOREIGN, "launch", &store));
     assert!(said.contains(r#""mode":"source""#) && said.contains("is no world store"), "{said}");
     assert_eq!(std::fs::read_dir(&store).unwrap().count(), 1, "nothing written in it");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn a_store_made_under_umask_000_is_private_all_the_way_down() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(UMASK);
+    std::fs::set_permissions(&scratch, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let store = scratch.join("cache/romacs/worlds");
+    assert_eq!(outcome(&mut child_of(UMASK, "open-launch", &store)), restored());
+    // Each directory made on the way, and the store's own, 0700; no file
+    // in it readable or writable by anyone else.
+    for dir in ["cache", "cache/romacs", "cache/romacs/worlds"] {
+        let mode = std::fs::metadata(scratch.join(dir)).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o700, "{dir}: {mode:o}");
+    }
+    let mut pending = vec![store.clone()];
+    let mut seen = 0;
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            assert_eq!(meta.permissions().mode() & 0o077, 0, "{}: {:o}", path.display(), meta.permissions().mode());
+            if meta.is_dir() {
+                pending.push(path);
+            }
+            seen += 1;
+        }
+    }
+    assert!(seen > 3, "a built store: {seen} entries");
     let _ = std::fs::remove_dir_all(&scratch);
 }
