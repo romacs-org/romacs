@@ -33,3 +33,14 @@ fn a_lambda_list_is_stored_and_called_with_dynamic_binding() {
         assert_eq!(eval(&mut vm, source), expected, "{source}");
     }
 }
+
+/// funcall_lambda's argument walk with the list as the function datum:
+/// a bad arglist is invalid-function, a wrong count
+/// wrong-number-of-arguments (eval-tests.el eval-bad-specbind).
+#[test]
+fn a_lambda_list_with_a_bad_arglist_or_count_signals_as_gnu() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    assert_eq!(vm.eval_source(r#"(list (condition-case e (funcall '(lambda ((a b) 3.15) 84) 5 4) (error e)) (condition-case e (eval '(funcall '(lambda ((a b) 3.15) 84) 5 4)) (error e)) (condition-case e (funcall '(lambda (x) x)) (error e)) (condition-case e (funcall '(lambda (x) x) 1 2) (error e)) (condition-case e (funcall '(lambda (&rest) 1)) (error e)) (condition-case e (funcall '(lambda (&optional &optional) 1)) (error e)) (condition-case e (funcall '(lambda (a . b) 1) 1) (error e)) (condition-case e (apply '(lambda (a 5) 1) '(1)) (error e)) (funcall '(lambda (a &optional b &rest c) (list a b c)) 1 2 3 4) (condition-case e (mapcar '(lambda (&rest &optional) 1) '(1)) (error e)))"#).unwrap().display().unwrap(),
+        r#"((invalid-function (lambda ((a b) 3.15) 84)) (invalid-function (lambda ((a b) 3.15) 84)) (wrong-number-of-arguments (lambda (x) x) 0) (wrong-number-of-arguments (lambda (x) x) 2) (invalid-function (lambda (&rest) 1)) (invalid-function (lambda (&optional &optional) 1)) (invalid-function (lambda (a . b) 1)) (invalid-function (lambda (a 5) 1)) (1 2 (3 4)) (invalid-function (lambda (&rest &optional) 1)))"#);
+}

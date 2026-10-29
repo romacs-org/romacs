@@ -2328,6 +2328,9 @@ unsafe fn invoke_full(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
+            if let Some((condition, data)) = lambda_list_signal(e.vm, target, argc) {
+                return raise(e, condition, &data);
+            }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_invoke_full(e, r, pc, closure, start, argc),
                 None => Value::UNBOUND,
@@ -2770,6 +2773,9 @@ unsafe fn t2_dispatch(
         }
         if lambda_list(e, target) {
             enter_native(e, r, pc, target, start, argc);
+            if let Some((condition, data)) = lambda_list_signal(e.vm, target, argc) {
+                return raise(e, condition, &data);
+            }
             return match lambda_list_then(e, r, target) {
                 Some((r, closure)) => t2_dispatch(e, r, pc, closure, start, argc),
                 None => Value::UNBOUND,
@@ -3279,6 +3285,37 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
 #[inline(never)]
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
     unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
+}
+/// eval.c funcall_lambda's argument walk for a `(lambda ARGS . BODY)'
+/// list called with ARGC arguments: the signal it raises before the body
+/// runs, with the list itself as the function datum. A parameter that is
+/// not a symbol or a misplaced &optional or &rest is invalid-function; a
+/// missing required argument (met in order) or one too many is
+/// wrong-number-of-arguments.
+fn lambda_list_signal(vm: &mut Vm, list: Value, argc: usize) -> Option<(&'static str, Vec<Value>)> {
+    let (and_rest, and_optional) = (Value::reference(vm.slot("&rest") + 1, 7), Value::reference(vm.slot("&optional") + 1, 7));
+    let (_, tail) = vm.cons_pair(list).ok()?;
+    let (mut params, _) = vm.cons_pair(tail).ok()?;
+    let invalid = || Some(("invalid-function", vec![list]));
+    let arity = || Some(("wrong-number-of-arguments", vec![list, Value::integer(argc as i64).unwrap()]));
+    let (mut optional, mut rest, mut previous_rest, mut i) = (false, false, false, 0);
+    while let Ok((next, more)) = vm.cons_pair(params) {
+        if next.tag() != 7 && next != Value::NIL && next != Value::TRUE { return invalid() }
+        if next == and_rest {
+            if rest || previous_rest { return invalid() }
+            (rest, previous_rest) = (true, true);
+        } else if next == and_optional {
+            if optional || rest || previous_rest { return invalid() }
+            optional = true;
+        } else {
+            if rest { i = argc } else if i < argc { i += 1 } else if !optional { return arity() }
+            previous_rest = false;
+        }
+        params = more;
+    }
+    if params != Value::NIL || previous_rest { return invalid() }
+    if i < argc { return arity() }
+    None
 }
 /// GNU `(lambda ...)' list functions: a list headed by `lambda' whose cdr
 /// is a cons (funcall_lambda signals `invalid-function' otherwise).
