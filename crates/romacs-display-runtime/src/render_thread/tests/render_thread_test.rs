@@ -601,7 +601,6 @@ fn s1b_visible_cursor_poll_preserves_preedit_and_default_color_cycle() {
                 render.compositor.current_frame.as_ref().unwrap(),
                 &EffectsConfig::default(),
                 std::num::NonZeroU16::new(240).unwrap(),
-                true,
             ),
             std::num::NonZeroU16::new(24),
         );
@@ -615,7 +614,7 @@ fn cursor_color_cycle_cadence_follows_the_effective_frame_profile() {
     global.cursor_color_cycle.enabled = false;
     let frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
     assert_eq!(
-        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz, true),
+        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz),
         None
     );
 
@@ -624,7 +623,7 @@ fn cursor_color_cycle_cadence_follows_the_effective_frame_profile() {
     local.cursor_color_cycle.fps = FrameRate::new(12).unwrap();
     let frame = frame_with_cursor_effects(Some(local), CursorStyle::FilledBox);
     assert_eq!(
-        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz, true),
+        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz),
         std::num::NonZeroU16::new(12)
     );
 
@@ -634,7 +633,7 @@ fn cursor_color_cycle_cadence_follows_the_effective_frame_profile() {
         CursorStyle::FilledBox,
     );
     assert_eq!(
-        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz, true),
+        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz),
         None
     );
 }
@@ -643,16 +642,18 @@ fn cursor_color_cycle_cadence_follows_the_effective_frame_profile() {
 fn cursor_color_cycle_cadence_pauses_when_the_cycle_cannot_change_pixels() {
     let display_60_hz = std::num::NonZeroU16::new(60).unwrap();
     let global = EffectsConfig::default();
-    let filled = frame_with_cursor_effects(None, CursorStyle::FilledBox);
+    // blink-cursor-mode's off phase publishes no cursor (internal-show-cursor).
+    let mut off = frame_with_cursor_effects(None, CursorStyle::FilledBox);
+    off.window_cursors.clear();
     assert_eq!(
-        RenderApp::cursor_color_cycle_cadence(&filled, &global, display_60_hz, false),
+        RenderApp::cursor_color_cycle_cadence(&off, &global, display_60_hz),
         None,
-        "a blinked-off filled cursor has no visible cycle work"
+        "a frame whose cursor is shown off has no visible cycle work"
     );
 
     let hollow = frame_with_cursor_effects(None, CursorStyle::Hollow);
     assert_eq!(
-        RenderApp::cursor_color_cycle_cadence(&hollow, &global, display_60_hz, true),
+        RenderApp::cursor_color_cycle_cadence(&hollow, &global, display_60_hz),
         None,
         "the renderer deliberately does not color-cycle hollow cursors"
     );
@@ -684,14 +685,14 @@ fn cursor_color_cycle_cadence_covers_every_rendered_window_cursor() {
     frame.set_window_cursor_effects(decorative_window, decorative);
 
     assert_eq!(
-        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz, true),
+        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz),
         std::num::NonZeroU16::new(24),
         "demand must use the fastest visible cursor rendered in a split frame"
     );
 
     frame.active_cursor_mut().unwrap().style = CursorStyle::Hollow;
     assert_eq!(
-        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz, true),
+        RenderApp::cursor_color_cycle_cadence(&frame, &global, display_60_hz),
         std::num::NonZeroU16::new(24),
         "a hollow selected cursor must not suppress a cycling decorative cursor"
     );
@@ -704,6 +705,8 @@ fn cursor_color_cycle_state_translates_to_an_exact_scheduler_demand() {
     let display_60_hz = std::num::NonZeroU16::new(60).unwrap();
     let global = EffectsConfig::default();
     let frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
+    let mut off = frame.clone();
+    off.window_cursors.clear();
     let expected = FrameDemand {
         invalidation: Invalidation::CompositeOnly {
             layers: LayerMask::CURSOR_EFFECTS,
@@ -713,16 +716,16 @@ fn cursor_color_cycle_state_translates_to_an_exact_scheduler_demand() {
     };
 
     assert_eq!(
-        RenderApp::cursor_color_cycle_demand(&frame, &global, display_60_hz, true, true),
+        RenderApp::cursor_color_cycle_demand(&frame, &global, display_60_hz, true),
         Some(expected)
     );
     assert_eq!(
-        RenderApp::cursor_color_cycle_demand(&frame, &global, display_60_hz, false, true),
+        RenderApp::cursor_color_cycle_demand(&off, &global, display_60_hz, true),
         None,
-        "blinked-off cursor state must retract standing demand"
+        "a cursor shown off must retract standing demand"
     );
     assert_eq!(
-        RenderApp::cursor_color_cycle_demand(&frame, &global, display_60_hz, true, false),
+        RenderApp::cursor_color_cycle_demand(&frame, &global, display_60_hz, false),
         None,
         "unfocused windows must retract standing demand"
     );
@@ -741,6 +744,8 @@ fn cursor_color_cycle_reconciliation_drives_attributed_frames_and_retracts() {
     let display_60_hz = std::num::NonZeroU16::new(60).unwrap();
     let global = EffectsConfig::default();
     let frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
+    let mut off = frame.clone();
+    off.window_cursors.clear();
     let tick = |at| FrameTick {
         frame_time: at,
         target_presentation_time: at,
@@ -755,7 +760,6 @@ fn cursor_color_cycle_reconciliation_drives_attributed_frames_and_retracts() {
             Some(&frame),
             &global,
             display_60_hz,
-            true,
             now,
         ),
         PacingAction::RequestRedraw
@@ -777,7 +781,6 @@ fn cursor_color_cycle_reconciliation_drives_attributed_frames_and_retracts() {
             Some(&frame),
             &global,
             display_60_hz,
-            true,
             now.plus(std::time::Duration::from_millis(1)),
         ),
         PacingAction::WakeAt(_)
@@ -786,14 +789,13 @@ fn cursor_color_cycle_reconciliation_drives_attributed_frames_and_retracts() {
         RenderApp::reconcile_cursor_color_cycle_demand(
             &mut coordinator,
             id,
-            Some(&frame),
+            Some(&off),
             &global,
             display_60_hz,
-            false,
             now.plus(std::time::Duration::from_millis(2)),
         ),
         PacingAction::Sleep,
-        "a blinked-off cursor must withdraw its standing deadline"
+        "a cursor shown off must withdraw its standing deadline"
     );
     assert!(coordinator.active_reasons(id).is_empty());
     assert_eq!(coordinator.next_wake_deadline_unserviced(), None);
@@ -805,7 +807,6 @@ fn cursor_color_cycle_reconciliation_drives_attributed_frames_and_retracts() {
             Some(&frame),
             &global,
             display_60_hz,
-            true,
             now.plus(std::time::Duration::from_millis(3)),
         ),
         PacingAction::RequestRedraw
@@ -818,7 +819,6 @@ fn cursor_color_cycle_reconciliation_drives_attributed_frames_and_retracts() {
             Some(&frame),
             &global,
             display_60_hz,
-            true,
             now.plus(std::time::Duration::from_millis(4)),
         ),
         PacingAction::WakeAt(_)
@@ -831,7 +831,6 @@ fn cursor_color_cycle_reconciliation_drives_attributed_frames_and_retracts() {
             Some(&frame),
             &global,
             display_60_hz,
-            true,
             now.plus(std::time::Duration::from_millis(5)),
         ),
         PacingAction::Sleep,

@@ -127,6 +127,9 @@ pub struct WindowSnapshot {
     pub tab_width: u32,
     /// How a line wider than the window shows.
     pub wrap: LineWrap,
+    /// GNU's `w->cursor_off_p': `internal-show-cursor' hid this window's
+    /// cursor, as blink-cursor-mode's timer does every other blink.
+    pub cursor_off: bool,
 }
 
 /// GNU's `it->line_wrap': `truncate-lines' (or a partial-width window

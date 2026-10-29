@@ -132,6 +132,11 @@ fn recursive_edit(cx) -> Step { enter(cx, "romacs--recursive-edit", vec![], DONE
 defsubr! { name = "romacs--run-host-command", gnu = "keyboard.c:1158", effect = Global,
 fn run_host_command(cx) -> Step { enter(cx, "romacs--host-command", vec![], DONE) }}
 
+// read_char's special events (focus-in, focus-out), for an embedder's loop:
+// `romacs--special-event' of the Lisp half runs the event's binding.
+defsubr! { name = "romacs--run-special-event", gnu = "keyboard.c:3113", effect = Global,
+fn run_special_event(cx, event: Value) -> Step { enter(cx, "romacs--special-event", vec![event], DONE) }}
+
 defsubr! { name = "top-level", gnu = "keyboard.c:1199", effect = Global,
 fn top_level(cx) -> Step { enter(cx, "romacs--top-level", vec![], DONE) }}
 

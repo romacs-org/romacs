@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "bb3a52ad5c8ed47ce1ddee62b17ba82a6200db2d61d3a955619eef2333c35683",
+    "input_hash": "3cd6cf14c61fe7288abe8fe18ba5e2dd0fa42ae0cf3ada9d05a1a1d22a35518c",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4436
+    "vm2_universe": 4444
   },
   "schema": 2,
   "vm2": {
-    "count": 1017,
+    "count": 1019,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -424,6 +424,7 @@
       "internal-complete-buffer",
       "internal-default-signal-process",
       "internal-get-lisp-face-attribute",
+      "internal-handle-focus-in",
       "internal-lisp-face-attribute-values",
       "internal-lisp-face-p",
       "internal-make-lisp-face",
@@ -746,6 +747,7 @@
       "romacs--restore-excursion",
       "romacs--restore-restriction",
       "romacs--run-host-command",
+      "romacs--run-special-event",
       "romacs--save-excursion",
       "romacs--save-restriction",
       "romacs--secure-hash",

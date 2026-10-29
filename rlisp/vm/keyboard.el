@@ -543,6 +543,17 @@ Return nil at the end of an executing keyboard macro."
   (while (romacs--command-loop-step))
   nil)
 
+(defun romacs--special-event (event)
+  "keyboard.c read_char for a special EVENT such as (focus-in FRAME): run
+its `special-event-map' binding at once, outside any key sequence, with
+EVENT as its keys.  Value: whether EVENT ran a command.  A VM without
+GNU's preloaded Lisp has the bindings but not frame.el's handlers."
+  (let ((command (lookup-key special-event-map (vector (car-safe event)))))
+    (when (commandp command)
+      (setq last-input-event event)
+      (command-execute command nil (vector event) t)
+      t)))
+
 (defun romacs--host-command ()
   "keyboard.c command_loop_2 one command at a time, for a host whose own
 loop calls this whenever input waits (the GUI): read one key sequence,

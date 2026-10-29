@@ -45,7 +45,7 @@ fn unused_faces_do_not_multiply_unicode_bindings() {
     let snapshot = romacs_layout_input::WindowSnapshot {
         id: 1, width: 800, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: romacs_layout_input::TextSlice { utf8: "Καλημέρα Жизнь".into(), face_runs: vec![] },
-        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(),
+        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false,
         faces: vec![face; 24],
     };
     let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
@@ -77,4 +77,31 @@ fn selected_minibuffer_shows_the_active_cursor_at_point() {
     assert_eq!(cursor.x, 9.0 * col as f32, "after \"Name: abc\"");
     let main_cursor = frame.window_cursors.iter().find(|c| c.window_id.get() == main as i64).unwrap();
     assert_eq!(main_cursor.style, CursorStyle::Hollow);
+}
+
+/// `internal-show-cursor' (dispnew.c, GNU's blink-cursor-mode) turns one
+/// window's cursor off: the frame publishes none for it, the other window
+/// keeps its own, and turning it on publishes it again.
+#[test]
+fn a_cursor_shown_off_is_not_published() {
+    let mut vm = Vm::new();
+    let face = vm.display_default_face().unwrap();
+    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    vm.set_frame_geometry(800, 600, line, col).unwrap();
+    vm.eval_source("(setq a (selected-window)) (set-window-new-pixel a 400) (setq b (split-window-internal a 400 t 0.5)) (set-buffer (get-buffer-create \"blink\")) (insert \"abc\") (set-window-buffer a (current-buffer)) (set-window-buffer b (current-buffer)) (setq mode-line-format '(\"%b\")) (select-window a)").unwrap();
+    let rum = Color::from_pixel(0x9099d9);
+    let cursors = |vm: &mut Vm| {
+        let snap = vm.frame_snapshot(800, 600).unwrap();
+        let (selected, other) = (snap.windows[0].snapshot.id, snap.windows[1].snapshot.id);
+        let (frame, _) = romacs_layout2::layout_frame_with_cursors(&snap, 1, selected, rum).unwrap();
+        let ids: Vec<i64> = frame.window_cursors.iter().map(|c| c.window_id.get()).collect();
+        (ids, selected as i64, other as i64)
+    };
+    let (ids, selected, other) = cursors(&mut vm);
+    assert_eq!(ids, [selected, other]);
+    vm.eval_source("(internal-show-cursor nil nil)").unwrap();
+    assert_eq!(vm.eval_source("(internal-show-cursor-p)").unwrap().display().unwrap(), "nil");
+    assert_eq!(cursors(&mut vm).0, [other], "the selected window's cursor is off");
+    vm.eval_source("(internal-show-cursor nil t)").unwrap();
+    assert_eq!(cursors(&mut vm).0, [selected, other]);
 }

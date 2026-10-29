@@ -10,7 +10,7 @@ fn scene() -> WindowSnapshot {
         buffer_version: 1,
         mode_line: None,
         mode_line_face: FaceHandle(0),
-        vscroll_px: 0, tab_width: 8, wrap: Default::default(),
+        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false,
         text: TextSlice {
             utf8: "Ωμέγα Hello\nΔ".into(),
             face_runs: vec![FaceRun {

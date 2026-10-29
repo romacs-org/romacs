@@ -148,6 +148,18 @@ fn internal_char_font(cx, position: Value; optional ch: Value) {
     // initial terminal has no glyph codes (VM2 frames, VM2-WIN5).
     Ok(Value::NIL)
 }}
+defsubr! { name = "internal-handle-focus-in", gnu = "keyboard.c:7891", effect = Reads,
+fn internal_handle_focus_in(cx, event: Value) {
+    // GNU queues a switch-frame event when the focused frame is not the
+    // selected one; a VM2 session has one frame (`frame-list'), always
+    // selected, so there is never one to queue.
+    let focus_in = cx.intern("focus-in");
+    let frame = cx.pair(event).filter(|&(head, _)| head == focus_in).and_then(|(_, rest)| cx.pair(rest)).map(|(frame, _)| frame);
+    if !frame.is_some_and(|frame| cx.windows().frame_p(frame) == Value::TRUE) {
+        return Err(Fault::Error("Invalid focus-in event".into()));
+    }
+    Ok(Value::NIL)
+}}
 defsubr! { name = "internal-show-cursor", gnu = "dispnew.c:7428", effect = Global,
 fn internal_show_cursor(cx, window: Value, show: Value) {
     cx.windows().set_cursor_off(window, show == Value::NIL)?;

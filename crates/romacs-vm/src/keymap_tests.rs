@@ -137,3 +137,18 @@ fn keymap_roots_survive_counted_compaction() {
     assert!(vm.heap_stats().collections > before, "fixture must actually collect");
     check(&mut vm, "(list (lookup-key m [97 98]) (key-binding [97 98]) (lookup-key (key-binding [f1]) [97 98]))", "([\"payload\"] [\"payload\"] [\"payload\"])");
 }
+
+/// keyboard.c read_char runs a special event's `special-event-map'
+/// binding at once with the event as its keys; focus-in and focus-out are
+/// bound as keys_of_keyboard binds them, and `internal-handle-focus-in'
+/// accepts only a focus-in event naming a frame.
+#[test]
+fn focus_events_run_their_special_event_bindings() {
+    let mut vm = Vm::new();
+    // A bare VM installs its keymaps on first keymap use (`ensure_keymaps').
+    check(&mut vm, "(progn (current-global-map) (list (lookup-key special-event-map [focus-in]) (lookup-key special-event-map [focus-out])))", "(handle-focus-in handle-focus-out)");
+    check(&mut vm, "(romacs--run-special-event (list 'focus-in (selected-frame)))", "nil");
+    check(&mut vm, "(defun handle-focus-in (event) (interactive \"e\") (internal-handle-focus-in event) (setq focused (list (car event) (framep (car (cdr event))) (eq last-input-event event))))
+                    (list (romacs--run-special-event (list 'focus-in (selected-frame))) focused)", "(t (focus-in t t))");
+    check(&mut vm, "(list (romacs--run-special-event '(no-such-event)) (condition-case e (internal-handle-focus-in '(focus-out nil)) (error e)))", "(nil (error \"Invalid focus-in event\"))");
+}

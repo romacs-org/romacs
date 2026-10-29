@@ -17,7 +17,7 @@ pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
     let snapshot = WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![] }, mode_line: None,
-        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), faces: vec![face.clone()],
+        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face.clone()],
     };
     let frame = layout(&snapshot, 1)?;
     Ok((frame.char_height.ceil() as u32, frame.char_width.ceil() as u32))
@@ -84,7 +84,9 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         }
         // Windows with a mode line always own a cursor; the minibuffer (no mode
         // line) only while it is the selected window, i.e. a prompt is active.
-        let end = append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id).map(|(id, color)| (id == placed.snapshot.id, color)))?;
+        // A window whose cursor `internal-show-cursor' turned off has none.
+        let owns = |&(id, _): &(u64, Color)| (placed.snapshot.mode_line.is_some() || id == placed.snapshot.id) && !placed.snapshot.cursor_off;
+        let end = append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?;
         ends.push((placed.snapshot.id, end));
     }
     Ok((frame, ends))

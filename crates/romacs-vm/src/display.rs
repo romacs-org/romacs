@@ -620,6 +620,7 @@ impl Vm {
             faces,
             tab_width: self.buffer_tab_width(buffer)?,
             wrap: self.window_line_wrap(window, buffer)?,
+            cursor_off: self.window(window)?.cursor_off,
         };
         // The owned last publication also covers mutation paths with specialised
         // fast dispatch (point moves, regexp, yank), without retaining GC handles.
