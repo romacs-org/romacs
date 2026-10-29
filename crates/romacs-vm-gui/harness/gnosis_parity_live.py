@@ -576,8 +576,7 @@ WORKFLOWS = {
         # History shows in its own buffer, *Gnosis History*.
         key('history', [T('H')], MODE_IS("gnosis-dashboard-history-mode")),
         key('history-back', [T('q')], DASHBOARD_READY),
-        # Line motion last: GNU's next-line needs vertical-motion and
-        # current-bidi-paragraph-direction, which t3/daily-use-gui-fixes adds.
+        # Line motion and scrolling over the themata list.
         key('themata-menu-2', [T('t')], POPUP_HAS('"View all themata"')),
         key('all-themata-2', [T('a')], f'(and {MODE_IS("gnosis-dashboard-themata-mode")} {DASHBOARD_RENDERED})'),
         key('next-line', [C('n')]),
@@ -613,12 +612,8 @@ WORKFLOWS = {
     # Adding a basic thema through its Org draft, then finding and editing it.
     'add-edit': [
         dict(name='add', **mx('gnosis-add-thema'), ready=f'(and (minibufferp (window-buffer (selected-window))) {PROMPT_IS(lisp_string("Select type: "))})'),
-        # settle: M-x's binding suggestion sits for 2s in a timer, and in
-        # Romacs that read swallows the next key until t3/daily-use-gui-fixes
-        # (unread-command-events before host input) lands.
         typed('type', 'basic', [K('Return')],
-              f'(and {BUFFER_IS(lisp_string("*Gnosis NEW*"))} (save-excursion (forward-line -1) (looking-at-p "\\*\\* Keimenon")))',
-              settle=3),
+              f'(and {BUFFER_IS(lisp_string("*Gnosis NEW*"))} (save-excursion (forward-line -1) (looking-at-p "\\*\\* Keimenon")))'),
         # Org's heading motion to the Answer heading, then to the line below.
         typed('keimenon', 'Parity keimenon λ', [C('c'), C('n'), C('c'), C('n'), C('e'), C('f')],
               '(save-excursion (forward-line -1) (looking-at-p "\\*\\* Answer"))'),
