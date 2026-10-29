@@ -146,8 +146,6 @@ fn reseed_forms_restate_their_gnu_sources() {
         ("emacs-lisp/find-func.el",
          "(defvar find-function-C-source-directory\n  (let ((dir (expand-file-name \"src\" source-directory)))\n    (if (file-accessible-directory-p dir) dir))",
          "(let ((dir (expand-file-name \"src\" source-directory)))\n             (if (file-accessible-directory-p dir) dir))"),
-        ("cus-start.el", "(put symbol 'standard-value (list standard))",
-         "(put 'exec-path 'standard-value (list (list 'quote (default-value 'exec-path))))"),
     ] {
         let gnu = std::fs::read_to_string(root.join("gnu-lisp").join(file)).unwrap();
         assert!(gnu.contains(source), "{file} no longer has {source}");

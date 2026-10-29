@@ -191,10 +191,7 @@ and `after-init-time' its clock."
      (setq find-function-C-source-directory
            (let ((dir (expand-file-name "src" source-directory)))
              (if (file-accessible-directory-p dir) dir)))
-     "GNU dumps no find-func.el, so each process computes the directory, against its default-directory, when find-func loads")
-    (cus-start "cus-start.el"
-     (put 'exec-path 'standard-value (list (list 'quote (default-value 'exec-path))))
-     "cus-start.el saves exec-path's value from this process's PATH as its standard value"))
+     "GNU dumps no find-func.el, so each process computes the directory, against its default-directory, when find-func loads"))
   "Load-time forms outside startup that read a per-process fact.
 Each entry is (FEATURE FILE FORM REASON): FILE's FORM, which
 `romacs-world-restart' evaluates again when FEATURE is loaded.")
