@@ -69,6 +69,7 @@ pub mod coordinates;
 mod data;
 mod bool_vector;
 mod lstring;
+mod let_forms;
 mod symkey;
 mod display;
 mod overlay_order;
@@ -2195,6 +2196,9 @@ impl Vm {
                         Ok(r)
                     }
                     "let" | "let*" if !rest.is_empty() => {
+                        if let Some(form) = let_forms::malformed_let(head == "let*", &rest[0]) {
+                            return self.expr(b, &form);
+                        }
                         let saved = b.env.clone();
                         let saved_specials = b.local_specials.clone();
                         let mut pending = vec![];
