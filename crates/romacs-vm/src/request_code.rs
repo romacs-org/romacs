@@ -12,6 +12,7 @@ pub(super) struct RequestCode {
     compiled: Vec<usize>,
     since_collection: usize,
 }
+romacs_snapshot::snapshot_struct!(RequestCode { permanent, image_caches, live, free, free_caches, compiling, compiled, since_collection });
 
 impl Vm {
     pub(super) fn require_live_function(&self, function: usize) -> Result<()> {

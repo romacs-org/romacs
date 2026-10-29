@@ -53,6 +53,13 @@ pub(crate) enum Fwd {
     /// sees it; the kind queries see the redirect it keeps.
     Fence(u32),
 }
+romacs_snapshot::snapshot_enum!(Fwd {
+    Fwd::Obj(f0) => (f0),
+    Fwd::Bool(f0) => (f0),
+    Fwd::Int(f0) => (f0),
+    Fwd::Buffer(f0) => (f0),
+    Fwd::Fence(f0) => (f0),
+});
 
 /// GNU `enum Lisp_Fwd_Predicate`, checked by `store_symval_forwarding` for a
 /// non-nil value stored into a per-buffer variable. Only the predicates of
@@ -672,6 +679,7 @@ pub(crate) struct Forwarded {
     buffer_vars: Vec<usize>,
     by_name: HashMap<&'static str, Fwd>,
 }
+romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, defaults, object_vars, buffer_vars, by_name });
 
 impl Default for Forwarded {
     fn default() -> Self {
@@ -757,6 +765,7 @@ impl Forwarded {
 /// local here": the buffer sees the default.
 #[derive(Clone, Default)]
 pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<String>, Option<Value>);
+romacs_snapshot::snapshot_tuple!(PerBuffer(f0, f1, f2, f3, f4));
 
 /// Native scalar state, not Lisp Values: safe through moving collection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -766,6 +775,11 @@ pub(crate) enum VisitedModtime {
     Missing,
     Known { seconds: i64, nanos: i64, size: Option<u64> },
 }
+romacs_snapshot::snapshot_enum!(VisitedModtime {
+    VisitedModtime::Unknown => (),
+    VisitedModtime::Missing => (),
+    VisitedModtime::Known { seconds, nanos, size } => (seconds, nanos, size),
+});
 
 pub(crate) fn file_identity(path: &str) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;

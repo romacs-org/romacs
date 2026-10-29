@@ -50,6 +50,9 @@ type NameSet<K> = std::collections::HashSet<K, NameState>;
 /// foldhash's own `RandomState` reads a seed each process draws anew.
 #[derive(Clone)]
 pub(crate) struct NameState(foldhash::fast::SeedableRandomState);
+// Its own seed is a number, and its shared seed the one `default` leaked
+// to the heap, never foldhash's global one in a writable static.
+unsafe impl romacs_snapshot::SnapshotSafe for NameState {}
 
 impl Default for NameState {
     fn default() -> Self {
@@ -137,6 +140,7 @@ pub type Result<T> = std::result::Result<T, String>;
 /// Opaque compiler identity. Source APIs cannot construct one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GeneratedName(u64);
+romacs_snapshot::snapshot_tuple!(GeneratedName(f0));
 impl std::fmt::Display for GeneratedName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
@@ -164,6 +168,18 @@ pub enum Form {
     #[doc(hidden)]
     Object(handle::FormObject),
 }
+romacs_snapshot::snapshot_enum!(Form {
+    Form::Int(f0) => (f0),
+    Form::Float(f0) => (f0),
+    Form::Sym(f0) => (f0),
+    Form::Generated(f0) => (f0),
+    Form::List(f0) => (f0),
+    Form::String(f0) => (f0),
+    Form::Bytes(f0) => (f0),
+    Form::Vector(f0) => (f0),
+    Form::Dotted(f0, f1) => (f0, f1),
+    Form::Object(f0) => (f0),
+});
 impl Form {
     pub fn from_json(v: serde_json::Value) -> Result<Self> {
         match v {
@@ -227,6 +243,7 @@ impl Form {
 /// Two-bit fixnums and three-bit reference tags; private indices move at collection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Value(u64);
+romacs_snapshot::snapshot_tuple!(Value(f0));
 impl Value {
     pub const NIL: Self = Self(0);
     pub const TRUE: Self = Self(2);
@@ -826,6 +843,34 @@ enum Op {
     LeaveProtect(usize),
     ResumeExit,
 }
+romacs_snapshot::snapshot_enum!(Op {
+    Op::Const(f0, f1) => (f0, f1),
+    Op::Move(f0, f1) => (f0, f1),
+    Op::Cell(f0) => (f0),
+    Op::ReadCell(f0, f1) => (f0, f1),
+    Op::WriteCell(f0, f1) => (f0, f1),
+    Op::Global(f0, f1) => (f0, f1),
+    Op::SetGlobal(f0, f1) => (f0, f1),
+    Op::Bind(f0, f1) => (f0, f1),
+    Op::Unbind(f0) => (f0),
+    Op::Jump(f0) => (f0),
+    Op::Unless(f0, f1) => (f0, f1),
+    Op::Closure(f0, f1, f2) => (f0, f1, f2),
+    Op::Define(f0, f1) => (f0, f1),
+    Op::DefineMacro(f0, f1) => (f0, f1),
+    Op::DeclareSpecial(f0) => (f0),
+    Op::Call(f0, f1, f2, f3) => (f0, f1, f2, f3),
+    Op::Direct(f0, f1, f2, f3, f4) => (f0, f1, f2, f3, f4),
+    Op::ResolveHead(f0, f1) => (f0, f1),
+    Op::Prepared(f0, f1, f2, f3, f4, f5) => (f0, f1, f2, f3, f4, f5),
+    Op::Return(f0) => (f0),
+    Op::Catch(f0, f1, f2) => (f0, f1, f2),
+    Op::Condition(f0, f1, f2) => (f0, f1, f2),
+    Op::PopHandlers(f0) => (f0),
+    Op::Protect(f0, f1, f2) => (f0, f1, f2),
+    Op::LeaveProtect(f0) => (f0),
+    Op::ResumeExit => (),
+});
 impl Op {
     // Register operands only: slots, function ids, branch targets, and arities
     // are different coordinate spaces. Argument windows stay contiguous because
@@ -900,6 +945,7 @@ struct Function {
     /// `code` is empty while this is present; every frame entry forces it.
     lazy: Option<Arc<LazyBody>>,
 }
+romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy });
 /// The unexpanded body of a function defined in GNU's non-eager load regime
 /// (src/lread.c:2183: `internal-macroexpand-for-load' not yet fbound).
 ///
@@ -923,6 +969,7 @@ struct LazyBody {
     /// compiled strictly, so a failure signals instead of deferring again.
     deferred: bool,
 }
+romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, local_specials, pending_specials, dynamic_scope, deferred });
 #[derive(Clone, Copy)]
 struct Binding {
     reg: usize,
@@ -933,6 +980,10 @@ enum Name {
     Source(String),
     Generated(GeneratedName),
 }
+romacs_snapshot::snapshot_enum!(Name {
+    Name::Source(f0) => (f0),
+    Name::Generated(f0) => (f0),
+});
 impl Name {
     fn source(&self) -> Option<&str> {
         match self {
@@ -999,6 +1050,7 @@ struct Cache {
     version: u64,
     target: Value,
 }
+romacs_snapshot::snapshot_struct!(Cache { version, target });
 struct Slot {
     value: Value,
     function: Value,
@@ -1017,6 +1069,7 @@ struct Slot {
     /// Object-owned declaration flag for uninterned symbols.
     declared_special: bool,
 }
+romacs_snapshot::snapshot_struct!(Slot { value, function, version, plist, local, explicit_local, declared_special });
 impl Slot {
     const fn new() -> Self {
         Self {
@@ -1045,12 +1098,20 @@ enum VariableRedirect {
     /// in runtime storage (`forwarded.rs`), never in the symbol's value cell.
     Forwarded(forwarded::Fwd),
 }
+romacs_snapshot::snapshot_enum!(VariableRedirect {
+    VariableRedirect::Plain => (),
+    VariableRedirect::Localized => (),
+    VariableRedirect::LocalizedForwarded(f0) => (f0),
+    VariableRedirect::Alias(f0) => (f0),
+    VariableRedirect::Forwarded(f0) => (f0),
+});
 struct Closure {
     function: usize,
     captures: Vec<Value>,
     metadata: Vec<Value>,
     document: Value,
 }
+romacs_snapshot::snapshot_struct!(Closure { function, captures, metadata, document });
 
 /// Source interning is compiler-owned; cold faults intern diagnostics. Hot calls use slots and guards.
 #[cfg(test)]
@@ -1064,10 +1125,20 @@ pub(crate) enum SpecialKind {
     FileLocal = 1,
     Global = 2,
 }
+romacs_snapshot::snapshot_enum!(SpecialKind {
+    SpecialKind::Lexical => (),
+    SpecialKind::FileLocal => (),
+    SpecialKind::Global => (),
+});
 /// One recent_keys entry: an input character or event symbol, or the
 /// command it ran, which `recent-keys' shows as (nil . COMMAND).
 #[derive(Clone)]
 pub(crate) enum RecentKey { Char(i64), Event(String), Command(String) }
+romacs_snapshot::snapshot_enum!(RecentKey {
+    RecentKey::Char(f0) => (f0),
+    RecentKey::Event(f0) => (f0),
+    RecentKey::Command(f0) => (f0),
+});
 /// lossage_limit's default.
 pub(crate) const RECENT_KEYS: usize = 300;
 
@@ -1076,6 +1147,12 @@ pub(crate) const RECENT_KEYS: usize = 300;
 /// (t or 0), or a rule string.
 #[derive(Clone)]
 pub(crate) enum LocalZone { Process, Wall, Utc, Rule(String) }
+romacs_snapshot::snapshot_enum!(LocalZone {
+    LocalZone::Process => (),
+    LocalZone::Wall => (),
+    LocalZone::Utc => (),
+    LocalZone::Rule(f0) => (f0),
+});
 
 pub struct Vm {
     charsets: charset::Registry,
@@ -1240,6 +1317,119 @@ pub struct Vm {
     /// Embedder `Rooted` handles; see handle.rs.
     rooted: handle::RootSet,
 }
+// What a world image may hold of a VM (`world::safe`): every field, each
+// SnapshotSafe or, at rest, checked by `world_quiescent`: the hosts, the
+// children and jobs, the mapped code image, the fence, the lowered code
+// (function pointers), the suspended engines (pointers into it), the
+// compiled patterns (their SIMD searchers hold function pointers) and the
+// idle clock reading (process-relative).
+romacs_snapshot::snapshot_struct!(Vm {
+    charsets,
+    standard_case_tables,
+    command_point,
+    change_prepared,
+    kernel_stack,
+    change_slots,
+    case_symbols_slot,
+    print_number_index,
+    undo_list_slot,
+    display_state,
+    window_state,
+    world_version,
+    #[cfg(test)] variable_read_probes,
+    #[cfg(test)] speculative_hits,
+    #[cfg(test)] inline_hits,
+    #[cfg(test)] disable_inline,
+    #[cfg(test)] speculative_misses,
+    regexp,
+    execution_fatal,
+    loader,
+    source_cache,
+    macros,
+    expanding,
+    compile_depth,
+    eval_depth,
+    dynamic_scope,
+    propagated_escape,
+    signal_handlers,
+    backtrace,
+    propagated_escape_hooked,
+    propagated_eval_depth,
+    propagate_next,
+    keymap_generation,
+    environment_snapshot,
+    trapped,
+    doc_file,
+    terminal_bindings,
+    pending_specials,
+    file_specials,
+    seed_file_specials,
+    lazy_regime,
+    defer_expansion_errors,
+    keep_captures,
+    expanded_macros,
+    expanded_symbols,
+    buffer_slot,
+    multibyte_slot,
+    truncate_lines_slot,
+    defun_start_epoch,
+    variable_redirects,
+    forwarded,
+    fixnum_slots,
+    local_binding_slots,
+    free_local_binding_slots,
+    gc_stats,
+    gc_retained,
+    gc_threshold,
+    gc_floor,
+    names,
+    initial_obarray,
+    symbol_names,
+    obarray_symbol_names,
+    permanent_symbol_names,
+    native_case_roots,
+    obarray_free_slots,
+    generated_symbols,
+    generated_slots,
+    slots,
+    specials,
+    functions,
+    request_code,
+    register_width,
+    closures,
+    cells,
+    cell_pairs,
+    random,
+    mktime_offset,
+    tz_rule_dstoff,
+    local_zone,
+    recent_keys,
+    conses,
+    objects,
+    caches,
+    stack,
+    external_roots,
+    keymap_filters,
+    keymap_pending_filter,
+    dynamic,
+    conditions,
+    rooted,
+
+} at_rest {
+    regexp_cache,
+    suspended_code,
+    host_input,
+    layout_host,
+    terminal_host,
+    subprocesses,
+    process_jobs,
+    image,
+    fence,
+    execution,
+    spare_programs,
+    idle_since,
+});
+
 impl Default for Vm {
     fn default() -> Self {
         Self::new()

@@ -10,6 +10,7 @@ pub struct HeapStats {
     pub live_bytes: usize,
     pub capacity_bytes: usize,
 }
+romacs_snapshot::snapshot_struct!(HeapStats { collections, allocations, reclaimed, live_objects, live_bytes, capacity_bytes });
 
 /// What a retention probe measured at each workload size.
 #[derive(Clone, Debug, Default)]

@@ -10,12 +10,17 @@ pub enum Bias {
     Left,
     Right,
 }
+romacs_snapshot::snapshot_enum!(Bias {
+    Bias::Left => (),
+    Bias::Right => (),
+});
 /// Stable identity; stale handles cannot alias a reused slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Anchor {
     slot: u32,
     generation: u32,
 }
+romacs_snapshot::snapshot_struct!(Anchor { slot, generation });
 const NIL: u32 = u32::MAX;
 #[derive(Clone, Copy)]
 struct Node {
@@ -26,6 +31,7 @@ struct Node {
     lazy: u32, // pending wrapping add for descendants (not self)
     flags: u32,
 }
+romacs_snapshot::snapshot_struct!(Node { l, r, p, pos, lazy, flags });
 #[derive(Clone)]
 pub struct AnchorTree {
     n: Vec<Node>,
@@ -38,6 +44,7 @@ pub struct AnchorTree {
     births: Vec<u64>,
     born: u64,
 }
+romacs_snapshot::snapshot_struct!(AnchorTree { n, root, free, len, extent, births, born });
 #[inline]
 fn prio(i: u32) -> u32 {
     let mut x = i.wrapping_mul(0x9E37_79B9) ^ 0x85eb_ca6b;

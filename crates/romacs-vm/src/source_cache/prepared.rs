@@ -8,6 +8,7 @@ pub(super) struct Prepared {
     pub(super) function: usize,
     guard: Option<Entry>,
 }
+romacs_snapshot::snapshot_struct!(Prepared { source, function, guard });
 impl Vm {
     fn prepared_function(&mut self, source: &str) -> Result<Prepared> {
         let (value, used) = self.read_source_raw(source)?.ok_or("lambda required")?;

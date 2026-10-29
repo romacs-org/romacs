@@ -10,6 +10,7 @@ pub(super) struct Loader {
     completed_files: usize,
     completed_forms: usize,
 }
+romacs_snapshot::snapshot_struct!(Loader { propagate, active, steps, completed_files, completed_forms });
 impl Vm {
     pub(super) fn source_string_if(&self, v: Value) -> Option<&str> {
         if v.tag() != 0 {

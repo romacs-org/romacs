@@ -27,6 +27,7 @@ pub mod arena;
 pub mod image;
 pub mod store;
 pub mod sandbox;
+pub mod safe;
 
 use crate::data::Object;
 use crate::forwarded::Fwd;
@@ -138,6 +139,10 @@ impl Vm {
     pub fn world_normalize(&mut self) {
         self.execution = crate::threaded::Program::default();
         self.spare_programs.clear();
+        // Compiled patterns' SIMD searchers hold function pointers; each is
+        // compiled again at its first search.
+        self.regexp_cache = Default::default();
+        self.idle_since = None;
         for name in ["process-environment", "initial-environment", "exec-path"] {
             let slot = self.slot(name);
             self.slots[slot].value = Value::NIL;

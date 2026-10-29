@@ -8,7 +8,10 @@
 //!
 //! Capture is refused, naming the field, unless the VM is at rest (Q) and
 //! holds nothing of the process beyond its heap (X): no host attachment,
-//! child, job, code image or local time-zone rule.
+//! child, job, code image, lowered code, compiled pattern or local
+//! time-zone rule, and no object holding a resource (`Object::
+//! foreign_resource`). These are the fields and variants the VM's
+//! `SnapshotSafe` listing names as at rest (`world::safe`).
 use super::arena::{self, ImageFields};
 use crate::{LocalZone, Value, Vm};
 use std::sync::atomic::Ordering;
@@ -16,7 +19,7 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 17] = [
+        let checks: [(&str, bool); 22] = [
             ("stack", self.stack.is_empty()),
             ("dynamic", self.dynamic.is_empty()),
             ("eval_depth", self.eval_depth == 0),
@@ -34,9 +37,17 @@ impl Vm {
             ("local_zone", matches!(self.local_zone, LocalZone::Process)),
             ("fence", self.fence.is_none()),
             ("rooted", self.rooted.is_empty()),
+            ("execution", self.execution.holds_nothing()),
+            ("spare_programs", self.spare_programs.is_empty()),
+            ("regexp_cache", self.regexp_cache.is_empty()),
+            ("idle_since", self.idle_since.is_none()),
+            ("suspended_code", self.suspended_code.is_empty()),
         ];
-        match checks.iter().find(|(_, ok)| !ok) {
-            Some((field, _)) => Err(format!("world capture refused: {field} is not at rest")),
+        if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
+            return Err(format!("world capture refused: {field} is not at rest"));
+        }
+        match self.objects.iter().enumerate().find_map(|(at, object)| Some((at, object.foreign_resource()?))) {
+            Some((at, what)) => Err(format!("world capture refused: object {at} is {what}, a resource of this process")),
             None => Ok(()),
         }
     }
@@ -76,7 +87,7 @@ impl Vm {
 /// process's heap; nothing else allocates while the image is written, and
 /// the process exits after it. CARRY travels as it is, unencoded: the key
 /// binds the embedder, so its restorer knows CARRY's type.
-pub fn capture<T: 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
+pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     vm.world_quiescent()?;
     let counters = [crate::expand::next_generated(), 0, 0, 0];
     let root = Box::into_raw(Box::new((vm, carry))) as usize;
@@ -90,7 +101,7 @@ pub fn capture<T: 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]
 /// KEY, with the process-global counters it depends on restored. Taken once.
 ///
 /// T must be the type `capture` carried: KEY binds the embedder that made it.
-pub fn restore<T: 'static>(key: &[u8; 32]) -> Option<(Vm, T)> {
+pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option<(Vm, T)> {
     use std::sync::atomic::AtomicBool;
     static TAKEN: AtomicBool = AtomicBool::new(false);
     let fields = arena::mapped_image().filter(|fields| fields.key == *key)?;

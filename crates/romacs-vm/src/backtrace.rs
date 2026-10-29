@@ -8,6 +8,7 @@ pub(super) struct Activation {
     args: std::ops::Range<usize>,
     pub dynamic: usize,
 }
+romacs_snapshot::snapshot_struct!(Activation { token, function, resolved, args, dynamic });
 #[derive(Default)]
 pub(super) struct Backtrace {
     pub frames: Vec<Activation>,
@@ -20,6 +21,7 @@ pub(super) struct Backtrace {
     /// Symbols are stable slot IDs, so the record needs no tracing.
     observed: Option<(usize, Vec<usize>)>,
 }
+romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, observed });
 impl Backtrace {
     pub fn enter(
         &mut self,

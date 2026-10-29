@@ -44,6 +44,7 @@ pub(super) struct DisplayState {
     building_band: bool,
     diagnostics: std::cell::RefCell<Vec<String>>,
 }
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, font_selection_order, font_alternatives, previous, segments, version, hosted, width, height, building_band, diagnostics });
 impl DisplayState {
     /// The theme with every pending face edit applied: built once for them
     /// all, or, when that fails, one edit at a time, so an edit the theme

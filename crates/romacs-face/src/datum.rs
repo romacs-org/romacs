@@ -45,6 +45,7 @@ pub const MAX_BYTES: usize = 16 << 20;
 /// Raw `Datum` is an untrusted construction language, never a face API input.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoundedDatum(Datum);
+romacs_snapshot::snapshot_tuple!(BoundedDatum(f0));
 
 impl BoundedDatum {
     pub fn new(raw: &Datum) -> Result<Self, DatumError> {
@@ -131,6 +132,16 @@ pub enum Datum {
     /// A non-empty improper list `(a b . tail)`; `tail` is never a list.
     Dotted(Vec<Datum>, Box<Datum>),
 }
+romacs_snapshot::snapshot_enum!(Datum {
+    Datum::Nil => (),
+    Datum::T => (),
+    Datum::Int(f0) => (f0),
+    Datum::Float(f0) => (f0),
+    Datum::Str(f0) => (f0),
+    Datum::Symbol(f0) => (f0),
+    Datum::List(f0) => (f0),
+    Datum::Dotted(f0, f1) => (f0, f1),
+});
 
 /// What a Lisp heap node looks like to the converter.
 ///

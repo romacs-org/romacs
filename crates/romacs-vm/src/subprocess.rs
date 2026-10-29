@@ -48,6 +48,7 @@ pub(crate) struct Process {
     pub nbytes_read: u64,
     pub readmax: usize,
 }
+romacs_snapshot::snapshot_struct!(Process { slots, serial, pid, alive, tick, update_tick, raw_status, kill_without_query, inherit_coding, pty_in, pty_out, nbytes_read, readmax });
 
 impl Process {
     pub(crate) fn new(serial: u64, readmax: usize) -> Self {

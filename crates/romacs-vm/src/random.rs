@@ -16,6 +16,7 @@ pub(crate) struct Random {
     front: usize,
     rear: usize,
 }
+romacs_snapshot::snapshot_struct!(Random { state, front, rear });
 
 impl Random {
     /// srandom (SEED).

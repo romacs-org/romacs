@@ -22,6 +22,7 @@ test-hooks = []
 fuzzing = []
 
 [dependencies]
+romacs-snapshot = { path = "../romacs-snapshot" }
 libc.workspace = true
 memchr.workspace = true
 num_enum.workspace = true

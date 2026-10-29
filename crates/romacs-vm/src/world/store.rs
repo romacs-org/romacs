@@ -166,7 +166,7 @@ impl World {
     /// are this process's arguments as a builder, which runs elsewhere, needs
     /// them: every path absolute. With WAIT a missing or stale world is
     /// built first, and the launch then boots from it.
-    pub fn launch<T: 'static>(&self, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool) -> Launch<T> {
+    pub fn launch<T: super::safe::SnapshotSafe + 'static>(&self, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool) -> Launch<T> {
         if building() {
             host::unset_env(BUILD_ENV);
             return Launch::Build;
@@ -303,7 +303,7 @@ impl World {
     /// printed, in its manifest. A build with any refusal publishes its
     /// manifest only, so launches boot from source until its records
     /// change. The image's length.
-    pub fn finish_build<T: 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
+    pub fn finish_build<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
         vm.world_check_inputs();
         let trace = host::leave_build().ok_or("no world build was recording")?;
         let records: Vec<&Json> = trace["records"].as_array().map(|r| r.iter().filter(|r| host::keyed(r)).collect()).unwrap_or_default();

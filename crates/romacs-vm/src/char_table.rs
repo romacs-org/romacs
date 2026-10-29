@@ -387,12 +387,17 @@ pub(super) enum CharTableSlot {
     Value(Value),
     Node(CharTableNodeHandle),
 }
+romacs_snapshot::snapshot_enum!(CharTableSlot {
+    CharTableSlot::Value(f0) => (f0),
+    CharTableSlot::Node(f0) => (f0),
+});
 
 pub(super) struct CharTableNode {
     pub(super) depth: usize,
     pub(super) min_char: usize,
     pub(super) slots: Vec<CharTableSlot>,
 }
+romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots });
 
 impl CharTableNode {
     pub(super) const WIDTHS: [usize; 4] = [65536, 4096, 128, 1];
@@ -568,6 +573,7 @@ pub(super) struct CharTable {
     pub parent: Value,
     pub extras: Vec<Value>,
 }
+romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras });
 
 // Lisp copy-sequence shares payload values, never native subdivision nodes.
 impl Clone for CharTable {

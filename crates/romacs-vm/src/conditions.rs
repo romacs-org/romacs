@@ -7,6 +7,7 @@ mod builtins;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct SymbolId(u64);
+romacs_snapshot::snapshot_tuple!(SymbolId(f0));
 impl SymbolId {
     pub(super) fn new(v: Value) -> Option<Self> {
         (v == Value::NIL || v == Value::TRUE || v.tag() == 7 && v != Value::UNBOUND)
@@ -22,10 +23,12 @@ pub(super) struct Entry {
     ancestry: Option<Vec<SymbolId>>,
     builtin: Option<(Vec<SymbolId>, &'static str)>,
 }
+romacs_snapshot::snapshot_struct!(Entry { properties, ancestry, builtin });
 #[derive(Default)]
 pub(super) struct Registry {
     pub(super) entries: HashMap<SymbolId, Entry>,
 }
+romacs_snapshot::snapshot_struct!(Registry { entries });
 impl Registry {
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         for entry in self.entries.values_mut() {

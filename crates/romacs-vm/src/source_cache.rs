@@ -16,6 +16,7 @@ pub struct SourceCacheStats {
     pub disk_hits: u64,
     pub direct: u64,
 }
+romacs_snapshot::snapshot_struct!(SourceCacheStats { hits, compilations, invalidations, disk_hits, direct });
 #[derive(Clone)]
 struct Entry {
     function: usize,
@@ -23,6 +24,7 @@ struct Entry {
     specials: Vec<(String, SpecialKind)>,
     calls: Vec<(usize, bool)>,
 }
+romacs_snapshot::snapshot_struct!(Entry { function, macros, specials, calls });
 #[derive(Default)]
 pub(super) struct SourceCache {
     entries: NameMap<String, Entry>,
@@ -31,6 +33,7 @@ pub(super) struct SourceCache {
     prepared: Vec<prepared::Prepared>,
     last_guard: Option<Entry>,
 }
+romacs_snapshot::snapshot_struct!(SourceCache { entries, stats, store, prepared, last_guard });
 fn key(source: &str) -> String {
     let mut hash = Sha256::new();
     hash.update(COMPILER.as_bytes());

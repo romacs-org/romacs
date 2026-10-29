@@ -184,6 +184,7 @@ impl<'r> From<&'r Rooted> for Arg<'r> {
 /// macro expansion inside the crate. Not constructible or readable outside.
 #[derive(Clone, Debug)]
 pub struct FormObject(pub(crate) Arc<Rooted>);
+romacs_snapshot::snapshot_tuple!(FormObject(f0));
 
 impl FormObject {
     pub(crate) fn new(vm: &Vm, value: Value) -> Self {
@@ -283,6 +284,7 @@ pub(crate) struct RootSet {
     id: u64,
     slots: RefCell<Vec<Weak<AtomicU64>>>,
 }
+romacs_snapshot::snapshot_struct!(RootSet { id, slots });
 
 impl RootSet {
     /// No embedder handle is live.
@@ -307,6 +309,7 @@ pub struct Rooted {
     slot: Arc<AtomicU64>,
     vm: u64,
 }
+romacs_snapshot::snapshot_struct!(Rooted { slot, vm });
 
 impl Rooted {
     pub fn get<'vm>(&self, vm: &'vm Vm) -> Result<Local<'vm>> {

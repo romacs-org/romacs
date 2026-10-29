@@ -34,7 +34,56 @@ pub(super) enum Object {
     HashTable(Box<hash::HashTable>),
     Obarray(Box<obarray::Obarray>),
 }
+romacs_snapshot::snapshot_enum!(Object {
+    Object::SyntaxTable(f0) => (f0),
+    Object::Float(f0) => (f0),
+    Object::Bignum(f0) => (f0),
+    Object::Window(f0) => (f0),
+    Object::Frame(f0) => (f0),
+    Object::Terminal(f0) => (f0),
+    Object::WindowConfiguration(f0) => (f0),
+    // At rest: `foreign_resource` refuses a live connection or statement,
+    // whose handles are SQLite's, in its own heap.
+    Object::Sqlite(f0) => (),
+    Object::Process(f0) => (f0),
+    Object::String(f0) => (f0),
+    Object::RawString(f0) => (f0),
+    Object::Vector(f0) => (f0),
+    Object::BoolVector(f0) => (f0),
+    Object::Record(f0) => (f0),
+    Object::CharTable(f0) => (f0),
+    Object::SubCharTable(f0) => (f0),
+    Object::MapKeymapCursor(f0) => (f0),
+    Object::Buffer(f0) => (f0),
+    Object::Marker(f0) => (f0),
+    Object::Overlay(f0) => (f0),
+    Object::Bytes(f0) => (f0),
+    Object::ByteBuffer(f0) => (f0),
+    Object::HashTable(f0) => (f0),
+    Object::Obarray(f0) => (f0),
+});
 const _: [(); 32] = [(); size_of::<Object>()];
+impl Object {
+    /// The resource of this process an object holds, which no other
+    /// process could use, named; None for data. Every variant is named
+    /// here, so a new one is classified before it compiles.
+    pub(super) fn foreign_resource(&self) -> Option<&'static str> {
+        match self {
+            Object::Sqlite(handle) => handle.is_live().then_some("a live sqlite object"),
+            // Its pipes, pty and child are the subprocess table's, which a
+            // VM at rest holds none of; a live process is one of them.
+            Object::Process(process) => process.alive.then_some("a live process"),
+            // The terminal's device is the terminal host's, which a VM at
+            // rest holds none of; the object is its parameters.
+            Object::Terminal(_) => None,
+            Object::SyntaxTable(_) | Object::Float(_) | Object::Bignum(_) | Object::Window(_) | Object::Frame(_)
+            | Object::WindowConfiguration(_) | Object::String(_) | Object::RawString(_) | Object::Vector(_)
+            | Object::BoolVector(_) | Object::Record(_) | Object::CharTable(_) | Object::SubCharTable(_)
+            | Object::MapKeymapCursor(_) | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::Bytes(_)
+            | Object::ByteBuffer(_) | Object::HashTable(_) | Object::Obarray(_) => None,
+        }
+    }
+}
 /// String slots contain valid UTF-8; RawString slots contain all other bytes.
 #[derive(Clone)]
 pub(super) struct LispString {
@@ -48,6 +97,7 @@ pub(super) struct LispString {
     #[cfg(test)]
     pub(super) flag_scanned: std::cell::Cell<usize>,
 }
+romacs_snapshot::snapshot_struct!(LispString { bytes, chars, flags, properties, cursors, #[cfg(test)] scanned, #[cfg(test)] flag_scanned });
 const MULTIBYTE: u8 = 1;
 const ASCII: u8 = 2;
 const UTF8: u8 = 4;

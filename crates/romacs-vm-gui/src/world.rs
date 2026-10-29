@@ -21,6 +21,7 @@ use std::path::PathBuf;
 pub struct Carry {
     pub loadup: crate::loadup::Loadup,
 }
+romacs_snapshot::snapshot_struct!(Carry { loadup });
 
 /// The source of the launch font's face, and its size in points, from
 /// ROMACS_GUI_FONT and ROMACS_GUI_FONT_SIZE.
