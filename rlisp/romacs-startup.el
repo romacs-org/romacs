@@ -220,12 +220,30 @@
   (condition-case err
       (romacs-gui--visit-file file name)
     (error
-     (setq romacs-gui-visit-errors (cons (cons file err) romacs-gui-visit-errors))
-     (set-buffer (get-buffer-create "*romacs visit errors*"))
-     (goto-char (point-max))
-     (insert (format "romacs could not visit %s:\n  %S\n" file err))
+     (romacs-gui--visit-error file err)
      (set-window-buffer (selected-window) (current-buffer))
      (current-buffer))))
+(defun romacs-gui--visit-error (file err)
+  "Record ERR visiting FILE in *romacs visit errors*, made current."
+  (setq romacs-gui-visit-errors (cons (cons file err) romacs-gui-visit-errors))
+  (set-buffer (get-buffer-create "*romacs visit errors*"))
+  (goto-char (point-max))
+  (insert (format "romacs could not visit %s:\n  %S\n" file err))
+  (current-buffer))
+(defvar romacs-gui-displayable-buffers nil
+  "The buffers --loadup's file arguments visited, the last one first:
+startup.el `command-line-1's `displayable-buffers', which
+`romacs-gui-loadup-command-line-1' displays.")
+(defun romacs-gui-visit-file-noselect (file name)
+  "Visit FILE, named NAME, as startup.el's `process-file-arg' does: the
+buffer goes onto `romacs-gui-displayable-buffers' and becomes current,
+and no window shows it yet.  A file the visitor refuses gives the
+*romacs visit errors* buffer in its place."
+  (let ((buffer (condition-case err
+                    (romacs-find-file-noselect file name)
+                  (error (romacs-gui--visit-error file err)))))
+    (setq romacs-gui-displayable-buffers (cons buffer romacs-gui-displayable-buffers))
+    (set-buffer buffer)))
 (defun romacs-gui--visit-file (file name)
   "Select the shared file visitor's result, preserving native visit identity."
   (let ((buffer (romacs-find-file-noselect file name)))

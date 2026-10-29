@@ -376,6 +376,7 @@ fn run() -> Result<(), String> {
     let mut trace_latency = false;
     let mut trace_scene = false;
     let mut load_user_init = true;
+    let mut quick = false;
     // Default: VM2's workspace. Running loadup.el by default was measured and
     // reverted: launch-to-ready 0.13s -> 0.95s (median of 5) with zero journey steps gained
     // and zero journey keys taken over by GNU (evidence/loadup/LOADUP.md).
@@ -385,7 +386,8 @@ fn run() -> Result<(), String> {
             "--wayland" => { socket = Some(args.next().ok_or("missing socket")?); live = false; },
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
-            "-Q" | "--no-init" => load_user_init = false,
+            "-Q" => (quick, load_user_init) = (true, false),
+            "--no-init" => load_user_init = false,
             "--trace-latency" => trace_latency = true,
             "--trace-scene" => trace_scene = true,
             "--gc-floor" => {
@@ -402,7 +404,7 @@ fn run() -> Result<(), String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()),
-            "--batch" => return batch::run(args.collect(), !load_user_init),
+            "--batch" => return batch::run(args.collect(), quick),
             "--" => {
                 startup::visit_at_startup("--");
                 for file in args.by_ref() { startup::visit_at_startup(&file); }
@@ -421,7 +423,7 @@ fn run() -> Result<(), String> {
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let worker = spawn_evaluator(move || {
         let sender = std::sync::Arc::new(sender);
-        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init);
+        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick);
         if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
         let _ = result_tx.send(result);
         drop(sender);
@@ -637,6 +639,7 @@ fn evaluate(
     mut width: u32,
     mut height: u32,
     load_user_init: bool,
+    quick: bool,
 ) -> Result<(), String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
     let mut vm = Vm::new();
@@ -678,6 +681,9 @@ fn evaluate(
         } else {
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
+        if quick && launch == startup::Launch::Loadup {
+            vm.eval_source(startup::QUICK_START)?;
+        }
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 if let Err(error) = user_init::load(&mut vm, &path) {

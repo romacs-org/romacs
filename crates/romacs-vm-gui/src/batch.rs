@@ -53,8 +53,7 @@ fn run_emacs(args: Vec<String>, quick: bool) -> Result<(), String> {
         vm.set_frame_geometry(80, 25, 1, 1)?;
         super::startup::drive_loadup(&mut vm, &super::startup::lisp_dir())?;
         let args: Vec<String> = args.iter().map(|arg| super::startup::lisp_string(arg)).collect();
-        // command-line's -Q (startup.el:1412).
-        let quick = if quick { "(setq site-run-file nil inhibit-x-resources t)" } else { "" };
+        let quick = if quick { super::startup::QUICK_START } else { "" };
         vm.eval_source(&format!(
             "(progn (setq command-line-args (cons (expand-file-name invocation-name invocation-directory) (list {}))
                           command-line-default-directory default-directory)

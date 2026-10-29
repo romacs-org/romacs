@@ -58,6 +58,8 @@ fn install_command_after_gnu_loadup() {
         assert_eq!(printed(&mut vm, "(lookup-key (current-global-map) [24 57344])"), "nil");
         printed(&mut vm, "(romacs-gui-install-command [24 57344] '(defun romacs-gui-loadup-probe () (interactive) (insert \"loadup\")))");
         assert_eq!(printed(&mut vm, "(get 'romacs-gui-loadup-probe (intern \"#:interactive\"))"), "(nil)");
+        // The startup screen is read-only; type into *scratch*.
+        printed(&mut vm, "(progn (switch-to-buffer \"*scratch*\") (goto-char (point-max)) (setq romacs-test-start (point)))");
         let mut commands = command::Commands::default();
         let mut presentation = presentation::Presentation::new();
         for code in [24, 57344] {
@@ -65,7 +67,7 @@ fn install_command_after_gnu_loadup() {
                 assert!(outcome.signal.is_none(), "{outcome:?}");
             }
         }
-        assert_eq!(printed(&mut vm, "(buffer-substring romacs-gui-scratch-start (point-max))"), "\"loadup\"", "INSTALL_SEAM_LOADUP_DISPATCH");
+        assert_eq!(printed(&mut vm, "(buffer-substring romacs-test-start (point-max))"), "\"loadup\"", "INSTALL_SEAM_LOADUP_DISPATCH");
     }).unwrap().join().unwrap();
 }
 

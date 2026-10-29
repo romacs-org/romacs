@@ -68,6 +68,20 @@ fn take_queued() -> Vec<std::path::PathBuf> {
 /// and the session continues; a missing file becomes an empty buffer visiting
 /// it, as GNU's find-file does.
 pub fn visit_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<(), String> {
+    visit_each(vm, files, true)
+}
+
+/// [`visit_files`] as startup.el's `process-file-arg` visits, for
+/// --loadup: each buffer goes onto `romacs-gui-displayable-buffers` and
+/// becomes current, and `romacs-gui-loadup-command-line-1` shows them.
+fn visit_startup_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<(), String> {
+    visit_each(vm, files, false)
+}
+
+/// Visit FILES with their `+LINE[:COLUMN]` positions: into the selected
+/// window when SELECT, else with `romacs-gui-visit-file-noselect`.
+fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result<(), String> {
+    let visitor = if select { "romacs-gui-visit-file" } else { "romacs-gui-visit-file-noselect" };
     let mut position = None;
     let mut literal = false;
     for file in files {
@@ -96,13 +110,13 @@ pub fn visit_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<(), Stri
         let name = file.file_name().map(|n| n.to_string_lossy().into_owned())
             .filter(|n| !n.is_empty()).unwrap_or_else(|| file.to_string_lossy().into_owned());
         let path = file.to_str().ok_or_else(|| format!("{}: file name is not UTF-8", file.display()))?;
-        vm.eval_source(&format!("(romacs-gui-visit-file {} {})", lisp_string(path), lisp_string(&name)))?;
+        vm.eval_source(&format!("({visitor} {} {})", lisp_string(path), lisp_string(&name)))?;
         if let Some((line, column)) = position.take() {
             if line > 0 {
                 vm.eval_source(&format!("(goto-char (point-min)) (forward-line {})", line - 1))?;
             }
             if column > 0 { visit_column(vm, column - 1)?; }
-            vm.eval_source("(set-window-point (selected-window) (point))")?;
+            if select { vm.eval_source("(set-window-point (selected-window) (point))")?; }
         }
     }
     Ok(())
@@ -451,24 +465,65 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     let bindings = bind_journey_keys(vm, true)?;
     load_gui_extensions(vm, dir)?;
-    // The workspace and the files wait for the user's init (finish_loadup).
+    // Without bindings.el's `mode-line-format' every buffer shows the
+    // labelled stand-in, which the user's init may replace; with it, a
+    // visited file keeps GNU's.
+    vm.eval_source(&format!("(setq romacs-gui-preserve-mode-line {})", if gnu_mode_line { "t" } else { "nil" }))?;
+    if !gnu_mode_line {
+        vm.eval_source(&format!("(set-default 'mode-line-format (append {STAND_IN_MODE_LINE} '(\"   Rum / VM\")))"))?;
+    }
+    // The startup screen and the files wait for the user's init (finish_loadup).
     Ok(Started { launch, loadup: Some(loadup), bindings, gnu_mode_line, files })
 }
 
+/// startup.el `command-line's -Q (startup.el:1416): no init file, no site
+/// file, no X resources, so no startup screen.  Evaluated before the
+/// user's init would load, by the GUI's --loadup and the batch session.
+pub const QUICK_START: &str = "(progn (setq init-file-user nil site-run-file nil inhibit-x-resources t)
+  (put 'site-run-file 'standard-value '(nil)))";
+
+/// The buffer --loadup shows where GNU shows its "*GNU Emacs*" startup
+/// screen.  *scratch* stays GNU's: `initial-scratch-message' and whatever
+/// the user's init wrote.
+pub const STARTUP_SCREEN: &str = "*Romacs*";
+
 /// --loadup's startup once the user's init has loaded, in startup.el's
 /// order (rlisp/romacs-gui-loadup.el): `command-line's end with
-/// `after-init-hook', `command-line-1' visiting the file arguments and then
-/// showing the startup screen, which here is the Romacs workspace, and
-/// `normal-top-level's startup hooks.  An init that inhibits the startup
-/// screen never sees the workspace inserted.
+/// `after-init-hook', `command-line-1' visiting the file arguments,
+/// resolving `initial-buffer-choice', showing the buffers and then the
+/// startup screen, here [`STARTUP_SCREEN`], and `normal-top-level's
+/// frame settings and startup hooks.
 pub fn finish_loadup(vm: &mut Vm, started: &Started) -> Result<(), String> {
     vm.eval_source("(romacs-gui-loadup-after-init)")?;
-    visit_files(vm, &started.files)?;
-    let files = if started.files.is_empty() { "nil" } else { "t" };
-    if vm.eval_source(&format!("(romacs-gui-loadup-command-line-1 {files})"))? != romacs_vm::Fixed::NIL {
-        workspace(vm, started, true)?;
+    visit_startup_files(vm, &started.files)?;
+    match vm.eval_source("(romacs-gui-loadup-command-line-1)")?.display()?.as_str() {
+        "nil" => {}
+        screen => startup_screen(vm, started, screen == "concise")?,
     }
     vm.eval_source("(romacs-gui-loadup-normal-top-level)")?;
+    Ok(())
+}
+
+/// startup.el `display-startup-screen' (startup.el:2708): once, a
+/// read-only [`STARTUP_SCREEN`] with the launch's status, shown as GNU
+/// shows its screen, beside the visited buffers when CONCISE.
+fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), String> {
+    let name = lisp_string(STARTUP_SCREEN);
+    if vm.eval_source(&format!("(get-buffer {name})"))? != romacs_vm::Fixed::NIL {
+        return Ok(());
+    }
+    vm.eval_source(&format!(
+        "(romacs-gui-loadup-startup-screen
+           (with-current-buffer (get-buffer-create {name})
+             {screen}
+             (setq buffer-read-only t)
+             (set-buffer-modified-p nil)
+             (goto-char (point-min))
+             (current-buffer))
+           {concise})",
+        screen = screen_text(started, "\n"),
+        concise = if concise { "t" } else { "nil" },
+    ))?;
     Ok(())
 }
 
@@ -653,42 +708,12 @@ pub const STAND_IN_MODE_LINE: &str =
 /// in GNU's `emacs FILE`.
 fn workspace(vm: &mut Vm, started: &Started, showcase: bool) -> Result<(), String> {
     vm.eval_source(&format!("(setq romacs-gui-preserve-mode-line {})", if started.gnu_mode_line { "t" } else { "nil" }))?;
-    let mut by_gnu: Vec<String> = vec![];
-    let mut stand_in: Vec<String> = vec![];
-    for b in &started.bindings {
-        let entry = format!("{} {}", key_label(b.key), b.gnu);
-        if b.gnu_defined { by_gnu.push(entry) } else { stand_in.push(entry) }
-    }
-    by_gnu.dedup();
-    stand_in.dedup();
-    let list = |items: &[String]| if items.is_empty() { "  (none)\n".to_owned() } else {
-        items.iter().map(|i| format!("  {i}\n")).collect::<String>()
-    };
-    let help = format!(
-        "\nType below; multibyte text works.\n\n",
-    );
     let mode_line = if started.gnu_mode_line { "nil" } else { "t" };
     vm.eval_source(&format!(
         r#"(progn
   (set-buffer (get-buffer-create "*scratch*"))
   (erase-buffer)
-  (romacs-gui-line "romacs / VM" 'font-lock-function-name-face)
-  (romacs-gui-line {status} 'romacs-comment)
-  (insert {help})
-  (romacs-gui-line "GNU COMMANDS (C in GNU, Rust here)" 'font-lock-function-name-face)
-  (insert "C-f C-b  char      C-a C-e  line      C-d  delete\n\n")
-  (romacs-gui-line "GNU'S LISP COMMANDS, LOADED BY LOADUP" 'font-lock-function-name-face)
-  (insert {by_gnu} "\n")
-  (romacs-gui-line "ROMACS STAND-INS (GNU'S COMMAND DID NOT LOAD)" 'font-lock-function-name-face)
-  (insert {stand_in} "  DEL  delete back (VM2's delete-backward-char)\n\n")
-  (romacs-gui-line "FILES AND BUFFERS" 'font-lock-function-name-face)
-  (insert "C-x C-f  find local file       C-x b  switch buffer\n")
-  (insert "M-x  run interactive command by name     C-x d  browse directory\n")
-  (insert "TAB completes; M-p/M-n history; C-g cancels. Local UTF-8 paths.\n")
-  (insert "Dired: n/p move, RET open, ^ parent, g refresh, q return.\n\n")
-  (romacs-gui-line "NOT YET" 'font-lock-function-name-face)
-  (insert "M-< M->: need simple.el.\n")
-  (insert "Errors show GNU's message below; the session survives.\n\n")
+  {screen}
   (setq romacs-gui-scratch-start (point))
   (when {mode_line}
     (setq mode-line-format (append @STAND_IN_MODE_LINE@ '("   Rum / VM")))
@@ -697,10 +722,7 @@ fn workspace(vm: &mut Vm, started: &Started, showcase: bool) -> Result<(), Strin
   (set-window-buffer nil (current-buffer))
   (setq romacs-gui-welcome-window (selected-window))
   (set-window-point romacs-gui-welcome-window romacs-gui-scratch-start))"#,
-        status = lisp_string(&started.status()),
-        help = lisp_string(&help),
-        by_gnu = lisp_string(&list(&by_gnu)),
-        stand_in = lisp_string(&list(&stand_in)),
+        screen = screen_text(started, "\nType below; multibyte text works.\n\n"),
     ).replace("@STAND_IN_MODE_LINE@", STAND_IN_MODE_LINE))?;
     if !showcase {
         return Ok(());
@@ -753,6 +775,45 @@ fn workspace(vm: &mut Vm, started: &Started, showcase: bool) -> Result<(), Strin
         lisp_string(&sample),
     ))?;
     Ok(())
+}
+
+/// Forms inserting the launch's status into the current buffer: per key,
+/// whether GNU or romacs runs it, with HELP after the status.
+fn screen_text(started: &Started, help: &str) -> String {
+    let mut by_gnu: Vec<String> = vec![];
+    let mut stand_in: Vec<String> = vec![];
+    for b in &started.bindings {
+        let entry = format!("{} {}", key_label(b.key), b.gnu);
+        if b.gnu_defined { by_gnu.push(entry) } else { stand_in.push(entry) }
+    }
+    by_gnu.dedup();
+    stand_in.dedup();
+    let list = |items: &[String]| if items.is_empty() { "  (none)\n".to_owned() } else {
+        items.iter().map(|i| format!("  {i}\n")).collect::<String>()
+    };
+    format!(
+        r#"(romacs-gui-line "romacs / VM" 'font-lock-function-name-face)
+  (romacs-gui-line {status} 'romacs-comment)
+  (insert {help})
+  (romacs-gui-line "GNU COMMANDS (C in GNU, Rust here)" 'font-lock-function-name-face)
+  (insert "C-f C-b  char      C-a C-e  line      C-d  delete\n\n")
+  (romacs-gui-line "GNU'S LISP COMMANDS, LOADED BY LOADUP" 'font-lock-function-name-face)
+  (insert {by_gnu} "\n")
+  (romacs-gui-line "ROMACS STAND-INS (GNU'S COMMAND DID NOT LOAD)" 'font-lock-function-name-face)
+  (insert {stand_in} "  DEL  delete back (VM2's delete-backward-char)\n\n")
+  (romacs-gui-line "FILES AND BUFFERS" 'font-lock-function-name-face)
+  (insert "C-x C-f  find local file       C-x b  switch buffer\n")
+  (insert "M-x  run interactive command by name     C-x d  browse directory\n")
+  (insert "TAB completes; M-p/M-n history; C-g cancels. Local UTF-8 paths.\n")
+  (insert "Dired: n/p move, RET open, ^ parent, g refresh, q return.\n\n")
+  (romacs-gui-line "NOT YET" 'font-lock-function-name-face)
+  (insert "M-< M->: need simple.el.\n")
+  (insert "Errors show GNU's message below; the session survives.\n\n")"#,
+        status = lisp_string(&started.status()),
+        help = lisp_string(help),
+        by_gnu = lisp_string(&list(&by_gnu)),
+        stand_in = lisp_string(&list(&stand_in)),
+    )
 }
 
 fn key_label(key: &str) -> String {
@@ -1562,10 +1623,11 @@ mod tests {
         for (file, text) in files { std::fs::write(gnu.join(file), text).unwrap(); }
         std::fs::write(loadup_bootstrap(&gnu), bootstrap).unwrap();
         // A scratch chain has no startup.el: its session file clears
-        // `noninteractive' and shows the workspace when no file is given.
+        // `noninteractive' and always shows the full startup screen.
         std::fs::write(root.join("rlisp/romacs-gui-loadup.el"), "(setq noninteractive nil)
 (defun romacs-gui-loadup-after-init () nil)
-(defun romacs-gui-loadup-command-line-1 (files) (not files))
+(defun romacs-gui-loadup-command-line-1 () 'full)
+(defun romacs-gui-loadup-startup-screen (buffer concise) (set-window-buffer nil buffer) (set-buffer buffer))
 (defun romacs-gui-loadup-normal-top-level () nil)\n").unwrap();
         // A scratch chain has no minibuffer.el or icomplete.el to configure.
         std::fs::write(root.join("rlisp/romacs-completion-defaults.el"), "(provide 'romacs-completion-defaults)\n").unwrap();
@@ -1814,8 +1876,9 @@ mod tests {
     }
 
     /// Mode lines after `--loadup`, from a chain whose files are known:
-    /// (painted bands, each workspace buffer's own `mode-line-format` or
-    /// `GLOBAL` when it has none, the default value, `gnu_mode_line`).
+    /// (the startup screen's painted band, the screen's and *scratch*'s own
+    /// `mode-line-format` or `GLOBAL` when it has none, the default value,
+    /// `gnu_mode_line`).
     fn loadup_mode_lines(name: &str, loadup: &'static str) -> (Vec<String>, Vec<String>, String, bool) {
         let dir = scratch_runtime(name, loadup, &[]);
         on_evaluator(move || {
@@ -1824,39 +1887,39 @@ mod tests {
             let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
             let snapshot = vm.frame_snapshot(1200, 800).unwrap();
-            let bands = snapshot.windows.iter().take(2)
+            assert_eq!(snapshot.windows.len(), 2, "the screen's window and the minibuffer");
+            let bands = snapshot.windows.iter().take(1)
                 .map(|w| w.snapshot.mode_line.as_ref().map_or(String::new(), |b| b.utf8.clone())).collect();
-            let locals = ["*scratch*", "*VM evaluations*"].iter().map(|b| printed(&mut vm, &own_mode_line(b))).collect();
+            let locals = [STARTUP_SCREEN, "*scratch*"].iter().map(|b| printed(&mut vm, &own_mode_line(b))).collect();
             let global = printed(&mut vm, "(default-value 'mode-line-format)");
             (bands, locals, global, started.gnu_mode_line)
         })
     }
 
-    /// Loadup did not reach bindings.el's `mode-line-format`: each workspace
-    /// buffer keeps its own format, and its content is the labelled stand-in,
-    /// so the screen says bindings.el did not load.
+    /// Loadup did not reach bindings.el's `mode-line-format`: the default
+    /// is the labelled stand-in, so the screen says bindings.el did not load.
     #[test]
     fn workspace_mode_lines_are_labelled_stand_ins_when_bindings_el_did_not_load() {
         let (bands, locals, global, gnu) = loadup_mode_lines("ml-stand-in", "(setq romacs-test-loadup-ran t)\n");
         assert!(!gnu);
         let stand_in = r#""-" "%z%Z%*%+%@" "  " "%12b" "   " "%p L%l" "   " "[stand-in: no bindings.el]""#;
-        assert_eq!(locals, [format!("({stand_in} \"   Rum / VM\")"), format!("({stand_in} \"   evaluated at startup\")")]);
+        assert_eq!(locals, ["GLOBAL", "GLOBAL"]);
         assert_eq!(global, format!("({stand_in} \"   Rum / VM\")"));
-        for (band, name) in bands.iter().zip(["*scratch*", "*VM evaluations*"]) {
+        for (band, name) in bands.iter().zip([STARTUP_SCREEN]) {
             assert!(band.starts_with("---:") && band.contains(name) && band.contains(" L"), "{band}");
             assert!(band.contains("[stand-in: no bindings.el]"), "{band}");
         }
     }
 
     /// Loadup set `mode-line-format` (as GNU's bindings.el does): GNU's
-    /// value wins untouched, globally and in every workspace buffer.
+    /// value wins untouched, globally and in the startup buffers.
     #[test]
     fn workspace_leaves_gnus_mode_line_format_alone_when_loadup_set_it() {
         let (bands, locals, global, gnu) = loadup_mode_lines("ml-gnu", "(setq mode-line-format '(\"GNU-SET %b\"))\n");
         assert!(gnu);
         assert_eq!(locals, ["GLOBAL", "GLOBAL"]);
         assert_eq!(global, "(\"GNU-SET %b\")");
-        for (band, name) in bands.iter().zip(["*scratch*", "*VM evaluations*"]) {
+        for (band, name) in bands.iter().zip([STARTUP_SCREEN]) {
             assert!(band.starts_with(&format!("GNU-SET {name}")), "{band}");
             assert!(!band.contains("stand-in"), "{band}");
         }
@@ -1874,13 +1937,13 @@ mod tests {
                 finish_loadup(&mut vm, &started).unwrap();
                 assert!(started.gnu_mode_line, "an unchanged bound default must not be mistaken for an unset default: {initial}");
                 assert_eq!(printed(&mut vm, "(eq (default-value 'mode-line-format) romacs-test-mode-line)"), "t");
-                for buffer in ["*scratch*", "*VM evaluations*"] {
+                for buffer in [STARTUP_SCREEN, "*scratch*"] {
                     assert_eq!(printed(&mut vm, &own_mode_line(buffer)), "GLOBAL", "{buffer}: {initial}");
                 }
                 let snapshot = vm.frame_snapshot(1200, 800).unwrap();
                 println!("startup reproduction: initial={initial} gnu_mode_line={} bands={:?}", started.gnu_mode_line,
-                    snapshot.windows.iter().take(2).map(|w| w.snapshot.mode_line.as_ref().map(|b| b.utf8.clone())).collect::<Vec<_>>());
-                for (window, name) in snapshot.windows.iter().take(2).zip(["*scratch*", "*VM evaluations*"]) {
+                    snapshot.windows.iter().take(1).map(|w| w.snapshot.mode_line.as_ref().map(|b| b.utf8.clone())).collect::<Vec<_>>());
+                for (window, name) in snapshot.windows.iter().take(1).zip([STARTUP_SCREEN]) {
                     if initial == "nil" {
                         assert!(window.snapshot.mode_line.is_none(), "GNU nil must suppress the mode line: {name}");
                     } else {
@@ -1902,34 +1965,47 @@ mod tests {
     }
 
     /// What --loadup does after the user's init, in startup.el's order,
-    /// against pinned GNU on a terminal (fixtures/startup-order-tty.py):
-    /// a file argument is visited after `after-init-hook', so a hook that
-    /// switches buffers does not hide it, and the later hooks see it; an
-    /// init that inhibits the startup screen keeps the *scratch* text it
-    /// wrote, with its modified flag, and no workspace is inserted.
+    /// against pinned GNU on a window system (fixtures/startup-order-gui.py),
+    /// with *Romacs* where GNU shows *GNU Emacs*: a file argument visited
+    /// after `after-init-hook' and shown with the concise screen beside it;
+    /// *scratch* keeping the text the init wrote, screen or not;
+    /// `initial-buffer-choice' as a function, t and a file name selected
+    /// ahead of the file arguments; -Q's `inhibit-x-resources' inhibiting
+    /// the screen; `initial-frame-alist' applied between the startup hooks
+    /// and `window-setup-hook' on both paths; and an `emacs-startup-hook'
+    /// that sets `inhibit-startup-hooks' stopping `window-setup-hook'.
     #[test]
     fn startup_after_the_init_runs_in_gnus_order() {
         on_evaluator(|| {
-            let fixture = include_str!("../tests/fixtures/startup-order-tty.txt");
+            let fixture = include_str!("../tests/fixtures/startup-order-gui.txt");
             let lines: Vec<&str> = fixture.lines().filter(|line| !line.starts_with(";;")).collect();
+            let mut failures = vec![];
             for case in lines.chunks(4) {
-                let (name, with_file, init, expected) = (case[0], case[1] == "t", case[2], case[3]);
+                let (name, args, init, expected) = (case[0], case[1], case[2], case[3]);
                 let mut vm = Vm::new();
                 vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+                let home = private_home(&mut vm, &format!("order-{name}"));
+                for (file, text) in [("visited.txt", "visited\n"), ("chosen.txt", "chosen\n")] {
+                    std::fs::write(home.join(file), text).unwrap();
+                }
                 let mut started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
-                let dir = std::env::temp_dir().join(format!("romacs-startup-order-{name}-{}", std::process::id()));
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(dir.join("visited.txt"), "visited\n").unwrap();
-                if with_file { started.files = vec![dir.join("visited.txt")]; }
-                // Where the GUI loads the user's init.
-                printed(&mut vm, &format!("(progn {init} t)"));
+                // GNU ran in HOME, so relative names are HOME's.
+                printed(&mut vm, &format!("(dolist (b (buffer-list)) (with-current-buffer b (setq default-directory {})))",
+                                          lisp_string(&format!("{}/", home.display()))));
+                let quick = args.split(' ').any(|arg| arg == "-Q");
+                started.files = args.split(' ').filter(|arg| arg.ends_with(".txt")).map(|arg| home.join(arg)).collect();
+                if quick { printed(&mut vm, QUICK_START); }
+                // Where the GUI loads the user's init; -Q's probe comes in
+                // through -l, which no scenario's record can tell apart.
+                printed(&mut vm, &format!("(progn (defvar startup-order-screen {}) {init} t)", lisp_string(STARTUP_SCREEN)));
                 finish_loadup(&mut vm, &started).unwrap();
-                let log = printed(&mut vm, "(let ((print-escape-newlines t)) (prin1-to-string startup-order-log))");
-                let log: String = serde_json::from_str(&log).unwrap();
-                assert_eq!(log, expected, "{name}");
-                assert_eq!(printed(&mut vm, "(get-buffer \"*VM evaluations*\")"), "nil", "{name}: no workspace");
-                let _ = std::fs::remove_dir_all(&dir);
+                let record = printed(&mut vm, "(let ((print-escape-newlines t)) (prin1-to-string (startup-order-record)))");
+                let record: String = serde_json::from_str(&record).unwrap();
+                let expected = expected.replace("\"*GNU Emacs*\"", &lisp_string(STARTUP_SCREEN));
+                if record != expected { failures.push(format!("{name}:\n  romacs {record}\n  gnu    {expected}")); }
+                let _ = std::fs::remove_dir_all(&home);
             }
+            assert!(failures.is_empty(), "{}", failures.join("\n"));
         });
     }
 
@@ -1977,7 +2053,8 @@ mod tests {
                 ran.extend(press(&mut vm, keys));
                 live.push(ask(&mut vm, "(length (romacs-gui-leaves (romacs-gui-root)))"));
             }
-            vm.eval_source("(goto-char (point-max))").unwrap();
+            // The startup screen is read-only; evaluate in *scratch*.
+            vm.eval_source("(progn (switch-to-buffer \"*scratch*\") (goto-char (point-max)))").unwrap();
             ran.extend(press(&mut vm, &[40, 43, 32, 49, 32, 50, 41, 24, 5]));
             live.push(ask(&mut vm, "(let ((old (current-buffer))) (set-buffer (window-buffer (minibuffer-window))) (prog1 (buffer-string) (set-buffer old)))"));
             vm.collect_garbage();
@@ -1990,11 +2067,11 @@ mod tests {
         for (gnu, command) in keys {
             assert_eq!(gnu, !command.starts_with("romacs-"), "{command}");
         }
-        // Two windows, selected first; C-x 2, C-x 3 split, C-x o moves, C-x 1
-        // leaves one; C-x C-e evaluates; all with GNU's window.el loaded.
+        // The startup screen's one window; C-x 2, C-x 3 split, C-x o moves,
+        // C-x 1 leaves one; C-x C-e evaluates; all with GNU's window.el loaded.
         // romacs' bundled Lisp follows GNU's installed load-path.
         assert_eq!(bundled, "t", "rlisp/hermes not on load-path after loadup");
-        assert_eq!(live, ["2", "3", "4", "4", "1", r#""3 (#o3, #x3, ?\\C-c)""#, "1"], "{ran:?}");
+        assert_eq!(live, ["1", "2", "3", "3", "1", r#""3 (#o3, #x3, ?\\C-c)""#, "1"], "{ran:?}");
         assert!(ran.iter().all(|r| !r.contains("SIGNAL")), "{ran:?}");
         assert!(ran.contains(&"eval-last-sexp".to_owned()), "{ran:?}");
     }
