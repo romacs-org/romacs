@@ -219,6 +219,16 @@ impl FontResolver {
         })
     }
 
+    /// The files this resolver's answers so far came from: the font files
+    /// it read and Fontconfig's configuration and font directories, sorted.
+    pub fn font_inputs(&self) -> Vec<String> {
+        let mut inputs: Vec<String> = self.files.keys().chain(self.opened.keys().map(|(file, _, _)| file)).cloned()
+            .chain(catalog::configuration_inputs()).collect();
+        inputs.sort();
+        inputs.dedup();
+        inputs
+    }
+
     /// Current raw order; effective shifts also depend on earlier orders.
     pub fn selection_order(&self) -> [FontSelectionAttribute; 4] {
         self.selection_order.order()

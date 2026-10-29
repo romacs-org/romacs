@@ -59,6 +59,36 @@ pub(crate) fn register_font_file(path: &std::path::Path) -> bool {
     }
 }
 
+/// What Fontconfig's answers depend on: its configuration files and
+/// directories and the font directories it scans, as it names them.
+pub(crate) fn configuration_inputs() -> Vec<String> {
+    if handle().is_none() {
+        return vec![];
+    }
+    let _serial = serialize();
+    let mut inputs = vec![];
+    // SAFETY: a null config names the current configuration; each list is
+    // walked to its end and released, and its strings are copied first.
+    unsafe {
+        for list in [fontconfig_sys::FcConfigGetConfigFiles(std::ptr::null_mut()),
+                     fontconfig_sys::FcConfigGetConfigDirs(std::ptr::null_mut()),
+                     fontconfig_sys::FcConfigGetFontDirs(std::ptr::null_mut())] {
+            if list.is_null() {
+                continue;
+            }
+            loop {
+                let next = fontconfig_sys::FcStrListNext(list);
+                if next.is_null() {
+                    break;
+                }
+                inputs.push(CStr::from_ptr(next.cast()).to_string_lossy().into_owned());
+            }
+            fontconfig_sys::FcStrListDone(list);
+        }
+    }
+    inputs
+}
+
 /// The concrete family Fontconfig's match gives GENERIC (an alias such as
 /// `monospace`, or a family that is not installed), if any.
 pub(crate) fn match_family(generic: &str) -> Option<String> {

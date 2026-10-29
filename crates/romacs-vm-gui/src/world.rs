@@ -96,7 +96,7 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result
         world.begin_build(&world.build_roots(build_roots(&dir))).map_err(|e| e.to_string())?;
         let mut vm = Vm::new();
         vm.world_begin();
-        vm.set_layout_host(Some(Box::new(crate::measure::Host { engine })));
+        vm.set_layout_host(Some(Box::new(crate::measure::Host { engine: engine.clone() })));
         // A live launch attaches its terminal service here; the world keeps
         // what that declares, and the restored launch attaches the service.
         vm.declare_terminal_errors()?;
@@ -108,6 +108,13 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result
         let font = launch_font()?;
         let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, font.as_ref().map(|(s, _)| s.as_str()), &dir)?;
         vm.set_layout_host(None);
+        // The fonts the world measured with, the default face's among them:
+        // their files and Fontconfig's are keyed records, so a font added,
+        // removed or changed, or another configuration, rebuilds the world.
+        engine.borrow_mut().frame_metrics(&vm.display_default_face()?)?;
+        for input in engine.borrow().font_inputs() {
+            let _ = romacs_vm::host::metadata(&input);
+        }
         let len = world.finish_build(vm, Carry { loadup }, json!({}))?;
         eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
         Ok(())
