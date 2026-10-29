@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "2b181279f1def6840a4c54fe5ad09c0dbbadf1b4c781ff92df2fb22fb305f503",
+  "input_hash": "94289d788203d67063656209eaca91444eabf3d0270c0b528695a5bf19abde91",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4757,7 +4757,7 @@
    "planned": false,
    "mechanism": "`--loadup` startup screen and the user's frame settings",
    "gnu": "startup.el `command-line-1` (`:3008-3125`) shows `*GNU Emacs*` (`fancy-startup-screen`, `:2269`) unless `inhibit-startup-screen`, `initial-buffer-choice`, `noninteractive`, `daemonp` or `inhibit-x-resources` (set by `-Q`) prevents it, fitted in another window beside visited buffers; `frame-notice-user-settings` (`frame.el:460`) applies `initial-frame-alist` and `default-frame-alist` to the window system's initial frame between `term-setup-hook` and `window-setup-hook`",
-   "romacs": "`rlisp/romacs-gui-loadup.el` runs GNU's order, choice and inhibitors and shows `*Romacs*`, a read-only buffer with the launch's status (`crates/romacs-vm-gui/src/startup.rs` `startup_screen`), where GNU shows `*GNU Emacs*`; its concise form is the same text. Romacs's one frame is the host's window, with no `frame-initial-frame`, so `frame-notice-user-settings` takes GNU's path for a frame that already exists: every parameter is stored and `frame-parameter` reads it back, except that the host window owns its geometry and font, so `width`, `height`, `left`, `top`, `fullscreen` and `font` neither resize nor move it, and `frame-parameter` answers the frame's own `width`, `height` and `font` (VM2-WIN5)",
+   "romacs": "`rlisp/romacs-gui-loadup.el` runs GNU's order, choice and inhibitors and shows `*Romacs*`, a read-only buffer with the launch's status (`crates/romacs-vm-gui/src/startup.rs` `startup_screen`), where GNU shows `*GNU Emacs*`, in `command-line-default-directory` and with GNU's `splash-screen-keymap` (q kills it); its concise form is the same text. Romacs's one frame is the host's window, with no `frame-initial-frame`, so `frame-notice-user-settings` takes GNU's path for a frame that already exists: every parameter is stored and `frame-parameter` reads it back, except that the host window owns its geometry and font, so `width`, `height`, `left`, `top`, `fullscreen` and `font` neither resize nor move it, and `frame-parameter` answers the frame's own `width`, `height` and `font` (VM2-WIN5)",
    "why": "**Visible to the user** (the screen's text, frame geometry) and to Lisp as the screen buffer's name and text. Order, buffers, *scratch*, hooks and stored parameters match pinned GNU (pgtk) on `crates/romacs-vm-gui/tests/fixtures/startup-order-gui.txt`",
    "symbols": [
     "initial-buffer-choice",

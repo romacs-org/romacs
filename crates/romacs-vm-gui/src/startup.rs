@@ -506,7 +506,11 @@ pub fn finish_loadup(vm: &mut Vm, started: &Started) -> Result<(), String> {
 
 /// startup.el `display-startup-screen' (startup.el:2708): once, a
 /// read-only [`STARTUP_SCREEN`] with the launch's status, shown as GNU
-/// shows its screen, beside the visited buffers when CONCISE.
+/// shows its screen, beside the visited buffers when CONCISE.  As
+/// `fancy-startup-screen' (startup.el:2269) sets up *GNU Emacs*, it starts
+/// in `command-line-default-directory' and takes GNU's
+/// `splash-screen-keymap': typing does nothing, SPC and DEL scroll, and q
+/// (`exit-splash-screen') kills it.
 fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), String> {
     let name = lisp_string(STARTUP_SCREEN);
     if vm.eval_source(&format!("(get-buffer {name})"))? != romacs_vm::Fixed::NIL {
@@ -515,7 +519,9 @@ fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), S
     vm.eval_source(&format!(
         "(romacs-gui-loadup-startup-screen
            (with-current-buffer (get-buffer-create {name})
+             (setq default-directory command-line-default-directory)
              {screen}
+             (use-local-map splash-screen-keymap)
              (setq buffer-read-only t)
              (set-buffer-modified-p nil)
              (goto-char (point-min))
@@ -1623,8 +1629,10 @@ mod tests {
         for (file, text) in files { std::fs::write(gnu.join(file), text).unwrap(); }
         std::fs::write(loadup_bootstrap(&gnu), bootstrap).unwrap();
         // A scratch chain has no startup.el: its session file clears
-        // `noninteractive' and always shows the full startup screen.
+        // `noninteractive', stands in for the screen's directory and
+        // keymap, and always shows the full startup screen.
         std::fs::write(root.join("rlisp/romacs-gui-loadup.el"), "(setq noninteractive nil)
+(setq command-line-default-directory default-directory splash-screen-keymap (make-sparse-keymap))
 (defun romacs-gui-loadup-after-init () nil)
 (defun romacs-gui-loadup-command-line-1 () 'full)
 (defun romacs-gui-loadup-startup-screen (buffer concise) (set-window-buffer nil buffer) (set-buffer buffer))
@@ -1972,25 +1980,31 @@ mod tests {
     /// `initial-buffer-choice' as a function, t and a file name selected
     /// ahead of the file arguments; -Q's `inhibit-x-resources' inhibiting
     /// the screen; `initial-frame-alist' applied between the startup hooks
-    /// and `window-setup-hook' on both paths; and an `emacs-startup-hook'
-    /// that sets `inhibit-startup-hooks' stopping `window-setup-hook'.
+    /// and `window-setup-hook' on both paths; an `emacs-startup-hook'
+    /// that sets `inhibit-startup-hooks' stopping `window-setup-hook'; the
+    /// screen in the command line's directory beside a file from another;
+    /// and its keymap through the GUI's command dispatch: typing leaves it,
+    /// SPC and DEL scroll, q kills it and shows *scratch* again.
     #[test]
     fn startup_after_the_init_runs_in_gnus_order() {
         on_evaluator(|| {
             let fixture = include_str!("../tests/fixtures/startup-order-gui.txt");
             let lines: Vec<&str> = fixture.lines().filter(|line| !line.starts_with(";;")).collect();
             let mut failures = vec![];
-            for case in lines.chunks(4) {
-                let (name, args, init, expected) = (case[0], case[1], case[2], case[3]);
+            for case in lines.chunks(5) {
+                let (name, args, keys, init, expected) = (case[0], case[1], case[2], case[3], case[4]);
                 let mut vm = Vm::new();
                 vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
                 let home = private_home(&mut vm, &format!("order-{name}"));
-                for (file, text) in [("visited.txt", "visited\n"), ("chosen.txt", "chosen\n")] {
+                std::fs::create_dir_all(home.join("sub")).unwrap();
+                for (file, text) in [("visited.txt", "visited\n"), ("chosen.txt", "chosen\n"), ("sub/visited.txt", "visited\n")] {
                     std::fs::write(home.join(file), text).unwrap();
                 }
                 let mut started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
-                // GNU ran in HOME, so relative names are HOME's.
-                printed(&mut vm, &format!("(dolist (b (buffer-list)) (with-current-buffer b (setq default-directory {})))",
+                // GNU ran in HOME, so relative names and the command line's
+                // directory are HOME's.
+                printed(&mut vm, &format!("(let ((dir {})) (setq command-line-default-directory dir)
+                                             (dolist (b (buffer-list)) (with-current-buffer b (setq default-directory dir))))",
                                           lisp_string(&format!("{}/", home.display()))));
                 let quick = args.split(' ').any(|arg| arg == "-Q");
                 started.files = args.split(' ').filter(|arg| arg.ends_with(".txt")).map(|arg| home.join(arg)).collect();
@@ -1999,7 +2013,17 @@ mod tests {
                 // through -l, which no scenario's record can tell apart.
                 printed(&mut vm, &format!("(progn (defvar startup-order-screen {}) {init} t)", lisp_string(STARTUP_SCREEN)));
                 finish_loadup(&mut vm, &started).unwrap();
-                let record = printed(&mut vm, "(let ((print-escape-newlines t)) (prin1-to-string (startup-order-record)))");
+                let record = if keys.is_empty() { "(startup-order-record)".to_owned() } else {
+                    let codes: Vec<i64> = keys.split(' ').map(|key| key.parse().unwrap()).collect();
+                    let bindings = printed(&mut vm, &format!("(startup-order-bindings '({keys}))"));
+                    let (mut commands, mut presentation) = (crate::command::Commands::default(), crate::presentation::Presentation::new());
+                    for code in codes {
+                        presentation.command(&mut vm, &mut commands, romacs_vm::CommandEvent::Character(code)).unwrap();
+                        printed(&mut vm, &format!("(startup-order-key-note {code})"));
+                    }
+                    format!("(startup-order-key-record '{bindings})")
+                };
+                let record = printed(&mut vm, &format!("(let ((print-escape-newlines t)) (prin1-to-string {record}))"));
                 let record: String = serde_json::from_str(&record).unwrap();
                 let expected = expected.replace("\"*GNU Emacs*\"", &lisp_string(STARTUP_SCREEN));
                 if record != expected { failures.push(format!("{name}:\n  romacs {record}\n  gnu    {expected}")); }
