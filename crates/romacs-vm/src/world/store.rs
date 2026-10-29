@@ -117,7 +117,9 @@ impl World {
     pub fn new(store: PathBuf, recipe: Vec<String>) -> std::io::Result<World> {
         private_store(&store)?;
         let executable = file_digest(&store, &host::open_world_file("/proc/self/exe")?)?;
-        let mut text = format!("{FORMAT}\nexecutable {}\nlibraries {}\n", hex(&executable), hex(&arena::libraries()));
+        let libraries = arena::libraries()
+            .ok_or_else(|| std::io::Error::other("the libraries this process loaded cannot all be identified"))?;
+        let mut text = format!("{FORMAT}\nexecutable {}\nlibraries {}\n", hex(&executable), hex(&libraries));
         for line in &recipe {
             text.push_str(line);
             text.push('\n');

@@ -101,7 +101,7 @@ static BASE: AtomicUsize = AtomicUsize::new(0);
 /// Where the process's first arena starts, once an image replaced it.
 static FORMER: AtomicUsize = AtomicUsize::new(0);
 /// The digest of the libraries mapped as the arena started (`libraries`).
-static mut LIBRARIES: [u8; 32] = [0; 32];
+static mut LIBRARIES: Option<[u8; 32]> = None;
 
 /// What became of the image this process adopted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -493,55 +493,104 @@ unsafe fn shadow_executable(old: usize) -> bool {
     true
 }
 
-/// The SHA-256 of the files of the libraries this process maps as code, by
-/// path, device, inode, size and change times, as the dynamic loader left
-/// them before the first allocation, in no order: where each loaded is
-/// random. Read without allocating.
-unsafe fn libraries_digest() -> [u8; 32] {
-    use sha2::Digest;
+/// A file's identity: device, inode, size, and modification and change
+/// times.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct FileId([u64; 7]);
+
+fn file_id(stat: &libc::stat) -> FileId {
+    FileId([stat.st_dev, stat.st_ino, stat.st_size as u64, stat.st_mtime as u64, stat.st_mtime_nsec as u64,
+            stat.st_ctime as u64, stat.st_ctime_nsec as u64])
+}
+
+/// The files of the libraries this process maps as code, as the dynamic
+/// loader left them before the first allocation. Read without allocating.
+unsafe fn libraries_digest() -> Option<[u8; 32]> {
     static mut MAPS: [u8; 65536] = [0; 65536];
+    static mut ENTRIES: [[u8; 32]; 256] = [[0; 32]; 256];
     let buffer = unsafe { &mut *std::ptr::addr_of_mut!(MAPS) };
     let fd = unsafe { libc::open(c"/proc/self/maps".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
-    let mut len = 0;
-    if fd >= 0 {
-        while len < buffer.len() {
-            let n = unsafe { libc::read(fd, buffer[len..].as_mut_ptr().cast(), buffer.len() - len) };
-            if n <= 0 { break; }
-            len += n as usize;
-        }
-        unsafe { libc::close(fd) };
+    if fd < 0 {
+        return None;
     }
-    // The executable's own content is keyed apart.
-    let mut own: libc::stat = unsafe { std::mem::zeroed() };
-    unsafe { libc::stat(c"/proc/self/exe".as_ptr(), &mut own) };
-    static mut ENTRIES: [[u8; 32]; 256] = [[0; 32]; 256];
-    let entries = unsafe { &mut *std::ptr::addr_of_mut!(ENTRIES) };
+    let mut len = 0;
+    let mut ended = false;
+    while len < buffer.len() {
+        let n = unsafe { libc::read(fd, buffer[len..].as_mut_ptr().cast(), buffer.len() - len) };
+        if n < 0 {
+            break;
+        }
+        if n == 0 {
+            ended = true;
+            break;
+        }
+        len += n as usize;
+    }
+    unsafe { libc::close(fd) };
+    // A listing that did not end within the buffer is incomplete.
+    if !ended {
+        return None;
+    }
+    let stat = |path: &[u8]| -> Option<FileId> {
+        let mut name = [0u8; 4096];
+        if path.len() >= name.len() {
+            return None;
+        }
+        name[..path.len()].copy_from_slice(path);
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        (unsafe { libc::stat(name.as_ptr().cast(), &mut stat) } == 0).then(|| file_id(&stat))
+    };
+    let own = stat(b"/proc/self/exe")?;
+    library_digest(&buffer[..len], own, stat, unsafe { &mut *std::ptr::addr_of_mut!(ENTRIES) })
+}
+
+/// The SHA-256 of the libraries MAPS lists as mapped code, but OWN, the
+/// executable, keyed apart: each by path and identity, in no order, since
+/// where each loaded is random. IDENTIFY gives the identity of the file a
+/// path names now; it counts only when it is the object mapped there, by
+/// the inode the listing gives and its device, where both devices are block
+/// devices (btrfs lists a superblock's anonymous device, and stat a
+/// subvolume's). None, failing closed, when a mapping's file is deleted or
+/// replaced, or when any identity is unknown or more libraries are mapped
+/// than ENTRIES holds: a world keyed on an incomplete inventory could
+/// outlive a change.
+fn library_digest(maps: &[u8], own: FileId, mut identify: impl FnMut(&[u8]) -> Option<FileId>,
+                  entries: &mut [[u8; 32]]) -> Option<[u8; 32]> {
+    use sha2::Digest;
     let mut count = 0;
-    let mut path = [0u8; 4096];
-    for line in buffer[..len].split(|&b| b == b'\n') {
+    for line in maps.split(|&b| b == b'\n') {
         // start-end perms offset dev inode path
         let mut fields = line.splitn(6, |&b| b == b' ');
         let (Some(range), Some(perms)) = (fields.next(), fields.next()) else { continue };
-        let name = fields.nth(3).map(|rest| rest.trim_ascii_start()).unwrap_or_default();
-        if range.is_empty() || perms.get(2) != Some(&b'x') || name.first() != Some(&b'/') || name.len() >= path.len()
-            || count == entries.len()
-        {
+        let number = |text: Option<&[u8]>, radix| text.and_then(|t| std::str::from_utf8(t).ok()).and_then(|t| u64::from_str_radix(t, radix).ok());
+        let device = fields.nth(1).and_then(|d| {
+            let mut parts = d.splitn(2, |&b| b == b':');
+            Some((number(parts.next(), 16)?, number(parts.next(), 16)?))
+        });
+        let inode = number(fields.next(), 10);
+        let name = fields.next().map(|rest| rest.trim_ascii_start()).unwrap_or_default();
+        if range.is_empty() || perms.get(2) != Some(&b'x') || name.first() != Some(&b'/') {
             continue;
         }
-        path[..name.len()].copy_from_slice(name);
-        path[name.len()] = 0;
-        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-        let known = unsafe { libc::stat(path.as_ptr().cast(), &mut stat) } == 0;
-        if known && (stat.st_dev, stat.st_ino) == (own.st_dev, own.st_ino) {
+        if name.ends_with(b" (deleted)") {
+            return None;
+        }
+        let named = identify(name)?;
+        let (Some((major, minor)), Some(inode)) = (device, inode) else { return None };
+        let (named_major, named_minor) = (libc::major(named.0[0]) as u64, libc::minor(named.0[0]) as u64);
+        if inode != named.0[1] || (major != 0 && named_major != 0 && (major, minor) != (named_major, named_minor)) {
+            return None;
+        }
+        if (named.0[0], named.0[1]) == (own.0[0], own.0[1]) {
             continue;
+        }
+        if count == entries.len() {
+            return None;
         }
         let mut digest = sha2::Sha256::new();
         digest.update(name);
-        if known {
-            for n in [stat.st_dev, stat.st_ino, stat.st_size as u64, stat.st_mtime as u64, stat.st_mtime_nsec as u64,
-                      stat.st_ctime as u64, stat.st_ctime_nsec as u64] {
-                digest.update(n.to_le_bytes());
-            }
+        for n in named.0 {
+            digest.update(n.to_le_bytes());
         }
         entries[count] = digest.finalize().into();
         count += 1;
@@ -554,13 +603,14 @@ unsafe fn libraries_digest() -> [u8; 32] {
             digest.update(entry);
         }
     }
-    digest.finalize().into()
+    Some(digest.finalize().into())
 }
 
 /// The digest of the libraries this process mapped before its first
 /// allocation: what a world's key binds of them. A library changed in
-/// place, or another one found, changes it.
-pub fn libraries() -> [u8; 32] {
+/// place, or another one found, changes it. None when they could not all
+/// be identified (`library_digest`).
+pub fn libraries() -> Option<[u8; 32]> {
     state();
     unsafe { LIBRARIES }
 }
@@ -783,6 +833,60 @@ mod tests {
         assert_eq!(class_of(SMALL_MAX + 1, 8), None);
         assert_eq!(class_of(64, 8192), None);
         assert_eq!((class_size(63), class_size(64), class_size(CLASSES - 1)), (1024, 1280, SMALL_MAX));
+    }
+
+    fn id(dev: u64, ino: u64) -> FileId {
+        FileId([dev, ino, 100, 1, 2, 3, 4])
+    }
+
+    /// A maps line of a code mapping of PATH, inode INO on device DEV.
+    fn line(dev: &str, ino: u64, path: &str) -> String {
+        format!("1000-2000 r-xp 00001000 {dev} {ino}                    {path}\n")
+    }
+
+    #[test]
+    fn libraries_are_known_by_the_object_mapped_and_fail_closed() {
+        let ext4 = libc::makedev(259, 2);
+        let own = id(ext4, 1);
+        let maps = [line("103:02", 1, "/exe"), line("103:02", 7, "/lib/a.so"), line("00:1e", 8, "/lib/b.so"),
+                    "7000-8000 rw-p 00000000 00:00 0\n".into(), line("00:00", 0, "[vdso]")].concat();
+        let files = |path: &[u8]| -> Option<FileId> {
+            match path {
+                b"/exe" => Some(id(ext4, 1)),
+                b"/lib/a.so" => Some(id(ext4, 7)),
+                // btrfs: stat gives the subvolume's device, not the listing's.
+                b"/lib/b.so" => Some(id(libc::makedev(0, 55), 8)),
+                _ => None,
+            }
+        };
+        let mut entries = [[0u8; 32]; 4];
+        let digest = library_digest(maps.as_bytes(), own, files, &mut entries).expect("all identified");
+        // In no order: the loader's placement is random.
+        let swapped = [line("00:1e", 8, "/lib/b.so"), line("103:02", 1, "/exe"), line("103:02", 7, "/lib/a.so")].concat();
+        assert_eq!(library_digest(swapped.as_bytes(), own, files, &mut entries), Some(digest));
+        // Changed in place: another identity, another digest.
+        let changed = |path: &[u8]| files(path).map(|f| if path == b"/lib/a.so" { FileId([f.0[0], 7, 100, 9, 9, 9, 9]) } else { f });
+        assert_ne!(library_digest(maps.as_bytes(), own, changed, &mut entries), Some(digest));
+
+        // Replaced after it loaded: its path names another inode.
+        let replaced = |path: &[u8]| files(path).map(|f| if path == b"/lib/a.so" { id(ext4, 99) } else { f });
+        assert_eq!(library_digest(maps.as_bytes(), own, replaced, &mut entries), None);
+        // The same inode number on another block device.
+        let moved = |path: &[u8]| files(path).map(|f| if path == b"/lib/a.so" { id(libc::makedev(259, 3), 7) } else { f });
+        assert_eq!(library_digest(maps.as_bytes(), own, moved, &mut entries), None);
+        // A mapping of a deleted file, or one whose identity cannot be read.
+        let deleted = [maps.clone(), line("103:02", 9, "/lib/c.so (deleted)")].concat();
+        assert_eq!(library_digest(deleted.as_bytes(), own, files, &mut entries), None);
+        let unknown = [maps.clone(), line("103:02", 9, "/lib/c.so")].concat();
+        assert_eq!(library_digest(unknown.as_bytes(), own, files, &mut entries), None);
+        // More libraries than the inventory holds.
+        let mut small = [[0u8; 32]; 1];
+        assert_eq!(library_digest(maps.as_bytes(), own, files, &mut small), None);
+    }
+
+    #[test]
+    fn this_process_identifies_its_libraries() {
+        assert!(unsafe { libraries_digest() }.is_some());
     }
 
     #[test]
