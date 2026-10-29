@@ -1453,7 +1453,7 @@ impl<'a> Windows<'a> {
         let w = self.live(window)?;
         let format = {
             let slot = self.vm.slot("mode-line-format");
-            self.vm.slots[slot].value
+            self.vm.variable_value(slot).map_err(internal)?
         };
         let line = self.vm.window_state.line;
         let key = self.vm.intern("mode-line-format");

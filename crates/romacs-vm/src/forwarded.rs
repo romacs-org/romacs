@@ -572,6 +572,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Variable harness (R216 task 2) and DIVERGENCES.md VM2-VARALIAS1: the
     // per-buffer kind. buffer.c:4898 default 70, predicate Qintegerp.
     CVariable { name: "major-mode", gnu: "buffer.c:5242", kind: Kind::PerBuffer { default: Init::Symbol("fundamental-mode"), predicate: Some(Predicate::Symbolp) } },
+    // Automatically local in every buffer, unibyte ones included: url-http
+    // sets its connection buffers' own (url-http.el:1393).
+    CVariable { name: "mode-line-format", gnu: "buffer.c:5168", kind: Kind::PerBuffer { default: Init::Str("%-"), predicate: None } },
     CVariable { name: "mode-name", gnu: "buffer.c:5255", kind: Kind::PerBuffer { default: Init::Str("Fundamental"), predicate: None } },
     CVariable { name: "fill-column", gnu: "buffer.c:5259", kind: Kind::PerBuffer { default: Init::Fixnum(70), predicate: Some(Predicate::Integerp) } },
     // Chain: compile.el's easy-mmode docstrings fill through back-to-indentation.

@@ -208,7 +208,7 @@ fn each_window_formats_its_own_buffer_local_mode_line() {
     let mut vm = Vm::new();
     vm.set_frame_geometry(WIDTH, HEIGHT, LINE, COLUMN).unwrap();
     eval(&mut vm, r#"(progn
-        (setq mode-line-format '("global %b"))
+        (set-default 'mode-line-format '("global %b"))
         (set-buffer (get-buffer-create "left")) (make-local-variable 'mode-line-format)
         (setq mode-line-format '("left-local %b"))
         (set-window-buffer nil (current-buffer))
@@ -293,9 +293,10 @@ fn eval_that_collects_during_expansion_retains_nothing() {
     let (second, _, objects2, bytes2) = run(&mut vm);
     assert_eq!(second, first);
     assert_eq!((objects2, bytes2), (objects, bytes), "a redisplay retained heap objects");
-    // Only the buffer-local value exists, so an equal second band also
-    // proves the local binding survived both collections.
-    assert_eq!(eval(&mut vm, "(progn (set-buffer (get-buffer-create \"other\")) (boundp 'mode-line-format))"), "nil");
+    // Only the buffer-local value was set, so an equal second band also
+    // proves the local binding survived both collections; elsewhere the
+    // default is still buffer.c's.
+    assert_eq!(eval(&mut vm, "(progn (set-buffer (get-buffer-create \"other\")) (list (local-variable-p 'mode-line-format) (equal (default-value 'mode-line-format) \"%-\")))"), "(nil t)");
 }
 
 /// GNU clips the band at the window's edge (`xdisp.c:30105`), so a field
@@ -477,7 +478,7 @@ fn all_bands(vm: &mut Vm) -> Vec<String> {
 #[test]
 fn eval_window_context_is_local_and_restored() {
     let mut vm = two_window_eval_probe();
-    eval(&mut vm, r#"(setq mode-line-format '((:eval (if (eq (window-buffer (selected-window)) (current-buffer)) "SELF" "OTHER"))))"#);
+    eval(&mut vm, r#"(set-default 'mode-line-format '((:eval (if (eq (window-buffer (selected-window)) (current-buffer)) "SELF" "OTHER"))))"#);
     assert_eq!(all_bands(&mut vm), ["SELF", "SELF"]);
     assert_eq!(eval(&mut vm, "(eq real-window (selected-window))"), "t");
 }
@@ -485,7 +486,7 @@ fn eval_window_context_is_local_and_restored() {
 #[test]
 fn eval_window_context_unwinds_after_errors() {
     let mut vm = two_window_eval_probe();
-    eval(&mut vm, r#"(setq seen nil mode-line-format
+    eval(&mut vm, r#"(setq seen nil) (set-default 'mode-line-format
         '((:eval (progn (setq seen (cons (eq (window-buffer (selected-window)) (current-buffer)) seen)) (error "context probe")))))"#);
     assert_eq!(all_bands(&mut vm), ["", ""]);
     assert_eq!(eval(&mut vm, "seen"), "(t t)", "both erroring evaluations see their own window");
@@ -496,7 +497,7 @@ fn eval_window_context_unwinds_after_errors() {
 #[test]
 fn eval_window_context_survives_collection() {
     let mut vm = two_window_eval_probe();
-    eval(&mut vm, r#"(setq mode-line-format '((:eval (progn (make-string 100 ?x) (if (eq (window-buffer (selected-window)) (current-buffer)) "SELF" "OTHER")))))"#);
+    eval(&mut vm, r#"(set-default 'mode-line-format '((:eval (progn (make-string 100 ?x) (if (eq (window-buffer (selected-window)) (current-buffer)) "SELF" "OTHER")))))"#);
     vm.set_collection_floor(1);
     let before = vm.heap_stats().collections;
     let actual = all_bands(&mut vm);

@@ -167,10 +167,10 @@ pub struct Started {
     pub launch: Launch,
     pub loadup: Option<crate::loadup::Loadup>,
     pub bindings: Vec<Binding>,
-    /// True when `mode-line-format` has a default binding after loadup,
-    /// including nil or an unchanged pre-existing value, which is left alone;
-    /// false when each workspace buffer shows the labelled
-    /// [`STAND_IN_MODE_LINE`] (or, under --gnu-lisp, no mode line at all).
+    /// True when loadup replaced `mode-line-format`'s buffer.c default "%-",
+    /// with nil or any other value, which is left alone; false when the
+    /// workspace shows the labelled [`STAND_IN_MODE_LINE`] (or, under
+    /// --gnu-lisp, GNU's bare "%-").
     pub gnu_mode_line: bool,
     /// --loadup's file arguments, which [`finish_loadup`] visits once the
     /// user's init has run, where startup.el `command-line-1' visits them.
@@ -440,7 +440,8 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
             vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
         }
     }
-    let gnu_mode_line = vm.eval_source("(default-boundp 'mode-line-format)")? != romacs_vm::Fixed::NIL;
+    // buffer.c's default is "%-" until bindings.el replaces it.
+    let gnu_mode_line = vm.eval_source("(not (equal (default-value 'mode-line-format) \"%-\"))")? != romacs_vm::Fixed::NIL;
     if launch == Launch::GnuOnly {
         if !files.is_empty() {
             return Err("FILE arguments need romacs's visiting command, which --gnu-lisp does not install".into());
@@ -693,12 +694,12 @@ pub fn load_gui_extensions(vm: &mut Vm, dir: &std::path::Path) -> Result<(), Str
 
 fn mode_line_note(gnu: bool) -> String {
     if gnu { "Mode line: GNU's mode-line-format.".into() } else {
-        "Mode line: mode-line-format is void after loadup (bindings.el did not reach it), so --gnu-lisp draws no mode line and no cursor (layout draws the cursor only in windows that have a mode line).".into()
+        "Mode line: mode-line-format is still buffer.c's \"%-\" after loadup (bindings.el did not reach it), so --gnu-lisp draws that.".into()
     }
 }
 
-/// The mode line used when `mode-line-format` has no default binding after
-/// loadup: the default launch loads no GNU Lisp, and under `--loadup`
+/// The mode line used when `mode-line-format` keeps buffer.c's default
+/// after loadup: the default launch loads no GNU Lisp, and under `--loadup`
 /// bindings.el can stop before its default (see DIVERGENCES.md GUI-ML1). Built from GNU's own
 /// %-constructs in GNU's order (coding/EOL, modified, remote, buffer name,
 /// position, line) and expanded by GNU's display_mode_element/decode_mode_spec;
@@ -722,7 +723,7 @@ fn workspace(vm: &mut Vm, started: &Started, showcase: bool) -> Result<(), Strin
   {screen}
   (setq romacs-gui-scratch-start (point))
   (when {mode_line}
-    (setq mode-line-format (append @STAND_IN_MODE_LINE@ '("   Rum / VM")))
+    (set-default 'mode-line-format (append @STAND_IN_MODE_LINE@ '("   Rum / VM")))
     (make-local-variable 'mode-line-format)
     (setq mode-line-format (append @STAND_IN_MODE_LINE@ '("   Rum / VM"))))
   (set-window-buffer nil (current-buffer))
@@ -1923,7 +1924,7 @@ mod tests {
     /// value wins untouched, globally and in the startup buffers.
     #[test]
     fn workspace_leaves_gnus_mode_line_format_alone_when_loadup_set_it() {
-        let (bands, locals, global, gnu) = loadup_mode_lines("ml-gnu", "(setq mode-line-format '(\"GNU-SET %b\"))\n");
+        let (bands, locals, global, gnu) = loadup_mode_lines("ml-gnu", "(set-default 'mode-line-format '(\"GNU-SET %b\"))\n");
         assert!(gnu);
         assert_eq!(locals, ["GLOBAL", "GLOBAL"]);
         assert_eq!(global, "(\"GNU-SET %b\")");
