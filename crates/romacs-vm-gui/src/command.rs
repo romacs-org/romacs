@@ -281,9 +281,10 @@ mod tests {
         let before = vm.frame_snapshot(800, 280).unwrap();
         keys.dispatch(&mut vm, CommandEvent::Character(14)).unwrap();
         let after = vm.frame_snapshot(800, 280).unwrap();
+        // A window publishes from its start's line, "line N λ".
         let start_line = |s: &romacs_layout_input::FrameSnapshot| {
             let w = &s.windows[0].snapshot;
-            w.text.utf8[..w.start_byte].bytes().filter(|b| *b == b'\n').count()
+            w.text.utf8[w.start_byte..].split(' ').nth(1).unwrap().parse::<usize>().unwrap()
         };
         assert_eq!(start_line(&after), start_line(&before) + 1, "AUTO_SCROLL_MINIMAL_REVEAL");
         for _ in 0..60 {
@@ -292,13 +293,13 @@ mod tests {
         }
         let stable = vm.frame_snapshot(800, 280).unwrap();
         let w = &stable.windows[0].snapshot;
-        let expected = (w.start_byte, w.point_byte);
+        let expected = (w.text.utf8.clone(), w.start_byte, w.point_byte);
         for _ in 0..5 {
             let outcome = keys.dispatch(&mut vm, CommandEvent::Character(14)).unwrap().unwrap();
             assert_eq!(outcome.signal.unwrap().condition, "end-of-buffer");
             let snapshot = vm.frame_snapshot(800, 280).unwrap();
             let w = &snapshot.windows[0].snapshot;
-            assert_eq!((w.start_byte, w.point_byte), expected, "EOF_POINT_AND_VIEWPORT_STABLE");
+            assert_eq!((w.text.utf8.clone(), w.start_byte, w.point_byte), expected, "EOF_POINT_AND_VIEWPORT_STABLE");
         }
     }
 

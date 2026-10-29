@@ -137,7 +137,8 @@ fn collections_during_fontification_keep_the_snapshot_intact() {
     let before = vm.heap_stats().collections;
     let snapshot = vm.display_snapshot(400, 200).unwrap();
     assert!(vm.heap_stats().collections > before);
-    assert!(snapshot.text.utf8.starts_with("line 00 "));
+    // The window publishes from its start, line 05.
+    assert!(snapshot.text.utf8.starts_with("line 05 "));
     assert_eq!(printed(&mut vm, "(reverse romacs-fl-log)"), "(196 246 296 346 396 446 496 546)");
     assert_eq!(printed(&mut vm, "(buffer-name)"), "\"fl\"");
 }
@@ -199,7 +200,7 @@ fn deleting_the_window_drops_it_from_the_frame() {
 fn a_failing_walk_is_a_diagnostic() {
     let mut vm = romacs_vm("(progn (setq fontification-functions (list 'ignore)) (fset 'romacs--redisplay-fontify (lambda (start end) (error \"walk %d %d\" start end))))");
     let snapshot = vm.display_snapshot(400, 200).unwrap();
-    assert!(snapshot.text.utf8.starts_with("line 00"));
+    assert!(snapshot.text.utf8.starts_with("line 05"));
     assert_eq!(vm.take_display_diagnostics(), ["fontification: walk 196 586"]);
 }
 

@@ -157,10 +157,11 @@ fn every_window_scrolls_independently_and_the_snapshot_paints_the_new_start() {
     let snapshot = vm.frame_snapshot(800, 24 * LINE).unwrap();
     let upper = &snapshot.windows[0].snapshot;
     let lower = &snapshot.windows[1].snapshot;
-    let line_start = |n: usize| upper.text.utf8.match_indices('\n').nth(n - 2).unwrap().0 + 1;
-    assert_eq!(upper.start_byte, line_start(35), "selected 11-row window recentred on line 40");
-    assert_eq!(&upper.text.utf8[upper.start_byte..upper.start_byte + 7], "line 35");
-    assert_eq!(lower.start_byte, 0, "the other window's point (1) was visible");
+    // Each window publishes the lines from its start's.
+    let line_start = |n: usize| upper.text.utf8.match_indices('\n').nth(n - 36).unwrap().0 + 1;
+    assert_eq!(upper.start_byte, 0);
+    assert!(upper.text.utf8.starts_with("line 35\n"), "selected 11-row window recentred on line 40");
+    assert_eq!((lower.start_byte, &lower.text.utf8[..7]), (0, "line 1\n"), "the other window's point (1) was visible");
     assert_eq!(upper.point_byte, line_start(40));
 }
 
@@ -199,5 +200,6 @@ fn a_one_row_window_starts_at_points_line() {
     let window = &snapshot.windows[0].snapshot;
     let start = vm.eval_source("(window-start)").unwrap();
     assert_eq!(start.display().unwrap(), "15", "point 17 is on line 3, which starts at 15");
-    assert_eq!(window.start_byte, 14);
+    assert_eq!(window.start_byte, 0);
+    assert!(window.text.utf8.starts_with("line 3\n"), "a window publishes from its start's line");
 }

@@ -29,6 +29,17 @@ fn rows_end(text: &str, from: usize, rows: usize, zv: usize) -> usize {
         .map_or(zv, |(i, _)| from + i + 1)
 }
 
+/// The bytes of TEXT a window starting at START can show in ROWS rows,
+/// within ACCESSIBLE: from the start of START's line through the end of
+/// the ROWS-th line from START. Every row is at least one frame line tall
+/// and every line takes at least one row, so no shown byte lies outside.
+pub(crate) fn shown_bytes(text: &str, accessible: std::ops::Range<usize>, start: usize, rows: usize) -> std::ops::Range<usize> {
+    let start = start.clamp(accessible.start, accessible.end);
+    let line = text.as_bytes()[accessible.start..start].iter().rposition(|&c| c == b'\n')
+        .map_or(accessible.start, |i| accessible.start + i + 1);
+    line..rows_end(text, start, rows, accessible.end)
+}
+
 impl Vm {
     /// Text-area rows of the window with `text_height` pixels: (fully
     /// visible, displayed including a partial last row).

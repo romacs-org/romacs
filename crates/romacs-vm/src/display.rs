@@ -44,6 +44,8 @@ pub(super) struct DisplayState {
     /// Per window id, how its last publication's display text maps to
     /// buffer text, when overlay strings were spliced in.
     segments: std::collections::BTreeMap<u64, Vec<mini_window::Segment>>,
+    /// Per window id, the buffer byte its last publication's text starts at.
+    bases: std::collections::BTreeMap<u64, usize>,
     pub version: u64,
     /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
     pub(super) hosted: bool,
@@ -83,10 +85,15 @@ impl DisplayState {
     pub(super) fn forget_window(&mut self, id: u64) {
         self.previous.remove(&id);
         self.segments.remove(&id);
+        self.bases.remove(&id);
     }
     /// How window ID's last publication maps display bytes to buffer bytes.
     pub(super) fn segments(&self, id: u64) -> Option<&[mini_window::Segment]> {
         self.segments.get(&id).map(Vec::as_slice)
+    }
+    /// The buffer byte window ID's last publication starts at.
+    pub(super) fn base(&self, id: u64) -> usize {
+        self.bases.get(&id).copied().unwrap_or(0)
     }
     pub fn new() -> Self {
         let mut attrs = AttrsBuilder::default();
@@ -123,6 +130,7 @@ impl DisplayState {
             face_table: None,
             previous: std::collections::BTreeMap::new(),
             segments: std::collections::BTreeMap::new(),
+            bases: std::collections::BTreeMap::new(),
             theme: Theme::build(
                 Arc::new(defs),
                 None,
@@ -510,7 +518,7 @@ impl Vm {
         if !w.live() {
             return Err("window deleted during snapshot".into());
         }
-        let (id, buffer, start, mini) = (w.id, w.buffer, w.start, w.mini);
+        let (id, buffer, start, mini, vscroll) = (w.id, w.buffer, w.start, w.mini, w.vscroll_px);
         self.slots[slot].value = buffer;
         let start = self
             .marker_position_value(start)?
@@ -522,13 +530,25 @@ impl Vm {
         let Object::Buffer(b) = self.object(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
-        let utf8 = b.as_str().to_owned();
         let point_byte = b
             .byte_of_char(crate::coordinates::CharOffset((point - 1) as usize))?
             .0;
         let start_byte = b
             .byte_of_char(crate::coordinates::CharOffset((start - 1) as usize))?
             .0;
+        // The mini-window splices overlay strings into its whole buffer.
+        // Any other window publishes only the bytes its rows can show, so a
+        // frame costs what the window shows, not what its buffer holds.
+        let accessible = b.accessible();
+        let shown = if mini { 0..b.as_str().len() } else {
+            let rows = height.saturating_add(vscroll).div_ceil(self.window_state.line.max(1)) as usize;
+            crate::window::shown_bytes(b.as_str(), accessible.start.0..accessible.end.0, start_byte, rows)
+        };
+        let base = shown.start;
+        let utf8 = b.as_str()[shown.clone()].to_owned();
+        let start_byte = start_byte.clamp(shown.start, shown.end) - base;
+        // Point outside the published bytes is not shown: no glyph is at it.
+        let point_byte = point_byte.checked_sub(base).filter(|&p| p <= utf8.len()).unwrap_or(utf8.len());
         let mut faces = table.faces.clone();
         let terminal = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer);
         if let Some(binding) = terminal {
@@ -538,7 +558,6 @@ impl Vm {
         let default = faces[0].clone();
         let mut merged = std::collections::HashMap::new();
         let styles = terminal.map_or(&[][..], |binding| binding.styles.as_ref());
-        let mut style_index = 0;
         let mut terminal_faces = std::collections::HashMap::new();
         let mut region_faces = std::collections::HashMap::new();
         let region_background = table.handle("region").map(|i| faces[i.0 as usize].background);
@@ -547,13 +566,16 @@ impl Vm {
         let mut face_runs: Vec<FaceRun> = vec![];
         // Resolve `face` once per run of one value, not per character.
         let mut named = (0, FaceHandle(0));
-        for (at, ch) in utf8.char_indices() {
+        let mut style_index = styles.partition_point(|run| run.bytes.end <= base);
+        for (offset, ch) in utf8.char_indices() {
+            // AT is the buffer byte; face runs are over the published bytes.
+            let at = base + offset;
             if at >= named.0 {
                 let value = b
                     .properties
                     .get_property(ByteOffset(at), "face")
                     .unwrap_or(Value::NIL);
-                let end = b.properties.next_single_change(ByteOffset(at), "face", ByteOffset(utf8.len())).0;
+                let end = b.properties.next_single_change(ByteOffset(at), "face", ByteOffset(shown.end)).0;
                 named = (end, self.face_handle(&table, &mut faces, &mut merged, value));
             }
             let mut face = named.1;
@@ -582,14 +604,15 @@ impl Vm {
             if let Some(last) = face_runs.last_mut()
                 && last.face == face
             {
-                last.bytes.end = at + ch.len_utf8()
+                last.bytes.end = offset + ch.len_utf8()
             } else {
                 face_runs.push(FaceRun {
-                    bytes: at..at + ch.len_utf8(),
+                    bytes: offset..offset + ch.len_utf8(),
                     face,
                 })
             }
         }
+        self.display_state.bases.insert(id, base);
         // No version bump here: this runs once per WINDOW, and
         // `display_state.width/height` is frame-wide, so each window's own
         // dimensions looked like a frame resize and every `frame_snapshot`

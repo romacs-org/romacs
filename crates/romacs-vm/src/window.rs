@@ -2,6 +2,7 @@
 use crate::{data::Object, *};
 #[path = "redisplay.rs"]
 mod redisplay;
+pub(crate) use redisplay::shown_bytes;
 #[path = "window_config.rs"]
 mod config;
 pub(crate) use config::WindowConfiguration;
@@ -946,7 +947,9 @@ impl Vm {
             let Object::Buffer(b) = self.object(w.buffer)? else {
                 return Err("buffer required".into());
             };
-            // A display with overlay strings ends at a display byte.
+            // A display with overlay strings ends at a display byte; any
+            // other, at a byte of the text it published.
+            let end = end + self.display_state.base(id);
             let end = self.display_state.segments(id)
                 .map_or(end, |segments| crate::display::buffer_of(segments, end, b.len_bytes()));
             let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
