@@ -35,6 +35,7 @@ mod processors;
 mod locale_info;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
+pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
 pub use session_host::SessionHost;
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};

@@ -44,6 +44,8 @@ pub struct GuiHost {
     pub sender: Arc<PaintSender>,
     pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
     pub terminal_ready: crossbeam_channel::Receiver<()>,
+    /// The process descriptors the next wait also watches.
+    pub processes: Vec<(std::os::fd::RawFd, i16)>,
 }
 
 /// What one transport event means to a waiting prompt. By reference: a
@@ -100,7 +102,7 @@ impl GuiHost {
         match *event {
             HostEvent::Closed => shared.closed = true,
             HostEvent::Resize { width, height } => shared.size = Some((width, height)),
-            HostEvent::Key(_) | HostEvent::Background | HostEvent::Timeout => {}
+            HostEvent::Key(_) | HostEvent::Background | HostEvent::Process | HostEvent::Timeout => {}
         }
     }
 }
@@ -165,6 +167,10 @@ impl HostInput for GuiHost {
         Ok(ends)
     }
 
+    fn watch_processes(&mut self, fds: &[(std::os::fd::RawFd, i16)]) {
+        self.processes = fds.to_vec();
+    }
+
     fn next_event(&mut self, timeout: Option<Duration>) -> Result<HostEvent, String> {
         let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
         loop {
@@ -174,9 +180,10 @@ impl HostInput for GuiHost {
                 Next::Event(event) => event,
                 Next::Wait => {
                     let left = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
-                    match crate::terminal_wait::wait(self.sender.input(), &self.terminal_ready, left) {
+                    match crate::terminal_wait::wait(self.sender.input(), &self.terminal_ready, left, &std::mem::take(&mut self.processes)) {
                         crate::terminal_wait::Wake::Input(event) => event,
                         crate::terminal_wait::Wake::Terminal => return Ok(HostEvent::Background),
+                        crate::terminal_wait::Wake::Process => return Ok(HostEvent::Process),
                         crate::terminal_wait::Wake::Closed => return Err("input closed while reading".into()),
                         crate::terminal_wait::Wake::Timeout => return Ok(HostEvent::Timeout),
                     }

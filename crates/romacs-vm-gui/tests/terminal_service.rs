@@ -147,7 +147,7 @@ fn closing_the_last_real_terminal_returns_editor_waits_to_idle() {
     loop {
         assert!(Instant::now() < deadline, "LAST_TERMINAL_CLOSE_MUST_RETURN_TO_IDLE");
         assert!(!vm.poll_terminal_output().unwrap());
-        match terminal_wait::wait(&input, &ready, Some(Duration::from_millis(50))) {
+        match terminal_wait::wait(&input, &ready, Some(Duration::from_millis(50)), &[]) {
             terminal_wait::Wake::Terminal => {},
             terminal_wait::Wake::Timeout => break,
             _ => panic!("no keyboard or close event was sent"),

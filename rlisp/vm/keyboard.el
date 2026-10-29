@@ -113,7 +113,8 @@ runs no timers."
           ;; Each round, as wait_reading_process_output's: completed
           ;; background commands' callbacks (before every block, not only
           ;; after a completion's wake, which a minibuffer read may have
-          ;; used), then one timer_check pass, which runs each ripe timer at
+          ;; used), the processes' ready output, connections and status
+          ;; changes, then one timer_check pass, which runs each ripe timer at
           ;; most once.  Requeued input and the time limit come next, then
           ;; the deadline, from the timers as they are now: one that a
           ;; callback or timer added and is ripe already gives 0 and another
@@ -122,7 +123,9 @@ runs no timers."
           ;; changed something or it has not yet, and a redisplay that
           ;; schedules a timer or requeues input ends the wait
           ;; (`romacs--wait-state').
-          (let ((dispatched (romacs--dispatch-background)) left)
+          (let* ((background (romacs--dispatch-background))
+                 (dispatched (or (and timers (romacs--process-idle)) background))
+                 left)
             (and timers (romacs--timer-check))
             (setq left (and end (- end (float-time))))
             (if (or (romacs--unread-p) (and left (<= left 0)))

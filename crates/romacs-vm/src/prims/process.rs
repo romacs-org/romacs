@@ -401,6 +401,9 @@ fn proc_select(cx, wait_proc: Value, just_this_one: Value, seconds: Value) {
     cx.process_select(wait_proc, just_this_one != Value::NIL, seconds)
 }}
 
+defsubr! { name = "romacs--proc-activity", gnu = "romacs:process", effect = Reads,
+fn proc_activity(cx) { Value::integer(cx.process_activity() as i64).map_err(Fault::Error) }}
+
 defsubr! { name = "romacs--proc-input-pending", gnu = "process.c:5566", effect = Global,
 fn proc_input_pending(cx) { Ok(if cx.process_input_pending()? { Value::TRUE } else { Value::NIL }) }}
 

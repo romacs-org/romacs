@@ -123,6 +123,9 @@ pub(crate) struct Table {
     pub deleted: Vec<(i32, Option<std::path::PathBuf>)>,
     /// GNU last_read_channel, as a serial.
     pub last_read: u64,
+    /// How many selects found something ready: the command loop's idle
+    /// wait asks whether its pass handled anything.
+    pub activity: u64,
 }
 
 impl Table {
@@ -548,6 +551,43 @@ mod libc {
 }
 
 /// Poll FDS (descriptor, events) for at most TIMEOUT; the revents of each.
+/// A thread waiting, for a host's blocking wait, until one of a set of
+/// process descriptors (`Vm::process_wait_fds') is ready, which it reports
+/// once through READY; dropping it ends the wait.  The descriptors must
+/// stay open meanwhile, as they do while the VM runs no Lisp.
+pub struct ProcessWatch {
+    cancel: std::os::unix::net::UnixStream,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ProcessWatch {
+    pub fn start(mut fds: Vec<(RawFd, i16)>, ready: impl FnOnce() + Send + 'static) -> io::Result<Self> {
+        let (cancel, stop) = std::os::unix::net::UnixStream::pair()?;
+        let thread = std::thread::Builder::new().name("process-watch".into()).spawn(move || {
+            use std::os::fd::AsRawFd;
+            fds.push((stop.as_raw_fd(), libc::POLLIN));
+            loop {
+                let Ok(revents) = poll(&fds, None) else { return };
+                let (watched, stopped) = revents.split_at(revents.len() - 1);
+                if stopped[0] != 0 { return; }
+                if watched.iter().any(|&r| r != 0) {
+                    ready();
+                    return;
+                }
+            }
+        })?;
+        Ok(Self { cancel, thread: Some(thread) })
+    }
+}
+
+impl Drop for ProcessWatch {
+    fn drop(&mut self) {
+        use std::io::Write;
+        let _ = (&self.cancel).write_all(&[0]);
+        if let Some(thread) = self.thread.take() { let _ = thread.join(); }
+    }
+}
+
 pub(crate) fn poll(fds: &[(RawFd, i16)], timeout: Option<std::time::Duration>) -> io::Result<Vec<i16>> {
     let mut set: Vec<libc::pollfd> = fds.iter().map(|&(fd, events)| libc::pollfd { fd, events, revents: 0 }).collect();
     let millis = match timeout {

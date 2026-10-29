@@ -229,6 +229,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "load-path-filter-function", gnu: "lread.c:5808", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "load-read-function", gnu: "lread.c:5697", kind: Kind::Lisp(Init::Symbol("read")) },
     CVariable { name: "lread--unescaped-character-literals", gnu: "lread.c:5775", kind: Kind::Lisp(Init::Nil) },
+    // thread.c's value in a build without threads: VM2 has no thread
+    // objects and does not provide `threads' (DIVERGENCES.md VM2-THREAD1).
+    CVariable { name: "main-thread", gnu: "thread.c:1307", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "make-cursor-line-fully-visible", gnu: "xdisp.c:38931", kind: Kind::Lisp(Init::True) },
     CVariable { name: "make-pointer-invisible", gnu: "frame.c:7496", kind: Kind::Lisp(Init::True) },
     CVariable { name: "max-mini-window-height", gnu: "xdisp.c:39037", kind: Kind::Lisp(Init::Float(0.25)) },

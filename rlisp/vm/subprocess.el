@@ -1048,6 +1048,15 @@ run no timers).  Return GNU's got_some_output."
         (setq got-some-output (- (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes)))
     got-some-output))
 
+(defun romacs--process-idle ()
+  "What keyboard.c read_char's wait_reading_process_output does for the
+processes while the command loop idles for a key: read the output, finish
+the connections and report the status changes that are ready now, without
+waiting or running timers.  Non-nil if anything was ready."
+  (let ((activity (romacs--proc-activity)))
+    (romacs--wait-reading-process-output 'minimum nil -1)
+    (/= activity (romacs--proc-activity))))
+
 (defun accept-process-output (&optional process seconds millisec just-this-one)
   "Allow any pending output from subprocesses to be read by Emacs.
 GNU process.c Faccept_process_output."
@@ -1235,5 +1244,13 @@ GNU callproc.c Fcall_process_region."
                                 buffer display args
                                 (cons program (cons infile (cons buffer (cons display args))))))
       (if tempfile (delete-file tempfile)))))
+
+;;;; Features
+
+;; syms_of_process (process.c:9083-9111): `make-network-process' with the
+;; subfeatures this implementation supports, in GNU's order: TCP servers,
+;; `:service t', IPv6 and IPv4, and `:nowait' connections.  Not datagram
+;; or seqpacket types, local sockets or socket options (VM2-PROC1).
+(provide 'make-network-process '((:server t) (:service t) (:family ipv6) (:family ipv4) (:nowait t)))
 
 ;;; subprocess.el ends here

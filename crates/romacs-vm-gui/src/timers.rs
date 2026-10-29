@@ -1,7 +1,9 @@
-//! Lisp timers in the GUI's command loop, as GNU keyboard.c `read_char' runs
-//! them: once the loop has no key to dispatch it starts idling and runs ripe
-//! timers (`romacs--timer-check-idle', the same `romacs--timer-check' the Lisp
-//! waits use), then blocks until the next one is due; a key press for a
+//! Lisp timers and process output in the GUI's command loop, as GNU
+//! keyboard.c `read_char' runs them: once the loop has no key to dispatch it
+//! starts idling, handles the process output that is ready
+//! (`romacs--process-idle') and runs ripe timers (`romacs--timer-check-idle',
+//! the same `romacs--timer-check' the Lisp waits use), then blocks until the
+//! next timer is due, a key arrives or a process is ready; a key press for a
 //! command ends idleness (`timer_stop_idle').
 use romacs_display_runtime::thread_comm::InputEvent;
 use romacs_vm::Vm;
@@ -10,7 +12,8 @@ use std::time::Duration;
 /// What one idle check did.
 #[derive(Debug, PartialEq)]
 pub struct Idle {
-    /// A timer ran: redisplay, then check again before blocking.
+    /// A timer ran or process output was handled: redisplay, then check
+    /// again before blocking.
     pub ran: bool,
     /// The timers left a new message for the echo area.
     pub message: bool,
@@ -20,8 +23,8 @@ pub struct Idle {
 
 pub fn idle(vm: &mut Vm) -> Result<Idle, String> {
     let (ran, rest) = vm.eval_source(
-        "(let* ((message (current-message)) (check (romacs--timer-check-idle)))
-           (list (car check) (not (eq message (current-message)))
+        "(let* ((message (current-message)) (output (romacs--process-idle)) (check (romacs--timer-check-idle)))
+           (list (or output (car check)) (not (eq message (current-message)))
                  (and (cdr check) (ceiling (* (cdr check) 1e6)))))",
     )?.cons_pair()?;
     let ran = !ran.is_nil();
@@ -218,6 +221,85 @@ mod tests {
         printed(&mut vm, rescheduling);
         let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 0.5))");
         assert_eq!((key.as_str(), limit.as_str()), ("(97 t t)", "(nil t)"), "a queued key, then the time limit");
+    }
+
+    /// Process output reaches its filter while the session waits for a key,
+    /// with no Lisp wait: `read-event' with a time limit runs the filter
+    /// of a :nowait connection's data as it arrives, as pinned GNU's
+    /// read_char does (batch, stdin open), and the command loop's idle wait
+    /// wakes for the process, not its time limit, then runs its filter.
+    #[test]
+    fn process_output_runs_while_waiting_for_a_key() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(process_body).unwrap().join().unwrap();
+    }
+    /// A local server: each connection gets "hi" after DELAY, then stays open.
+    fn serve_after(delay: Duration) -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || for stream in listener.incoming().flatten() {
+            std::thread::spawn(move || {
+                use std::io::Write;
+                std::thread::sleep(delay);
+                let mut stream = stream;
+                let _ = stream.write_all(b"hi");
+                std::thread::sleep(Duration::from_secs(30));
+            });
+        });
+        port
+    }
+    fn process_body() {
+        let port = serve_after(Duration::from_millis(200));
+        let form = format!("(let ((got nil) (states nil) (start (float-time)))
+            (make-network-process :name \"p\" :host \"127.0.0.1\" :service {port} :nowait t
+              :filter (lambda (_ s) (push s got)) :sentinel (lambda (_ e) (push (car (split-string e)) states)))
+            (list (read-event nil nil 1) (reverse states) got (< (- (float-time) start) 1.5)))");
+        let gnu = std::process::Command::new(std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle"))
+            .args(["-Q", "--batch", "--eval", &format!("(prin1 {form})")])
+            .stdin(std::process::Stdio::piped()).output().unwrap();
+        let expected = String::from_utf8(gnu.stdout).unwrap();
+        assert_eq!(expected, "(nil (\"open\") (\"hi\") t)", "pinned GNU");
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        vm.set_host_input(Some(Box::new(Waiting(vec![]))));
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil)");
+        assert_eq!(printed(&mut vm, &form), expected, "read-event's wait");
+        // The command loop: idle, block on the process, idle again.
+        printed(&mut vm, &format!("(setq got nil states nil)
+            (make-network-process :name \"q\" :host \"127.0.0.1\" :service {port} :nowait t
+              :filter (lambda (_ s) (push s got)) :sentinel (lambda (_ e) (push (car (split-string e)) states)))"));
+        vm.timer_stop_idle();
+        let (_keys, input) = crossbeam_channel::bounded::<InputEvent>(1);
+        let (_terminals, terminal) = crossbeam_channel::bounded::<()>(1);
+        let mut woke = vec![];
+        for _ in 0..4 {
+            if idle(&mut vm).unwrap().ran { continue; }
+            if printed(&mut vm, "got") != "nil" { break; }
+            let processes = vm.process_wait_fds();
+            woke.push(matches!(crate::terminal_wait::wait(&input, &terminal, Some(Duration::from_secs(5)), &processes),
+                               crate::terminal_wait::Wake::Process));
+        }
+        assert_eq!(printed(&mut vm, "(list (reverse states) got)"), "((\"open\") (\"hi\"))");
+        assert!(!woke.is_empty() && woke.iter().all(|&process| process), "the wait woke for the process: {woke:?}");
+    }
+
+    /// A keyboard nobody types on whose waits watch the process
+    /// descriptors, as the GUI's prompt host does.
+    struct Waiting(Vec<(std::os::fd::RawFd, i16)>);
+
+    impl romacs_vm::HostInput for Waiting {
+        fn input_pending(&mut self) -> bool { false }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<(u64, usize)>, String> { Ok(vec![]) }
+        fn watch_processes(&mut self, fds: &[(std::os::fd::RawFd, i16)]) { self.0 = fds.to_vec(); }
+        fn next_event(&mut self, timeout: Option<Duration>) -> Result<romacs_vm::HostEvent, String> {
+            let (_keys, input) = crossbeam_channel::bounded::<InputEvent>(1);
+            let (_terminals, terminal) = crossbeam_channel::bounded::<()>(1);
+            Ok(match crate::terminal_wait::wait(&input, &terminal, timeout, &std::mem::take(&mut self.0)) {
+                crate::terminal_wait::Wake::Process => romacs_vm::HostEvent::Process,
+                _ => romacs_vm::HostEvent::Timeout,
+            })
+        }
     }
 
     /// A pause, a key, or the wake a completed background command gives

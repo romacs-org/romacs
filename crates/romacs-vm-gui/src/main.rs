@@ -724,7 +724,7 @@ fn evaluate(
     host.borrow_mut().presentation = 1;
     let last_presentation = || host.borrow().presentation;
     if live {
-        vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone() })));
+        vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
     }
     let initial = frame(&mut vm, g1, width, height)?;
     let mut pending = std::collections::VecDeque::new();
@@ -953,10 +953,13 @@ fn evaluate(
                     live_presentation.changed();
                     continue;
                 }
-                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay)) {
+                // read_char's wait_reading_process_output also selects on
+                // the processes: one ready wakes the loop to read it.
+                let processes = vm.process_wait_fds();
+                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(()),
-                    terminal_wait::Wake::Terminal | terminal_wait::Wake::Timeout => {},
+                    terminal_wait::Wake::Terminal | terminal_wait::Wake::Process | terminal_wait::Wake::Timeout => {},
                 }
             }
             continue;
