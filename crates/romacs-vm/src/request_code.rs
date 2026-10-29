@@ -11,6 +11,10 @@ pub(super) struct RequestCode {
     compiling: bool,
     compiled: Vec<usize>,
     pub(super) since_collection: usize,
+    /// Cache slots a builder took that no installed function's code owns
+    /// yet: at a collection, where no builder is open, those of a failed or
+    /// discarded build.
+    unclaimed_caches: Vec<usize>,
 }
 
 impl Vm {
@@ -23,6 +27,14 @@ impl Vm {
     }
     pub(super) fn install_code(&mut self, function: Function) -> usize {
         let code = &mut self.request_code;
+        // The function's code now owns the cache slots its builder took.
+        for op in &function.code {
+            if let Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) = *op
+                && let Some(i) = code.unclaimed_caches.iter().rposition(|&c| c == cache)
+            {
+                code.unclaimed_caches.swap_remove(i);
+            }
+        }
         let id = if code.compiling
             && let Some(id) = code.free.pop()
         {
@@ -48,7 +60,7 @@ impl Vm {
             version: 0,
             target: Value::UNBOUND,
         };
-        if self.request_code.compiling
+        let id = if self.request_code.compiling
             && let Some(id) = self.request_code.free_caches.pop()
         {
             self.caches[id] = cache;
@@ -57,7 +69,9 @@ impl Vm {
             let id = self.caches.len();
             self.caches.push(cache);
             id
-        }
+        };
+        self.request_code.unclaimed_caches.push(id);
+        id
     }
 
     pub(super) fn compile_request(&mut self, form: &Form) -> Result<(usize, Vec<usize>)> {
@@ -134,7 +148,10 @@ impl Vm {
             .iter()
             .map(|f| self.install_function(f.clone()))
             .collect();
-        let cache_ids = (0..caches).map(|_| self.install_cache()).collect();
+        let cache_ids: Vec<usize> = (0..caches).map(|_| self.install_cache()).collect();
+        // The artifact's functions, which the caller rewrites to these
+        // ordinals, own them.
+        self.request_code.unclaimed_caches.retain(|c| !cache_ids.contains(c));
         self.request_code.compiling = previous;
         if !previous {
             self.request_code.compiled.clear();
@@ -208,6 +225,12 @@ impl Vm {
     pub(super) fn retire_code(&mut self, marks: &[bool]) {
         for program in self.programs_mut() {
             program.retire_code(marks);
+        }
+        // No builder is open at a collection: a slot no installed function
+        // owns belongs to a build that failed or discarded that code.
+        for id in std::mem::take(&mut self.request_code.unclaimed_caches) {
+            self.caches[id] = Cache { version: 0, target: Value::UNBOUND };
+            self.request_code.free_caches.push(id);
         }
         // With no request code dead, no cache becomes free: skip rescanning
         // every live body.
@@ -297,6 +320,22 @@ mod tests {
         );
         let live = vm.compile(&form(r#"["+",20,22]"#)).unwrap();
         assert_eq!(vm.execute_raw(live).unwrap().as_integer().unwrap(), 42);
+    }
+    /// A compilation that fails after its builder took a cache slot (for
+    /// `(foo)') installs no function to own it; collections reclaim it.
+    #[test]
+    fn failed_compilations_do_not_accumulate_cache_slots() {
+        let mut vm = Vm::new();
+        for i in 0..2_000 {
+            assert!(vm.eval_source_raw("(progn (foo) (let ((nil 1)) nil))").is_err());
+            if i % 10 == 0 {
+                vm.collect(&mut []);
+            }
+        }
+        vm.collect(&mut []);
+        // Slots reclaimed by one collection serve the next ten failures.
+        assert!(vm.caches.len() <= 64, "orphaned cache slots accumulate: {}", vm.caches.len());
+        assert_eq!(vm.request_code.unclaimed_caches, Vec::<usize>::new(), "every builder's slot is owned or reclaimed");
     }
     #[test]
     fn short_distinct_requests_collect_and_reuse_code_slots() {
