@@ -27,6 +27,7 @@ mod terminal_host;
 mod process_jobs;
 mod subprocess;
 pub mod host;
+pub mod world;
 mod environment;
 mod watchers;
 mod user_db;
@@ -1181,6 +1182,8 @@ pub struct Vm {
     cell_pairs: HashMap<usize, Value>,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
+    /// A world build's P fence (`world`); None outside build mode.
+    fence: Option<Box<world::Fence>>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1319,6 +1322,7 @@ impl Vm {
             cells: vec![],
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
+            fence: None,
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,
@@ -1461,6 +1465,9 @@ impl Vm {
     /// Slot stamps retain precise source-macro dependencies; the world epoch
     /// guards speculative dispatch, including intervening writes to other slots.
     fn define_function(&mut self, slot: usize, value: Value, is_macro: bool) -> Result<()> {
+        if self.fence.is_some() {
+            self.fence_function(slot);
+        }
         let world = self
             .world_version
             .checked_add(1)
@@ -2547,6 +2554,17 @@ impl Vm {
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
+        // A `let' moves a fenced value back unread; a watcher would see it.
+        if let Some(forwarded::Fwd::Fence(cell)) = self.native_forwarding(slot) {
+            self.fence_unbound(cell as usize);
+            self.fence_watched(cell as usize);
+            return self.unfenced(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
+        }
+        self.restore_binding(slot, base, value, owner, let_default)
+    }
+    /// `unbind_one`'s restore of the popped binding of SLOT (BASE its
+    /// variable, when the backtrace names one) to VALUE.
+    fn restore_binding(&mut self, slot: usize, base: Option<usize>, value: Value, owner: Value, let_default: bool) -> Result<()> {
         // A local let restores the owner's current local binding, if it
         // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
         // may have been killed and made again inside the let.

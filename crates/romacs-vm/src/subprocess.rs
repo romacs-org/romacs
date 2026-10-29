@@ -344,7 +344,7 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     // A process creation retries a reaper that failed to start.
     REAPER.adopt(Vec::new(), spawn_reaper);
     let os = |b: &[u8]| std::ffi::OsStr::from_bytes(b).to_os_string();
-    let mut command = crate::host::command(os(&spec.argv[0]));
+    let mut command = crate::host::command(os(&spec.argv[0]))?;
     command.args(spec.argv[1..].iter().map(|a| os(a)));
     command.env_clear();
     for entry in spec.env {

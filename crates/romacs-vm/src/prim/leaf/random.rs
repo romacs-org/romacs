@@ -3,6 +3,7 @@ use super::*;
 
 impl Leaf<'_> {
     pub(crate) fn random(&mut self, limit: Value) -> super::super::Out {
+        self.vm.fence_random();
         if limit == Value::TRUE {
             self.vm.random = crate::random::Random::from_entropy();
         } else if let Some(view) = self.vm.str_view(limit) {

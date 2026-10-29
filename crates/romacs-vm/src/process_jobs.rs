@@ -66,6 +66,9 @@ impl Jobs {
             return Err("CLI job timeout must be nonzero and at most 120 seconds".into());
         }
         let id = self.next_id.checked_add(1).ok_or("CLI job IDs exhausted")?;
+        // Made on the submitting thread, whose host mode refuses it in a
+        // world build: the worker's is its own.
+        let command = crate::host::command(&request.argv[0]).map_err(|error| error.to_string())?;
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
         let completions = self.completions.clone();
@@ -75,7 +78,7 @@ impl Jobs {
         let worker = std::thread::Builder::new()
             .name(format!("cli-job-{id}"))
             .spawn(move || {
-                let output = run(request, worker_cancel);
+                let output = run(request, command, worker_cancel);
                 if sender.send(Arc::new(output)).is_ok() {
                     completions.fetch_add(1, Ordering::Release);
                     if let Some(wake) = wake { wake(); }
@@ -159,7 +162,7 @@ fn refresh(job: &mut Job) {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn run(_: Request, _: Arc<AtomicBool>) -> Output {
+fn run(_: Request, _: std::process::Command, _: Arc<AtomicBool>) -> Output {
     Output {
         status: None,
         stdout: Vec::new(),
@@ -169,7 +172,7 @@ fn run(_: Request, _: Arc<AtomicBool>) -> Output {
 }
 
 #[cfg(target_os = "linux")]
-fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
+fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicBool>) -> Output {
     use std::io::{Read, Write};
     use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
@@ -212,7 +215,7 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
         return output;
     }
     let started = crate::host::monotonic();
-    let child = crate::host::command(&request.argv[0])
+    let child = command
         .args(&request.argv[1..])
         .current_dir(&request.directory)
         .stdin(std::process::Stdio::piped())

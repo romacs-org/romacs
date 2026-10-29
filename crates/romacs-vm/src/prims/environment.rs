@@ -36,8 +36,7 @@ pub(super) fn egetenv(cx: &mut Leaf<'_>, variable: &str) -> std::result::Result<
 }
 
 fn environment_value(cx: &mut Leaf<'_>, name: &str) -> Out {
-    let symbol = cx.intern(name);
-    cx.variable_value(symbol)?.ok_or(Fault::VoidVariable(symbol))
+    cx.environment_list(name)
 }
 
 fn lookup(cx: &Leaf<'_>, name: &[u8], mut tail: Value) -> std::result::Result<Option<Option<Vec<u8>>>, Fault> {

@@ -936,6 +936,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
+            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -944,6 +945,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
+            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
             self.vm.dynamic[binding].1 = value;
             Ok(true)
@@ -956,6 +958,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
+            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -964,6 +967,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
+            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -980,11 +984,7 @@ mod leaf {
                 return Ok(v);
             }
             let base = self.vm.indirect_variable(self.symbol_slot(v)?);
-            // GNU default_value, SYMBOL_FORWARDED arm (data.c:1983).
-            if let Some(fwd) = self.vm.native_forwarding(base) {
-                return self.vm.forwarded_default(fwd).map_err(Fault::Error);
-            }
-            let value = self.vm.slots[base].value;
+            let value = self.vm.default_value(base).map_err(Fault::Error)?;
             if value == Value::UNBOUND {
                 Err(Fault::VoidVariable(v))
             } else {
@@ -1012,7 +1012,7 @@ mod leaf {
             // GNU set_default_internal, SYMBOL_FORWARDED arm (data.c:2085).
             if let Some(fwd) = self.vm.native_forwarding(slot) {
                 // A global variable's set_internal reports again.
-                if self.vm.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_))) {
+                if self.vm.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_) | crate::forwarded::Fwd::Fence(_))) {
                     self.notify(slot, value, "set", Some(Value::NIL))?;
                 }
                 self.vm.set_forwarded_default(slot, fwd, value, crate::forwarded::SetFlag::Set)?;
@@ -1670,6 +1670,7 @@ mod leaf {
     mod display_hosted;
     mod text_pixel_size;
     pub(crate) use text_pixel_size::TextSizeArgs;
+    mod world;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
 

@@ -249,6 +249,9 @@ impl Vm {
             && y != self.intern_symbol("error-message")
         {
             if p == Get {
+                if self.fence.is_some() {
+                    self.fence_property(x, Some(y), world::Access::Read);
+                }
                 return Ok(self.symbol_property(x, y).expect("checked symbol"));
             }
             let value = self.stack[start + 2];
