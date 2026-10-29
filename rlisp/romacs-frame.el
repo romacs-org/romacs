@@ -119,7 +119,10 @@ If FRAME is t, report on the defaults for face FACE (for new frames).
   of the form (bold), (italic) or (bold italic).
 If FRAME is omitted or nil, use the selected frame.
 xfaces.c Fface_font: Romacs's frame is a terminal frame, which realizes no
-font, so a frame's answer is nil once FACE is known."
+font, so a frame's answer is nil once FACE is known.  On a graphic
+display the frame's font is the default face's, so for `default' the
+answer is the frame's `font' parameter, as GNU's is until that face's
+font changes."
   ;; resolve_face_name: a string names the face of that symbol.
   (when (stringp face) (setq face (intern face)))
   (if (eq frame t)
@@ -132,7 +135,8 @@ font, so a frame's answer is nil once FACE is known."
     (unless (frame-live-p (or frame (selected-frame)))
       (signal 'wrong-type-argument (list 'frame-live-p frame)))
     (unless (facep face) (signal 'error (list "Invalid face" face)))
-    nil))
+    (and (eq face 'default) (display-graphic-p frame)
+         (frame-parameter frame 'font))))
 
 (defun display-color-cells (&optional _display)
   "Return the number of color cells supported by DISPLAY."

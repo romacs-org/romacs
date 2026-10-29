@@ -548,13 +548,13 @@ SUBMISSION retains the recipient, exact draft and account independently of BUFFE
 (defvar romacs-mail-search-map
   (let ((map (make-sparse-keymap)))
     (define-key map [110] 'romacs-mail-next) (define-key map [112] 'romacs-mail-previous)
-    (define-key map [10] 'romacs-mail-open-tree) (define-key map [13] 'romacs-mail-open-tree)
+    (define-key map [13] 'romacs-mail-open-tree)
     (define-key map [103] 'romacs-mail-refresh) (define-key map [113] 'romacs-mail-quit)
     (define-key map [115] 'romacs-mail-new-search) (define-key map [109] 'romacs-mail-new-compose) map))
 (defvar romacs-mail-tree-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map romacs-mail-search-map)
-    (define-key map [10] 'romacs-mail-show-message) (define-key map [13] 'romacs-mail-show-message)
+    (define-key map [13] 'romacs-mail-show-message)
     (define-key map [78] 'romacs-mail-next-all) (define-key map [80] 'romacs-mail-previous-all)
     (define-key map [114] 'romacs-mail-reply-sender) (define-key map [82] 'romacs-mail-reply-all) map))
 (defvar romacs-mail-message-map

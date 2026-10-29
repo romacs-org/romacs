@@ -1,15 +1,28 @@
 //! GNU's C mode-line engine: `display_mode_element` (`src/xdisp.c:28458`)
-//! and `decode_mode_spec` (`src/xdisp.c:29429`), for the display target
-//! (`MODE_LINE_DISPLAY`). The format is converted to an owned `Form` before
+//! and `decode_mode_spec` (`src/xdisp.c:29429`), for the painted band
+//! (`MODE_LINE_DISPLAY`) and for `format-mode-line`'s string
+//! (`MODE_LINE_STRING`, `MODE_LINE_NOPROP`). The format is converted to an owned `Form` before
 //! expansion. Executable object constants own collector-traced roots across
 //! collecting `:eval` forms; window and buffer are re-read from rooted slots.
 use crate::*;
 use std::ops::Range;
 
-/// One painted mode line: text plus face-name runs over its bytes.
+/// GNU's `mode_line_target`: the band a window paints, or the string
+/// `format-mode-line' returns, with face properties or without.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Target { Display, String, NoProp }
+
+/// One expanded mode line: text plus face-name runs over its bytes.
 pub(super) struct Band {
     pub text: String,
     pub runs: Vec<(Range<usize>, String)>,
+    pub target: Target,
+    /// GNU's `mode_line_elt_no` for a string: the count of elements entered
+    /// so far, and the count each piece was stored under, its
+    /// `mode-line-elt-no' property. A `format-mode-line' inside an `:eval'
+    /// restarts the count, as GNU's global does.
+    pub elt: i64,
+    pub elts: Vec<(Range<usize>, i64)>,
     /// Columns already built, and the most that can ever be shown. GNU's
     /// display_string stops at the window's last visible column
     /// (`xdisp.c:30105`); text past it is never produced, so no field width
@@ -37,6 +50,9 @@ pub(super) struct SpecState {
 /// anything wider than the band's `4 * frame columns` is invisible anyway,
 /// and the clamp keeps every column count in this file far from i64 overflow.
 const MAX_FIELD: i64 = 1 << 20;
+
+/// The slot where a `format-mode-line' leaves its final element count.
+pub(super) const ELT_RESTARTED: &str = "#:vm2-mode-line-elt-no";
 
 /// GNU `lots_of_dashes` (`xdisp.c:29426`).
 const LOTS_OF_DASHES: usize = 140;
@@ -168,10 +184,25 @@ impl Band {
         self.push(&" ".repeat(n), face);
     }
 
-    /// Append display text, clipped at `max_cols`: control characters show
-    /// as GNU's `^X`.
+    /// An element's own padding, which GNU stores with no element number.
+    fn pad_element(&mut self, n: i64) {
+        let begin = self.text.len();
+        self.pad(n, None);
+        if self.elts.last().is_some_and(|(range, _)| range.start >= begin) { self.elts.pop(); }
+    }
+
+    /// Append text. A painted band clips it at `max_cols` and shows control
+    /// characters as GNU's `^X`; a string keeps them all
+    /// (`store_mode_line_string`, `store_mode_line_noprop`).
     fn push(&mut self, s: &str, face: Option<&String>) {
         let begin = self.text.len();
+        if self.target == Target::Display { self.push_clipped(s) } else { self.text.push_str(s) }
+        if self.text.len() == begin || self.target == Target::NoProp { return; }
+        if let Some(face) = face { self.runs.push((begin..self.text.len(), face.clone())); }
+        if self.target == Target::String { self.elts.push((begin..self.text.len(), self.elt)); }
+    }
+
+    fn push_clipped(&mut self, s: &str) {
         for c in s.chars() {
             let (shown, w) = match c {
                 '\u{0}'..='\u{1f}' | '\u{7f}' => ([Some('^'), Some(char::from((c as u8) ^ 0x40))], 2),
@@ -183,11 +214,6 @@ impl Band {
             }
             self.cols += w;
             self.text.extend(shown.into_iter().flatten());
-        }
-        if let Some(face) = face
-            && self.text.len() > begin
-        {
-            self.runs.push((begin..self.text.len(), face.clone()));
         }
     }
 }
@@ -254,9 +280,23 @@ impl Vm {
         self.eval_form_raw(&form).is_ok_and(|v| v != Value::NIL)
     }
 
+    /// The element count a `format-mode-line' inside an `:eval' left, once
+    /// it restarted GNU's global count.
+    fn ml_elt_restarted(&mut self) -> Option<i64> {
+        let slot = self.slot(ELT_RESTARTED);
+        let n = self.slots[slot].value.integer_value();
+        self.slots[slot].value = Value::UNBOUND;
+        n
+    }
+
     /// Expand a whole mode-line format for the window whose buffer is current.
     pub(super) fn mode_line_band(&mut self, format: &Form, state: &SpecState) -> Result<Band> {
-        let mut band = Band { text: String::new(), runs: vec![], cols: 0, max_cols: 4 * state.frame_cols };
+        self.mode_line_expand(format, state, Target::Display)
+    }
+
+    pub(super) fn mode_line_expand(&mut self, format: &Form, state: &SpecState, target: Target) -> Result<Band> {
+        let max_cols = if target == Target::Display { 4 * state.frame_cols } else { usize::MAX };
+        let mut band = Band { text: String::new(), runs: vec![], target, elt: 0, elts: vec![], cols: 0, max_cols };
         self.mode_line_element(&mut band, state, 0, 0, 0, format.clone(), None, false)?;
         Ok(band)
     }
@@ -279,6 +319,8 @@ impl Vm {
         let mut n = 0i64;
         let mut literal = false;
         loop {
+            // `tail_recurse' too counts as entering an element.
+            if band.target == Target::String { band.elt += 1; }
             if depth > 100 {
                 elt = Form::String("*too-deep*".into());
             }
@@ -329,7 +371,7 @@ impl Vm {
                         n += self.mode_line_element(band, state, depth, field, prec, value, props.clone(), risky)?;
                         continue;
                     }
-                    let spec = self.decode_mode_spec(state, c, field)?;
+                    let spec = self.decode_mode_spec(state, c, field, band.target)?;
                     let shown = if prec > 0 { char_prefix(&spec, prec as usize) } else { spec.as_str() };
                     let mut written = chars(shown);
                     band.push(shown, props.as_ref());
@@ -365,6 +407,7 @@ impl Vm {
                             }
                             if let Some((expression, _)) = split(&cdr) {
                                 // GNU `dsafe_eval`: an error displays as nil.
+                                self.ml_elt_restarted();
                                 let spec = match self.eval_form_raw(&expression) {
                                     Ok(value) => self.mode_line_form(value),
                                     Err(error) => {
@@ -372,6 +415,7 @@ impl Vm {
                                         Form::Sym("nil".into())
                                     }
                                 };
+                                if band.target == Target::String && let Some(n) = self.ml_elt_restarted() { band.elt = n; }
                                 n += self.mode_line_element(band, state, depth, field_width - n, precision - n, spec, props.clone(), risky)?;
                             }
                             break;
@@ -440,14 +484,14 @@ impl Vm {
             }
         }
         if field_width > 0 && n < field_width {
-            band.pad(field_width - n, None);
+            band.pad_element(field_width - n);
             n = field_width;
         }
         Ok(n)
     }
 
     /// GNU `decode_mode_spec` for the current (window's) buffer.
-    fn decode_mode_spec(&mut self, state: &SpecState, c: char, field: i64) -> Result<String> {
+    fn decode_mode_spec(&mut self, state: &SpecState, c: char, field: i64, target: Target) -> Result<String> {
         let width = field.min(4 * state.frame_cols as i64);
         let read_only = self.ml_symbol_value("buffer-read-only")?.is_some_and(|v| !is_nil(&v));
         let string_of = |value: Option<Form>| match value {
@@ -467,6 +511,8 @@ impl Vm {
             '%' => "%".into(),
             // command_loop_level: VM2 has no recursive edit.
             '[' | ']' => String::new(),
+            // A string's dashes are "infinitely long" as two.
+            '-' if target != Target::Display => "--".into(),
             '-' => "-".repeat(if field <= 0 || field as usize > LOTS_OF_DASHES { 4 * state.frame_cols - 1 } else { LOTS_OF_DASHES }),
             'b' => state.buffer_name.clone(),
             'c' => pint2str(width, state.column as i64),

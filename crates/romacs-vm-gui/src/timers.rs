@@ -136,9 +136,93 @@ mod tests {
             (run-at-time 0.01 nil (lambda () (push ?a unread-command-events)))");
         assert_eq!(printed(&mut vm, "(list (read-event nil nil 1) (< (- (float-time) start) 0.5) unread-command-events)"),
                    "(97 t nil)");
+        // sit-for in a timer reads a key typed during it and pushes it back
+        // as (t . KEY) (subr.el); the command loop, which reads Lisp's
+        // unread queues first, then runs it as the next command, though no
+        // other key follows. As simple.el's M-x suggestion timer does in a
+        // session (`interactive' sit-for).
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_millis(30)), Step::Key('x')].into()))));
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil unread-command-events nil probe 'unset)
+            (run-with-timer 0 nil (lambda () (let ((noninteractive nil)) (setq probe (sit-for 5)))))
+            (set-buffer (get-buffer-create \"unread\")) (erase-buffer) (set-window-buffer nil (current-buffer))");
+        vm.timer_stop_idle();
+        assert!(idle(&mut vm).unwrap().ran);
+        assert_eq!(printed(&mut vm, "(list probe unread-command-events)"), "(nil ((t . 120)))");
+        assert!(crate::command::unread_pending(&mut vm).unwrap());
+        let outcome = crate::command::run(&mut vm).unwrap();
+        assert_eq!(outcome.command.as_deref(), Some("self-insert-command"));
+        assert_eq!(printed(&mut vm, "(list (buffer-string) unread-command-events)"), "(\"x\" nil)");
+        assert!(!crate::command::unread_pending(&mut vm).unwrap());
     }
 
-    enum Step { Pause(Duration), Key(char) }
+    /// Work that runs during a command-key wait and schedules a timer,
+    /// a background command's callback or a mode-line :eval in the wait's
+    /// redisplay, counts toward the wait's deadline: the timer fires on time
+    /// while C-x waits for its next key, before C-x h runs.
+    #[test]
+    fn timers_scheduled_during_a_key_wait_fire_on_time() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(scheduled_body).unwrap().join().unwrap();
+    }
+    fn scheduled_body() {
+        let mut vm = Vm::new();
+        vm.set_echo_area_host(true);
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        vm.eval_source(include_str!("../../../rlisp/vm/process.el")).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        let schedule = "(run-with-timer 0.2 nil (lambda () (setq log (cons (list 'timer (- (float-time) start)) log))))";
+        // A background command completes while C-x waits (it outlasts the
+        // start of that wait); its callback schedules the timer.
+        printed(&mut vm, &format!("(setq timer-list nil timer-idle-list nil log nil start nil)
+            (set-buffer (get-buffer-create \"keys\")) (set-window-buffer nil (current-buffer))
+            (romacs-process-start (list \"sleep\" \"0.3\") \"\" default-directory 10
+              (lambda (_) (setq start (float-time) log (cons 'callback log)) {schedule} nil))"));
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('\u{18}'), Step::Completed(Duration::from_millis(800)),
+            Step::Pause(Duration::from_secs(2)), Step::Key('h')].into()))));
+        vm.timer_stop_idle();
+        assert_eq!(crate::command::run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
+        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.0))))");
+        assert_eq!(fired, "((callback timer) t)", "a callback's timer");
+        // A mode-line :eval schedules it in the redisplay of the wait for
+        // C-x's next key.
+        printed(&mut vm, &format!("(setq timer-list nil log nil start nil)
+            (setq mode-line-format (list (list :eval (quote (progn (when (and (null start) (equal (this-command-keys-vector) [24]))
+              (setq start (float-time) log (cons 'eval log)) {schedule}) \"\")))))"));
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('\u{18}'), Step::Pause(Duration::from_secs(2)), Step::Key('h')].into()))));
+        assert_eq!(crate::command::run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
+        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.0))))");
+        assert_eq!(fired, "((eval timer) t)", "a redisplay's timer");
+    }
+
+    /// A timer that reschedules itself at once runs once per round of a
+    /// wait, which reads a queued key and ends at its time limit between
+    /// rounds. Pinned GNU 45b0f7699df, -nw: the key typed 0.3s in is read
+    /// then; its time limit waits for the rescheduling to stop
+    /// (DIVERGENCES.md VM2-KBD1).
+    #[test]
+    fn a_rescheduling_timer_never_starves_a_wait() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(rescheduling_body).unwrap().join().unwrap();
+    }
+    fn rescheduling_body() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        let rescheduling = "(setq timer-list nil timer-idle-list nil unread-command-events nil runs 0 start (float-time))
+            (defun rescheduling () (setq runs (1+ runs)) (when (< (- (float-time) start) 2) (run-with-timer 0 nil #'rescheduling)))
+            (run-with-timer 0 nil #'rescheduling)";
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('a')].into()))));
+        printed(&mut vm, rescheduling);
+        let key = printed(&mut vm, "(list (read-event) (< (- (float-time) start) 0.5) (<= runs 2))");
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        printed(&mut vm, rescheduling);
+        let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 0.5))");
+        assert_eq!((key.as_str(), limit.as_str()), ("(97 t t)", "(nil t)"), "a queued key, then the time limit");
+    }
+
+    /// A pause, a key, or the wake a completed background command gives
+    /// after the time it takes to complete.
+    enum Step { Pause(Duration), Key(char), Completed(Duration) }
 
     /// A keyboard whose keys come after pauses, honouring each read's time limit.
     struct Paced(std::collections::VecDeque<Step>);
@@ -149,6 +233,7 @@ mod tests {
         fn next_event(&mut self, timeout: Option<Duration>) -> Result<romacs_vm::HostEvent, String> {
             match self.0.pop_front().ok_or("paced keys exhausted")? {
                 Step::Key(c) => Ok(romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))),
+                Step::Completed(after) => { std::thread::sleep(after); Ok(romacs_vm::HostEvent::Background) }
                 Step::Pause(left) => {
                     let wait = timeout.map_or(left, |timeout| timeout.min(left));
                     std::thread::sleep(wait);

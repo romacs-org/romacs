@@ -246,6 +246,7 @@ impl Vm {
                 self.autoload_do_load(arg(0), arg(1), arg(2))
             }
             Primitive::ReadHostEvent => self.read_host_event(args),
+            Primitive::FormatModeLine => self.format_mode_line(args),
             _ => unreachable!(),
         }
     }

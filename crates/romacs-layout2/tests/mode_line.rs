@@ -21,7 +21,7 @@ fn scene() -> WindowSnapshot {
             }],
         }),
         mode_line_face: FaceHandle(1),
-        vscroll_px: 0,
+        vscroll_px: 0, tab_width: 8, wrap: Default::default(),
         faces: vec![
             Face {
                 foreground: [255; 3],
