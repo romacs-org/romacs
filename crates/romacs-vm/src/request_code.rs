@@ -26,16 +26,28 @@ impl Vm {
         }
     }
     pub(super) fn install_code(&mut self, function: Function) -> usize {
-        let code = &mut self.request_code;
         // The function's code now owns the cache slots its builder took.
-        for op in &function.code {
-            if let Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) = *op
-                && let Some(i) = code.unclaimed_caches.iter().rposition(|&c| c == cache)
-            {
-                code.unclaimed_caches.swap_remove(i);
+        let caches: Vec<usize> = function.code.iter().filter_map(|op| match *op {
+            Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) => Some(cache),
+            _ => None,
+        }).collect();
+        self.claim_caches(&caches);
+        self.install_slot(function, self.request_code.compiling)
+    }
+    /// The installed code that uses CACHES now owns them.
+    pub(super) fn claim_caches(&mut self, caches: &[usize]) {
+        let unclaimed = &mut self.request_code.unclaimed_caches;
+        for cache in caches {
+            if let Some(i) = unclaimed.iter().rposition(|c| c == cache) {
+                unclaimed.swap_remove(i);
             }
         }
-        let id = if code.compiling
+    }
+    /// Install FUNCTION, request-owned when REQUEST, claiming no cache slot.
+    fn install_slot(&mut self, function: Function, request: bool) -> usize {
+        self.register_width = self.register_width.max(function.regs);
+        let code = &mut self.request_code;
+        let id = if request
             && let Some(id) = code.free.pop()
         {
             self.functions[id] = Arc::new(function);
@@ -44,23 +56,31 @@ impl Vm {
         } else {
             let id = self.functions.len();
             self.functions.push(Arc::new(function));
-            code.permanent.push(!code.compiling);
+            code.permanent.push(!request);
             code.live.push(true);
             id
         };
-        if code.compiling {
-            code.compiled.push(id);
+        if request {
+            // Only an enclosing compile_request collects what it compiled.
+            if code.compiling {
+                code.compiled.push(id);
+            }
             code.since_collection += 1;
         }
         id
     }
 
     pub(super) fn install_cache(&mut self) -> usize {
+        self.install_cache_slot(self.request_code.compiling)
+    }
+    /// A cache slot, unclaimed until installed code that uses it is
+    /// (`claim_caches'); a request reuses a free one.
+    fn install_cache_slot(&mut self, request: bool) -> usize {
         let cache = Cache {
             version: 0,
             target: Value::UNBOUND,
         };
-        let id = if self.request_code.compiling
+        let id = if request
             && let Some(id) = self.request_code.free_caches.pop()
         {
             self.caches[id] = cache;
@@ -142,24 +162,21 @@ impl Vm {
         functions: &[Function],
         caches: usize,
     ) -> (Vec<usize>, Vec<usize>) {
-        let previous = self.request_code.compiling;
-        self.request_code.compiling = true;
-        // These functions still hold the artifact's own cache ordinals, not
-        // slots: installing them claims nothing.
-        let unclaimed = std::mem::take(&mut self.request_code.unclaimed_caches);
+        // Request-owned placeholders: they still hold the artifact's own cache
+        // ordinals, not slots, so installing them claims nothing. The slots
+        // stay unclaimed until the caller has rewritten and stored the
+        // functions that use them (`claim_caches'). No state is changed and
+        // restored here, so an unwinding failure leaves only unreachable
+        // placeholders and unclaimed slots, which a collection reclaims.
         let ids = functions
             .iter()
-            .map(|f| self.install_function(f.clone()))
+            .map(|f| {
+                #[cfg(test)]
+                artifact_fault(ArtifactFault::Installing);
+                self.install_slot(f.clone(), true)
+            })
             .collect();
-        self.request_code.unclaimed_caches = unclaimed;
-        let cache_ids: Vec<usize> = (0..caches).map(|_| self.install_cache()).collect();
-        // The slots received, which the caller rewrites the functions to use,
-        // are the artifact's.
-        self.request_code.unclaimed_caches.retain(|c| !cache_ids.contains(c));
-        self.request_code.compiling = previous;
-        if !previous {
-            self.request_code.compiled.clear();
-        }
+        let cache_ids = (0..caches).map(|_| self.install_cache_slot(true)).collect();
         (ids, cache_ids)
     }
 
@@ -279,6 +296,26 @@ impl Vm {
     }
 }
 
+/// Test-only failure points in persistent artifact installation.
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum ArtifactFault {
+    Installing,
+    Remapped,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static ARTIFACT_FAULT: std::cell::Cell<Option<ArtifactFault>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn artifact_fault(at: ArtifactFault) {
+    if ARTIFACT_FAULT.get() == Some(at) {
+        panic!("injected artifact installation failure");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,6 +410,64 @@ mod tests {
         }
         assert!(owned.iter().all(|c| !vm.request_code.free_caches.contains(c)), "the artifact's slots stay claimed");
         assert_eq!(vm.request_code.unclaimed_caches, Vec::<usize>::new());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    /// Cache slots the code of live functions uses.
+    fn owned_caches(vm: &Vm) -> Vec<usize> {
+        vm.functions.iter().zip(&vm.request_code.live).filter(|&(_, &live)| live)
+            .flat_map(|(f, _)| f.code.iter().filter_map(|op| match *op {
+                Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) => Some(cache),
+                _ => None,
+            }))
+            .collect()
+    }
+
+    /// A panic while a persistent artifact is installed, before or after its
+    /// slots are reserved, leaves nothing to restore: the unclaimed list
+    /// holds what it held plus any slots reserved, `compiling' is untouched,
+    /// and a collection then reclaims every slot no live code owns.
+    #[test]
+    fn a_panic_while_installing_an_artifact_leaves_reclaimable_state() {
+        let dir = std::env::temp_dir().join(format!("romacs-artifact-panic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = "(defalias 'gr-art (lambda () (list (gr-callee 1) (gr-callee 2))))";
+        let mut cold = Vm::new();
+        cold.set_source_cache_store(dir.clone()).unwrap();
+        cold.eval_source_raw(source).unwrap();
+        for fault in [ArtifactFault::Installing, ArtifactFault::Remapped] {
+            let mut vm = Vm::new();
+            vm.set_source_cache_store(dir.clone()).unwrap();
+            assert!(vm.eval_source_raw("(progn (foo) (let ((nil 1)) nil))").is_err());
+            let before = vm.request_code.unclaimed_caches.clone();
+            assert!(!before.is_empty());
+            ARTIFACT_FAULT.set(Some(fault));
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.eval_source_raw(source)));
+            ARTIFACT_FAULT.set(None);
+            assert!(caught.is_err(), "the injected failure unwinds");
+            assert!(!vm.request_code.compiling, "compiling is untouched");
+            let after = vm.request_code.unclaimed_caches.clone();
+            assert_eq!(after[..before.len()], before[..], "the unclaimed list keeps what it held");
+            match fault {
+                ArtifactFault::Installing => assert_eq!(after, before, "no slot was reserved yet"),
+                ArtifactFault::Remapped => assert!(after.len() > before.len(), "the reserved slots stay unclaimed"),
+            }
+            vm.collect(&mut []);
+            assert_eq!(vm.request_code.unclaimed_caches, Vec::<usize>::new());
+            let owned = owned_caches(&vm);
+            for slot in &after {
+                assert!(!owned.contains(slot) && vm.request_code.free_caches.contains(slot), "slot {slot} reclaimed");
+            }
+            // The VM still loads the artifact and runs it.
+            vm.eval_source_raw("(defun gr-callee (x) (* x 10))").unwrap();
+            let hits = vm.source_cache_stats().disk_hits;
+            vm.eval_source_raw(source).unwrap();
+            assert_eq!(vm.source_cache_stats().disk_hits, hits + 1, "the artifact came from the store");
+            let value = vm.eval_source_raw("(gr-art)").unwrap();
+            assert_eq!(vm.display(value).unwrap(), "(10 20)");
+            vm.collect(&mut []);
+            let owned = owned_caches(&vm);
+            assert!(owned.iter().all(|c| !vm.request_code.free_caches.contains(c)), "live slots stay claimed");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]

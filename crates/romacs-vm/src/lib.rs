@@ -1574,7 +1574,6 @@ impl Vm {
         result
     }
     fn install_function(&mut self, function: Function) -> usize {
-        self.register_width = self.register_width.max(function.regs);
         self.install_code(function)
     }
     /// Compile one function. Its builder keeps constants in untraced Rust

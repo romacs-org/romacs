@@ -163,9 +163,13 @@ impl Vm {
         }));
         calls.sort_unstable();
         calls.dedup();
+        #[cfg(test)]
+        request_code::artifact_fault(request_code::ArtifactFault::Remapped);
         for (id, function) in ids.into_iter().zip(a.functions) {
             self.functions[id] = Arc::new(function);
         }
+        // The stored functions use the reserved slots: they own them now.
+        self.claim_caches(&cache_ids);
         self.trim_source_cache();
         self.source_cache.entries.insert(
             k.into(),
