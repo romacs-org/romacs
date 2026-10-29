@@ -46,6 +46,12 @@ CASES = [
     '(format-mode-line "%p %P %q %i %n")',
     '(format-mode-line \'("" "%b") nil nil (get-buffer "*scratch*"))',
     '(format-mode-line "%%%m")',
+    # A propertized string keeps its own faces where no :propertize gives one.
+    '(format-mode-line (list " " (propertize "q" \'face \'bold) " x"))',
+    '(format-mode-line (list (propertize "ab" \'face \'bold) "c" (propertize "d" \'face \'italic)))',
+    '(format-mode-line (list \'(:propertize "p" face italic) (propertize "s" \'face \'bold)))',
+    '(format-mode-line (list \'(:eval (propertize " k " \'face \'bold)) "rest"))',
+    '(format-mode-line (list (propertize "pre" \'face \'bold) "%%" (propertize "post" \'face \'italic)))',
     # Two windows on one buffer at different points: WINDOW is selected
     # while it formats, and the selection and point come back after.
     '''(let ((w (split-window))) (set-window-point w 14) (prog1 (list (format-mode-line "%l:%c" nil w) (format-mode-line '(:eval (format "%d" (point))) nil w) (format-mode-line "%l:%c") (point) (eq (selected-window) (frame-first-window)) (buffer-name) (window-point w)) (delete-window w)))''',
