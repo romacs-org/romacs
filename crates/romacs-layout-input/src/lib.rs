@@ -133,7 +133,7 @@ pub struct WindowSnapshot {
 /// byte offsets into that text: where its last displayed row ends (GNU's
 /// `window_end_pos') and how far its fully visible rows reach, which is
 /// where point can be without redisplay choosing another start.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WindowEnd {
     pub id: u64,
     /// The byte after the last displayed character.
@@ -141,6 +141,19 @@ pub struct WindowEnd {
     /// Every position before this byte is on a fully visible row: one past
     /// the text's length when its end position is on one too.
     pub visible_end: usize,
+    /// The text area's height: the window's less its mode line's.
+    pub body_height: f32,
+    /// The rows laid out from the window start, top to bottom, through the
+    /// first that reaches the text area's bottom.
+    pub rows: Vec<Row>,
+}
+
+/// One screen row: the byte it starts at, its top and its height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Row {
+    pub start: usize,
+    pub y: f32,
+    pub height: f32,
 }
 
 /// GNU's `it->line_wrap': `truncate-lines' (or a partial-width window

@@ -42,6 +42,16 @@ pub(super) struct RowsKey {
     wrap: romacs_layout_input::LineWrap,
 }
 
+/// What laying a window out from its start established, in its buffer's
+/// bytes: where its last displayed row ends, where its fully visible rows
+/// end (MAX: through the end of its text) and its text area's height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Laid {
+    pub end: usize,
+    pub visible_end: usize,
+    pub body_height: f32,
+}
+
 /// A window's text as a snapshot publishes it (`Vm::window_text`): byte
 /// offsets are into TEXT, which starts at buffer byte BASE.
 struct ShownText {
@@ -78,9 +88,9 @@ pub(super) struct DisplayState {
     /// Per window id, what its last publication's rows depend on and the
     /// length of the text it published, until a paint reports the rows.
     published_rows: std::collections::BTreeMap<u64, (RowsKey, usize)>,
-    /// Per window id, the buffer byte its fully visible rows end at (MAX:
-    /// through the end of its text), as painting that geometry reported.
-    rows: std::collections::BTreeMap<u64, (RowsKey, usize)>,
+    /// Per window id, its layout from its start (`Laid`), as painting that
+    /// geometry reported.
+    rows: std::collections::BTreeMap<u64, (RowsKey, Laid)>,
     /// Advances when what fonts faces realize may change.
     face_revision: u64,
     pub version: u64,
@@ -141,12 +151,11 @@ impl DisplayState {
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
     }
-    /// Window ID's last publication was painted and its fully visible rows
-    /// end at VISIBLE_END, an offset into its text.
-    pub(super) fn painted_rows(&mut self, id: u64, visible_end: usize) {
-        if let Some(&(key, len)) = self.published_rows.get(&id) {
-            let end = if visible_end > len { usize::MAX } else { self.base(id) + visible_end };
-            self.rows.insert(id, (key, end));
+    /// Window END.id's last publication was painted as END reports.
+    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd) {
+        if let Some(&(key, len)) = self.published_rows.get(&end.id) {
+            let laid = laid(end, self.base(end.id), len);
+            self.rows.insert(end.id, (key, laid));
         }
     }
     pub fn new() -> Self {
@@ -583,7 +592,7 @@ impl Vm {
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
         let ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, mut faces, base, table, mut merged }
-            = self.window_text(window, height)?;
+            = self.window_text(window, height, None)?;
         self.display_state.bases.insert(id, base);
         // No version bump here: this runs once per WINDOW, and
         // `display_state.width/height` is frame-wide, so each window's own
@@ -671,36 +680,70 @@ impl Vm {
             faces: self.display_state.face_revision, tab_width: self.buffer_tab_width(buffer)?,
             wrap: self.window_line_wrap(window, buffer)? })
     }
-    /// The buffer byte where WINDOW's fully visible rows end (MAX: through
-    /// the end of its buffer's accessible text), from its start, with the
-    /// mode line it last showed (GNU's CURRENT_MODE_LINE_HEIGHT): from the
-    /// last paint while what its rows depend on is unchanged, else from
-    /// laying it out as painting will. None before its first paint, or
-    /// with no layout host. Runs no Lisp.
-    pub(crate) fn visible_rows_end(&mut self, window: Value, width: u32, height: u32) -> Result<Option<usize>> {
+    /// WINDOW laid out from its start as painting will, with the mode line
+    /// it last showed (GNU's CURRENT_MODE_LINE_HEIGHT): from the last paint
+    /// while what its rows depend on is unchanged, else laid out now. None
+    /// before its first paint in these faces, or with no layout host. Runs
+    /// no Lisp.
+    pub(crate) fn window_layout(&mut self, window: Value) -> Result<Option<Laid>> {
         let key = self.rows_key(window)?;
         let id = self.window(window)?.id;
-        if let Some(&(known, end)) = self.display_state.rows.get(&id) && known == key { return Ok(Some(end)); }
-        let same_faces = self.display_state.rows.get(&id).is_some_and(|(known, _)| known.faces == key.faces);
-        let Some(shown) = self.display_state.previous.get(&id).filter(|_| same_faces && self.has_layout_host()) else { return Ok(None) };
+        let known = self.display_state.rows.get(&id).copied();
+        if let Some((known, laid)) = known && known == key { return Ok(Some(laid)); }
+        let Some(shown) = self.display_state.previous.get(&id)
+            .filter(|_| known.is_some_and(|(known, _)| known.faces == key.faces) && self.has_layout_host()) else { return Ok(None) };
         let (mode_line, mode_line_face) = (shown.mode_line.clone(), shown.mode_line_face);
-        let ShownText { text, start_byte, point_byte, faces, base, .. } = self.window_text(window, height)?;
+        let (width, height) = self.window_body_size(window)?;
+        let ShownText { text, start_byte, point_byte, faces, base, .. } = self.window_text(window, height, None)?;
         let len = text.utf8.len();
         let snapshot = WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: 0, text, mode_line,
             mode_line_face, vscroll_px: key.vscroll, faces, tab_width: key.tab_width, wrap: key.wrap };
+        let end = self.lay_out_alone(snapshot)?;
+        let laid = laid(&end, base, len);
+        self.display_state.rows.insert(id, (key, laid));
+        Ok(Some(laid))
+    }
+    /// The rows WINDOW's buffer shows from the line starting at byte FROM
+    /// through the end of byte TO's line, laid out as painting lays them
+    /// out in a window as wide as WINDOW and tall enough for them all: each
+    /// row's buffer byte and height. None as for `window_layout'.
+    pub(crate) fn rows_between(&mut self, window: Value, from: usize, to: usize) -> Result<Option<Vec<(usize, f32)>>> {
+        let key = self.rows_key(window)?;
+        let id = self.window(window)?.id;
+        if !self.has_layout_host() || !self.display_state.rows.get(&id).is_some_and(|(known, _)| known.faces == key.faces) { return Ok(None); }
+        let (width, _) = self.window_body_size(window)?;
+        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let zv = b.accessible().end.0;
+        let to = b.as_str().as_bytes()[to.min(zv)..zv].iter().position(|&c| c == b'\n').map_or(zv, |i| to + i + 1);
+        let ShownText { text, start_byte, point_byte, faces, base, .. } = self.window_text(window, 0, Some(from..to))?;
+        // Taller than all of them: rows of the default face's line or more.
+        let height = 1 << 24;
+        let snapshot = WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: 0, text, mode_line: None,
+            mode_line_face: FaceHandle(0), vscroll_px: 0, faces, tab_width: key.tab_width, wrap: key.wrap };
+        let end = self.lay_out_alone(snapshot)?;
+        Ok(Some(end.rows.iter().map(|row| (base + row.start, row.height)).collect()))
+    }
+    /// What painting SNAPSHOT alone in a frame of its size would report.
+    fn lay_out_alone(&mut self, snapshot: WindowSnapshot) -> Result<romacs_layout_input::WindowEnd> {
+        let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
             windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
-        let visible_end = self.host_lay_out(&frame)?.first().ok_or("layout host laid out no window")?.visible_end;
-        let end = if visible_end > len { usize::MAX } else { base + visible_end };
-        self.display_state.rows.insert(id, (key, end));
-        Ok(Some(end))
+        self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
+    }
+    /// WINDOW's text width less its margins, and its height, as a frame's
+    /// snapshot gives them.
+    fn window_body_size(&self, window: Value) -> Result<(u32, u32)> {
+        let w = self.window(window)?;
+        Ok((w.width.saturating_sub((w.left_margin + w.right_margin) * self.window_state.column), w.height))
     }
     /// The text WINDOW shows from its start, as a snapshot publishes it:
     /// for any window but the mini-window, only the bytes the rows of a
     /// window HEIGHT pixels tall can show, so that a frame costs what its
     /// windows show rather than what their buffers hold. Runs no Lisp.
-    fn window_text(&mut self, window: Value, height: u32) -> Result<ShownText> {
+    /// SPAN, buffer bytes, overrides the start and the rows: the text from
+    /// SPAN's start through its end.
+    fn window_text(&mut self, window: Value, height: u32, span: Option<std::ops::Range<usize>>) -> Result<ShownText> {
         let w = self.window(window)?;
         let (buffer, start, mini, vscroll) = (w.buffer, w.start, w.mini, w.vscroll_px);
         let start = self
@@ -716,14 +759,14 @@ impl Vm {
         let point_byte = b
             .byte_of_char(crate::coordinates::CharOffset((point - 1) as usize))?
             .0;
-        let start_byte = b
+        let start_byte = match &span { Some(span) => span.start, None => b
             .byte_of_char(crate::coordinates::CharOffset((start - 1) as usize))?
-            .0;
+            .0 };
         // The mini-window splices overlay strings into its whole buffer.
         // Any other window publishes only the bytes its rows can show, so a
         // frame costs what the window shows, not what its buffer holds.
         let accessible = b.accessible();
-        let shown = if mini { 0..b.as_str().len() } else {
+        let shown = if let Some(span) = span { span.start.max(accessible.start.0)..span.end.min(accessible.end.0) } else if mini { 0..b.as_str().len() } else {
             let rows = height.saturating_add(vscroll).div_ceil(self.window_state.line.max(1)) as usize;
             crate::window::shown_bytes(b.as_str(), accessible.start.0..accessible.end.0, start_byte, rows)
         };
@@ -1098,15 +1141,8 @@ impl Vm {
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
         let buffer = self.slots[buffer_slot].value;
-        let buffer_name = self
-            .symbol_names
-            .iter()
-            .enumerate()
-            .find(|(slot, name)| {
-                name.starts_with("#:vm2-buffer:") && self.slots[*slot].value == buffer
-            })
-            .map(|(_, name)| name.trim_start_matches("#:vm2-buffer:").to_owned())
-            .unwrap_or_default();
+        // `buffer-name', not a search of every symbol for its registry slot.
+        let buffer_name = self.buffer_state(buffer)?.name.clone().unwrap_or_default();
         let window = self.slots[root].value;
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1) as usize;
         let point = self.window_point_value(window)?.as_integer()? as usize;
@@ -1326,4 +1362,11 @@ fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
         family: string(Attribute::Family)?,
         pixel_size: size,
     })
+}
+
+/// The `Laid' painting reported in END for text published from buffer
+/// byte BASE, LEN bytes long.
+fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize) -> Laid {
+    let visible_end = if end.visible_end > len { usize::MAX } else { base + end.visible_end };
+    Laid { end: base + end.end, visible_end, body_height: end.body_height }
 }

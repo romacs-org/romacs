@@ -959,7 +959,7 @@ impl Vm {
             changes.push((index, b.len_chars() - end_char));
         }
         self.display_state.hosted = true;
-        for end in ends { self.display_state.painted_rows(end.id, end.visible_end); }
+        for end in ends { self.display_state.painted_rows(end); }
         for (index, distance) in changes {
             let Object::Window(w) = &mut self.objects[index] else {
                 unreachable!()

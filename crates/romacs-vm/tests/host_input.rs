@@ -45,7 +45,7 @@ impl HostInput for Script {
             frame.frame.windows[0].snapshot.mode_line.as_ref().map(|m| m.utf8.clone()).unwrap_or_default(),
         );
         seen.widths.push(frame.frame.width);
-        Ok(self.first_end.map(|end| vec![romacs_vm::WindowEnd { id: frame.frame.windows[0].snapshot.id, end, visible_end: 0 }]).unwrap_or_default())
+        Ok(self.first_end.map(|end| vec![romacs_vm::WindowEnd { id: frame.frame.windows[0].snapshot.id, end, visible_end: 0, body_height: 0.0, rows: vec![] }]).unwrap_or_default())
     }
     fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
         self.seen.borrow_mut().reads += 1;

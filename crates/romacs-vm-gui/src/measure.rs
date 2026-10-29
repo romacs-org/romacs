@@ -229,6 +229,57 @@ mod tests {
         assert!(kept > 300 && moved > 3, "kept {kept}, moved {moved}");
     }
 
+    /// A start redisplay chooses from the painted rows puts point where
+    /// GNU's do, as the display iterator measures them: with
+    /// `scroll-conservatively' 101 on the last whole row going down and the
+    /// first going up, and one row more would not show it whole; with 0,
+    /// on the row GNU's recentring moves back to.
+    #[test]
+    fn a_new_start_puts_point_where_gnus_rules_do() {
+        let mut h = hosted();
+        h.eval(r#"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
+          (let ((i 0))
+            (while (< i 120)
+              (insert (format "line %d " i) (make-string (* 17 (% i 4)) ?x)
+                      (if (= (% i 9) 4) (propertize "BIG" 'face 'hosted-big) "") "\n")
+              (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        h.paint();
+        let whole = |h: &mut Hosted, form: &str| {
+            let visible = h.eval(&format!("(pos-visible-in-window-p {form} nil t)"));
+            visible != "nil" && visible.split(' ').count() == 2
+        };
+        let line = h.eval("(frame-char-height)").parse::<u32>().unwrap();
+        let body = h.eval("(window-body-height nil t)").parse::<u32>().unwrap();
+        let back = { let dy = body / 2; let mut back = (dy / line).max(1);
+            if dy > back * line && dy - back * line > body.min(line * 2 / 3) { back += 1; } back };
+        let mut scrolls = 0;
+        for (conservative, step) in [(101, "(forward-line 1)"), (101, "(forward-line -1)"), (0, "(forward-line 7)"), (0, "(forward-line -9)")] {
+            h.eval(&format!("(setq scroll-conservatively {conservative})"));
+            for _ in 0..60 {
+                let start = h.eval(&format!("(progn {step} (window-start))"));
+                h.paint();
+                if h.eval("(window-start)") == start { continue; }
+                scrolls += 1;
+                assert!(whole(&mut h, "(point)"), "{step}: point shows whole after the scroll");
+                let row = h.eval("(save-excursion (vertical-motion 0) (point))");
+                if conservative == 0 {
+                    // Recentring: point's row is BACK rows below the start, or the buffer starts sooner.
+                    let down = h.eval(&format!("(save-excursion (goto-char (window-start)) (vertical-motion {back}) (point))"));
+                    assert!(down == row || h.eval("(window-start)") == "1", "{step}: row {row}, {back} rows down {down}");
+                } else if step.contains(" -") {
+                    assert_eq!(h.eval("(window-start)"), row, "{step}: point on the first row");
+                } else {
+                    // One row more above would not show point whole.
+                    let up = h.eval("(save-excursion (goto-char (window-start)) (vertical-motion -1) (point))");
+                    let shown = h.eval(&format!("(let ((s (window-start))) (set-window-start nil {up} t) (prog1 (pos-visible-in-window-p (point) nil t) (set-window-start nil s t)))"));
+                    assert!(shown == "nil" || shown.split(' ').count() != 2, "{step}: start {up} shows point too: {shown}");
+                }
+            }
+        }
+        assert!(scrolls > 20, "{scrolls} scrolls");
+    }
+
     /// A window that starts on a continuation row: the host's glyphs and
     /// the VM's answers agree there, TABs stopping as from the line start.
     #[test]

@@ -10,7 +10,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, LineWrap, WindowEnd, tab_advance};
+use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, LineWrap, Row, WindowEnd, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -84,8 +84,7 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         }
         // Windows with a mode line always own a cursor; the minibuffer (no mode
         // line) only while it is the selected window, i.e. a prompt is active.
-        let (end, visible_end) = append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id).map(|(id, color)| (id == placed.snapshot.id, color)))?;
-        ends.push(WindowEnd { id: placed.snapshot.id, end, visible_end });
+        ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
     Ok((frame, ends))
 }
@@ -131,9 +130,8 @@ pub fn layout(snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyph
     Ok(frame)
 }
 
-/// Paint SNAPSHOT's window at OX, OY: the end of its last displayed row,
-/// and the end of its fully visible rows (`WindowEnd`).
-fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>) -> Result<(usize, usize), String> {
+/// Paint SNAPSHOT's window at OX, OY, and report its rows (`WindowEnd`).
+fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>) -> Result<WindowEnd, String> {
     let text = &snapshot.text.utf8;
     if snapshot.height == 0
         || snapshot.faces.is_empty()
@@ -159,7 +157,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // repaired to prevent. A window whose *total* geometry does not fit its
     // parent is still rejected, by layout_frame's placement check.
     if snapshot.width == 0 {
-        return Ok((snapshot.start_byte, snapshot.start_byte));
+        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![] });
     }
     validate_runs(&snapshot.text, snapshot.faces.len())?;
     if let Some(band) = &snapshot.mode_line {
@@ -216,6 +214,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // within the text area (GNU's cursor_row_fully_visible_p).
     let (mut row_start, mut visible_end) = (snapshot.start_byte, snapshot.start_byte);
     let fully_visible = |y: f32, height: f32| y >= 0.0 && y + height <= body_height;
+    // Each drawn row as it ends; the last, as the text ends.
+    let mut rows: Vec<Row> = vec![];
     for (byte, ch) in text[line_start..].char_indices().map(|(at, ch)| (line_start + at, ch)) {
         // The window start begins a row: at a line start, or where the row
         // before it breaks, which the character there decides below, so
@@ -233,6 +233,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         if ch == '\n' {
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte + 1; }
+                rows.push(Row { start: row_start, y, height: row_height });
                 row_start = byte + 1;
             }
             x = 0.0;
@@ -255,6 +256,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             if drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
+                rows.push(Row { start: row_start, y, height: row_height });
                 row_start = byte;
             }
             // A TAB that does not fit continues from the text area's edge.
@@ -307,6 +309,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     if end_byte == text.len() && visible_end == row_start && fully_visible(y, row_height) {
         visible_end = text.len() + 1;
     }
+    if end_byte == text.len() && y < body_height { rows.push(Row { start: row_start, y, height: row_height }); }
     if let (Some((active, color)), Some((x, y, width, height, ascent))) = (cursor, point_rect) {
         // No cursor may bleed into the mode line or another window.
         if x >= 0.0 && x < snapshot.width as f32 && y >= 0.0 && y + height <= body_height {
@@ -358,7 +361,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             x += advance;
         }
     }
-    Ok((end_byte, visible_end))
+    Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows })
 }
 
 /// Draw CH at X, Y in face ID, whose ascent, height and nominal advance

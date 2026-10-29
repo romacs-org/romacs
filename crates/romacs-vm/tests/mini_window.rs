@@ -104,7 +104,7 @@ fn overlay_strings_show_with_their_faces_and_cursor() {
     // A layout's end, a display byte inside the after-string, is the
     // string's buffer position: the window shows its buffer to the end.
     let id = snapshot.id;
-    vm.display_apply_layout(&[romacs_vm::WindowEnd { id, end: text.find("fill").unwrap(), visible_end: 0 }]).unwrap();
+    vm.display_apply_layout(&[romacs_vm::WindowEnd { id, end: text.find("fill").unwrap(), visible_end: 0, body_height: 0.0, rows: vec![] }]).unwrap();
     assert_eq!(eval(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window))
         (list (window-end (minibuffer-window)) (point-max)))"), "(7 7)");
     // Without a cursor property point follows the string.

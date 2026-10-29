@@ -84,10 +84,11 @@ impl Vm {
         });
         let clamped = b.char_of_byte(coordinates::ByteOffset(start_byte))?.0 + 1;
         // Over a host's layout, which continues lines, rows are screen
-        // lines. Point on a fully visible row keeps the start, as the rows
-        // painting that start reports (GNU's try_cursor_movement and
-        // try_window): only a point outside them makes the iterator choose
-        // another start, unless it refuses the text.
+        // lines: the rows painting lays out. Point on a fully visible row
+        // keeps the start (GNU's try_cursor_movement and try_window); else
+        // those rows around point choose another (try_scrolling, recenter).
+        // Before a window's first paint the display iterator chooses,
+        // unless it refuses the text.
         if !forced && self.display_state.hosted && self.has_layout_host() {
             if self.point_on_visible_rows(window, start_byte, point_byte)? {
                 if clamped != start { self.set_marker_object(start_marker, Value::integer(clamped as i64)?, buffer)?; }
@@ -103,6 +104,11 @@ impl Vm {
             };
             let minimal = conservative > 100 || (conservative > 0 && distance <= conservative);
             let back = recenter_rows(text_height, line);
+            if let Some(chosen) = self.start_from_rows(window, start_byte, point_byte, minimal, back as usize)? {
+                let Object::Buffer(b) = self.object(buffer)? else { return Ok(()) };
+                let position = Value::integer((b.char_of_byte(ByteOffset(chosen))?.0 + 1) as i64)?;
+                return self.set_marker_object(start_marker, position, buffer).map(drop);
+            }
             if let Ok(chosen) = crate::prim::hosted_window_start(self, window, clamped as i64, point as i64, minimal, i64::from(back)) {
                 let position = Value::integer(chosen.unwrap_or(clamped as i64))?;
                 if chosen.is_some() || clamped != start { self.set_marker_object(start_marker, position, buffer)?; }
@@ -188,18 +194,23 @@ impl Vm {
         let w = self.window(window)?;
         let (rows, start) = (self.window_rows(text_height.saturating_add(w.vscroll_px)).1, w.start);
         let start = self.marker_position_value(start)?.integer_value().unwrap_or(1).max(1) as usize;
-        let hosted = (self.display_state.hosted && self.has_layout_host())
-            .then(|| crate::prim::hosted_rows_end(self, window, start as i64, rows as i64).ok())
-            .flatten();
+        let painted = if self.display_state.hosted { self.window_layout(window)? } else { None };
+        let hosted = match painted {
+            Some(_) => None,
+            None => (self.display_state.hosted && self.has_layout_host())
+                .then(|| crate::prim::hosted_rows_end(self, window, start as i64, rows as i64).ok())
+                .flatten(),
+        };
         let Object::Buffer(b) = self.object(self.slots[self.buffer_slot].value)? else {
             return Ok(None);
         };
         let accessible = b.accessible();
         let from = b.byte_of_char(CharOffset(start - 1))?.0.clamp(accessible.start.0, accessible.end.0);
         let start = b.char_of_byte(ByteOffset(from))?.0 + 1;
-        let end = match hosted {
-            Some(end) => end as usize,
-            None => b.char_of_byte(ByteOffset(rows_end(b.as_str(), from, rows, accessible.end.0)))?.0 + 1,
+        let end = match (painted, hosted) {
+            (Some(laid), _) => b.char_of_byte(ByteOffset(laid.end.min(accessible.end.0)))?.0 + 1,
+            (None, Some(end)) => end as usize,
+            (None, None) => b.char_of_byte(ByteOffset(rows_end(b.as_str(), from, rows, accessible.end.0)))?.0 + 1,
         };
         Ok((start < end).then_some((start, end)))
     }
@@ -208,11 +219,26 @@ impl Vm {
     /// which a vertically scrolled window, whose first row may be partly
     /// hidden, never answers.
     fn point_on_visible_rows(&mut self, window: Value, start_byte: usize, point_byte: usize) -> Result<bool> {
-        let w = self.window(window)?;
-        if w.vscroll_px != 0 { return Ok(false); }
-        let column = self.window_state.column;
-        let (width, height) = (w.width.saturating_sub((w.left_margin + w.right_margin) * column), w.height);
-        Ok(point_byte >= start_byte && self.visible_rows_end(window, width, height)?.is_some_and(|end| point_byte < end))
+        if self.window(window)?.vscroll_px != 0 { return Ok(false); }
+        Ok(point_byte >= start_byte && self.window_layout(window)?.is_some_and(|laid| point_byte < laid.visible_end))
+    }
+
+    /// The start byte that shows POINT_BYTE, not on a whole row of WINDOW
+    /// from START_BYTE, from the rows painting lays out around it: with
+    /// MINIMAL, point on the first whole row when above the start, else on
+    /// the last (GNU's try_scrolling); otherwise point's row BACK rows down
+    /// (recenter). None where `rows_between' answers none.
+    fn start_from_rows(&mut self, window: Value, start_byte: usize, point_byte: usize, minimal: bool, back: usize) -> Result<Option<usize>> {
+        if self.window(window)?.vscroll_px != 0 { return Ok(None); }
+        let Some(laid) = self.window_layout(window)? else { return Ok(None) };
+        // Every row is at least a frame line tall: this many lines above
+        // point's fill the text area.
+        let lines = (laid.body_height / self.window_state.line.max(1) as f32).ceil() as i64 + 1;
+        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let accessible = b.accessible();
+        let from = crate::prim::line_beginning(b.as_str().as_bytes(), accessible.start.0, accessible.end.0, point_byte, -lines);
+        let Some(rows) = self.rows_between(window, from, point_byte)? else { return Ok(None) };
+        Ok(Some(start_for_point(&rows, point_byte, laid.body_height, (minimal, point_byte >= start_byte), back)))
     }
 
     fn set_window_point_position(&mut self, window: Value, position: Value) -> Result<()> {
@@ -223,6 +249,27 @@ impl Vm {
             self.set_marker_object(marker, position, buffer).map(drop)
         }
     }
+}
+
+/// The start of the row of ROWS (each a start byte and height, top to
+/// bottom) that shows POINT where redisplay puts it: with MINIMAL and
+/// BELOW, on the last whole row of a BODY-pixel text area, as many rows
+/// above it as fit; with MINIMAL alone, on the first; else BACK rows down.
+fn start_for_point(rows: &[(usize, f32)], point: usize, body: f32, (minimal, below): (bool, bool), back: usize) -> usize {
+    let Some(at) = rows.iter().rposition(|&(start, _)| start <= point) else { return point };
+    let top = match (minimal, below) {
+        (true, true) => {
+            let (mut top, mut height) = (at, rows[at].1);
+            while top > 0 && height + rows[top - 1].1 <= body {
+                top -= 1;
+                height += rows[top].1;
+            }
+            top
+        }
+        (true, false) => at,
+        (false, _) => at.saturating_sub(back),
+    };
+    rows[top].0
 }
 
 /// The lines redisplay's recentring moves back from point's (`xdisp.c:21230`,
