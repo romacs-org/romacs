@@ -97,6 +97,9 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result
         let mut vm = Vm::new();
         vm.world_begin();
         vm.set_layout_host(Some(Box::new(crate::measure::Host { engine })));
+        // A live launch attaches its terminal service here; the world keeps
+        // what that declares, and the restored launch attaches the service.
+        vm.declare_terminal_errors()?;
         vm.set_echo_area_host(true);
         if let Some(floor) = floor { vm.set_collection_floor(floor); }
         let (line_height, column_width) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;

@@ -100,9 +100,17 @@ impl Vm {
             return Err("Terminal sessions must be closed before replacing their host".into());
         }
         if host.is_some() {
-            self.eval_source_raw("(put 'romacs-terminal-not-running 'error-conditions '(romacs-terminal-not-running error)) (put 'romacs-terminal-not-running 'error-message \"Terminal is not running\")")?;
+            self.declare_terminal_errors()?;
         }
         self.terminal_host = host;
+        Ok(())
+    }
+
+    /// The error a terminal command signals without a running terminal,
+    /// which attaching the terminal service declares. A world builder, which
+    /// attaches none, declares it where a live launch attaches one.
+    pub fn declare_terminal_errors(&mut self) -> Result<(), String> {
+        self.eval_source_raw("(put 'romacs-terminal-not-running 'error-conditions '(romacs-terminal-not-running error)) (put 'romacs-terminal-not-running 'error-message \"Terminal is not running\")")?;
         Ok(())
     }
 
