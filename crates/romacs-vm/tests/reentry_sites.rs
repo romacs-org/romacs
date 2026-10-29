@@ -99,6 +99,24 @@ fn calls(source: &str) -> Vec<(String, String)> {
     let toks = tokens(source);
     let ident = |i: usize| match toks.get(i) { Some(Ident(name)) => Some(name.as_str()), _ => None };
     let punct = |i: usize, c: char| toks.get(i) == Some(&Punct(c));
+    // Past `::<..>' explicit generic arguments at I, balanced; `->' inside
+    // them does not close one.
+    let after_generics = |i: usize| {
+        if !(punct(i, ':') && punct(i + 1, ':') && punct(i + 2, '<')) {
+            return i;
+        }
+        let mut j = i + 2;
+        let mut angles = 0usize;
+        while j < toks.len() {
+            if punct(j, '<') { angles += 1; }
+            if punct(j, '>') && !punct(j - 1, '-') {
+                angles -= 1;
+                if angles == 0 { return j + 1; }
+            }
+            j += 1;
+        }
+        j
+    };
     let mut found = vec![];
     let mut functions: Vec<(String, usize)> = vec![];
     let mut pending: Option<String> = None;
@@ -145,7 +163,7 @@ fn calls(source: &str) -> Vec<(String, String)> {
                 depth = depth.saturating_sub(1);
             }
             Punct(';') => { pending = None; }
-            Ident(name) if punct(i + 1, '(') => {
+            Ident(name) if punct(after_generics(i + 1), '(') => {
                 let callee = if name == "collect" && i > 0 && punct(i - 1, '.') && punct(i + 2, '&') { Some("collect") }
                     else { ENTRIES.iter().copied().find(|entry| entry == name) };
                 if let Some(callee) = callee {
@@ -200,6 +218,7 @@ fn the_scanner_finds_calls_a_line_matcher_missed() {
             let _r = r#"vm.execute_raw(id) {"#;
             "done"
         }
+        fn generic(e: &mut Engine) { call_suspended::<()>(e, r, |_vm| ()); vm.execute_args::<Vec<(u8, fn() -> u8)>>(x); }
         fn reader_call(&mut self) {}
         defsubr! { name = "x", fn subr(cx, a: Value; optional b: Value) { cx.variable_set(a, b)?; } }
         fn collects(vm: &mut Vm) { let _: Vec<_> = it.collect(); vm.collect(&mut []); }
@@ -208,7 +227,7 @@ fn the_scanner_finds_calls_a_line_matcher_missed() {
         fn after(vm: &mut Vm) { vm.finish_request(o); }
     "##);
     let expect = [("helper", "reader_call"), ("spaced", "reader_call"), ("spaced", "execute_raw"),
-        ("inner", "eval_form_raw"), ("outer", "load_file_raw"), ("subr", "variable_set"), ("collects", "collect"), ("after", "finish_request")];
+        ("inner", "eval_form_raw"), ("outer", "load_file_raw"), ("generic", "call_suspended"), ("generic", "execute_args"), ("subr", "variable_set"), ("collects", "collect"), ("after", "finish_request")];
     let expect: Vec<_> = expect.iter().map(|(f, c)| (f.to_string(), c.to_string())).collect();
     assert_eq!(found, expect);
 }
