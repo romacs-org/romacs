@@ -1236,42 +1236,26 @@ pub fn temp_file(template: &Path) -> io::Result<(PathBuf, File)> {
 // calls elsewhere (read, write, poll, fcntl, ioctl, the termios calls, fsync,
 // close, waitpid, shutdown, accept) act only on what these returned.
 
-/// Every child process starts from a Command made here. A world process
-/// runs without address randomization; its children run with it again.
+/// Every child process starts from a Command made here.
 pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     effect(|| format!("run {}", String::from_utf8_lossy(program.as_ref().as_bytes())))?;
-    let mut command = Command::new(program);
-    if unrandomized() {
-        use std::os::unix::process::CommandExt;
-        // personality(2) only: safe between fork and exec.
-        unsafe { command.pre_exec(|| { set_personality(false); Ok(()) }) };
-    }
-    Ok(command)
+    Ok(Command::new(program))
 }
 
-const ADDR_NO_RANDOMIZE: libc::c_ulong = 0x0040000;
-
-/// Whether this process runs without address-space randomization.
-pub fn unrandomized() -> bool {
-    let persona = unsafe { libc::personality(0xffff_ffff) };
-    persona >= 0 && (persona as libc::c_ulong & ADDR_NO_RANDOMIZE) != 0
+/// A file of a world store, opened for reading: the store's own, never a
+/// fact of a build.
+pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
+    File::open(path)
 }
 
-fn set_personality(unrandomized: bool) {
-    let persona = unsafe { libc::personality(0xffff_ffff) };
-    if persona >= 0 {
-        let persona = persona as libc::c_ulong;
-        let wanted = if unrandomized { persona | ADDR_NO_RANDOMIZE } else { persona & !ADDR_NO_RANDOMIZE };
-        unsafe { libc::personality(wanted) };
-    }
-}
-
-/// Run this executable again in place, without address randomization, with
-/// this process's arguments and environment, in order, and NAME=VALUE
-/// last: a world process maps code where its image expects it, and its
-/// environment lists come out as the launcher's. Returns only the error
-/// when the exec fails.
-pub fn exec_unrandomized(name: &str, value: &OsStr) -> io::Error {
+/// Run this executable again in place, with this process's arguments and
+/// environment, in order, and NAME=FD last, FD open across the exec: the
+/// restored process maps the image on FD, the file the launcher checked,
+/// and its environment lists come out as the launcher's. Returns only the
+/// error when the exec fails.
+pub fn exec_self(name: &str, fd: &File) -> io::Error {
+    use std::os::fd::AsRawFd;
+    let value = OsString::from(fd.as_raw_fd().to_string());
     use std::ffi::CString;
     let cstring = |bytes: &[u8]| CString::new(bytes).map_err(io::Error::other);
     let prepared = (|| -> io::Result<(Vec<CString>, Vec<CString>)> {
@@ -1284,21 +1268,14 @@ pub fn exec_unrandomized(name: &str, value: &OsStr) -> io::Error {
     let (args, env) = match prepared { Ok(prepared) => prepared, Err(e) => return e };
     let pointers = |list: &[CString]| list.iter().map(|c| c.as_ptr()).chain([std::ptr::null()]).collect::<Vec<_>>();
     let (argv, envp) = (pointers(&args), pointers(&env));
-    set_personality(true);
+    let fd = fd.as_raw_fd();
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, 0) } != 0 {
+        return io::Error::last_os_error();
+    }
     unsafe { libc::execve(c"/proc/self/exe".as_ptr(), argv.as_ptr(), envp.as_ptr()) };
     let error = io::Error::last_os_error();
-    set_personality(false);
+    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
     error
-}
-
-/// A command that starts without address randomization, as a world builder
-/// must, whatever this process runs with.
-pub fn unrandomized_command(program: impl AsRef<OsStr>) -> io::Result<Command> {
-    use std::os::unix::process::CommandExt;
-    effect(|| format!("run {}", String::from_utf8_lossy(program.as_ref().as_bytes())))?;
-    let mut command = Command::new(program);
-    unsafe { command.pre_exec(|| { set_personality(true); Ok(()) }) };
-    Ok(command)
 }
 
 /// Remove NAME from this process's environment, before any other thread

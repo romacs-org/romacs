@@ -80,7 +80,7 @@ pub fn capture<T: 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]
     vm.world_quiescent()?;
     let counters = [crate::expand::next_generated(), 0, 0, 0];
     let root = Box::into_raw(Box::new((vm, carry))) as usize;
-    let fields = ImageFields { len: 0, root, counters, layout: arena::layout(), key };
+    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"));
     // The VM stays allocated: the image owns it, and this process exits.
     written

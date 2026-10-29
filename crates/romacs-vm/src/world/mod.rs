@@ -132,8 +132,12 @@ impl Vm {
     }
 
     /// Drop the values restore rebuilds before the capture collection
-    /// (§5 step 5): the environment lists, with the strings they share.
+    /// (§5 step 5): the environment lists, with the strings they share, and
+    /// the lowered code, whose handlers are addresses in this executable;
+    /// each function is lowered again at its first call.
     pub fn world_normalize(&mut self) {
+        self.execution = crate::threaded::Program::default();
+        self.spare_programs.clear();
         for name in ["process-environment", "initial-environment", "exec-path"] {
             let slot = self.slot(name);
             self.slots[slot].value = Value::NIL;

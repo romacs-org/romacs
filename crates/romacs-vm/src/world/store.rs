@@ -4,14 +4,16 @@
 //! with the keyed host records the build consumed and the events the
 //! embedder printed while it built.
 //!
-//! The key binds the executable's content and the embedder's recipe. The
-//! records bind every host fact the build read; a launch asks the host each
-//! of them again and boots from source on any difference. The image binds
-//! the executable mappings it needs (`arena::layout`).
+//! The key binds the executable's content, the libraries it loads
+//! (`arena::libraries`) and the embedder's recipe. The records bind every
+//! host fact the build read; a launch asks the host each of them again and
+//! boots from source on any difference. The manifest binds the image's
+//! content by its SHA-256, which a launch checks against the file it hands
+//! on, hashed once and then known by its identity.
 //!
 //! A launch is one of three processes:
-//! - the launcher, with its world valid, runs itself again without address
-//!   randomization, naming the image; it never returns;
+//! - the launcher, with its world valid, runs itself again, handing on the
+//!   image's open descriptor; it never returns;
 //! - that process maps the image at its first allocation and takes the VM
 //!   (`Launch::Restored`);
 //! - with no valid world, the launcher boots from source and starts a
@@ -24,8 +26,8 @@ use serde_json::{Value as Json, json};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-pub const FORMAT: &str = "romacs-world 1";
-/// Set in the process that maps an image: the image's path.
+pub const FORMAT: &str = "romacs-world 2";
+/// Set in the process that maps an image: the image's descriptor.
 const IMAGE_ENV: &str = "ROMACS_WORLD_IMAGE";
 /// Set in a builder: the store it publishes to.
 const BUILD_ENV: &str = "ROMACS_WORLD_BUILD";
@@ -60,12 +62,15 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     sha2::Sha256::digest(data).into()
 }
 
-/// The content digest of this executable, cached in STORE by the file's
-/// identity and change times: hashing tens of megabytes at every launch
-/// would cost more than the rest of a restore.
-fn executable_digest(store: &Path) -> std::io::Result<[u8; 32]> {
+/// The content digest of FILE, cached in STORE by the file's identity and
+/// change times: hashing tens or hundreds of megabytes at every launch
+/// would cost more than the rest of a restore. A write, a truncation or a
+/// change of mode changes the identity.
+fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> {
+    use sha2::Digest;
+    use std::io::Read;
     use std::os::unix::fs::MetadataExt;
-    let meta = host::metadata("/proc/self/exe")?;
+    let meta = host::file_metadata(file)?;
     let name = format!("{}-{}-{}-{}.{}-{}.{}", meta.dev(), meta.ino(), meta.size(),
                        meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec());
     let cached = store.join("ids").join(name);
@@ -74,7 +79,16 @@ fn executable_digest(store: &Path) -> std::io::Result<[u8; 32]> {
     {
         return Ok(digest.try_into().expect("32 bytes"));
     }
-    let digest = sha256(&host::read_file("/proc/self/exe")?);
+    let mut digest = sha2::Sha256::new();
+    let mut buffer = vec![0u8; 1 << 20];
+    let mut reader = file;
+    loop {
+        match reader.read(&mut buffer)? {
+            0 => break,
+            n => digest.update(&buffer[..n]),
+        }
+    }
+    let digest: [u8; 32] = digest.finalize().into();
     let _ = host::create_dir_all(store.join("ids")).and_then(|()| host::write(&cached, hex(&digest)));
     Ok(digest)
 }
@@ -99,7 +113,8 @@ impl World {
     /// RECIPE's world in STORE: the key of this executable and RECIPE.
     pub fn new(store: PathBuf, recipe: Vec<String>) -> std::io::Result<World> {
         private_store(&store)?;
-        let mut text = format!("{FORMAT}\nexecutable {}\n", hex(&executable_digest(&store)?));
+        let executable = file_digest(&store, &host::open_world_file("/proc/self/exe")?)?;
+        let mut text = format!("{FORMAT}\nexecutable {}\nlibraries {}\n", hex(&executable), hex(&arena::libraries()));
         for line in &recipe {
             text.push_str(line);
             text.push('\n');
@@ -128,10 +143,18 @@ impl World {
         if let Some(refusals) = manifest["refusals"].as_array().filter(|r| !r.is_empty()) {
             return Err(json!({"refused": refusals}));
         }
-        if !host::probe(host::Probe::IsFile, self.file(".rwi")) {
-            return Err(json!({"missing": "image"}));
-        }
         Ok(manifest)
+    }
+
+    /// The image MANIFEST names, opened, when its content is the one it
+    /// binds.
+    fn checked_image(&self, manifest: &Json) -> Result<std::fs::File, Json> {
+        let image = host::open_world_file(self.file(".rwi")).map_err(|e| json!({"missing": e.to_string()}))?;
+        let digest = file_digest(&self.store, &image).map_err(|e| json!({"image": e.to_string()}))?;
+        match manifest["image"].as_str() {
+            Some(bound) if bound == hex(&digest) => Ok(image),
+            bound => Err(json!({"image": {"bound": bound, "now": hex(&digest)}})),
+        }
     }
 
     /// What this process does: see the module documentation. BUILDER_ARGS
@@ -174,9 +197,9 @@ impl World {
                 return Launch::Chain { reason: json!({"world": reason}) };
             }
         }
-        match valid {
-            Ok(_) => {
-                let error = host::exec_unrandomized(IMAGE_ENV, self.file(".rwi").as_os_str());
+        match valid.and_then(|manifest| self.checked_image(&manifest)) {
+            Ok(image) => {
+                let error = host::exec_self(IMAGE_ENV, &image);
                 Launch::Chain { reason: json!({"exec": error.to_string()}) }
             }
             Err(reason) => {
@@ -202,7 +225,7 @@ impl World {
         let log = host::open_output(self.file(".log"), host::OpenOptions::new().write(true).create(true).truncate(true))?;
         let mut env = pinned_env(&host::env_snapshot(), &pinned);
         env.push((BUILD_ENV.into(), self.store.clone().into_os_string()));
-        host::unrandomized_command(host::current_exe()?)?
+        host::command(host::current_exe()?)?
             .args(args).env_clear().envs(env).current_dir(pinned.join("cwd"))
             .stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log)
             .process_group(0).spawn()
@@ -264,15 +287,15 @@ impl World {
         let manifest = json!({"format": FORMAT, "key": hex(&self.key), "recipe": self.recipe,
                               "records": records, "refusals": trace["refusals"], "events": events,
                               "built": host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())});
-        let text = serde_json::to_vec(&manifest).map_err(|e| e.to_string())?;
         let publish = |suffix: &str, bytes: &[u8]| -> std::io::Result<()> {
             let temporary = self.file(&format!("{suffix}.new"));
             host::write(&temporary, bytes)?;
             read_only(&temporary)?;
             host::rename(&temporary, self.file(suffix))
         };
+        let text = |manifest: &Json| serde_json::to_vec(manifest).map_err(|e| e.to_string());
         if trace["refusals"].as_array().is_some_and(|r| !r.is_empty()) {
-            publish(".json", &text).map_err(|e| e.to_string())?;
+            publish(".json", &text(&manifest)?).map_err(|e| e.to_string())?;
             return Err(format!("world build refused: {}", trace["refusals"]));
         }
         vm.world_lift();
@@ -285,7 +308,12 @@ impl World {
         file.sync_all().map_err(|e| e.to_string())?;
         read_only(&temporary).map_err(|e| e.to_string())?;
         host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string())?;
-        publish(".json", &text).map_err(|e| e.to_string())?;
+        // Hashed from the file as published, which also caches it.
+        let image = host::open_world_file(self.file(".rwi")).map_err(|e| e.to_string())?;
+        let digest = file_digest(&self.store, &image).map_err(|e| e.to_string())?;
+        let mut manifest = manifest;
+        manifest["image"] = json!(hex(&digest));
+        publish(".json", &text(&manifest)?).map_err(|e| e.to_string())?;
         Ok(len)
     }
 }

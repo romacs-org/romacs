@@ -6,11 +6,20 @@
 //! process's first allocation. Nothing is decoded and nothing is relocated:
 //! every pointer in the image is valid again where it was.
 //!
-//! Code addresses in the image stay valid only when the executable and its
-//! libraries load where they loaded in the builder. World processes run
-//! without address randomization (`world::image`), and an image records the
-//! executable mappings of the process that made it (`layout`); a process
-//! whose mappings differ does not map it.
+//! The range's address is random, chosen by each process that starts a
+//! fresh arena, so each world has its own. Everything else a world process
+//! maps stays randomized, the executable too. What an image holds of the
+//! executable is read-only data: string literals, constant tables and the
+//! empty hash table group in its first segment, vtables and `&'static`
+//! tables in its RELRO segment. A process that maps an image maps a copy of
+//! those two segments where the builder's executable had them, and nothing
+//! else there (`shadow_executable`). An image holds no code or writable
+//! static address: a VM at rest keeps no lowered code (`world_normalize`)
+//! and no host attachment (`world_quiescent`), and nothing in the VM's
+//! types holds a function pointer or a reference to a writable static.
+//! Should one appear, the rest of the builder's executable range is mapped
+//! inaccessible, so following it faults rather than running whatever now
+//! lies there. The libraries hold nothing of an image.
 //!
 //! The allocator has size classes up to 32 KiB, carved from page slabs and
 //! kept on free lists, and page runs above that, kept in bins by size. One
@@ -20,13 +29,14 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
-/// Where the arena starts: far from the executable, the heap, the stack and
-/// the libraries, with or without randomization.
-pub const BASE: usize = 0x2000_0000_0000;
+/// Where an arena may start: a GiB-aligned address in this window, far from
+/// the executable, its heap, the libraries and the stack.
+const WINDOW: (usize, usize) = (0x1000_0000_0000, 0x5000_0000_0000);
+const ALIGN: usize = 1 << 30;
 /// The reserved range. Pages are committed only as they are touched.
 const RESERVE: usize = 1 << 37;
 const PAGE: usize = 4096;
-const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA1");
+const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA2");
 /// 16..=1024 by 16, then four steps per doubling to 32 KiB.
 const CLASSES: usize = 64 + 20;
 const SMALL_MAX: usize = 32768;
@@ -34,11 +44,13 @@ const BINS: usize = 40;
 /// Freed page runs this long give their pages back.
 const RELEASE_PAGES: usize = 64;
 
-/// The allocator's state, at `BASE`. An image carries it, and the fields a
-/// restore needs.
+/// The allocator's state, at the arena's start. An image carries it, and
+/// the fields a restore needs.
 #[repr(C)]
 struct Header {
     magic: u64,
+    /// Where the arena starts.
+    base: usize,
     /// The first page never handed out as a run.
     top: usize,
     /// Every address at or above this one is untouched, so zero.
@@ -61,8 +73,8 @@ pub struct ImageFields {
     pub root: usize,
     /// Process-global counters the image's contents depend on.
     pub counters: [u64; 4],
-    /// The digest of the executable mappings of the process that made it.
-    pub layout: [u8; 32],
+    /// Where the executable of the process that made it loaded.
+    pub executable: usize,
     /// The world's key.
     pub key: [u8; 32],
 }
@@ -74,10 +86,14 @@ const SYSTEM: u8 = 2;
 static STATE: AtomicU8 = AtomicU8::new(UNSET);
 static LOCK: AtomicBool = AtomicBool::new(false);
 /// How the image this process asked for fared (`Restore`).
+/// Whether freed blocks are zeroed: in a builder, so that no freed byte
+/// reaches an image.
+static SCRUB: AtomicBool = AtomicBool::new(false);
 static RESTORE: AtomicU8 = AtomicU8::new(Restore::None as u8);
-/// The layout digest, taken as the arena started.
-static LAYOUT: AtomicUsize = AtomicUsize::new(0);
-static mut LAYOUT_BYTES: [u8; 32] = [0; 32];
+/// Where the arena starts, once it has.
+static BASE: AtomicUsize = AtomicUsize::new(0);
+/// The digest of the libraries mapped as the arena started (`libraries`).
+static mut LIBRARIES: [u8; 32] = [0; 32];
 
 /// What became of the image named by `ROMACS_WORLD_IMAGE`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,16 +107,20 @@ pub enum Restore {
     Unreadable,
     /// It is no arena image of this format.
     Format,
-    /// The process's executable mappings differ from the builder's.
-    Layout,
+    /// Where the builder's executable loaded is taken here.
+    Executable,
     /// Its range could not be mapped.
     Map,
 }
 
 pub struct Arena;
 
+fn base() -> usize {
+    BASE.load(Ordering::Relaxed)
+}
+
 fn header() -> *mut Header {
-    BASE as *mut Header
+    base() as *mut Header
 }
 
 fn lock() {
@@ -195,7 +215,7 @@ unsafe fn take_pages(h: &mut Header, pages: usize, align: usize) -> usize {
     }
     let at = h.top.next_multiple_of(align.max(PAGE));
     let end = at + pages * PAGE;
-    if end > BASE + RESERVE {
+    if end > base() + RESERVE {
         return 0;
     }
     if at > h.top {
@@ -243,7 +263,8 @@ unsafe fn give_small(h: &mut Header, at: usize, class: usize) {
 }
 
 fn in_arena(at: *mut u8) -> bool {
-    (BASE..BASE + RESERVE).contains(&(at as usize))
+    let base = base();
+    base != 0 && (base..base + RESERVE).contains(&(at as usize))
 }
 
 fn state() -> u8 {
@@ -261,78 +282,199 @@ fn state() -> u8 {
     }
 }
 
-/// Map the image `ROMACS_WORLD_IMAGE` names, or reserve a fresh range.
+/// Map the image on the descriptor `ROMACS_WORLD_IMAGE` names, or reserve
+/// a fresh range at a random address in the window.
 unsafe fn start() -> u8 {
-    let layout = unsafe { layout_digest() };
-    unsafe { LAYOUT_BYTES = layout };
-    LAYOUT.store(1, Ordering::Release);
+    unsafe { LIBRARIES = libraries_digest() };
+    SCRUB.store(!unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null(), Ordering::Relaxed);
     let wanted = unsafe { libc::getenv(c"ROMACS_WORLD_IMAGE".as_ptr()) };
     if !wanted.is_null() {
-        let outcome = unsafe { map_image(wanted, &layout) };
+        let outcome = match unsafe { descriptor(wanted) } {
+            Some(fd) => {
+                let outcome = unsafe { map_image_fd(fd) };
+                unsafe { libc::close(fd) };
+                outcome
+            }
+            None => Restore::Unreadable,
+        };
         RESTORE.store(outcome as u8, Ordering::Release);
         if outcome == Restore::Mapped {
             return ARENA;
         }
     }
     let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
-    let at = unsafe { libc::mmap(BASE as *mut libc::c_void, RESERVE, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
-    if at != BASE as *mut libc::c_void {
+    for _ in 0..8 {
+        let mut random = 0usize;
+        let read = unsafe { libc::getrandom((&raw mut random).cast(), size_of::<usize>(), 0) };
+        if read != size_of::<usize>() as isize {
+            break;
+        }
+        let base = WINDOW.0 + random % ((WINDOW.1 - WINDOW.0 - RESERVE) / ALIGN) * ALIGN;
+        let at = unsafe { libc::mmap(base as *mut libc::c_void, RESERVE, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
+        if at == base as *mut libc::c_void {
+            BASE.store(base, Ordering::Relaxed);
+            let h = unsafe { &mut *header() };
+            h.magic = MAGIC;
+            h.base = base;
+            h.top = base + size_of::<Header>().next_multiple_of(PAGE);
+            h.zero = h.top;
+            return ARENA;
+        }
         if at != libc::MAP_FAILED {
             unsafe { libc::munmap(at, RESERVE) };
         }
-        return SYSTEM;
     }
-    let h = unsafe { &mut *header() };
-    h.magic = MAGIC;
-    h.top = BASE + size_of::<Header>().next_multiple_of(PAGE);
-    h.zero = h.top;
-    ARENA
+    SYSTEM
 }
 
-unsafe fn map_image(path: *const libc::c_char, layout: &[u8; 32]) -> Restore {
-    let fd = unsafe { libc::open(path, libc::O_RDONLY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return Restore::Unreadable;
+/// The descriptor a decimal string names, read without allocating.
+unsafe fn descriptor(text: *const libc::c_char) -> Option<i32> {
+    let bytes = unsafe { std::ffi::CStr::from_ptr(text) }.to_bytes();
+    if bytes.is_empty() || bytes.len() > 9 || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
     }
-    let outcome = unsafe { map_image_fd(fd, layout) };
-    unsafe { libc::close(fd) };
-    outcome
+    Some(bytes.iter().fold(0i32, |n, &b| n * 10 + (b - b'0') as i32))
 }
 
-unsafe fn map_image_fd(fd: i32, layout: &[u8; 32]) -> Restore {
+unsafe fn map_image_fd(fd: i32) -> Restore {
+    // Inherited: no child of this process gets it.
+    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
     let mut bytes = [0u8; size_of::<Header>()];
     let read = unsafe { libc::pread(fd, bytes.as_mut_ptr().cast(), bytes.len(), 0) };
-    if read != bytes.len() as isize {
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    if read != bytes.len() as isize || unsafe { libc::fstat(fd, &mut stat) } != 0 {
         return Restore::Unreadable;
     }
     let image = unsafe { std::ptr::read_unaligned(bytes.as_ptr().cast::<Header>()) };
-    let len = image.image.len;
-    if image.magic != MAGIC || len == 0 || len % PAGE != 0 || len >= RESERVE || image.top > BASE + len {
+    let (base, len) = (image.base, image.image.len);
+    // A truncated or extended file is no image: mapped, it would fault.
+    if image.magic != MAGIC || len == 0 || len % PAGE != 0 || len >= RESERVE || stat.st_size as usize != len
+        || base % ALIGN != 0 || !(WINDOW.0..=WINDOW.1 - RESERVE).contains(&base) || !(base..=base + len).contains(&image.top)
+    {
         return Restore::Format;
     }
-    if image.image.layout != *layout {
-        return Restore::Layout;
-    }
     let file = libc::MAP_PRIVATE | libc::MAP_FIXED_NOREPLACE;
-    let at = unsafe { libc::mmap(BASE as *mut libc::c_void, len, libc::PROT_READ | libc::PROT_WRITE, file, fd, 0) };
-    if at != BASE as *mut libc::c_void {
+    let at = unsafe { libc::mmap(base as *mut libc::c_void, len, libc::PROT_READ | libc::PROT_WRITE, file, fd, 0) };
+    if at != base as *mut libc::c_void {
+        if at != libc::MAP_FAILED {
+            unsafe { libc::munmap(at, len) };
+        }
         return Restore::Map;
     }
     let anon = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
-    let rest = unsafe { libc::mmap((BASE + len) as *mut libc::c_void, RESERVE - len, libc::PROT_READ | libc::PROT_WRITE, anon, -1, 0) };
-    if rest != (BASE + len) as *mut libc::c_void {
-        unsafe { libc::munmap(BASE as *mut libc::c_void, len) };
+    let rest = unsafe { libc::mmap((base + len) as *mut libc::c_void, RESERVE - len, libc::PROT_READ | libc::PROT_WRITE, anon, -1, 0) };
+    if rest != (base + len) as *mut libc::c_void {
+        if rest != libc::MAP_FAILED {
+            unsafe { libc::munmap(rest, RESERVE - len) };
+        }
+        unsafe { libc::munmap(base as *mut libc::c_void, len) };
         return Restore::Map;
     }
+    if !unsafe { shadow_executable(image.image.executable) } {
+        unsafe { libc::munmap(base as *mut libc::c_void, RESERVE) };
+        return Restore::Executable;
+    }
+    BASE.store(base, Ordering::Relaxed);
     // The kernel reads the file ahead while the process starts.
-    unsafe { libc::madvise(BASE as *mut libc::c_void, len, libc::MADV_WILLNEED) };
+    unsafe { libc::madvise(base as *mut libc::c_void, len, libc::MADV_WILLNEED) };
     Restore::Mapped
 }
 
-/// The SHA-256 of the process's executable mappings, as /proc/self/maps
-/// lists them: where the executable, the libraries and the vDSO are.
-/// Read without allocating, since the allocator is starting.
-unsafe fn layout_digest() -> [u8; 32] {
+/// The executable's load segments, as the kernel loaded it: where it
+/// starts, and each PT_LOAD segment's (address, file offset, file size,
+/// memory size, flags), and the RELRO range, all relative to the start.
+struct Executable {
+    base: usize,
+    loads: [(usize, usize, usize, usize, u32); 8],
+    count: usize,
+    relro: (usize, usize),
+}
+
+/// This process's executable, from its program headers, without allocating.
+unsafe fn executable() -> Option<Executable> {
+    let phdr = unsafe { libc::getauxval(libc::AT_PHDR) } as usize;
+    let count = unsafe { libc::getauxval(libc::AT_PHNUM) } as usize;
+    if phdr == 0 {
+        return None;
+    }
+    let headers = unsafe { std::slice::from_raw_parts(phdr as *const libc::Elf64_Phdr, count) };
+    let own = headers.iter().find(|h| h.p_type == libc::PT_PHDR)?;
+    let mut exe = Executable { base: phdr - own.p_vaddr as usize, loads: [(0, 0, 0, 0, 0); 8], count: 0, relro: (0, 0) };
+    for h in headers {
+        match h.p_type {
+            libc::PT_LOAD if exe.count < exe.loads.len() => {
+                exe.loads[exe.count] = (h.p_vaddr as usize, h.p_offset as usize, h.p_filesz as usize, h.p_memsz as usize, h.p_flags);
+                exe.count += 1;
+            }
+            libc::PT_LOAD => return None,
+            libc::PT_GNU_RELRO => exe.relro = (h.p_vaddr as usize, h.p_vaddr as usize + h.p_memsz as usize),
+            _ => {}
+        }
+    }
+    Some(exe)
+}
+
+/// Where this process's executable loaded.
+pub fn executable_base() -> usize {
+    unsafe { executable() }.map_or(0, |exe| exe.base)
+}
+
+/// Map, at OLD, where the builder's executable loaded, what an image may
+/// address there: the read-only segments, from the executable's file, and
+/// a read-only copy of this process's RELRO, whose pointers are this
+/// process's. The rest of the builder's executable range is reserved
+/// inaccessible. False when that range is taken.
+unsafe fn shadow_executable(old: usize) -> bool {
+    let Some(exe) = (unsafe { executable() }) else { return false };
+    if old == exe.base {
+        return true;
+    }
+    let loads = &exe.loads[..exe.count];
+    let floor = |n: usize| n / PAGE * PAGE;
+    let ceil = |n: usize| n.next_multiple_of(PAGE);
+    let Some(low) = loads.iter().map(|l| floor(l.0)).min() else { return false };
+    let high = loads.iter().map(|l| ceil(l.0 + l.3)).max().unwrap_or(low);
+    let span = high - low;
+    let anon = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE;
+    let at = unsafe { libc::mmap((old + low) as *mut libc::c_void, span, libc::PROT_NONE, anon | libc::MAP_FIXED_NOREPLACE, -1, 0) };
+    if at != (old + low) as *mut libc::c_void {
+        if at != libc::MAP_FAILED {
+            unsafe { libc::munmap(at, span) };
+        }
+        return false;
+    }
+    let undo = || { unsafe { libc::munmap((old + low) as *mut libc::c_void, span) }; false };
+    let fd = unsafe { libc::open(c"/proc/self/exe".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return undo();
+    }
+    let mut mapped = true;
+    for &(vaddr, offset, filesz, _, flags) in loads.iter().filter(|l| l.4 & (libc::PF_W | libc::PF_X) == 0) {
+        let (start, end) = (floor(vaddr), ceil(vaddr + filesz));
+        let at = unsafe { libc::mmap((old + start) as *mut libc::c_void, end - start, libc::PROT_READ, libc::MAP_PRIVATE | libc::MAP_FIXED, fd, floor(offset) as i64) };
+        mapped &= at == (old + start) as *mut libc::c_void && flags & libc::PF_R != 0;
+    }
+    unsafe { libc::close(fd) };
+    let (start, end) = (floor(exe.relro.0), ceil(exe.relro.1));
+    if mapped && end > start {
+        let at = unsafe { libc::mmap((old + start) as *mut libc::c_void, end - start, libc::PROT_READ | libc::PROT_WRITE, anon | libc::MAP_FIXED, -1, 0) };
+        mapped = at == (old + start) as *mut libc::c_void;
+        if mapped {
+            unsafe { std::ptr::copy_nonoverlapping((exe.base + start) as *const u8, (old + start) as *mut u8, end - start) };
+            mapped = unsafe { libc::mprotect(at, end - start, libc::PROT_READ) } == 0;
+        }
+    }
+    if !mapped {
+        return undo();
+    }
+    true
+}
+
+/// The SHA-256 of the files of the libraries this process maps as code, by
+/// path, device, inode, size and change times, as the dynamic loader left
+/// them before the first allocation, in no order: where each loaded is
+/// random. Read without allocating.
+unsafe fn libraries_digest() -> [u8; 32] {
     use sha2::Digest;
     static mut MAPS: [u8; 65536] = [0; 65536];
     let buffer = unsafe { &mut *std::ptr::addr_of_mut!(MAPS) };
@@ -346,15 +488,58 @@ unsafe fn layout_digest() -> [u8; 32] {
         }
         unsafe { libc::close(fd) };
     }
-    let mut digest = sha2::Sha256::new();
+    // The executable's own content is keyed apart.
+    let mut own: libc::stat = unsafe { std::mem::zeroed() };
+    unsafe { libc::stat(c"/proc/self/exe".as_ptr(), &mut own) };
+    static mut ENTRIES: [[u8; 32]; 256] = [[0; 32]; 256];
+    let entries = unsafe { &mut *std::ptr::addr_of_mut!(ENTRIES) };
+    let mut count = 0;
+    let mut path = [0u8; 4096];
     for line in buffer[..len].split(|&b| b == b'\n') {
         // start-end perms offset dev inode path
-        if line.split(|&b| b == b' ').nth(1).is_some_and(|perms| perms.get(2) == Some(&b'x')) {
-            digest.update(line);
-            digest.update(b"\n");
+        let mut fields = line.splitn(6, |&b| b == b' ');
+        let (Some(range), Some(perms)) = (fields.next(), fields.next()) else { continue };
+        let name = fields.nth(3).map(|rest| rest.trim_ascii_start()).unwrap_or_default();
+        if range.is_empty() || perms.get(2) != Some(&b'x') || name.first() != Some(&b'/') || name.len() >= path.len()
+            || count == entries.len()
+        {
+            continue;
+        }
+        path[..name.len()].copy_from_slice(name);
+        path[name.len()] = 0;
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        let known = unsafe { libc::stat(path.as_ptr().cast(), &mut stat) } == 0;
+        if known && (stat.st_dev, stat.st_ino) == (own.st_dev, own.st_ino) {
+            continue;
+        }
+        let mut digest = sha2::Sha256::new();
+        digest.update(name);
+        if known {
+            for n in [stat.st_dev, stat.st_ino, stat.st_size as u64, stat.st_mtime as u64, stat.st_mtime_nsec as u64,
+                      stat.st_ctime as u64, stat.st_ctime_nsec as u64] {
+                digest.update(n.to_le_bytes());
+            }
+        }
+        entries[count] = digest.finalize().into();
+        count += 1;
+    }
+    let entries = &mut entries[..count];
+    entries.sort_unstable();
+    let mut digest = sha2::Sha256::new();
+    for (i, entry) in entries.iter().enumerate() {
+        if i == 0 || entries[i - 1] != *entry {
+            digest.update(entry);
         }
     }
     digest.finalize().into()
+}
+
+/// The digest of the libraries this process mapped before its first
+/// allocation: what a world's key binds of them. A library changed in
+/// place, or another one found, changes it.
+pub fn libraries() -> [u8; 32] {
+    state();
+    unsafe { LIBRARIES }
 }
 
 /// How the image this process asked for fared.
@@ -364,7 +549,7 @@ pub fn restore_outcome() -> Restore {
         1 => Restore::Mapped,
         2 => Restore::Unreadable,
         3 => Restore::Format,
-        4 => Restore::Layout,
+        4 => Restore::Executable,
         5 => Restore::Map,
         _ => Restore::None,
     }
@@ -378,12 +563,6 @@ pub fn active() -> bool {
 /// The fields of the image this process mapped.
 pub fn mapped_image() -> Option<ImageFields> {
     (restore_outcome() == Restore::Mapped).then(|| unsafe { (*header()).image })
-}
-
-/// The digest of this process's executable mappings.
-pub fn layout() -> [u8; 32] {
-    state();
-    unsafe { LAYOUT_BYTES }
 }
 
 /// Write the arena to FILE as an image with FIELDS (its length is set
@@ -400,7 +579,8 @@ pub unsafe fn write_image(file: &std::fs::File, mut fields: ImageFields) -> std:
     }
     lock();
     let h = unsafe { &mut *header() };
-    fields.len = h.top - BASE;
+    unsafe { scrub(h) };
+    fields.len = h.top - base();
     let saved = h.image;
     h.image = fields;
     let result = unsafe { write_pages(file.as_raw_fd(), fields.len) };
@@ -409,24 +589,49 @@ pub unsafe fn write_image(file: &std::fs::File, mut fields: ImageFields) -> std:
     result.map(|()| fields.len)
 }
 
+/// Zero what free blocks and runs still hold, but for their links: freed
+/// bytes are no part of a world, and zero pages are holes in its file.
+unsafe fn scrub(h: &mut Header) {
+    for class in 0..CLASSES {
+        let size = class_size(class);
+        let mut at = h.free[class];
+        while at != 0 {
+            unsafe { std::ptr::write_bytes((at + 8) as *mut u8, 0, size - 8) };
+            at = unsafe { *(at as *const usize) };
+        }
+    }
+    for b in 0..BINS {
+        let mut at = h.runs[b];
+        while at != 0 {
+            let run = unsafe { &*(at as *const Run) };
+            unsafe { std::ptr::write_bytes((at + size_of::<Run>()) as *mut u8, 0, PAGE - size_of::<Run>()) };
+            if run.pages > 1 {
+                unsafe { libc::madvise((at + PAGE) as *mut libc::c_void, (run.pages - 1) * PAGE, libc::MADV_DONTNEED) };
+            }
+            at = run.next;
+        }
+    }
+}
+
 unsafe fn write_pages(fd: i32, len: usize) -> std::io::Result<()> {
-    let zero = unsafe { (*header()).zero }.min(BASE + len);
-    let mut at = BASE;
-    while at < BASE + len {
+    let base = base();
+    let zero = unsafe { (*header()).zero }.min(base + len);
+    let mut at = base;
+    while at < base + len {
         // Untouched and all-zero pages stay holes.
         if at >= zero || unsafe { std::slice::from_raw_parts(at as *const u8, PAGE) }.iter().all(|&b| b == 0) {
             at += PAGE;
             continue;
         }
         let mut end = at + PAGE;
-        while end < zero.min(BASE + len) && end - at < (1 << 24)
+        while end < zero.min(base + len) && end - at < (1 << 24)
             && unsafe { std::slice::from_raw_parts(end as *const u8, PAGE) }.iter().any(|&b| b != 0)
         {
             end += PAGE;
         }
         let mut done = 0;
         while at + done < end {
-            let n = unsafe { libc::pwrite(fd, (at + done) as *const libc::c_void, end - at - done, (at + done - BASE) as i64) };
+            let n = unsafe { libc::pwrite(fd, (at + done) as *const libc::c_void, end - at - done, (at + done - base) as i64) };
             if n < 0 {
                 return Err(std::io::Error::last_os_error());
             }
@@ -480,6 +685,9 @@ unsafe impl GlobalAlloc for Arena {
         if !in_arena(at) {
             return unsafe { System.dealloc(at, layout) };
         }
+        if SCRUB.load(Ordering::Relaxed) {
+            unsafe { std::ptr::write_bytes(at, 0, layout.size()) };
+        }
         lock();
         let h = unsafe { &mut *header() };
         match class_of(layout.size(), layout.align()) {
@@ -494,6 +702,9 @@ unsafe impl GlobalAlloc for Arena {
             return unsafe { System.realloc(at, layout, new_size) };
         }
         let align = layout.align();
+        if SCRUB.load(Ordering::Relaxed) && new_size < layout.size() {
+            unsafe { std::ptr::write_bytes(at.add(new_size), 0, layout.size() - new_size) };
+        }
         match (class_of(layout.size(), align), class_of(new_size, align)) {
             (Some(old), Some(new)) if old == new => return at,
             (None, None) if align <= PAGE => {
@@ -506,7 +717,7 @@ unsafe impl GlobalAlloc for Arena {
                         unsafe { give_pages(h, start + new * PAGE, old - new) };
                     }
                     true
-                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= BASE + RESERVE {
+                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= base() + RESERVE {
                     h.top += (new - old) * PAGE;
                     h.zero = h.zero.max(h.top);
                     true

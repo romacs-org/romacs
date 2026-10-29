@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "fed1718326ae38d0e2b09dacce96b258add8ff3b58279ef857f3eb2b9bd46910",
+  "input_hash": "010ef356083036ad7433ac19f130760b83051d1dfe11f7a7631250a92f7706b3",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -6706,10 +6706,10 @@
    "section": "World snapshots",
    "observable": false,
    "planned": false,
-   "mechanism": "Address-space randomization of a process booted from a world",
+   "mechanism": "Where a process booted from a world keeps its heap",
    "gnu": "GNU restores its dump at any address: pdumper relocates every pointer.",
-   "romacs": "A world image is the heap of the process that built it, mapped back at its own addresses (`world::arena`), so a process that maps one, and the builder, run with the personality flag `ADDR_NO_RANDOMIZE`. Their child processes run with randomization again. A process booted from source keeps randomization.",
-   "why": "Not package-observable. It weakens memory-corruption mitigation for world processes; `ROMACS_WORLD=off` boots from source.",
+   "romacs": "A world image is the heap of the process that built it, mapped back at its own addresses (`world::arena`): the arena's address is random per world, not per process. Everything else a world process maps keeps address randomization, the executable too. The image addresses only read-only data of the builder's executable (literals, constant tables, vtables); a restored process maps a read-only copy of those segments where the builder had them and leaves the rest of that range inaccessible, so an image holds no code address that could be followed.",
+   "why": "Not package-observable. Someone who can read the world store learns where a world process keeps its heap; `ROMACS_WORLD=off` boots from source, with a heap at a per-process random address.",
    "symbols": [],
    "symbols_derived": false
   },
