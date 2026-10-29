@@ -369,7 +369,7 @@ fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), 
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { utf8: PREPARING.into(), face_runs: vec![] }, mode_line: None,
-            mode_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), faces: vec![face],
+            mode_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face],
         } }],
     };
     let (frame, _) = romacs_layout2::LayoutEngine::new()?.layout_frame(&snapshot, 1, None)?;
