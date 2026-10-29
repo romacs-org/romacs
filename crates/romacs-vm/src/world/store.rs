@@ -29,6 +29,11 @@ pub const FORMAT: &str = "romacs-world 2";
 /// Set in a builder: the store it publishes to.
 const BUILD_ENV: &str = "ROMACS_WORLD_BUILD";
 
+/// Whether worlds are off for this process: ROMACS_WORLD=off.
+pub fn disabled() -> bool {
+    host::getenv("ROMACS_WORLD").is_some_and(|v| v == "off")
+}
+
 /// Whether this process is a world's builder: one `launch` makes
 /// `Launch::Build`, before any window.
 pub fn building() -> bool {
@@ -213,7 +218,7 @@ impl World {
             host::unset_env(BUILD_ENV);
             return Launch::Build;
         }
-        if host::getenv("ROMACS_WORLD").is_some_and(|v| v == "off") {
+        if disabled() {
             return Launch::Chain { reason: json!("ROMACS_WORLD=off") };
         }
         if !arena::active() {
@@ -222,6 +227,11 @@ impl World {
         let mut builder_args = Some(builder_args);
         let mut args = move || builder_args.take().map(|f| f()).unwrap_or_default();
         let mut valid = self.valid_manifest();
+        // A build refused or failed on these very inputs would only fail
+        // again: boot from source until one of them changes.
+        if let Err(reason) = &valid && reason.get("refused").is_some() {
+            return Launch::Chain { reason: json!({"world": reason}) };
+        }
         if let (Err(_), true) = (&valid, wait) {
             let built = self.start_builder(args()).and_then(|mut child| child.wait());
             valid = match built {
@@ -315,6 +325,39 @@ impl World {
         Ok(())
     }
 
+    /// The manifest of a build that read TRACE, with REFUSALS and EVENTS.
+    fn manifest(&self, trace: &Json, refusals: Json, events: Json) -> Json {
+        let records: Vec<&Json> = trace["records"].as_array().map(|r| r.iter().filter(|r| host::keyed(r)).collect()).unwrap_or_default();
+        json!({"format": FORMAT, "key": hex(&self.key), "recipe": self.recipe,
+               "records": records, "refusals": refusals, "events": events,
+               "built": host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())})
+    }
+
+    /// Publish BYTES as this world's SUFFIX file, read-only.
+    fn publish(&self, suffix: &str, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
+        let (temporary, mut file) = self.temporary(suffix)?;
+        file.write_all(bytes)?;
+        read_only(&temporary)?;
+        host::rename(&temporary, self.file(suffix))
+    }
+
+    /// A build that failed after `begin_build`, with ERROR: its manifest is
+    /// published with the failure as a refusal, bound to the records the
+    /// build read, so a launch does not build it again until one of them
+    /// changes (`launch`). ERROR, as the failure to report.
+    pub fn abandon_build(&self, error: String) -> String {
+        if let Some(trace) = host::leave_build() {
+            let mut refusals = trace["refusals"].as_array().cloned().unwrap_or_default();
+            refusals.push(json!({"kind": "build-failed", "error": error}));
+            let manifest = self.manifest(&trace, Json::Array(refusals), json!({}));
+            if let Ok(text) = serde_json::to_vec(&manifest) {
+                let _ = self.publish(".json", &text);
+            }
+        }
+        error
+    }
+
     /// A new file for what will be published as SUFFIX: a unique name, so
     /// no file a builder left behind stands in its way.
     fn temporary(&self, suffix: &str) -> std::io::Result<(PathBuf, std::fs::File)> {
@@ -348,17 +391,8 @@ impl World {
     pub fn finish_build<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
         vm.world_check_inputs();
         let trace = host::leave_build().ok_or("no world build was recording")?;
-        let records: Vec<&Json> = trace["records"].as_array().map(|r| r.iter().filter(|r| host::keyed(r)).collect()).unwrap_or_default();
-        let manifest = json!({"format": FORMAT, "key": hex(&self.key), "recipe": self.recipe,
-                              "records": records, "refusals": trace["refusals"], "events": events,
-                              "built": host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())});
-        let publish = |suffix: &str, bytes: &[u8]| -> std::io::Result<()> {
-            use std::io::Write;
-            let (temporary, mut file) = self.temporary(suffix)?;
-            file.write_all(bytes)?;
-            read_only(&temporary)?;
-            host::rename(&temporary, self.file(suffix))
-        };
+        let manifest = self.manifest(&trace, trace["refusals"].clone(), events);
+        let publish = |suffix: &str, bytes: &[u8]| self.publish(suffix, bytes);
         let text = |manifest: &Json| serde_json::to_vec(manifest).map_err(|e| e.to_string());
         if trace["refusals"].as_array().is_some_and(|r| !r.is_empty()) {
             publish(".json", &text(&manifest)?).map_err(|e| e.to_string())?;

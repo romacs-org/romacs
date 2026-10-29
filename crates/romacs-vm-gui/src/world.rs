@@ -7,6 +7,13 @@
 //! `romacs-world-restart` and continues with the interactive session
 //! (`startup::initialize_session`) and the workspace.
 //!
+//! A live `--loadup` launch uses a world unless ROMACS_WORLD=off: in
+//! `--world-store`, or else in `$XDG_CACHE_HOME/romacs/worlds`
+//! (`default_store`). A launch that finds its world missing or stale builds
+//! it first, which costs about what a boot from source does, and boots from
+//! it; later launches restore it. A build refused or failed on the same
+//! inputs is not tried again until one of them changes.
+//!
 //! The world ends at the chain, not after the session's own startup steps
 //! (rlisp/romacs-gui-loadup.el): Romacs's layers after them read and write
 //! the delayed variables and the inputs of those steps, which a world build
@@ -82,11 +89,23 @@ fn user_font_configuration(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> 
     paths
 }
 
+/// Where a launch keeps its worlds when no --world-store names a place:
+/// `$XDG_CACHE_HOME/romacs/worlds`, or `~/.cache/romacs/worlds` (the XDG
+/// base directory default), from GET. None without an absolute directory
+/// to put it in.
+pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let cache = get("XDG_CACHE_HOME").map(PathBuf::from).filter(|p| p.is_absolute())
+        .or_else(|| get("HOME").map(PathBuf::from).filter(|p| p.is_absolute()).map(|h| h.join(".cache")))?;
+    Some(cache.join("romacs/worlds"))
+}
+
 /// This launch with WORLD: the restored VM and its carry, or None to boot
-/// from source (a builder runs beside it then, unless WAIT built the world
-/// first). A builder process builds and exits here.
-pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, wait: bool) -> Option<(Box<Vm>, Carry)> {
-    match world.launch::<Carry>(|| builder_args(world, width, height, floor), wait) {
+/// from source. A missing or stale world is built first, which costs about
+/// what a boot from source does, and the launch then boots from it; one
+/// whose build was refused or failed on these very inputs boots from
+/// source until they change. A builder process builds and exits here.
+pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>) -> Option<(Box<Vm>, Carry)> {
+    match world.launch::<Carry>(|| builder_args(world, width, height, floor), true) {
         Launch::Restored { vm, carry, manifest } => {
             eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"]}));
             Some((vm, carry))
@@ -137,39 +156,57 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result
         let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
         let dir = startup::lisp_root(&startup::lisp_dir())?;
         world.begin_build(&world.build_roots(build_roots(&dir))).map_err(|e| e.to_string())?;
-        let mut vm = Vm::new();
-        vm.world_begin();
-        vm.set_layout_host(Some(Box::new(crate::measure::Host { engine: engine.clone() })));
-        // A live launch attaches its terminal service here; the world keeps
-        // what that declares, and the restored launch attaches the service.
-        vm.declare_terminal_errors()?;
-        vm.set_echo_area_host(true);
-        if let Some(floor) = floor { vm.set_collection_floor(floor); }
-        let (line_height, column_width) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
-        vm.set_frame_geometry(width, height, line_height, column_width)?;
-        vm.eval_source(INTERPROGRAM)?;
-        let font = launch_font()?;
-        let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, font.as_ref().map(|(s, _)| s.as_str()), &dir)?;
-        vm.set_layout_host(None);
-        // The fonts the world measured with, the default face's among them:
-        // their files and Fontconfig's are keyed records, so a font added,
-        // removed or changed, or another configuration, rebuilds the world.
-        engine.borrow_mut().frame_metrics(&vm.display_default_face()?)?;
-        for input in engine.borrow().font_inputs() {
-            let _ = romacs_vm::host::metadata(&input);
-        }
-        for path in user_font_configuration(|name| std::env::var_os(name)) {
-            let _ = romacs_vm::host::metadata(&path);
-        }
-        let len = world.finish_build(vm, Carry { loadup }, json!({}))?;
-        eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
-        Ok(())
+        build_world(&world, width, height, floor, &dir, engine).map_err(|e| world.abandon_build(e))
     })?.join().map_err(|_| "world builder panicked".to_owned())?
+}
+
+/// The build's steps once it records: up to the chain's end, then publish.
+fn build_world(world: &World, width: u32, height: u32, floor: Option<usize>, dir: &std::path::Path,
+               engine: std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>) -> Result<(), String> {
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.set_layout_host(Some(Box::new(crate::measure::Host { engine: engine.clone() })));
+    // A live launch attaches its terminal service here; the world keeps
+    // what that declares, and the restored launch attaches the service.
+    vm.declare_terminal_errors()?;
+    vm.set_echo_area_host(true);
+    if let Some(floor) = floor { vm.set_collection_floor(floor); }
+    let (line_height, column_width) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
+    vm.set_frame_geometry(width, height, line_height, column_width)?;
+    vm.eval_source(INTERPROGRAM)?;
+    let font = launch_font()?;
+    let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, font.as_ref().map(|(s, _)| s.as_str()), dir)?;
+    vm.set_layout_host(None);
+    // The fonts the world measured with, the default face's among them:
+    // their files and Fontconfig's are keyed records, so a font added,
+    // removed or changed, or another configuration, rebuilds the world.
+    engine.borrow_mut().frame_metrics(&vm.display_default_face()?)?;
+    for input in engine.borrow().font_inputs() {
+        let _ = romacs_vm::host::metadata(&input);
+    }
+    for path in user_font_configuration(|name| std::env::var_os(name)) {
+        let _ = romacs_vm::host::metadata(&path);
+    }
+    let len = world.finish_build(vm, Carry { loadup }, json!({}))?;
+    eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_launch_keeps_its_worlds_in_the_users_cache_by_default() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |name: &str| {
+            pairs.iter().find(|(n, _)| *n == name).map(|(_, v)| std::ffi::OsString::from(v))
+        };
+        assert_eq!(default_store(env(&[("XDG_CACHE_HOME", "/c"), ("HOME", "/h")])), Some(PathBuf::from("/c/romacs/worlds")));
+        assert_eq!(default_store(env(&[("HOME", "/h")])), Some(PathBuf::from("/h/.cache/romacs/worlds")));
+        // A relative XDG_CACHE_HOME is invalid and ignored (XDG base directories).
+        assert_eq!(default_store(env(&[("XDG_CACHE_HOME", "c"), ("HOME", "/h")])), Some(PathBuf::from("/h/.cache/romacs/worlds")));
+        assert_eq!(default_store(env(&[])), None);
+    }
 
     #[test]
     fn the_font_environment_keys_a_world_and_names_the_per_user_configuration() {

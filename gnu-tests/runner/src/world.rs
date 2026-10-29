@@ -175,7 +175,7 @@ fn build(world: &World, args: &crate::Args, count: usize) -> ! {
     let mut vm = crate::fresh_vm(args);
     let mut chain = vec![];
     if !crate::load_chain(&mut vm, args, 0, count, &mut chain) || chain.iter().any(|e| e["loaded"] != true) {
-        let _ = host::leave_build();
+        world.abandon_build(json!(chain).to_string());
         crate::emit(json!({"event": "world-build", "ok": false, "chain": chain}));
         std::process::exit(3);
     }

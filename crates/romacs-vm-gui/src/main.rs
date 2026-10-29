@@ -382,11 +382,12 @@ fn run() -> Result<(), String> {
     // and zero journey keys taken over by GNU (evidence/loadup/LOADUP.md).
     let mut launch = startup::Launch::Workspace;
     let mut world_store = None;
-    let mut world_wait = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--world-store" => world_store = Some(std::path::absolute(args.next().ok_or("missing world store")?).map_err(|e| e.to_string())?),
-            "--world-wait" => world_wait = true,
+            // Waiting for a missing world to build is what a launch does
+            // now; the flag stays accepted for the scripts that passed it.
+            "--world-wait" => {}
             "--wayland" => { socket = Some(args.next().ok_or("missing socket")?); live = false; },
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
@@ -420,15 +421,21 @@ fn run() -> Result<(), String> {
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
-    // A live --loadup launch boots from its world. Its builder builds here,
-    // before any window; a launch maps the world on the evaluator's thread
-    // while this one brings up the window and the GPU.
-    let world = match world_store {
-        Some(store) if live && launch == startup::Launch::Loadup => Some(world::open(store, width, height, floor)?),
-        _ => None,
+    // A live --loadup launch boots from its world, in --world-store or by
+    // default in the user's cache (world::default_store), unless
+    // ROMACS_WORLD=off. Its builder builds here, before any window; a launch
+    // opens and maps the world on the evaluator's thread while this one
+    // brings up the window and the GPU.
+    let world_store = match (live && launch == startup::Launch::Loadup, romacs_vm::world::store::disabled()) {
+        (true, false) => world_store.or_else(|| world::default_store(|name| std::env::var_os(name))),
+        (true, true) => {
+            eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": "ROMACS_WORLD=off"}));
+            None
+        }
+        (false, _) => None,
     };
-    if let Some(world) = world.as_ref().filter(|_| romacs_vm::world::store::building()) {
-        world::launch(world, width, height, floor, world_wait);
+    if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
+        world::launch(&world::open(store.clone(), width, height, floor)?, width, height, floor);
     }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (host, sender) =
@@ -436,7 +443,13 @@ fn run() -> Result<(), String> {
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let worker = spawn_evaluator(move || {
         let sender = std::sync::Arc::new(sender);
-        let restored = world.and_then(|world| world::launch(&world, width, height, floor, world_wait));
+        let restored = world_store.and_then(|store| match world::open(store, width, height, floor) {
+            Ok(world) => world::launch(&world, width, height, floor),
+            Err(reason) => {
+                eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason}));
+                None
+            }
+        });
         let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, restored);
         if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
         let _ = result_tx.send(result);

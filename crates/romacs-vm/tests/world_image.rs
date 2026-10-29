@@ -18,6 +18,7 @@ static ALLOCATOR: Arena = Arena;
 const ROLE: &str = "ROMACS_WORLD_IMAGE_TEST";
 const NAME: &str = "a_world_restores_randomized_and_refuses_a_damaged_image";
 const INTERRUPTED: &str = "an_interrupted_build_leaves_nothing_in_the_way";
+const FAILED: &str = "a_failed_build_is_not_retried_until_its_inputs_change";
 const PAGES: &str = "capture_reads_no_heap_byte_so_a_page_zeroed_by_a_store_is_data";
 
 /// Test NAME in a process of its own, in ROLE, with STORE.
@@ -108,7 +109,14 @@ fn launch(store: &Path) {
                                                "moved": builder != arena::executable_base()}));
         }
         Launch::Build => {
-            world.begin_build(&world.build_roots(vec![])).unwrap();
+            // An input beside the store: the word "fail" in it fails the build.
+            let input = store.parent().unwrap().join("input");
+            world.begin_build(&world.build_roots(vec![input.clone()])).unwrap();
+            if romacs_vm::host::read_to_string(input.join("flag")).is_ok_and(|t| t.trim() == "fail") {
+                let error = world.abandon_build("the input says fail".into());
+                println!("WORLD-IMAGE {}", json!({"mode": "failed", "error": error}));
+                std::process::exit(1);
+            }
             let mut vm = Vm::new();
             vm.world_begin();
             // A hash table, a string literal's copy and a closure.
@@ -246,5 +254,31 @@ fn an_interrupted_build_leaves_nothing_in_the_way() {
     let names: Vec<String> = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap())
         .filter(|n| n.starts_with(&key)).collect();
     assert!(names.iter().all(|n| [".rwi", ".json", ".lock", ".log"].iter().any(|s| *n == format!("{key}{s}"))), "{names:?}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn a_failed_build_is_not_retried_until_its_inputs_change() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(FAILED);
+    let store = scratch.join("store");
+    std::fs::create_dir_all(scratch.join("input")).unwrap();
+    std::fs::write(scratch.join("input/flag"), "fail").unwrap();
+    // The launch waits for its builder, which fails: from source.
+    let first = outcome(&mut child_of(FAILED, "launch", &store));
+    assert!(first.contains(r#""mode":"source""#), "{first}");
+    // Its failure is recorded against what it read: the next launch boots
+    // from source at once, starting no builder.
+    let logs = || std::fs::read_dir(&store).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "log")).count();
+    let modified = || std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().metadata().unwrap().modified().unwrap()).max();
+    let (before, logs_before) = (modified(), logs());
+    let second = outcome(&mut child_of(FAILED, "launch", &store));
+    assert!(second.contains(r#""mode":"source""#) && second.contains("build-failed") && !second.contains("builder"), "{second}");
+    assert_eq!((modified(), logs()), (before, logs_before), "no builder ran");
+    // Another input: built again, and booted from.
+    std::fs::write(scratch.join("input/flag"), "ok").unwrap();
+    assert_eq!(outcome(&mut child_of(FAILED, "launch", &store)), restored());
     let _ = std::fs::remove_dir_all(&scratch);
 }
