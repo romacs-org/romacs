@@ -1929,6 +1929,42 @@ impl Vm {
             }
         }
     }
+    /// load-with-code-conversion for a source without a coding cookie that
+    /// is not UTF-8: the detection walk over the coding priority, as
+    /// `insert-file-contents' decides, then the chosen system's decoding,
+    /// as internal multibyte text (raw-text's bytes as raw-byte characters).
+    /// `last-coding-system-used' is left as it was.
+    pub(crate) fn detected_source(&mut self, bytes: &[u8]) -> crate::Result<Vec<u8>> {
+        let decoded = no_collection(self, |vm| {
+            let mut cx = Leaf::new(vm);
+            let undecided = cx.intern("undecided");
+            let spec = cx.coding_spec(undecided)?;
+            if spec == Value::NIL { return Err(Fault::Error("no undecided coding system to detect with".into())) }
+            let attrs = cx.vector_get(spec, Value::integer(0).unwrap())?;
+            let found = cx.coding_detect(bytes, attrs)?.0.unwrap_or(undecided);
+            let last = cx.intern("last-coding-system-used");
+            let previous = cx.variable_value(last)?.unwrap_or(Value::NIL);
+            let string = cx.make_string(bytes.to_vec(), false);
+            let decoded = cx.coding_convert_string(string, found, Value::NIL, Value::NIL, false);
+            cx.variable_set(last, previous)?;
+            let view = cx.string_view(decoded?)?;
+            if view.is_multibyte() { return Ok(view.bytes().to_vec()) }
+            let mut out = Vec::with_capacity(view.bytes().len());
+            for &byte in view.bytes() {
+                let mut encoded = [0; 5];
+                let code = if byte < 128 { u32::from(byte) } else { crate::lstring::BYTE8_OFFSET + u32::from(byte) };
+                let n = crate::lstring::char_string(code, &mut encoded);
+                out.extend_from_slice(&encoded[..n]);
+            }
+            Ok(out)
+        });
+        decoded.map_err(|fault| {
+            let (condition, data) = self.fault(fault);
+            let text = format!("source coding detection signalled {}", self.display(condition).unwrap_or_default());
+            self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+            text
+        })
+    }
     /// Legacy fset shares the checked Leaf cell writer without exposing Vm to leaves.
     pub(crate) fn set_function_leaf(
         &mut self,

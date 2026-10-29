@@ -345,7 +345,10 @@ impl Vm {
         }
         let bytes =
             std::fs::read(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;
-        let source = decode_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        let source = match decode_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))? {
+            Some(source) => source,
+            None => self.detected_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))?,
+        };
         // Each public variable binds as a `let' does, in pinned GNU's order:
         // Fload's lread--unescaped-character-literals, then
         // load-with-code-conversion's load-in-progress (held over the
@@ -540,8 +543,9 @@ fn expanded_path(path: &Path) -> Result<String> {
     }
     Ok(parts.iter().collect::<std::path::PathBuf>().to_string_lossy().into_owned())
 }
-/// Source text as GNU internal multibyte bytes.
-fn decode_source(bytes: &[u8]) -> Result<Vec<u8>> {
+/// Source text as GNU internal multibyte bytes, or None when it names no
+/// coding system and is not UTF-8, so the coding priority must decide.
+fn decode_source(bytes: &[u8]) -> Result<Option<Vec<u8>>> {
     let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
     let header = String::from_utf8_lossy(
         bytes
@@ -573,9 +577,7 @@ fn decode_source(bytes: &[u8]) -> Result<Vec<u8>> {
             // Without a cookie GNU detects the coding system
             // (load-with-code-conversion); its UTF-8 detector accepts
             // exactly what this decodes without a raw byte.
-            if raw && coding.is_none() {
-                return Err("source is not valid UTF-8 and names no coding system: GNU would detect one, VM2 detects only UTF-8".into());
-            }
+            if raw && coding.is_none() { return Ok(None) }
             text
         }
         "latin-1" | "iso-latin-1" | "iso-8859-1" => bytes.iter().map(|b| char::from(*b)).collect::<String>().into_bytes(),
@@ -593,7 +595,7 @@ fn decode_source(bytes: &[u8]) -> Result<Vec<u8>> {
     if name.ends_with("-mac") {
         for b in &mut source { if *b == b'\r' { *b = b'\n'; } }
     }
-    Ok(source)
+    Ok(Some(source))
 }
 
 /// coding.c decode_coding_utf_8, which utf-8 and utf-8-emacs share: the

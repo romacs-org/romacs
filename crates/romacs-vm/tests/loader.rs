@@ -138,11 +138,11 @@ fn source_coding_is_explicit_and_invalid_utf8_is_not_replaced() {
     vm.load_file(&dir.join("latin.el")).unwrap();
     let v = vm.eval_source("latin").unwrap();
     assert_eq!(v.display().unwrap(), "\"é\"");
-    assert!(
-        vm.load_file(&dir.join("bad.el"))
-            .unwrap_err()
-            .contains("valid UTF-8")
-    );
+    // Without a cookie the coding priority decides; the bare registry gives
+    // no category a system, so the walk decides raw-text, which only
+    // mule-conf.el defines (tests/source_detection.rs has the loadup cases).
+    let error = vm.load_file(&dir.join("bad.el")).unwrap_err();
+    assert!(error.contains("coding-system-error"), "{error}");
     assert!(
         vm.load_file(&dir.join("other.el"))
             .unwrap_err()
