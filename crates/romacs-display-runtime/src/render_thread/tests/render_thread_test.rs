@@ -580,6 +580,32 @@ fn s1b_hidden_cursor_repeated_poll_has_no_dirty_content_with_default_effects() {
     assert_eq!(after.root_glyph_passes, before.root_glyph_passes);
 }
 
+/// A blink-off frame (`internal-show-cursor` nil: layout drops the active
+/// cursor and says it is blinked off) hides the cursor's paint only: the
+/// IME's composition and its cursor area stand, as the renderer's own
+/// blink kept them.
+#[test]
+fn a_blinked_off_cursor_keeps_the_ime_preedit_and_cursor_area() {
+    let mut app = make_test_app();
+    let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
+    render.set_current_frame(Some(frame_with_cursor_effects(None, CursorStyle::FilledBox)), None, Default::default(), Default::default());
+    // Composing: the cursor's frame places the IME.
+    render.set_ime_preedit("composition".into(), Some((0, 3)));
+    app.poll_frame();
+    let window = app.frame_windows.primary_window_mut().unwrap();
+    let area = window.lifecycle.last_ime_cursor_area();
+    assert!(area.is_some(), "the cursor placed the IME");
+    let mut off = frame_with_cursor_effects(None, CursorStyle::FilledBox);
+    off.window_cursors.clear();
+    off.cursor_blinked_off = true;
+    window.render.set_current_frame(Some(off), None, Default::default(), Default::default());
+    app.poll_frame();
+    let window = app.frame_windows.primary_window().unwrap();
+    assert!(window.render.cursor.target_cloned().is_none(), "the cursor is not painted");
+    assert!(window.render.has_ime_preedit(), "the composition survives the blink");
+    assert_eq!(window.lifecycle.last_ime_cursor_area(), area, "the IME keeps its anchor");
+}
+
 #[test]
 fn s1b_visible_cursor_poll_preserves_preedit_and_default_color_cycle() {
     let mut app = make_test_app();

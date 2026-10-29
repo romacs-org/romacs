@@ -99,6 +99,7 @@ pub fn layout_frame_with_cursors(snapshot: &FrameSnapshot, presentation: u64, se
 /// turned off.
 fn hide_cursors_off(frame: &mut FrameGlyphBuffer, snapshot: &FrameSnapshot) {
     let off: Vec<i64> = snapshot.windows.iter().filter(|w| w.snapshot.cursor_off).map(|w| w.snapshot.id as i64).collect();
+    frame.cursor_blinked_off = frame.window_cursors.iter().any(|c| c.active && off.contains(&c.window_id.get()));
     frame.window_cursors.retain(|c| !off.contains(&c.window_id.get()));
 }
 

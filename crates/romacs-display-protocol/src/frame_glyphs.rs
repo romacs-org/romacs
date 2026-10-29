@@ -1225,6 +1225,10 @@ pub struct FrameGlyphBuffer {
     /// window; the selected window's entry has `active: true`.
     pub window_cursors: Vec<WindowCursor>,
 
+    /// The active cursor is blinked off, not gone: its window keeps point,
+    /// so the IME's anchor (cursor area) and composition (preedit) stand.
+    pub cursor_blinked_off: bool,
+
     /// Per-window cursor effect profiles emitted by layout.
     ///
     /// Fancy Romacs cursor effects are an extension layered on top of GNU's
@@ -1582,6 +1586,7 @@ impl FrameGlyphBuffer {
             window_infos: Vec::with_capacity(16),
             transition_hints: Vec::with_capacity(16),
             window_cursors: Vec::with_capacity(8),
+            cursor_blinked_off: false,
             cursor_effects_by_window: HashMap::default(),
             current_face_id: FaceId::new(0),
             current_fg: Color::WHITE,
@@ -1622,6 +1627,7 @@ impl FrameGlyphBuffer {
         self.window_infos.clear();
         self.transition_hints.clear();
         self.window_cursors.clear();
+        self.cursor_blinked_off = false;
         self.fringe_bitmaps.clear();
         self.faces.clear();
         self.fonts.clear();

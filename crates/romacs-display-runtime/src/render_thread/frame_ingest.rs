@@ -584,9 +584,17 @@ impl RenderApp {
             })
         } else {
             render.cursor.clear_target();
-            render.clear_ime_preedit();
+            if !Self::cursor_blinked_off(render) {
+                render.clear_ime_preedit();
+            }
             None
         }
+    }
+
+    /// RENDER's frame has its active cursor blinked off, not gone: IME
+    /// state stands (`FrameGlyphBuffer::cursor_blinked_off`).
+    fn cursor_blinked_off(render: &GuiFrameRenderState) -> bool {
+        render.compositor.current_frame.as_ref().is_some_and(|frame| frame.cursor_blinked_off)
     }
 
     fn sync_frame_window_cursor(
@@ -594,7 +602,7 @@ impl RenderApp {
         cursor_config: CursorConfigSnapshot,
     ) -> Option<CursorSyncOutcome> {
         let cursor_sync = Self::sync_render_cursor(&mut window_state.render, cursor_config);
-        if window_state.render.cursor.target_cloned().is_none() {
+        if window_state.render.cursor.target_cloned().is_none() && !Self::cursor_blinked_off(&window_state.render) {
             window_state.reset_ime_cursor_area();
         }
         cursor_sync
@@ -1167,9 +1175,10 @@ impl RenderApp {
                 |cursor| cursor.apply_config(cursor_config),
                 romacs_display_protocol::frame_time::observe_platform_now(),
             );
+            let blinked_off = Self::cursor_blinked_off(primary_frame);
             if let Some(cursor_sync) = cursor_sync {
                 self.update_ime_cursor_area_if_needed(&cursor_sync.target);
-            } else {
+            } else if !blinked_off {
                 if let Some(window_state) = self.frame_windows.primary_window_mut() {
                     window_state.reset_ime_cursor_area()
                 };
