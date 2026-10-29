@@ -923,9 +923,12 @@ seconds until the next timer, or nil."
 (defun romacs--wait-reading-process-output (limit wait-proc just-wait-proc)
   "process.c wait_reading_process_output, with READ_KBD 0, no redisplay
 and no WAIT_FOR_CELL.  LIMIT is a positive number of seconds, `minimum'
-or `forever'.  JUST-WAIT-PROC is 0, 1 (read only WAIT-PROC) or -1 (and
-run no timers).  Return GNU's got_some_output."
-  (let* ((wait (cond ((memq limit '(minimum forever)) limit) (t 'timeout)))
+or `forever', or `idle': one round, which reads what is ready once and
+returns, as read_char's call returns when keyboard input or a timer is
+due, so its caller checks those between reads.  JUST-WAIT-PROC is 0, 1
+\(read only WAIT-PROC) or -1 (and run no timers).  Return GNU's
+got_some_output."
+  (let* ((wait (cond ((memq limit '(minimum forever idle)) limit) (t 'timeout)))
          (end-time (if (eq wait 'timeout) (+ (float-time) limit)))
          (got-some-output -1)
          (prev-nbytes (if wait-proc (romacs--proc-get wait-proc 'nbytes-read) 0))
@@ -937,7 +940,7 @@ run no timers).  Return GNU's got_some_output."
         (if (eq wait 'timeout)
             (let ((now (float-time)))
               (if (<= end-time now) (setq done t) (setq timeout (- end-time now))))
-          (setq timeout (if (eq wait 'minimum) 0 100000)))
+          (setq timeout (if (memq wait '(minimum idle)) 0 100000)))
         (if (and (not done) (>= just-wait-proc 0))
             (setq timer-delay (romacs--timer-check)))
         (if (and (not done) (romacs--proc-ticks-pending)
@@ -973,7 +976,7 @@ run no timers).  Return GNU's got_some_output."
                  ((null ready)
                   (if (romacs--proc-ticks-pending)
                       (setq got-some-output (romacs--status-notify nil wait-proc)))
-                  (if (or (eq wait 'minimum)
+                  (if (or (memq wait '(minimum idle))
                           (and wait-proc
                                (/= (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes)))
                       (setq done t)
@@ -996,20 +999,23 @@ run no timers).  Return GNU's got_some_output."
                              (< got-some-output nread))
                         (setq got-some-output nread))
                     (if (and (> nread 0) (eq wait-proc ready))
-                        (setq wait 'minimum))))))))))
+                        (setq wait 'minimum)))))
+                (if (eq wait 'idle) (setq done t)))))))
     (if (and wait-proc (/= (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes))
         (setq got-some-output (- (romacs--proc-get wait-proc 'nbytes-read) prev-nbytes)))
     got-some-output))
 
 (defun romacs--process-idle ()
   "What keyboard.c read_char's wait_reading_process_output does for the
-processes while the command loop idles for a key: read the output, finish
-the connections and report the status changes that are ready now, without
-waiting or running timers.  Non-nil if anything was ready.  With no
-process there is nothing to read, and no wait."
+processes while the command loop idles for a key: one round that reads
+the output, finishes the connections and reports the status changes that
+are ready now, without waiting or running timers, so that a process whose
+output keeps arriving leaves the keys, timers and redisplay their turn
+between rounds.  Non-nil if anything was ready.  With no process there is
+nothing to read, and no wait."
   (when (process-list)
     (let ((activity (romacs--proc-activity)))
-      (romacs--wait-reading-process-output 'minimum nil -1)
+      (romacs--wait-reading-process-output 'idle nil -1)
       (/= activity (romacs--proc-activity)))))
 
 (defun accept-process-output (&optional process seconds millisec just-this-one)

@@ -284,6 +284,66 @@ mod tests {
         assert!(!woke.is_empty() && woke.iter().all(|&process| process), "the wait woke for the process: {woke:?}");
     }
 
+    /// A process whose output never stops arriving starves neither the
+    /// keyboard nor the timers: wait_reading_process_output, called by
+    /// read_char, returns when keyboard input or a timer is due, so each
+    /// idle pass reads what is ready once and the wait goes on to the
+    /// timers, the keys and redisplay.  A 50 ms timer fires and a key
+    /// pending after 300 ms is read while the output streams; the command
+    /// loop's idle step returns at once.
+    #[test]
+    fn a_streaming_process_starves_neither_keys_nor_timers() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(streaming_body).unwrap().join().unwrap();
+    }
+    fn streaming_body() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil bytes 0)");
+        // Output for 5 s, faster than its filter, which works on each
+        // chunk as a parser does, takes it: the pipe is never empty.
+        printed(&mut vm, "(make-process :name \"stream\" :command '(\"timeout\" \"5\" \"yes\" \"0123456789abcdef\")
+                            :filter (lambda (_ s) (dotimes (_ 3000) (setq bytes (+ bytes 0))) (setq bytes (+ bytes (length s)))))");
+        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(200));
+        vm.set_host_input(Some(Box::new(KeyAfter(std::time::Instant::now() + Duration::from_millis(300), vec![]))));
+        let read = printed(&mut vm, "(let ((start (float-time)) fired)
+            (run-with-timer 0.05 nil (lambda () (setq fired (- (float-time) start))))
+            (let ((key (read-event)))
+              (list key (and fired (< fired 0.25)) (< (- (float-time) start) 1.0) (> bytes 0)
+                    (eq (process-status \"stream\") 'run))))");
+        assert_eq!(read, "(97 t t t t)", "read-event's wait: (key, timer on time, key on time, output read, still streaming)");
+        vm.set_host_input(None);
+        vm.timer_stop_idle();
+        let (start, before) = (std::time::Instant::now(), printed(&mut vm, "bytes"));
+        assert!(idle(&mut vm).unwrap().ran, "the idle step read the output");
+        assert!(start.elapsed() < Duration::from_millis(500), "the idle step returned after {:?}", start.elapsed());
+        assert_ne!(printed(&mut vm, "bytes"), before);
+        printed(&mut vm, "(delete-process \"stream\")");
+    }
+
+    /// A keyboard whose one key arrives at AT; its waits watch the process
+    /// descriptors meanwhile, as the GUI's prompt host does.
+    struct KeyAfter(std::time::Instant, Vec<(std::os::fd::RawFd, i16)>);
+
+    impl romacs_vm::HostInput for KeyAfter {
+        fn input_pending(&mut self) -> bool { std::time::Instant::now() >= self.0 }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
+        fn watch_processes(&mut self, fds: &[(std::os::fd::RawFd, i16)]) { self.1 = fds.to_vec(); }
+        fn next_event(&mut self, timeout: Option<Duration>) -> Result<romacs_vm::HostEvent, String> {
+            let left = self.0.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() { return Ok(romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character('a' as i64))); }
+            let (_keys, input) = crossbeam_channel::bounded::<InputEvent>(1);
+            let (_terminals, terminal) = crossbeam_channel::bounded::<()>(1);
+            let wait = timeout.map_or(left, |timeout| timeout.min(left));
+            Ok(match crate::terminal_wait::wait(&input, &terminal, Some(wait), &std::mem::take(&mut self.1)) {
+                crate::terminal_wait::Wake::Process => romacs_vm::HostEvent::Process,
+                _ => romacs_vm::HostEvent::Timeout,
+            })
+        }
+    }
+
     /// A keyboard nobody types on whose waits watch the process
     /// descriptors, as the GUI's prompt host does.
     struct Waiting(Vec<(std::os::fd::RawFd, i16)>);
