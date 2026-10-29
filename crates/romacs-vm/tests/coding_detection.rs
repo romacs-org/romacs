@@ -14,6 +14,11 @@ mod gnu_ert_vm;
 const FULL: &str = r##"(with-temp-buffer (PRIORITY (insert-file-contents FILE)) (list last-coding-system-used (append (buffer-string) nil) (get-text-property 1 'charset)))"##;
 const DECISION: &str = r##"(with-temp-buffer (condition-case e (PRIORITY (insert-file-contents FILE) (coding-system-base last-coding-system-used)) (error (if (string-match "decoding with \\([^ ]+\\) is unsupported" (cadr e)) (coding-system-base (intern (match-string 1 (cadr e)))) e))))"##;
 
+// An undecided system whose attribute inhibits ISO escape detection, and
+// a read through it with iso-2022-8bit-ss2 first in the priority.
+const SYSTEM: &str = "(define-coding-system 's7-undecided \"undecided, ISO escapes inhibited\" :coding-type 'undecided :mnemonic ?- :inhibit-iso-escape-detection t) \
+    (defmacro s7-ss2 (&rest body) `(let ((coding-system-for-read 's7-undecided)) (with-coding-priority '(iso-2022-8bit-ss2) ,@body)))";
+
 fn oracle(expression: &str) -> String {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let source = format!("(prin1 (prin1-to-string {expression}))");
@@ -34,7 +39,7 @@ fn romacs(vm: &mut Vm, expression: &str) -> String {
 fn insert_file_contents_detects_coding_systems_as_gnu() {
     let dir: PathBuf = std::env::temp_dir().join(format!("romacs-coding-detection-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let files: [(&str, &[u8]); 10] = [
+    let files: [(&str, &[u8]); 11] = [
         ("latin", b"caf\xe9\n"),
         ("sjis", b"\x82\xa0\x83A\xb1\r\n"),
         ("big5", b"\xa4@\xa4A\n"),
@@ -45,6 +50,7 @@ fn insert_file_contents_detects_coding_systems_as_gnu() {
         ("iso7", b"\x1b$B$\"\x1b(B"),
         ("mule", b"\x92\xa4\xa2"),
         ("ss2", b"a\x8e\xb1b\n"),
+        ("esc8", b"\xa1\x1b$B$\"\x1b(B"),
     ];
     for (name, bytes) in files { std::fs::write(dir.join(name), bytes).unwrap(); }
     let cases = [
@@ -53,11 +59,14 @@ fn insert_file_contents_detects_coding_systems_as_gnu() {
         (FULL, "nul", "progn"), (FULL, "euc", "progn"),
         (DECISION, "iso7", "progn"), (DECISION, "mule", "with-coding-priority '(emacs-mule)"),
         (DECISION, "euc", "with-coding-priority '(chinese-iso-8bit)"), (DECISION, "ss2", "with-coding-priority '(iso-2022-8bit-ss2)"),
+        // A system's :inhibit-iso-escape-detection gates only the initial
+        // escape scan; the ISO-2022 detector reads the global variable.
+        (DECISION, "esc8", "s7-ss2"),
     ];
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
     let failures: Vec<String> = cases.iter()
-        .map(|(form, file, priority)| form.replace("PRIORITY", priority)
+        .map(|(form, file, priority)| format!("(progn {SYSTEM} {})", form.replace("PRIORITY", priority))
             .replace("FILE", &serde_json::to_string(dir.join(file).to_str().unwrap()).unwrap()))
         .filter_map(|expression| {
             let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));

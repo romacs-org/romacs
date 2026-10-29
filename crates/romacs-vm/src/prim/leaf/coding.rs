@@ -1955,7 +1955,10 @@ impl Leaf<'_> {
             let category = self.vector_get(priorities, num(i as i64))?.integer_value().unwrap_or(0) as usize;
             order.push((category, self.vector_get(systems, num(category as i64))?));
         }
-        let iso = self.iso_context(systems, inhibit_ied)?;
+        // detect_coding_iso_2022 reads the global variable itself; the
+        // system's attribute only gates the initial escape scan.
+        let iso_inhibit = self.flag_variable("inhibit-iso-escape-detection")?;
+        let iso = self.iso_context(systems, iso_inhibit)?;
         let mut info = DetectInfo::default();
         let (mut head_ascii, mut null_byte, mut eight_bit, mut eol_seen) = (0, false, false, 0u8);
         let mut at = 0;
