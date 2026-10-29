@@ -29,7 +29,9 @@ the commands produced, and the counted thread is still the evaluator.
 Their median idle rate is subtracted from each phase.  Before the first idle
 the evaluator must be quiet for --settle seconds, past the visit's undo
 boundary timer; the timer's later firing (armed by the first self-insert,
-10s on) is ordinary typing cost and lands in a key phase.
+10s on) is ordinary typing cost and lands in a key phase.  Before the
+second idle it must be quiet again, once blink-cursor-mode has stopped
+blinking after the last phase's keys.
 
 usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
@@ -354,6 +356,9 @@ class Session:
             point = phase['point']
             phase['coalesced'] = phase['paints'] < keys
             result['phases'][name] = phase
+        # The keys' own aftermath is not background: blink-cursor-mode blinks
+        # for blink-cursor-blinks after the last key, then stops.
+        self.quiesce()
         second = self.counted(idle, idle=True)
         if not self.latency:
             result['idle'] = [(first[0], first[1]), (second[0], second[1])]
