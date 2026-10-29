@@ -1,14 +1,17 @@
-;;; gnosis_parity_probe.el --- The same observer in GNU and Romacs  -*- lexical-binding: t -*-
+;;; parity_probe.el --- The same observer in GNU and Romacs  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
-;; gnosis_parity_live.py loads this file from each engine's init.  A
+;; The parity harnesses (parity_live.py) load this file from each engine's
+;; init.  A
 ;; repeating timer answers requests the harness writes to
 ;; $PARITY_PROBE_DIR/request.eld, a `(ID . FORM)' pair, by writing
 ;; `(ID ok VALUE)' or `(ID error CONDITION)' to response.eld.  Timers run
 ;; when the engine waits for input, so an answer also means the engine has
 ;; consumed the input before it.  The observer reads state; it does not
 ;; touch the match data, the current buffer, the echo area or *Messages*.
+;; An init may set `parity-probe-variable-prefix', `parity-probe-variables'
+;; and `parity-probe-secrets-function' before loading it.
 
 ;;; Code:
 
@@ -17,8 +20,25 @@
   "*Messages* position where the current workflow began.")
 (defvar parity-probe-text-limit 6000
   "Most characters of a window's text a snapshot records.")
+(defvar parity-probe-variable-prefix "gnosis"
+  "Prefix of the variables a snapshot records, unless `parity-probe-variables'.")
+(defvar parity-probe-variables nil
+  "The variables a snapshot records, if non-nil.
+A package whose state holds credentials lists its own rather than
+having every variable with its prefix recorded.")
+(defvar parity-probe-secrets-function nil
+  "A function of no arguments returning the credentials the session holds.
+Every string the probe reports that contains one becomes \"<secret>\".")
 
 (defun parity-probe--file (name) (expand-file-name name parity-probe-dir))
+
+(defun parity-probe--scrub (string)
+  "STRING, or \"<secret>\" when it holds a credential the session has."
+  (if (and parity-probe-secrets-function
+           (seq-some (lambda (secret) (and (stringp secret) (> (length secret) 7) (string-search secret string)))
+                     (funcall parity-probe-secrets-function)))
+      "<secret>"
+    string))
 
 (defun parity-probe--write (value)
   (let ((print-length nil) (print-level nil) (print-escape-newlines t)
@@ -66,7 +86,7 @@ Below DEPTH 8 a structure is elided as `deep', so cycles end too."
         ((> depth 8) 'deep)
         ((and (stringp value) (member value parity-probe-event-ids))
          (format "<event-id-%d>" (length (member value parity-probe-event-ids))))
-        ((stringp value) (substring-no-properties value))
+        ((stringp value) (parity-probe--scrub (substring-no-properties value)))
         ((bufferp value) (list 'buffer (buffer-name value)))
         ((markerp value) (list 'marker (marker-position value)
                                (and (marker-buffer value) (buffer-name (marker-buffer value)))))
@@ -131,21 +151,27 @@ Below DEPTH 8 a structure is elided as `deep', so cycles end too."
         #'string<))
 
 (defun parity-probe--variables (buffer)
-  "Gnosis state: every bound `gnosis-' variable, with BUFFER's local values."
+  "The package's state, with BUFFER's local values: `parity-probe-variables'
+that are bound, else every bound non-custom variable named with
+`parity-probe-variable-prefix'."
   (with-current-buffer buffer
     (let (result)
-      (mapatoms
-       (lambda (symbol)
-         (let ((name (symbol-name symbol)))
-           (when (and (boundp symbol) (string-prefix-p "gnosis" name)
-                      (not (get symbol 'standard-value)) (not (keymapp (symbol-value symbol))))
-             (push (list symbol (parity-probe--plain (symbol-value symbol))) result)))))
+      (if parity-probe-variables
+          (dolist (symbol parity-probe-variables)
+            (when (boundp symbol)
+              (push (list symbol (parity-probe--plain (symbol-value symbol))) result)))
+        (mapatoms
+         (lambda (symbol)
+           (let ((name (symbol-name symbol)))
+             (when (and (boundp symbol) (string-prefix-p parity-probe-variable-prefix name)
+                        (not (get symbol 'standard-value)) (not (keymapp (symbol-value symbol))))
+               (push (list symbol (parity-probe--plain (symbol-value symbol))) result))))))
       (sort result (lambda (a b) (string< (car a) (car b)))))))
 
 (defun parity-probe--format-line (format window)
   "FORMAT as WINDOW's mode or header line shows it, or the error it signals."
   (condition-case condition
-      (substring-no-properties (format-mode-line format nil window))
+      (parity-probe--scrub (substring-no-properties (format-mode-line format nil window)))
     (error (list 'error (parity-probe--plain condition)))))
 
 (defun parity-probe--window (window)
@@ -165,7 +191,7 @@ Below DEPTH 8 a structure is elided as `deep', so cycles end too."
             :hscroll (window-hscroll window)
             :dedicated (window-dedicated-p window)
             :header (and header-line-format (parity-probe--format-line header-line-format window))
-            :text (buffer-substring-no-properties start end)
+            :text (parity-probe--scrub (buffer-substring-no-properties start end))
             :runs (parity-probe--runs start end)
             :overlays (parity-probe--overlays start end)))))
 
@@ -181,8 +207,9 @@ Below DEPTH 8 a structure is elided as `deep', so cycles end too."
 
 (defun parity-probe--messages ()
   (with-current-buffer (messages-buffer)
-    (split-string (buffer-substring-no-properties (min parity-probe-messages-start (point-max)) (point-max))
-                  "\n" t)))
+    (mapcar #'parity-probe--scrub
+            (split-string (buffer-substring-no-properties (min parity-probe-messages-start (point-max)) (point-max))
+                          "\n" t))))
 
 (defun parity-probe-mark-messages ()
   "Start the *Messages* tail a snapshot returns here."
@@ -214,7 +241,7 @@ Below DEPTH 8 a structure is elided as `deep', so cycles end too."
      :minibuffer (and (active-minibuffer-window)
                       (with-current-buffer (window-buffer (active-minibuffer-window))
                         (list (minibuffer-depth) (minibuffer-prompt) (minibuffer-contents-no-properties))))
-     :echo (let ((message (current-message))) (and message (substring-no-properties message)))
+     :echo (let ((message (current-message))) (and message (parity-probe--scrub (substring-no-properties message))))
      :messages (last (parity-probe--messages) 12)
      :buffers (seq-remove (lambda (name) (string-prefix-p " " name)) (mapcar #'buffer-name (buffer-list)))
      :tree (parity-probe--tree (frame-root-window))
@@ -241,9 +268,9 @@ and no one-shot timer is about to run."
         :ready (and (not (input-pending-p)) (parity-probe-quiet)
                     (with-current-buffer (window-buffer (selected-window)) (funcall predicate)) t)
         :buffer (buffer-name (window-buffer (selected-window)))
-        :echo (let ((message (current-message))) (and message (substring-no-properties message)))))
+        :echo (let ((message (current-message))) (and message (parity-probe--scrub (substring-no-properties message))))))
 
 (run-with-timer 0 0.025 #'parity-probe--poll)
 
-(provide 'gnosis-parity-probe)
-;;; gnosis_parity_probe.el ends here
+(provide 'parity-probe)
+;;; parity_probe.el ends here
