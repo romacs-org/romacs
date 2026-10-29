@@ -144,13 +144,17 @@ impl Vm {
     ) -> (Vec<usize>, Vec<usize>) {
         let previous = self.request_code.compiling;
         self.request_code.compiling = true;
+        // These functions still hold the artifact's own cache ordinals, not
+        // slots: installing them claims nothing.
+        let unclaimed = std::mem::take(&mut self.request_code.unclaimed_caches);
         let ids = functions
             .iter()
             .map(|f| self.install_function(f.clone()))
             .collect();
+        self.request_code.unclaimed_caches = unclaimed;
         let cache_ids: Vec<usize> = (0..caches).map(|_| self.install_cache()).collect();
-        // The artifact's functions, which the caller rewrites to these
-        // ordinals, own them.
+        // The slots received, which the caller rewrites the functions to use,
+        // are the artifact's.
         self.request_code.unclaimed_caches.retain(|c| !cache_ids.contains(c));
         self.request_code.compiling = previous;
         if !previous {
@@ -336,6 +340,40 @@ mod tests {
         // Slots reclaimed by one collection serve the next ten failures.
         assert!(vm.caches.len() <= 64, "orphaned cache slots accumulate: {}", vm.caches.len());
         assert_eq!(vm.request_code.unclaimed_caches, Vec::<usize>::new(), "every builder's slot is owned or reclaimed");
+    }
+    /// A persistent IR artifact numbers its caches from 0; installing it
+    /// claims the slots it receives, never a failed build's slot that only
+    /// shares an artifact ordinal.
+    #[test]
+    fn a_persistent_artifact_claims_only_the_slots_it_receives() {
+        let dir = std::env::temp_dir().join(format!("romacs-artifact-claim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = "(defalias 'gr-art (lambda () (gr-callee 1)))";
+        let mut cold = Vm::new();
+        cold.set_source_cache_store(dir.clone()).unwrap();
+        cold.eval_source_raw(source).unwrap();
+        let mut vm = Vm::new();
+        vm.set_source_cache_store(dir.clone()).unwrap();
+        assert!(vm.eval_source_raw("(progn (foo) (let ((nil 1)) nil))").is_err());
+        let orphans = vm.request_code.unclaimed_caches.clone();
+        assert!(orphans.contains(&0), "the failed build left slot 0: {orphans:?}");
+        vm.eval_source_raw(source).unwrap();
+        assert_eq!(vm.source_cache_stats().disk_hits, 1, "the artifact came from the store");
+        vm.collect(&mut []);
+        // The loaded function stays live through gr-art.
+        let owned: Vec<usize> = vm.functions.iter().zip(&vm.request_code.live).filter(|&(_, &live)| live)
+            .flat_map(|(f, _)| f.code.iter().filter_map(|op| match *op {
+                Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) => Some(cache),
+                _ => None,
+            }))
+            .collect();
+        assert!(!owned.is_empty(), "the artifact's call owns a slot");
+        for orphan in &orphans {
+            assert!(!owned.contains(orphan) && vm.request_code.free_caches.contains(orphan), "orphan {orphan} reclaimed");
+        }
+        assert!(owned.iter().all(|c| !vm.request_code.free_caches.contains(c)), "the artifact's slots stay claimed");
+        assert_eq!(vm.request_code.unclaimed_caches, Vec::<usize>::new());
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn short_distinct_requests_collect_and_reuse_code_slots() {
