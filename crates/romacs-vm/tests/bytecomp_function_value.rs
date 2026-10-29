@@ -32,3 +32,21 @@ fn byte_compile_returns_an_already_compiled_function() {
         assert_eq!(query(&mut vm, form), expected, "{form}");
     }
 }
+
+/// A `(lambda ...)' list whose body bytecomp's front end refuses gives
+/// GNU's diagnostic string and no function, as an argument (lexical) or as
+/// a symbol's definition (dynamic, left unchanged). Pinned GNU 32.0.50
+/// answers outside any file.
+#[test]
+fn byte_compile_of_a_malformed_lambda_list_returns_gnus_diagnostic() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    for (form, expected) in [
+        ("(let ((lexical-binding t)) (byte-compile '(lambda () (let 1))))", r#"" Error: Wrong type argument: listp, 1""#),
+        ("(let ((lexical-binding t)) (byte-compile '(lambda () (cond 1))))", r#"" Error: Wrong type argument: listp, 1""#),
+        ("(progn (defalias 'bfv-bad '(lambda () (let 1))) (list (byte-compile 'bfv-bad) (symbol-function 'bfv-bad)))", r#"(" Error: Wrong type argument: listp, 1" (lambda nil (let 1)))"#),
+        ("(let ((lexical-binding t)) (funcall (byte-compile '(lambda (x) (* x 3))) 4))", "12"),
+    ] {
+        assert_eq!(query(&mut vm, form), expected, "{form}");
+    }
+}
