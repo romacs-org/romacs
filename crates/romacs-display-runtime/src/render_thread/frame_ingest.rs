@@ -582,18 +582,19 @@ impl RenderApp {
                 target_moved,
                 old_cursor_rect,
             })
+        } else if Self::cursor_blinked_off(render) {
+            // The cursor's paint is off; its target stays the IME's anchor.
+            None
         } else {
             render.cursor.clear_target();
-            if !Self::cursor_blinked_off(render) {
-                render.clear_ime_preedit();
-            }
+            render.clear_ime_preedit();
             None
         }
     }
 
     /// RENDER's frame has its active cursor blinked off, not gone: IME
     /// state stands (`FrameGlyphBuffer::cursor_blinked_off`).
-    fn cursor_blinked_off(render: &GuiFrameRenderState) -> bool {
+    pub(super) fn cursor_blinked_off(render: &GuiFrameRenderState) -> bool {
         render.compositor.current_frame.as_ref().is_some_and(|frame| frame.cursor_blinked_off)
     }
 
@@ -939,7 +940,7 @@ impl RenderApp {
                                 cursor_trail_fade_enabled,
                                 update_transient_effects,
                             );
-                        } else {
+                        } else if !Self::cursor_blinked_off(&window_state.render) {
                             window_state.reset_ime_cursor_area();
                         }
                         if let Some(transition) = outcome.presentation {

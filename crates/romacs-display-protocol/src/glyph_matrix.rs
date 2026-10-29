@@ -2081,6 +2081,10 @@ pub struct FrameDisplayState {
     pub borders: Vec<BorderItem>,
     /// Cursor entries.
     pub cursors: Vec<CursorItem>,
+    /// The active cursor is blinked off, not gone
+    /// (`FrameGlyphBuffer::cursor_blinked_off`).
+    #[serde(default)]
+    pub cursor_blinked_off: bool,
     /// Per-window cursor effect profiles.
     pub cursor_effects_by_window: HashMap<DisplayWindowId, EffectsConfig>,
     /// Scroll bars.
@@ -2603,6 +2607,7 @@ impl FrameDisplayState {
             face_fills: Vec::new(),
             borders: Vec::new(),
             cursors: Vec::new(),
+            cursor_blinked_off: false,
             cursor_effects_by_window: HashMap::default(),
             scroll_bars: Vec::new(),
             phys_cursor: None,
@@ -2698,6 +2703,7 @@ impl FrameDisplayState {
         state.cursor_effects_by_window = buf.cursor_effects_by_window.clone();
         state.fringe_bitmaps = buf.fringe_bitmaps.clone();
         state.transition_hints = buf.transition_hints.clone();
+        state.cursor_blinked_off = buf.cursor_blinked_off;
         // Render buffers do not retain buffer-position semantics. Non-active
         // entries therefore round-trip as paint-only cursors; the active entry
         // is reconstructed into `phys_cursor` above.
@@ -2881,6 +2887,7 @@ impl FrameDisplayState {
             });
         }
         buf.cursor_effects_by_window = self.cursor_effects_by_window.clone();
+        buf.cursor_blinked_off = self.cursor_blinked_off;
 
         if let Some(cursor) = self.phys_cursor.clone() {
             buf.set_phys_cursor(cursor);

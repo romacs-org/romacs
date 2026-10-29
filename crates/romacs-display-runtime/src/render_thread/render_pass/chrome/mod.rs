@@ -28,7 +28,7 @@
 //! frame-dirty flag rather than by scheduling anything themselves.
 
 mod frame_bands;
-mod transient_overlays;
+pub(in crate::render_thread) mod transient_overlays;
 
 /// Production code reaches this through `frame_bands` itself; the re-export
 /// exists so `input_test` can assert that the tool bar's origin comes from the

@@ -581,29 +581,48 @@ fn s1b_hidden_cursor_repeated_poll_has_no_dirty_content_with_default_effects() {
 }
 
 /// A blink-off frame (`internal-show-cursor` nil: layout drops the active
-/// cursor and says it is blinked off) hides the cursor's paint only: the
-/// IME's composition and its cursor area stand, as the renderer's own
-/// blink kept them.
+/// cursor and says it is blinked off), queued as the GUI sends frames,
+/// hides the cursor's paint only: the IME pre-edit panel draws the same
+/// text at the same place, and the IME keeps its cursor area, as the
+/// renderer's own blink kept them.
 #[test]
-fn a_blinked_off_cursor_keeps_the_ime_preedit_and_cursor_area() {
-    let mut app = make_test_app();
-    let render = &mut app.frame_windows.primary_window_mut().unwrap().render;
-    render.set_current_frame(Some(frame_with_cursor_effects(None, CursorStyle::FilledBox)), None, Default::default(), Default::default());
-    // Composing: the cursor's frame places the IME.
-    render.set_ime_preedit("composition".into(), Some((0, 3)));
+fn a_blinked_off_cursor_keeps_the_drawn_ime_preedit() {
+    let comms = ThreadComms::new();
+    let (emacs, render) = comms.split();
+    let mut app = RenderApp::new(render, 800, 600, "test".to_string(),
+        Arc::new(crate::render_thread::ImageRenderState::default()),
+        Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())), true);
+    let id = app.frame_windows.primary_window().unwrap().render.emacs_frame_id;
+    let frame = |presentation: u64, blinked_off: bool| {
+        let mut frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
+        frame.presentation_id = romacs_display_protocol::PresentationId::new(presentation);
+        frame.set_frame_identity(romacs_display_protocol::DisplayFrameId::new(id), romacs_display_protocol::DisplayFrameId::new(0),
+            0.0, 0.0, 0, false, 0.0, romacs_display_protocol::Color::BLACK, false, 1.0);
+        if blinked_off {
+            frame.window_cursors.clear();
+            frame.cursor_blinked_off = true;
+        }
+        seal_state(FrameDisplayState::from_frame_glyph_buffer(&frame))
+    };
+    let drawn = |app: &RenderApp| {
+        let render = &app.frame_windows.primary_window().unwrap().render;
+        crate::render_thread::render_pass::chrome::transient_overlays::ime_preedit_overlay(render)
+            .map(|overlay| (overlay.text.to_owned(), overlay.x, overlay.y, overlay.height))
+    };
+    // Composing: the cursor's frame places the IME and its panel.
+    app.frame_windows.primary_window_mut().unwrap().render.set_ime_preedit("composition".into(), Some((0, 3)));
+    emacs.frame_tx.submit(frame(1, false)).expect("queue the cursor's frame");
     app.poll_frame();
-    let window = app.frame_windows.primary_window_mut().unwrap();
-    let area = window.lifecycle.last_ime_cursor_area();
-    assert!(area.is_some(), "the cursor placed the IME");
-    let mut off = frame_with_cursor_effects(None, CursorStyle::FilledBox);
-    off.window_cursors.clear();
-    off.cursor_blinked_off = true;
-    window.render.set_current_frame(Some(off), None, Default::default(), Default::default());
+    let shown = drawn(&app);
+    let area = app.frame_windows.primary_window().unwrap().lifecycle.last_ime_cursor_area();
+    assert!(shown.is_some() && area.is_some(), "the cursor placed the IME and its panel");
+    emacs.frame_tx.submit(frame(2, true)).expect("queue the blink-off frame");
     app.poll_frame();
     let window = app.frame_windows.primary_window().unwrap();
-    assert!(window.render.cursor.target_cloned().is_none(), "the cursor is not painted");
-    assert!(window.render.has_ime_preedit(), "the composition survives the blink");
-    assert_eq!(window.lifecycle.last_ime_cursor_area(), area, "the IME keeps its anchor");
+    assert!(RenderApp::cursor_blinked_off(&window.render), "the blink-off frame is current");
+    assert!(window.render.compositor.current_frame.as_ref().unwrap().active_cursor().is_none(), "no cursor is painted");
+    assert_eq!(drawn(&app), shown, "the pre-edit panel draws as before the blink");
+    assert_eq!(app.frame_windows.primary_window().unwrap().lifecycle.last_ime_cursor_area(), area, "the IME keeps its anchor");
 }
 
 #[test]

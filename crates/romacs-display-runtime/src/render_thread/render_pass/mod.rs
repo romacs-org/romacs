@@ -265,7 +265,9 @@ fn render_frame_window_contents_reserved(
     RenderApp::begin_fps_cpu_span(&mut render.overlays.fps);
     RenderApp::update_fps_counter(&mut render.overlays.fps, renderer.frame_sample());
 
-    let animated_cursor = render.cursor.animated_cursor();
+    // A blinked-off cursor keeps its target (the IME's anchor) but paints
+    // nothing, effects included.
+    let animated_cursor = render.cursor.animated_cursor().filter(|_| !RenderApp::cursor_blinked_off(render));
     let root_animated_cursor = animated_cursor.filter(|cursor| {
         cursor.frame_id == DisplayFrameId::new(render.emacs_frame_id)
             && !render.compositor.input_scroll.active()
