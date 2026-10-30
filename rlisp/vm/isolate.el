@@ -270,9 +270,11 @@ new worker), :allow-source-boot t."
 ;;;; Waiting and delivery
 
 (defun romacs--isolate-pump (timeout)
-  "Wait up to TIMEOUT for isolate traffic and deliver it; non-nil if any came."
+  "Wait up to TIMEOUT for isolate traffic and deliver what has arrived,
+including frames an earlier wait read and nobody delivered; non-nil if
+anything came now."
   (let ((came (romacs--isolate-wait timeout)))
-    (when came (romacs--isolate-dispatch))
+    (romacs--isolate-dispatch)
     (romacs--isolate-check-deadlines)
     came))
 
@@ -544,6 +546,8 @@ onto the queue."
   "Run the queued jobs in order, reading what arrived before each: a
 cancellation sent behind a job cancels it before it runs."
   (while (and romacs--isolate-deferred romacs--isolate-serving)
+    ;; A signal nobody took (its job was in a leaf, or done) is stale.
+    (romacs--isolate-interrupted-p)
     (romacs--isolate-wait 0)
     (romacs--isolate-note-control-frames)
     (let ((frame (pop romacs--isolate-deferred)))

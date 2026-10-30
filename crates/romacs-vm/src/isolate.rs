@@ -338,15 +338,18 @@ impl Vm {
     /// worker's death, reading what is ready: whether anything was. In a
     /// worker, a pending interrupt or termination ends the wait at once.
     pub(crate) fn isolate_wait(&mut self, timeout: Option<std::time::Duration>) -> Result<bool> {
-        if crate::host::interrupt_pending() || crate::host::terminate_pending() { return Ok(true); }
+        // Interrupted or terminating: no wait, but what the sockets hold is
+        // still read (the frame naming the interrupt's job is there).
+        let interrupted = crate::host::interrupt_pending() || crate::host::terminate_pending();
+        let timeout = if interrupted { Some(std::time::Duration::ZERO) } else { timeout };
         let fds = self.isolate_fds();
         if fds.is_empty() {
             if let Some(timeout) = timeout { std::thread::sleep(timeout.min(std::time::Duration::from_millis(50))); }
-            return Ok(false);
+            return Ok(interrupted);
         }
         let ready = crate::subprocess::poll(&fds, timeout).map_err(|e| e.to_string())?;
         let ready: Vec<RawFd> = fds.iter().zip(ready).filter(|(_, r)| *r != 0).map(|((fd, _), _)| *fd).collect();
-        if ready.is_empty() { return Ok(false); }
+        if ready.is_empty() { return Ok(interrupted); }
         if let Some(parent) = &mut self.isolates.parent && ready.contains(&parent.socket.as_raw_fd()) {
             parent.drain(|_, _, _| {}).map_err(|e| e.to_string())?;
         }
