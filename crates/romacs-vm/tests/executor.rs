@@ -28,10 +28,12 @@ fn warm_named_and_primitive_sites_observe_in_execution_redefinition() {
         ])),
         20
     );
+    // The primitive is not one of GNU's byte-ops (VM2-SEALED1): `(+ 9 4)` would
+    // stay 13 through any redefinition of `+`, as in compiled GNU.
     assert_eq!(
         run(json!([
             "progn",
-            ["defun", "caller", [], ["+", 9, 4]],
+            ["defun", "caller", [], ["abs", -13]],
             [
                 "let",
                 [["i", 0], ["s", 0], ["before", 0]],
@@ -45,7 +47,7 @@ fn warm_named_and_primitive_sites_observe_in_execution_redefinition() {
                         [
                             "progn",
                             ["setq", "before", "s"],
-                            ["defun", "+", ["a", "b"], ["-", "a", "b"]]
+                            ["defun", "abs", ["a"], ["-", "a", 8]]
                         ]
                     ],
                     ["setq", "i", ["1+", "i"]]
@@ -53,7 +55,7 @@ fn warm_named_and_primitive_sites_observe_in_execution_redefinition() {
                 ["*", "before", "s"]
             ]
         ])),
-        65
+        -273
     );
 }
 

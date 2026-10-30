@@ -1,4 +1,4 @@
-//! Coarse list kernels shared by guarded handlers and indirect primitive calls.
+//! Coarse list kernels shared by sealed handlers and indirect primitive calls.
 use super::*;
 
 impl Vm {
@@ -143,7 +143,7 @@ fn mapped_pair(vm: &Vm, value: Value) -> Option<(Value, Value)> {
     vm.cons_pair(value).ok()
 }
 #[inline(always)]
-fn pair(vm: &Vm, value: Value) -> Option<(Value, Value)> {
+pub(super) fn pair(vm: &Vm, value: Value) -> Option<(Value, Value)> {
     if value.tag() != 3 {
         return None;
     }
@@ -247,13 +247,10 @@ macro_rules! handler {
         pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             unsafe {
                 let i = &*pc;
-                if e.vm.slots[i.b].function != i.value {
-                    return direct(e, r, pc);
-                }
                 let x = *r.add(i.d);
                 let y = if i.e > 1 { *r.add(i.d + 1) } else { Value::NIL };
                 let Some(value) = kernel::<{ Primitive::$p as usize }>(e.vm, x, y) else {
-                    return direct(e, r, pc);
+                    return sealed_call(e, r, pc);
                 };
                 *r.add(i.a) = value;
                 advance(e, r, pc)

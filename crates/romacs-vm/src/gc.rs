@@ -700,7 +700,8 @@ impl Vm {
                     let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
                     match op {
                         Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _) | Op::DeclareSpecial(slot)
-                        | Op::Define(slot, _) | Op::DefineMacro(slot, _) | Op::ResolveHead(_, slot) => pending.extend(symbol(slot)),
+                        | Op::Define(slot, _) | Op::DefineMacro(slot, _) | Op::ResolveHead(_, slot)
+                        | Op::Sealed(_, slot, _, _) => pending.extend(symbol(slot)),
                         Op::Closure(_, child, _) => code_pending.push(child),
                         Op::Direct(_, slot, cache, _, _) | Op::Prepared(_, _, slot, cache, _, _) => {
                             pending.extend(symbol(slot));

@@ -4,12 +4,19 @@ use romacs_vm::{Fixed, Vm};
 fn tiny_tier_is_direct_but_redefinitions_are_observed() {
     let mut vm = Vm::new();
     for _ in 0..3 {
-        assert_eq!(vm.eval_source("(+ 1 2)").unwrap().as_integer().unwrap(), 3);
+        assert_eq!(vm.eval_source("(abs -2)").unwrap().as_integer().unwrap(), 2);
     }
     assert_eq!(vm.source_cache_stats().direct, 3);
     assert_eq!(vm.source_cache_stats().compilations, 0);
+    vm.eval_source("(defun abs (x) (- x 1))").unwrap();
+    assert_eq!(vm.eval_source("(abs -2)").unwrap().as_integer().unwrap(), -3);
+    // A byte-op call is the primitive, as compiled GNU code (VM2-SEALED1)...
     vm.eval_source("(defun + (x y) (- x y))").unwrap();
-    assert_eq!(vm.eval_source("(+ 8 3)").unwrap().as_integer().unwrap(), 5);
+    assert_eq!(vm.eval_source("(+ 8 3)").unwrap().as_integer().unwrap(), 11);
+    // ...except that a macro, or an alias of one, expands first (bytecomp
+    // macroexpands before open-coding): pinned compiled GNU gives 42.
+    vm.eval_source("(defmacro sc-m (a b) 42) (defalias '+ 'sc-m)").unwrap();
+    assert_eq!(vm.eval_source("(+ 8 3)").unwrap().as_integer().unwrap(), 42);
 }
 #[test]
 fn mutable_literals_are_not_reused_as_source_constants() {
