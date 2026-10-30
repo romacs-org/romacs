@@ -103,7 +103,7 @@ impl Vm {
                 bindings.clear();
             }
         }
-        let mut form = self.expansion_form(datum, 0)?;
+        let mut form = self.eval_datum_form(datum)?;
         // The declarations scope the form's own bindings, inside the
         // supplied ones: those stay lexical, as GNU's alist entries do.
         if !specials.is_empty() {
@@ -115,12 +115,9 @@ impl Vm {
             form = Form::List(body);
         }
         if !bindings.is_empty() {
-            let quote = |f| Form::List(vec![Form::Sym("quote".into()), f]);
             let bindings = bindings
                 .into_iter()
-                .map(|(name, value)| {
-                    Ok(Form::List(vec![self.source_form(name, 0)?, quote(self.expansion_form(value, 0)?)]))
-                })
+                .map(|(name, value)| Ok(Form::List(vec![self.source_form(name, 0)?, self.eval_quoted_form(value)])))
                 .collect::<Result<Vec<_>>>()?;
             form = Form::List(vec![Form::Sym("let".into()), Form::List(bindings), form]);
         }

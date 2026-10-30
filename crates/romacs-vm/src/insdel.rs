@@ -552,7 +552,7 @@ impl Vm {
             self.record_insert(index, to, inserted, unmodified).map_err(Fault::Error)?;
             self.record_delete(index, from, deletion, false).map_err(Fault::Error)?;
         }
-        let modification = self.buffer_state(buffer).map_err(Fault::Error)?.modification;
+        let modification = *self.buffer_state(buffer).map_err(Fault::Error)?.modification;
         if let Some(bytes) = bytes {
             // ByteBuffer::replace moves the saved positions as
             // adjust_markers_for_replace does.
@@ -564,7 +564,7 @@ impl Vm {
             self.replace_text(buffer, from, to, text, inserted)?;
         }
         let state = self.buffer_state_mut(buffer).map_err(Fault::Error)?;
-        state.modification = modification;
+        *state.modification = modification;
         state.modification.changed((to - from + inserted) as usize, true);
         let point = if from < point || point == to { point + from + inserted - point.min(to) } else { point };
         self.set_change_point(buffer, point)?;
@@ -615,20 +615,22 @@ impl Vm {
         Ok(self.allocate_object(object))
     }
 
-    /// The markers of buffer INDEX at character positions FROM..=TO, with
-    /// their insertion types, the last attached first as GNU's marker chain
-    /// lists them.
+    /// The markers of buffer INDEX's text at character positions FROM..=TO,
+    /// those of the buffers sharing it too, with their insertion types, the
+    /// last attached first as GNU's marker chain lists them.
     pub(crate) fn markers_between(&self, index: usize, from: i64, to: i64) -> Result<Vec<(Value, i64, bool)>> {
         let Object::Buffer(b) = &self.objects[index] else { return Ok(Vec::new()) };
         let (a, z) = (b.byte_of_char(CharOffset((from - 1) as usize))?, b.byte_of_char(CharOffset((to - 1) as usize))?);
         if !b.anchors.any_between(a.0 as u32, z.0 as u32) {
             return Ok(Vec::new());
         }
-        let buffer = Value::reference(index + 1, 0);
+        let family = self.text_family(index);
+        let buffers: Vec<Value> = if family.is_empty() { vec![index] } else { family }
+            .into_iter().map(|i| Value::reference(i + 1, 0)).collect();
         let mut found = Vec::new();
         for (i, object) in self.objects.iter().enumerate() {
             let Object::Marker(m) = object else { continue };
-            if m.buffer != buffer { continue; }
+            if !buffers.contains(&m.buffer) { continue; }
             let Some(anchor) = m.anchor else { continue };
             let Some(at) = b.anchors.resolve(anchor) else { continue };
             if (a.0 as u32..=z.0 as u32).contains(&at) {

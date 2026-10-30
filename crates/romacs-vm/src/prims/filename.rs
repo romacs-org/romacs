@@ -39,16 +39,47 @@ pub(super) fn utf8_file_names(cx: &mut Leaf<'_>, operation: &str) -> std::result
 
 defsubr! { name = "directory-files", gnu = "dired.c:379", effect = Global,
 fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, nosort: Value, count: Value) {
+    let (_, matched) = directory_entries(cx, "directory-files", directory, full, pattern, nosort, count)?;
+    let mut result = Value::NIL;
+    for name in matched.into_iter().rev() {
+        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+        result = cx.cons(value, result);
+    }
+    Ok(result)
+}}
+
+// dired.c directory_files_internal with ATTRS: each entry as directory-files
+// names it, with its `file-attributes' in ID-FORMAT, sorted by name.
+defsubr! { name = "directory-files-and-attributes", gnu = "dired.c:420", effect = Global,
+fn directory_files_and_attributes(cx, directory: Value; optional full: Value, pattern: Value, nosort: Value, id_format: Value, count: Value) {
+    let operation = "directory-files-and-attributes";
+    let (path, matched) = directory_entries(cx, operation, directory, full, pattern, nosort, count)?;
+    let mut result = Value::NIL;
+    for name in matched.into_iter().rev() {
+        let file = if full != Value::NIL { name.clone() } else { format!("{}/{name}", path.trim_end_matches('/')) };
+        let attributes = super::savejourney::local_file_attributes(cx, &file, id_format)?;
+        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+        let entry = cx.cons(value, attributes);
+        result = cx.cons(entry, result);
+    }
+    Ok(result)
+}}
+
+/// dired.c directory_files_internal's scan for OPERATION: DIRECTORY's
+/// expansion and the entry names matching PATTERN, full names when FULL,
+/// at most COUNT, sorted unless NOSORT.
+fn directory_entries(cx: &mut Leaf<'_>, operation: &str, directory: Value, full: Value, pattern: Value, nosort: Value, count: Value)
+    -> std::result::Result<(String, Vec<String>), Fault> {
     if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
     let path = super::fileio::expand_file_name(cx, directory)?;
     let expanded = cx.string(&path);
-    super::fileio::refuse_handler(cx, expanded, "directory-files")?;
+    super::fileio::refuse_handler(cx, expanded, operation)?;
     let count = if count == Value::NIL { usize::MAX } else {
         let n = count.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", count))?;
         usize::try_from(n).unwrap_or(usize::MAX)
     };
     if pattern != Value::NIL { cx.string_text(pattern)?; }
-    utf8_file_names(cx, "directory-files")?;
+    utf8_file_names(cx, operation)?;
     // Open even when COUNT is zero: GNU validates the directory first.
     let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
     let entries = crate::host::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", directory_file, e))?;
@@ -72,13 +103,8 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
         } else { name });
     }
     if nosort == Value::NIL { matched.sort(); } else { matched.reverse(); }
-    let mut result = Value::NIL;
-    for name in matched.into_iter().rev() {
-        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
-        result = cx.cons(value, result);
-    }
-    Ok(result)
-}}
+    Ok((path, matched))
+}
 
 // Ffile_name_all_completions: the entries of DIRECTORY that begin with FILE
 // (ignoring case under `completion-ignore-case') and match every

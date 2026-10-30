@@ -10,6 +10,16 @@ use std::io::Write;
 const LISP_HALF: &str = include_str!("../../../../rlisp/vm/message.el");
 const DOLOG: &str = "romacs--message-dolog";
 
+// GNU has no message catalog yet: MSGID when N is the fixnum 1, else
+// MSGID-PLURAL.
+defsubr! { name = "ngettext", gnu = "editfns.c:3180", effect = Pure,
+fn ngettext(cx, msgid: Value, msgid_plural: Value, n: Value) {
+    cx.string_view(msgid)?;
+    cx.string_view(msgid_plural)?;
+    cx.bigint_value(n).ok_or(Fault::Wrong("integerp", n))?;
+    Ok(if n.integer_value() == Some(1) { msgid } else { msgid_plural })
+}}
+
 defsubr! { name = "message", gnu = "editfns.c:3197", effect = Global,
 fn message(cx, format_string: Value; rest args) -> Step {
     // GNU message1 (0): nil or "" clears the echo area and logs nothing;

@@ -31,6 +31,8 @@ fn quote(f: Form) -> Form {
 enum CommandFault {
     Internal(String),
     Boundary(&'static str),
+    /// A condition and its data, as a field query signals them.
+    Signal(Value, Value),
 }
 impl From<String> for CommandFault {
     fn from(s: String) -> Self {
@@ -408,6 +410,7 @@ impl Vm {
         self.command_impl(p, start, n).map_err(|f| match f {
             CommandFault::Internal(s) => s,
             CommandFault::Boundary(s) => s.into(),
+            CommandFault::Signal(condition, _) => self.display(condition).unwrap_or_else(|e| e),
         })
     }
     pub(super) fn command_call(
@@ -430,6 +433,10 @@ impl Vm {
                 let condition = self.intern(s);
                 *signal = Some((condition, Value::NIL));
                 s.into()
+            }
+            CommandFault::Signal(condition, data) => {
+                *signal = Some((condition, data));
+                self.display(condition).unwrap_or_else(|e| e)
             }
         })
     }
@@ -455,17 +462,19 @@ impl Vm {
         } else {
             self.stack[start].as_integer()?
         };
+        if matches!(p, BeginningOfLine | EndOfLine) {
+            // cmds.c: point to the field-respecting line boundary.
+            let target = crate::prim::line_field_position(self, Value::integer(count)?, p == EndOfLine)
+                .map_err(|fault| { let (condition, data) = self.fault(fault); CommandFault::Signal(condition, data) })?;
+            self.command_buffer_call(GotoChar, &[Value::integer(target)?])?;
+            return Ok(Value::NIL);
+        }
         let index = self.buffer_index()?;
-        // Byte scans: a newline byte is never part of another character.
-        let (text, point_byte, low_byte, high_byte): (&[u8], usize, usize, usize) = match &self.objects[index] {
-            Object::Buffer(b) => { let range = b.accessible(); (b.as_str().as_bytes(), b.point.0, range.start.0, range.end.0) }
-            Object::ByteBuffer(b) => (&b.bytes, b.point.0, b.restriction.start.0, b.restriction.end.0),
+        let (point_byte, low_byte, high_byte) = match &self.objects[index] {
+            Object::Buffer(b) => { let range = b.accessible(); (b.point.0, range.start.0, range.end.0) }
+            Object::ByteBuffer(b) => (b.point.0, b.restriction.start.0, b.restriction.end.0),
             _ => unreachable!(),
         };
-        let line = matches!(p, BeginningOfLine | EndOfLine).then(|| {
-            let start = crate::prim::line_beginning(text, low_byte, high_byte, point_byte, count.saturating_sub(1));
-            if p == EndOfLine { text[start..high_byte].iter().position(|&c| c == b'\n').map_or(high_byte, |i| start + i) } else { start }
-        });
         let char_of = |byte: usize| -> std::result::Result<usize, CommandFault> {
             Ok(match &self.objects[index] {
                 Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte))?.0,
@@ -478,10 +487,7 @@ impl Vm {
         } else {
             count
         };
-        let target = match line {
-            Some(byte) => char_of(byte)? as i64,
-            None => (point as i64).saturating_add(delta),
-        };
+        let target = (point as i64).saturating_add(delta);
         let boundary = if target < (low as i64) {
             Some("beginning-of-buffer")
         } else if target > (high as i64) {

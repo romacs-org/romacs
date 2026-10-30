@@ -898,7 +898,9 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
             },
             "user-db" => {
                 let key = &record["key"];
-                if let Some(uid) = key["uid"].as_u64() {
+                if let Some(list) = key.as_str() {
+                    match list { "users" => { account_names(false); } "groups" => { account_names(true); } _ => return None }
+                } else if let Some(uid) = key["uid"].as_u64() {
                     let _ = user_by_uid(uid as u32, 1 << 16);
                 } else if let Some(gid) = key["gid"].as_u64() {
                     let _ = group_by_gid(gid as u32, 1 << 16);
@@ -1040,6 +1042,27 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
         record("user-db", json!({"key": {"gid": gid}, "result": observed}));
     }
     result
+}
+
+/// The names getpwent (users) or getgrent (groups) walks the whole database
+/// for, in its order, then endpwent or endgrent, as dired.c Fsystem_users and
+/// Fsystem_groups do (so NSS sources count). The walk's cursor is the C
+/// library's, shared by the process, so one walk runs at a time.
+pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
+    static WALK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _walk = WALK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let next = || unsafe {
+        let name = if groups { libc::getgrent().as_ref().map(|g| g.gr_name) } else { libc::getpwent().as_ref().map(|p| p.pw_name) };
+        name.map(|name| (!name.is_null()).then(|| CStr::from_ptr(name).to_bytes().to_vec()))
+    };
+    let mut names = Vec::new();
+    unsafe { if groups { libc::setgrent() } else { libc::setpwent() } }
+    while let Some(name) = next() { names.extend(name); }
+    unsafe { if groups { libc::endgrent() } else { libc::endpwent() } }
+    if building() {
+        record("user-db", json!({"key": if groups { "groups" } else { "users" }, "result": sha256(&names.join(&0))}));
+    }
+    names
 }
 
 // Machine.
@@ -1559,6 +1582,23 @@ pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
 
 #[cfg(test)]
 mod tests {
+    /// A build's walk of the account database replays as the same walk.
+    #[test]
+    fn account_name_walks_replay() {
+        for (groups, key) in [(false, "users"), (true, "groups")] {
+            enter_build(Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] });
+            begin_recipe();
+            account_names(groups);
+            let trace = leave_build().expect("a build trace");
+            let record = trace["records"].as_array().unwrap().iter()
+                .find(|r| r["kind"] == "user-db" && r["key"] == key).expect("the walk is recorded").clone();
+            let mut answer = replay(&record, |_| Ok(false)).expect("the walk replays");
+            let mut recorded = record;
+            recorded.as_object_mut().unwrap().remove("site");
+            answer.as_object_mut().unwrap().remove("site");
+            assert_eq!(answer["result"], recorded["result"], "{key}");
+        }
+    }
     use super::*;
 
     #[test]

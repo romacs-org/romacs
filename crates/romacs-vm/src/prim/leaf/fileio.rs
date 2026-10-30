@@ -248,7 +248,21 @@ impl Leaf<'_> {
     pub fn insert_before_point(&mut self, bytes: &[u8], multibyte: bool) -> std::result::Result<usize, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let unmodified = !self.vm.buffer_state(Value::reference(index + 1, 0)).map_err(Fault::Error)?.modified();
-        let (inserted, at) = match &mut self.vm.objects[index] {
+        let marks = self.vm.family_record(index);
+        let inserted = self.insert_raw_before_point(index, bytes, multibyte);
+        self.vm.family_fetch(marks);
+        let (inserted, at) = inserted?;
+        if inserted > 0 {
+            self.vm.display_state.version += 1;
+            self.vm.record_insert(index, at, inserted as i64, unmodified).map_err(Fault::Error)?;
+        }
+        Ok(inserted)
+    }
+
+    /// `insert_before_point`'s edit of buffer INDEX: the characters
+    /// inserted and their position.
+    fn insert_raw_before_point(&mut self, index: usize, bytes: &[u8], multibyte: bool) -> std::result::Result<(usize, i64), Fault> {
+        Ok(match &mut self.vm.objects[index] {
             data::Object::Buffer(t) => {
                 let internal;
                 let bytes = if multibyte { bytes } else {
@@ -273,12 +287,7 @@ impl Leaf<'_> {
                 (bytes.len(), at.0 as i64 + 1)
             }
             _ => return Err(Fault::Error("buffer required".into())),
-        };
-        if inserted > 0 {
-            self.vm.display_state.version += 1;
-            self.vm.record_insert(index, at, inserted as i64, unmodified).map_err(Fault::Error)?;
-        }
-        Ok(inserted)
+        })
     }
 
     /// The text properties of decoded STRING (the `charset' runs of a
@@ -315,6 +324,10 @@ impl Leaf<'_> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let replacement = match &self.vm.objects[index] {
             data::Object::Buffer(t) if !multibyte => {
+                // DIVERGENCES.md VM2-INDIRECT1.
+                if t.base != Value::NIL || !t.indirect.is_empty() {
+                    return Err(fileio_refusal("insert-file-contents unibyte toggle of a buffer sharing its text"));
+                }
                 if t.len_bytes() != 0 {
                     return Err(fileio_refusal("insert-file-contents unibyte toggle of a buffer with text"));
                 }
@@ -325,7 +338,7 @@ impl Leaf<'_> {
                 // Its markers, all at its start, live in the unibyte buffer
                 // meanwhile; the held buffer keeps its overlays.
                 let mut held = t.clone();
-                b.anchors = std::mem::replace(&mut held.anchors, crate::anchors::AnchorTree::new(0));
+                b.anchors = std::mem::replace(&mut *held.anchors, crate::anchors::AnchorTree::new(0));
                 b.held = Some(held);
                 data::Object::ByteBuffer(Box::new(b))
             }
@@ -337,7 +350,7 @@ impl Leaf<'_> {
                     Some(held) => (**held).clone(),
                     None => crate::text::Text::decode_binary(b).map_err(Fault::Error)?.into(),
                 };
-                a.anchors = b.anchors.clone();
+                *a.anchors = b.anchors.clone();
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
@@ -384,11 +397,15 @@ impl Leaf<'_> {
                 b.state = state;
                 Ok(bytes)
             }
-            data::Object::Buffer(t) => {
-                let (state, bytes) = (t.state.clone(), t.bytes().to_vec());
+            data::Object::Buffer(_) => {
+                let marks = self.vm.family_record(index);
+                let data::Object::Buffer(t) = &mut self.vm.objects[index] else { unreachable!("text buffer") };
+                let (modification, bytes) = (*t.state.modification, t.bytes().to_vec());
                 t.widen();
-                t.replace(ByteOffset(0)..ByteOffset(bytes.len()), &[]).map_err(Fault::Error)?;
-                t.state = state;
+                let edited = t.replace(ByteOffset(0)..ByteOffset(bytes.len()), &[]);
+                *t.state.modification = modification;
+                self.vm.family_fetch(marks);
+                edited.map_err(Fault::Error)?;
                 Ok(bytes)
             }
             _ => Err(Fault::Error("buffer required".into())),

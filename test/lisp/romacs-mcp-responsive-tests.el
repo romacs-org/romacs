@@ -296,5 +296,22 @@
           (should-not forbidden))
       (kill-buffer buffer))))
 
+(ert-deftest romacs-mcp-responsive-cancel-stops-deferred-poll ()
+  (let* ((romacs-mcp--generation 7) (romacs-mcp--peers '(a))
+         (romacs-mcp--active nil) (romacs-mcp--queue nil)
+         (romacs-mcp--deferred nil) (romacs-mcp--deferred-timer nil)
+         (polls 0) (sent nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'run-at-time) (lambda (&rest _) 'timer))
+              ((symbol-function 'cancel-timer) #'ignore)
+              ((symbol-function 'romacs-mcp--send) (lambda (&rest args) (push args sent))))
+      (romacs-mcp--defer-request (romacs-mcp-test--request 'a 1) 1
+                                 (lambda () (cl-incf polls) nil) nil)
+      (romacs-mcp--frame 'a "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{\"requestId\":1}}")
+      (romacs-mcp--poll-deferred)
+      (should (= polls 0))
+      (should-not romacs-mcp--deferred)
+      (should-not sent))))
+
 (provide 'romacs-mcp-responsive-tests)
 ;;; romacs-mcp-responsive-tests.el ends here

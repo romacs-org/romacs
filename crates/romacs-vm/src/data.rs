@@ -18,6 +18,7 @@ pub(super) enum Object {
     WindowConfiguration(Box<crate::window::WindowConfiguration>),
     Sqlite(Box<crate::sqlite::Handle>),
     Process(Box<crate::subprocess::Process>),
+    Finalizer(Value), // alloc.c's: its function, nil once called (gc.rs dooms it)
     String(Box<LispString>),
     RawString(Box<LispString>),
     Vector(Vec<Value>),
@@ -46,6 +47,7 @@ romacs_snapshot::snapshot_enum!(Object {
     // whose handles are SQLite's, in its own heap.
     Object::Sqlite(f0) => (),
     Object::Process(f0) => (f0),
+    Object::Finalizer(f0) => (f0),
     Object::String(f0) => (f0),
     Object::RawString(f0) => (f0),
     Object::Vector(f0) => (f0),
@@ -80,7 +82,7 @@ impl Object {
             | Object::WindowConfiguration(_) | Object::String(_) | Object::RawString(_) | Object::Vector(_)
             | Object::BoolVector(_) | Object::Record(_) | Object::CharTable(_) | Object::SubCharTable(_)
             | Object::MapKeymapCursor(_) | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::Bytes(_)
-            | Object::ByteBuffer(_) | Object::HashTable(_) | Object::Obarray(_) => None,
+            | Object::ByteBuffer(_) | Object::HashTable(_) | Object::Obarray(_) | Object::Finalizer(_) => None,
         }
     }
 }
@@ -669,6 +671,7 @@ impl Vm {
                 Aref | Aset if matches!(self.object_if(x), Some(Object::Record(_))) => ("fixnump", y),
                 Aref | Aset => ("integerp", y),
                 CharAfter => ("integer-or-marker-p", x),
+                BufferSize => ("bufferp", x),
                 Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
                     let value = self.stack[start..start + argc]
                         .iter()
@@ -774,6 +777,7 @@ impl Vm {
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Finalizer(_)
                             | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_) => Err("array required".into()),
@@ -822,6 +826,7 @@ impl Vm {
                         | Object::Terminal(_)
                         | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Finalizer(_)
                             | Object::Process(_)
                         | Object::HashTable(_)
                     | Object::SyntaxTable(_) => {
@@ -872,6 +877,7 @@ impl Vm {
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Finalizer(_)
                             | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_)

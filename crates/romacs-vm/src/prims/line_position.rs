@@ -3,12 +3,12 @@ use super::*;
 
 defsubr! { name = "line-beginning-position", gnu = "editfns.c:774", effect = Reads,
 fn line_beginning_position(cx; optional n: Value) {
-    cx.line_boundary_position(n, false)
+    cx.line_field_position(n, false)
 }}
 
 defsubr! { name = "line-end-position", gnu = "editfns.c:823", effect = Reads,
 fn line_end_position(cx; optional n: Value) {
-    cx.line_boundary_position(n, true)
+    cx.line_field_position(n, true)
 }}
 
 defsubr! { name = "line-number-at-pos", gnu = "fns.c:6688", effect = Reads,
@@ -16,8 +16,8 @@ fn line_number_at_pos(cx; optional position: Value, absolute: Value) {
     cx.line_number_at_pos(position, absolute)
 }}
 
-// The field-free scans line-beginning-position and line-end-position share
-// (editfns.c bol and eol).
+// The field-free scans line-beginning-position and line-end-position
+// constrain (editfns.c bol and eol).
 defsubr! { name = "pos-bol", gnu = "editfns.c:684", effect = Reads,
 fn pos_bol(cx; optional n: Value) {
     cx.line_boundary_position(n, false)
