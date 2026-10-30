@@ -35,7 +35,7 @@ fn subr_arity_reports_current_native_handler_bounds() {
         ("search-forward", "(1 . 4)"),
         ("copy-marker", "(1 . 2)"),
         ("overlays-at", "(1 . 1)"),
-        ("set-window-vscroll", "(3 . 3)"),
+        ("set-window-vscroll", "(2 . 4)"),
         ("local-variable-if-set-p", "(1 . 1)"),
         ("make-interpreted-closure", "(5 . 5)"),
         ("buffer-encode-utf8", "(0 . 0)"),

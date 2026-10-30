@@ -650,6 +650,16 @@ impl CharTable {
     pub fn get(&self, index: usize) -> Result<Value> {
         self.span(index).map(|(value, ..)| value)
     }
+    /// No character has a value of its own, nor a default.
+    pub(crate) fn all_nil(&self) -> bool {
+        fn nil(slot: &CharTableSlot) -> bool {
+            match slot {
+                CharTableSlot::Value(value) => *value == Value::NIL,
+                CharTableSlot::Node(node) => node.lock().unwrap().slots.iter().all(nil),
+            }
+        }
+        self.default == Value::NIL && nil(&self.ascii) && self.root.lock().unwrap().slots.iter().all(nil)
+    }
     /// char_table_ref_and_range at slot granularity: INDEX's value (the
     /// default for nil) and the inclusive character range of its slot. ASCII
     /// reads the table's own ASCII slot, which a literal may detach from the

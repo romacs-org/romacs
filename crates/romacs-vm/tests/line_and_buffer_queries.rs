@@ -1,7 +1,7 @@
 //! pos-bol, pos-eol, buffer-base-buffer and line-number-display-width
 //! against pinned GNU (editfns.c, buffer.c, indent.c): counts, clipping,
 //! narrowing, bignums, fields ignored, buffers without a base, and the
-//! width while `display-line-numbers' is off.
+//! width with `display-line-numbers' off, absolute, relative and of a set least.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -10,6 +10,7 @@ const CASES: &str = r###"
 (with-temp-buffer (insert "ab cd\nef") (put-text-property 1 4 'field 'f) (goto-char 3) (list (pos-bol) (pos-eol) (progn (goto-char (point-max)) (list (pos-bol) (pos-eol)))))
 (let ((b (get-buffer-create " rt-base"))) (list (buffer-base-buffer) (buffer-base-buffer b) (progn (kill-buffer b) (buffer-base-buffer b)) (condition-case e (buffer-base-buffer 'x) (error e)) (condition-case e (buffer-base-buffer "rt-none") (error e))))
 (list (line-number-display-width) (line-number-display-width 'columns) (line-number-display-width t) (with-temp-buffer (line-number-display-width 'columns)))
+(with-current-buffer (window-buffer) (dotimes (i 150) (insert "x\n")) (list (progn (setq display-line-numbers t) (list (line-number-display-width) (line-number-display-width 'columns) (line-number-display-width t))) (progn (setq display-line-numbers 'relative) (line-number-display-width)) (progn (setq display-line-numbers-width 6) (line-number-display-width)) (progn (set-window-start nil 200) (setq display-line-numbers-width nil) (line-number-display-width))))
 "###;
 
 #[test]
