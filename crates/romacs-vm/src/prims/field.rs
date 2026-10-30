@@ -1,13 +1,49 @@
-//! Field-free motion; field-bearing buffers are explicitly refused.
+//! editfns.c fields: runs of text with an `eq' `field' char-property.
+//! find_field and constrain-to-field are prim/leaf/field.rs.
 use super::*;
 
 defsubr! { name = "current-column", gnu = "indent.c:298", effect = Reads,
 fn current_column(cx) { cx.native_current_column() }}
 
 defsubr! { name = "constrain-to-field", gnu = "editfns.c:551", effect = Reads,
-fn constrain_to_field(cx, new: Value, old: Value; optional _escape: Value, _line: Value, _capture: Value) {
-    cx.fieldless_constraint(new, old)
+fn constrain_to_field(cx, new: Value, old: Value; optional escape: Value, only_in_line: Value, capture: Value) {
+    cx.constrain_to_field(new, old, escape, only_in_line, capture)
 }}
+
+defsubr! { name = "field-beginning", gnu = "editfns.c:521", effect = Reads,
+fn field_beginning(cx; optional pos: Value, escape: Value, limit: Value) {
+    let (beg, _) = cx.find_field(pos, escape != Value::NIL, limit, Value::NIL, (true, false))?;
+    Value::integer(beg).map_err(Fault::Error)
+}}
+
+defsubr! { name = "field-end", gnu = "editfns.c:536", effect = Reads,
+fn field_end(cx; optional pos: Value, escape: Value, limit: Value) {
+    let (_, end) = cx.find_field(pos, escape != Value::NIL, Value::NIL, limit, (false, true))?;
+    Value::integer(end).map_err(Fault::Error)
+}}
+
+/// Call F, a buffer function of two positions, on POS's field.
+fn over_field(cx: &mut Leaf<'_>, f: &str, pos: Value) -> Next {
+    let (beg, end) = cx.find_field(pos, false, Value::NIL, Value::NIL, (true, true))?;
+    let args = vec![Value::integer(beg).map_err(Fault::Error)?, Value::integer(end).map_err(Fault::Error)?];
+    if f == "delete-region" && beg == end {
+        return Ok(Step::Done(Value::NIL));
+    }
+    Ok(Step::Call { f: cx.intern(f), args, then: done, saved: vec![] })
+}
+
+fn done(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
+
+defsubr! { name = "field-string", gnu = "editfns.c:499", effect = Reads,
+fn field_string(cx; optional pos: Value) -> Step { over_field(cx, "buffer-substring", pos) }}
+
+defsubr! { name = "field-string-no-properties", gnu = "editfns.c:510", effect = Reads,
+fn field_string_no_properties(cx; optional pos: Value) -> Step {
+    over_field(cx, "buffer-substring-no-properties", pos)
+}}
+
+defsubr! { name = "delete-field", gnu = "editfns.c:486", effect = Global,
+fn delete_field(cx; optional pos: Value) -> Step { over_field(cx, "delete-region", pos) }}
 
 #[cfg(test)]
 mod tests {
@@ -27,9 +63,10 @@ mod tests {
     }
 
     #[test]
-    fn field_constraints_refuse_instead_of_crossing_protected_fields() {
+    fn field_constraints_stop_at_field_boundaries_as_gnu_does() {
+        // Pinned GNU's answers: motion out of either side stops at the edge.
         let mut vm = crate::Vm::new();
-        let got = vm.eval_source_raw("(with-temp-buffer (insert \"abc\") (put-text-property 1 3 'field 'prompt) (condition-case e (constrain-to-field 3 1) (error e)))").unwrap();
-        assert_eq!(vm.display(got).unwrap(), "(error \"VM2 field-boundary motion is not implemented\")");
+        let got = vm.eval_source_raw("(with-temp-buffer (insert \"abc\") (put-text-property 1 3 'field 'prompt) (list (constrain-to-field 3 1) (constrain-to-field 1 3) (constrain-to-field 4 2) (constrain-to-field 2 4) (constrain-to-field 1 4 t) (progn (goto-char 4) (list (constrain-to-field nil 2) (point)))))").unwrap();
+        assert_eq!(vm.display(got).unwrap(), "(3 1 3 3 3 (3 3))");
     }
 }

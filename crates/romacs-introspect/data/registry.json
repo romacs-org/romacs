@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "8480732fc3be578f75168b76ab563aeff11d74c770f0794eeb12889268d69337",
+    "input_hash": "09731a7ad9b403c16b1aef64779ef22b18429745f114fc05a589334bb1b5c050",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4829
+    "vm2_universe": 4842
   },
   "schema": 2,
   "vm2": {
-    "count": 1054,
+    "count": 1060,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -248,6 +248,7 @@
       "delete-backward-char",
       "delete-char",
       "delete-directory-internal",
+      "delete-field",
       "delete-file",
       "delete-file-internal",
       "delete-other-windows-internal",
@@ -296,6 +297,10 @@
       "fceiling",
       "featurep",
       "ffloor",
+      "field-beginning",
+      "field-end",
+      "field-string",
+      "field-string-no-properties",
       "file-accessible-directory-p",
       "file-attributes",
       "file-directory-p",
@@ -630,6 +635,7 @@
       "prefix-numeric-value",
       "previous-overlay-change",
       "previous-property-change",
+      "previous-single-char-property-change",
       "previous-single-property-change",
       "previous-window",
       "prin1",
