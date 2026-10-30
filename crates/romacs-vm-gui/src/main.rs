@@ -24,6 +24,7 @@ mod terminal_wait;
 mod batch;
 mod user_init;
 mod measure;
+mod fonts;
 mod timers;
 mod world;
 
@@ -766,6 +767,8 @@ fn evaluate(
     // host unwinds the evaluator to the worker, which drops the VM (killing
     // its children, as shut_down_emacs does) and exits with the status.
     if live { vm.set_session_host(Some(Box::new(|code| std::panic::resume_unwind(Box::new(SessionEnd(code)))))); }
+    // Its window system, which the session opens (fonts.rs).
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?)));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     // A completed background command wakes the same wait as a terminal.

@@ -497,6 +497,12 @@ impl Vm {
     pub fn display_default_face(&self) -> Result<Face> {
         self.snapshot_face("default")
     }
+    /// The face NAME as painting realizes it: one the theme does not hold
+    /// paints in the default face (`painted_face').
+    pub(crate) fn display_face(&self, name: &str) -> Result<Face> {
+        let known = self.display_state.theme().realize(name).is_some();
+        self.snapshot_face(if known { name } else { "default" })
+    }
 
     /// Commit scalar display mutations only after the frozen frame has painted.
     pub fn display_apply_journal(&mut self) -> bool {
