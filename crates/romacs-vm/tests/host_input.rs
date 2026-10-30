@@ -259,8 +259,10 @@ fn focus_events_during_a_read_run_their_binding_and_are_not_input() {
 #[test]
 fn a_special_events_binding_is_redisplayed_before_the_next_wait() {
     let (mut vm, seen) = vm_with(vec![HostEvent::Focus(false), key('a'), RET], false);
-    eval(&mut vm, "(progn (defvar mode-line-format nil) (setq mode-line-format \"before\")
-                     (defun handle-focus-out (event) (interactive \"e\") (setq mode-line-format \"after\")))");
+    // `mode-line-format' is per-buffer and the binding runs in the
+    // minibuffer, so both set the default every window's buffer shows.
+    eval(&mut vm, "(progn (set-default (quote mode-line-format) \"before\")
+                     (defun handle-focus-out (event) (interactive \"e\") (set-default (quote mode-line-format) \"after\")))");
     assert_eq!(eval(&mut vm, "(read-string \"P: \")"), "\"a\"");
     let seen = seen.borrow();
     assert_eq!(seen.mini, ["P: ", "P: ", "P: a"], "one redisplay after the focus binding, before the key");

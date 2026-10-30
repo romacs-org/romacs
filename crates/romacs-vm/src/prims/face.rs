@@ -533,3 +533,32 @@ fn color_values_from_color_spec(cx, spec: Value) {
     for c in [b, g, r] { list = cx.cons(Value::integer(i64::from(c)).unwrap(), list); }
     Ok(list)
 }}
+
+// xfaces.c Fmerge_face_attribute: VALUE1 unless it is unspecified, then
+// VALUE2; for :height, merge_face_heights (VALUE1, VALUE2, VALUE1): a scale
+// applies to VALUE2 and a function is called on it.
+defsubr! { name = "merge-face-attribute", gnu = "xfaces.c:4214", effect = Global,
+fn merge_face_attribute(cx, attribute: Value, value1: Value, value2: Value) -> Step {
+    if value1 == cx.intern("unspecified") || value1 == cx.intern(":ignore-defface") { return Ok(Step::Done(value2)); }
+    if attribute != cx.intern(":height") || value1.integer_value().is_some() { return Ok(Step::Done(value1)); }
+    if cx.kind(value1) == Kind::Float {
+        let scale = cx.float_value(value1)?;
+        return Ok(Step::Done(if let Some(to) = value2.integer_value() {
+            Value::integer((scale * to as f64) as i64).map_err(Fault::Error)?
+        } else if cx.kind(value2) == Kind::Float {
+            let to = cx.float_value(value2)?;
+            cx.float(scale * to)
+        } else { value1 }));
+    }
+    let lambda = cx.pair(value1).is_some_and(|(car, _)| car == cx.intern("lambda") || car == cx.intern("closure"));
+    if matches!(cx.kind(value1), Kind::Closure | Kind::Subr) || lambda
+        || (cx.kind(value1) == Kind::Symbol && value1 != Value::NIL && cx.fboundp(value1)) {
+        return Ok(Step::Call { f: value1, args: vec![value2], then: merged_height, saved: vec![value1, value2] });
+    }
+    Ok(Step::Done(value1))
+}}
+
+/// A function's height, which stays absolute when VALUE2 was.
+fn merged_height(_: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
+    Ok(Step::Done(if saved[1].integer_value().is_some() && result.integer_value().is_none() { saved[0] } else { result }))
+}

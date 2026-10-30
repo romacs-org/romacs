@@ -99,6 +99,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "initial-window-system", gnu: "dispnew.c:7507", kind: Kind::Lisp(Init::Nil) },
     // DEFVAR_KBOARD; read_char applies it (rlisp/vm/keyboard.el).
     CVariable { name: "keyboard-translate-table", gnu: "keyboard.c:13980", kind: Kind::Lisp(Init::Nil) },
+    // command-line sets it as initialization begins; org-persist reads it.
+    CVariable { name: "before-init-time", gnu: "emacs.c:3587", kind: Kind::Lisp(Init::Nil) },
     // command-line sets it once initialization is done; package.el reads it.
     CVariable { name: "after-init-time", gnu: "emacs.c:3591", kind: Kind::Lisp(Init::Nil) },
     // C variables that GNU's preloaded Lisp and the Gnosis/emacs-hermes load
@@ -240,6 +242,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "load-path-filter-function", gnu: "lread.c:5808", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "load-read-function", gnu: "lread.c:5697", kind: Kind::Lisp(Init::Symbol("read")) },
     CVariable { name: "lread--unescaped-character-literals", gnu: "lread.c:5775", kind: Kind::Lisp(Init::Nil) },
+    // thread.c's value in a build without threads: VM2 has no thread
+    // objects and does not provide `threads' (DIVERGENCES.md VM2-THREAD1).
+    CVariable { name: "main-thread", gnu: "thread.c:1307", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "make-cursor-line-fully-visible", gnu: "xdisp.c:38931", kind: Kind::Lisp(Init::True) },
     CVariable { name: "make-pointer-invisible", gnu: "frame.c:7496", kind: Kind::Lisp(Init::True) },
     CVariable { name: "max-mini-window-height", gnu: "xdisp.c:39037", kind: Kind::Lisp(Init::Float(0.25)) },
@@ -319,6 +324,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "ring-bell-function", gnu: "terminal.c:695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "saved-region-selection", gnu: "keyboard.c:14363", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "scalable-fonts-allowed", gnu: "xfaces.c:7692", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "face-font-rescale-alist", gnu: "xfaces.c:7784", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "script-representative-chars", gnu: "character.c:1149", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "scroll-bar-adjust-thumb-portion", gnu: "frame.c:7467", kind: Kind::Bool(true) },
     CVariable { name: "scroll-conservatively", gnu: "xdisp.c:38731", kind: Kind::Int(0) },
@@ -582,6 +588,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Variable harness (R216 task 2) and DIVERGENCES.md VM2-VARALIAS1: the
     // per-buffer kind. buffer.c:4898 default 70, predicate Qintegerp.
     CVariable { name: "major-mode", gnu: "buffer.c:5242", kind: Kind::PerBuffer { default: Init::Symbol("fundamental-mode"), predicate: Some(Predicate::Symbolp) } },
+    // Automatically local in every buffer, unibyte ones included: url-http
+    // sets its connection buffers' own (url-http.el:1393).
+    CVariable { name: "mode-line-format", gnu: "buffer.c:5168", kind: Kind::PerBuffer { default: Init::Str("%-"), predicate: None } },
     CVariable { name: "mode-name", gnu: "buffer.c:5255", kind: Kind::PerBuffer { default: Init::Str("Fundamental"), predicate: None } },
     CVariable { name: "fill-column", gnu: "buffer.c:5259", kind: Kind::PerBuffer { default: Init::Fixnum(70), predicate: Some(Predicate::Integerp) } },
     // Chain: compile.el's easy-mmode docstrings fill through back-to-indentation.

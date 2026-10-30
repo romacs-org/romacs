@@ -42,15 +42,26 @@ impl Mailbox {
 pub(crate) enum Wake {
     Input(InputEvent),
     Terminal,
+    /// One of PROCESSES is ready.
+    Process,
     Timeout,
     Closed,
 }
 
-pub(crate) fn wait(input: &Receiver<InputEvent>, terminal: &Receiver<()>, timeout: Option<Duration>) -> Wake {
+/// Block for input, a terminal, one of the PROCESSES descriptors
+/// (`Vm::process_wait_fds'), or TIMEOUT, input first.
+pub(crate) fn wait(input: &Receiver<InputEvent>, terminal: &Receiver<()>, timeout: Option<Duration>,
+                   processes: &[(std::os::fd::RawFd, i16)]) -> Wake {
     let deadline = timeout.map(crossbeam_channel::after).unwrap_or_else(crossbeam_channel::never);
+    let (signal, process) = bounded(1);
+    // Dropped on return, which ends its wait.
+    let _watch = if processes.is_empty() { None } else {
+        romacs_vm::ProcessWatch::start(processes.to_vec(), move || { let _ = signal.try_send(()); }).ok()
+    };
     crossbeam_channel::select_biased! {
         recv(input) -> event => event.map(Wake::Input).unwrap_or(Wake::Closed),
         recv(terminal) -> event => if event.is_ok() { Wake::Terminal } else { Wake::Closed },
+        recv(process) -> _ => Wake::Process,
         recv(deadline) -> _ => Wake::Timeout,
     }
 }
@@ -106,14 +117,14 @@ mod tests {
         let mailbox = Mailbox::default();
         let ready = mailbox.ready();
         let (keys, input) = bounded(1);
-        assert!(matches!(wait(&input, &ready, Some(Duration::ZERO)), Wake::Timeout));
+        assert!(matches!(wait(&input, &ready, Some(Duration::ZERO), &[]), Wake::Timeout));
         mailbox.mark(1);
         keys.send(InputEvent::WindowClose { emacs_frame_id: 0 }).unwrap();
-        assert!(matches!(wait(&input, &ready, None), Wake::Input(InputEvent::WindowClose { .. })));
-        assert!(matches!(wait(&input, &ready, None), Wake::Terminal));
-        assert!(matches!(wait(&input, &ready, Some(Duration::ZERO)), Wake::Timeout), "CONSUMED_WAKE_MUST_NOT_SPIN_WITH_STALE_OWNER");
+        assert!(matches!(wait(&input, &ready, None, &[]), Wake::Input(InputEvent::WindowClose { .. })));
+        assert!(matches!(wait(&input, &ready, None, &[]), Wake::Terminal));
+        assert!(matches!(wait(&input, &ready, Some(Duration::ZERO), &[]), Wake::Timeout), "CONSUMED_WAKE_MUST_NOT_SPIN_WITH_STALE_OWNER");
         assert_eq!(mailbox.take(), vec![1]);
         drop(keys);
-        assert!(matches!(wait(&input, &ready, None), Wake::Closed));
+        assert!(matches!(wait(&input, &ready, None, &[]), Wake::Closed));
     }
 }

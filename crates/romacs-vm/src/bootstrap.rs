@@ -129,6 +129,15 @@ impl Vm {
                     }
                 }
                 self.define_function(slot, definition, is_macro)?;
+                // data.c defalias: LOADHIST_ATTACH ((defun . SYMBOL)), which
+                // `symbol-file' reads.
+                let defun = self.intern("defun");
+                self.conses.push((defun, a[0]));
+                let entry = Value::reference(self.conses.len() - 1, 3);
+                let history = self.slot("current-load-list");
+                let old = self.variable_value(history)?;
+                self.conses.push((entry, old));
+                self.set_variable_value(history, Value::reference(self.conses.len() - 1, 3))?;
                 self.defalias_documentation(&a)?;
                 Ok(a[0])
             }

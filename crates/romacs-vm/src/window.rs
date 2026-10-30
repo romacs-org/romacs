@@ -385,13 +385,20 @@ impl Vm {
         w.buffer = buffer;
         w.end_distance = 0;
         w.end_valid = false;
-        // GNU resets margins when KEEP-MARGINS is nil
+        self.display_state.version += 1;
+        // Without KEEP-MARGINS the window takes the buffer's margin widths
         // (src/window.c:4397), independently of the guard above.
         if !keep {
-            w.left_margin = 0;
-            w.right_margin = 0;
+            let width = |vm: &mut Self, name: &str| -> Result<u32> {
+                let slot = vm.slot(name);
+                let value = vm.value_in_buffer(slot, buffer)?;
+                Ok(value.integer_value().and_then(|n| u32::try_from(n).ok()).unwrap_or(0))
+            };
+            let (left, right) = (width(self, "left-margin-width")?, width(self, "right-margin-width")?);
+            let w = self.window_mut(v)?;
+            w.left_margin = left;
+            w.right_margin = right;
         }
-        self.display_state.version += 1;
         Ok(())
     }
     /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time
@@ -411,7 +418,11 @@ impl Vm {
             self.set_buffer_point_for_window(v, new_point)?;
             self.put_window_root(SELECTED, v);
         }
-        self.slots[self.buffer_slot].value = self.window(v)?.buffer;
+        let buffer = self.window(v)?.buffer;
+        self.slots[self.buffer_slot].value = buffer;
+        // window.c select_window's record_and_return: record_buffer moves
+        // the buffer to the front of `buffer-list' (buffer.c:2120).
+        if record { self.record_buffer_model(buffer); }
         Ok(v)
     }
     fn prepared_check(&self, v: Value, horizontal: bool, omit: Value) -> Result<bool> {
@@ -981,8 +992,8 @@ impl Vm {
             SetWindowStart | SetWindowMargins | SetWindowNewPixel => n >= 2 && n <= 3,
             SetWindowParameter => n == 3,
             SplitWindowInternal => n == 4 || n == 5,
-            SelectWindow | WindowEnd | WindowTotalHeight | WindowTotalWidth | WindowResizeApply => {
-                n <= 2 && (p != SelectWindow || n >= 1)
+            WindowTotalHeight | WindowTotalWidth | WindowResizeApply => {
+                n <= 2
             }
             WindowParameter => n == 2,
             DeleteWindowInternal | Windowp | WindowLiveP => n == 1,
@@ -1047,12 +1058,10 @@ impl Vm {
         }
         let live = matches!(
             p,
-            SelectWindow
-                | SetWindowPoint
+            SetWindowPoint
                 | SetWindowStart
                 | WindowPoint
                 | WindowStart
-                | WindowEnd
                 | SetWindowMargins
                 | WindowMargins
         );
@@ -1062,7 +1071,6 @@ impl Vm {
         );
         let v = self.decode_window(a, live, dead_ok)?;
         let value = match p {
-            SelectWindow => self.select_window_value(v, b == Value::NIL)?,
             DeleteWindowInternal => self.delete_window_value(v)?,
             SplitWindowInternal => self.split_window_value(
                 v,
@@ -1096,19 +1104,6 @@ impl Vm {
                     w.force_start = true;
                 }
                 b
-            }
-            WindowEnd => {
-                let w = self.window(v)?;
-                let Object::Buffer(buffer) = self.object(w.buffer)? else {
-                    return Err("buffer required".into());
-                };
-                if b != Value::NIL {
-                    return Err(
-                        "VM2 window-end UPDATE requires synchronous layout, which is unsupported"
-                            .into(),
-                    );
-                }
-                Value::integer(buffer.len_chars() as i64 + 1 - w.end_distance as i64)?
             }
             WindowParent => self.window(v)?.parent,
             WindowChild => self
@@ -1240,8 +1235,7 @@ impl Vm {
         };
         if matches!(
             p,
-            SelectWindow
-                | DeleteWindowInternal
+            DeleteWindowInternal
                 | SplitWindowInternal
                 | SetWindowPoint
                 | SetWindowStart
@@ -1266,6 +1260,7 @@ pub(crate) struct TextArea {
     pub full_width: bool,
     pub hscroll: i64,
     pub mode_line: i64,
+    pub header_line: i64,
     pub column: i64,
     pub line: i64,
     /// A host has laid the frame out and measures for it (VM2-WTPS1):
@@ -1447,7 +1442,7 @@ impl<'a> Windows<'a> {
         self.vm.display_state.free_realized_faces();
         Ok(Value::NIL)
     }
-    /// Decorations VM2 does not draw: header/tab lines, scroll bars and
+    /// Decorations VM2 does not draw: tab lines, scroll bars and
     /// dividers are 0 pixels (window.c:1224-1269 on a live window).
     pub(crate) fn live_zero(&mut self, window: Value) -> Out {
         self.live(window)?;
@@ -1464,7 +1459,7 @@ impl<'a> Windows<'a> {
         let w = self.live(window)?;
         let format = {
             let slot = self.vm.slot("mode-line-format");
-            self.vm.slots[slot].value
+            self.vm.variable_value(slot).map_err(internal)?
         };
         let line = self.vm.window_state.line;
         let key = self.vm.intern("mode-line-format");
@@ -1477,12 +1472,41 @@ impl<'a> Windows<'a> {
             && x.height > line;
         Self::int(if wants { i64::from(line) } else { 0 })
     }
+    /// The header line window_wants_header_line (window.c:6067) gives W, a
+    /// live window: its `header-line-format' parameter, else its buffer's
+    /// `header-line-format', unless W is a minibuffer window, the parameter
+    /// is `none', or W is no taller than its mode line and one canonical
+    /// line.  nil when W wants none.
+    pub(crate) fn header_line_format(&mut self, w: Value) -> std::result::Result<Value, Fault> {
+        let mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0) != 0;
+        let (key, none, slot) = (self.vm.intern("header-line-format"), self.vm.intern("none"), self.vm.slot("header-line-format"));
+        let line = self.vm.window_state.line;
+        let x = self.get(w)?;
+        let (mini, height, buffer) = (x.mini, x.height, x.buffer);
+        let parameter = x.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
+        let format = if parameter != Value::NIL { parameter } else { self.vm.value_in_buffer(slot, buffer).map_err(internal)? };
+        let tall = height > if mode_line { 2 * line } else { line };
+        Ok(if mini || parameter == none || format == Value::UNBOUND || !tall { Value::NIL } else { format })
+    }
+    /// WINDOW_HEADER_LINE_HEIGHT (window.h): one canonical line, or once a
+    /// host lays the frame out, the height it gives the header line.
+    pub(crate) fn window_header_line_height(&mut self, window: Value) -> Out {
+        let w = self.live(window)?;
+        if self.header_line_format(w)? == Value::NIL { return Self::int(0); }
+        let height = if self.vm.display_state.hosted && self.vm.has_layout_host() {
+            self.vm.host_band_height(w, true).map_err(internal)?
+        } else {
+            self.vm.window_state.line
+        };
+        Self::int(i64::from(height))
+    }
     /// window_body_width / window_body_height (window.c): WINDOW's text
     /// area in canonical characters (PIXELWISE nil, or `remap' with no face
     /// remapping) or pixels. The width loses the margins and, on a frame
     /// that is not a window system's, the column of the vertical bar a
     /// window left of another has; the height loses the mode line. VM2 has
-    /// no fringes, scroll bars, dividers, header or tab lines.
+    /// no fringes, scroll bars, dividers or tab lines; the height also loses
+    /// the header line.
     /// window_pixel_left / window_pixel_top: the window's frame-relative
     /// pixel edge.
     /// The refusal for a question about what a host has laid out, when no
@@ -1536,6 +1560,22 @@ impl<'a> Windows<'a> {
         if !self.vm.has_layout_host() { return Err(Self::displayed_window(caller)); }
         Ok(Some((w, posint.unwrap_or(-1), top)))
     }
+    /// Fwindow_end (window.c:1782) for WINDOW: the live window, the end its
+    /// last layout recorded (Z less the distance left after its last row),
+    /// and its start clipped to the accessible region
+    /// (CLIP_TEXT_POS_FROM_MARKER).
+    pub(crate) fn window_end(&mut self, window: Value) -> std::result::Result<(Value, i64, i64), Fault> {
+        let w = self.live(window)?;
+        let (start, buffer, distance) = { let x = self.get(w)?; (x.start, x.buffer, x.end_distance as i64) };
+        let top = self.vm.marker_position_value(start).map_err(internal)?.as_integer().map_err(internal)?;
+        let Object::Buffer(b) = self.vm.object(buffer).map_err(internal)? else {
+            return Err(internal("buffer required".into()));
+        };
+        let accessible = b.accessible();
+        let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
+        let (begv, zv) = (char_at(accessible.start)?, char_at(accessible.end)?);
+        Ok((w, b.len_chars() as i64 + 1 - distance, top.clamp(begv, zv)))
+    }
     /// decode_live_window and what xdisp.c init_iterator reads of the
     /// window. The terminal frame model holds until a host lays the frame
     /// out; then the host's layout answers, if one is attached (VM2-WTPS1).
@@ -1545,15 +1585,16 @@ impl<'a> Windows<'a> {
         if hosted && !self.vm.has_layout_host() { return Err(Self::displayed_window(caller)); }
         let mut mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0);
         if hosted && mode_line != 0 {
-            mode_line = i64::from(self.vm.host_mode_line_height(w).map_err(internal)?);
+            mode_line = i64::from(self.vm.host_band_height(w, false).map_err(internal)?);
         }
+        let header_line = self.window_header_line_height(w)?.integer_value().unwrap_or(0);
         let (column, line) = (i64::from(self.vm.window_state.column), i64::from(self.vm.window_state.line));
         let root = self.vm.window_root_peek(ROOT);
         let (root_x, root_width) = self.vm.window(root).map_or((0, 0), |r| (i64::from(r.x), i64::from(r.width)));
         let x = self.get(w)?;
         let (left, width) = (i64::from(x.x), i64::from(x.width));
         let body_width = (width - i64::from(x.left_margin + x.right_margin) * column).max(0);
-        let body_height = (i64::from(x.height) - mode_line).max(0);
+        let body_height = (i64::from(x.height) - mode_line - header_line).max(0);
         Ok(TextArea {
             window: w,
             buffer: x.buffer,
@@ -1564,6 +1605,7 @@ impl<'a> Windows<'a> {
             full_width: left == root_x && width == root_width,
             hscroll: x.hscroll,
             mode_line,
+            header_line,
             column,
             line,
             hosted,
@@ -1623,7 +1665,8 @@ impl<'a> Windows<'a> {
             if chars { px / column } else { px }
         } else {
             let mode_line = self.window_mode_line_height(window)?.integer_value().unwrap_or(0);
-            let px = i64::from(self.get(w)?.height) - mode_line;
+            let header_line = self.window_header_line_height(window)?.integer_value().unwrap_or(0);
+            let px = i64::from(self.get(w)?.height) - mode_line - header_line;
             if chars { px / line } else { px }
         };
         Self::int(size.max(0))
@@ -1829,11 +1872,62 @@ impl<'a> Windows<'a> {
         self.vm.set_window_buffer_value(window, buffer, keep_margins != Value::NIL).map_err(internal)?;
         Ok(Value::NIL)
     }
+    /// window.c select_window: WINDOW, live, becomes the selected window and
+    /// its buffer current; without NORECORD its use time and buffer are
+    /// recorded.  The selected window and its buffer.
+    pub(crate) fn select_window(&mut self, window: Value, norecord: bool) -> std::result::Result<(Value, Value), Fault> {
+        let v = self.live(window)?;
+        let v = self.vm.select_window_value(v, !norecord).map_err(internal)?;
+        self.vm.display_state.version += 1;
+        Ok((v, self.get(v)?.buffer))
+    }
     /// GNU `window-prev-buffers` (NEXT false) / `window-next-buffers`.
     pub(crate) fn window_buffers(&mut self, window: Value, next: bool) -> Out {
         let v = self.live(window)?;
         let w = self.get(v)?;
         Ok(if next { w.next_buffers } else { w.prev_buffers })
+    }
+    /// window.c window_discard_buffer_from_window: BUFFER leaves WINDOW's
+    /// previous buffers (an alist), its next buffers, and with ALL the
+    /// `quit-restore' parameters that name it (nth 3, or the car of nth 1).
+    pub(crate) fn discard_buffer(&mut self, buffer: Value, window: Value, all: bool) -> Out {
+        if !self.vm.buffer_state(buffer).is_ok_and(|s| s.live) { return Err(Fault::Error("Not a live buffer".into())); }
+        let v = match self.vm.object_if(window) {
+            Some(Object::Window(x)) if x.live() => window,
+            _ => return Err(Fault::Error("Not a live window".into())),
+        };
+        let keep = |vm: &mut Vm, list: Value, alist: bool| -> std::result::Result<Value, Fault> {
+            let items = vm.list_values(list).map_err(internal)?;
+            let kept: Vec<Value> = items.into_iter()
+                .filter(|&item| (if alist { vm.cons_pair(item).map(|(car, _)| car).unwrap_or(item) } else { item }) != buffer)
+                .collect();
+            Ok(vm.list_value(&kept))
+        };
+        let (prev, next) = { let w = self.get(v)?; (w.prev_buffers, w.next_buffers) };
+        let prev = keep(self.vm, prev, true)?;
+        let next = keep(self.vm, next, false)?;
+        { let w = self.get_mut(v)?; w.prev_buffers = prev; w.next_buffers = next; }
+        if !all { return Ok(Value::NIL); }
+        let names = [self.vm.intern("quit-restore"), self.vm.intern("quit-restore-prev")];
+        let mentions = |vm: &Vm, value: Value| -> bool {
+            let items = vm.list_values(value).unwrap_or_default();
+            items.get(3) == Some(&buffer)
+                || items.get(1).and_then(|&quint| vm.cons_pair(quint).ok()).is_some_and(|(car, _)| car == buffer)
+        };
+        let parameter = |w: &Window, key: Value| w.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
+        let (restore, restore_prev) = { let w = self.get(v)?; (parameter(w, names[0]), parameter(w, names[1])) };
+        let set = |w: &mut Window, key: Value, value: Value| {
+            if let Some((_, slot)) = w.parameters.iter_mut().find(|(k, _)| *k == key) { *slot = value; }
+            else { w.parameters.insert(0, (key, value)); }
+        };
+        if mentions(self.vm, restore_prev) { set(self.get_mut(v)?, names[1], Value::NIL); }
+        let restore_prev = { let w = self.get(v)?; parameter(w, names[1]) };
+        if mentions(self.vm, restore) {
+            let w = self.get_mut(v)?;
+            set(w, names[0], restore_prev);
+            set(w, names[1], Value::NIL);
+        }
+        Ok(Value::NIL)
     }
     /// GNU `set-window-prev-buffers` (NEXT false) / `set-window-next-buffers`.
     pub(crate) fn set_window_buffers(&mut self, window: Value, buffers: Value, next: bool) -> Out {

@@ -206,6 +206,22 @@ impl Band {
         if self.target == Target::String { self.elts.push((begin..self.text.len(), self.elt)); }
     }
 
+    /// Append S, the characters from START of a string whose own faces
+    /// are OWN (`ml_own_faces'), each run in its own face.
+    fn push_own(&mut self, s: &str, own: &[(usize, Option<String>)], start: usize) {
+        let mut run = own.partition_point(|(at, _)| *at <= start).saturating_sub(1);
+        let mut from = 0;
+        for (k, (at, _)) in s.char_indices().enumerate() {
+            // Character K of S is the string's character START + K.
+            if own.get(run + 1).is_some_and(|(next, _)| start + k >= *next) {
+                if at > from { self.push(&s[from..at], own[run].1.as_ref()); }
+                from = at;
+                while own.get(run + 1).is_some_and(|(next, _)| start + k >= *next) { run += 1; }
+            }
+        }
+        if from < s.len() { self.push(&s[from..], own[run].1.as_ref()); }
+    }
+
     fn push_clipped(&mut self, s: &str) {
         for c in s.chars() {
             let (shown, w) = match c {
@@ -220,6 +236,11 @@ impl Band {
             self.text.extend(shown.into_iter().flatten());
         }
     }
+}
+
+/// The face of character K of a string whose own faces are OWN.
+fn own_face(own: &[(usize, Option<String>)], k: usize) -> Option<&String> {
+    own[..own.partition_point(|(at, _)| *at <= k)].last().and_then(|(_, face)| face.as_ref())
 }
 
 impl Vm {
@@ -261,8 +282,8 @@ impl Vm {
 
     /// A string element's text. A string with text properties reaches the
     /// expander as an object (`expansion_form`), as GNU's `propertize`d
-    /// mode-line strings do; VM2 does not project its properties (VM2-G1B),
-    /// so it expands as its text.
+    /// mode-line strings do; it expands as its text, and its own faces come
+    /// from `ml_own_faces' (other properties are not projected, VM2-G1B).
     fn ml_string(&self, elt: &Form) -> Result<Option<String>> {
         Ok(match elt {
             Form::String(s) => Some(s.clone()),
@@ -276,6 +297,40 @@ impl Vm {
             }
             _ => None,
         })
+    }
+
+    /// A propertized string element's own faces where the element's PROPS
+    /// give none: GNU merges PROPS onto a string's own properties unless it
+    /// is risky (display_mode_element), so each character shows its `face'
+    /// (a symbol, or a face list's first one). Runs of one face, each from
+    /// its first character; None when no character has one.
+    fn ml_own_faces(&mut self, elt: &Form, props: Option<&String>, risky: bool) -> Result<Option<Vec<(usize, Option<String>)>>> {
+        if props.is_some() || risky { return Ok(None); }
+        let Form::Object(object) = elt else { return Ok(None) };
+        let value = object.value(self)?;
+        if !matches!(self.object_if(value), Some(data::Object::String(_))) || self.string_bytes(value)?.is_empty() { return Ok(None); }
+        let face = self.intern("face");
+        let mut runs: Vec<(usize, Option<String>)> = vec![];
+        for start in self.property_run_starts(value).map_err(crate::forwarded::fault_text)? {
+            let v = self.property_textget(value, start, face).map_err(crate::forwarded::fault_text)?;
+            let name = self.ml_face_name(v);
+            if runs.last().is_none_or(|(_, last)| *last != name) { runs.push((start as usize, name)); }
+        }
+        Ok(runs.iter().any(|(_, face)| face.is_some()).then_some(runs))
+    }
+
+    /// A `face' property's name: a symbol, or a face list's first symbol.
+    fn ml_face_name(&self, value: Value) -> Option<String> {
+        let name = |v: Value| (v.tag() == 7 && v != Value::NIL).then(|| v.index(7).ok())
+            .flatten().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned())
+            .filter(|n| !n.starts_with(':'));
+        let mut tail = value;
+        if value.tag() != 3 { return name(value); }
+        while let Ok((head, rest)) = self.cons_pair(tail) {
+            if let Some(found) = name(head) { return Some(found); }
+            tail = rest;
+        }
+        None
     }
 
     /// GNU's C `Fget (elt, Qrisky_local_variable)`, read in place: compiling
@@ -355,14 +410,14 @@ impl Vm {
             if let Some(s) = self.ml_string(&elt)? {
                 let tab = self.ml_tab_width()?;
                 // GNU replaces a risky string's properties with PROPS and
-                // otherwise merges PROPS onto the string's own; VM2 does not
-                // project a string's own properties (VM2-G1B), so the face is
-                // PROPS's face either way.
+                // otherwise merges PROPS onto the string's own: where PROPS
+                // has no face, the string's own faces show.
+                let own = self.ml_own_faces(&elt, props.as_ref(), risky)?;
                 if literal {
                     // GNU `store_mode_line_string`: precision and N count characters.
                     let shown = if precision - n > 0 { char_prefix(&s, (precision - n) as usize) } else { &s };
                     n += chars(shown);
-                    band.push(shown, props.as_ref());
+                    match &own { Some(own) => band.push_own(shown, own, 0), None => band.push(shown, props.as_ref()) }
                     break;
                 }
                 let mut rest = s.split('\0').next().unwrap_or_default();
@@ -374,11 +429,21 @@ impl Vm {
                         // substring then counts its characters (`xdisp.c` MODE_LINE_STRING).
                         let shown = if precision > 0 { prefix(segment, (precision - n) as usize, tab) } else { segment };
                         n += chars(shown);
-                        band.push(shown, props.as_ref());
+                        match &own {
+                            // The segment's first character's index in S.
+                            Some(own) => band.push_own(shown, own, chars(&s[..rest.as_ptr() as usize - s.as_ptr() as usize]) as usize),
+                            None => band.push(shown, props.as_ref()),
+                        }
                         rest = &rest[percent..];
                         continue;
                     }
-                    // rest starts with '%'.
+                    // rest starts with '%'. Its expansion takes the string's
+                    // own face there (xdisp.c display_mode_element takes the
+                    // text properties at the construct's offset).
+                    let face = match &own {
+                        Some(own) => own_face(own, chars(&s[..rest.as_ptr() as usize - s.as_ptr() as usize]) as usize),
+                        None => props.as_ref(),
+                    };
                     rest = &rest[1..];
                     let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
                     // GNU accumulates the width in a C `int` (`xdisp.c:28663`);
@@ -401,9 +466,9 @@ impl Vm {
                     let spec = self.decode_mode_spec(state, c, field, band.target)?;
                     let shown = if prec > 0 { char_prefix(&spec, prec as usize) } else { spec.as_str() };
                     let mut written = chars(shown);
-                    band.push(shown, props.as_ref());
+                    band.push(shown, face);
                     if field > written {
-                        band.pad(field - written, props.as_ref());
+                        band.pad(field - written, face);
                         written = field;
                     }
                     n += written;

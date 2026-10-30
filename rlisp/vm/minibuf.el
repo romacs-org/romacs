@@ -160,6 +160,9 @@ innermost-loop checks, which need recursive minibuffers)."
           (when initial
             (insert initial)
             (forward-char pos))
+          ;; minibuf.c:905 clear_message: the minibuffer replaces the echo
+          ;; area's message.
+          (message nil)
           (use-local-map keymap)
           (when (and minibuffer-setup-hook (fboundp 'run-hooks))
             (run-hooks 'minibuffer-setup-hook))

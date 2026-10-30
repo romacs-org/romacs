@@ -432,6 +432,90 @@ mod tests {
         assert!(calls.windows(2).all(|w| w[0] < w[1]), "{calls:?}: each pass walks only text newly in view");
     }
 
+    /// A row a plain newline starts measures alone, whatever the line
+    /// before holds: gnosis's review centres each line with an overlay
+    /// string, then measures the next line.  The line holding the string
+    /// still refuses.
+    #[test]
+    fn a_row_after_a_plain_newline_measures_without_the_line_before() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer) (insert "first line\nwhich fuse") (goto-char 1) (set-window-start nil 1))"#);
+        let plain = h.eval("(window-text-pixel-size nil 12 22 1000)");
+        h.eval(r#"(overlay-put (make-overlay 1 11) 'before-string (propertize " " 'display '(space :align-to 30)))"#);
+        assert_eq!(h.eval("(window-text-pixel-size nil 12 22 1000)"), plain);
+        assert_eq!(h.eval("(condition-case e (window-text-pixel-size nil 1 11) (error (car (cdr e))))"),
+                   "\"VM2 window-text-pixel-size of text the host does not lay out as GNU displays it in a displayed window is unsupported\"");
+    }
+
+    /// `window-end' with UPDATE lays the window out from its start as
+    /// Fwindow_end (window.c:1782) does: the end the host's paint then
+    /// records, asked before that paint catches up with the edit.
+    #[test]
+    fn window_end_update_answers_the_end_the_host_paints() {
+        let mut h = hosted();
+        for insert in [
+            r#"(dotimes (i 40) (insert (format "line %d\n" i)))"#,
+            r#"(insert "short\nno newline")"#,
+            r#"(insert "short\n")"#,
+            r#"(insert "")"#,
+            r#"(dotimes (i 18) (insert "x\n")) (insert (propertize "BIG\n" 'face 'hosted-big) "after\nmore\n")"#,
+            r#"(dotimes (i 40) (insert (format "line %d\n" i))) (narrow-to-region 20 60)"#,
+        ] {
+            h.eval(&format!("(progn (widen) (erase-buffer) {insert} (goto-char (point-min)) (set-window-start nil (point-min)))"));
+            let update = h.eval("(window-end nil t)");
+            h.paint();
+            assert_eq!(update, h.eval("(window-end)"), "{insert}");
+        }
+        h.eval("(widen)");
+    }
+
+    /// A header line paints above the text, and the measures count from
+    /// the window's top as GNU's do (window_top_y): the text starts below
+    /// the band, whose height the body loses.
+    #[test]
+    fn a_header_line_paints_above_the_text_and_shrinks_the_body() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer) (dotimes (i 40) (insert (format "line %d\n" i)))
+                         (setq header-line-format "Header") (goto-char 1) (set-window-start nil 1))"#);
+        let update = h.eval("(window-end nil t)");
+        let paint = h.paint();
+        let header: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::HeaderLine).map(|g| g.0).collect();
+        assert_eq!(header, "Header");
+        let band = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::HeaderLine).map(|g| (g.2, g.4)).unwrap();
+        let first = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::Text).unwrap();
+        assert_eq!((band.0, first.0, first.2), (0.0, 'l', band.1), "the text starts below the band");
+        let mode_y = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map(|g| g.2).unwrap();
+        let body = (mode_y - band.1) as i64;
+        assert_eq!(h.eval("(list (window-header-line-height) (window-body-height nil t))"), format!("({} {body})", band.1 as i64));
+        assert_eq!(h.eval("(pos-visible-in-window-p 1 nil t)"), format!("(0 {})", band.1 as i64));
+        assert_eq!(h.eval("(nth 2 (posn-at-point 1))"), format!("(0 . {})", band.1 as i64));
+        assert_eq!(update, h.eval("(window-end)"));
+        h.eval("(setq header-line-format nil)");
+    }
+
+    /// `recenter' and `scroll-up' move by the host's screen lines:
+    /// M->'s `(recenter -3)' paints point three lines up from the bottom
+    /// row, and `scroll-up' paints from the start it set, keeping
+    /// `next-screen-context-lines' of the old page.
+    #[test]
+    fn recenter_and_scroll_up_set_the_start_the_host_paints() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer) (dotimes (i 100) (insert (format "line %d\n" i))) (goto-char (point-max)) (recenter -3))"#);
+        let paint = h.paint();
+        let line = h.eval("(frame-char-height)").parse::<f32>().unwrap();
+        let rows = h.eval("(window-body-height)").parse::<f32>().unwrap();
+        let cursor = paint.cursor.expect("cursor");
+        assert_eq!(cursor.1, (rows - 3.0) * line, "point on the third row from the bottom");
+        let first: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).take_while(|g| g.2 == 0.0).map(|g| g.0).collect();
+        let start = h.eval("(save-excursion (goto-char (window-start)) (buffer-substring-no-properties (point) (line-end-position)))");
+        assert_eq!(format!("{first:?}"), start);
+        h.eval("(progn (goto-char 1) (set-window-start nil 1) (scroll-up))");
+        let paint = h.paint();
+        let first: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).take_while(|g| g.2 == 0.0).map(|g| g.0).collect();
+        let expected = h.eval("(format \"line %d\" (- (window-body-height) next-screen-context-lines))");
+        assert_eq!(format!("{first:?}"), expected, "scroll-up keeps the old page's last lines");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]

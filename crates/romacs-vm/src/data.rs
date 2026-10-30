@@ -463,11 +463,13 @@ impl Vm {
         Ok(values)
     }
     #[inline(never)]
+    /// `apply`'s spread window: (FUNCTION, OFFSET, COUNT), or Err(COUNT)
+    /// when COUNT arguments do not fit the stack's reserved tail.
     pub(super) fn prepare_apply(
         &mut self,
         start: usize,
         argc: usize,
-    ) -> Result<(Value, usize, usize)> {
+    ) -> Result<std::result::Result<(Value, usize, usize), usize>> {
         if argc < 1 {
             return Err("wrong primitive arity".into());
         }
@@ -478,12 +480,12 @@ impl Vm {
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
         let values = values.get(1..).unwrap_or_default();
-        if values.len() > 4096 {
-            return Err("apply argument limit exceeded".into());
+        if values.len() > self.spread_reserve {
+            return Ok(Err(values.len()));
         }
-        let offset = self.stack.len() - 4096;
+        let offset = self.stack.len() - self.spread_reserve;
         self.stack[offset..offset + values.len()].copy_from_slice(values);
-        Ok((target, offset, values.len()))
+        Ok(Ok((target, offset, values.len())))
     }
     #[inline(never)]
     pub(super) fn primitive_call(
@@ -734,6 +736,15 @@ impl Vm {
                 }
                 if p == Aref && x.tag() == 4 && !self.closures[x.index(4)?].metadata.is_empty() {
                     return self.closures[x.index(4)?].metadata.get(index).copied().ok_or_else(|| "index out of range".into());
+                }
+                // CLOSURE_CONSTANTS of a closure made where no lexical
+                // binding is visible: the dialect's empty environment, as
+                // nadvice reads it (VM2-CLOSEQ1).
+                if p == Aref && x.tag() == 4 && index == 2 {
+                    let function = self.closures[x.index(4)?].function;
+                    if let Some(dynamic) = self.functions[function].dynamic {
+                        return Ok(if dynamic { Value::NIL } else { self.list_value(&[Value::TRUE]) });
+                    }
                 }
                 if p == Aref {
                     return match self.object(x)? {

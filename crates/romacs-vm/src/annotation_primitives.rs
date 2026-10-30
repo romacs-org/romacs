@@ -165,6 +165,28 @@ impl Vm {
             _ => Err("text buffer required".into()),
         }
     }
+    /// The anchors markers in BUFFER live in: a text buffer's, or a
+    /// unibyte buffer's, whose byte offsets are its character positions.
+    pub(crate) fn marker_anchors(&self, buffer: Value) -> Result<&crate::anchors::AnchorTree> {
+        match self.object(buffer)? {
+            Object::Buffer(b) => Ok(&b.anchors),
+            Object::ByteBuffer(b) => Ok(&b.anchors),
+            _ => Err("buffer required".into()),
+        }
+    }
+    pub(crate) fn marker_anchors_mut(&mut self, buffer: Value) -> Result<&mut crate::anchors::AnchorTree> {
+        let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
+        match self.objects.get_mut(i) {
+            Some(Object::Buffer(b)) => Ok(&mut b.anchors),
+            Some(Object::ByteBuffer(b)) => Ok(&mut b.anchors),
+            _ => Err("buffer required".into()),
+        }
+    }
+    /// The byte offset MARKER points at in its buffer, or None if it points nowhere.
+    pub(crate) fn marker_byte(&self, marker: &Marker) -> Result<Option<usize>> {
+        let Some(anchor) = marker.anchor else { return Ok(None) };
+        Ok(Some(self.marker_anchors(marker.buffer)?.resolve(anchor).ok_or("invalid marker anchor")? as usize))
+    }
     pub(super) fn marker(&self, v: Value) -> Result<&Marker> {
         match self.object(v)? {
             Object::Marker(m) => Ok(m),
@@ -183,11 +205,16 @@ impl Vm {
         self.annotated(v)?;
         Ok(v)
     }
+    /// The current buffer, where a marker given no buffer goes.
+    fn current_marker_buffer(&mut self) -> Result<Value> {
+        self.buffer_index()?;
+        Ok(self.slots[self.buffer_slot].value)
+    }
     /// MARKER's insertion type: Right advances it on insertion at its position.
     pub(super) fn set_marker_bias(&mut self, x: Value, b: Bias) -> Result<()> {
         let m = self.marker(x)?.clone();
         if let Some(a) = m.anchor {
-            let tree = &mut self.annotated_mut(m.buffer)?.anchors;
+            let tree = self.marker_anchors_mut(m.buffer)?;
             let pos = tree.resolve(a).unwrap();
             assert!(tree.set(a, pos, b));
         }
@@ -199,12 +226,11 @@ impl Vm {
     }
     pub(super) fn marker_position_value(&self, v: Value) -> Result<Value> {
         let m = self.marker(v)?;
-        match m.anchor {
-            Some(a) => {
-                let b = self.annotated(m.buffer)?;
-                let pos = b.anchors.resolve(a).ok_or("invalid marker anchor")?;
-                Value::integer((b.char_of_byte(ByteOffset(pos as usize))?.0 + 1) as i64)
-            }
+        match self.marker_byte(m)? {
+            Some(pos) => match self.object(m.buffer)? {
+                Object::Buffer(b) => Value::integer((b.char_of_byte(ByteOffset(pos))?.0 + 1) as i64),
+                _ => Value::integer(pos as i64 + 1),
+            },
             None => Ok(Value::NIL),
         }
     }
@@ -217,6 +243,13 @@ impl Vm {
     fn buffer_position(&self, buffer: Value, v: Value, clip: bool) -> Result<u32> {
         self.require_live_buffer(buffer)?;
         let n = self.scalar_position(v)?;
+        if let Object::ByteBuffer(b) = self.object(buffer)? {
+            let max = b.bytes.len() as i64 + 1;
+            if !clip && (n < 1 || n > max) {
+                return Err("index out of range".into());
+            }
+            return u32::try_from(n.clamp(1, max) - 1).map_err(|_| "buffer too large".into());
+        }
         let b = self.annotated(buffer)?;
         let max = b.len_chars() as i64 + 1;
         let n = if clip {
@@ -254,19 +287,13 @@ impl Vm {
         if let (Some(a), Some(p)) = (m.anchor, destination)
             && m.buffer == buffer
         {
-            assert!(self.annotated_mut(buffer)?.anchors.set(a, p, m.bias));
+            assert!(self.marker_anchors_mut(buffer)?.set(a, p, m.bias));
             return Ok(v);
         }
         if let Some(a) = m.anchor {
-            self.annotated_mut(m.buffer)?.anchors.remove(a);
+            self.marker_anchors_mut(m.buffer)?.remove(a);
         }
-        let anchor = destination.map(|p| {
-            self.annotated_mut(buffer)
-                .unwrap()
-                .anchors
-                .create(p, m.bias)
-                .unwrap()
-        });
+        let anchor = destination.map(|p| self.marker_anchors_mut(buffer).unwrap().create(p, m.bias).unwrap());
         let Object::Marker(target) = &mut self.objects[v.index(0)? - 1] else {
             unreachable!()
         };
@@ -725,7 +752,7 @@ impl Vm {
                 let buffer = if n == 3 && args[2] != Value::NIL {
                     args[2]
                 } else {
-                    self.current_annotation_buffer()?
+                    self.current_marker_buffer()?
                 };
                 self.set_marker_object(x, args[1], buffer)
             }
@@ -736,7 +763,7 @@ impl Vm {
                     self.marker_position_value(x)?
                 };
                 let buffer = if x.as_integer().is_ok() {
-                    self.current_annotation_buffer()?
+                    self.current_marker_buffer()?
                 } else {
                     self.marker(x)?.buffer
                 };

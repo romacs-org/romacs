@@ -141,7 +141,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         }
         Eval | Provide | Featurep
         | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | CopyMarker | LookingAt
-        | MatchString | SelectWindow | Macroexpand | Signal => (1, Some(2)),
+        | MatchString | Macroexpand | Signal => (1, Some(2)),
         Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
         SplitWindowInternal => (4, Some(5)),
         GetProperty | Defalias | GetCharProperty | SetMarker | DefineError | Gethash
@@ -155,7 +155,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         StringMatch => (2, Some(4)),
         MatchData => (0, Some(3)),
         ReSearchForward | ReSearchBackward | SearchForward | SearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
-        WindowVscroll | WindowEnd | WindowTotalHeight | WindowResizeApply | WindowTotalWidth => {
+        WindowVscroll | WindowTotalHeight | WindowResizeApply | WindowTotalWidth => {
             (0, Some(2))
         }
         ClosureMetadata => (6, Some(6)),

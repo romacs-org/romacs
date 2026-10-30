@@ -81,7 +81,7 @@ fn window_no_longer_showing_buffer() {
 
 #[test]
 fn excursion_restores_point_in_unibyte_buffers() {
-    // VM2-EXCUR1 resolved: a unibyte buffer keeps its saved point itself.
+    // A unibyte buffer keeps its saved point in a marker, as GNU does.
     // Pinned GNU answers (42 2) for this fixture.
     check("(with-temp-buffer (set-buffer-multibyte nil) (insert \"abc\") (goto-char 2) (condition-case c (list (save-excursion (goto-char 1) 42) (point)) (error c)))", "(42 2)", "SAVE_EXCURSION_UNIBYTE");
 }

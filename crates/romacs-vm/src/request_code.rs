@@ -160,6 +160,7 @@ impl Vm {
                 rest: false,
                 sites: Vec::new(),
                 lazy: None,
+                dynamic: None,
             },
         );
         if self.request_code.live[id] && !self.request_code.permanent[id] {

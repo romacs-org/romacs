@@ -54,6 +54,10 @@ struct Args {
     /// result then carries `caught`: the should-errors absent machinery
     /// satisfied (run.py refuses to count a pass without it).
     audit: Option<PathBuf>,
+    /// The Romacs executable the session names as `invocation-name' and
+    /// `invocation-directory' (GNU's argv[0]): tests spawn it as their
+    /// Emacs, and this runner is not one (romacs-vm-gui's `--batch' is).
+    invocation: Option<PathBuf>,
     /// `--world-trace OUT`: write the recipe's world-build trace to OUT.
     world_trace: Option<PathBuf>,
     /// `--world-trace-child DIR`: set in the confined child that
@@ -69,7 +73,7 @@ fn usage() -> ! {
         "usage: romacs-gnu-ert --harness FILE --plan PLAN.json [--load-path DIR]... \
          [--preload FILE]... [--skip-test NAME]... [--probe EXPR]... \
          [--harness-kind mini|real] [--ert-adapter none|romacs-batch] [--reporter FILE] [--audit FILE] \
-         [--world-trace OUT.json] [--world-store DIR]"
+         [--world-trace OUT.json] [--world-store DIR] [--invocation EMACS]"
     );
     std::process::exit(2)
 }
@@ -77,7 +81,7 @@ fn usage() -> ! {
 fn parse() -> Args {
     let mut it = std::env::args().skip(1);
     let (mut load_path, mut preload, mut skip, mut probe) = (vec![], vec![], vec![], vec![]);
-    let (mut harness, mut plan, mut reporter, mut audit) = (None, None, None, None);
+    let (mut harness, mut plan, mut reporter, mut audit, mut invocation) = (None, None, None, None, None);
     let (mut world_trace, mut world_child, mut world_store) = (None, None, None);
     let mut kind = HarnessKind::Mini;
     let mut measurement_regime = false;
@@ -98,6 +102,7 @@ fn parse() -> Args {
             "--plan" => plan = Some(PathBuf::from(value)),
             "--reporter" => reporter = Some(PathBuf::from(value)),
             "--audit" => audit = Some(PathBuf::from(value)),
+            "--invocation" => invocation = Some(PathBuf::from(value)),
             "--harness-kind" => {
                 kind = match value.as_str() {
                     "mini" => HarnessKind::Mini,
@@ -141,6 +146,7 @@ fn parse() -> Args {
         skip,
         probe,
         audit,
+        invocation,
         world_trace,
         world_child,
         world_store,
@@ -333,6 +339,16 @@ fn fresh_vm(args: &Args) -> Vm {
     if let Err((_, error)) = eval(&mut vm, "(setq noninteractive t)") {
         emit(json!({"event": "setup", "ok": false, "phase": "batch-mode", "error": error}));
         std::process::exit(3);
+    }
+    if let Some(emacs) = &args.invocation {
+        let (Some(name), Some(directory)) = (emacs.file_name(), emacs.parent()) else { usage() };
+        let quote = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
+        let set = format!("(setq invocation-name {} invocation-directory {})",
+                          quote(&name.to_string_lossy()), quote(&format!("{}/", directory.display())));
+        if let Err((_, error)) = eval(&mut vm, &set) {
+            emit(json!({"event": "setup", "ok": false, "phase": "invocation", "error": error}));
+            std::process::exit(3);
+        }
     }
     // GNU batch runs on its initial terminal frame: 80 columns by 25 lines
     // of 1x1 characters (DIVERGENCES.md VM2-WIN5).

@@ -217,3 +217,19 @@ fn recent_keys_record_events_and_their_commands() {
     vm.command_event(CommandEvent::Named("romacs-gui-sequence".into())).unwrap();
     assert_eq!(text(&mut vm, "(let ((k (recent-keys t))) (list (aref k (- (length k) 3)) (aref k (- (length k) 2)) (aref k (- (length k) 1))))"), "(24 6 (nil . ignore))");
 }
+
+/// keyboard.c command_loop_1 runs whatever the key is bound to: a closure
+/// (keymap-popup binds them) runs and becomes `this-command' and then
+/// `last-command' itself, as in pinned GNU.
+#[test]
+fn a_closure_binding_runs_as_the_command() {
+    let mut vm = Vm::new();
+    vm.eval_source("(progn (defvar closure-ran nil)
+                           (define-key (current-global-map) [closure-key]
+                             (lambda () (interactive) (setq closure-ran (list this-command real-this-command)))))").unwrap();
+    let outcome = vm.command_event(CommandEvent::Named("closure-key".into())).unwrap();
+    assert!(outcome.signal.is_none(), "{:?}", outcome.signal);
+    assert_eq!(text(&mut vm, "(list (functionp (car closure-ran)) (eq (car closure-ran) (car (cdr closure-ran)))
+                                    (eq last-command (car closure-ran)) (eq real-last-command last-command))"),
+               "(t t t t)");
+}

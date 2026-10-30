@@ -296,13 +296,17 @@ impl Vm {
                 redisplay: true,
             });
         }
-        // Convert immediately: eval_form may compact on every invocation.
-        let command = self
-            .symbol_names
-            .get(binding.index(7)?.saturating_sub(1))
-            .ok_or("symbol command required")?
-            .clone();
-        self.record_recent_key(RecentKey::Command(command.clone()));
+        // GNU's Vthis_command is the binding itself: a symbol, or a closure
+        // such as a keymap's lambda (keyboard.c command_loop_1).  The variable
+        // roots it; eval_form may compact on every invocation.
+        let symbol = binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned());
+        let this_command = self.slot("this-command");
+        self.set_variable_value(this_command, binding)?;
+        let command = match &symbol {
+            Some(name) => name.clone(),
+            None => self.display(binding)?,
+        };
+        if let Some(name) = &symbol { self.record_recent_key(RecentKey::Command(name.clone())); }
         // command_loop_1: the previous command's undo boundaries, then the
         // point record_point compares against.
         self.eval_form_raw(&call("if", vec![
@@ -314,8 +318,7 @@ impl Vm {
             "progn",
             vec![
                 call("setq", vec![
-                    sym("this-command"), quote(sym(&command)),
-                    sym("real-this-command"), quote(sym(&command)),
+                    sym("real-this-command"), sym("this-command"),
                     sym("current-prefix-arg"), sym("prefix-arg"),
                     sym("prefix-arg"), sym("nil"),
                 ]),
@@ -336,7 +339,7 @@ impl Vm {
                                                 call("romacs-delete-selection-before-command", vec![sym("this-command")]),
                                             ],
                                         ),
-                                        call("call-interactively", vec![quote(sym(&command))]),
+                                        call("call-interactively", vec![sym("real-this-command")]),
                                     ],
                                 ),
                                 sym("nil"),

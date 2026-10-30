@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "0f618d9b3a1d1147891c22d85cf153b8d710112eb8e883856fa1e14a462507a2",
+  "input_hash": "3aba07982af52e24165cdec6dfe91a1aa5922d85089b1090ca5ff9d81a80a6d6",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,157 +12,157 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 277,
-  "symbols": 633,
+  "rows": 281,
+  "symbols": 651,
   "rows_without_symbols": 16
  },
  "by_symbol": {
   "#x400000": [
-   85
+   86
   ],
   "(max-char)": [
-   207
+   211
   ],
   "+": [
-   70
+   71
   ],
   "/proc/stat": [
    10
   ],
   "1+": [
-   222
+   226
   ],
   ":20": [
-   85
+   86
   ],
   "<=": [
-   70
+   71
   ],
   "=": [
-   70
+   71
   ],
   "[:class:]": [
-   276
+   280
   ],
   "abort-minibuffers": [
-   64
+   65
   ],
   "accept-process-output": [
-   174,
-   175
+   176,
+   178
   ],
   "add-name-to-file": [
    8
   ],
   "add-text-properties": [
-   221,
-   263
+   225,
+   267
   ],
   "add-variable-watcher": [
-   234,
-   235
+   238,
+   239
   ],
   "after-change-functions": [
-   168
+   170
   ],
   "after-insert-file-set-coding": [
-   264
+   268
   ],
   "after-load-alist": [
-   249
+   253
   ],
   "after-string": [
-   258
+   262
   ],
   "all-completions": [
-   259,
-   260
+   263,
+   264
   ],
   "append": [
-   109
+   110
   ],
   "apply": [
-   110,
-   132,
-   228
+   111,
+   133,
+   232
   ],
   "aref": [
-   76,
-   85
+   77,
+   86
   ],
   "arrayp": [
    52
   ],
   "aset": [
-   76,
-   85,
-   91
+   77,
+   86,
+   92
   ],
   "autoload": [
-   238
+   242
   ],
   "autoload-do-load": [
-   238,
-   250
+   242,
+   254
   ],
   "b->last_window_start": [
-   182
+   185
   ],
   "backtrace--locals": [
-   262
+   266
   ],
   "backward-char": [
-   143
+   144
   ],
   "backward-prefix-chars": [
-   156
+   158
   ],
   "bare-symbol-p": [
    52
   ],
   "base64-decode-region": [
-   172
+   174
   ],
   "before-change-functions": [
-   168
+   170
   ],
   "before-string": [
-   258
+   262
   ],
   "beginning-of-line": [
-   143
+   144
   ],
   "bidi-display-reordering": [
-   196
+   198
   ],
   "bidi-paragraph-separate-re": [
-   196
+   198
   ],
   "bidi-paragraph-start-re": [
-   196
+   198
   ],
   "blink-cursor-mode": [
-   233
+   237
   ],
   "bool-vector": [
-   83,
-   219
+   84,
+   223
   ],
   "bool-vector-p": [
-   83
+   84
   ],
   "boundp": [
-   245
+   249
   ],
   "buffer-chars-modified-tick": [
-   100
+   101
   ],
   "buffer-file-coding-system": [
-   99,
-   264
+   100,
+   268
   ],
   "buffer-file-name": [
-   99
+   100
   ],
   "buffer-local-value": [
    42
@@ -171,47 +171,47 @@
    42
   ],
   "buffer-modified-p": [
-   62,
-   100
+   63,
+   101
   ],
   "buffer-modified-tick": [
-   100
+   101
   ],
   "buffer-name": [
-   59,
-   60
+   60,
+   61
   ],
   "buffer-name buffer-modified-p": [
-   61
+   62
   ],
   "buffer-read-only": [
    1
   ],
   "buffer-text-pixel-size": [
-   199
+   201
   ],
   "buffer-undo-list": [
-   168
+   170
   ],
   "byte-code-function-p": [
    39,
    40,
-   242
+   246
   ],
   "byte-compile": [
    40,
    50
   ],
   "call-interactively": [
-   73,
-   146
+   74,
+   147
   ],
   "call-process": [
-   174,
-   175
+   176,
+   178
   ],
   "call-process-region": [
-   174
+   176
   ],
   "capitalize": [
    55
@@ -220,19 +220,19 @@
    56
   ],
   "car": [
-   230
+   234
   ],
   "ccl-execute": [
-   166
+   168
   ],
   "ccl-execute-on-string": [
-   166
+   168
   ],
   "ceiling": [
-   203
+   205
   ],
   "char-category-set": [
-   227
+   231
   ],
   "char-code-property-description": [
    41
@@ -241,87 +241,90 @@
    52
   ],
   "char-syntax": [
-   156
+   158
   ],
   "char-table": [
-   98
+   99
   ],
   "char-table-range": [
-   76
+   77
   ],
   "characterp": [
-   85
+   86
   ],
   "cl-print-object": [
-   262
+   266
   ],
   "cl-type-of": [
-   261
+   265
   ],
   "clear-composition-cache": [
-   165
+   167
   ],
   "closurep": [
-   109
+   110
   ],
   "coding-system-for-read": [
-   99
+   100
   ],
   "coding-system-for-write": [
-   99
+   100
   ],
   "color-defined-p": [
-   176
+   179
   ],
   "color-values": [
-   176
+   179
   ],
   "combine-after-change-calls": [
-   168
+   170
   ],
   "command-error-default-function": [
-   146
+   147
   ],
   "command-execute": [
-   65
+   66
   ],
   "command-history": [
-   73
+   74
+  ],
+  "command-line-1": [
+   209
   ],
   "command-line-args": [
-   88
+   89
   ],
   "command-remapping": [
-   106
+   107
   ],
   "compare-strings": [
-   260
+   264
   ],
   "compiled-function-p": [
-   242
+   246
   ],
   "compose-region-internal": [
-   165
+   167
   ],
   "compose-string-internal": [
-   165
+   167
   ],
   "composition-function-table": [
-   165
+   167
   ],
   "concat": [
    19,
-   208,
-   209,
-   210,
-   248
+   212,
+   213,
+   214,
+   252
   ],
   "condition-case": [
-   243,
-   250
+   247,
+   254
   ],
   "configure-info-directory": [
-   96
+   97
   ],
   "copy-case-table": [
    55
@@ -330,21 +333,21 @@
    8
   ],
   "copy-sequence": [
-   76,
-   107,
-   248
+   77,
+   108,
+   252
   ],
   "copy-syntax-table": [
-   155
+   157
   ],
   "crates/romacs-vm/evidence/file-name-handler/": [
    49
   ],
   "ctl-x-map": [
-   141
+   142
   ],
   "current-bidi-paragraph-direction": [
-   196
+   198
   ],
   "current-case-table": [
    55
@@ -353,52 +356,55 @@
    3
   ],
   "current-global-map": [
-   101
+   102
   ],
   "current-idle-time": [
-   174
+   176
   ],
   "current-indentation": [
    3
   ],
   "current-load-list": [
-   249
+   253
   ],
   "current-prefix-arg": [
-   73
+   74
+  ],
+  "current-thread": [
+   177
   ],
   "current-time": [
-   93
+   94
   ],
   "current-time-list": [
-   93
+   94
   ],
   "current-time-string": [
-   84
+   85
   ],
   "current-time-zone": [
-   84
+   85
   ],
   "current-window-configuration": [
-   183
+   186
   ],
   "custom-set": [
-   137
+   138
   ],
   "custom-set-faces": [
-   118
+   119
   ],
   "custom-type": [
-   137
+   138
   ],
   "custom-variable-p": [
-   137
+   138
   ],
   "daemon-initialized": [
-   180
+   183
   ],
   "daemonp": [
-   180
+   183
   ],
   "debug-on-error": [
    20
@@ -407,97 +413,97 @@
    12
   ],
   "decode-time": [
-   84
+   85
   ],
   "defalias": [
-   102,
-   105,
-   238,
-   240
-  ],
-  "default-boundp": [
+   103,
+   106,
+   242,
    244
   ],
+  "default-boundp": [
+   248
+  ],
   "default-directory": [
-   95
+   96
   ],
   "default-file-name-coding-system": [
-   264
+   268
   ],
   "default-value": [
-   244,
-   245
+   248,
+   249
   ],
   "defcustom": [
-   137
+   138
   ],
   "defface": [
-   117,
-   120,
+   118,
    121,
-   126,
+   122,
    127,
-   151,
-   268,
-   272
+   128,
+   153,
+   272,
+   276
   ],
   "define-category": [
-   227
+   231
   ],
   "define-ccl-program": [
-   166
+   168
   ],
   "define-charset-internal": [
-   163,
-   224
+   165,
+   228
   ],
   "define-coding-system": [
-   264
+   268
   ],
   "define-coding-system-alias": [
-   225
+   229
   ],
   "define-error": [
-   239
+   243
   ],
   "define-hash-table-test": [
-   133
+   134
   ],
   "defined-colors": [
-   176
+   179
   ],
   "defmacro": [
-   110
+   111
   ],
   "defun": [
-   139,
-   240
+   140,
+   244
   ],
   "defvar": [
    15,
-   138,
    139,
-   140
+   140,
+   141
   ],
   "defvaralias": [
-   234,
-   237
+   238,
+   241
   ],
   "delete": [
-   248
+   252
   ],
   "delete-backward-char": [
-   143
+   144
   ],
   "delete-char": [
-   143
+   144
   ],
   "delete-other-windows-internal": [
-   185,
-   187
+   188,
+   190
   ],
   "ding": [
-   144
+   145
   ],
   "dired": [
    0
@@ -506,57 +512,60 @@
    0
   ],
   "discard-input": [
-   65
+   66
   ],
   "display-color-cells": [
-   176
+   179
   ],
   "display-color-p": [
-   127,
-   176
+   128,
+   179
   ],
   "display-graphic-p": [
-   127,
-   176
+   128,
+   179
   ],
   "display-grayscale-p": [
-   176
+   179
   ],
   "display-mm-height": [
-   176
+   179
   ],
   "display-mm-width": [
-   176
+   179
   ],
   "display-monitor-attributes-list": [
-   176
+   179
   ],
   "display-pixel-height": [
-   176
+   179
   ],
   "display-pixel-width": [
-   176
+   179
   ],
   "display-planes": [
-   176
+   179
+  ],
+  "display-startup-screen": [
+   152
   ],
   "display-visual-class": [
-   176
+   179
   ],
   "display-warning": [
-   237
+   241
   ],
   "do-after-load-evaluation": [
-   249
+   253
   ],
   "documentation-property": [
-   105
+   106
   ],
   "downcase": [
-   260
+   264
   ],
   "downcase_char_code_emacs_compat": [
-   275
+   279
   ],
   "elt": [
    22,
@@ -564,30 +573,30 @@
    24
   ],
   "emacs-build-time": [
-   265
+   269
   ],
   "emacs-lisp-mode": [
-   159
+   161
   ],
   "emacs_downcase_compat": [
-   275
+   279
   ],
   "enable-recursive-minibuffers": [
-   246
+   250
   ],
   "encode-coding-string": [
    12
   ],
   "end-of-line": [
-   143
+   144
   ],
   "eq": [
    58,
-   107
+   108
   ],
   "equal": [
-   134,
-   178
+   135,
+   181
   ],
   "erase-buffer": [
    1
@@ -596,248 +605,251 @@
    11
   ],
   "error-message-string": [
-   145,
    146,
-   229
+   147,
+   233
   ],
   "ert--run-test-internal": [
-   262
+   266
   ],
   "esc-map": [
-   141
+   142
   ],
   "eval": [
-   230,
-   231,
-   241
+   234,
+   235,
+   245
   ],
   "eval-after-load": [
-   249
+   253
   ],
   "eval-buffer": [
-   113
+   114
   ],
   "eval-last-sexp": [
-   145
+   146
   ],
   "eval-when-compile": [
-   231
+   235
   ],
   "excessive-lisp-nesting": [
-   90
+   91
   ],
   "exec-directory": [
-   96
+   97
   ],
   "exec-path": [
-   96
+   97
   ],
   "execute-extended-command": [
    0
   ],
   "execute-kbd-macro": [
-   65
-  ],
-  "executing-kbd-macro": [
-   64,
    66
   ],
+  "executing-kbd-macro": [
+   65,
+   67
+  ],
   "exit-minibuffer": [
-   64
+   65
   ],
   "expand-file-name": [
-   95
+   96
   ],
   "face-attribute": [
-   104,
-   116,
+   105,
    117,
-   120,
-   123,
+   118,
+   121,
    124,
    125,
    126,
-   268,
-   269,
-   272
+   127,
+   272,
+   273,
+   276
   ],
   "face-family": [
-   122,
-   271
+   123,
+   275
   ],
   "face-font": [
-   121,
-   270
-  ],
-  "face-remapping-alist": [
-   116,
-   125,
-   126,
+   122,
    274
   ],
+  "face-remapping-alist": [
+   117,
+   126,
+   127,
+   278
+  ],
   "featurep": [
-   88,
-   177
+   89,
+   180
   ],
   "features": [
-   88,
-   238,
-   251
+   89,
+   242,
+   255
   ],
   "file-accessible-directory-p": [
    31
   ],
   "file-coding-system-alist": [
-   99
+   100
   ],
   "file-directory-p": [
-   95
+   96
   ],
   "file-name-all-completions": [
    8
   ],
   "file-name-handler-alist": [
-   99
+   100
   ],
   "fillarray": [
-   98
+   99
   ],
   "find-auto-coding": [
-   264
+   268
   ],
   "find-composition": [
-   201
+   203
   ],
   "find-composition-internal": [
-   201
+   203
   ],
   "find-file": [
    0,
-   100
+   101
   ],
   "find-file-name-handler": [
    49,
-   257
+   261
   ],
   "find-file-noselect": [
    0
   ],
   "fit-window-to-buffer": [
-   199
+   201
   ],
   "float-output-format": [
-   162
+   164
   ],
   "float-time": [
-   84
+   85
   ],
   "floatp": [
    52
   ],
   "floor": [
-   203
+   205
   ],
   "fontification-functions": [
-   195
+   197
   ],
   "force-mode-line-update": [
-   159
+   161
   ],
   "force-window-update": [
-   233
+   237
   ],
   "format": [
-   70,
-   74,
-   92,
-   94,
-   108,
-   112,
-   256
+   71,
+   75,
+   93,
+   95,
+   109,
+   113,
+   260
   ],
   "format-message": [
-   74,
-   108,
-   256
+   75,
+   109,
+   260
   ],
   "format-mode-line": [
-   148,
-   232
+   149,
+   236
   ],
   "format-time-string": [
-   84
+   85
   ],
   "forward-char": [
-   143
+   144
   ],
   "forward-comment": [
-   156
+   158
   ],
   "frame-char-height": [
-   188
+   191
   ],
   "frame-char-width": [
-   188
+   191
   ],
   "frame-list": [
-   189
+   192
   ],
   "frame-live-p": [
-   188
+   191
   ],
   "frame-native-height": [
-   188
+   191
   ],
   "frame-native-width": [
-   188
+   191
+  ],
+  "frame-notice-user-settings": [
+   152
   ],
   "frame-parameter": [
-   236
+   240
   ],
   "frame-parameters": [
-   236
+   240
   ],
   "frame-pixel-height": [
-   151
+   153
   ],
   "frame-pixel-width": [
-   151
+   153
   ],
   "frame-set-background-mode": [
-   176
+   179
   ],
   "frame-terminal": [
-   189,
-   202
+   192,
+   204
   ],
   "frame-visible-p": [
-   193
+   195
   ],
   "framep": [
-   189
+   192
   ],
   "fset": [
-   102
+   103
   ],
   "funcall": [
-   102,
-   110,
-   132,
-   139,
-   228,
-   230
+   103,
+   111,
+   133,
+   140,
+   232,
+   234
   ],
   "funcall-interactively": [
-   73
+   74
   ],
   "function-documentation": [
-   105
+   106
   ],
   "function-history": [
-   238
+   242
   ],
   "function-key-map": [
-   141
+   142
   ],
   "garbage-collect": [
    32,
@@ -848,59 +860,59 @@
    34
   ],
   "generate-new-buffer": [
-   181
+   184
   ],
   "get": [
-   85,
-   239
+   86,
+   243
   ],
   "get-buffer": [
-   181
+   184
   ],
   "get-buffer-window": [
-   189
+   192
   ],
   "get-char-code-property": [
    41
   ],
   "get-file-buffer": [
-   100
+   101
   ],
   "get-load-suffixes": [
-   75,
-   245,
-   247
+   76,
+   249,
+   251
   ],
   "get-text-property": [
-   209,
-   210
+   213,
+   214
   ],
   "get-variable-watchers": [
-   235
+   239
   ],
   "global-map": [
-   141
+   142
   ],
   "gnutls-available-p": [
-   97
+   98
   ],
   "graphic": [
-   119
+   120
   ],
   "gtk": [
-   119
+   120
   ],
   "handler-bind": [
-   90
+   91
   ],
   "hash-table-keys": [
-   135
+   136
   ],
   "header-line-format": [
-   186
+   189
   ],
   "iconify-frame": [
-   193
+   195
   ],
   "identity": [
    53
@@ -909,58 +921,67 @@
    3
   ],
   "indirect-function": [
-   102
+   103
   ],
   "indirect-variable": [
-   234
+   238
   ],
   "inhibit-file-name-handlers": [
-   257
+   261
   ],
   "inhibit-file-name-operation": [
-   257
+   261
   ],
   "inhibit-mouse-event-check": [
-   73
+   74
   ],
   "inhibit-read-only": [
    1
   ],
+  "inhibit-startup-screen": [
+   152
+  ],
+  "inhibit-x-resources": [
+   152
+  ],
+  "initial-buffer-choice": [
+   152
+  ],
   "input-pending-p": [
-   65
+   66
   ],
   "insert-file-contents": [
-   99
+   100
   ],
   "integer-or-marker-p": [
    52
   ],
   "interactive": [
-   142
+   143
   ],
   "interactive-form": [
-   73
+   74
   ],
   "intern": [
-   211,
-   252,
-   253,
-   254,
-   255
+   215,
+   256,
+   257,
+   258,
+   259
   ],
   "intern-soft": [
-   253,
-   254
+   257,
+   258
   ],
   "internal-delete-indirect-variable": [
-   234
+   238
   ],
   "internal-interpreter-environment": [
-   140
+   141
   ],
   "internal-macroexpand-for-load": [
-   240,
-   241
+   244,
+   245
   ],
   "internal-set-alternative-font-family-alist": [
    16,
@@ -973,115 +994,127 @@
    16
   ],
   "internal-set-lisp-face-attribute": [
-   104
+   105
   ],
   "internal-show-cursor": [
-   233,
-   236
+   237,
+   240
   ],
   "interpreted-function-p": [
    40,
-   242
+   246
   ],
   "invalid-function": [
-   110
+   111
+  ],
+  "invocation-directory": [
+   209
+  ],
+  "invocation-name": [
+   209
   ],
   "jit-lock-function": [
-   195
+   197
   ],
   "kbd": [
-   147
+   148
   ],
   "key-binding": [
-   106,
-   142,
-   147
+   107,
+   143,
+   148
   ],
   "key-description": [
-   82,
-   146
+   83,
+   147
   ],
   "key-translation-map": [
-   141
+   142
   ],
   "kill-all-local-variables": [
    43,
-   158
+   160
   ],
   "kill-buffer": [
-   100,
-   158
+   101,
+   160
+  ],
+  "kill-emacs": [
+   209
+  ],
+  "kill-emacs-hook": [
+   209
   ],
   "kill-local-variable": [
    43,
-   158
+   160
   ],
   "lambda": [
-   138,
    139,
-   228,
-   240,
-   243
+   140,
+   232,
+   244,
+   247
   ],
   "last-coding-system-used": [
-   99,
-   264
+   100,
+   268
   ],
   "last-command": [
-   73
+   74
   ],
   "last-command-event": [
-   142,
-   147
+   143,
+   148
   ],
   "last-nonminibuffer-frame": [
-   189
+   192
   ],
   "latin-extra-code-table": [
-   264
+   268
   ],
   "length": [
-   109
+   110
   ],
   "let": [
-   138,
-   140,
-   245
+   139,
+   141,
+   249
   ],
   "lexical-binding": [
-   87
+   88
   ],
   "libgnutls-version": [
-   97
+   98
   ],
   "libxml-available-p": [
-   169
+   171
   ],
   "libxml-parse-html-region": [
-   169
+   171
   ],
   "libxml-parse-xml-region": [
-   169
+   171
   ],
   "line-move-visual": [
-   197
+   199
   ],
   "line-pixel-height": [
-   197
+   199
   ],
   "lisp-eval-depth-reserve": [
-   90
+   91
   ],
   "list-system-processes": [
-   174
+   176
   ],
   "load": [
-   103,
-   113,
-   140,
-   241,
-   250,
-   251
+   104,
+   114,
+   141,
+   245,
+   254,
+   255
   ],
   "load eval-buffer eval-region": [
    26
@@ -1090,246 +1123,261 @@
    25
   ],
   "load-file-rep-suffixes": [
-   245,
-   247
+   249,
+   251
   ],
   "load-history": [
-   234,
    238,
-   249
+   242,
+   253
   ],
   "load-path": [
-   88,
-   89
+   89,
+   90
   ],
   "load-source-file-function": [
-   103
+   104
   ],
   "load-suffixes": [
-   245
+   249
   ],
   "load-with-code-conversion": [
-   103
+   104
   ],
   "local-variable-p": [
    42
   ],
   "locate-file-internal": [
-   95,
-   257
+   96,
+   261
   ],
   "locate-library": [
-   89,
-   179
+   90,
+   182
+  ],
+  "long-line-optimizations-p": [
+   59
+  ],
+  "long-line-threshold": [
+   59
   ],
   "looking-at": [
-   155,
-   157
+   157,
+   159
   ],
   "looking-back": [
-   157
+   159
   ],
   "lower-frame": [
-   193
+   195
   ],
   "macroexp--pending-eager-loads": [
-   241
+   245
   ],
   "macroexpand": [
-   231,
-   240
+   235,
+   244
+  ],
+  "main-thread": [
+   177
   ],
   "major-mode": [
-   159
+   161
   ],
   "make-bool-vector": [
    19,
    53,
    58,
-   82,
    83,
-   219
+   84,
+   223
   ],
   "make-char-table": [
-   76,
-   219
+   77,
+   223
   ],
   "make-frame-invisible": [
-   193
+   195
   ],
   "make-frame-visible": [
-   193
+   195
   ],
   "make-hash-table": [
-   133
+   134
   ],
   "make-interpreted-closure": [
-   261
+   265
   ],
   "make-local-variable": [
-   158,
-   246
+   160,
+   250
   ],
   "make-marker": [
-   78,
-   131
+   79,
+   132
   ],
   "make-network-process": [
-   174
+   176
   ],
   "make-overlay": [
-   131
+   132
   ],
   "make-pipe-process": [
-   174
+   176
   ],
   "make-process": [
-   174,
-   175
+   176,
+   178
   ],
   "make-serial-process": [
-   174
+   176
   ],
   "make-string": [
-   107,
-   248
+   108,
+   252
   ],
   "make-symbol": [
-   86,
-   252
+   87,
+   256
   ],
   "make-symbolic-link": [
    8
   ],
+  "make-thread": [
+   177
+  ],
   "make-variable-buffer-local": [
-   158,
-   244,
-   246
+   160,
+   248,
+   250
   ],
   "make-vector": [
-   219,
-   220,
-   222
+   223,
+   224,
+   226
   ],
   "makunbound": [
-   245
+   249
   ],
   "map-char-table": [
-   76
+   77
   ],
   "map-keymap": [
-   76
+   77
   ],
   "mapatoms": [
-   253
+   257
   ],
   "mapbacktrace": [
-   262
+   266
   ],
   "mapc": [
    53,
    54
   ],
   "mapcar": [
-   109,
-   111
+   110,
+   112
   ],
   "mapconcat": [
    19
   ],
   "maphash": [
-   132
+   133
   ],
   "markerp": [
    52
   ],
   "match-beginning": [
-   152
-  ],
-  "match-data": [
-   152,
-   153,
    154
   ],
-  "match-data--translate": [
-   152
-  ],
-  "match-end": [
-   152
-  ],
-  "match-string": [
-   72
-  ],
-  "matching-paren": [
+  "match-data": [
+   154,
+   155,
    156
   ],
+  "match-data--translate": [
+   154
+  ],
+  "match-end": [
+   154
+  ],
+  "match-string": [
+   73
+  ],
+  "matching-paren": [
+   158
+  ],
   "max-lisp-eval-depth": [
-   90
+   91
   ],
   "max-mini-window-height": [
-   258
+   262
   ],
   "memory-signal-data": [
-   220
+   224
   ],
   "menu-bar-lines": [
-   159
+   161
   ],
   "menu-bar-mode": [
-   159
+   161
   ],
   "merge_face_ref": [
-   115
+   116
   ],
   "message": [
-   112,
-   144
+   113,
+   145
   ],
   "min": [
-   70
+   71
   ],
   "minibuffer-history": [
-   64
+   65
   ],
   "minibuffer-local-map": [
-   245
+   249
   ],
   "minibuffer-prompt-properties": [
-   64
+   65
   ],
   "minibuffer-quit-recursive-edit": [
-   64
+   65
   ],
   "minibuffer-selected-window": [
-   190
+   193
   ],
   "mode-line-format": [
-   136,
-   148,
-   150,
-   186,
-   232
-  ],
-  "mode-line-in-non-selected-windows": [
-   148
-  ],
-  "mode-line-inactive": [
-   148
-  ],
-  "modify-category-entry": [
-   227
-  ],
-  "modify-frame-parameters": [
+   137,
+   149,
+   151,
+   189,
    236
   ],
+  "mode-line-in-non-selected-windows": [
+   149
+  ],
+  "mode-line-inactive": [
+   149
+  ],
+  "modify-category-entry": [
+   231
+  ],
+  "modify-frame-parameters": [
+   240
+  ],
   "modify-syntax-entry": [
-   155
+   157
   ],
   "move-to-column": [
    3
   ],
-  "multibyte-string-p": [
+  "move-to-window-line": [
    208
+  ],
+  "multibyte-string-p": [
+   212
   ],
   "native-comp-function-p": [
    50
@@ -1338,25 +1386,25 @@
    52
   ],
   "next-line": [
-   197
+   199
   ],
   "next-overlay-change": [
-   128
+   129
   ],
   "next-property-change": [
-   263
+   267
   ],
   "next-single-char-property-change": [
-   263
+   267
   ],
   "normal-top-level-add-to-load-path": [
-   89
+   90
   ],
   "not-unicode-string": [
-   211,
-   212,
-   213,
-   214
+   215,
+   216,
+   217,
+   218
   ],
   "nreverse": [
    15
@@ -1365,249 +1413,249 @@
    52
   ],
   "obarray-make": [
-   255
+   259
   ],
   "obarrayp": [
-   253
+   257
   ],
   "oclosure-type": [
-   261
+   265
   ],
   "optimize-char-table": [
-   164
+   166
   ],
   "overlays-at": [
-   128
+   129
   ],
   "overlays-in": [
-   128,
    129,
-   130
-  ],
-  "overriding-plist-environment": [
-   239
-  ],
-  "overwrite-mode": [
-   168
-  ],
-  "parse-partial-sexp": [
-   156
-  ],
-  "permanent-local": [
-   158
-  ],
-  "permanent-local-hook": [
-   158
-  ],
-  "pgtk": [
-   119
-  ],
-  "pgtk-initialize-window-system": [
-   177
-  ],
-  "point-marker": [
+   130,
    131
   ],
+  "overriding-plist-environment": [
+   243
+  ],
+  "overwrite-mode": [
+   170
+  ],
+  "parse-partial-sexp": [
+   158
+  ],
+  "permanent-local": [
+   160
+  ],
+  "permanent-local-hook": [
+   160
+  ],
+  "pgtk": [
+   120
+  ],
+  "pgtk-initialize-window-system": [
+   180
+  ],
+  "point-marker": [
+   132
+  ],
   "point-max": [
-   130
+   131
   ],
   "pos-visible-in-window-p": [
-   198
+   200
   ],
   "position-symbol": [
    51
   ],
   "posn-at-point": [
-   198
+   200
   ],
   "prefix-numeric-value": [
-   73
+   74
   ],
   "previous-line": [
-   197
+   199
   ],
   "previous-overlay-change": [
-   128
+   129
   ],
   "prin1": [
-   160,
-   161,
    162,
-   202,
-   252
+   163,
+   164,
+   204,
+   256
   ],
   "prin1-to-string": [
    54,
-   70,
-   112,
-   160,
+   71,
+   113,
    162,
-   202,
-   218,
-   252
+   164,
+   204,
+   222,
+   256
   ],
   "princ": [
-   160,
-   161,
    162,
-   218
+   163,
+   164,
+   222
   ],
   "print": [
-   160,
-   161,
-   162
+   162,
+   163,
+   164
   ],
   "print-charset-text-property": [
-   162
+   164
   ],
   "print-circle": [
-   160
+   162
   ],
   "print-continuous-numbering": [
-   162
+   164
   ],
   "print-escape-newlines": [
-   160
+   162
   ],
   "print-gensym": [
-   162
+   164
   ],
   "print-integers-as-characters": [
-   162
+   164
   ],
   "print-length": [
-   160
+   162
   ],
   "print-level": [
-   160
+   162
   ],
   "print-number-table": [
-   162
+   164
   ],
   "print-symbols-bare": [
-   162
+   164
   ],
   "print-unreadable-function": [
-   162
+   164
   ],
   "process-attributes": [
-   174
+   176
   ],
   "propertize": [
-   210,
-   221
+   214,
+   225
   ],
   "provide": [
-   238,
-   249,
-   251
+   242,
+   253,
+   255
   ],
   "purify-flag": [
-   261
+   265
   ],
   "push macroexp-let2 gv-letplace": [
    27
   ],
   "put": [
-   239
+   243
   ],
   "put-text-property": [
-   210
+   214
   ],
   "quit-flag": [
-   66
+   67
   ],
   "raise-frame": [
-   193
+   195
   ],
   "re-search-backward": [
-   155,
-   157
+   157,
+   159
   ],
   "re-search-forward": [
-   155,
-   157
+   157,
+   159
   ],
   "read": [
-   77,
    78,
    79,
    80,
    81,
-   113,
-   209
+   82,
+   114,
+   213
   ],
   "read-char": [
-   65
-  ],
-  "read-char-exclusive": [
-   65
-  ],
-  "read-event": [
-   65
-  ],
-  "read-from-minibuffer": [
-   64,
    66
   ],
+  "read-char-exclusive": [
+   66
+  ],
+  "read-event": [
+   66
+  ],
+  "read-from-minibuffer": [
+   65,
+   67
+  ],
   "read-from-string": [
-   63,
-   67,
+   64,
    68,
    69,
    70,
    71,
-   77,
-   79,
+   72,
+   78,
    80,
    81,
-   113,
-   209,
-   255
+   82,
+   114,
+   213,
+   259
   ],
   "read-key-sequence": [
-   65
+   66
   ],
   "read-key-sequence-vector": [
-   65
+   66
   ],
   "read-positioning-symbols": [
    51
   ],
   "read-string": [
-   64,
-   66
+   65,
+   67
   ],
   "real-this-command": [
-   73
+   74
   ],
   "recent-keys": [
-   65
+   66
   ],
   "recenter": [
-   192
+   208
   ],
   "record": [
-   219
+   223
   ],
   "recordp": [
    29
   ],
   "recursive-edit": [
-   65
+   66
   ],
   "redisplay": [
-   144,
-   194
+   145,
+   196
   ],
   "redisplay-adhoc-scroll-in-resize-mini-windows": [
-   258
+   262
   ],
   "register-ccl-program": [
-   166
+   168
   ],
   "remove-variable-watcher": [
-   235
+   239
   ],
   "replace-match": [
    44,
@@ -1616,197 +1664,203 @@
    47
   ],
   "replace-region-contents": [
-   173
+   175
   ],
   "replace_range": [
    44
   ],
   "require": [
-   88,
-   238,
-   249,
-   250,
-   251
+   89,
+   242,
+   253,
+   254,
+   255
   ],
   "reset": [
-   124,
-   267
+   125,
+   271
   ],
   "resize-mini-windows": [
-   258
+   262
   ],
   "reverse": [
    58,
-   219
+   223
   ],
   "romacs--host-input": [
-   66
+   67
   ],
   "romacs--oclosure-type": [
-   261
+   265
   ],
   "romacs--read-host-event": [
-   66
+   67
   ],
   "romacs--replace-range": [
    44
   ],
   "romacs-display": [
-   176
+   179
   ],
   "romacs-gui-install-command": [
-   101
+   102
   ],
   "romacs-unsafe-coding": [
-   264
+   268
   ],
   "round": [
-   203
+   205
   ],
   "run-with-idle-timer": [
-   174
+   176
   ],
   "save-buffer": [
-   100
+   101
   ],
   "save-window-excursion": [
-   183
+   186
   ],
   "scan-lists": [
-   156
+   158
   ],
   "scan-sexps": [
-   156
+   158
   ],
   "scroll-conservatively": [
-   149
+   150
+  ],
+  "scroll-down": [
+   208
   ],
   "scroll-down-aggressively": [
-   167
+   169
   ],
   "scroll-margin": [
-   149
+   150
   ],
   "scroll-step": [
-   149
+   150
+  ],
+  "scroll-up": [
+   208
   ],
   "scroll-up-aggressively": [
-   167
+   169
   ],
   "secure-hash": [
-   223
+   227
   ],
   "secure-hash-algorithms": [
-   223
+   227
   ],
   "select-safe-coding-system": [
-   264
+   268
   ],
   "select-safe-coding-system-function": [
-   99
+   100
   ],
   "select-safe-coding-system-interactively": [
-   264
+   268
   ],
   "selected-frame": [
-   151,
-   189,
-   202
+   153,
+   192,
+   204
   ],
   "selected-window": [
-   151
+   153
   ],
   "self-insert-command": [
-   143,
    144,
-   168
+   145,
+   170
   ],
   "sequencep": [
    52
   ],
   "set": [
-   85,
-   245
+   86,
+   249
   ],
   "set-auto-coding": [
    11,
-   264
+   268
   ],
   "set-buffer-redisplay": [
-   235
+   239
   ],
   "set-case-table": [
    55
   ],
   "set-char-table-range": [
-   76
+   77
   ],
   "set-charset-priority": [
-   224
+   228
   ],
   "set-coding-system-priority": [
-   225,
-   264
+   229,
+   268
   ],
   "set-default": [
-   245
+   249
   ],
   "set-face-attribute": [
-   104,
-   120,
+   105,
    121,
    122,
-   269,
-   270,
-   271,
-   273
+   123,
+   273,
+   274,
+   275,
+   277
   ],
   "set-file-times": [
    8
   ],
   "set-match-data": [
-   72
+   73
   ],
   "set-process-thread": [
-   174
+   176
   ],
   "set-standard-case-table current-case-table": [
    37
   ],
   "set-syntax-table": [
-   155
+   157
   ],
   "set-visited-file-modtime": [
-   93,
-   99
+   94,
+   100
   ],
   "set-window-buffer": [
-   151,
-   182
+   153,
+   185
   ],
   "set-window-configuration": [
-   183
+   186
   ],
   "set-window-hscroll": [
-   191,
-   200
+   194,
+   202
   ],
   "set-window-new-total": [
-   184
+   187
   ],
   "set-window-next-buffers": [
-   183
+   186
   ],
   "set-window-prev-buffers": [
-   183
+   186
   ],
   "set-window-start": [
-   149,
-   204
+   150,
+   206
   ],
   "set-window-vscroll": [
-   136,
-   148
+   137,
+   149
   ],
   "setcar": [
    15
@@ -1815,117 +1869,117 @@
    15
   ],
   "setf": [
-   243
+   247
   ],
   "setplist": [
-   239
+   243
   ],
   "setq": [
-   245
+   249
   ],
   "signal": [
-   250
+   254
   ],
   "signal-hook-function": [
-   90
+   91
   ],
   "skip-chars-backward": [
-   276
+   280
   ],
   "skip-chars-forward": [
-   276
+   280
   ],
   "sleep-for": [
-   174
+   176
   ],
   "sort": [
    18
   ],
   "source_string": [
-   212,
-   213
+   216,
+   217
   ],
   "special-event-map": [
-   141
+   142
   ],
   "special-variable-p": [
-   87,
-   245
+   88,
+   249
   ],
   "split-window-internal": [
-   206
+   210
   ],
   "standard-case-table": [
    38
   ],
   "standard-input": [
-   77
+   78
   ],
   "standard-output": [
-   161
+   163
   ],
   "standard-syntax-table": [
-   155
+   157
   ],
   "standard-value": [
-   137
+   138
   ],
   "store-substring": [
-   91
+   92
   ],
   "string-glyph-split": [
-   201
+   203
   ],
   "string-match": [
-   155,
-   157
+   157,
+   159
   ],
   "string-match-p": [
-   157
+   159
   ],
   "string-replace": [
-   108
+   109
   ],
   "string-to-number": [
-   74
+   75
   ],
   "string-trim": [
-   108
+   109
   ],
   "subr-x": [
-   135
+   136
   ],
   "subrp": [
    50,
-   111
+   112
   ],
   "subst-char-in-region": [
-   168
+   170
   ],
   "substring": [
-   107,
-   248
+   108,
+   252
   ],
   "supports": [
-   119
+   120
   ],
   "switch-to-buffer": [
-   159
+   161
   ],
   "symbol-function": [
-   102,
-   111
+   103,
+   112
   ],
   "symbol-name": [
-   254
+   258
   ],
   "symbol-plist": [
    15,
-   239
+   243
   ],
   "symbol-value": [
    21,
-   245
+   249
   ],
   "symbol-with-pos-p": [
    51
@@ -1934,108 +1988,108 @@
    51
   ],
   "syntax-class-to-char": [
-   156
+   158
   ],
   "syntax-table": [
-   155
+   157
   ],
   "tab-width": [
    3
   ],
   "terminal-list": [
-   189
+   192
   ],
   "terminal-live-p": [
-   189,
-   226
+   192,
+   230
   ],
   "terminal-parameter": [
-   226
+   230
   ],
   "terpri": [
-   161
+   163
   ],
   "test-completion": [
-   259,
-   260
+   263,
+   264
   ],
   "text-properties-at": [
-   80,
-   210,
-   221
+   81,
+   214,
+   225
   ],
   "text-quoting-style": [
-   256
-  ],
-  "theme-face": [
-   118
-  ],
-  "this-command": [
-   73
-  ],
-  "this-command-keys": [
-   65,
-   142,
-   147
-  ],
-  "this-original-command": [
-   73
-  ],
-  "transient": [
-   114
-  ],
-  "translate-region": [
-   171
-  ],
-  "translate-region-internal": [
-   168,
-   171
-  ],
-  "treesit-available-p": [
-   170
-  ],
-  "truncate": [
-   203
-  ],
-  "truncate-lines": [
-   159
-  ],
-  "try-completion": [
-   259,
    260
   ],
+  "theme-face": [
+   119
+  ],
+  "this-command": [
+   74
+  ],
+  "this-command-keys": [
+   66,
+   143,
+   148
+  ],
+  "this-original-command": [
+   74
+  ],
+  "transient": [
+   115
+  ],
+  "translate-region": [
+   173
+  ],
+  "translate-region-internal": [
+   170,
+   173
+  ],
+  "treesit-available-p": [
+   172
+  ],
+  "truncate": [
+   205
+  ],
+  "truncate-lines": [
+   161
+  ],
+  "try-completion": [
+   263,
+   264
+  ],
   "tty-color-alist": [
-   176
+   179
   ],
   "tty-top-frame": [
-   189
+   192
   ],
   "undefined": [
-   65,
-   144
+   66,
+   145
   ],
   "undo-limit": [
-   246
+   250
   ],
   "unibyte-string": [
-   208
+   212
   ],
   "unicode-property-table-internal": [
    41
   ],
   "unify-charset": [
-   224
+   228
   ],
   "unintern": [
-   253,
-   254
+   257,
+   258
   ],
   "unread-command-events": [
-   64,
-   66
+   65,
+   67
   ],
   "upcase": [
-   260
+   264
   ],
   "upcase-initials": [
    55
@@ -2049,131 +2103,131 @@
    57
   ],
   "usize": [
-   85
+   86
   ],
   "value<": [
    18
   ],
   "vconcat": [
-   219
+   223
   ],
   "vector": [
-   107
+   108
   ],
   "vector-or-char-table-p": [
    52
   ],
   "verify-visited-file-modtime": [
-   99
+   100
   ],
   "vertical-motion": [
-   197
-  ],
-  "visible-frame-list": [
-   193
-  ],
-  "visited-file-modtime": [
-   93,
-   99
-  ],
-  "window-bottom-divider-width": [
-   186
-  ],
-  "window-buffer": [
-   151
-  ],
-  "window-combination-limit": [
-   189
-  ],
-  "window-configuration-frame": [
-   183
-  ],
-  "window-configuration-p": [
-   183
-  ],
-  "window-end": [
-   205
-  ],
-  "window-header-line-height": [
-   186
-  ],
-  "window-hscroll": [
-   191,
-   200
-  ],
-  "window-list": [
-   189
-  ],
-  "window-mode-line-height": [
-   186
-  ],
-  "window-next-buffers": [
-   183
-  ],
-  "window-persistent-parameters": [
-   245
-  ],
-  "window-point": [
-   151,
-   182
-  ],
-  "window-prev-buffers": [
-   183
-  ],
-  "window-resize-apply-total": [
-   184
-  ],
-  "window-right-divider-width": [
-   186
-  ],
-  "window-scroll-bar-height": [
-   186
-  ],
-  "window-scroll-bar-width": [
-   186
-  ],
-  "window-start": [
-   149,
-   151,
-   182,
-   187
-  ],
-  "window-system": [
-   177
-  ],
-  "window-tab-line-height": [
-   186
-  ],
-  "window-text-pixel-size": [
    199
   ],
-  "window-total-height": [
-   184
+  "visible-frame-list": [
+   195
   ],
-  "window-vscroll": [
-   136,
-   148
+  "visited-file-modtime": [
+   94,
+   100
   ],
-  "with-eval-after-load": [
+  "window-bottom-divider-width": [
+   189
+  ],
+  "window-buffer": [
+   153
+  ],
+  "window-combination-limit": [
+   192
+  ],
+  "window-configuration-frame": [
+   186
+  ],
+  "window-configuration-p": [
+   186
+  ],
+  "window-end": [
+   207
+  ],
+  "window-header-line-height": [
+   189
+  ],
+  "window-hscroll": [
+   194,
+   202
+  ],
+  "window-list": [
+   192
+  ],
+  "window-mode-line-height": [
+   189
+  ],
+  "window-next-buffers": [
+   186
+  ],
+  "window-persistent-parameters": [
    249
   ],
+  "window-point": [
+   153,
+   185
+  ],
+  "window-prev-buffers": [
+   186
+  ],
+  "window-resize-apply-total": [
+   187
+  ],
+  "window-right-divider-width": [
+   189
+  ],
+  "window-scroll-bar-height": [
+   189
+  ],
+  "window-scroll-bar-width": [
+   189
+  ],
+  "window-start": [
+   150,
+   153,
+   185,
+   190
+  ],
+  "window-system": [
+   180
+  ],
+  "window-tab-line-height": [
+   189
+  ],
+  "window-text-pixel-size": [
+   201
+  ],
+  "window-total-height": [
+   187
+  ],
+  "window-vscroll": [
+   137,
+   149
+  ],
+  "with-eval-after-load": [
+   253
+  ],
   "with-output-to-string": [
-   218
+   222
   ],
   "with-temp-buffer": [
-   181
+   184
   ],
   "write-char": [
-   161
+   163
   ],
   "write-region": [
-   99
+   100
   ],
   "wrong-number-of-arguments": [
-   111
+   112
   ],
   "wrong-type-argument": [
-   229
+   233
   ]
  },
  "rows": [
@@ -3100,6 +3154,22 @@
    "symbols_derived": false
   },
   {
+   "id": "VM2-LONGLINE1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "Long-line optimizations",
+   "gnu": "xdisp.c narrows display and font-lock around a line longer than `long-line-threshold` and sets the buffer's flag that `long-line-optimizations-p` reads",
+   "romacs": "Romacs's redisplay has none: `long-line-optimizations-p` is always nil, so `line-move`, font-lock and jit-lock take their ordinary paths on any line length",
+   "why": "**User-observable** only as speed on very long lines; Lisp sees GNU's answer for a buffer without long lines",
+   "symbols": [
+    "long-line-optimizations-p",
+    "long-line-threshold"
+   ],
+   "symbols_derived": false
+  },
+  {
    "id": "VM2-BUFNAME1",
    "source": "DIVERGENCES.md",
    "section": "Observable by a package",
@@ -3720,8 +3790,8 @@
    "planned": false,
    "mechanism": "`format` conversion language and numeric arguments",
    "gnu": "GNU parses positional `N$`, flags, width and precision and accepts floating and integer/character conversions (`src/editfns.c:3611-3653,3729-3730,3829-3845`).",
-   "romacs": "The shared formatter supports those fields and `%s`, `%S`, `%c`, `%d`, `%i`, `%b`, `%B`, `%o`, `%x`, `%X`, `%e`, `%f`, `%g` and `%%`, including exact bignum integer output and float coercion/rounding. Width, precision and field-number components above 2^20 refuse; text-property propagation and GNU string-identity behavior remain unsupported.",
-   "why": "Live GNU comparisons are in `tests/format_numeric.rs`. Locale/quoting capability limits remain VM2-FORMAT-MESSAGE1; this is not full GNU formatting parity.",
+   "romacs": "The shared formatter supports those fields and `%s`, `%S`, `%c`, `%d`, `%i`, `%b`, `%B`, `%o`, `%x`, `%X`, `%e`, `%f`, `%g` and `%%`, including exact bignum integer output and float coercion/rounding. Width, precision and field-number components above 2^20 refuse; GNU string-identity behavior remains unsupported. Text properties follow styled_format: the format string's move to where its characters land, and each `%s` string argument's start at its text (after left padding) with runs ending at its end extended over the field; `%S` of a propertized string prints it as `prin1` does.",
+   "why": "Live GNU comparisons are in `tests/format_numeric.rs` and `tests/format_properties.rs`. Locale/quoting capability limits remain VM2-FORMAT-MESSAGE1; this is not full GNU formatting parity.",
    "symbols": [
     "format"
    ],
@@ -3802,7 +3872,7 @@
    "planned": false,
    "mechanism": "`insert-file-contents` and `write-region` subset",
    "gnu": "`fileio.c:4057` `insert-file-contents` consults file name handlers (`Ffind_file_name_handler`, `file-name-handler-alist`; `-Q` ships jka-compr, epa and tramp entries), decodes through `coding-system-for-read` or detection (`detect_coding`, `set-auto-coding-function`, `file-coding-system-alist`: CRLF/CR EOLs, BOM, latin-1 and every other coding system), supports REPLACE (`t`/`if-regular`), unibyte buffers, devices and FIFOs, runs `before-`/`after-change-functions` for a non-visiting insertion, calls `format-decode` and `after-insert-file-set-coding`, and on VISIT also records modtime, `SAVE_MODIFF`, the file's truename and `buffer-file-coding-system`, and unlocks. `fileio.c:5461` `write-region` likewise consults handlers, runs `write-region-annotate-functions`/`buffer-file-format` annotations and `write-region-post-annotation-function`, chooses and ENCODES through `coding-system-for-write`/`buffer-file-coding-system`/`select-safe-coding-system-function` (EOL conversion included), asks before overwriting when MUSTBENEW is non-nil and not `excl`, locks LOCKNAME, and on VISIT records modtime and `SAVE_MODIFF`. It returns nil; an interactive `Wrote`/`Added to`/`Updated` message is selected by APPEND and suppressed when VISIT is non-nil but neither t nor a string; batch suppresses the message (`fileio.c:5859`)",
-   "romacs": "VM2 (`crates/romacs-vm/src/prims/fileio.rs`, `insert_coding.rs`) reads through GNU's decision and decoding (`insert_coding.rs`, a T2 state machine): `coding-system-for-read` (including `auto-save-coding`), else `set-auto-coding-function` (given the name ENCODE_FILE makes through `file-name-coding-system` or `default-file-name-coding-system`) on the read bytes made the empty buffer's unibyte text with undo off and restored on every exit (decide_coding_unwind), or on the head and tail sample in the ` *code-converting-work*` buffer when the buffer has text, then `file-coding-system-alist` through `find-operation-coding-system` including function entries, CHECK_CODING_SYSTEM with lazy define forms, and raw-text for unibyte buffers; a visited missing file stores `coding-system-for-read` in `buffer-file-coding-system`, and visiting by a for-unibyte coding makes the buffer unibyte. Decoding transcribes coding.c `detect_coding` for undecided types (NUL, 8-bit and EOL scan, `prefer-utf-8`, the inhibit flags, the priority walk with GNU's ISO-2022, UTF-8, UTF-16, charset, Shift-JIS, Big5 and emacs-mule detectors (`latin-extra-code-table` and the ISO categories' safe charsets included; `tests/coding_detection.rs`), `no-conversion` for NUL-only text) and the utf-8-auto category, then the native string decoder (UTF-8, UTF-16, charset and raw-text types, and decoding of Shift-JIS and Big5 as decode_coding_sjis and decode_coding_big5 do) with decode_coding_gap's EOL naming; inserted text keeps the decoder's `charset` properties. After the visit bookkeeping it calls `after-insert-file-set-coding`, then `format-decode` and `after-insert-file-functions` with `inhibit-point-motion-hooks` and `inhibit-modification-hooks` bound and undo off, range-checking each count as `inserted-chars`, and restores or adjusts the undo list as GNU does; `buffer-substring` (refusing a unibyte range that carries text properties) and `save-excursion` (VM2-EXCUR1) work in unibyte buffers for that Lisp. Bootstrap regime: the bare registry sets up no coding category, so detection finds nothing in 8-bit text there and the raw decoder's raw bytes are refused; the GUI workspace defines GNU's UTF-8 and Latin-1 systems (VM2-WORKSPACE-CODING); GNU's UTF-8 reading is recorded in the loadup regime (`real_ert_load.rs`); writing through GNU's `choose_write_coding_system` (`prims/write_coding.rs`, a T2 state machine: `coding-system-for-write` with `coding-system-require-warning`, a local `buffer-file-coding-system`, `file-coding-system-alist` through `find-operation-coding-system` including function entries, the buffer's value, raw-text for unibyte buffers and raw-text-type codings, `select-safe-coding-system-function`, EOL inheritance from the default value, lazy define forms, all inside one save-restriction extent that a nil START widens) and encoding the region or string with the native string encoder (UTF-8, UTF-16, charset, raw-text and undecided types, EOL conversion), with `last-coding-system-used` set to the choice; `buffer-file-coding-system` is GNU's permanent per-buffer C variable. Bootstrap regime: before mule-conf.el defines `raw-text` (the bare VM), syms_of_coding's `no-conversion` stands for it (it encodes byte-identically to raw-text-unix), so a nil choice reports `no-conversion` and naming a system the bare registry lacks, such as `utf-8`, signals `coding-system-error`. The loadup regime does not run `set-locale-environment`, so the default `buffer-file-coding-system` stays nil where GNU batch has the locale's `utf-8-unix`; the write choices recorded against pinned GNU coincide; BEG/END offsets (integers and integral floats), APPEND `t` and numeric offsets, VISIT `t`/string (sets `buffer-file-name`, EQ to an already-expanded argument), `excl`, the `file-missing`/`file-already-exists`/`permission-denied`/`file-error` conditions and data, `buffer-read-only`/`inhibit-read-only` (including the point's inhibit text property, sticky read-only insertion boundaries, selective inhibition lists and category properties), `deactivate-mark`, and visiting a missing file (visit completes, then `file-missing`). Output devices and FIFOs with a reader are supported; `/dev/null` succeeds and `/dev/full` signals `file-error` / `Write error`. `write-region-inhibit-fsync` is a forwarded boolean defaulting to t; nil requests fsync with EINTR retry and EINVAL ignored. A FIFO with no reader fails closed at nonblocking open with ENXIO instead of waiting as GNU does; output remains nonblocking and write/poll fails with ETIMEDOUT after a one-second deadline instead of GNU's C-g-interruptible indefinite write. A failure can leave a partially written destination, but never completes VISIT metadata or reports success; explicit close errors also signal `Write error`. `write-region` returns nil for every supported VISIT mode. REPLACE of a non-empty accessible region follows fileio.c's decoding path (4684-4880): the whole range decoded, only the text between the longest common head and tail (on character boundaries) deleted and replaced as two ordinary changes with their hooks, the insertion's after-change seen with point after the new text, point kept as a marker and spread over the new text when it was inside the replaced text (restore_window_points, bug#19161; window points other than point are not adjusted, and point is restored after a read-only refusal of the insertion but not on a non-local exit from a change hook), read-only text checked only in the ranges it changes, an undo entry recorded for the deletion and for the insertion, a middle holding raw-byte characters refused before anything changes, and a file that is the buffer's head truncating it (`tests/insert_file_contents_hooks.rs` `insert_file_contents_replace_matches_gnu`); GNU's shortcut for codings that need no decoding (4452-4672) reaches the same text but signals the insertion with point before it; VM2 always takes the decoding path. Filesystem open/status errors precede the remaining refusals; MUSTBENEW confirmation on a directory signals `file-error` / `File is a directory`, while `excl` preserves EEXIST. Everything else SIGNALS `(error \"VM2 ... is unsupported\")` before the buffer or the file changes: any non-nil `file-name-handler-alist`, detection that reaches a CCL-category system (the one detector VM2 lacks), a decision for a coding type VM2 has no decoder for (ISO-2022 and its EUC variants, emacs-mule, CCL; the refusal names the system chosen), raw bytes for a multibyte buffer (whose text cannot hold eight-bit characters), post-read conversion and decoding translation tables, REPLACE of a visited missing file, non-regular input files, before-change/first-change and text-property modification/insertion hooks on non-visiting reads with a positive requested range (including empty-file reads without explicit END) and after-change hooks on non-visiting nonempty insertion, write annotations, `selective-display` t for a buffer write, a write coding the native encoder lacks (ISO-2022, CCL, SJIS, Big5 and emacs-mule types, translation tables, pre-write conversion, BOM-pair detection; these signal before the file is opened, even for ASCII text that `encode-coding-string` passes through), MUSTBENEW other than `excl` on an existing file. Successful visits and writes now record native nanosecond modtime and byte size. `visited-file-modtime`, `set-visited-file-modtime` and `verify-visited-file-modtime` implement unknown/missing flags, stat-only verification with the size guard, and explicit timestamps disabling the size guard. File handlers still refuse. `current-time-list` defaults to nil and selects dotted nanosecond ticks versus a four-component list; legacy dotted HIGH/LOW/USEC and ignored extra components are supported, and finite float conversion floors the exact binary value. VM2 timestamp conversion does not consume radix-read bignums, and output ticks beyond fixnum range explicitly refuse (VM2-TIME1). Failed writes retain the old timestamp rather than GNU's post-failure fstat update. Native `MODIFF`/`CHARS_MODIFF`/`SAVE_MODIFF` counters now back `buffer-modified-p`, both modified-state setters and both tick functions; successful VISIT reads/writes establish SAVE_MODIFF. Text, byte, fast-append and ordinary property edits advance counters; inverse edits back to identical bytes stay modified. Internal yank property-only normalization does not yet independently advance MODIFF. Native undo recording/replay is absent; real GNU undo can clear modified through its `(t . visited-modtime)` save marker, rather than text equality. Native visits retain truename and device/inode for validated alias lookup; `get-file-buffer` itself intentionally preserves GNU expanded-path-only matching. NOT modelled and NOT signalled: `insert-file-contents`' `buffer-file-coding-system` bookkeeping, file locks (LOCKNAME is type-checked only), and interactive GNU `Wrote`/`Added to`/`Updated` echo. Packages observing the echo area or messages see no GNU write message, including VISIT=t/string; batch silence and nil return are correct. Names expand as `expand-file-name` does, against the current buffer's `default-directory`; an expansion that would call a file name handler is refused (VM2-PATH2). The C variables both DEFUNs read are now VM2 specials with GNU's C values (`forwarded.rs`; `default-directory`, `buffer-file-name`, `buffer-read-only`, `buffer-file-format`, `buffer-file-coding-system` per-buffer); GNU's `-Q` image fills `file-name-handler-alist`, `file-coding-system-alist` and `set-auto-coding-function` from Lisp, VM2 keeps nil. The old byte-buffer-only VM2 `insert-file-contents` (`Primitive::InsertFile`, any arity-1 call, no coding, no errors) is gone. Corpus: `tools/primh/fileio-specs`, recorded from the pinned oracle; every non-PASS row is one of the refusals above or the bare-registry regime, pinned",
+   "romacs": "VM2 (`crates/romacs-vm/src/prims/fileio.rs`, `insert_coding.rs`) reads through GNU's decision and decoding (`insert_coding.rs`, a T2 state machine): `coding-system-for-read` (including `auto-save-coding`), else `set-auto-coding-function` (given the name ENCODE_FILE makes through `file-name-coding-system` or `default-file-name-coding-system`) on the read bytes made the empty buffer's unibyte text with undo off and restored on every exit (decide_coding_unwind), or on the head and tail sample in the ` *code-converting-work*` buffer when the buffer has text, then `file-coding-system-alist` through `find-operation-coding-system` including function entries, CHECK_CODING_SYSTEM with lazy define forms, and raw-text for unibyte buffers; a visited missing file stores `coding-system-for-read` in `buffer-file-coding-system`, and visiting by a for-unibyte coding makes the buffer unibyte. Decoding transcribes coding.c `detect_coding` for undecided types (NUL, 8-bit and EOL scan, `prefer-utf-8`, the inhibit flags, the priority walk with GNU's ISO-2022, UTF-8, UTF-16, charset, Shift-JIS, Big5 and emacs-mule detectors (`latin-extra-code-table` and the ISO categories' safe charsets included; `tests/coding_detection.rs`), `no-conversion` for NUL-only text) and the utf-8-auto category, then the native string decoder (UTF-8, UTF-16, charset and raw-text types, and decoding of Shift-JIS and Big5 as decode_coding_sjis and decode_coding_big5 do) with decode_coding_gap's EOL naming; inserted text keeps the decoder's `charset` properties. After the visit bookkeeping it calls `after-insert-file-set-coding`, then `format-decode` and `after-insert-file-functions` with `inhibit-point-motion-hooks` and `inhibit-modification-hooks` bound and undo off, range-checking each count as `inserted-chars`, and restores or adjusts the undo list as GNU does; `buffer-substring` (refusing a unibyte range that carries text properties) and `save-excursion` work in unibyte buffers for that Lisp. Bootstrap regime: the bare registry sets up no coding category, so detection finds nothing in 8-bit text there and the raw decoder's raw bytes are refused; the GUI workspace defines GNU's UTF-8 and Latin-1 systems (VM2-WORKSPACE-CODING); GNU's UTF-8 reading is recorded in the loadup regime (`real_ert_load.rs`); writing through GNU's `choose_write_coding_system` (`prims/write_coding.rs`, a T2 state machine: `coding-system-for-write` with `coding-system-require-warning`, a local `buffer-file-coding-system`, `file-coding-system-alist` through `find-operation-coding-system` including function entries, the buffer's value, raw-text for unibyte buffers and raw-text-type codings, `select-safe-coding-system-function`, EOL inheritance from the default value, lazy define forms, all inside one save-restriction extent that a nil START widens) and encoding the region or string with the native string encoder (UTF-8, UTF-16, charset, raw-text and undecided types, EOL conversion), with `last-coding-system-used` set to the choice; `buffer-file-coding-system` is GNU's permanent per-buffer C variable. Bootstrap regime: before mule-conf.el defines `raw-text` (the bare VM), syms_of_coding's `no-conversion` stands for it (it encodes byte-identically to raw-text-unix), so a nil choice reports `no-conversion` and naming a system the bare registry lacks, such as `utf-8`, signals `coding-system-error`. The loadup regime does not run `set-locale-environment`, so the default `buffer-file-coding-system` stays nil where GNU batch has the locale's `utf-8-unix`; the write choices recorded against pinned GNU coincide; BEG/END offsets (integers and integral floats), APPEND `t` and numeric offsets, VISIT `t`/string (sets `buffer-file-name`, EQ to an already-expanded argument), `excl`, the `file-missing`/`file-already-exists`/`permission-denied`/`file-error` conditions and data, `buffer-read-only`/`inhibit-read-only` (including the point's inhibit text property, sticky read-only insertion boundaries, selective inhibition lists and category properties), `deactivate-mark`, and visiting a missing file (visit completes, then `file-missing`). Output devices and FIFOs with a reader are supported; `/dev/null` succeeds and `/dev/full` signals `file-error` / `Write error`. `write-region-inhibit-fsync` is a forwarded boolean defaulting to t; nil requests fsync with EINTR retry and EINVAL ignored. A FIFO with no reader fails closed at nonblocking open with ENXIO instead of waiting as GNU does; output remains nonblocking and write/poll fails with ETIMEDOUT after a one-second deadline instead of GNU's C-g-interruptible indefinite write. A failure can leave a partially written destination, but never completes VISIT metadata or reports success; explicit close errors also signal `Write error`. `write-region` returns nil for every supported VISIT mode. REPLACE of a non-empty accessible region follows fileio.c's decoding path (4684-4880): the whole range decoded, only the text between the longest common head and tail (on character boundaries) deleted and replaced as two ordinary changes with their hooks, the insertion's after-change seen with point after the new text, point kept as a marker and spread over the new text when it was inside the replaced text (restore_window_points, bug#19161; window points other than point are not adjusted, and point is restored after a read-only refusal of the insertion but not on a non-local exit from a change hook), read-only text checked only in the ranges it changes, an undo entry recorded for the deletion and for the insertion, a middle holding raw-byte characters refused before anything changes, and a file that is the buffer's head truncating it (`tests/insert_file_contents_hooks.rs` `insert_file_contents_replace_matches_gnu`); GNU's shortcut for codings that need no decoding (4452-4672) reaches the same text but signals the insertion with point before it; VM2 always takes the decoding path. Filesystem open/status errors precede the remaining refusals; MUSTBENEW confirmation on a directory signals `file-error` / `File is a directory`, while `excl` preserves EEXIST. Everything else SIGNALS `(error \"VM2 ... is unsupported\")` before the buffer or the file changes: any non-nil `file-name-handler-alist`, detection that reaches a CCL-category system (the one detector VM2 lacks), a decision for a coding type VM2 has no decoder for (ISO-2022 and its EUC variants, emacs-mule, CCL; the refusal names the system chosen), raw bytes for a multibyte buffer (whose text cannot hold eight-bit characters), post-read conversion and decoding translation tables, REPLACE of a visited missing file, non-regular input files, before-change/first-change and text-property modification/insertion hooks on non-visiting reads with a positive requested range (including empty-file reads without explicit END) and after-change hooks on non-visiting nonempty insertion, write annotations, `selective-display` t for a buffer write, a write coding the native encoder lacks (ISO-2022, CCL, SJIS, Big5 and emacs-mule types, translation tables, pre-write conversion, BOM-pair detection; these signal before the file is opened, even for ASCII text that `encode-coding-string` passes through), MUSTBENEW other than `excl` on an existing file. Successful visits and writes now record native nanosecond modtime and byte size. `visited-file-modtime`, `set-visited-file-modtime` and `verify-visited-file-modtime` implement unknown/missing flags, stat-only verification with the size guard, and explicit timestamps disabling the size guard. File handlers still refuse. `current-time-list` defaults to nil and selects dotted nanosecond ticks versus a four-component list; legacy dotted HIGH/LOW/USEC and ignored extra components are supported, and finite float conversion floors the exact binary value. VM2 timestamp conversion does not consume radix-read bignums, and output ticks beyond fixnum range explicitly refuse (VM2-TIME1). Failed writes retain the old timestamp rather than GNU's post-failure fstat update. Native `MODIFF`/`CHARS_MODIFF`/`SAVE_MODIFF` counters now back `buffer-modified-p`, both modified-state setters and both tick functions; successful VISIT reads/writes establish SAVE_MODIFF. Text, byte, fast-append and ordinary property edits advance counters; inverse edits back to identical bytes stay modified. Internal yank property-only normalization does not yet independently advance MODIFF. Native undo recording/replay is absent; real GNU undo can clear modified through its `(t . visited-modtime)` save marker, rather than text equality. Native visits retain truename and device/inode for validated alias lookup; `get-file-buffer` itself intentionally preserves GNU expanded-path-only matching. NOT modelled and NOT signalled: `insert-file-contents`' `buffer-file-coding-system` bookkeeping, file locks (LOCKNAME is type-checked only), and interactive GNU `Wrote`/`Added to`/`Updated` echo. Packages observing the echo area or messages see no GNU write message, including VISIT=t/string; batch silence and nil return are correct. Names expand as `expand-file-name` does, against the current buffer's `default-directory`; an expansion that would call a file name handler is refused (VM2-PATH2). The C variables both DEFUNs read are now VM2 specials with GNU's C values (`forwarded.rs`; `default-directory`, `buffer-file-name`, `buffer-read-only`, `buffer-file-format`, `buffer-file-coding-system` per-buffer); GNU's `-Q` image fills `file-name-handler-alist`, `file-coding-system-alist` and `set-auto-coding-function` from Lisp, VM2 keeps nil. The old byte-buffer-only VM2 `insert-file-contents` (`Primitive::InsertFile`, any arity-1 call, no coding, no errors) is gone. Corpus: `tools/primh/fileio-specs`, recorded from the pinned oracle; every non-PASS row is one of the refusals above or the bare-registry regime, pinned",
    "why": "**User-observable**: input coding/handler refusals and the output deadline remain narrower than GNU. **Package-observable**: `find-file`-style Lisp that relies on detection of non-UTF-8 files, CRLF files, compression/remote handlers fails loudly. Packages can observe narrower timestamp forms, failed-write freshness, undo absence, internal property ticks and missing interactive write messages. FIFO no-reader ENXIO and the one-second write deadline are observable to both users and Lisp error handlers; GNU waits interruptibly instead. Plain supported UTF-8 visits match GNU bytes; writes choose and encode as pinned GNU does (`crates/romacs-vm/tests/real_ert_load.rs` `write_region_coding_matches_gnu`).",
    "symbols": [
     "insert-file-contents",
@@ -3989,7 +4059,7 @@
    "planned": false,
    "mechanism": "a closure is not a sequence in VM2",
    "gnu": "A closure is a vector-like object in GNU 32.0.50, so `length`, `append` and `mapcar` accept it as a sequence: `(length (lambda (x) x))` is 5 for the byte-compiled closure and 3 for the interpreted one (both regimes recorded; `src/fns.c:154` at pin `45b0f7699df`, `Flength` counts a `CLOSUREP` object's slots).",
-   "romacs": "Ordinary VM2 closures remain opaque objects: all three signal `wrong-type-argument`. Explicit `make-interpreted-closure` values and marked OClosures expose their supported metadata slots; this does not make ordinary closures sequences. Pinned in the bulk `core` corpus as `length/0071`, `append/1041`, `mapcar/0257` (class `VALUE`; the probes catch the type error as -99 so the closure is never printed).",
+   "romacs": "Ordinary VM2 closures remain opaque objects: all three signal `wrong-type-argument`. Explicit `make-interpreted-closure` values and marked OClosures expose their supported metadata slots; this does not make ordinary closures sequences. `aref` of slot 2, the environment, answers for a closure made where no lexical binding is visible (a top-level `defun` or `lambda`): GNU's is then the dialect's alone, `(t)` or nil, which nadvice reads to run an advised command's computed interactive form (`tests/closure_environment.rs`); under a `let` it still signals, as do slots 0 and 1. Pinned in the bulk `core` corpus as `length/0071`, `append/1041`, `mapcar/0257` (class `VALUE`; the probes catch the type error as -99 so the closure is never printed).",
    "why": "**Package-observable, rarely:** only code that measures or walks a function object's slots (OClosure internals, some debuggers/`cl-print`) sees the difference. General closure sequence operations remain out of scope. OClosure uses the explicit metadata boundary described in VM2-OCLOSURE1.",
    "symbols": [
     "length",
@@ -4654,8 +4724,8 @@
    "planned": false,
    "mechanism": "VM2 mode-line/vscroll subset",
    "gnu": "`src/xdisp.c:display_mode_element` (`:28458`) and `decode_mode_spec` (`:29429`): buffer-local formats per window, propertized strings with their own text properties, conditionals, field widths/precision, risk filtering, every percent escape over the C state (coding systems, frame name, recursion depth, processes, save point); `src/window.c:Fwindow_vscroll/Fset_window_vscroll` support character units, numeric scroll values and preserve-vscroll",
-   "romacs": "Tier B evaluates each window's format with that window's buffer current, its window point installed as buffer point (`redisplay_window`, `xdisp.c:20620-20641`), and the window temporarily selected (`display_mode_lines`, `xdisp.c:28114-28156`); the real selection is rooted across collecting `:eval` forms, and buffer point and selection are restored after evaluation, including error/throw/quit, before choosing the active/inactive face (same-buffer split oracle `crates/romacs-vm-gui/evidence/tierb/gnu/point-context.txt`): buffer-local formats, `:eval`/`:propertize` (face symbol or first face of a face list), conditionals, integer field widths and precisions, risky-variable filtering, `*too-deep*`/`*invalid*`, and `%b %f %* %+ %& %l %c %C %p %P %o %q %i %I %n %m %M %@ %- %%` exactly as GNU 32.0.50 formats them (oracle `crates/romacs-vm-gui/evidence/tierb/gnu/mode-line.txt`). Without the C state GNU reads: `%z` is `-` and `%Z` is `-` plus `eol-mnemonic-undecided` (GNU: the buffer's coding mnemonic, `UUU:` for utf-8-unix); `%F` is `Emacs` (GNU tty `F1`, GUI frame title); `%[ %]` are empty (no recursive edit); `%s` is `no process`; `%e` is empty, which is GNU's answer on a `SYSTEM_MALLOC` build such as glibc GNU/Linux even while `memory-full` is non-nil (`xdisp.c` `decode_mode_spec` `case 'e'`; oracle `crates/romacs-vm-gui/evidence/tierb/gnu/standard-head.txt`), where a gmalloc build shows `!MEM FULL! `; `save_modiff` stays 0 (no `set-buffer-modified-p`/save), so any edit shows `**` until the buffer dies; text-property changes (`put-text-property`, `remove-text-properties`) do not count as modifications, where GNU's `modify_text_properties` (textprop.c) bumps MODIFF when a property actually changes, so a buffer changed only in its properties shows `--` here and `**` in GNU; `mode-name` has no buffer.c default `\"Fundamental\"`. Assigned `%m`/`%f` values and `%Z`'s explicit EOL mnemonic accept both multibyte and unibyte strings; unibyte high bytes are projected to octal glyph text before field-width/precision handling (not GNU's raw-byte character counting). A string's own text properties and anonymous face plists are not projected onto the band. GNU stops producing band glyphs at the window's last visible column (`xdisp.c:30105`); VM2 builds band text up to four times the frame's columns and the painter clips it at the window edge, so the visible band is the same, and both keep evaluating `:eval` elements past the edge. Field widths and integer limits wrap to a C `int` as GNU's do (`xdisp.c:28663`, `:28879`; 32.0.50 transcript `crates/romacs-vm-gui/evidence/tierb/gnu/field-wrap.txt`: a limit of 2305843009213693951 is -1, a one-column precision, so the next element stays visible), then VM2 clamps them to 2^20 columns; the clamp only changes text beyond the band's four frame widths, which neither side shows. A format string's literal run is selected by columns (TAB `tab-width`, other control characters 2, GNU `c_string_width`) and then counts its characters toward precision and padding, as `store_mode_line_string` does; `%`-spec results and literal strings truncate and pad by characters (`crates/romacs-vm-gui/evidence/tierb/gnu/control-width.txt`). A control character that fits is painted `^X`; GNU's painted form of a TAB in a mode line has not been compared. Band faces follow GNU's `CURRENT_MODE_LINE_ACTIVE_FACE_ID`: the selected window draws `mode-line-active`, others `mode-line-inactive` while `mode-line-in-non-selected-windows` is non-nil; because faces.el (which defines `mode-line-active` inheriting `mode-line`) is not loaded, an undefined `mode-line-active`/`mode-line-inactive` falls back to `mode-line`. Vscroll requires explicit pixelwise non-nil and a nonnegative u32 integer; other units, floats, negative clamp and fourth setter argument are rejected. `format-mode-line` (`Fformat_mode_line`, `xdisp.c:29058`) runs the same engine for GNU's string targets (`MODE_LINE_STRING`, `MODE_LINE_NOPROP`, `src/display.rs` `format_mode_line`): GNU's argument checks, the empty unibyte answer for a nil FORMAT or in batch, WINDOW selected and BUFFER current while it runs, no clipping and no `^X` forms, `%-` as `--`, each piece's `mode-line-elt-no` (GNU's global element count, restarted by a nested call) and its face: the `:propertize` face with FACE appended, else FACE, where FACE t is the window's `mode-line-active`/`mode-line-inactive` and an integer drops all properties (oracle: `tests/format_mode_line.rs` against pinned GNU in batch and, recorded by `tests/fixtures/format-mode-line-tty.py`, on an 80x24 terminal frame). As in the band, a string element's own properties are not projected and `:propertize` contributes only its face (its `help-echo`, `mouse-face`, `local-map` and other properties are dropped). Batch is the Lisp variable `noninteractive` (GNU reads its C flag, which binding the variable does not change). Neighbouring pieces with equal properties share one interval, where GNU's concatenation keeps them apart; `equal-including-properties` cannot tell",
-   "why": "**Package-observable**: `%z`/`%Z`/`%F`/`%m` text, the modified flag after a save, and band faces from string properties differ; `format-mode-line` strings lack the non-face properties above. Escapes, constructs and per-window evaluation follow GNU within the restrictions above",
+   "romacs": "Tier B evaluates each window's format with that window's buffer current, its window point installed as buffer point (`redisplay_window`, `xdisp.c:20620-20641`), and the window temporarily selected (`display_mode_lines`, `xdisp.c:28114-28156`); the real selection is rooted across collecting `:eval` forms, and buffer point and selection are restored after evaluation, including error/throw/quit, before choosing the active/inactive face (same-buffer split oracle `crates/romacs-vm-gui/evidence/tierb/gnu/point-context.txt`): buffer-local formats, `:eval`/`:propertize` (face symbol or first face of a face list), conditionals, integer field widths and precisions, risky-variable filtering, `*too-deep*`/`*invalid*`, and `%b %f %* %+ %& %l %c %C %p %P %o %q %i %I %n %m %M %@ %- %%` exactly as GNU 32.0.50 formats them (oracle `crates/romacs-vm-gui/evidence/tierb/gnu/mode-line.txt`). Without the C state GNU reads: `%z` is `-` and `%Z` is `-` plus `eol-mnemonic-undecided` (GNU: the buffer's coding mnemonic, `UUU:` for utf-8-unix); `%F` is `Emacs` (GNU tty `F1`, GUI frame title); `%[ %]` are empty (no recursive edit); `%s` is `no process`; `%e` is empty, which is GNU's answer on a `SYSTEM_MALLOC` build such as glibc GNU/Linux even while `memory-full` is non-nil (`xdisp.c` `decode_mode_spec` `case 'e'`; oracle `crates/romacs-vm-gui/evidence/tierb/gnu/standard-head.txt`), where a gmalloc build shows `!MEM FULL! `; `save_modiff` stays 0 (no `set-buffer-modified-p`/save), so any edit shows `**` until the buffer dies; text-property changes (`put-text-property`, `remove-text-properties`) do not count as modifications, where GNU's `modify_text_properties` (textprop.c) bumps MODIFF when a property actually changes, so a buffer changed only in its properties shows `--` here and `**` in GNU; `mode-name` has no buffer.c default `\"Fundamental\"`. Assigned `%m`/`%f` values and `%Z`'s explicit EOL mnemonic accept both multibyte and unibyte strings; unibyte high bytes are projected to octal glyph text before field-width/precision handling (not GNU's raw-byte character counting). A string element's own `face` (a symbol, or a face list's first symbol) shows where its `:propertize` gives none, as GNU merges PROPS onto a non-risky string's properties; its other properties and anonymous face plists are not projected onto the band. GNU stops producing band glyphs at the window's last visible column (`xdisp.c:30105`); VM2 builds band text up to four times the frame's columns and the painter clips it at the window edge, so the visible band is the same, and both keep evaluating `:eval` elements past the edge. Field widths and integer limits wrap to a C `int` as GNU's do (`xdisp.c:28663`, `:28879`; 32.0.50 transcript `crates/romacs-vm-gui/evidence/tierb/gnu/field-wrap.txt`: a limit of 2305843009213693951 is -1, a one-column precision, so the next element stays visible), then VM2 clamps them to 2^20 columns; the clamp only changes text beyond the band's four frame widths, which neither side shows. A format string's literal run is selected by columns (TAB `tab-width`, other control characters 2, GNU `c_string_width`) and then counts its characters toward precision and padding, as `store_mode_line_string` does; `%`-spec results and literal strings truncate and pad by characters (`crates/romacs-vm-gui/evidence/tierb/gnu/control-width.txt`). A control character that fits is painted `^X`; GNU's painted form of a TAB in a mode line has not been compared. Band faces follow GNU's `CURRENT_MODE_LINE_ACTIVE_FACE_ID`: the selected window draws `mode-line-active`, others `mode-line-inactive` while `mode-line-in-non-selected-windows` is non-nil; because faces.el (which defines `mode-line-active` inheriting `mode-line`) is not loaded, an undefined `mode-line-active`/`mode-line-inactive` falls back to `mode-line`. Vscroll requires explicit pixelwise non-nil and a nonnegative u32 integer; other units, floats, negative clamp and fourth setter argument are rejected. `format-mode-line` (`Fformat_mode_line`, `xdisp.c:29058`) runs the same engine for GNU's string targets (`MODE_LINE_STRING`, `MODE_LINE_NOPROP`, `src/display.rs` `format_mode_line`): GNU's argument checks, the empty unibyte answer for a nil FORMAT or in batch, WINDOW selected and BUFFER current while it runs, no clipping and no `^X` forms, `%-` as `--`, each piece's `mode-line-elt-no` (GNU's global element count, restarted by a nested call) and its face: the `:propertize` face with FACE appended, else FACE, where FACE t is the window's `mode-line-active`/`mode-line-inactive` and an integer drops all properties (oracle: `tests/format_mode_line.rs` against pinned GNU in batch and, recorded by `tests/fixtures/format-mode-line-tty.py`, on an 80x24 terminal frame). As in the band, a string element contributes only its own `face` and `:propertize` only its face (its `help-echo`, `mouse-face`, `local-map` and other properties are dropped). Batch is the Lisp variable `noninteractive` (GNU reads its C flag, which binding the variable does not change). Neighbouring pieces with equal properties share one interval, where GNU's concatenation keeps them apart; `equal-including-properties` cannot tell",
+   "why": "**Package-observable**: `%z`/`%Z`/`%F`/`%m` text, the modified flag after a save, and band faces from a string's anonymous face plists differ; `format-mode-line` strings lack the non-face properties above. Escapes, constructs and per-window evaluation follow GNU within the restrictions above",
    "symbols": [
     "mode-line-format",
     "set-window-vscroll",
@@ -4693,10 +4763,29 @@
    "planned": false,
    "mechanism": "romacs GUI's default mode-line value",
    "gnu": "`lisp/bindings.el` sets `mode-line-format` to `mode-line-front-space`, `mode-line-mule-info`, `mode-line-modified`, `mode-line-remote`, frame id, `mode-line-buffer-identification`, `mode-line-position`, `mode-line-modes`, `mode-line-misc-info`, `mode-line-end-spaces` (GNU -Q `*scratch*`: `-UUU:--- F1  *scratch*      All L4     (Lisp Interaction ElDoc) ---`, `crates/romacs-vm-gui/evidence/tierb/gnu/default-mode-line.txt`)",
-   "romacs": "When `mode-line-format` has a default binding after loadup, the GUI preserves that value, including nil and an unchanged pre-existing object; nil suppresses the mode line. Only when the default is void (the default launch loads no GNU Lisp; `--loadup` can stop before establishing the default), `crates/romacs-vm-gui/src/startup.rs` (`workspace`, `STAND_IN_MODE_LINE`) gives each workspace buffer its own value built from the same %-constructs in the same order -- `- %z%Z%*%+%@  %12b   %p L%l` -- labelled on screen `[stand-in: no bindings.el]` and followed by that buffer's tag (`Rum / VM2`, `evaluated at startup`); there is no mode-name/minor-mode section. `--gnu-lisp` sets none",
+   "romacs": "When `mode-line-format` has a default binding after loadup, the GUI preserves that value, including nil and an unchanged pre-existing object; nil suppresses the mode line. `mode-line-format` is buffer.c's DEFVAR_PER_BUFFER, local wherever it is set, with buffer.c's default `\"%-\"`. Only when the default is still that (the default launch loads no GNU Lisp; `--loadup` can stop before bindings.el replaces it), `crates/romacs-vm-gui/src/startup.rs` (`STAND_IN_MODE_LINE`) builds a value from the same %-constructs in the same order -- `- %z%Z%*%+%@  %12b   %p L%l` -- labelled on screen `[stand-in: no bindings.el]` and followed by a tag: the default launch's `workspace` gives each of its buffers its own copy (`Rum / VM`, `evaluated at startup`); `--loadup` makes it the default value, tagged `Rum / VM`, before the user's init, which may replace it; there is no mode-name/minor-mode section. `--gnu-lisp` shows buffer.c's `\"%-\"`",
    "why": "**Visible to the user and to Lisp** (`mode-line-format`'s value). bindings.el:203 needs the C primitive `propertize`",
    "symbols": [
     "mode-line-format"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "GUI-STARTUP1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`--loadup` startup screen and the user's frame settings",
+   "gnu": "startup.el `command-line-1` (`:3008-3125`) shows `*GNU Emacs*` (`fancy-startup-screen`, `:2269`) unless `inhibit-startup-screen`, `initial-buffer-choice`, `noninteractive`, `daemonp` or `inhibit-x-resources` (set by `-Q`) prevents it, fitted in another window beside visited buffers; `frame-notice-user-settings` (`frame.el:460`) applies `initial-frame-alist` and `default-frame-alist` to the window system's initial frame between `term-setup-hook` and `window-setup-hook`",
+   "romacs": "`rlisp/romacs-gui-loadup.el` runs GNU's order, choice and inhibitors and shows `*Romacs*`, a read-only buffer with the launch's status (`crates/romacs-vm-gui/src/startup.rs` `startup_screen`), where GNU shows `*GNU Emacs*`, in `command-line-default-directory` and with GNU's `splash-screen-keymap` (q kills it); its concise form is the same text. Romacs's one frame is the host's window, with no `frame-initial-frame`, so `frame-notice-user-settings` takes GNU's path for a frame that already exists: every parameter is stored and `frame-parameter` reads it back, except that the host window owns its geometry and font, so `width`, `height`, `left`, `top`, `fullscreen` and `font` neither resize nor move it, and `frame-parameter` answers the frame's own `width`, `height` and `font` (VM2-WIN5)",
+   "why": "**Visible to the user** (the screen's text, frame geometry) and to Lisp as the screen buffer's name and text. Order, buffers, *scratch*, hooks and stored parameters match pinned GNU (pgtk) on `crates/romacs-vm-gui/tests/fixtures/startup-order-gui.txt`",
+   "symbols": [
+    "initial-buffer-choice",
+    "inhibit-startup-screen",
+    "inhibit-x-resources",
+    "frame-notice-user-settings",
+    "display-startup-screen"
    ],
    "symbols_derived": false
   },
@@ -4750,7 +4839,7 @@
    "mechanism": "binary-buffer `match-data` default representation",
    "gnu": "markers, as for Unicode buffers",
    "romacs": "integers for binary buffers; Unicode buffers retain default markers; explicit integer mode appends either buffer as GNU does",
-   "why": "binary storage has no marker/anchor substrate; **package-observable**, live-GNU transcript and chosen representation in the VM2 ledger",
+   "why": "unibyte buffers hold markers (VM2-EXCUR1, withdrawn), but their match data is not yet kept in them; **package-observable**, live-GNU transcript and chosen representation in the VM2 ledger",
    "symbols": [
     "match-data"
    ],
@@ -5136,8 +5225,8 @@
    "planned": false,
    "mechanism": "Subprocesses, waits and timers",
    "gnu": "process.c and callproc.c: process objects (`make-process`, `make-pipe-process`, `make-network-process` for every socket kind, `make-serial-process`), filters and sentinels run by `wait_reading_process_output` in every wait (`accept-process-output`, `sleep-for`, `sit-for`, and the command loop's idle wait), which also runs ordinary and idle timers (keyboard.c `timer_check`); SIGCHLD wakes the wait; `call-process` reads its output incrementally, with DISPLAY redisplaying",
-   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP stream servers and clients only, refusing datagrams, local sockets, `:local`/`:remote` addresses, numeric families, non-numeric service names, `:tls-parameters` and `:use-external-socket`; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does; `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop redisplays after any timer ran and otherwise blocks until the next timer, key or native wake. It reads no process output: filters and sentinels run only inside Lisp waits. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
-   "why": "**Package-observable:** asynchronous network code beyond TCP and serial ports cannot run; batch runs have no keyboard wait, so idle timers never run there and `current-idle-time` is nil (keyboard.c:4949 answers nil whenever Emacs is not idle); GUI sessions see process output only while Lisp waits",
+   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP stream servers and clients only, refusing datagrams, local sockets, `:local`/`:remote` addresses, numeric families, non-numeric service names, `:tls-parameters` and `:use-external-socket`; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does; `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
+   "why": "**Package-observable:** asynchronous network code beyond TCP and serial ports cannot run; batch runs have no keyboard wait, so idle timers never run there and `current-idle-time` is nil (keyboard.c:4949 answers nil whenever Emacs is not idle); process filters and sentinels run while the GUI waits for a key, never during a command except inside its Lisp waits, as GNU's",
    "symbols": [
     "current-idle-time",
     "run-with-idle-timer",
@@ -5152,6 +5241,23 @@
     "list-system-processes",
     "set-process-thread",
     "sleep-for"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-THREAD1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "Lisp threads",
+   "gnu": "The pinned GNU is built with threads (`THREADS_ENABLED`): `make-thread`, mutexes and condition variables (`src/thread.c`), `(featurep 'threads)`, and `main-thread` the main thread's object; a build without threads keeps `main-thread` and binds it to nil (`thread.c:1307-1312`), and url-http.el keys its connection pool on it (`url-http-find-free-connection`)",
+   "romacs": "VM2 has no thread objects and does not provide `threads`, so `main-thread` is the threadless build's nil: url-http keys connections by host and port, as GNU without threads does",
+   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread primitives' absence. `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
+   "symbols": [
+    "main-thread",
+    "current-thread",
+    "make-thread"
    ],
    "symbols_derived": false
   },
@@ -5364,8 +5470,8 @@
    "planned": false,
    "mechanism": "`window-mode-line-height`, `window-header-line-height`, decoration widths",
    "gnu": "GNU `window_wants_mode_line` (`src/window.c:6037`) reads WINDOW's buffer's `mode-line-format`, whose C default is `\"%-\"` (`src/buffer.c`), and `window_wants_header_line` likewise reads `header-line-format`; a header line is one line tall",
-   "romacs": "VM2 answers from what its display draws: a mode line one canonical line tall from `mode-line-format`'s current value cell (as `display.rs` `build_mode_line` reads it), honouring the window's `mode-line-format` parameter and `none`; no header line, tab line, scroll bars or dividers (all 0). A bare VM2 has no default `mode-line-format`, so its windows want no mode line until `bindings.el` sets one. Pins `window-mode-line-height/0006`, `/0011`, `window-header-line-height/0010` (VALUE)",
-   "why": "**Package-observable**: body sizes computed from these heights match what VM2 draws, not what GNU would draw, in a bare VM and with a header line",
+   "romacs": "VM2 answers from what its display draws: a mode line one canonical line tall from `mode-line-format`'s current value cell (as `display.rs` `build_mode_line` reads it), honouring the window's `mode-line-format` parameter and `none`; a header line as GNU's `window_wants_header_line` decides it, from the window's `header-line-format` parameter or its buffer's value, one canonical line tall, or once a host lays the frame out the height the host paints it (`tests/header_line.rs` against pinned GNU, `romacs-vm-gui` `measure.rs` against the paint); no tab line, scroll bars or dividers (all 0). `mode-line-format` has buffer.c's default `\"%-\"`, so a bare VM2's windows want a mode line as GNU's do. Pin `window-header-line-height/0010` (VALUE: the backend line's pixels, VM2-WIN5)",
+   "why": "**Package-observable**: body sizes computed from these heights match what VM2 draws, not what GNU would draw, in a bare VM",
    "symbols": [
     "window-mode-line-height",
     "window-header-line-height",
@@ -5467,21 +5573,6 @@
    "symbols": [
     "set-window-hscroll",
     "window-hscroll"
-   ],
-   "symbols_derived": false
-  },
-  {
-   "id": "VM2-FRAME-RECENTER",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "Visual recentering is unsupported",
-   "gnu": "GNU `recenter` (`src/window.c:7219`) uses visual motion, window start, vscroll and redisplay",
-   "romacs": "Unregistered: direct calls and funcall signal `(void-function recenter)`",
-   "why": "Package-observable refusal, not a successful no-op or newline approximation",
-   "symbols": [
-    "recenter"
    ],
    "symbols_derived": false
   },
@@ -5598,7 +5689,7 @@
    "planned": false,
    "mechanism": "`window-text-pixel-size` and `buffer-text-pixel-size`",
    "gnu": "GNU `window_text_pixel_size` (`src/xdisp.c:11742`) runs the display iterator (`move_it_to`, `src/xdisp.c:10928`) over the window's buffer: on batch's initial terminal frame in columns and lines (`src/term.c` `produce_glyphs`), on a GUI frame with its fonts and images",
-   "romacs": "Until a host lays the frame out, which batch never does, VM2 runs a port of that iterator for a terminal frame (`src/prim/leaf/display_motion.rs`, `display_elements.rs`): `char-width-table` widths, tabs, control and escape sequences, display tables, `nobreak-char-display`, `glyphless-char-display`, invisibility and ellipses, `display` strings, spaces (`:width`, `:align-to`, `:relative-width`), margin and fringe specs, overlay strings and their `window` property, line and wrap prefixes, truncation, continuation and `word-wrap`, with GNU's FROM, TO, X-LIMIT, Y-LIMIT, MODE-LINES and IGNORE-LINE-AT-END, in units of the frame's character size. VM2 draws no tab or header line, so MODE-LINES adds only the mode line (VM2-WIN3). It signals `VM2 window-text-pixel-size ... is unsupported` for a `(when FORM ...)` display spec with a FORM other than t or nil (the primitive cannot evaluate Lisp), `(min-width ...)`, physical width units, the `composition` property, `selective-display`, `display-line-numbers`, a horizontally scrolled window, `word-wrap-by-category`, an image line prefix, a unibyte buffer, a unibyte string with non-ASCII bytes under `unibyte-display-via-language-environment`, and strings from two overlays that share a start: GNU orders those by when its overlay tree last inserted each (`move-overlay`, or insertion before a front-advance start, reinserts), which VM2 does not record. Automatic compositions are not applied (VM2-WIDTH1). After a host has applied a layout, the same motion runs over the host's layout (`src/prim/leaf/display_hosted.rs`): within the call the VM hands the attached `LayoutHost` the window's buffer text and the faces its snapshot paints, and the host answers each character's advance and row height from the code that paints it (`romacs-layout2` `LayoutEngine::measure`), presenting nothing. The GUI host does not lay text on a cell grid: fallback and proportional fonts advance per glyph, faces have their own sizes, and a row is as tall as its tallest face and at least the default's. It paints buffer characters, a TAB as a stretch to GNU's window-system tab stop (`tab-width` spaces of the TAB's face, the next stop when the nearer is less than a space away, `gui_produce_glyphs`), which the motion measures from the host's space advance (`romacs_layout_input::tab_advance`, shared with the painter), and another control character as its escape (`^X`, octal beyond ASCII, in `escape-glyph`); it continues a row where its next glyph would pass the text area less the `\\` glyph, a TAB that does not fit continuing from the area's edge, and truncates at the `$` glyph, hiding the rest, as GNU's iterator does on a frame without fringes, but never at a word boundary (with `word-wrap` it still continues at the edge), and it shows no display, invisible, overlay or prefix strings, so there, over an escape, and on a continued row under `word-wrap`, the answer is refused, not guessed: `VM2 window-text-pixel-size of a continued or truncated line in a displayed window is unsupported`, likewise `of text the host does not lay out as GNU displays it`, `of a line or wrap prefix`, `of a face the host does not paint` (a face other than nil, a symbol or a one-element list of one, `font-lock-face`, an overlay `face`), `with a display table` and `from a vertical offset`. The last visible x is the text area less the continuation or truncation glyph's advance, as on a GUI frame without fringes. MODE-LINES adds the host's band: the last painted band's height, else the mode-line face's (GNU's CURRENT_MODE_LINE_HEIGHT). With no host layout attached a displayed window signals `VM2 window-text-pixel-size in a displayed window is unsupported` (`buffer-text-pixel-size` names itself)",
+   "romacs": "Until a host lays the frame out, which batch never does, VM2 runs a port of that iterator for a terminal frame (`src/prim/leaf/display_motion.rs`, `display_elements.rs`): `char-width-table` widths, tabs, control and escape sequences, display tables, `nobreak-char-display`, `glyphless-char-display`, invisibility and ellipses, `display` strings, spaces (`:width`, `:align-to`, `:relative-width`), margin and fringe specs, overlay strings and their `window` property, line and wrap prefixes, truncation, continuation and `word-wrap`, with GNU's FROM, TO, X-LIMIT, Y-LIMIT, MODE-LINES and IGNORE-LINE-AT-END, in units of the frame's character size. VM2 draws no tab line, so MODE-LINES adds only the header and mode lines (VM2-WIN3). It signals `VM2 window-text-pixel-size ... is unsupported` for a `(when FORM ...)` display spec with a FORM other than t or nil (the primitive cannot evaluate Lisp), `(min-width ...)`, physical width units, the `composition` property, `selective-display`, `display-line-numbers`, a horizontally scrolled window, `word-wrap-by-category`, an image line prefix, a unibyte buffer, a unibyte string with non-ASCII bytes under `unibyte-display-via-language-environment`, and strings from two overlays that share a start: GNU orders those by when its overlay tree last inserted each (`move-overlay`, or insertion before a front-advance start, reinserts), which VM2 does not record. Automatic compositions are not applied (VM2-WIDTH1). After a host has applied a layout, the same motion runs over the host's layout (`src/prim/leaf/display_hosted.rs`): within the call the VM hands the attached `LayoutHost` the window's buffer text and the faces its snapshot paints, and the host answers each character's advance and row height from the code that paints it (`romacs-layout2` `LayoutEngine::measure`), presenting nothing. The GUI host does not lay text on a cell grid: fallback and proportional fonts advance per glyph, faces have their own sizes, and a row is as tall as its tallest face and at least the default's. It paints buffer characters, a TAB as a stretch to GNU's window-system tab stop (`tab-width` spaces of the TAB's face, the next stop when the nearer is less than a space away, `gui_produce_glyphs`), which the motion measures from the host's space advance (`romacs_layout_input::tab_advance`, shared with the painter), and another control character as its escape (`^X`, octal beyond ASCII, in `escape-glyph`); it continues a row where its next glyph would pass the text area less the `\\` glyph, a TAB that does not fit continuing from the area's edge, and truncates at the `$` glyph, hiding the rest, as GNU's iterator does on a frame without fringes, but never at a word boundary (with `word-wrap` it still continues at the edge), and it shows no display, invisible, overlay or prefix strings, so there, over an escape, and on a continued row under `word-wrap`, the answer is refused, not guessed: `VM2 window-text-pixel-size of a continued or truncated line in a displayed window is unsupported`, likewise `of text the host does not lay out as GNU displays it`, `of a line or wrap prefix`, `of a face the host does not paint` (a face other than nil, a symbol or a one-element list of one, `font-lock-face`, an overlay `face`), `with a display table` and `from a vertical offset`. The last visible x is the text area less the continuation or truncation glyph's advance, as on a GUI frame without fringes. MODE-LINES adds the host's band: the last painted band's height, else the mode-line face's (GNU's CURRENT_MODE_LINE_HEIGHT). With no host layout attached a displayed window signals `VM2 window-text-pixel-size in a displayed window is unsupported` (`buffer-text-pixel-size` names itself)",
    "why": "**Package-observable** in the GUI only for the refused forms; keymap-popup's and `fit-window-to-buffer`'s plain popups size from the host's layout. `crates/romacs-vm-gui/src/measure.rs` compares the hosted answers with the host's painted glyphs, TAB stretches, cursors, rows and band for text in several fonts, sizes, widths and `tab-width`s, and each refusal with a twin that answers; `harness/lines_live.py` checks every painted glyph of a visited gnu-lisp/ file with TABs at its GNU column; `harness/popup_live.py` fits a hermes keymap popup in a native session and judges it by the painted scene. In batch, `tests/window_text_pixel_size.rs` compares 70 primitive cases, the refusal of overlays sharing a start (with GNU's answer for a moved overlay), window.el's side-window fitting and a keymap-popup popup with pinned GNU",
    "symbols": [
     "window-text-pixel-size",
@@ -5697,14 +5788,51 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`window-end` refuses a non-nil UPDATE",
-   "gnu": "GNU recomputes an accurate end when UPDATE is non-nil and the window is outdated, running display routines for that window (`src/window.c:1854-1862` onward, guarded by `windows_or_buffers_changed",
+   "mechanism": "`window-end` with UPDATE in a displayed window",
+   "gnu": "GNU `Fwindow_end` (`src/window.c:1782`) returns Z less the recorded `window_end_pos`, unless UPDATE is non-nil, the end may be stale (`windows_or_buffers_changed",
    "romacs": "",
    "why": "!w->window_end_valid",
    "symbols": [
     "window-end"
    ],
-   "symbols_derived": true
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-SCROLL1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`recenter`, `scroll-up`, `scroll-down`, `move-to-window-line`",
+   "gnu": "GNU `Frecenter` (`src/window.c:7219`), `scroll_command` and `Fmove_to_window_line` (`src/window.c:7502`) move by screen lines on a terminal frame (`window_scroll_line_based`, `vmotion`) and by pixels on a window-system frame (`window_scroll_pixel_based`, `move_it_vertically_backward`), honouring `scroll-margin`, `next-screen-context-lines` and `scroll-preserve-screen-position`",
+   "romacs": "VM2 runs GNU's line-based paths on every frame, as Lisp over `vertical-motion` (`rlisp/vm/window-scroll.el`, entered from `src/prims/window_scroll.rs`), which moves over the host's layout once a host lays the frame out; the pixel paths give the same window start where a window's rows share the frame's line height. vscroll is reset in pixels (VM2 keeps it in pixels only); `recenter-redisplay` `tty` redraws nothing, a window-system frame being no tty",
+   "why": "**Package-observable** only for rows of differing heights (a taller face or image row), where GNU's pixel arithmetic and VM2's line counts can choose different starts; `window-old-point` is not adjusted. `tests/window_scroll.rs` compares the four commands, their errors, `scroll-margin` and `scroll-preserve-screen-position` with pinned GNU in batch; `romacs-vm-gui` `measure.rs` checks M->'s `(recenter -3)` and `scroll-up` against the paint",
+   "symbols": [
+    "recenter",
+    "scroll-up",
+    "scroll-down",
+    "move-to-window-line"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-BATCH2",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`emacs --batch` command line and `kill-emacs`",
+   "gnu": "GNU emacs.c takes `--batch`, startup.el `command-line` the leading options (`-Q`, `-q`, `--no-site-file`, ...), then `command-line-1` runs `-L`, `-l`, `-f`, `--eval` and the rest and `(kill-emacs t)` ends the session (`lisp/startup.el:1748-1751`); an uncaught error goes to `command-error-function`, whose batch default prints it and exits 255. `Fkill_emacs` (`src/emacs.c:2953`) runs `kill-emacs-hook` (safe_run_hooks in batch), stuffs a string ARG as terminal input, re-executes Emacs for RESTART, and exits with an integer ARG's code, else success",
+   "romacs": "`romacs-vm-gui [-Q] --batch ARGS...` runs the GNU-loadup chain `--loadup` shares with the batch package runner, on GNU's 80x25 batch frame, takes the same leading options, then GNU's own `command-line-1` over the rest, then `(kill-emacs t)`; errors reach `command-error-function` as keyboard.c cmd_error sends them. The rest of `command-line` is not run: no `site-run-file` load and no package activation (a batch session loads no init file either). `--batch RLISP_DIRECTORY` stays Romacs's stdin test runner. `kill-emacs` (`src/prims/emacs.rs`) runs the hook as safe_run_hooks in every session, exits 0 for a string ARG, refuses RESTART, and without a session host (a library embedder, `romacs-gnu-ert`) signals `VM2 kill-emacs without a session host is unsupported`; only the batch entry attaches one so far, so the GUI quits through its own `romacs-gui-quit`. `romacs-gnu-ert --invocation EMACS` names the executable its tests spawn as `invocation-name`. `-nw` (a terminal session) is not a batch command line and stays refused",
+   "why": "**Package-observable**: a spawned batch child starts in about 10 s (the chain from source) where GNU's takes 0.1 s, so a caller with a short deadline fails (gnosis waits 15 s for model preparation); `kill-emacs` in the GUI signals. `crates/romacs-vm-gui/tests/batch_command_line.rs` compares exit statuses and output with pinned GNU for `-L`/`-l`/`-f`/`--eval`, `command-line-args-left`, `kill-emacs-hook` and an uncaught error (its message; the batch backtrace is VM2-ERRTEXT1); `tests/kill_emacs.rs` covers the hook, codes and refusals",
+   "symbols": [
+    "kill-emacs",
+    "kill-emacs-hook",
+    "command-line-1",
+    "invocation-name",
+    "invocation-directory"
+   ],
+   "symbols_derived": false
   },
   {
    "id": "VM2-SP1",
@@ -6451,7 +6579,7 @@
    "planned": false,
    "mechanism": "Load-history contents",
    "gnu": "GNU's C maintains both while it loads: `load` specbinds `current-load-list` to `(FILE)` (`loadhist_initialize`, `src/lread.c:1031-1035`), `build_load_history` (`src/lread.c:2054-2114`) moves it into `load-history`, and `load` then calls `do-after-load-evaluation` (`src/lread.c:1539-1540`); `LOADHIST_ATTACH` (`src/lisp.h:4735-4739`) conses onto `current-load-list` from `defvar` (`src/eval.c:913`), `defalias` (`src/data.c:979`), `defvaralias` (`src/eval.c:721`), `provide` and `require` (`src/fns.c:3759`, `src/fns.c:3824`). Harness rows `defvar/036` and `defvar/038`: after `(defvar current-load-list 99)` GNU's `current-load-list` is a new cons, so `(eq current-load-list old)` is nil",
-   "romacs": "Romacs binds `current-load-list` to `(FILE)` for each load, with FILE the name the file was found by (expanded, not resolved through symlinks, as GNU's `hist_file_name`), replaces the file's `load-history` entry with it when the load completes, then calls `do-after-load-evaluation`; `provide` funcalls its `after-load-alist` entry (`tests/real_ert_load.rs`). Variable declarations can attach entries, but `defalias`, `defvar`, `provide` and `require` do not, so an entry usually holds only FILE. Backtraces therefore lack source-file cross-references from load history. `eval-buffer` and `eval-region` remain unsupported, so `eval-buffer-list` stays nil. The two rows above remain pinned VALUE",
+   "romacs": "Romacs binds `current-load-list` to `(FILE)` for each load, with FILE the name the file was found by (expanded, not resolved through symlinks, as GNU's `hist_file_name`), replaces the file's `load-history` entry with it when the load completes, then calls `do-after-load-evaluation`; `provide` funcalls its `after-load-alist` entry (`tests/real_ert_load.rs`). `defalias` attaches `(defun . SYMBOL)` (`tests/load_history_defun.rs`), so `symbol-file` finds a function's file; variable declarations can attach entries, but `autoload`, `defvar`, `provide` and `require` do not. Backtraces therefore lack source-file cross-references from load history. `eval-buffer` and `eval-region` remain unsupported, so `eval-buffer-list` stays nil. The two rows above remain pinned VALUE",
    "why": "**Package-observable** for code that inspects `current-load-list` or what `load-history` records about definitions (`symbol-file`, `unload-feature`, `find-function` by load history)",
    "symbols": [
     "after-load-alist",
@@ -6582,7 +6710,7 @@
    "planned": false,
    "mechanism": "General formatting and initial locale capability",
    "gnu": "`format-message` has all `format` conversions and text-property/identity behavior; the initial internal quoting flag follows the process locale.",
-   "romacs": "Quote selection, template-only substitution, explicit capability bindings, display-table fallback and byte8 promotion are implemented. The shared formatter supports field numbers, flags, width and precision for `%s`, `%S`, `%c`, `%d`, `%i`, `%b`, `%B`, `%o`, `%x`, `%X`, `%e`, `%f`, `%g` and `%%`, including bignum integers and float rounding. Width, precision and field-number components are capped at 2^20. Text-property propagation and GNU string-identity behavior remain unsupported. Initial capability is the VM UTF-8 default (`t`), without host non-UTF-8 locale detection, and the capability binding is not boolean-normalized.",
+   "romacs": "Quote selection, template-only substitution, explicit capability bindings, display-table fallback and byte8 promotion are implemented. The shared formatter supports field numbers, flags, width and precision for `%s`, `%S`, `%c`, `%d`, `%i`, `%b`, `%B`, `%o`, `%x`, `%X`, `%e`, `%f`, `%g` and `%%`, including bignum integers and float rounding. Width, precision and field-number components are capped at 2^20. Text properties propagate as in `format` (VM2-FMT1), except on the path that promotes raw octets beside Unicode text, which returns no properties; GNU string-identity behavior remains unsupported. Initial capability is the VM UTF-8 default (`t`), without host non-UTF-8 locale detection, and the capability binding is not boolean-normalized.",
    "why": "`tests/format_numeric.rs` compares the formatting domain with pinned GNU; the separate 64-case quoting corpus does not establish text-property, identity or host-locale parity.",
    "symbols": [
     "format",

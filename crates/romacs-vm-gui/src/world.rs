@@ -142,6 +142,8 @@ fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
     roots.extend(dir.parent().map(|parent| parent.join("rlisp")));
     roots.extend(startup::bundled_load_path(dir).unwrap_or_default());
     roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
+    // startup.el's locale step reads `locale-translation-file-name'.
+    roots.push(PathBuf::from("/usr/share/X11/locale"));
     if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {
         roots.extend([home.join(".local/share/fonts"), home.join(".fonts"), home.join(".cache/fontconfig")]);
     }

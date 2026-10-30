@@ -53,7 +53,11 @@ import live_oracle as live
 ROOT = Path(__file__).resolve().parents[3]
 TAB_FILE = ROOT / 'gnu-lisp/help-macro.el'
 
-INIT = '''(defun lines-live-record (form)
+# The journeys start where a GNU init that inhibits the startup screen
+# starts: in *scratch*, or in the visited file alone.  Without it GNU, and
+# --loadup, show the read-only screen, or its concise form beside the file.
+INIT = '''(setq inhibit-startup-screen t)
+(defun lines-live-record (form)
   (write-region (concat (prin1-to-string form) "\\n") nil {state} 'append 'silent))
 (run-with-timer 1 nil (lambda () (lines-live-record
   (list 'geometry (frame-char-width) (frame-char-height) (window-body-width nil t) tab-width
@@ -318,7 +322,11 @@ def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion')
           [{'command': i + 1, 'gnu': g, 'romacs': r} for i, (g, r) in enumerate(zip(gnu[1:], shown + [None] * len(keys))) if g != r][:6])
 
 
-RETURN_INIT = INIT + '''(run-with-timer 1 nil (lambda () (lines-live-record
+# *scratch* in fundamental-mode, so C-j has its global binding, which
+# inserts a newline; initial-major-mode's lisp-interaction-mode binds it to
+# eval-print-last-sexp, as in GNU.
+RETURN_INIT = INIT + '''(setq initial-major-mode 'fundamental-mode)
+(run-with-timer 1 nil (lambda () (lines-live-record
   (list 'bindings (with-current-buffer (window-buffer) (list (key-binding [13]) (key-binding [10])))
         (lookup-key local-function-key-map [return])))))
 (add-hook 'pre-command-hook (lambda () (lines-live-record (list 'pre this-command))))

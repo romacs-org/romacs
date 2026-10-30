@@ -390,6 +390,7 @@ impl Vm {
                     rest,
                     sites: vec![],
                     lazy: Some(Arc::new(lazy)),
+                    dynamic: names.is_empty().then_some(a[2] == Value::NIL),
                 });
                 (function, names)
                 } else {

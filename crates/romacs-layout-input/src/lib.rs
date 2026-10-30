@@ -144,6 +144,9 @@ pub struct WindowSnapshot {
     pub text: TextSlice,
     pub mode_line: Option<TextSlice>,
     pub mode_line_face: FaceHandle,
+    /// The header line above the text, painted in HEADER_LINE_FACE.
+    pub header_line: Option<TextSlice>,
+    pub header_line_face: FaceHandle,
     pub vscroll_px: u32,
     /// FaceHandle indexes this owned table; entry zero is the default face.
     pub faces: Vec<Face>,
@@ -155,7 +158,7 @@ pub struct WindowSnapshot {
     /// cursor, as blink-cursor-mode's timer does every other blink.
     pub cursor_off: bool,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap, cursor_off });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off });
 
 /// What laying a window out established about the text it published, in
 /// byte offsets into that text: where its last displayed row ends (GNU's
@@ -169,7 +172,7 @@ pub struct WindowEnd {
     /// Every position before this byte is on a fully visible row: one past
     /// the text's length when its end position is on one too.
     pub visible_end: usize,
-    /// The text area's height: the window's less its mode line's.
+    /// The text area's height: the window's less its mode and header lines'.
     pub body_height: f32,
     /// The rows laid out from the window start, top to bottom, through the
     /// first that reaches the text area's bottom.
@@ -202,10 +205,10 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _ } = self;
-        (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px, *tab_width)
-            == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.vscroll_px, other.tab_width)
-            && *wrap == other.wrap && *text == other.text && *mode_line == other.mode_line && *faces == other.faces
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _ } = self;
+        (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *tab_width)
+            == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.tab_width)
+            && *wrap == other.wrap && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces
     }
 }
 

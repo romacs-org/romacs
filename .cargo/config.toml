@@ -11,3 +11,8 @@ CARGO_WORKSPACE_DIR = { value = "", relative = true, force = true }
 # stack, so we avoid stacker::maybe_grow (which creates separate mmap
 # segments invisible to the scanner) and use a large stack instead.
 RUST_MIN_STACK = "134217728"
+
+# The bundled SQLite (libsqlite3-sys) takes the bound-parameter limit of the
+# platform library GNU links (Arch's and nixpkgs' sqlite build with 250000),
+# where its own default is 32766; packages read it from compile_options.
+SQLITE_MAX_VARIABLE_NUMBER = "250000"

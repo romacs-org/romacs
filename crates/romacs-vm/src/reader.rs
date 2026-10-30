@@ -1225,11 +1225,7 @@ impl Vm {
         if let Some(Object::Marker(m)) = self.object_if(source) {
             let anchor = m.anchor.ok_or("Reader refuses a detached marker")?;
             self.require_live_buffer(m.buffer)?;
-            let at = match self.object(m.buffer)? {
-                Object::Buffer(b) => b.anchors.resolve(anchor),
-                _ => return Err("marker byte-buffer stream is not wired".into()),
-            }
-            .ok_or("invalid marker anchor")? as usize;
+            let at = self.marker_anchors(m.buffer)?.resolve(anchor).ok_or("invalid marker anchor")? as usize;
             Ok((m.buffer, at, true))
         } else {
             self.require_live_buffer(source)?;
@@ -1253,10 +1249,7 @@ impl Vm {
                 unreachable!()
             };
             let (anchor, bias) = (m.anchor.unwrap(), m.bias);
-            if !match &mut self.objects[buffer.index(0)? - 1] {
-                Object::Buffer(b) => b.anchors.set(anchor, at as u32, bias),
-                _ => return Err("marker byte-buffer stream is not wired".into()),
-            } {
+            if !self.marker_anchors_mut(buffer)?.set(anchor, at as u32, bias) {
                 return Err("invalid marker anchor".into());
             }
         } else {

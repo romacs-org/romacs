@@ -387,6 +387,13 @@ impl AnchorTree {
         self.place(h.slot);
         true
     }
+    /// Text grows by LEN at the end and no anchor moves, whatever its bias:
+    /// insdel.c insert_from_gap_1, which adjusts no marker.
+    pub(crate) fn grow(&mut self, len: u32) -> bool {
+        let Some(extent) = self.extent.checked_add(len) else { return false };
+        self.extent = extent;
+        true
+    }
     pub(crate) fn extend_empty(&mut self, extent: u32) {
         debug_assert!(self.is_empty());
         debug_assert!(extent >= self.extent);

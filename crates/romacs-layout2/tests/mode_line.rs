@@ -20,7 +20,7 @@ fn scene() -> WindowSnapshot {
                 face: FaceHandle(2),
             }],
         }),
-        mode_line_face: FaceHandle(1),
+        mode_line_face: FaceHandle(1), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false,
         faces: vec![
             Face {
@@ -215,4 +215,41 @@ fn empty_band_still_reserves_height_and_none_preserves_body() {
         })
         .collect();
     assert_eq!(chars, "bodynextlast");
+}
+
+/// A header line paints at the window's top in its face's band and the
+/// text starts below it; a window with only a header line leaves no gap in
+/// the face table, so the next window's faces are its own.
+#[test]
+fn header_line_is_top_anchored_and_its_faces_stay_the_windows() {
+    let mut header = scene();
+    header.header_line = Some(TextSlice { utf8: "head".into(), face_runs: vec![] });
+    header.header_line_face = FaceHandle(1);
+    header.mode_line = None;
+    let mut below = scene();
+    below.id = 2;
+    let frame_snapshot = romacs_layout_input::FrameSnapshot {
+        font_selection: romacs_layout_input::FontSelectionState::default(),
+        font_alternatives: romacs_layout_input::FontAlternativeState::default(),
+        width: 100, height: 120,
+        windows: vec![
+            romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: header },
+            romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 60, snapshot: below },
+        ],
+    };
+    let (frame, _) = romacs_layout2::layout_frame(&frame_snapshot, 1).unwrap();
+    let chars: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, row_role, y, window_id, face_id, .. } => Some((*char, *row_role, *y, window_id.get(), *face_id)),
+        _ => None,
+    }).collect();
+    let band: String = chars.iter().filter(|c| c.1 == GlyphRowRole::HeaderLine).map(|c| c.0).collect();
+    assert_eq!(band, "head");
+    let band_height = (frame.fonts.values().find(|f| f.pixel_size == 20.0).map(|f| f.ascent_px + f.descent_px).unwrap()).ceil();
+    let first = chars.iter().find(|c| c.1 == GlyphRowRole::Text && c.3 == 1).unwrap();
+    assert_eq!((first.0, first.2), ('b', band_height), "text starts below the header line");
+    assert!(chars.iter().all(|c| c.1 != GlyphRowRole::HeaderLine || c.2 == 0.0));
+    // The window below paints its text in its own faces, not the header's copies.
+    let header_faces: Vec<_> = chars.iter().filter(|c| c.1 == GlyphRowRole::HeaderLine).map(|c| c.4).collect();
+    assert!(chars.iter().filter(|c| c.3 == 2).all(|c| !header_faces.contains(&c.4)));
+    assert!(chars.iter().all(|c| frame.faces.contains_key(&c.4)));
 }

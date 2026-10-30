@@ -34,6 +34,9 @@ pub enum HostEvent {
     Closed,
     /// Native background state changed.
     Background,
+    /// A descriptor `HostInput::watch_processes' named is ready: the read
+    /// ends as a timeout does, for Lisp to read it.
+    Process,
     /// The read's time limit passed first.
     Timeout,
     /// The frame gained (true) or lost focus: keyboard.c's FOCUS_IN_EVENT
@@ -51,6 +54,12 @@ pub trait HostInput {
     fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String>;
     /// Block until the next event, or until TIMEOUT passes (`Timeout').
     fn next_event(&mut self, timeout: Option<std::time::Duration>) -> std::result::Result<HostEvent, String>;
+
+    /// The process descriptors the next `next_event' also waits on, as
+    /// wait_reading_process_output selects on them with the keyboard:
+    /// one ready ends it with `Process'.  A host that cannot wait on them
+    /// ignores them, and process output waits for Lisp's own waits.
+    fn watch_processes(&mut self, _fds: &[(std::os::fd::RawFd, i16)]) {}
 
     /// Read CLIPBOARD text with a bounded wait and without running Lisp.
     /// No text (`None`) is distinct from an unavailable host or backend error.
@@ -117,7 +126,7 @@ impl Vm {
                 let frame = self.frame_value_peek();
                 Ok(self.list_value(&[kind, frame]))
             }
-            HostEvent::Resize { .. } | HostEvent::Background => unreachable!("background events are consumed by the wait"),
+            HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
             HostEvent::Closed => {
                 let quit = self.intern("quit");
                 self.propagated_escape = Some(threaded::Escape::Signal(quit, Value::NIL));
@@ -164,6 +173,7 @@ impl Vm {
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
             }
             let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
+            host.watch_processes(&self.process_wait_fds());
             match host.next_event(timeout)? {
                 HostEvent::Resize { width, height } => {
                     let (line, column) = (self.window_state.line, self.window_state.column);
@@ -175,6 +185,8 @@ impl Vm {
                 // (rlisp/vm/keyboard.el `romacs--read-host-char').
                 HostEvent::Background if self.background_processes_ready() => return Ok(HostEvent::Timeout),
                 HostEvent::Background => {}
+                // Lisp reads it (rlisp/vm/keyboard.el `romacs--read-host-char').
+                HostEvent::Process => return Ok(HostEvent::Timeout),
                 event => return Ok(event),
             }
         }

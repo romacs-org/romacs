@@ -165,7 +165,13 @@ impl FormatSpec {
         decimal_point(fixed, self.alternate)
     }
 
-    pub fn text(&self, mut text: Vec<u8>, multibyte: bool, tab: usize) -> Vec<u8> {
+    pub fn text(&self, text: Vec<u8>, multibyte: bool, tab: usize) -> Vec<u8> {
+        self.text_field(text, multibyte, tab).0
+    }
+
+    /// `text', and how many bytes of padding come before the text: where
+    /// GNU's field starts for the text's properties (editfns.c:3787, 3797).
+    pub fn text_field(&self, mut text: Vec<u8>, multibyte: bool, tab: usize) -> (Vec<u8>, usize) {
         if self.precision == Some(0) { text.clear(); }
         let mut at = 0;
         let mut columns = 0;
@@ -178,7 +184,8 @@ impl FormatSpec {
             at += bytes;
         }
         text.truncate(at);
-        self.pad_text(text, columns)
+        let leading = if self.left { 0 } else { self.width.saturating_sub(columns) };
+        (self.pad_text(text, columns), leading)
     }
 
     pub fn character(&self, text: Vec<u8>, code: u32) -> Vec<u8> {
