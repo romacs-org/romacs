@@ -11,8 +11,18 @@
 //! that file by the kernel, so capture never reads heap bytes (`write_image`).
 //!
 //! The range's address is random, chosen by each process that starts a
-//! fresh arena, so each world has its own. Everything else a world process
-//! maps stays randomized, the executable too. What an image holds of the
+//! fresh arena, so each world has its own; and the window every range is
+//! chosen from is reserved whole, inaccessible, at the process's first
+//! allocation, before anything the process maps later could land in it
+//! (`reserve_window`). A builder's range and an image's are in the lower
+//! part of the window, a process's first arena in the upper part, so an
+//! image's range overlaps nothing of its restorer's: restore maps it over
+//! the reservation, which cannot find the range taken. Where the window
+//! cannot be reserved (an address-space limit, or something mapped there
+//! before the process's first allocation), each range is mapped only where
+//! nothing is, and a taken range refuses the image (`Restore::Map`), with
+//! the step and error that found it so (`map_failure`). Everything else a
+//! world process maps stays randomized, the executable too. What an image holds of the
 //! executable is read-only data: string literals, constant tables and the
 //! empty hash table group in its first segment, vtables and `&'static`
 //! tables in its RELRO segment. A process that maps an image maps a copy of
@@ -34,8 +44,11 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
 /// Where an arena may start: a GiB-aligned address in this window, far from
-/// the executable, its heap, the libraries and the stack.
+/// the executable, its heap, the libraries and the stack. Builders' arenas,
+/// so images, start below FIRST; a process's first arena starts in FIRST,
+/// the window's top eighth.
 const WINDOW: (usize, usize) = (0x1000_0000_0000, 0x5000_0000_0000);
+const FIRST: (usize, usize) = (0x4800_0000_0000, WINDOW.1);
 const ALIGN: usize = 1 << 30;
 /// The most an arena reserves. Pages are committed only as they are
 /// touched; under an address-space limit an arena reserves a quarter of it,
@@ -93,11 +106,18 @@ const ARENA: u8 = 1;
 const SYSTEM: u8 = 2;
 static STATE: AtomicU8 = AtomicU8::new(UNSET);
 static LOCK: AtomicBool = AtomicBool::new(false);
-/// How the image this process asked for fared (`Restore`).
 /// Whether freed blocks are zeroed: in a builder, so that no freed byte
 /// reaches an image.
 static SCRUB: AtomicBool = AtomicBool::new(false);
+/// How the image this process asked for fared (`Restore`).
 static RESTORE: AtomicU8 = AtomicU8::new(Restore::None as u8);
+/// Whether the window is this process's, reserved at its first allocation.
+static WINDOW_RESERVED: AtomicBool = AtomicBool::new(false);
+/// What refused the image's range (`Restore::Map`): the step (an index in
+/// STEPS) and the error.
+static MAP_STEP: AtomicU8 = AtomicU8::new(0);
+static MAP_ERRNO: AtomicI32 = AtomicI32::new(0);
+const STEPS: [&str; 6] = ["", "no arena", "adopted already", "address-space limit", "image", "rest of the range"];
 /// Where the arena allocations come from starts, once it has.
 static BASE: AtomicUsize = AtomicUsize::new(0);
 /// Where the process's first arena starts, once an image replaced it.
@@ -304,23 +324,69 @@ fn state() -> u8 {
     }
 }
 
-/// Reserve a fresh range at a random address in the window.
+/// Reserve the window whole, inaccessible: nothing the process maps after
+/// its first allocation lands in it, and the ranges this module maps there
+/// replace the reservation (`place`). Not under an address-space limit, nor
+/// where something of the process is already mapped in the window.
+unsafe fn reserve_window() {
+    if unsafe { reserve() } != Some(RESERVE) {
+        return;
+    }
+    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
+    let at = unsafe { libc::mmap(WINDOW.0 as *mut libc::c_void, WINDOW.1 - WINDOW.0, libc::PROT_NONE, flags, -1, 0) };
+    if at == WINDOW.0 as *mut libc::c_void {
+        WINDOW_RESERVED.store(true, Ordering::Relaxed);
+    } else if at != libc::MAP_FAILED {
+        unsafe { libc::munmap(at, WINDOW.1 - WINDOW.0) };
+    }
+}
+
+/// Whether the window is this process's reservation (`reserve_window`).
+pub fn window_reserved() -> bool {
+    state();
+    WINDOW_RESERVED.load(Ordering::Relaxed)
+}
+
+/// The flags that map a range of this process at AT, LEN bytes, which
+/// `place` requires in the window: over the reservation where the window
+/// is this process's, else only where nothing is mapped.
+fn place(at: usize, len: usize) -> i32 {
+    let reserved = WINDOW_RESERVED.load(Ordering::Relaxed) && at >= WINDOW.0 && len <= WINDOW.1 - at;
+    if reserved { libc::MAP_FIXED } else { libc::MAP_FIXED_NOREPLACE }
+}
+
+/// Give up the range at AT, LEN bytes, this module's mapping placed with
+/// PLACED (`place`): back to the reservation where it was mapped over it,
+/// else unmapped.
+unsafe fn unplace(at: usize, len: usize, placed: i32) {
+    if placed == libc::MAP_FIXED {
+        let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED;
+        unsafe { libc::mmap(at as *mut libc::c_void, len, libc::PROT_NONE, flags, -1, 0) };
+    } else {
+        unsafe { libc::munmap(at as *mut libc::c_void, len) };
+    }
+}
+
+/// Reserve a fresh range at a random address in the window: a builder's
+/// below FIRST, where images are made, any other process's first arena in
+/// FIRST.
 unsafe fn start() -> u8 {
     unsafe { take_inventory() };
+    unsafe { reserve_window() };
     let building = !unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null();
     SCRUB.store(building, Ordering::Relaxed);
     let Some(reserve) = (unsafe { reserve() }) else { return SYSTEM };
     let backing = if building { unsafe { backing_file(reserve) } } else { -1 };
-    let flags = libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE
-        | if backing >= 0 { libc::MAP_SHARED } else { libc::MAP_PRIVATE | libc::MAP_ANONYMOUS };
+    let flags = libc::MAP_NORESERVE | if backing >= 0 { libc::MAP_SHARED } else { libc::MAP_PRIVATE | libc::MAP_ANONYMOUS };
+    let (low, high) = if building { (WINDOW.0, FIRST.0) } else { FIRST };
     for _ in 0..8 {
         let mut random = 0usize;
         let read = unsafe { libc::getrandom((&raw mut random).cast(), size_of::<usize>(), 0) };
         if read != size_of::<usize>() as isize {
             break;
         }
-        let base = WINDOW.0 + random % ((WINDOW.1 - WINDOW.0 - reserve) / ALIGN) * ALIGN;
-        let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags, backing, 0) };
+        let base = low + random % ((high - low - reserve) / ALIGN) * ALIGN;
+        let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags | place(base, reserve), backing, 0) };
         if at == base as *mut libc::c_void {
             BACKING.store(backing, Ordering::Relaxed);
             BASE.store(base, Ordering::Relaxed);
@@ -386,17 +452,46 @@ unsafe fn reserve() -> Option<usize> {
 }
 
 /// Allocate from the image in FILE from now on: map it where it was made,
-/// with what it addresses of the executable (`shadow_executable`), when it
-/// is a whole image of this format and its range is free. Once per
-/// process; the first arena keeps the blocks allocated before.
+/// over this process's reservation of the window, or where nothing is when
+/// the window is not reserved (`place`), with what it addresses of the
+/// executable (`shadow_executable`), when it is a whole image of this
+/// format. Once per process; the first arena keeps the blocks allocated
+/// before. Refused, `map_failure` says at which step and why.
 pub fn adopt(file: &std::fs::File) -> Restore {
     use std::os::fd::AsRawFd;
-    if state() != ARENA || FORMER.load(Ordering::Acquire) != 0 {
-        return Restore::Map;
+    if state() != ARENA {
+        return refuse(1, 0);
+    }
+    // The first image stays this process's: what became of it stays said.
+    if FORMER.load(Ordering::Acquire) != 0 {
+        return refuse(2, 0);
     }
     let outcome = unsafe { map_image_fd(file.as_raw_fd()) };
     RESTORE.store(outcome as u8, Ordering::Release);
     outcome
+}
+
+/// The image's range is refused at STEP (an index in STEPS) with ERRNO.
+fn refuse(step: u8, errno: i32) -> Restore {
+    MAP_ERRNO.store(errno, Ordering::Relaxed);
+    MAP_STEP.store(step, Ordering::Release);
+    Restore::Map
+}
+
+fn errno() -> i32 {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+
+/// What refused the image's range, once `adopt` has (`Restore::Map`): the
+/// step, and the error number of the moment, 0 for none.
+pub fn map_failure() -> Option<(&'static str, i32)> {
+    let step = MAP_STEP.load(Ordering::Acquire);
+    (step != 0).then(|| (STEPS[step as usize], MAP_ERRNO.load(Ordering::Relaxed)))
+}
+
+/// Whether the ranges AT, LEN bytes, and OTHER, OTHER_LEN bytes, share an address.
+fn overlaps(at: usize, len: usize, other: usize, other_len: usize) -> bool {
+    at < other + other_len && other < at + len
 }
 
 unsafe fn map_image_fd(fd: i32) -> Restore {
@@ -416,27 +511,39 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     }
     let reserve = match unsafe { reserve() } {
         Some(reserve) if len < reserve && base + reserve <= WINDOW.1 => reserve,
-        _ => return Restore::Map,
+        _ => return refuse(3, 0),
     };
-    let file = libc::MAP_PRIVATE | libc::MAP_FIXED_NOREPLACE;
+    // Over the reservation, unless the range reaches this process's first
+    // arena (an image made under another address-space limit could): then
+    // only where nothing is, which refuses it.
+    let first = unsafe { &*header() };
+    let placed = if overlaps(base, reserve, first.base, first.reserve) { libc::MAP_FIXED_NOREPLACE } else { place(base, reserve) };
+    let file = libc::MAP_PRIVATE | placed;
     let at = unsafe { libc::mmap(base as *mut libc::c_void, len, libc::PROT_READ | libc::PROT_WRITE, file, fd, 0) };
+    // What a failure leaves is given up (`unplace`): only what this
+    // module mapped, never what refused it, which the launch's source boot
+    // may be using.
     if at != base as *mut libc::c_void {
+        let refused = refuse(4, errno());
         if at != libc::MAP_FAILED {
             unsafe { libc::munmap(at, len) };
+        } else if placed == libc::MAP_FIXED {
+            unsafe { unplace(base, len, placed) };
         }
-        return Restore::Map;
+        return refused;
     }
-    let anon = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
+    let anon = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | placed;
     let rest = unsafe { libc::mmap((base + len) as *mut libc::c_void, reserve - len, libc::PROT_READ | libc::PROT_WRITE, anon, -1, 0) };
     if rest != (base + len) as *mut libc::c_void {
+        let refused = refuse(5, errno());
         if rest != libc::MAP_FAILED {
             unsafe { libc::munmap(rest, reserve - len) };
         }
-        unsafe { libc::munmap(base as *mut libc::c_void, len) };
-        return Restore::Map;
+        unsafe { unplace(base, if placed == libc::MAP_FIXED { reserve } else { len }, placed) };
+        return refused;
     }
     if !unsafe { shadow_executable(image.image.executable) } {
-        unsafe { libc::munmap(base as *mut libc::c_void, reserve) };
+        unsafe { unplace(base, reserve, placed) };
         return Restore::Executable;
     }
     // This process's reservation, not the builder's.
@@ -695,6 +802,12 @@ pub fn restore_outcome() -> Restore {
 /// Whether this process's heap is the arena.
 pub fn active() -> bool {
     state() == ARENA
+}
+
+/// The range the arena's allocations come from: where it starts and how
+/// much address space it holds. None when the heap is the system's.
+pub fn current_range() -> Option<(usize, usize)> {
+    active().then(|| { let h = unsafe { &*header() }; (h.base, h.reserve) })
 }
 
 /// The fields of the image this process mapped.
