@@ -2218,6 +2218,23 @@ impl Vm {
             }
         }
     }
+    /// The special form HEAD's function names through a chain of symbol
+    /// aliases (GNU indirect_function), if it ends at one.
+    fn special_form_alias(&self, head: &str) -> Option<String> {
+        let mut slot = *self.names.get(head)?;
+        for _ in 0..self.slots.len() {
+            let function = self.slots[slot].function;
+            if let Some(name) = prim::name(function) {
+                return prim::prims::special_forms::special_form_min(name).map(|_| name.to_owned());
+            }
+            slot = function.index_if(7)?.checked_sub(1)?;
+            let name = &self.symbol_names[slot];
+            if prim::prims::special_forms::special_form_min(name).is_some() {
+                return Some(name.clone());
+            }
+        }
+        None
+    }
     fn expr_now(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
         if let Some(expanded) = self.expand_macro(f)? {
             return self.expr(b, &expanded);
@@ -2330,6 +2347,16 @@ impl Vm {
                     }
                 };
                 let rest = &a[1..];
+                // GNU eval_sub dispatches on the head's function: a symbol
+                // whose function is, through aliases, a special form is
+                // that form, as byte-run.el's `inline' is `progn'.
+                if prim::prims::special_forms::special_form_min(head).is_none()
+                    && let Some(form) = self.special_form_alias(head)
+                {
+                    let mut aliased = a.clone();
+                    aliased[0] = Form::Sym(form);
+                    return self.expr(b, &Form::List(aliased));
+                }
                 match head {
                     "save-excursion" => self.save_excursion(b, rest),
                     "save-restriction" => self.save_restriction(b, rest),
