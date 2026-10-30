@@ -291,3 +291,23 @@ fn frame_or_buffer_changed_p(cx; optional variable: Value) {
 
 defsubr! { name = "frame-initial-p", gnu = "terminal.c:482", effect = Reads,
 fn frame_initial_p(cx; optional frame: Value) { cx.windows().frame_initial_p(frame) }}
+
+defsubr! { name = "font-info", gnu = "font.c:5594", effect = Reads,
+fn font_info(cx, name: Value; optional frame: Value) {
+    // A VM2 frame's one font is the initial terminal's "tty" (VM2-WIN5),
+    // whose metrics are the frame's canonical character, which the host
+    // lays out: [OPENED-NAME FULL-NAME SIZE HEIGHT BASELINE-OFFSET
+    // RELATIVE-COMPOSE DEFAULT-ASCENT MAX-WIDTH ASCENT DESCENT SPACE-WIDTH
+    // AVERAGE-WIDTH FILENAME CAPABILITY].  Any other font does not open,
+    // so its information is nil, as Ffont_info answers then.
+    if !cx.string_view(name).is_ok_and(|n| n.bytes() == b"tty") {
+        if cx.kind(name) != leaf::Kind::String { return Err(Fault::Wrong("stringp", name)); }
+        return Ok(Value::NIL);
+    }
+    let width = cx.windows().frame_char_size(frame, true)?;
+    let height = cx.windows().frame_char_size(frame, false)?;
+    let zero = Value::integer(0).map_err(Fault::Error)?;
+    let format = cx.intern("x");
+    let capability = cx.cons(format, Value::NIL);
+    Ok(cx.vector(&[name, name, height, height, zero, zero, zero, width, height, zero, width, width, Value::NIL, capability]))
+}}

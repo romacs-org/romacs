@@ -294,12 +294,17 @@ struct Frame {
 /// point), and layout never reads it.
 impl PartialEq for Frame {
     fn eq(&self, other: &Self) -> bool {
-        let (a, b) = (&self.snapshot, &other.snapshot);
-        self.selected == other.selected && a.font_selection == b.font_selection
-            && a.font_alternatives == b.font_alternatives && (a.width, a.height) == (b.width, b.height)
-            && a.windows.len() == b.windows.len()
-            && a.windows.iter().zip(&b.windows).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot))
+        self.selected == other.selected && frames_alike(&self.snapshot, &other.snapshot)
     }
+}
+
+/// Whether frames A and B paint identically; the prompt host (prompt.rs)
+/// asks it too.
+pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_layout_input::FrameSnapshot) -> bool {
+    a.font_selection == b.font_selection
+        && a.font_alternatives == b.font_alternatives && (a.width, a.height) == (b.width, b.height)
+        && a.windows.len() == b.windows.len()
+        && a.windows.iter().zip(&b.windows).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot))
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
@@ -369,7 +374,7 @@ fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), 
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { utf8: PREPARING.into(), face_runs: vec![] }, mode_line: None,
-            mode_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face],
+            mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face],
         } }],
     };
     let (frame, _) = romacs_layout2::LayoutEngine::new()?.layout_frame(&snapshot, 1, None)?;
@@ -406,6 +411,7 @@ fn run() -> Result<(), String> {
     let mut trace_latency = false;
     let mut trace_scene = false;
     let mut load_user_init = true;
+    let mut quick = false;
     // Default: VM2's workspace. Running loadup.el by default was measured and
     // reverted: launch-to-ready 0.13s -> 0.95s (median of 5) with zero journey steps gained
     // and zero journey keys taken over by GNU (evidence/loadup/LOADUP.md).
@@ -424,7 +430,8 @@ fn run() -> Result<(), String> {
             "--wayland" => { socket = Some(args.next().ok_or("missing socket")?); live = false; },
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
-            "-Q" | "--no-init" => load_user_init = false,
+            "-Q" => (quick, load_user_init) = (true, false),
+            "--no-init" => load_user_init = false,
             "--trace-latency" => trace_latency = true,
             "--trace-scene" => trace_scene = true,
             "--gc-floor" => {
@@ -441,7 +448,7 @@ fn run() -> Result<(), String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()),
-            "--batch" => return batch::run(args.collect()),
+            "--batch" => return batch::run(args.collect(), quick),
             "--" => {
                 startup::visit_at_startup("--");
                 for file in args.by_ref() { startup::visit_at_startup(&file); }
@@ -504,7 +511,7 @@ fn run() -> Result<(), String> {
                 eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted}));
             }
         }); });
-        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, restored,
+        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
                               first_presentation, prune);
         if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
         let _ = result_tx.send(result);
@@ -722,6 +729,7 @@ fn evaluate(
     mut width: u32,
     mut height: u32,
     load_user_init: bool,
+    quick: bool,
     restored: Option<(Box<Vm>, world::Carry)>,
     first_presentation: u64,
     after_first_frame: Option<impl FnOnce()>,
@@ -772,12 +780,20 @@ fn evaluate(
         } else {
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
+        if quick && launch == startup::Launch::Loadup {
+            vm.eval_source(startup::QUICK_START)?;
+        }
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
                 }
+            }
+        }
+        if launch == startup::Launch::Loadup {
+            if let Err(error) = startup::finish_loadup(&mut vm, &started) {
+                eprintln!("romacs: startup after init failed: {error}");
             }
         }
         eprintln!("romacs: {}", started.status());
@@ -807,7 +823,7 @@ fn evaluate(
     host.borrow_mut().presentation = first_presentation;
     let last_presentation = || host.borrow().presentation;
     if live {
-        vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone() })));
+        vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
     }
     let initial = frame(&mut vm, g1, width, height)?;
     let mut pending = std::collections::VecDeque::new();
@@ -1046,10 +1062,13 @@ fn evaluate(
                     live_presentation.changed();
                     continue;
                 }
-                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay)) {
+                // read_char's wait_reading_process_output also selects on
+                // the processes: one ready wakes the loop to read it.
+                let processes = vm.process_wait_fds();
+                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(()),
-                    terminal_wait::Wake::Terminal | terminal_wait::Wake::Timeout => {},
+                    terminal_wait::Wake::Terminal | terminal_wait::Wake::Process | terminal_wait::Wake::Timeout => {},
                 }
             }
             continue;

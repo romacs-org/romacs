@@ -73,12 +73,14 @@ fn function_json(f: &Function) -> J {
         f.required,
         f.rest,
         f.sites,
-        f.code.iter().map(|op| op_json(*op)).collect::<Vec<_>>()
+        f.code.iter().map(|op| op_json(*op)).collect::<Vec<_>>(),
+        f.dynamic
     ])
 }
 fn function(v: &J) -> Option<Function> {
     let a = v.as_array()?;
-    if a.len() != 7 {
+    // An eighth element, the dialect, is absent from older entries.
+    if a.len() != 7 && a.len() != 8 {
         return None;
     }
     let sites = a[5]
@@ -96,6 +98,7 @@ fn function(v: &J) -> Option<Function> {
         rest: a[4].as_bool()?,
         sites,
         lazy: None,
+        dynamic: a.get(7).and_then(J::as_bool),
         code: a[6]
             .as_array()?
             .iter()

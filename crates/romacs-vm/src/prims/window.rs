@@ -78,7 +78,7 @@ fn window_mode_line_height(cx; optional window: Value) {
 
 defsubr! { name = "window-header-line-height", gnu = "window.c:1224", effect = Reads,
 fn window_header_line_height(cx; optional window: Value) {
-    cx.windows().live_zero(window)
+    cx.windows().window_header_line_height(window)
 }}
 
 defsubr! { name = "window-tab-line-height", gnu = "window.c:1233", effect = Reads,
@@ -237,6 +237,11 @@ fn set_window_prev_buffers(cx, window: Value, prev_buffers: Value) {
 defsubr! { name = "window-next-buffers", gnu = "window.c:2353", effect = Reads,
 fn window_next_buffers(cx; optional window: Value) {
     cx.windows().window_buffers(window, true)
+}}
+
+defsubr! { name = "window-discard-buffer-from-window", gnu = "window.c:3445", effect = Global,
+fn window_discard_buffer_from_window(cx, buffer: Value, window: Value; optional all: Value) {
+    cx.windows().discard_buffer(buffer, window, all != Value::NIL)
 }}
 
 defsubr! { name = "set-window-next-buffers", gnu = "window.c:2362", effect = Global,
@@ -418,4 +423,43 @@ fn window_top_line(cx; optional window: Value) {
 defsubr! { name = "frame-internal-border-width", gnu = "frame.c:4524", effect = Reads,
 fn frame_internal_border_width(cx; optional frame: Value) {
     cx.windows().frame_absent_width(frame)
+}}
+
+// xdisp.c sets a buffer's long_line_optimizations_p when redisplay meets a
+// line past `long-line-threshold'; Romacs's redisplay has no long-line
+// optimizations, so none is ever in effect (DIVERGENCES.md VM2-LONGLINE1).
+defsubr! { name = "long-line-optimizations-p", gnu = "xdisp.c:20409", effect = Reads,
+fn long_line_optimizations_p(_cx) {
+    Ok(Value::NIL)
+}}
+
+// window.c Fselect_window; record_buffer (buffer.c:2218) runs
+// buffer-list-update-hook unless the buffer inhibits its hooks.
+defsubr! { name = "select-window", gnu = "window.c:604", effect = Global,
+fn select_window(cx, window: Value; optional norecord: Value) -> Step {
+    let (window, buffer) = cx.windows().select_window(window, norecord != Value::NIL)?;
+    if norecord != Value::NIL || cx.buffer_state(buffer).is_none_or(|s| s.inhibit_buffer_hooks) {
+        return Ok(Step::Done(window));
+    }
+    let hook = cx.intern("buffer-list-update-hook");
+    Ok(Step::Call { f: cx.intern("run-hooks"), args: vec![hook], then: selected, saved: vec![window] })
+}}
+fn selected(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
+
+defsubr! { name = "window-end", gnu = "window.c:1782", effect = Reads,
+fn window_end(cx; optional window: Value, update: Value) {
+    cx.window_end(window, update)
+}}
+
+defsubr! { name = "previous-window", gnu = "window.c:2980", effect = Reads,
+fn previous_window(cx; optional window: Value, minibuf: Value, all_frames: Value) {
+    cx.windows().next_window(window, minibuf, all_frames, false)
+}}
+
+defsubr! { name = "redraw-frame", gnu = "dispnew.c:3243", effect = Global,
+fn redraw_frame(cx; optional frame: Value) {
+    // decode_live_frame, then redraw_frame: the one frame VM2 has, as
+    // redraw-display redraws it.
+    cx.windows().check_live_frame(frame)?;
+    cx.windows().redraw_display()
 }}

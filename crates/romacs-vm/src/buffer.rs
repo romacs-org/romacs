@@ -148,6 +148,14 @@ impl Vm {
         Ok(())
     }
     /// Fbury_buffer_internal: BUFFER moves to the end of the buffer list.
+    /// buffer.c record_buffer's list: BUFFER first.
+    pub(crate) fn record_buffer_model(&mut self, buffer: Value) {
+        let mut order = self.buffer_order();
+        if order.first() == Some(&buffer) || !order.contains(&buffer) { return; }
+        order.retain(|&b| b != buffer);
+        order.insert(0, buffer);
+        self.set_buffer_order(&order);
+    }
     pub(crate) fn bury_buffer_model(&mut self, buffer: Value) {
         let mut order = self.buffer_order();
         order.retain(|&b| b != buffer);
@@ -241,11 +249,7 @@ impl Vm {
         state.kill();
         let index = value.index(0)? - 1;
         self.objects[index] = match &self.objects[index] {
-            Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer {
-                state, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, case_tables: [Value::NIL; 4],
-                point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0), saved_restrictions: Vec::new(), saved_points: Vec::new(),
-                properties: Default::default(), had_intervals: false, per_buffer: retained, held: None,
-            })),
+            Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer::empty(state, retained))),
             _ => {
                 let mut empty: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
                 empty.state = state;
@@ -466,10 +470,8 @@ impl Vm {
             match self.object_if(args[0]) {
                 Some(Object::Marker(marker)) => {
                     let anchor = marker.anchor.ok_or("Marker does not point anywhere")?;
-                    let Some(Object::Buffer(owner)) = self.object_if(marker.buffer) else {
-                        return Err("Marker does not point anywhere".into());
-                    };
-                    Some(ByteOffset(owner.anchors.resolve(anchor).ok_or("Marker does not point anywhere")? as usize))
+                    let owner = self.marker_anchors(marker.buffer).map_err(|_| "Marker does not point anywhere")?;
+                    Some(ByteOffset(owner.resolve(anchor).ok_or("Marker does not point anywhere")? as usize))
                 }
                 Some(Object::Bignum(_)) => return Ok(Value::NIL),
                 _ => None,
@@ -698,19 +700,7 @@ impl Vm {
         if p == InsertFileBytes {
             self.ensure_buffer_writable()?;
             let replacement = match &self.objects[index] {
-                Object::Buffer(t) => {
-                    if !t.anchors.is_empty() {
-                        return Err("cannot encode buffer with registered anchors".into());
-                    }
-                    {
-                    // Per-buffer variables belong to the buffer, not its representation.
-                    let mut b = t.binary();
-                    b.state = t.state.clone();
-                    b.per_buffer = t.per_buffer.clone();
-                    b.case_tables = t.case_tables;
-                    Some(Object::ByteBuffer(Box::new(b)))
-                }
-                }
+                Object::Buffer(t) => Some(Object::ByteBuffer(Box::new(Self::unibyte_buffer(t)?))),
                 _ => None,
             };
             if let Some(o) = replacement {
@@ -733,37 +723,24 @@ impl Vm {
         // This is an explicit text/byte boundary, not a second text encoding.
         // Conversion preserves octets and byte-canonical metadata or fails atomically.
         let replacement = match (&self.objects[index], text) {
-            (Object::Buffer(t), false) => {
-                if !t.anchors.is_empty() {
-                    return Err("cannot encode buffer with registered anchors".into());
-                }
-                {
-                    // Per-buffer variables belong to the buffer, not its representation.
-                    let mut b = t.binary();
-                    b.state = t.state.clone();
-                    b.per_buffer = t.per_buffer.clone();
-                    b.case_tables = t.case_tables;
-                    Some(Object::ByteBuffer(Box::new(b)))
-                }
-            }
+            (Object::Buffer(t), false) => Some(Object::ByteBuffer(Box::new(Self::unibyte_buffer(t)?))),
             (Object::ByteBuffer(b), true) => {
-                if !b.saved_restrictions.is_empty() {
-                    return Err("cannot decode buffer with a saved restriction".into());
-                }
-                if !b.saved_points.is_empty() {
-                    return Err("cannot decode buffer with a saved excursion".into());
-                }
-                // VM2-IFC-HELD1: its markers are held for insert-file-contents.
+                // VM2-IFC-HELD1: insert-file-contents holds its text buffer.
                 if b.held.is_some() {
                     return Err("cannot decode buffer while insert-file-contents decides its coding".into());
                 }
-                {
                 let mut a: crate::annotations::AnnotatedBuffer = Text::decode_binary(b)?.into();
+                // The markers keep their bytes, which must start characters.
+                let text = a.as_str().as_bytes();
+                if !b.anchors.is_empty()
+                    && (1..text.len()).any(|i| (text[i] & 0xc0) == 0x80 && b.anchors.any_between(i as u32, i as u32)) {
+                    return Err("cannot decode buffer with a marker inside a character".into());
+                }
+                a.anchors = b.anchors.clone();
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
                 Some(Object::Buffer(Box::new(a)))
-            }
             }
             _ => None,
         };
@@ -771,6 +748,19 @@ impl Vm {
             self.objects[index] = o;
         }
         Ok(if text { Value::TRUE } else { Value::NIL })
+    }
+    /// T's unibyte storage: the same bytes, per-buffer variables and
+    /// markers.  Overlays have no unibyte storage (VM2-MD2).
+    fn unibyte_buffer(t: &crate::annotations::AnnotatedBuffer) -> Result<bytes::ByteBuffer> {
+        if !t.intervals.is_empty() {
+            return Err("cannot encode buffer with overlays".into());
+        }
+        let mut b = t.binary();
+        b.state = t.state.clone();
+        b.per_buffer = t.per_buffer.clone();
+        b.case_tables = t.case_tables;
+        b.anchors = t.anchors.clone();
+        Ok(b)
     }
     /// The bytes TEXT, an octet or a string, puts in a unibyte buffer: a
     /// unibyte string's bytes and ASCII text as they are; other text
@@ -794,6 +784,11 @@ impl Vm {
         args: &[Value],
     ) -> Result<Value> {
         use Primitive::*;
+        // A marker stands for its position (CHECK_FIXNUM_COERCE_MARKER).
+        let args = &args.iter().map(|&v| match self.object_if(v) {
+            Some(Object::Marker(_)) => self.marker_position_value(v),
+            _ => Ok(v),
+        }).collect::<Result<Vec<Value>>>()?;
         let inserted = if p == Insert {
             let mut out = vec![];
             for &v in &self.stack[start..start + n] {
@@ -1012,7 +1007,7 @@ mod tests {
             bytes: vec![0xce, 0xbb],
             point: ByteOffset(1),
             restriction: ByteOffset(0)..ByteOffset(2),
-            saved_restrictions: Vec::new(), saved_points: Vec::new(),
+            anchors: crate::anchors::AnchorTree::new(2),
             properties: Default::default(),
             had_intervals: false,
             per_buffer: Default::default(),

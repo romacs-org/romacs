@@ -349,11 +349,16 @@ fn save_restriction_unibyte_matches_gnu() {
     let printed = vm.eval_source(source).unwrap().display().unwrap();
     let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
     assert_eq!(actual, expected);
-    // VM2-RESTRICT1: GNU converts such a buffer (t 2 3 t); Romacs refuses
-    // and leaves the buffer unibyte with its restriction.
-    let refused = vm.eval_source(r#"(prin1-to-string (with-temp-buffer (set-buffer-multibyte nil) (insert "abc") (narrow-to-region 2 3) (list (condition-case e (save-restriction (widen) (set-buffer-multibyte t)) (error (cadr e))) (point-min) (point-max) enable-multibyte-characters)))"#).unwrap().display().unwrap();
-    let refused: String = serde_json::from_str(&refused).unwrap_or(refused);
-    assert_eq!(refused, r#"("cannot decode buffer with a saved restriction" 2 3 nil)"#);
+    // Converting the buffer inside the form carries the saved bounds, as
+    // GNU's markers do.
+    let converted = r#"(prin1-to-string (with-temp-buffer (set-buffer-multibyte nil) (insert "abc") (narrow-to-region 2 3) (list (condition-case e (save-restriction (widen) (set-buffer-multibyte t)) (error (cadr e))) (point-min) (point-max) enable-multibyte-characters)))"#;
+    let output = std::process::Command::new(std::env::var("ROMACS_GNU_ORACLE").unwrap())
+        .args(["-Q", "--batch", "--eval", &format!("(princ {converted})")]).output().unwrap();
+    let expected = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(expected, "(t 2 3 t)");
+    let actual = vm.eval_source(converted).unwrap().display().unwrap();
+    let actual: String = serde_json::from_str(&actual).unwrap_or(actual);
+    assert_eq!(actual, expected);
 }
 
 // save-excursion and buffer-substring in a unibyte buffer, which holds no

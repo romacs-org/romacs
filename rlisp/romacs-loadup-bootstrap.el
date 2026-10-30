@@ -169,15 +169,90 @@
   (and (listp custom-delayed-init-variables) (reverse custom-delayed-init-variables))
   "The preloaded variables whose standard value depends on the runtime, in load order.
 These are `custom-delayed-init-variables' as the preloaded files left it.")
+;; The locale step changes the language and coding state the chain left; a
+;; later step, as a VM restored from a world takes in its own process,
+;; starts again from that state, as a fresh process starts from its dump's.
+(defconst romacs--locale-variables
+  '(current-language-environment current-locale-environment current-iso639-language
+    system-messages-locale system-time-locale woman-locale locale-coding-system
+    default-sendmail-coding-system default-process-coding-system
+    default-file-name-coding-system default-terminal-coding-system
+    default-keyboard-coding-system keyboard-coding-system default-input-method
+    buffer-file-coding-system coding-category-list char-width-table)
+  "The variables `set-locale-environment' sets, directly or through
+`set-language-environment' and `prefer-coding-system', besides each coding
+category's (`coding-category-list').")
+(defvar romacs--locale-defaults nil
+  "The language and coding state before this session's first locale step
+\(`romacs--locale-state'), which each later step starts from.")
+(defun romacs--locale-state ()
+  "What the locale step changes: each of `romacs--locale-variables' and
+of the coding categories by its default value (a bare symbol when void;
+a char-table copied), the display table, the coding system and charset
+priorities, and the terminal and keyboard coding systems."
+  (list (mapcar (lambda (variable)
+                  (if (default-boundp variable)
+                      (let ((value (default-value variable)))
+                        (cons variable (if (char-table-p value) (copy-sequence value) value)))
+                    variable))
+                (append romacs--locale-variables coding-category-list))
+        (and standard-display-table (copy-sequence standard-display-table))
+        (coding-system-priority-list)
+        (charset-priority-list)
+        (terminal-coding-system)
+        (keyboard-coding-system)))
+(defun romacs--restore-locale-state (state)
+  "Give the language and coding state STATE (`romacs--locale-state') back.
+A language environment other than STATE's is left first, as
+`set-language-environment' leaves it.  Only startup's own replay, before
+the user's init, may call this: it discards their coding and language
+settings."
+  (let ((variables (nth 0 state)))
+    (unless (equal current-language-environment
+                   (cdr (assq 'current-language-environment variables)))
+      (run-hooks 'exit-language-environment-hook)
+      (let ((func (get-language-info current-language-environment 'exit-function)))
+        (if (functionp func) (funcall func))))
+    (apply #'set-coding-system-priority (nth 2 state))
+    ;; The whole order, categories with no coding system included.
+    (apply #'romacs--set-coding-category-order (cdr (assq 'coding-category-list variables)))
+    (apply #'set-charset-priority (nth 3 state))
+    (set-terminal-coding-system-internal (nth 4 state))
+    (set-keyboard-coding-system-internal (nth 5 state))
+    ;; After the priorities, which set the coding categories' variables too.
+    (dolist (variable variables)
+      (if (consp variable)
+          (set-default (car variable) (if (char-table-p (cdr variable)) (copy-sequence (cdr variable)) (cdr variable)))
+        (makunbound variable)))
+    (setq standard-display-table (and (nth 1 state) (copy-sequence (nth 1 state))))))
+;; The per-process steps startup.el takes before the init file, in batch
+;; and in an interactive session alike.
+(defun romacs--startup-environment ()
+  "Take the per-process steps startup.el takes before the init file.
+`normal-top-level' (startup.el:639-668) sets Unix's end-of-line
+mnemonics, then the language environment and coding systems from this
+process's LANG and LC_* (`set-locale-environment'), from the state the
+chain left (`romacs--locale-defaults'); `command-line' \(startup.el:1300)
+then begins initialization, in the directory the process started in."
+  (setq eol-mnemonic-dos "(DOS)"
+        eol-mnemonic-mac "(Mac)")
+  ;; The replay is startup's, before the user's init only.
+  (if romacs--locale-defaults
+      (romacs--restore-locale-state romacs--locale-defaults)
+    (setq romacs--locale-defaults (romacs--locale-state)))
+  (set-locale-environment nil)
+  (setq before-init-time (current-time) after-init-time nil
+        command-line-default-directory default-directory))
 ;; The steps of startup.el's `command-line' a batch session takes in each
 ;; process.  `romacs--startup-phase' marks their extent: a world build may
 ;; read per-process host facts only inside it, and a VM restored from a
 ;; world runs them again (`romacs-world-restart').
 (defun romacs-batch-startup ()
   "Take the per-process steps of startup.el's `command-line', as batch does.
-The per-user directory is found as `normal-top-level' finds it, the
-delayed variables get their standard values in this process's context, and
-`after-init-time' its clock."
+The per-user directory is found as `normal-top-level' finds it, then the
+locale and the start of initialization (`romacs--startup-environment'),
+the delayed variables get their standard values in this process's context,
+and `after-init-time' its clock."
   (unwind-protect
       (progn
         (romacs--startup-phase t)
@@ -192,6 +267,7 @@ delayed variables get their standard values in this process's context, and
                   startup--xdg-config-default)))
         (setq user-emacs-directory
               (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
+        (romacs--startup-environment)
         (let ((user-emacs-directory-warning nil))
           (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
         (setq custom-delayed-init-variables t)

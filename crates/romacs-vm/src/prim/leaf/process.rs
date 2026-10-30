@@ -55,6 +55,10 @@ impl Leaf<'_> {
         let serial = self.process_if(v)?.serial;
         self.vm.subprocesses.get_mut(serial)
     }
+    /// How many selects have found something ready.
+    pub(crate) fn process_activity(&self) -> u64 {
+        self.vm.subprocesses.activity
+    }
     /// p->infd >= 0.
     pub(crate) fn process_infd(&self, v: Value) -> bool {
         self.channel(v).is_some_and(|c| c.infd.is_some())
@@ -387,6 +391,7 @@ impl Leaf<'_> {
         let tick = self.vm.subprocesses.tick;
         self.reap_children();
         if self.vm.subprocesses.tick != tick {
+            self.vm.subprocesses.activity += 1;
             return Ok(Value::TRUE);
         }
         // A :nowait connection refused at creation reports as soon as the
@@ -396,10 +401,40 @@ impl Leaf<'_> {
                 continue;
             }
             if let Some(errno) = self.channel_mut(proc).and_then(|c| c.connect.take()) {
+                self.vm.subprocesses.activity += 1;
                 let connect = self.sym("connect");
                 return Ok(self.list(&[connect, proc, fixnum(errno.into()), Value::NIL, Value::NIL]));
             }
         }
+        let (fds, owners) = self.select_set(wait_proc, just_this);
+        if wait_proc != Value::NIL && just_this && !self.process_infd(wait_proc) {
+            return Ok(self.sym("terminated"));
+        }
+        let timeout = seconds.map(|s| std::time::Duration::from_secs_f64(s.clamp(0.0, 1e7)));
+        let revents = sp::poll(&fds, timeout).map_err(|e| self.file_errno("Failed select", &e))?;
+        if revents.iter().all(|&r| r == 0) {
+            return Ok(Value::NIL);
+        }
+        self.vm.subprocesses.activity += 1;
+        self.reap_children();
+        let mut readable = Vec::new();
+        let mut connected = Vec::new();
+        for (&r, &(proc, wake)) in revents.iter().zip(&owners) {
+            if r == 0 {
+                continue;
+            }
+            match wake {
+                Wake::Read => readable.push(proc),
+                Wake::Write => self.process_flush(proc)?,
+                Wake::Connect => connected.push(proc),
+                Wake::Child => {}
+            }
+        }
+        self.process_select_ready(readable, connected)
+    }
+    /// The descriptors the wait selects on, with what each readiness means:
+    /// WAIT_PROC's alone when JUST_THIS, else every process's.
+    fn select_set(&mut self, wait_proc: Value, just_this: bool) -> (Vec<(RawFd, i16)>, Vec<(Value, Wake)>) {
         let mut fds: Vec<(RawFd, i16)> = Vec::new();
         let mut owners: Vec<(Value, Wake)> = Vec::new();
         let candidates = if wait_proc != Value::NIL && just_this { vec![wait_proc] } else { self.process_values() };
@@ -423,28 +458,11 @@ impl Leaf<'_> {
                 owners.push((proc, Wake::Child));
             }
         }
-        if wait_proc != Value::NIL && just_this && !self.process_infd(wait_proc) {
-            return Ok(self.sym("terminated"));
-        }
-        let timeout = seconds.map(|s| std::time::Duration::from_secs_f64(s.clamp(0.0, 1e7)));
-        let revents = sp::poll(&fds, timeout).map_err(|e| self.file_errno("Failed select", &e))?;
-        if revents.iter().all(|&r| r == 0) {
-            return Ok(Value::NIL);
-        }
-        self.reap_children();
-        let mut readable = Vec::new();
-        let mut connected = Vec::new();
-        for (&r, &(proc, wake)) in revents.iter().zip(&owners) {
-            if r == 0 {
-                continue;
-            }
-            match wake {
-                Wake::Read => readable.push(proc),
-                Wake::Write => self.process_flush(proc)?,
-                Wake::Connect => connected.push(proc),
-                Wake::Child => {}
-            }
-        }
+        (fds, owners)
+    }
+    /// What the wait selected: a finished connection, else the readable
+    /// process to read, chosen as wait_reading_process_output chooses.
+    fn process_select_ready(&mut self, readable: Vec<Value>, connected: Vec<Value>) -> Out {
         for proc in connected {
             if let Some(ready) = self.process_connect_poll(proc) {
                 return Ok(ready);
@@ -1115,6 +1133,16 @@ impl Leaf<'_> {
         let status = sp::wait_blocking(pid).map_err(|e| self.file_errno("Waiting for process", &e))?;
         let text = self.make_string(bytes, false);
         Ok(self.cons(fixnum(status.into()), text))
+    }
+}
+
+impl Vm {
+    /// The descriptors the command loop's idle wait watches with the
+    /// keyboard, as wait_reading_process_output selects on every process's
+    /// (process.c:5358), each with the poll events it waits for.  They stay
+    /// open while the VM runs no Lisp.
+    pub fn process_wait_fds(&mut self) -> Vec<(RawFd, i16)> {
+        Leaf::new(self).select_set(Value::NIL, false).0
     }
 }
 

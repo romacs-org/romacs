@@ -53,6 +53,7 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
               :window-pixel-height (window-pixel-height window)
               :window-body-pixel-height (window-body-height window t)
               :window-pixel-top (window-pixel-top window)
+              :text-left (car (window-inside-pixel-edges window))
               :frame-char-height (frame-char-height)
               :text-size (condition-case error (window-text-pixel-size window nil t nil nil t)
                            (error (error-message-string error)))
@@ -66,6 +67,7 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
               :dashboard-posn (condition-case error (popup-live--posn dashboard (window-point dashboard))
                                 (error (error-message-string error)))
               :dashboard-top (window-pixel-top dashboard)
+              :dashboard-text-left (car (window-inside-pixel-edges dashboard))
               :line-starts (condition-case error
                                (save-excursion
                                  (goto-char (point-min))
@@ -268,16 +270,21 @@ def main():
                     raise AssertionError(f'{band_y - text_bottom}px of blank rows above the mode line')
                 widest = max(x for _, _, row in popup_rows for x, _ in row)
                 report['checks'].append({'text_size': [width, height], 'painted_last_glyph_x': widest})
-                # Each posn's X, Y is where the painter drew its glyph.
-                for name, window_top in (('posn-first', top), ('posn-last', top), ('dashboard-posn', probe['dashboard-top'])):
+                # Each posn's X, Y is where the painter drew its glyph: X and
+                # Y count from the window's text area, which starts after
+                # its left margin (keymap-popup's buffer has one) and
+                # includes its header line (posn-at-x-y's doc).
+                for name, window_top, text_left in (('posn-first', top, probe['text-left']),
+                                                    ('posn-last', top, probe['text-left']),
+                                                    ('dashboard-posn', probe['dashboard-top'], probe['dashboard-text-left'])):
                     posn = probe[name]
                     if not isinstance(posn, list):
                         raise AssertionError(f'{name}: {posn}')
                     _, (x, y), _, _ = posn
-                    at = [g for g in painted if g['role'] == 'Text' and g['x'] == x and g['y'] == window_top + y]
-                    report['checks'].append({name: posn, 'painted': [g['char'] for g in at]})
+                    at = [g for g in painted if g['role'] == 'Text' and g['x'] == text_left + x and g['y'] == window_top + y]
+                    report['checks'].append({name: posn, 'text_left': text_left, 'painted': [g['char'] for g in at]})
                     if name != 'dashboard-posn' and not at:
-                        raise AssertionError(f'{name} {posn}: no glyph painted at ({x}, {window_top + y})')
+                        raise AssertionError(f'{name} {posn}: no glyph painted at ({text_left + x}, {window_top + y})')
                 report['status'] = 'PASS'
     except Exception as error:  # noqa: BLE001
         report['error'] = repr(error)

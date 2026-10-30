@@ -182,7 +182,7 @@ fn lazily_held_body_survives_moving_collection_and_is_reclaimed_after_expansion(
 #[test]
 fn never_called_lazy_body_is_reclaimed_with_its_function() {
     let mut vm = Vm::new();
-    vm.eval_source("(defalias 'lz-probe nil)").unwrap();
+    vm.eval_source("(progn (defalias 'lz-probe nil) (setq current-load-list nil))").unwrap();
     let (base_objects, base_bytes) = settled(&mut vm);
     let path = source_file("gc-dead.el", &discarded_body());
     vm.load_file(&path).unwrap();
@@ -192,9 +192,11 @@ fn never_called_lazy_body_is_reclaimed_with_its_function() {
         "held lazily: base {base_objects}/{base_bytes}, held {held_objects}/{held_bytes}"
     );
     vm.eval_source("(progn (defalias 'lz-probe nil) (defalias 'lz-ignore nil))").unwrap();
-    // `load-history' keeps each loaded file's entry, as GNU's does; it is
-    // not the object under test, so drop it before comparing heaps.
-    vm.eval_source("(setq load-history nil)").unwrap();
+    // `load-history' keeps each loaded file's entry, and `current-load-list'
+    // the (defun . NAME) entries those top-level defaliases attach, as
+    // GNU's do; neither is the object under test, so drop both before
+    // comparing heaps.
+    vm.eval_source("(setq load-history nil current-load-list nil)").unwrap();
     let (dead_objects, dead_bytes) = settled(&mut vm);
     eprintln!("base {base_objects}/{base_bytes} held {held_objects}/{held_bytes} dead {dead_objects}/{dead_bytes}");
     assert_eq!((dead_objects, dead_bytes), (base_objects, base_bytes), "an unreachable lazy body must be reclaimed");

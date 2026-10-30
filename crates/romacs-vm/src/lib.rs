@@ -24,6 +24,7 @@ mod oclosure;
 mod host_input;
 mod bidi;
 mod layout_host;
+mod session_host;
 mod terminal_host;
 mod process_jobs;
 mod subprocess;
@@ -32,9 +33,12 @@ pub mod world;
 mod environment;
 mod watchers;
 mod user_db;
+mod locale_info;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
+pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
+pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
 // Maps keyed by slots and ids the VM allocates use FxHash. Maps keyed by
@@ -477,12 +481,10 @@ enum Primitive {
     DeleteWindowInternal,
     FrameSelectedWindow,
     MinibufferWindow,
-    SelectWindow,
     SetWindowMargins,
     SetWindowParameter,
     SetWindowPoint,
     SetWindowStart,
-    WindowEnd,
     WindowTotalHeight,
     SplitWindowInternal,
     WindowResizeApply,
@@ -740,12 +742,10 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("delete-window-internal", Primitive::DeleteWindowInternal),
     ("frame-selected-window", Primitive::FrameSelectedWindow),
     ("minibuffer-window", Primitive::MinibufferWindow),
-    ("select-window", Primitive::SelectWindow),
     ("set-window-margins", Primitive::SetWindowMargins),
     ("set-window-parameter", Primitive::SetWindowParameter),
     ("set-window-point", Primitive::SetWindowPoint),
     ("set-window-start", Primitive::SetWindowStart),
-    ("window-end", Primitive::WindowEnd),
     ("window-total-height", Primitive::WindowTotalHeight),
     ("split-window-internal", Primitive::SplitWindowInternal),
     ("window-resize-apply", Primitive::WindowResizeApply),
@@ -946,8 +946,14 @@ struct Function {
     /// holds an interpreted closure's body before macroexp.el is loaded.
     /// `code` is empty while this is present; every frame entry forces it.
     lazy: Option<Arc<LazyBody>>,
+    /// Whether it was compiled under dynamic binding, recorded where its
+    /// closure site sees no lexical binding: GNU's interpreted closure
+    /// keeps its whole visible environment, so there `(aref CLOSURE 2)'
+    /// is the dialect's alone, nil or (t). Code images and older cache
+    /// entries do not record it.
+    dynamic: Option<bool>,
 }
-romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy });
+romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic });
 /// The unexpanded body of a function defined in GNU's non-eager load regime
 /// (src/lread.c:2183: `internal-macroexpand-for-load' not yet fbound).
 ///
@@ -1212,6 +1218,8 @@ pub struct Vm {
     host_input: Option<Box<dyn host_input::HostInput>>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
+    /// The embedder's end of the session while one is attached (session_host.rs).
+    session_host: Option<session_host::SessionHost>,
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     idle_since: Option<std::time::Instant>,
@@ -1294,6 +1302,9 @@ pub struct Vm {
     functions: Vec<Arc<Function>>,
     request_code: request_code::RequestCode,
     register_width: usize,
+    /// Registers kept free at the stack's end for `apply`'s spread
+    /// arguments; it grows to fit the longest spread (GNU has no limit).
+    spread_reserve: usize,
     execution: threaded::Program,
     /// Programs of finished nested engine runs (registers all NIL again,
     /// lowered code kept), reused by the next nested run
@@ -1444,12 +1455,14 @@ romacs_snapshot::snapshot_fields!(Vm {
     dynamic,
     conditions,
     rooted,
+    spread_reserve,
 
 } at_rest {
     regexp_cache,
     suspended_code,
     host_input,
     layout_host,
+    session_host,
     terminal_host,
     subprocesses,
     process_jobs,
@@ -1520,6 +1533,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             layout_host: None,
+            session_host: None,
             idle_since: None,
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
@@ -1570,6 +1584,7 @@ impl Vm {
             functions: vec![],
             request_code: request_code::RequestCode::default(),
             register_width: 1,
+            spread_reserve: 4096,
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
             closures: vec![],
@@ -1974,6 +1989,7 @@ impl Vm {
         if keep_captures {
             used.fill(true);
         }
+        let visible = names.len();
         let retained = used.iter().filter(|&&keep| keep).count();
         let removed = names.len() - retained;
         if removed != 0 {
@@ -2014,6 +2030,7 @@ impl Vm {
             rest,
             sites: b.sites,
             lazy: None,
+            dynamic: (visible == 0).then_some(self.dynamic_scope),
         });
         Ok((id, names))
     }
@@ -2093,6 +2110,7 @@ impl Vm {
             required,
             rest,
             sites: vec![],
+            dynamic: names.is_empty().then_some(self.dynamic_scope),
             lazy: Some(Arc::new(lazy)),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();

@@ -98,3 +98,21 @@ Implementation-time checks:
   live variants successfully; see `../evidence/current-oracle-live/summary.json` and
   `../README.md` for the exact commands, movement proof, and diagnostic limits.
   This harness does not invoke Cargo, a full gate, or Git publication.
+
+# Package parity: pinned GNU beside `--loadup`
+
+`parity_live.py` runs pinned GNU pgtk and `romacs-vm-gui --loadup` at once,
+each in its own headless labwc with a private HOME, types the same keys into
+both and compares the state both report after every step through
+`parity_probe.el`; `report.json` records every difference, the geometry
+apart, and each step's wall time and, with `--perf`, its `instructions:u`.
+It never invokes Cargo.  Each harness names its workflows, its private trees
+and its comparison policy in its docstring:
+
+* `gnosis_parity_live.py`: the owner's gnosis workflows (dashboard, search
+  and tags, review, adding and editing a thema), each engine on its own copy
+  of a Gnosis database.
+* `hermes_parity_live.py`: the owner's hermes checkout, read-only against
+  the running dashboard at 127.0.0.1:9119 (dashboard, session browser and
+  search, a session's history), its token discovered by hermes and never
+  reported.

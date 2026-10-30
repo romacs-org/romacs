@@ -322,17 +322,22 @@ impl Leaf<'_> {
                 b.state = t.state.clone();
                 b.per_buffer = t.per_buffer.clone();
                 b.case_tables = t.case_tables;
-                b.held = Some(t.clone());
+                // Its markers, all at its start, live in the unibyte buffer
+                // meanwhile; the held buffer keeps its overlays.
+                let mut held = t.clone();
+                b.anchors = std::mem::replace(&mut held.anchors, crate::anchors::AnchorTree::new(0));
+                b.held = Some(held);
                 data::Object::ByteBuffer(Box::new(b))
             }
             data::Object::ByteBuffer(b) if multibyte => {
-                if !b.bytes.is_empty() || !b.saved_restrictions.is_empty() || !b.saved_points.is_empty() {
-                    return Err(fileio_refusal("insert-file-contents multibyte toggle of a buffer with text, saved restrictions or excursions"));
+                if !b.bytes.is_empty() {
+                    return Err(fileio_refusal("insert-file-contents multibyte toggle of a buffer with text"));
                 }
                 let mut a: crate::annotations::AnnotatedBuffer = match &b.held {
                     Some(held) => (**held).clone(),
                     None => crate::text::Text::decode_binary(b).map_err(Fault::Error)?.into(),
                 };
+                a.anchors = b.anchors.clone();
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
@@ -355,6 +360,10 @@ impl Leaf<'_> {
             return Err(Fault::Error("unibyte buffer required".into()));
         };
         debug_assert!(b.bytes.is_empty());
+        // Its markers stay at BEG, as insert_from_gap_1 leaves them.
+        if !b.anchors.grow(u32::try_from(bytes.len()).map_err(|_| Fault::Error("buffer too large".into()))?) {
+            return Err(Fault::Error("buffer too large".into()));
+        }
         b.bytes = bytes.to_vec();
         b.point = ByteOffset(0);
         b.restriction = ByteOffset(0)..ByteOffset(bytes.len());

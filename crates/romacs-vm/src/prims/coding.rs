@@ -228,6 +228,9 @@ fn set_safe_terminal_coding_system_internal(cx, coding: Value) {
 defsubr! { name = "set-coding-system-priority", gnu = "coding.c:10875", effect = Global,
 fn set_coding_system_priority(cx; rest systems) { cx.set_coding_system_priority(systems) }}
 
+defsubr! { name = "romacs--set-coding-category-order", gnu = "coding.c:10923", effect = Global,
+fn set_coding_category_order(cx; rest categories) { cx.set_coding_category_order(categories) }}
+
 defsubr! { name = "coding-system-priority-list", gnu = "coding.c:10933", effect = Reads,
 fn coding_system_priority_list(cx; optional highestp: Value) { cx.coding_system_priority_list(highestp) }}
 

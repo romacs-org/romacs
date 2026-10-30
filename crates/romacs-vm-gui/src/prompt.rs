@@ -34,6 +34,9 @@ pub struct Shared {
     pub closed: bool,
     /// Under --trace-latency, when the prompt last read a key.
     pub key_read: Option<std::time::Instant>,
+    /// The prompt's last painted frame, its selected window, presentation
+    /// and window ends: an unchanged redisplay answers these again.
+    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>)>,
 }
 
 pub struct GuiHost {
@@ -41,6 +44,8 @@ pub struct GuiHost {
     pub sender: Arc<PaintSender>,
     pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
     pub terminal_ready: crossbeam_channel::Receiver<()>,
+    /// The process descriptors the next wait also watches.
+    pub processes: Vec<(std::os::fd::RawFd, i16)>,
 }
 
 /// What one transport event means to a waiting prompt. By reference: a
@@ -59,6 +64,45 @@ fn classify(event: &InputEvent) -> Option<HostEvent> {
         )
         .map(HostEvent::Key),
         _ => None,
+    }
+}
+
+/// What SHARED records of an event a prompt read: the frame closing, or its size.
+fn note(shared: &mut Shared, event: &HostEvent) {
+    match *event {
+        HostEvent::Closed => shared.closed = true,
+        HostEvent::Resize { width, height } => shared.size = Some((width, height)),
+        HostEvent::Key(_) | HostEvent::Background | HostEvent::Process | HostEvent::Timeout | HostEvent::Focus(_) => {}
+    }
+}
+
+/// A prompt's next event within TIMEOUT: a queued one, else what INPUT
+/// brings, a terminal's or a process's readiness, or the timeout.  Events a
+/// prompt ignores (releases, lone modifiers) go on waiting, on PROCESSES too.
+fn next_event(shared: &std::cell::RefCell<Shared>, input: &crossbeam_channel::Receiver<InputEvent>,
+              terminal: &crossbeam_channel::Receiver<()>, timeout: Option<Duration>,
+              processes: &[(std::os::fd::RawFd, i16)]) -> Result<HostEvent, String> {
+    let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
+    loop {
+        let queued = next_queued(&mut shared.borrow_mut());
+        let event = match queued {
+            Next::Closed => return Ok(HostEvent::Closed),
+            Next::Event(event) => event,
+            Next::Wait => {
+                let left = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
+                match crate::terminal_wait::wait(input, terminal, left, processes) {
+                    crate::terminal_wait::Wake::Input(event) => event,
+                    crate::terminal_wait::Wake::Terminal => return Ok(HostEvent::Background),
+                    crate::terminal_wait::Wake::Process => return Ok(HostEvent::Process),
+                    crate::terminal_wait::Wake::Closed => return Err("input closed while reading".into()),
+                    crate::terminal_wait::Wake::Timeout => return Ok(HostEvent::Timeout),
+                }
+            },
+        };
+        if let Some(classified) = classify(&event) {
+            note(&mut shared.borrow_mut(), &classified);
+            return Ok(classified);
+        }
     }
 }
 
@@ -93,14 +137,7 @@ impl GuiHost {
         shared.pending = kept;
     }
 
-    fn note(&self, event: &HostEvent) {
-        let mut shared = self.shared.borrow_mut();
-        match *event {
-            HostEvent::Closed => shared.closed = true,
-            HostEvent::Resize { width, height } => shared.size = Some((width, height)),
-            HostEvent::Key(_) | HostEvent::Background | HostEvent::Timeout | HostEvent::Focus(_) => {}
-        }
-    }
+
 }
 
 impl HostInput for GuiHost {
@@ -120,6 +157,16 @@ impl HostInput for GuiHost {
     }
 
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
+        // As the loop's changed_frame: a timer run in a prompt that left the
+        // frame as this prompt last painted it, with nothing presented
+        // since, submits no frame and answers that paint's window ends.
+        if let Some((painted, selected, presentation, ends)) = &self.shared.borrow().painted {
+            let shared = self.shared.borrow();
+            if *presentation == shared.presentation && shared.in_flight.is_none()
+                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame) {
+                return Ok(ends.clone());
+            }
+        }
         let started = std::time::Instant::now();
         let wait = Duration::from_secs(30);
         let presentation = {
@@ -135,6 +182,7 @@ impl HostInput for GuiHost {
         // Synchronous, like the oracle path: the prompt is on screen before
         // the evaluator blocks for its key.
         self.sender.wait_for_render(presentation, wait)?;
+        self.shared.borrow_mut().painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone()));
         eprintln!(
             "{}",
             serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
@@ -152,31 +200,18 @@ impl HostInput for GuiHost {
         Ok(ends)
     }
 
+    fn watch_processes(&mut self, fds: &[(std::os::fd::RawFd, i16)]) {
+        self.processes = fds.to_vec();
+    }
+
     fn next_event(&mut self, timeout: Option<Duration>) -> Result<HostEvent, String> {
-        let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
-        loop {
-            let queued = next_queued(&mut self.shared.borrow_mut());
-            let event = match queued {
-                Next::Closed => return Ok(HostEvent::Closed),
-                Next::Event(event) => event,
-                Next::Wait => {
-                    let left = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
-                    match crate::terminal_wait::wait(self.sender.input(), &self.terminal_ready, left) {
-                        crate::terminal_wait::Wake::Input(event) => event,
-                        crate::terminal_wait::Wake::Terminal => return Ok(HostEvent::Background),
-                        crate::terminal_wait::Wake::Closed => return Err("input closed while reading".into()),
-                        crate::terminal_wait::Wake::Timeout => return Ok(HostEvent::Timeout),
-                    }
-                },
-            };
-            if let Some(classified) = classify(&event) {
-                self.note(&classified);
-                if crate::tracing() && matches!(classified, HostEvent::Key(_)) {
-                    self.shared.borrow_mut().key_read = Some(std::time::Instant::now());
-                }
-                return Ok(classified);
-            }
+        // The descriptors this read watches, through every wait it makes.
+        let processes = std::mem::take(&mut self.processes);
+        let event = next_event(&self.shared, self.sender.input(), &self.terminal_ready, timeout, &processes)?;
+        if crate::tracing() && matches!(event, HostEvent::Key(_)) {
+            self.shared.borrow_mut().key_read = Some(std::time::Instant::now());
         }
+        Ok(event)
     }
 }
 
@@ -197,6 +232,32 @@ mod tests {
         }
         assert_eq!(shared.pending.len(), 1, "nothing more is consumed once closed");
         assert!(matches!(next_queued(&mut Shared::default()), Next::Wait));
+    }
+
+    /// A read that first gets an event a prompt ignores (a key release)
+    /// goes on watching its processes: output that arrives next ends the
+    /// read at once, not at its time limit.
+    #[test]
+    fn an_ignored_event_keeps_the_processes_watched() {
+        use romacs_display_runtime::host_types::FrontendKey;
+        use std::os::fd::AsRawFd;
+        // poll.h's POLLIN, as `Vm::process_wait_fds' gives it for output.
+        const POLLIN: i16 = 0x1;
+        let (keys, input) = crossbeam_channel::unbounded::<InputEvent>();
+        let (_terminals, terminal) = crossbeam_channel::bounded::<()>(1);
+        keys.send(InputEvent::Key { key: FrontendKey::Character('a'), modifiers: 0, pressed: false, emacs_frame_id: 0 }).unwrap();
+        let (mut writer, reader) = std::os::unix::net::UnixStream::pair().unwrap();
+        let wrote = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            std::io::Write::write_all(&mut writer, b"output").unwrap();
+            writer
+        });
+        let shared = RefCell::new(Shared::default());
+        let start = std::time::Instant::now();
+        let event = next_event(&shared, &input, &terminal, Some(Duration::from_secs(3)), &[(reader.as_raw_fd(), POLLIN)]);
+        assert!(matches!(event, Ok(HostEvent::Process)), "{event:?}");
+        assert!(start.elapsed() < Duration::from_secs(1), "the read waited {:?}", start.elapsed());
+        drop(wrote.join());
     }
 
     /// A focus change during a Lisp read reaches the read as GNU's special

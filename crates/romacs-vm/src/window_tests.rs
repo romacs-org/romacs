@@ -213,11 +213,9 @@ fn g3a_margins_start_and_stale_end() {
         &mut vm,
         "(and (set-window-margins nil 2 3) (not (set-window-margins nil 2 3)) (not (set-window-margins nil 999 3)) (equal (window-margins) '(2 . 3)) (= (set-window-start nil 3) 3) (= (window-start) 3))",
     );
-    assert!(
-        vm.eval_source_raw("(window-end nil t)")
-            .unwrap_err()
-            .contains("layout")
-    );
+    // Before a host lays the frame out, UPDATE keeps the recorded end, as
+    // GNU's batch does.
+    yes(&mut vm, "(= (window-end nil t) (window-end))");
     // NOFORCE sets the start without forcing it on redisplay.
     yes(&mut vm, "(and (= (set-window-start nil 2 t) 2) (= (window-start) 2))");
     assert_eq!(run(&mut vm, "(set-window-start nil nil)"), Value::NIL);
@@ -576,17 +574,12 @@ fn g3a_geometry_and_layout_end_journal() {
     let snapshot = vm.display_snapshot(800, 576).unwrap();
     vm.display_apply_layout(&[crate::WindowEnd { id: snapshot.id, end: 4, visible_end: 0, body_height: 0.0, rows: vec![] }]).unwrap();
     yes(&mut vm, "(= (window-end nil) 4)");
-    assert!(
-        vm.eval_source_raw("(window-end nil t)")
-            .unwrap_err()
-            .contains("layout")
-    );
+    // A laid-out window lays itself out again for UPDATE, which needs the
+    // host's layout attached.
+    let refused = r#"(equal (condition-case e (window-end nil t) (error (car (cdr e)))) "VM2 window-end in a displayed window is unsupported")"#;
+    yes(&mut vm, refused);
     run(&mut vm, "(insert \"z\")");
-    assert!(
-        vm.eval_source_raw("(window-end nil t)")
-            .unwrap_err()
-            .contains("layout")
-    );
+    yes(&mut vm, refused);
     yes(&mut vm, "(= (window-end nil) 5)");
     assert!(vm.set_frame_geometry(1, 1, 24, 12).is_err());
 }
@@ -809,6 +802,51 @@ fn face_changes_in_a_reused_windows_mode_line_redisplay_it_fully() {
         let changed = vm.frame_snapshot(800, 576).expect(change).windows[0].snapshot.clone();
         assert!(changed.faces.iter().any(|face| face.foreground == color), "{change} did not reach the published faces");
     }
+}
+
+/// The header line takes the mode line's shortcut: a redisplay that keeps
+/// a window's text, faces and start evaluates its header line again, as
+/// display_mode_lines builds both bands; a header line the window starts
+/// to want (its `header-line-format' parameter) takes rows from the text,
+/// so it redisplays the window fully.
+#[test]
+fn unchanged_windows_redisplay_their_header_line_too() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (setq walks 0 heads 0) (set-buffer (get-buffer-create "headed"))
+                          (dotimes (i 10) (insert (format "line %d\n" i)))
+                          (set-window-buffer nil (current-buffer)) (goto-char 1)
+                          (setq fontification-functions (list (lambda (_) (setq walks (1+ walks)))))
+                          (setq mode-line-format "%l")
+                          (setq header-line-format '("H%l " (:eval (progn (setq heads (1+ heads)) "h")))))"#);
+    let snapshot = |vm: &mut Vm| vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    let counts = |vm: &mut Vm| (run(vm, "walks").as_integer().unwrap(), run(vm, "heads").as_integer().unwrap());
+    let header = |snapshot: &romacs_layout_input::WindowSnapshot| snapshot.header_line.as_ref().map(|band| band.utf8.clone());
+    let first = snapshot(&mut vm);
+    vm.display_apply_layout(&[whole(&first)]).unwrap();
+    let full = snapshot(&mut vm);
+    vm.display_apply_layout(&[whole(&full)]).unwrap();
+    assert_eq!(header(&full).as_deref(), Some("H1 h"));
+    let (walks, heads) = counts(&mut vm);
+
+    run(&mut vm, "(forward-line 3)");
+    let moved = snapshot(&mut vm);
+    assert_eq!(counts(&mut vm), (walks, heads + 1), "a moved point walked the text, or kept the header line");
+    assert_eq!(header(&moved).as_deref(), Some("H4 h"));
+    assert_eq!(moved.mode_line.as_ref().unwrap().utf8, "4");
+
+    run(&mut vm, "(progn (setq header-line-format nil) (force-window-update))");
+    let bare = snapshot(&mut vm);
+    assert_eq!(header(&bare), None);
+    vm.display_apply_layout(&[whole(&bare)]).unwrap();
+    snapshot(&mut vm);
+    let (walks, _) = counts(&mut vm);
+    run(&mut vm, "(set-window-parameter nil 'header-line-format \"P\")");
+    let parameter = snapshot(&mut vm);
+    assert_eq!(header(&parameter).as_deref(), Some("P"));
+    assert!(counts(&mut vm).0 > walks, "a header line the window now wants kept the text");
 }
 
 /// The layout journal of a host that showed all of SNAPSHOT's text on

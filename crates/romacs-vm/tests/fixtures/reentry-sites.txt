@@ -22,7 +22,9 @@ autoload.rs load_source_named load_file_raw 1 clean  # FILE is read before the l
 autoload.rs load_with_autoload_queue load_source_named 1 rooted  # the queue and saved match data are bindings, read back from their slots
 autoload.rs load_with_autoload_queue unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 bootstrap.rs bootstrap_primitive call_lisp_at_write 1 held  # defalias-fset-function from a legacy primitive call: its engine is not suspended
+bootstrap.rs bootstrap_primitive set_variable_value 1 held  # defalias's LOADHIST_ATTACH to current-load-list: a native writer, its watchers hold collection (rooted_write unset)
 command.rs command_event eval_form_raw 6 clean  # events become forms and the binding a name before each call
+command.rs command_event set_variable_value 1 held  # this-command := the binding: a native writer, its watchers hold collection (rooted_write unset)
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
 eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
 eval_form.rs eval_primitive compile_request 1 held  # an open compiler builder holds collection
@@ -92,6 +94,7 @@ prim/leaf/buffer_locals.rs reset_buffer_locals set_variable_value 1 held  # a le
 prim/leaf/coding.rs coding_convert_string variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs coding_string_result variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs set_coding_system_priority variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/coding.rs set_coding_category_order variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/process.rs decode_output variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/callint.rs keep_all_history variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/callint.rs run_command variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
