@@ -79,7 +79,10 @@ import owner  # noqa: E402
 ENGINES = ('gnu', 'romacs')
 GUARDED = {'hermes-prompt': 1}  # effect -> calls allowed per engine per session
 ERROR_LINE = re.compile(r'(?i)\berror\b|failed|wrong type|is void|void-function|void-variable|not implemented|unsupported'
-                        r'|args out of range|invalid|debugger entered|\bVM2\b|not supported|wrong number of arguments')
+                        r'|args out of range|invalid|debugger entered|\bVM2\b|not supported|wrong number of arguments'
+                        # A condition's own name, as an unreported signal echoes it.
+                        r'|wrong-type-argument|args-out-of-range|wrong-number-of-arguments|cl-no-applicable-method'
+                        r'|setting-constant')
 CLOCK = re.compile(r'\b\d\d:\d\d:\d\d\b')
 
 
