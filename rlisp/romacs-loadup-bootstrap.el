@@ -155,8 +155,11 @@
 (load "emacs-lisp/shorthands.el" nil t t)
 (load "emacs-lisp/eldoc.el" nil t t)
 (load "emacs-lisp/cconv.el" nil t t)
-;; loadup.el preloads cus-start with this flag bound.
+;; loadup.el preloads cus-start with this flag bound, under `dump-mode',
+;; where it does not provide itself: Custom's `(require 'cus-start)'
+;; then loads the types and groups the preload skips.
 (dlet ((cus-start--preload t)) (load "cus-start.el" nil t t))
+(setq features (delq 'cus-start features))
 (load "tooltip.el" nil t t)
 (load "international/iso-transl.el" nil t t)
 (load "emacs-lisp/rmc.el" nil t t)
