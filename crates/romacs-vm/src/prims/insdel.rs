@@ -219,6 +219,14 @@ fn done(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
     Ok(Step::Done(Value::NIL))
 }
 
+// Fcombine_after_change_execute: only the Lisp half defers changes, so
+// without it none are pending.
+defsubr! { name = "combine-after-change-execute", gnu = "insdel.c:2475", effect = Global,
+fn combine_after_change_execute(cx) -> Step {
+    if half_missing(cx)? { return Ok(Step::Done(Value::NIL)); }
+    Ok(Step::Call { f: cx.intern("romacs--combine-after-change-execute"), args: vec![], then: done, saved: vec![] })
+}}
+
 // Fdelete_char: undo-auto-amalgamate for a single character, then
 // del_range from point, or kill-forward-chars with KILLFLAG.
 defsubr! { name = "delete-char", gnu = "cmds.c:221", effect = Global,
