@@ -179,10 +179,13 @@ fn traversal_handlers_preserve_values_errors_and_redefinition() {
             "(let ((x (list 'a 1))) (setcdr (cdr x) x) (plist-get x 'b))",
             "nil",
         ),
+        // GNU compiles (car x) to Bcar, which never reads the cell; funcall
+        // does (VM2-SEALED1).
         (
             "(defun probe (x) (car x)) (probe '(1)) (defalias 'car (lambda (x) 42)) (probe '(1))",
-            "42",
+            "1",
         ),
+        ("(funcall 'car '(1))", "42"),
     ] {
         let value = vm
             .eval_source(source)
@@ -192,14 +195,16 @@ fn traversal_handlers_preserve_values_errors_and_redefinition() {
 }
 
 #[test]
-fn null_redefinition_preserves_not_primitive_value_per_d003() {
+fn null_and_not_are_sealed_byte_ops() {
+    // Pinned GNU, byte-compiled: (defalias 'null ...) leaves (null nil) and
+    // (not nil) at t, both being Bnot (VM2-SEALED1).
     let mut vm = Vm::new();
     let value = vm
         .eval_source("(defalias 'null (lambda (x) 'nn)) (list (null nil) (not nil))")
         .unwrap();
-    assert_eq!(value.display().unwrap(), "(nn t)");
-    let value = vm.eval_source("(defalias 'not 'null) (not nil)").unwrap();
-    assert_eq!(value.display().unwrap(), "nn");
+    assert_eq!(value.display().unwrap(), "(t t)");
+    let value = vm.eval_source("(defalias 'not 'null) (list (not nil) (funcall 'not nil))").unwrap();
+    assert_eq!(value.display().unwrap(), "(t nn)");
 }
 
 #[test]
@@ -216,6 +221,16 @@ fn arithmetic_tail_dispatch_has_bounded_native_stack() {
     std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
         let mut vm = Vm::new();
         let value = vm.eval_source("(let ((n 0) (v [3 4]) (i 0)) (while (< i 200000) (setq n (% (* n 31) (aref v 1))) (length v) (setq i (1+ i))) i)").unwrap();
+        assert_eq!(value.as_integer().unwrap(), 200000);
+    }).unwrap().join().unwrap();
+}
+
+#[test]
+fn predicate_kernels_tail_dispatch_has_bounded_native_stack() {
+    std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
+        let mut vm = Vm::new();
+        // Flat forms: the dev-fast compiler itself needs most of this stack.
+        let value = vm.eval_source("(let ((l (make-list 200000 1)) (n 0) (s \"x\")) (while (consp l) (setq n (1+ n)) (listp l) (car-safe l) (cdr-safe n) (integerp n) (numberp n) (stringp l) (stringp s) (symbolp n) (setq l (cdr l))) n)").unwrap();
         assert_eq!(value.as_integer().unwrap(), 200000);
     }).unwrap().join().unwrap();
 }

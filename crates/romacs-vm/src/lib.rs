@@ -99,6 +99,7 @@ mod buffer;
 mod bytes;
 mod modification;
 mod conditions;
+mod sealed;
 pub mod coordinates;
 mod data;
 mod bool_vector;
@@ -844,6 +845,9 @@ enum Op {
     Direct(usize, usize, usize, usize, usize),
     ResolveHead(usize, usize),
     Prepared(usize, usize, usize, usize, usize, usize),
+    /// A call GNU compiles to a byte code (sealed.rs): the primitive itself,
+    /// never the function cell. (destination, symbol slot, first argument, count)
+    Sealed(usize, usize, usize, usize),
     Return(usize),
     Catch(usize, usize, usize),
     Condition(usize, Value, usize),
@@ -872,6 +876,7 @@ romacs_snapshot::snapshot_enum!(Op {
     Op::Direct(f0, f1, f2, f3, f4) => (f0, f1, f2, f3, f4),
     Op::ResolveHead(f0, f1) => (f0, f1),
     Op::Prepared(f0, f1, f2, f3, f4, f5) => (f0, f1, f2, f3, f4, f5),
+    Op::Sealed(f0, f1, f2, f3) => (f0, f1, f2, f3),
     Op::Return(f0) => (f0),
     Op::Catch(f0, f1, f2) => (f0, f1, f2),
     Op::Condition(f0, f1, f2) => (f0, f1, f2),
@@ -914,7 +919,7 @@ impl Op {
                 *target = map(*target);
                 *start = map(*start);
             }
-            Self::Direct(d, _, _, start, _) => {
+            Self::Direct(d, _, _, start, _) | Self::Sealed(d, _, start, _) => {
                 *d = map(*d);
                 *start = map(*start);
             }
@@ -2585,10 +2590,13 @@ impl Vm {
                         } else {
                             (None, rest)
                         };
+                        // GNU compiles these calls to a byte code that never reads
+                        // the function cell; so does Romacs (sealed.rs, VM2-SEALED1).
+                        let sealed = target.is_none() && sealed::target(head, args.len()).is_some();
                         // eval_sub resolves the named function before evaluating arguments.
                         // Keep its value in a traced register: argument evaluation may
                         // redefine the cell or collect the closure it used to own.
-                        let prepared = if target.is_none() {
+                        let prepared = if target.is_none() && !sealed {
                             let slot = self.slot(head);
                             // Non-eager Lisp bodies may name a macro before its
                             // defining file is loaded. Keep that entire form
@@ -2612,6 +2620,8 @@ impl Vm {
                         let r = b.reg();
                         if let Some(f) = target {
                             b.emit(Op::Call(r, f, start, args.len()));
+                        } else if sealed {
+                            b.emit(Op::Sealed(r, self.slot(head), start, args.len()));
                         } else {
                             let (function, slot) = prepared.unwrap();
                             let cache = self.install_cache();
@@ -2751,6 +2761,7 @@ impl Vm {
                     Op::Global(d, s) => format!("r{d} = value s{s}"),
                     Op::ResolveHead(d, s) => format!("r{d} = resolve-head s{s}"),
                     Op::Prepared(d, f, s, c, a, n) => format!("r{d} = prepared r{f} s{s} cache c{c} r{a}..+{n}"),
+                    Op::Sealed(d, s, a, n) => format!("r{d} = sealed s{s} r{a}..+{n}"),
                     Op::SetGlobal(s, r) => format!("value s{s} = r{r}"),
                     Op::Bind(s, r) => format!("bind-special s{s} r{r}"),
                     Op::Unbind(n) => format!("unbind {n}"),
@@ -3109,10 +3120,7 @@ impl Vm {
                     tails::TailEnd::Circular(_) => Err("circular list".into()),
                 }
             }
-            Nreverse => {
-                self.conditions.invalidate();
-                self.core_nreverse(a[0])
-            }
+            Nreverse => self.core_nreverse(a[0]),
             _ => Err("primitive requires executor adapter".into()),
         }
     }
@@ -3263,7 +3271,7 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
                     }
                     writes[d] += 1;
                 }
-                Op::Direct(d, _, _, start, n) => {
+                Op::Direct(d, _, _, start, n) | Op::Sealed(d, _, start, n) => {
                     for r in start..start + n {
                         read(r);
                     }
@@ -3317,6 +3325,7 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
                     Some(Op::Prepared(out, f, slot, cache, a, n)) if out == s => {
                         Some(Op::Prepared(d, f, slot, cache, a, n))
                     }
+                    Some(Op::Sealed(out, slot, a, n)) if out == s => Some(Op::Sealed(d, slot, a, n)),
                     _ => None,
                 };
                 if let Some(replacement) = replacement {
