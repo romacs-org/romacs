@@ -9,7 +9,7 @@ use super::*;
 #[path = "threaded_signal.rs"]
 mod signal_handlers;
 pub(super) use signal_handlers::SignalHandler;
-use signal_handlers::{prepare_signal, release_control};
+use signal_handlers::{prepare_signal, release_control, DEBUGGER_HELPER};
 #[cfg(test)]
 #[path = "error_signal_tests.rs"]
 mod error_signal_tests;
@@ -800,32 +800,57 @@ unsafe fn call_suspended<T>(e: &mut Engine<'_>, r: *mut Value, call: impl FnOnce
 }
 
 /// GNU signal_or_quit: call the edebug hook before unwinding, borrowing at
-/// most twenty levels from the reserve. Use the same suspended-engine/GC
-/// discipline as eval/load; no raw Value here crosses a collecting safepoint.
+/// most twenty levels from the reserve.
 #[cold]
 #[inline(never)]
 fn signal_hook(e: &mut Engine<'_>, condition: Value, data: Value, failed_depth: Option<usize>) -> Option<Escape> {
     let slot = e.vm.slot("signal-hook-function");
     let hook = e.vm.variable_value(slot).ok()?;
     if hook == Value::NIL || hook == Value::UNBOUND { return None; }
+    let form = Form::List(vec![Form::Sym("funcall".into()), quoted(e.vm, hook), quoted(e.vm, condition), quoted(e.vm, data)]);
+    call_in_signal(e, form, 20, failed_depth)
+}
+
+/// GNU maybe_call_debugger and call_debugger past the tests
+/// `debugger_wanted' makes: the Lisp half tests the error's CONDITIONS and
+/// OBJECT, then `debugger' runs under call_debugger's bindings, borrowing
+/// two hundred levels. The form is the signal path's own, so the
+/// debugger's frame sits on the signalling one, as GNU's C leaves it.
+#[cold]
+#[inline(never)]
+pub(super) fn call_debugger(e: &mut Engine<'_>, conditions: Value, object: Value, failed_depth: Option<usize>) -> Option<Escape> {
+    let sym = |name: &str| Form::Sym(name.into());
+    let bind = |name: &str, value: &str| Form::List(vec![sym(name), sym(value)]);
+    let test = Form::List(vec![sym(DEBUGGER_HELPER), quoted(e.vm, conditions), quoted(e.vm, object)]);
+    let call = Form::List(vec![sym("funcall"), sym("debugger"), Form::List(vec![sym("quote"), sym("error")]), quoted(e.vm, object)]);
+    let bindings = Form::List(vec![bind("debugger-may-continue", "t"), bind("inhibit-redisplay", "nil"),
+                                   bind("inhibit-debugger", "t"), bind("inhibit-changing-match-data", "nil")]);
+    let form = Form::List(vec![sym("if"), test, Form::List(vec![sym("let"), bindings, call])]);
+    call_in_signal(e, form, 200, failed_depth)
+}
+
+/// VALUE as a quoted, rooted form object.
+fn quoted(vm: &Vm, value: Value) -> Form {
+    Form::List(vec![Form::Sym("quote".into()), Form::Object(handle::FormObject::new(vm, value))])
+}
+
+/// Run FORM on the signal path, before unwinding, borrowing ROOM levels;
+/// the escape it leaves replaces the pending one. Use the same
+/// suspended-engine/GC discipline as eval/load; no raw Value here crosses a
+/// collecting safepoint: FORM's objects are rooted, and are also the
+/// pending escape's, which the suspended engine traces.
+fn call_in_signal(e: &mut Engine<'_>, form: Form, room: i64, failed_depth: Option<usize>) -> Option<Escape> {
     let r = e.regs;
     let saved_depth = e.vm.eval_depth;
     // A refused activation has already incremented GNU's depth, even though
     // no register frame was installed for it.
     let depth = failed_depth.unwrap_or(e.depth_base + e.frames.len());
     e.vm.eval_depth = depth;
-    let token = e.vm.max_ensure_room(20);
+    let token = e.vm.max_ensure_room(room);
     e.vm.propagated_escape = None;
     e.vm.propagated_eval_depth = None;
     e.vm.propagated_escape_hooked = false;
-    // The quoted objects are rooted; CONDITION and DATA are also the pending
-    // escape, which the suspended engine traces.
-    let form = {
-        let vm: &Vm = e.vm;
-        let quote = |v| Form::List(vec![Form::Sym("quote".into()), Form::Object(handle::FormObject::new(vm, v))]);
-        Form::List(vec![Form::Sym("funcall".into()), quote(hook), quote(condition), quote(data)])
-    };
-    // Compiling the hook can widen the registers; the rebase follows them.
+    // Compiling the call can widen the registers; the rebase follows them.
     let (result, rebased) = unsafe {
         call_suspended(e, r, |vm| {
             let function = vm.compile(&form)?;

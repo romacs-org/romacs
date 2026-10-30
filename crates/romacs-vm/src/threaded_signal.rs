@@ -75,9 +75,46 @@ pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Opt
         let conditions = e.vm.signal_conditions(condition);
         e.escape = Some(Escape::Error { condition, object, conditions, target: None });
         replaced |= search(e);
+        if !replaced && debugger_wanted(e)
+            && let Some(Escape::Error { conditions, object, .. }) = e.escape.as_ref()
+            && let Some(replacement) = call_debugger(e, *conditions, *object, failed_depth)
+        {
+            e.escape = Some(replacement);
+            prepare_signal(e, false, None);
+            replaced = true;
+        }
     }
     replaced
 }
+
+/// GNU signal_or_quit after its handler search: whether the debugger is
+/// considered for the pending error, then maybe_call_debugger's tests that
+/// need no Lisp. It is considered with `debug-on-signal', when no handler
+/// catches the error, or when the catching clause lists `debug' (the
+/// command loop's catch-all is `(debug t)', GNU's C handler `error').
+/// `romacs--call-debugger-p' (rlisp/vm/prelude.el) makes the rest.
+fn debugger_wanted(e: &mut Engine<'_>) -> bool {
+    let Some(Escape::Error { conditions, target, .. }) = e.escape.as_ref() else { return false; };
+    let (conditions, clause) = match target.and_then(|at| e.vm.signal_handlers.get(at)) {
+        Some(SignalHandler::Condition(choices)) => (*conditions, *choices),
+        _ => (*conditions, Value::NIL),
+    };
+    let set = |e: &mut Engine<'_>, name: &str| {
+        let slot = e.vm.slot(name);
+        !matches!(e.vm.variable_value(slot), Ok(Value::NIL | Value::UNBOUND) | Err(_))
+    };
+    let considered = clause == Value::NIL
+        || (clause.tag() == 3 && { let debug = e.vm.intern("debug"); member(e.vm, debug, clause) })
+        || set(e, "debug-on-signal");
+    if !considered || set(e, "inhibit-debugger") { return false; }
+    let quit = e.vm.intern("quit");
+    let wanted = if member(e.vm, quit, conditions) { set(e, "debug-on-quit") } else { set(e, "debug-on-error") };
+    let helper = e.vm.slot(DEBUGGER_HELPER);
+    wanted && !matches!(e.vm.slots[helper].function, Value::NIL | Value::UNBOUND)
+}
+
+/// The Lisp half of maybe_call_debugger's tests.
+pub(super) const DEBUGGER_HELPER: &str = "romacs--call-debugger-p";
 
 fn search(e: &mut Engine<'_>) -> bool {
     let mut at = e.vm.signal_handlers.len();

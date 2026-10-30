@@ -224,7 +224,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region" | "base64-decode-region" => "r",
         "upcase-region" | "downcase-region" | "capitalize-region" | "upcase-initials-region" => "(list (region-beginning) (region-end) (region-noncontiguous-p))",
         "widen" | "garbage-collect" | "redraw-display" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
-        "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" => "P",
+        "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" | "start-kbd-macro" => "P", "end-kbd-macro" | "call-last-kbd-macro" => "p", "kill-buffer" => "bKill buffer: ",
         "search-forward" => "MSearch: ",
         "re-search-forward" => "sRE search: ",
         "re-search-backward" => "sRE search backward: ",
@@ -633,7 +633,19 @@ fn arg_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
                 saved[POS] = fixnum(line_end.min(spec.len()) as i64);
                 return Ok(Step::Call { f, args, then: read_argument, saved });
             }
-            b'a' | b'b' | b'B' | b'c' | b'C' | b'k' | b'K' | b'M' | b'n' | b'N'
+            // callint.c:503-514: Fread_buffer, `b' an existing buffer that
+            // defaults to the current one (from the minibuffer, another
+            // one), `B' any name, defaulting to another buffer.
+            b'b' | b'B' => {
+                saved[POS] = fixnum(pos as i64);
+                let current = cx.current_buffer()?;
+                if spec[pos] == b'b' && cx.windows().window_minibuffer_p(Value::NIL)? == Value::NIL {
+                    return buffer_default(cx, current, &saved);
+                }
+                let f = cx.intern("other-buffer");
+                return Ok(Step::Call { f, args: vec![current, Value::NIL, Value::NIL], then: buffer_default, saved });
+            }
+            b'a' | b'c' | b'C' | b'k' | b'K' | b'M' | b'n' | b'N'
             | b'S' | b'v' | b'x' | b'X' | b'z' | b'Z' => {
                 let code = spec[pos] as char;
                 return Err(unsupported(&format!("the input-reading code `{code}'")));
@@ -651,6 +663,21 @@ fn arg_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
     }
     saved[POS] = fixnum(pos as i64);
     finish(cx, saved)
+}
+
+/// `b' and `B' with their DEFAULT: read the buffer name.
+fn buffer_default(cx: &mut Leaf<'_>, default: Value, saved: &[Value]) -> Next {
+    let spec = spec_bytes(cx, saved)?;
+    let pos = index(saved[POS]);
+    let line_end = spec[pos + 1..].iter().position(|&b| b == b'\n').map_or(spec.len(), |i| pos + 1 + i);
+    let prompt = spec[pos + 1..line_end].to_vec();
+    let template = cx.make_string(prompt.clone(), crate::environment::multibyte(&prompt));
+    let message = cx.format_message(template, &[])?;
+    let mustmatch = if spec[pos] == b'b' { Value::TRUE } else { Value::NIL };
+    let mut saved = saved.to_vec();
+    saved[POS] = fixnum(line_end.min(spec.len()) as i64);
+    let f = cx.intern("read-buffer");
+    Ok(Step::Call { f, args: vec![message, default, mustmatch, Value::NIL], then: read_argument, saved })
 }
 
 /// An argument read from the user: it varies == 0, so the call is

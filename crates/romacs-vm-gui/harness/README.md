@@ -116,3 +116,9 @@ and its comparison policy in its docstring:
   the running dashboard at 127.0.0.1:9119 (dashboard, session browser and
   search, a session's history), its token discovered by hermes and never
   reported.
+* `command_errors_live.py`: the command loop and the session's end on a
+  plain init: command errors' echo area, *Messages* and bells, the
+  debugger's *Backtrace* from M-: and from a `debug-on-error` command,
+  keyboard macros through kmacro.el's keys, C-x k's prompts, auto-saves by
+  event count and idle time, SIGTERM, and C-x C-c over a modified file
+  through the save prompt to the exit status.

@@ -319,7 +319,9 @@ fn gnu_defined(vm: &mut Vm, command: &str) -> Result<bool, String> {
     Ok(v != romacs_vm::Fixed::NIL)
 }
 
-/// Bind every stand-in key: GNU's command where loadup defined it, else romacs's.
+/// Bind every stand-in key: GNU's command where loadup defined it, else
+/// romacs's. The workspace, which has no GNU maps, also gets its own C-x k
+/// and GNU's keys for the commands it has; GNU's maps bind those after loadup.
 fn bind_journey_keys(vm: &mut Vm, after_loadup: bool) -> Result<Vec<Binding>, String> {
     let mut bindings = vec![];
     for (key, gnu, romacs) in STAND_INS {
@@ -327,12 +329,14 @@ fn bind_journey_keys(vm: &mut Vm, after_loadup: bool) -> Result<Vec<Binding>, St
         vm.eval_source(&define_global(key, if gnu_defined { gnu } else { romacs }))?;
         bindings.push(Binding { key, gnu, gnu_defined });
     }
-    vm.eval_source(&define_global("[24 107]", "romacs-gui-kill-buffer"))?;
-    vm.eval_source(&define_global("[24 6]", "find-file"))?;
-    vm.eval_source(&define_global("[24 98]", "switch-to-buffer"))?;
-    vm.eval_source(&define_global("[24 100]", "dired"))?;
-    vm.eval_source(&define_global("[27 120]", "execute-extended-command"))?;
-    vm.eval_source(&define_global("[134217848]", "execute-extended-command"))?;
+    if !after_loadup {
+        vm.eval_source(&define_global("[24 107]", "romacs-gui-kill-buffer"))?;
+        vm.eval_source(&define_global("[24 6]", "find-file"))?;
+        vm.eval_source(&define_global("[24 98]", "switch-to-buffer"))?;
+        vm.eval_source(&define_global("[24 100]", "dired"))?;
+        vm.eval_source(&define_global("[27 120]", "execute-extended-command"))?;
+        vm.eval_source(&define_global("[134217848]", "execute-extended-command"))?;
+    }
     Ok(bindings)
 }
 

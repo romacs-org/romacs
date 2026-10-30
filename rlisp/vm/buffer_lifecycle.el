@@ -32,6 +32,12 @@
               (while (and allow queries)
                 (setq allow (funcall (car queries)))
                 (setq queries (cdr queries))))
+            ;; buffer.c: an interactive session (no batch, no keyboard
+            ;; macro) asks before killing a modified file buffer.
+            (when (and allow (buffer-live-p buffer) (null executing-kbd-macro) (not noninteractive)
+                       buffer-file-name (buffer-modified-p) (fboundp 'kill-buffer--possibly-save))
+              (setq allow (kill-buffer--possibly-save buffer))
+              (set-buffer buffer))
             (when (and allow (buffer-live-p buffer) (not inhibit))
               (set-buffer buffer)
               (setq hooks (romacs--kill-hook-functions kill-buffer-hook (default-value 'kill-buffer-hook)))

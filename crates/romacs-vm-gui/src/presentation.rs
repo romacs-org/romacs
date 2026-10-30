@@ -72,13 +72,10 @@ impl Presentation {
         // GNU's command loop clears the previous message when a new command
         // starts, not on each key of a prefix sequence.
         if !in_prefix { crate::echo::clear(vm)?; }
+        // A command's signal reached `command-error-function' in the
+        // command loop, whose default left its message like any other.
         let outcome = run(vm);
-        if let Ok(Some(romacs_vm::CommandOutcome { signal: Some(signal), .. })) = &outcome {
-            let message = crate::echo::signal_message(vm, signal)?;
-            crate::echo::show(vm, &message)?;
-        } else {
-            crate::echo::show_current_message(vm)?;
-        }
+        crate::echo::show_current_message(vm)?;
         crate::eval_last_sexp::after_command(vm)?;
         outcome
     }

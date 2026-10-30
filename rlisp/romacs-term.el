@@ -79,10 +79,11 @@
   (search-forward text))
 
 (defun romacs-term--kill-query ()
-  "Refuse an unconfirmed programmatic kill while the child is running."
-  (if (and (romacs-term-running-p) (not romacs-term--closing))
-      (progn (message "Running terminal; use C-x k and confirm closure") nil)
-    t))
+  "Ask before killing a buffer whose terminal still runs, as GNU's
+`process-kill-buffer-query-function' asks for a buffer's process."
+  (or (not (romacs-term-running-p)) romacs-term--closing
+      (yes-or-no-p (format "Buffer %S has a running process; kill it? "
+                           (buffer-name (current-buffer))))))
 
 (defun romacs-term--close ()
   "Retire the native session when its terminal buffer is killed."

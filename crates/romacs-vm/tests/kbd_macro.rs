@@ -197,6 +197,29 @@ const CASES: &[&str] = &[
   (let ((command-error-function (lambda (data context _signal) (push (list data context) errors))))
     (list (condition-case e (execute-kbd-macro (kbd "m a C-g a")) (quit (list 'quit e)))
           got errors (with-current-buffer "*scratch*" (buffer-string)))))"#,
+    // Recording: keys read as new input (t . EVENT) are stored while a
+    // macro is defined, kmacro.el's C-x ( C-x ) C-x e and F3 F4 drive it,
+    // and the keys that end it are left out.
+    r#"(progn (global-set-key [f9] 'exit-recursive-edit) (set-buffer "*scratch*")
+  (setq unread-command-events (mapcar (lambda (e) (cons t e)) (list ?\C-x ?\( ?a ?b ?\C-x ?\) ?\C-x ?e 'f9)))
+  (recursive-edit) (list last-kbd-macro defining-kbd-macro (buffer-string)))"#,
+    r#"(progn (global-set-key [f9] 'exit-recursive-edit) (set-buffer "*scratch*")
+  (setq unread-command-events (mapcar (lambda (e) (cons t e)) (list 'f3 ?x ?y 'f4 'f4 'f4 'f9)))
+  (recursive-edit) (list last-kbd-macro defining-kbd-macro (buffer-string)))"#,
+    // A prefix argument's keys stay in the macro with the command they prefix.
+    r#"(progn (global-set-key [f9] 'exit-recursive-edit) (set-buffer "*scratch*")
+  (setq unread-command-events (mapcar (lambda (e) (cons t e)) (list ?\C-x ?\( ?\C-u ?3 ?z ?\C-x ?\) 'f9)))
+  (recursive-edit) (list last-kbd-macro (buffer-string)))"#,
+    // The primitives: their refusals, appending, a repeat count, and
+    // call-last-kbd-macro keeping the commands' view of the last command.
+    r#"(list (condition-case e (end-kbd-macro) (error e))
+  (condition-case e (let ((last-kbd-macro nil)) (call-last-kbd-macro)) (error e))
+  (progn (start-kbd-macro nil) (prog1 (list defining-kbd-macro (condition-case e (start-kbd-macro nil) (error e))
+                                           (condition-case e (call-last-kbd-macro) (error e)))
+                                 (end-kbd-macro)))
+  last-kbd-macro
+  (let ((last-kbd-macro "ab")) (start-kbd-macro t t) (store-kbd-macro-event ?c) (end-kbd-macro) last-kbd-macro)
+  (with-temp-buffer (let ((last-kbd-macro "q") (last-command 'previous)) (call-last-kbd-macro 3) (list (buffer-string) this-command))))"#,
 ];
 
 fn gnu_results(root: &Path) -> Vec<String> {

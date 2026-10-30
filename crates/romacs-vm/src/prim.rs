@@ -1623,6 +1623,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod clipboard;
+    mod keyboard;
     mod filesave;
     mod charset;
     mod coding;
