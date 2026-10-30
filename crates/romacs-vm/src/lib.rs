@@ -462,6 +462,10 @@ enum Primitive {
     MatchData,
     ReSearchForward,
     ReSearchBackward,
+    PosixLookingAt,
+    PosixStringMatch,
+    PosixSearchForward,
+    PosixSearchBackward,
     SyntaxTable,
     StandardSyntaxTable,
     CopySyntaxTable,
@@ -526,7 +530,6 @@ enum Primitive {
     DeepEqual,
     Min,
     Append,
-    Prin1ToString,
     GetBuffer,
     ForwardLine,
     SwitchToBuffer,
@@ -723,6 +726,10 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("match-data", Primitive::MatchData),
     ("re-search-forward", Primitive::ReSearchForward),
     ("re-search-backward", Primitive::ReSearchBackward),
+    ("posix-looking-at", Primitive::PosixLookingAt),
+    ("posix-string-match", Primitive::PosixStringMatch),
+    ("posix-search-forward", Primitive::PosixSearchForward),
+    ("posix-search-backward", Primitive::PosixSearchBackward),
     ("syntax-table", Primitive::SyntaxTable),
     ("standard-syntax-table", Primitive::StandardSyntaxTable),
     ("copy-syntax-table", Primitive::CopySyntaxTable),
@@ -789,7 +796,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("equal", Primitive::DeepEqual),
     ("min", Primitive::Min),
     ("append", Primitive::Append),
-    ("prin1-to-string", Primitive::Prin1ToString),
     ("get-buffer", Primitive::GetBuffer),
     ("forward-line", Primitive::ForwardLine),
     ("switch-to-buffer", Primitive::SwitchToBuffer),
@@ -2935,7 +2941,7 @@ impl Vm {
         use Primitive::*;
         if matches!(p, ClosureMetadata | ClosureDocument | MakeInterpretedClosure) { return self.interpreted_closure_primitive(p, start, n); }
         if p == TempBuffer { return self.eval_buffer_primitive(p, start, n); }
-        if matches!(p, DeepEqual | Min | Append | Prin1ToString) { return self.eval_data_primitive(p, start, n); }
+        if matches!(p, DeepEqual | Min | Append) { return self.eval_data_primitive(p, start, n); }
         if matches!(p, GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized) { return self.eval_buffer_primitive(p, start, n); }
         if (p as usize) >= SymbolValue as usize {
             return self.variable_primitive(p, start, n);

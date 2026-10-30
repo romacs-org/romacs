@@ -31,7 +31,7 @@ fn subr_arity_reports_current_native_handler_bounds() {
         ("apply", "(1 . many)"),
         ("signal", "(1 . 2)"),
         ("plist-get", "(2 . 2)"),
-        ("buffer-size", "(0 . 0)"),
+        ("buffer-size", "(0 . 1)"),
         ("search-forward", "(1 . 4)"),
         ("copy-marker", "(0 . 2)"),
         ("overlays-at", "(1 . 1)"),

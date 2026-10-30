@@ -2,18 +2,36 @@
 use super::*;
 use std::io::Write;
 
+// Each print first answers its unreadable objects (`answered'), then prints
+// with SAVED = [OBJECT, ESCAPE, OVERRIDES, STREAM].
 defsubr! { name = "prin1", gnu = "print.c:738", effect = Global,
 fn prin1(cx, object: Value; optional stream: Value, overrides: Value) -> Step {
-    let stream = destination(cx, stream)?; let text = cx.print_text(object, true, overrides, stream)?;
-    output(cx, object, text, stream)
+    let stream = destination(cx, stream)?;
+    answered(cx, vec![object, Value::TRUE, overrides, stream], prin1_answered)
 }}
+fn prin1_answered(cx: &mut Leaf<'_>, answers: Value, saved: &[Value]) -> Next {
+    let text = cx.print_text(saved[0], true, saved[2], saved[3], answers)?;
+    output(cx, saved[0], text, saved[3])
+}
+
+defsubr! { name = "prin1-to-string", gnu = "print.c:795", effect = Global,
+fn prin1_to_string(cx, object: Value; optional noescape: Value, overrides: Value) -> Step {
+    let escape = if noescape == Value::NIL { Value::TRUE } else { Value::NIL };
+    answered(cx, vec![object, escape, overrides, Value::NIL], to_string_answered)
+}}
+fn to_string_answered(cx: &mut Leaf<'_>, answers: Value, saved: &[Value]) -> Next {
+    Ok(Step::Done(cx.print_string(saved[0], saved[1] != Value::NIL, saved[2], answers)?))
+}
 
 defsubr! { name = "princ", gnu = "print.c:844", effect = Global,
 fn princ(cx, object: Value; optional stream: Value) -> Step {
     let stream = destination(cx, stream)?;
-    let text = cx.princ_text(object, stream)?;
-    output(cx, object, text, stream)
+    answered(cx, vec![object, Value::NIL, Value::NIL, stream], princ_answered)
 }}
+fn princ_answered(cx: &mut Leaf<'_>, answers: Value, saved: &[Value]) -> Next {
+    let text = cx.princ_text(saved[0], saved[3], answers)?;
+    output(cx, saved[0], text, saved[3])
+}
 
 defsubr! { name = "terpri", gnu = "print.c:627", effect = Global,
 fn terpri(cx; optional stream: Value, ensure: Value) -> Step {
@@ -24,10 +42,35 @@ fn terpri(cx; optional stream: Value, ensure: Value) -> Step {
 
 defsubr! { name = "print", gnu = "print.c:882", effect = Global,
 fn print(cx, object: Value; optional stream: Value) -> Step {
-    let stream = destination(cx, stream)?; let text = cx.print_text(object, true, Value::NIL, stream)?;
-    let text = cx.string(&format!("\n{}\n", cx.string_text(text)?));
-    output(cx, object, text, stream)
+    let stream = destination(cx, stream)?;
+    answered(cx, vec![object, Value::TRUE, Value::NIL, stream], print_answered)
 }}
+fn print_answered(cx: &mut Leaf<'_>, answers: Value, saved: &[Value]) -> Next {
+    let text = cx.print_text(saved[0], true, Value::NIL, saved[3], answers)?;
+    let text = cx.string(&format!("\n{}\n", cx.string_text(text)?));
+    output(cx, saved[0], text, saved[3])
+}
+
+/// print.c print_vectorlike_unreadable: while `print-unreadable-function'
+/// (or the OVERRIDES of SAVED binding it) is a function, its value for each
+/// unreadable object the print of SAVED meets, from
+/// `romacs--print-unreadable' (rlisp/vm/prelude.el); THEN prints with that
+/// list, or with nil when no call is due.
+fn answered(cx: &mut Leaf<'_>, saved: Vec<Value>, then: Then) -> Next {
+    let function = match overridden_function(cx, saved[2])? {
+        Some(function) => function,
+        None => cx.print_unreadable_function()?,
+    };
+    if function != Value::NIL && super::vars::function_p(cx, function)? {
+        let objects = cx.print_unreadables(saved[0], saved[1] != Value::NIL, saved[2], saved[3])?;
+        if !objects.is_empty() {
+            let objects = objects.into_iter().rev().fold(Value::NIL, |list, object| cx.cons(object, list));
+            let f = cx.intern("romacs--print-unreadable");
+            return Ok(Step::Call { f, args: vec![function, objects, saved[1]], then, saved });
+        }
+    }
+    then(cx, Value::NIL, &saved)
+}
 
 defsubr! { name = "write-char", gnu = "print.c:553", effect = Global,
 fn write_char(cx, character: Value; optional stream: Value) -> Step {
@@ -119,4 +162,33 @@ fn next_char(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
 }
 fn emitted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     next_char(cx, saved.to_vec())
+}
+
+/// print.c print_create_variable_mapping's override keys.
+const OVERRIDE_KEYS: [&str; 17] = ["length", "level", "circle", "quoted", "escape-newlines", "escape-control-characters",
+    "escape-nonascii", "escape-multibyte", "charset-text-property", "unreadable-function", "unreadeable-function",
+    "gensym", "continuous-numbering", "number-table", "float-format", "integers-as-characters", "symbols-bare"];
+
+/// print.c print_bind_overrides's checks of OVERRIDES, and the
+/// `print-unreadable-function' they bind: the last one given, nil after
+/// a `t', which binds every default; None when none is.
+fn overridden_function(cx: &mut Leaf<'_>, overrides: Value) -> std::result::Result<Option<Value>, Fault> {
+    if overrides == Value::NIL { return Ok(None); }
+    if overrides == Value::TRUE { return Ok(Some(Value::NIL)); }
+    if cx.pair(overrides).is_none() { return Err(Fault::Wrong("consp", overrides)); }
+    let (mut function, mut tail) = (None, overrides);
+    while let Some((setting, next)) = cx.pair(tail) {
+        if setting == Value::TRUE {
+            function = Some(Value::NIL);
+        } else {
+            let (key, value) = cx.pair(setting).ok_or(Fault::Wrong("consp", setting))?;
+            let name = if cx.kind(key) == leaf::Kind::Symbol { cx.symbol_name(key)? } else { String::new() };
+            // Fassq of an unknown key is nil, which is not a symbol here.
+            if !OVERRIDE_KEYS.contains(&name.as_str()) { return Err(Fault::Wrong("symbolp", Value::NIL)); }
+            if name.starts_with("unread") { function = Some(value); }
+        }
+        if next != Value::NIL && cx.pair(next).is_none() { return Err(Fault::Wrong("consp", tail)); }
+        tail = next;
+    }
+    Ok(function)
 }

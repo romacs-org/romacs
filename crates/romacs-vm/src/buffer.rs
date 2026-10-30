@@ -380,13 +380,22 @@ impl Vm {
         if (p as usize) >= SetMultibyte as usize {
             return self.edge_primitive(p, start, n);
         }
+        // editfns.c Fbuffer_size: a given BUFFER's whole text.
+        if p == BufferSize && n == 1 && self.stack[start] != Value::NIL {
+            return match self.object_if(self.stack[start]) {
+                Some(Object::Buffer(t)) => Value::integer(t.len_chars() as i64),
+                Some(Object::ByteBuffer(b)) => Value::integer(b.bytes.len() as i64),
+                _ => Err("buffer required".into()),
+            };
+        }
         let args = self.buffer_primitive_args(p, start, n)?;
         let valid = match p {
             Remainder | DeleteRegion | Substring | Narrow => n == 2,
             SetBuffer | GotoChar | CharToByte | ByteToChar => n == 1,
-            CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen => {
+            CurrentBuffer | Point | PointMin | PointMax | Widen => {
                 n == 0
             }
+            BufferSize => n <= 1,
             CharAfter => n <= 1,
             Insert => true,
             GetProperty => (2..=3).contains(&n),
