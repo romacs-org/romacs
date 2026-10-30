@@ -6,14 +6,21 @@
 
 ;; `project-find-file' and `project-find-regexp' as GNU defines them, with
 ;; the slow part, `project-files' and `xref-matches-in-files', run in a
-;; worker isolate of this session's own world (rlisp/vm/isolate.el).  The
-;; command returns to the command loop at once; when the worker's frozen
-;; result arrives at a wait point the command continues exactly where GNU's
-;; would be: the completion prompt, or the xref buffer.  The candidate list
-;; and the matches are the same functions over the same project, so they
-;; are what GNU shows; only the moment the prompt or buffer appears differs
-;; (DIVERGENCES.md VM2-PROJECT-ISOLATE).  Keys typed meanwhile run their
-;; commands instead of waiting.
+;; worker isolate of this session's own world (rlisp/vm/isolate.el) when
+;; one stands ready.  The command returns to the command loop at once; when
+;; the worker's frozen result arrives at a wait point the command continues
+;; exactly where GNU's would be: the completion prompt, or the xref buffer.
+;; The candidate list and the matches are the same functions over the same
+;; project, so they are what GNU shows; only the moment the prompt or buffer
+;; appears differs (DIVERGENCES.md VM2-PROJECT-ISOLATE).  Keys typed
+;; meanwhile run their commands instead of waiting.
+;;
+;; A worker is used only when it is already prepared and idle: a worker's
+;; boot (the world's adoption and the libraries' loading) costs about as
+;; much as the job, so a command that would have to start one runs GNU's
+;; definition instead, and warms a worker for the next command once the
+;; session idles.  `project-find-regexp' warms its worker while the user
+;; types the regexp, so its first run finds the worker ready.
 ;;
 ;; Without a world to spawn from (a source boot, batch) or for a remote
 ;; project, GNU's definitions run unchanged.
@@ -41,11 +48,34 @@ loaded while finding the project and the worker has not."
           (and (eq (car-safe project) 'vc) (symbolp (nth 1 project)) (nth 1 project)
                (list (intern (format "vc-%s" (downcase (symbol-name (nth 1 project)))))))))
 
-(defun romacs-project--spawn (project function &rest args)
-  "Spawn FUNCTION with ARGS on a worker ready for PROJECT."
+(defun romacs-project--worker (project)
+  "The idle worker prepared for PROJECT's commands, or nil."
+  (and (romacs-project--isolate-available-p project)
+       (isolate-idle-worker (romacs-project--features project))))
+
+(defun romacs-project--warm (project)
+  "Start a worker for PROJECT's commands unless the pool has one.
+A worker that cannot start (no world, the pool full) is simply not there:
+the commands then run GNU's definitions."
+  (when (romacs-project--isolate-available-p project)
+    (condition-case nil
+        (isolate-warm (romacs-project--features project) (eq isolate-boot 'source))
+      (error nil))))
+
+(defun romacs-project--warm-when-idle (project)
+  "Warm a worker for PROJECT once the session idles."
+  (run-with-idle-timer 0.5 nil #'romacs-project--warm project))
+
+(defun romacs-project--warm-at-prompt (&rest _)
+  "Before the regexp prompt: warm a worker for the current project, so the
+search that follows the prompt finds it ready."
+  (let ((project (condition-case nil (project-current nil) (error nil))))
+    (when project (romacs-project--warm project))))
+
+(defun romacs-project--spawn (project worker function &rest args)
+  "Spawn FUNCTION with ARGS on WORKER, prepared for PROJECT."
   (apply #'isolate-spawn function
-         (append args (list :require (romacs-project--features project)
-                            :allow-source-boot (eq isolate-boot 'source)))))
+         (append args (list :isolate worker :require (romacs-project--features project)))))
 
 ;;;; The jobs, run in the worker
 
@@ -69,25 +99,24 @@ loaded while finding the project and the worker has not."
 ;;;; The commands
 
 (defun romacs-project-find-file (original &optional include-all)
-  "Around `project-find-file': enumerate in a worker, then complete and visit.
-ORIGINAL runs as GNU's does with INCLUDE-ALL, or without a worker."
-  (let ((project (project-current t)))
-    (if (or include-all (not (romacs-project--isolate-available-p project)))
-        (funcall original include-all)
+  "Around `project-find-file': enumerate in a ready worker, then complete
+and visit.  ORIGINAL runs as GNU's does with INCLUDE-ALL, or without a
+ready worker, which is then warmed for the next time."
+  (let* ((project (project-current t))
+         (worker (and (not include-all) (romacs-project--worker project))))
+    (if (null worker)
+        (prog1 (funcall original include-all)
+          (unless include-all (romacs-project--warm-when-idle project)))
       (let* ((suggested (thing-at-point 'filename))
              (dirs (list (project-root project)))
              (buffer (current-buffer))
              (window (selected-window))
-             (future (condition-case nil
-                         (romacs-project--spawn project romacs-project--files-job project dirs)
-                       (isolate-queue-full nil))))
-        (if (null future)
-            (funcall original include-all)
-          (isolate-on-done future
-                           (lambda (future)
-                             (romacs-project--find-file-continue future project suggested buffer window)))
-          (message "Finding files in %s..." (project-root project))
-          nil)))))
+             (future (romacs-project--spawn project worker romacs-project--files-job project dirs)))
+        (isolate-on-done future
+                         (lambda (future)
+                           (romacs-project--find-file-continue future project suggested buffer window)))
+        (message "Finding files in %s..." (project-root project))
+        nil))))
 
 (defun romacs-project--find-file-continue (future project suggested buffer window)
   "`project-find-file-in' from its file list, FUTURE's value, in the WINDOW
@@ -107,26 +136,25 @@ and BUFFER it was invoked from, as the prompt and the visit would be."
     (error (message "%s" (error-message-string err)))))
 
 (defun romacs-project-find-regexp (original regexp)
-  "Around `project-find-regexp': search in a worker, then show the xrefs.
-ORIGINAL runs as GNU's does with a prefix argument, or without a worker."
-  (let ((project (project-current t)))
-    (if (or current-prefix-arg (not (romacs-project--isolate-available-p project)))
-        (funcall original regexp)
+  "Around `project-find-regexp': search in a ready worker, then show the
+xrefs.  ORIGINAL runs as GNU's does with a prefix argument, or without a
+ready worker, which is then warmed for the next time."
+  (let* ((project (project-current t))
+         (worker (and (not current-prefix-arg) (romacs-project--worker project))))
+    (if (null worker)
+        (prog1 (funcall original regexp)
+          (unless current-prefix-arg (romacs-project--warm-when-idle project)))
       (require 'xref)
       (require 'grep)
       (let* ((root (project-root project))
              (buffer (current-buffer))
              (window (selected-window))
-             (future (condition-case nil
-                         (romacs-project--spawn project romacs-project--matches-job regexp project)
-                       (isolate-queue-full nil))))
-        (if (null future)
-            (funcall original regexp)
-          (isolate-on-done future
-                           (lambda (future)
-                             (romacs-project--show-matches future regexp project root buffer window)))
-          (message "Searching %s for %s..." root regexp)
-          nil)))))
+             (future (romacs-project--spawn project worker romacs-project--matches-job regexp project)))
+        (isolate-on-done future
+                         (lambda (future)
+                           (romacs-project--show-matches future regexp project root buffer window)))
+        (message "Searching %s for %s..." root regexp)
+        nil))))
 
 (defun romacs-project--show-matches (future regexp project root buffer window)
   "`project-find-regexp' from its matches, FUTURE's value, where it was invoked."
@@ -155,6 +183,7 @@ ORIGINAL runs as GNU's does with a prefix argument, or without a worker."
 
 (when (fboundp 'advice-add)
   (with-eval-after-load 'project
+    (advice-add 'project--read-regexp :before #'romacs-project--warm-at-prompt)
     (advice-add 'project-find-file :around #'romacs-project-find-file)
     (advice-add 'project-find-regexp :around #'romacs-project-find-regexp)))
 

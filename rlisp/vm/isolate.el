@@ -212,6 +212,33 @@ features.  FRESH asks for a new worker outside the pool's bound."
            (isolate-create :require require :allow-source-boot allow-source-boot))
           (t (signal 'isolate-queue-full (list require))))))
 
+(defun isolate-idle-worker (require)
+  "A pooled worker prepared with REQUIRE's features and running nothing, or nil."
+  (let (found)
+    (dolist (isolate romacs--isolates)
+      (when (and (isolate-live-p isolate) (not (aref isolate 6)) (aref isolate 9)
+                 (null (aref isolate 5)) (equal (aref isolate 4) require))
+        (setq found isolate)))
+    found))
+
+(defun isolate-warm (require &optional allow-source-boot)
+  "Start a pooled worker with REQUIRE's features ahead of its first job,
+unless one is live (prepared or preparing) or the pool is at `isolate-pool-size';
+the isolate started, or nil."
+  (romacs--isolate-recycle)
+  (let ((live (delq nil (mapcar (lambda (i) (and (isolate-live-p i) (not (aref i 6)) i)) romacs--isolates))))
+    (and (not (romacs--isolate-with-features live require))
+         (< (length live) isolate-pool-size)
+         (isolate-create :require require :allow-source-boot allow-source-boot))))
+
+(defun romacs--isolate-with-features (isolates require)
+  "The first of ISOLATES whose features are REQUIRE, or nil."
+  (let (found)
+    (dolist (isolate isolates)
+      (when (and (null found) (equal (aref isolate 4) require))
+        (setq found isolate)))
+    found))
+
 (defun romacs--isolate-submit (isolate function args bindings require directory)
   "Queue (apply FUNCTION ARGS) on ISOLATE: its future."
   (unless (isolate-live-p isolate)

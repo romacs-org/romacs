@@ -86,21 +86,27 @@ fn a_worker_killed_from_outside_has_its_reported_child_reached() {
 fn the_project_commands_give_the_synchronous_results() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     // The repository itself is the project: a git tree of several thousand files.
-    let script = format!("(progn {PREAMBLE} (require 'project) (load {module:?})
+    let script = format!("(progn {PREAMBLE} (require 'project) (load {module:?}) (setq romacs-project-isolate 'source)
       (let* ((pr (project-current nil {dir:?}))
+             ;; No worker is ready until one is warmed and has prepared.
+             (before (romacs-project--worker pr))
+             (worker (romacs-project--warm pr))
+             (preparing (romacs-project--worker pr))
              (sync-files (funcall (eval romacs-project--files-job t) pr (list (project-root pr))))
-             (iso-files (thaw (isolate-await (romacs-project--spawn pr romacs-project--files-job pr (list (project-root pr))))))
+             (iso-files (thaw (isolate-await (romacs-project--spawn pr worker romacs-project--files-job pr (list (project-root pr))))))
+             (ready (eq (romacs-project--worker pr) worker))
              (sync-matches (funcall (eval romacs-project--matches-job t) \"defcustom project-\" pr))
-             (iso-matches (thaw (isolate-await (romacs-project--spawn pr romacs-project--matches-job \"defcustom project-\" pr))))
+             (iso-matches (thaw (isolate-await (romacs-project--spawn pr worker romacs-project--matches-job \"defcustom project-\" pr))))
              (summary (lambda (m) (list (xref-location-group (xref-item-location m)) (xref-location-line (xref-item-location m)) (substring-no-properties (xref-item-summary m))))))
         (prin1 (list 'files (length sync-files) (equal sync-files iso-files)
                      'matches (length sync-matches) (equal (mapcar summary sync-matches) (mapcar summary iso-matches))
+                     'ready (list before preparing ready (romacs-project--warm pr))
                      'boot (isolate-await (isolate-spawn '(lambda () isolate-boot) :allow-source-boot t))))
         (isolate-kill-all)))", dir = root.join("gnu-lisp").display().to_string() + "/", module = root.join("rlisp/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &root);
     assert!(ok, "batch failed: {err}");
     let out = out.trim();
-    assert!(out.starts_with("(files ") && out.contains(" t matches ") && out.ends_with(" t boot source)"), "{out}\n{err}");
+    assert!(out.starts_with("(files ") && out.contains(" t matches ") && out.ends_with(" t ready (nil nil t nil) boot source)"), "{out}\n{err}");
     let files: usize = out.split_whitespace().nth(1).unwrap().parse().unwrap();
     assert!(files > 1000, "{out}");
 }
