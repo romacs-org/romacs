@@ -458,6 +458,10 @@ unbound upper-case or shifted key is looked up without its shift, and
 (defun romacs--read-key-sequence-vs (prompt continue-echo dont-downcase-last _cmd-loop)
   (and prompt (not (stringp prompt))
        (signal 'wrong-type-argument (list 'stringp prompt)))
+  ;; read_key_sequence (keyboard.c:10993): an interactive read installs
+  ;; PROMPT as the start of the echo and shows it now, unlogged (echo_now).
+  (when (and prompt (not executing-kbd-macro) (not noninteractive))
+    (let ((message-log-max nil)) (message "%s" prompt)))
   (unless continue-echo
     (setq romacs--command-keys [] romacs--single-command-key-start 0))
   (or (romacs--read-key-sequence dont-downcase-last) []))
