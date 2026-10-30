@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "9f3a88ad261a60f4456edfd55f58ef0df542ccfc2a24b270da45ee93f2a53f3d",
+  "input_hash": "772559c627ceba44ac40e42a4217142a88c30ed59431a1e85e176c2e3d00f35c",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -3134,7 +3134,7 @@
    "planned": false,
    "mechanism": "`project-find-file`, `project-find-regexp`",
    "gnu": "Enumerate (`project-files`) and search (`xref-matches-in-files`) synchronously; the session blocks until the prompt or the xref buffer appears.",
-   "romacs": "When a worker of the session's own world stands prepared and idle, the enumeration and the grep run in it; the command returns to the command loop at once and continues, with the identical candidate list or xref matches, when the result arrives: the prompt or xref buffer appears then, and keys typed meanwhile run their commands. Without such a worker the GNU definitions run unchanged and a worker is warmed for the next command once the session idles; `project-find-regexp` warms its worker while the regexp is typed, so its first run finds it ready. Without a world (a source boot, batch) nothing is warmed.",
+   "romacs": "When a worker of the session's own world stands prepared and idle, the enumeration and the grep run in it; the command returns to the command loop at once and continues, with the identical candidate list or xref matches, when the result arrives: the prompt or xref buffer appears then, and keys typed meanwhile run their commands. Without such a worker the GNU definitions run unchanged and a worker is warmed for the next command once the session idles; `project-find-regexp` warms its worker while the regexp is typed, so its first run normally finds it ready; a worker that will not take the job after all (queue full, process gone) is passed over the same way. The commands never wait for a worker's boot. Without a world (a source boot, batch) nothing is warmed.",
    "why": "The candidate list and the matches are the worker's `project-files` and `xref-matches-in-files` over the same project; only the timing of the prompt differs. Live journey: `crates/romacs-vm-gui/harness/isolates_live.py`.",
    "symbols": [
     "project-find-file",

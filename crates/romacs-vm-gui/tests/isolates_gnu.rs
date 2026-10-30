@@ -110,3 +110,29 @@ fn the_project_commands_give_the_synchronous_results() {
     let files: usize = out.split_whitespace().nth(1).unwrap().parse().unwrap();
     assert!(files > 1000, "{out}");
 }
+
+#[test]
+fn a_ready_worker_that_will_not_take_the_job_gives_way_to_the_original() {
+    // Sol r6: readiness is checked before submission; a full queue or a
+    // process gone since the check runs GNU's definition, not an error.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let script = format!("(progn {PREAMBLE} (require 'project) (load {module:?}) (setq romacs-project-isolate 'source)
+      (let* ((pr (project-current nil {dir:?}))
+             (worker (romacs-project--warm pr))
+             (id (romacs--isolate-id worker))
+             (original-file (lambda (&optional all) (list 'original-file all)))
+             (original-regexp (lambda (regexp) (list 'original-regexp regexp))))
+        (isolate-await (isolate-spawn '(lambda () t) :isolate worker))
+        (prin1 (list 'ready (eq (romacs-project--worker pr) worker)
+                     'full (let ((isolate-queue-limit 0))
+                             (list (romacs-project-find-file original-file) (romacs-project-find-regexp original-regexp \"x\")))
+                     'still-ready (eq (romacs-project--worker pr) worker)
+                     'dead (progn (romacs--isolate-signal id 9)
+                                  (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
+                                  (list (romacs-project-find-file original-file) (romacs-project-find-regexp original-regexp \"x\")))
+                     'live (progn (romacs--isolate-pump 0.5) (isolate-list))))
+        (isolate-kill-all)))", dir = root.join("gnu-lisp").display().to_string() + "/", module = root.join("rlisp/romacs-project.el").display().to_string());
+    let (ok, out, err) = batch(&script, &root);
+    assert!(ok, "batch failed: {err}");
+    assert_eq!(out.trim(), "(ready t full ((original-file nil) (original-regexp \"x\")) still-ready t dead ((original-file nil) (original-regexp \"x\")) live nil)", "{err}");
+}
