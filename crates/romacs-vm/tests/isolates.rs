@@ -197,3 +197,20 @@ fn every_reply_arrives_when_the_parent_is_slow_to_read() {
     assert_eq!(out, "(64 3000 3000)");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+#[test]
+fn resubmitted_jobs_keep_their_snapshot_and_fit_the_pool() {
+    // Sol r3 S14: the job frozen at submission is what a resubmission sends.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((arg (list 1)) (a (isolate-spawn '(lambda () (provide 'journey-feature-2) 'provided))) (b (isolate-spawn 'identity arg))) (setcar arg 2) (list (isolate-await a) (isolate-await b 10))))");
+    assert_eq!(out, "(provided (1))");
+    eval(&mut vm, "(isolate-kill-all)");
+    // Sol r3 S5: two jobs queued behind the change both run again, with pool size 1.
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-3) 'provided))) (b (isolate-spawn '(lambda () (featurep 'journey-feature-3)))) (c (isolate-spawn 'list 'third))) (list (isolate-await a) (isolate-await b 10) (isolate-await c 10) (length (isolate-list)))))");
+    assert_eq!(out, "(provided nil (third) 1)");
+    eval(&mut vm, "(isolate-kill-all)");
+    // Sol r3 S4: cancelling a job the pump has just queued again reaches its new worker.
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-4) 'provided))) (b (isolate-spawn '(lambda () (while t))))) (romacs--isolate-wait 0.5) (isolate-future-cancel b) (list (isolate-await a) (condition-case e (isolate-await b 10) (quit 'cancelled)) (isolate-await (isolate-spawn 'list 'after) 10))))");
+    assert_eq!(out, "(provided cancelled (after))");
+    eval(&mut vm, "(isolate-kill-all)");
+}

@@ -193,11 +193,13 @@ features, else the least loaded one with them, else a new one while
 features; `isolate-queue-full' when every pooled worker is busy with other
 features.  FRESH asks for a new worker outside the pool's bound."
   (romacs--isolate-recycle)
-  (let ((live (delq nil (mapcar (lambda (i) (and (isolate-live-p i) i)) romacs--isolates)))
+  ;; A retiring worker (tainted, still answering the jobs queued behind
+  ;; the change) is on its way out: it does not count toward the bound.
+  (let ((live (delq nil (mapcar (lambda (i) (and (isolate-live-p i) (not (aref i 6)) i)) romacs--isolates)))
         best idle)
     (unless fresh
       (dolist (isolate live)
-        (when (and (not (aref isolate 6)) (equal (aref isolate 4) require)
+        (when (and (equal (aref isolate 4) require)
                    (or (null best) (< (length (aref isolate 5)) (length (aref best 5)))))
           (setq best isolate))))
     (cond (fresh (isolate-create :require require :allow-source-boot allow-source-boot))
@@ -217,11 +219,14 @@ features.  FRESH asks for a new worker outside the pool's bound."
   (when (>= (length (aref isolate 5)) isolate-queue-limit)
     (signal 'isolate-queue-full (list isolate)))
   (setq romacs--isolate-generation (1+ romacs--isolate-generation))
-  (let* ((job (list function args bindings require directory))
+  ;; The job is frozen once, here: what the worker gets, and what a
+  ;; resubmission resends, is this snapshot, whatever the caller does to
+  ;; its objects afterwards.
+  (let* ((job (freeze (list function args bindings require directory)))
          (future (romacs--isolate-future isolate romacs--isolate-generation job)))
     ;; What cannot be sent signals here: an argument that cannot freeze
-    ;; (`Cannot freeze'), a full queue (`isolate-queue-full'), a worker gone
-    ;; (`isolate-died', whose death the next wait point reports).
+    ;; (`Cannot freeze', above), a full queue (`isolate-queue-full'), a
+    ;; worker gone (`isolate-died', whose death the next wait point reports).
     (condition-case err
         (romacs--isolate-post (romacs--isolate-id isolate) 'job romacs--isolate-generation job)
       (isolate-died (signal 'isolate-died (list isolate))))
@@ -378,8 +383,10 @@ no job: it gets the frame alone."
   "Cancel FUTURE: interrupt its worker if it is running this job, else drop it.
 What has arrived is taken first, so a job that finished is left alone and
 the job running after it is not hit in its place."
+  (romacs--isolate-pump 0)
+  ;; The pump may have queued the job again elsewhere (a retired worker):
+  ;; its worker and generation are read after it.
   (let ((isolate (aref future 1)))
-    (romacs--isolate-pump 0)
     (when (eq (aref future 3) 'pending)
       (let ((pending (aref isolate 5)))
         (if (and pending (eq (cdr (car pending)) future))
