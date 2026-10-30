@@ -121,9 +121,17 @@ and its comparison policy in its docstring:
 
 `bench/bench.py` is an MCP server for agents.  `bench_start` launches pinned
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
-HOME, both on the owner's session (`bench/owner.py`: init.el's editing,
-completion (fido-vertical), org, dired, project, vc, vc-plus, eat, eshell,
-gnosis and hermes blocks, without straight).  Each engine serves
+HOME, on one of two profiles (`bench/owner.py`).  The default, `stock`, loads
+no one's init: GNU runs `-Q` and loads only the bench's endpoint with `-l`,
+and Romacs runs `--loadup` with that endpoint as its only init, because its
+GUI has `-Q` but no `-l`.  Both use only the stock gnu-lisp and rlisp, on a
+generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
+Markdown, Org and a Makefile, with a five-commit history whose authors and
+dates are fixed, so the hashes match everywhere).  `owner` is the owner's
+session: init.el's editing, completion (fido-vertical), org, dired, project,
+vc, vc-plus, eat, eshell, gnosis and hermes blocks, without straight.  Both
+profiles give GNU the settings Romacs's `--loadup` makes by design, as the
+parity harnesses do.  Each engine serves
 `rlisp/romacs-mcp.el` with the session tools from
 `rlisp/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
 expose the same tools with the same result shapes:
@@ -189,10 +197,33 @@ python3 -B crates/romacs-vm-gui/harness/bench/bench.py replay \
   --output OUT --gnu-cache RUN/session-*/results.jsonl
 ```
 
-The first time `bench_start` runs for a package set, the pinned GNU
-byte-compiles that set, which takes minutes.  After that, a start takes
-about 10 s for GNU and 25-35 s for Romacs.  `recordings/daily-journey.jsonl`
-is the first recorded agent session, the owner's daily journey: find-file
+A `stock` start takes about 4 s for GNU and 17 s for Romacs.  The first
+`owner` start for a package set has the pinned GNU byte-compile that set,
+which takes minutes; after that it takes about 10 s for GNU and 25-35 s for
+Romacs.
+
+`recordings/general-usage.jsonl`, on the `stock` profile, is general use of
+the machine:
+* find-file across directories, with minibuffer editing, completion and
+  history;
+* project.el: find-file, find-regexp, dired, switch-to-buffer, compile,
+  eshell, shell-command, query-replace and vc-dir with its log and diff;
+* dired copy and rename, vc-annotate and vc-log;
+* help (`C-h f`, `C-h v`, `C-h k`, `C-h m`, apropos, Info);
+* isearch, occur, grep, eval-buffer and `M-.`;
+* editing: undo and redo, rectangles, registers, keyboard macros, fill,
+  comment-dwim and indent-region;
+* Org: cycling, TODO, a table and export to a buffer;
+* splits, winner and tab-bar;
+* `M-x` with completion, customize-variable, calc, calendar, IELM and
+  `M-:`;
+* quitting.
+
+It has 101 compared steps; a replay with the GNU side cached takes about 7
+minutes.  It leaves out list-packages, which would need the network.
+
+`recordings/daily-journey.jsonl`, on the `owner` profile, is the owner's
+daily journey: find-file
 and minibuffer motion, editing, project commands, org, a gnosis review,
 one hermes project-chat prompt, help and search commands, and quitting.
 It has 103 compared steps.  Replaying it with the GNU side cached takes

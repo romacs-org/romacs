@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Paired-session bench: pinned GNU and Romacs side by side, driven by an agent.
 
-Each engine runs the owner's session (owner.py) in its own private HOME on
+Each engine runs a profile's session (owner.py: stock, no init on a generic
+project, by default; or the owner's) in its own private HOME on
 a headless labwc and serves romacs-mcp.el's endpoint with the session tools
 (romacs-mcp-session.el): the same Lisp and the same tool surface in both.
 The bench is itself an MCP server whose tools take an engine argument --
 gnu, romacs or both -- so an agent can work in the two editors as a person
 would, look at them and compare them:
 
-  bench_start       start the pair (or one engine) on the owner's session
+  bench_start       start the pair (or one engine) on a profile's session
   bench_send_keys   keys (kbd) or text through each command loop, or wtype
   bench_wait_idle   until each loop is idle and timers and processes settle
   bench_observe     what each frame shows (romacs_observe), paths normalised
@@ -28,7 +29,7 @@ usage:
   bench.py daemon  --control SOCK [options]     the same tools on a socket
   bench.py call    --control SOCK TOOL [JSON]   one call to a daemon
   bench.py replay  RECORDING --output DIR [--gnu-cache RESULTS] [options]
-options: --romacs BIN --gnu EMACS --output DIR --work DIR --gnosis-db COPY
+options: --romacs BIN --gnu EMACS --output DIR --work DIR --profile stock|owner --gnosis-db COPY
          --project REPO --org FILE (ROMACS_BENCH_ORG) --tools DIR --timeout SECONDS
 
 COMPARISON POLICY (bench_compare): the selected buffer, the buffer's name,
@@ -72,12 +73,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import parity_live  # noqa: E402
+import fixture  # noqa: E402
 import owner  # noqa: E402
 
 ENGINES = ('gnu', 'romacs')
 GUARDED = {'hermes-prompt': 1}  # effect -> calls allowed per engine per session
 ERROR_LINE = re.compile(r'(?i)\berror\b|failed|wrong type|is void|void-function|void-variable|not implemented|unsupported'
-                        r'|args out of range|invalid|debugger entered')
+                        r'|args out of range|invalid|debugger entered|\bVM2\b|not supported|wrong number of arguments')
 CLOCK = re.compile(r'\b\d\d:\d\d:\d\d\b')
 
 
@@ -270,8 +272,10 @@ ENGINE = {'type': 'string', 'enum': ['gnu', 'romacs', 'both'], 'description': 'd
 STEP = {'type': 'string', 'description': 'the journey step this call belongs to, for the recording'}
 
 TOOLS = {
-    'bench_start': ('Start GNU and Romacs (or one engine) on the owner session in private HOMEs.',
+    'bench_start': ('Start GNU and Romacs (or one engine) in private HOMEs: profile stock (no init, a generic '
+                    'project at ~/src/tally, the default) or owner (the owner\'s packages and data copies).',
                     schema({'engines': {'type': 'array', 'items': {'type': 'string', 'enum': list(ENGINES)}},
+                            'profile': {'type': 'string', 'enum': ['stock', 'owner']},
                             'hermes': {'type': 'boolean'}, 'step': STEP})),
     'bench_send_keys': ('Type keys (kbd notation, e.g. "C-x C-f") or literal text into each engine through its '
                         'command loop (via events, paced like typing) or the compositor (via wtype). '
@@ -325,6 +329,9 @@ class Bench:
             raise ToolError(f'unknown tool {tool}')
         if tool != 'bench_start' and self.session is None:
             raise ToolError('no session: call bench_start first')
+        if tool == 'bench_start':
+            # The recording names the profile, whatever default supplied it.
+            arguments = {**arguments, 'profile': arguments.get('profile') or self.options.profile}
         started = time.time()
         try:
             result, outcome = getattr(self, tool)(dict(arguments))
@@ -376,8 +383,10 @@ class Bench:
         self.cursors = {}
         work = Path(options.work)
         work.mkdir(parents=True, exist_ok=True)
-        project = Path(options.project) if options.project else owner.default_project()
-        org = Path(options.org) if options.org else None
+        profile = arguments.get('profile') or options.profile
+        stock = profile == 'stock'
+        project = Path(options.project) if options.project else None if stock else owner.default_project()
+        org = Path(options.org) if options.org and not stock else None
         started = {}
 
         def launch(name):
@@ -385,10 +394,18 @@ class Bench:
             root, home, env = parity_live.private_tree(name, work, options.tools)
             (root / 'mcp').mkdir(mode=0o700)
             token = secrets.token_hex(24)
-            used = owner.populate(home, project, org, options.gnosis_db)
-            lisp = owner.lisp_dir(work, name)
-            init = owner.init_source(name, lisp, root / 'mcp/port', token)
-            if name == 'gnu':
+            used = owner.populate(home, project, org, None if stock else options.gnosis_db)
+            if stock and not project:
+                fixture.make_repo(home / 'src/tally')
+                used['project'] = '~/src/tally'
+            lisp = None if stock else owner.lisp_dir(work, name)
+            init = owner.init_source(name, lisp, root / 'mcp/port', token, profile)
+            if name == 'gnu' and stock:
+                (root / 'bench-init.el').write_text(init)
+                engine = McpEngine('gnu', [options.gnu, '-Q', '--font', 'Iosevka-14', '-l', str(root / 'bench-init.el')],
+                                   root, None, env, options.timeout)
+                engine.start(options.tools)
+            elif name == 'gnu':
                 engine = parity_live.gnu_engine(root, home, env, init, lisp, options.timeout, options.tools, McpEngine)
             else:
                 engine = parity_live.romacs_engine(options.romacs, root, home, env, init, lisp, options.timeout,
@@ -399,7 +416,7 @@ class Bench:
             errors = engine.ask('bench-init-errors')
             # Startup's own steps finish after the init; let them.
             engine.tool('romacs_wait_idle', 70, timeout=60)
-            started[name] = {'startup_seconds': round(engine.startup_seconds, 3),
+            started[name] = {'profile': profile, 'startup_seconds': round(engine.startup_seconds, 3),
                              'ready_seconds': round(time.time() - t, 3), 'data': used,
                              'init_errors': errors or [], 'runtime': engine.ask('emacs-version'),
                              'startup_hook_ran': engine.ask('bench-startup-hook-ran') is not None}
@@ -714,6 +731,8 @@ def main():
     parser.add_argument('--work', default=os.environ.get('ROMACS_BENCH_WORK'))
     parser.add_argument('--gnosis-db', default=os.environ.get('ROMACS_BENCH_GNOSIS_DB'),
                         help='a copy of gnosis.db; never the live one')
+    parser.add_argument('--profile', choices=['stock', 'owner'], default='stock',
+                        help="bench_start's default profile")
     parser.add_argument('--project')
     parser.add_argument('--org', default=os.environ.get('ROMACS_BENCH_ORG'), help='an org file to copy')
     parser.add_argument('--tools', default=parity_live.TOOLS)

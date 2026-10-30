@@ -1,4 +1,14 @@
-"""The owner's session for the bench: packages, init and data copies.
+"""The sessions the bench starts: their init and data copies.
+
+Two profiles.  stock, the default: no one's init, only the stock gnu-lisp
+and rlisp, on a generic project (fixture.py); GNU runs with -Q and loads
+the bench's endpoint with -l, Romacs runs --loadup with that endpoint as
+its only init (its GUI has -Q but no -l).  owner: the owner's session,
+below.  Both give GNU the settings Romacs's --loadup makes by design
+(no menu, tool or scroll bars, scroll-conservatively 101, Romacs's
+completion defaults), as the parity harnesses do.
+
+The owner profile:
 
 The init mirrors ~/.config/emacs/init.el's blocks that shape daily editing,
 completion, org, dired, project, vc, eshell, gnosis and hermes, rewritten
@@ -321,10 +331,12 @@ OWNER_INIT = r'''
 '''.replace('@URL@', DASHBOARD_URL)
 
 
-def init_source(engine, lisp, port_file, token):
-    """ENGINE's init: the owner's blocks, then the MCP endpoint on loopback,
-    its port written to PORT_FILE, its peers sending TOKEN first.  Loopback,
-    not a local socket: Romacs's GUI host refuses local network processes."""
+def init_source(engine, lisp, port_file, token, profile='owner'):
+    """ENGINE's init: under PROFILE owner the owner's blocks from LISP, under
+    stock nothing of anyone's, then the MCP endpoint on loopback, its port
+    written to PORT_FILE, its peers sending TOKEN first.  Loopback, not a
+    local socket: Romacs's GUI host refuses local network processes."""
+    owner = profile == 'owner'
     # GNU takes the settings Romacs's --loadup makes before the user's
     # init, as the parity harnesses' GNU does.
     gnu_setup = ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
@@ -337,9 +349,9 @@ def init_source(engine, lisp, port_file, token):
   `(condition-case err (progn ,@body)
      (error (push (list ,name (error-message-string err)) bench-init-errors)
             (message "bench init: %s: %s" ,name (error-message-string err)))))
-(setq load-path (cons {lisp_string(str(lisp))} load-path))
+{f"(setq load-path (cons {lisp_string(str(lisp))} load-path))" if owner else ""}
 {gnu_setup}(setq inhibit-startup-screen t)
-{OWNER_INIT}
+{OWNER_INIT if owner else ""}
 (defun bench--strings (value)
   (cond ((stringp value) (list value))
         ((consp value) (append (bench--strings (car value)) (bench--strings (cdr value))))))
