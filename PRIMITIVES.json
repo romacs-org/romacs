@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "cb067dcb6fed85506bcb5b61ac64c45fb564c96692a86eb60b42f85338deb876",
+  "source_fingerprint": "fae015b7555bb2dd70390e611d0ff06b772a030610de2c5c36d7bd1b5ff82757",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1093,
-  "parsed_vm2_only": 1093
+  "parsed_total": 1094,
+  "parsed_vm2_only": 1094
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -872,7 +872,7 @@
   "color-values-from-color-spec": {
    "name": "color-values-from-color-spec",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:511"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:559"
   },
   "command-modes": {
    "name": "command-modes",
@@ -1320,7 +1320,7 @@
   "display-supports-face-attributes-p": {
    "name": "display-supports-face-attributes-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:497"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:545"
   },
   "do-auto-save": {
    "name": "do-auto-save",
@@ -1490,7 +1490,12 @@
   "face-attribute-relative-p": {
    "name": "face-attribute-relative-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:141"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:189"
+  },
+  "face-font": {
+   "name": "face-font",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:124"
   },
   "fboundp": {
    "name": "fboundp",
@@ -1672,7 +1677,7 @@
   "find-font": {
    "name": "find-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:936"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:944"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -1723,42 +1728,42 @@
   "font-at": {
    "name": "font-at",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1041"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1049"
   },
   "font-family-list": {
    "name": "font-family-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:945"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:953"
   },
   "font-get": {
    "name": "font-get",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:879"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:887"
   },
   "font-info": {
    "name": "font-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:972"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:980"
   },
   "font-put": {
    "name": "font-put",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:901"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:909"
   },
   "font-spec": {
    "name": "font-spec",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:852"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:860"
   },
   "font-xlfd-name": {
    "name": "font-xlfd-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:954"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:962"
   },
   "fontp": {
    "name": "fontp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:841"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:849"
   },
   "force-mode-line-update": {
    "name": "force-mode-line-update",
@@ -1818,7 +1823,7 @@
   "frame--face-hash-table": {
    "name": "frame--face-hash-table",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:504"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:552"
   },
   "frame-bottom-divider-width": {
    "name": "frame-bottom-divider-width",
@@ -2276,7 +2281,7 @@
   "internal-char-font": {
    "name": "internal-char-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1014"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1022"
   },
   "internal-complete-buffer": {
    "name": "internal-complete-buffer",
@@ -2301,7 +2306,7 @@
   "internal-get-lisp-face-attribute": {
    "name": "internal-get-lisp-face-attribute",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:124"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:172"
   },
   "internal-handle-focus-in": {
    "name": "internal-handle-focus-in",
@@ -2311,7 +2316,7 @@
   "internal-lisp-face-attribute-values": {
    "name": "internal-lisp-face-attribute-values",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:149"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:197"
   },
   "internal-lisp-face-p": {
    "name": "internal-lisp-face-p",
@@ -2346,7 +2351,7 @@
   "internal-set-lisp-face-attribute": {
    "name": "internal-set-lisp-face-attribute",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:492"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:540"
   },
   "internal-show-cursor": {
    "name": "internal-show-cursor",
@@ -2547,7 +2552,7 @@
   "list-fonts": {
    "name": "list-fonts",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:919"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:927"
   },
   "listp": {
    "name": "listp",
@@ -2964,7 +2969,7 @@
   "merge-face-attribute": {
    "name": "merge-face-attribute",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:527"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:575"
   },
   "message": {
    "name": "message",

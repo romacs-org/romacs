@@ -169,6 +169,28 @@ mod tests {
         assert_eq!(printed(&mut vm, "(equal (font-xlfd-name (font-at 1 nil \"a\\u03bb\")) (frame-parameter nil 'font))"), "t");
     }
 
+    /// xfaces.c Fface_font: on the display every face names the font
+    /// painting draws it with, from the face's family and pixel size, and
+    /// that font opens, so `window-font-width' (font.c `font-info' of
+    /// `face-font'), by which hermes sizes its tables in `fixed-pitch',
+    /// measures a face other than `default' instead of signalling. A face
+    /// the display theme does not hold paints, and so names, the default
+    /// face's font.
+    #[test]
+    fn every_face_names_the_font_it_draws() {
+        let mut vm = displayed();
+        vm.open_display();
+        assert_eq!(printed(&mut vm, "(progn (internal-make-lisp-face 'rt-big) (internal-make-lisp-face 'rt-big (selected-frame))
+            (internal-set-lisp-face-attribute 'rt-big :height 280 (selected-frame))
+            (internal-set-lisp-face-attribute 'rt-big :weight 'bold t)
+            (let ((font (face-font 'rt-big)))
+              (list font (aref (font-info font) 2) (aref (font-info font) 11)
+                    (equal (face-font \"default\" nil ?a) (frame-parameter nil 'font)) (face-font 'rt-big t)
+                    (progn (internal-make-lisp-face 'rt-empty) (equal (face-font 'rt-empty) (frame-parameter nil 'font)))
+                    (condition-case e (face-font 'rt-big nil 'x) (error e)) (condition-case e (face-font 'rt-nosuch) (error e)))))"),
+                   r#"("-TWR-PlemolJP Console NF-regular-normal-normal-*-37-*-*-*-d-0-iso10646-1" 37 20 t (bold) t (wrong-type-argument characterp x) (error "Invalid face" rt-nosuch))"#);
+    }
+
     /// `--loadup` on the GUI's display: the session puts the frame on it, a
     /// `pgtk' frame as pinned GNU pgtk's, and the owner's init, which turns
     /// prettify-symbols on in Lisp modes, lets startup finish: prettify asks

@@ -75,9 +75,10 @@ pub trait DisplayHost {
 pub(crate) struct Display {
     pub host: Box<dyn DisplayHost>,
     pub open: bool,
-    /// The frame font's name for the default face's family and pixel size
-    /// it was last asked for: `frame-parameters' names it on every call.
-    pub frame_font: Option<((String, u32), String)>,
+    /// The ASCII font's name for each family and pixel size (its bits) a
+    /// face realized to: `frame-parameters' and `face-font' name them on
+    /// every call.
+    pub face_fonts: rustc_hash::FxHashMap<(String, u32), String>,
 }
 
 impl Vm {
@@ -85,7 +86,7 @@ impl Vm {
     /// stays closed, the frame an initial-terminal frame, until
     /// [`Vm::open_display`].
     pub fn set_display_host(&mut self, host: Option<Box<dyn DisplayHost>>) {
-        self.display = host.map(|host| Display { host, open: false, frame_font: None });
+        self.display = host.map(|host| Display { host, open: false, face_fonts: Default::default() });
     }
     /// Put the frame on the attached display, as GNU's window-system
     /// initialization does: from here `framep' and `window-system' answer

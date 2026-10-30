@@ -23,19 +23,22 @@ impl Leaf<'_> {
     pub(crate) fn font_host(&mut self) -> Option<&mut (dyn crate::DisplayHost + 'static)> {
         self.vm.window_system_host()
     }
-    /// The open display's cached frame font name for KEY (the default
-    /// face's family and pixel-size bits), and its replacement.
-    pub(crate) fn cached_frame_font(&self, key: &(String, u32)) -> Option<String> {
-        self.vm.display.as_ref().filter(|d| d.open).and_then(|d| d.frame_font.as_ref())
-            .filter(|(cached, _)| cached == key).map(|(_, name)| name.clone())
+    /// The open display's cached ASCII font name for KEY (a face's family
+    /// and pixel-size bits), and its recording.
+    pub(crate) fn cached_face_font(&self, key: &(String, u32)) -> Option<String> {
+        self.vm.display.as_ref().filter(|d| d.open).and_then(|d| d.face_fonts.get(key).cloned())
     }
-    pub(crate) fn cache_frame_font(&mut self, key: (String, u32), name: String) {
-        if let Some(display) = self.vm.display.as_mut() { display.frame_font = Some((key, name)); }
+    pub(crate) fn cache_face_font(&mut self, key: (String, u32), name: String) {
+        if let Some(display) = self.vm.display.as_mut() { display.face_fonts.insert(key, name); }
     }
     /// The frame's default face's family and pixel size, as painting
     /// realizes it.
     pub(crate) fn default_font_request(&self) -> std::result::Result<(String, f32), Fault> {
-        let face = self.vm.display_default_face().map_err(Fault::Error)?;
+        self.face_font_request("default")
+    }
+    /// FACE's family and pixel size, as painting realizes it.
+    pub(crate) fn face_font_request(&self, face: &str) -> std::result::Result<(String, f32), Fault> {
+        let face = self.vm.display_face(face).map_err(Fault::Error)?;
         Ok((face.family, face.pixel_size))
     }
 }

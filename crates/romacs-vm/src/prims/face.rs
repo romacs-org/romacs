@@ -121,6 +121,54 @@ fn internal_copy_lisp_face(cx, from: Value, to: Value, frame: Value, new_frame: 
     Ok(to)
 }}
 
+defsubr! { name = "face-font", gnu = "xfaces.c:4423", effect = Reads,
+fn face_font(cx, face: Value; optional frame: Value, character: Value) {
+    if frame == Value::TRUE {
+        // The face's defaults for new frames: (bold), (italic) or both.
+        let resolved = resolve(cx, face, true)?;
+        let vector = cx.face_lookup(resolved, Value::NIL)?;
+        if vector == Value::NIL { return Err(signal(cx, "Invalid face", resolved)); }
+        let mut result = Value::NIL;
+        for (attribute, style) in [(":weight", "bold"), (":slant", "italic")] {
+            let index = LFACE_ATTRIBUTES.iter().position(|name| *name == attribute).unwrap() + 1;
+            let value = cx.vector_get(vector, Value::integer(index as i64).unwrap())?;
+            if value != cx.intern("unspecified") && value != cx.intern("normal") {
+                let style = cx.intern(style);
+                result = cx.cons(style, result);
+            }
+        }
+        return Ok(result);
+    }
+    cx.face_frame(frame, true)?;
+    let resolved = resolve(cx, face, true)?;
+    if cx.face_lookup(resolved, Value::NIL)? == Value::NIL { return Err(signal(cx, "Invalid face", resolved)); }
+    // The font the face draws CHARACTER, else ASCII, with on the display.
+    // The initial terminal realizes none, but under a graphic display
+    // record (a headless GUI) its one font, "tty", is every face's
+    // (DIVERGENCES.md VM2-WIN5).
+    if cx.font_host().is_none() {
+        return Ok(if graphic_record(cx)? { cx.string("tty") } else { Value::NIL });
+    }
+    let ch = if character == Value::NIL { ' ' } else {
+        let code = character.integer_value().filter(|c| (0..=0x3fffff).contains(c)).ok_or(Fault::Wrong("characterp", character))?;
+        char::from_u32(code as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
+    };
+    let name = cx.symbol_name(resolved)?;
+    Ok(match super::font::face_font(cx, &name, ch)? { Some(font) => cx.string(&font), None => Value::NIL })
+}}
+
+/// Whether romacs-frame.el's display record, `romacs-display', is graphic.
+fn graphic_record(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
+    let record = cx.intern("romacs-display");
+    let (graphic, mut tail) = (cx.intern(":graphic"), cx.variable_value(record)?.unwrap_or(Value::NIL));
+    while let Some((key, rest)) = cx.pair(tail) {
+        let Some((value, next)) = cx.pair(rest) else { break };
+        if key == graphic { return Ok(value != Value::NIL); }
+        tail = next;
+    }
+    Ok(false)
+}
+
 defsubr! { name = "internal-get-lisp-face-attribute", gnu = "xfaces.c:4230", effect = Reads,
 fn internal_get_lisp_face_attribute(cx, face: Value, attribute: Value; optional frame: Value) {
     let frame = if frame == Value::TRUE { Value::NIL } else { cx.face_frame(frame, true)? };

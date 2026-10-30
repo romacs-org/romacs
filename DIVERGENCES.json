@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "abd670366ee340b41d1a7561a62a40c0529be299e51b2195be27bf0c98c63cbf",
+  "input_hash": "1bddaa57d37862a53cf076ec0ca36fa29f5c8bacca79af8983361d50a47fdef4",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -5828,7 +5828,7 @@
    "planned": false,
    "mechanism": "Display queries (`display-graphic-p`, `display-color-cells`, `display-pixel-width`, `display-monitor-attributes-list`, ...), colors (`color-values`, `color-defined-p`, `defined-colors`) and `frame-set-background-mode`",
    "gnu": "frame.el and faces.el dispatch on the frame type to `x-`, `w32-`, `ns-`, `pgtk-`, `haiku-`, `android-` and `tty-` C primitives; a batch session answers for its initial terminal, approximating colors to 8 tty colors (`tty-colors.el`)",
-   "romacs": "rlisp/romacs-frame.el answers every one of them from one capability record, `romacs-display`. Without a GUI the record is pinned GNU's batch answers (not graphic, 0 color cells, 3 planes, `mono`, `dark`, the 8 standard colors), so package tests see GNU's batch values; colors keep tty-colors.el's names and approximation over the record's palette. No `tty-*` terminal primitives exist. Faces realize no font objects, so `face-font` is nil, except that on a graphic record the frame's font is the default face's: `(face-font 'default)` is the frame's `font` parameter (the display's font name on the GUI's frame, VM2-WIN5), as GNU's is until that face's font changes, and simple.el's `default-font-height` and `default-font-width` answer through `font-info` (VM2-FONT1)",
+   "romacs": "rlisp/romacs-frame.el answers every one of them from one capability record, `romacs-display`. Without a GUI the record is pinned GNU's batch answers (not graphic, 0 color cells, 3 planes, `mono`, `dark`, the 8 standard colors), so package tests see GNU's batch values; colors keep tty-colors.el's names and approximation over the record's palette. No `tty-*` terminal primitives exist. On the GUI's display `face-font` names, for every face and character, the font painting draws it with (the face's family and pixel size resolved by the display host, VM2-FONT1), as GNU names each realized face's font, so `window-font-width` and `window-font-height` measure any face; without a display it is nil, except that under a graphic record every face's font is the initial terminal's one font (VM2-WIN5), and simple.el's `default-font-height` and `default-font-width` answer through `font-info` (VM2-FONT1)",
    "why": "**Package-observable** in the GUI until it sets the record: graphic-only features stay off. Frame geometry, edges, z-order and mouse-position queries are not yet owned",
    "symbols": [
     "display-graphic-p",

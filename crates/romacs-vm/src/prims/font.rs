@@ -824,15 +824,23 @@ fn open(cx: &mut Leaf<'_>, font: Value) -> std::result::Result<Option<Value>, Fa
 /// The frame's font's name while the frame is on a display: the default
 /// face's font, the one its ASCII characters draw with.
 pub(crate) fn frame_font(cx: &mut Leaf<'_>) -> std::result::Result<Option<String>, Fault> {
+    face_font(cx, "default", ' ')
+}
+
+/// xfaces.c Fface_font on a display: the name of the font the face FACE
+/// draws CH with, as painting resolves it from the face's family and
+/// pixel size. None without a display, or for a face painting cannot
+/// realize.
+pub(crate) fn face_font(cx: &mut Leaf<'_>, face: &str, ch: char) -> std::result::Result<Option<String>, Fault> {
     if cx.font_host().is_none() { return Ok(None); }
-    let (family, pixels) = cx.default_font_request()?;
+    let Ok((family, pixels)) = cx.face_font_request(face) else { return Ok(None) };
     let key = (family, pixels.to_bits());
-    if let Some(name) = cx.cached_frame_font(&key) { return Ok(Some(name)); }
-    let Some((opened, _)) = cx.font_host().and_then(|host| host.char_font(&key.0, pixels, ' ')) else { return Ok(None) };
+    if ch == ' ' && let Some(name) = cx.cached_face_font(&key) { return Ok(Some(name)); }
+    let Some((opened, _)) = cx.font_host().and_then(|host| host.char_font(&key.0, pixels, ch)) else { return Ok(None) };
     // font_build_object's name: the entity's XLFD at the opened size.
     let entity = make_entity(cx, &opened.entity)?;
     let name = unparse_xlfd(cx, entity, opened.pixel_size);
-    cx.cache_frame_font(key, name.clone());
+    if ch == ' ' { cx.cache_face_font(key, name.clone()); }
     Ok(Some(name))
 }
 
