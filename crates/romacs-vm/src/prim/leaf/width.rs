@@ -16,7 +16,8 @@ impl Leaf<'_> {
             let purpose = self.intern("display-table");
             if let Some(crate::data::Object::CharTable(t)) = self.vm.object_if(table)
                 && t.purpose == purpose && t.extras.len() == DISP_TABLE_EXTRA_SLOTS {
-                return Ok(Some(table));
+                // The table in effect; one that holds nothing displays as none.
+                return Ok((!t.holds_nothing()).then_some(table));
             }
         }
         Ok(None)

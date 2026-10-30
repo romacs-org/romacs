@@ -533,6 +533,9 @@ mod tests {
             ("(insert (propertize \"abc\" 'face '(hosted-big bold)))".into(), "(insert (propertize \"abc\" 'face 'hosted-big))".into(), "of a face the host does not paint"),
             ("(insert (propertize \"abc\" 'font-lock-face 'hosted-big))".into(), "(insert (propertize \"abc\" 'face 'hosted-big))".into(), "of a face the host does not paint"),
             ("(setq line-prefix \"> \") (insert \"abc\")".into(), "(insert \"abc\")".into(), "of a line or wrap prefix"),
+            // A display table that holds nothing displays as none
+            // (disp-table.el's `make-display-table').
+            ("(put 'display-table 'char-table-extra-slots 18) (setq buffer-display-table (make-char-table 'display-table)) (aset buffer-display-table ?b [?x]) (insert \"abc\")".into(), "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "with a display table"),
             // Hidden text at the end, or all of it, skips characters the
             // host still paints; so does a multibyte control's escape.
             ("(insert \"a\" (propertize \"b\" 'invisible t))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
