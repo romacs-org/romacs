@@ -1092,6 +1092,180 @@ fn file_names_links_and_copies_match_gnu() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+// fileio.c's DEFUNs that Romacs lacked, each against pinned GNU (built
+// with libacl, without libselinux), in a fixture DIR whose files, links
+// and modes afterwards are compared too: ACLs (a plain file, a directory,
+// one with named entries made by setfacl, and an unreadable path),
+// SELinux contexts, `access-file', `file-newer-than-file-p',
+// `directory-files-and-attributes', the stream and sync DEFUNs, the
+// auto-save state, `do-auto-save' and the backup `save-buffer' makes.
+#[test]
+fn fileio_defuns_match_gnu() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("fileio-defuns-{}", std::process::id()));
+    let clear = || {
+        if dir.join("locked").exists() { std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let _ = std::fs::remove_dir_all(&dir);
+    };
+    let fixture = || {
+        clear();
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::create_dir_all(dir.join("locked")).unwrap();
+        for (name, text) in [("a", "hello\n"), ("b", "bee\n"), ("ext", "ext\n"), ("sub/inner", "inner\n"), ("locked/x", "x\n")] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let at = |name: &str, seconds: u64| std::fs::File::options().write(true).open(dir.join(name)).unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds)).unwrap();
+        at("a", 2_000_000_000);
+        at("b", 1_000_000_000);
+        let status = std::process::Command::new("setfacl").args(["-m", "u:root:rwx,g:wheel:r-x,m::r--"]).arg(dir.join("ext")).status().unwrap();
+        assert!(status.success(), "setfacl");
+        std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0)).unwrap();
+    };
+    fn snapshot(base: &Path, at: &Path, out: &mut Vec<String>) {
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(entries) = std::fs::read_dir(at) else { return };
+        let mut entries: Vec<_> = entries.map(|e| e.unwrap().path()).collect();
+        entries.sort();
+        for path in entries {
+            let name = path.strip_prefix(base).unwrap().display().to_string();
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            let mode = meta.permissions().mode() & 0o7777;
+            if meta.file_type().is_symlink() {
+                out.push(format!("{name} -> {}", std::fs::read_link(&path).unwrap().display()));
+            } else if meta.is_dir() {
+                out.push(format!("{name}/ {mode:o}"));
+                snapshot(base, &path, out);
+            } else {
+                out.push(format!("{name} {mode:o} {:?}", std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let cases = [
+        r#"(list (file-acl "a") (file-acl "sub") (file-acl "sub/") (file-acl "missing") (file-acl "ext") (condition-case e (file-acl "locked/x") (error e)))"#,
+        r#"(list (set-file-acl "a" "user::rw-,group::r--,other::---") (file-modes "a") (set-file-acl "b" (file-acl "ext")) (file-acl "b") (set-file-acl "a" "bogus") (set-file-acl "a" 7) (condition-case e (set-file-acl "missing" "user::rw-\ngroup::r--\nother::r--\n") (error e)) (condition-case e (set-file-acl "locked/x" "user::rw-\ngroup::r--\nother::r--\n") (error e)))"#,
+        r#"(list (file-selinux-context "a") (file-selinux-context "missing") (file-selinux-context "sub/") (set-file-selinux-context "a" '("u" "r" "t" "s")))"#,
+        r#"(list (access-file "a" "Reading") (condition-case e (access-file "missing" "Opening input file") (error e)) (condition-case e (access-file "locked/x" "Reading") (error e)) (condition-case e (access-file 'x "y") (error e)))"#,
+        r#"(list (file-newer-than-file-p "a" "b") (file-newer-than-file-p "b" "a") (file-newer-than-file-p "missing" "a") (file-newer-than-file-p "a" "missing") (file-newer-than-file-p "sub/" "a") (condition-case e (file-newer-than-file-p "a" 7) (error e)))"#,
+        r#"(list (mapcar (lambda (e) (list (car e) (file-attribute-type (cdr e)) (file-attribute-modes (cdr e)) (stringp (file-attribute-user-id (cdr e))))) (directory-files-and-attributes "sub" nil nil nil 'string)) (mapcar #'car (directory-files-and-attributes "sub" t "inn")) (length (directory-files-and-attributes "sub" nil nil t nil 1)) (condition-case e (directory-files-and-attributes "missing") (error (car e))))"#,
+        r#"(list (unix-sync) (commandp 'unix-sync) (commandp 'do-auto-save) (set-binary-mode 'stdout t) (set-binary-mode 'stdin nil) (condition-case e (set-binary-mode 'bogus t) (error e)) (condition-case e (set-binary-mode "x" t) (error e)) (condition-case e (file--close-stream 'bogus) (error e)))"#,
+        r#"(with-temp-buffer (insert "x") (list (buffer-modified-p) (progn (set-buffer-auto-saved) (buffer-modified-p)) (recent-auto-save-p) buffer-saved-size (clear-buffer-auto-save-failure) (progn (insert "y") (buffer-modified-p))))"#,
+        // An auto-save of a modified visiting buffer, its list, then nothing
+        // more to save.
+        r#"(let ((auto-save-list-file-name (expand-file-name "list")) (b (find-file-noselect "a"))) (with-current-buffer b (goto-char (point-max)) (insert "more\n") (auto-save-mode 1)) (prog1 (list (do-auto-save t) (with-current-buffer b (list (buffer-modified-p) (recent-auto-save-p) buffer-saved-size (file-name-nondirectory buffer-auto-save-file-name))) (do-auto-save t t)) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))"#,
+        // Auto-saving into the visited file is a real save: the buffer is
+        // left unmodified and its file unlocked.
+        r#"(let ((auto-save-visited-file-name t) (b (find-file-noselect "a"))) (with-current-buffer b (goto-char (point-max)) (insert "more\n") (auto-save-mode 1)) (prog1 (list (do-auto-save t) (with-current-buffer b (list (buffer-modified-p) (recent-auto-save-p) (file-locked-p buffer-file-name) (equal buffer-auto-save-file-name buffer-file-name)))) (kill-buffer b)))"#,
+        // save-buffer backs the visited file up with the default
+        // `make-backup-files', by renaming it to A~ (DIR is under
+        // `temporary-file-directory', which the default predicate exempts).
+        r#"(let ((backup-enable-predicate #'always) (b (find-file-noselect "a"))) (with-current-buffer b (goto-char (point-max)) (insert "new\n") (save-buffer)) (kill-buffer b) (list (file-exists-p "a~") (file-acl "a~") (file-acl "a")))"#,
+    ];
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let directory = format!("{}/", dir.display());
+    let mut failures = Vec::new();
+    for expression in cases {
+        let source = format!("(progn (setq default-directory {directory:?}) (string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err))))))");
+        fixture();
+        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let mut expected = (String::from_utf8(output.stdout).unwrap(), vec![]);
+        snapshot(&dir, &dir, &mut expected.1);
+        fixture();
+        let mut actual = (vm.eval_source(&source).and_then(|v| v.display()).unwrap_or_else(|e| e), vec![]);
+        snapshot(&dir, &dir, &mut actual.1);
+        if actual != expected {
+            let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+                .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+            failures.push(format!("{expression}\n  GNU    {} {:?}\n  Romacs {} {:?}", text(&expected.0), expected.1, text(&actual.0), actual.1));
+        }
+    }
+    clear();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// File name handlers, as GNU dispatches them. Tramp's completion handler
+// claims single-component names such as "/home" for `expand-file-name' and
+// declines through `tramp-run-real-handler'; every primitive that expands
+// such a name must then do what GNU does. RT-H logs each operation it is
+// asked for and declines the same way, so each primitive's dispatch, the
+// names it passes, and `inhibit-file-name-operation' are compared with
+// pinned GNU's, along with the values and DIR's files afterwards.
+#[test]
+fn file_name_handlers_match_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("fnhandlers-{}", std::process::id()));
+    let fixture = || {
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("rt-h-sub")).unwrap();
+        for (name, text) in [("rt-h-a", "hello\n"), ("rt-h-sub/inner", "inner\n"), ("plain", "plain\n")] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        std::os::unix::fs::symlink("rt-h-a", dir.join("rt-h-link")).unwrap();
+    };
+    fn snapshot(dir: &Path) -> Vec<String> {
+        let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        entries.sort();
+        entries.iter().map(|path| {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            match std::fs::read_link(path) {
+                Ok(target) => format!("{name} -> {}", target.display()),
+                Err(_) if path.is_dir() => format!("{name}/"),
+                Err(_) => format!("{name} {:?}", std::fs::read_to_string(path).unwrap()),
+            }
+        }).collect()
+    }
+    // Each case runs under RT-H with an empty log and yields (VALUE LOG).
+    const HANDLER: &str = r#"(progn (defvar rt-log nil) (defvar rt-expanding nil) (defun rt-h (op &rest args) (push (cons op args) rt-log) (when (eq op 'expand-file-name) (run-hooks 'rt-expanding)) (let ((inhibit-file-name-handlers (cons 'rt-h (and (eq inhibit-file-name-operation op) inhibit-file-name-handlers))) (inhibit-file-name-operation op)) (apply op args))))"#;
+    let handled = [
+        r#"(file-symlink-p "rt-h-link")"#,
+        r#"(list (file-attribute-type (file-attributes "rt-h-link")) (file-attribute-size (file-attributes "rt-h-a")) (file-attribute-type (file-attributes "rt-h-sub" 'string)))"#,
+        r#"(file-truename "rt-h-link")"#,
+        r#"(list (directory-files "rt-h-sub") (directory-files "rt-h-sub" t "inn") (mapcar #'car (directory-files-and-attributes "rt-h-sub" nil "inn")))"#,
+        r#"(list (file-accessible-directory-p "rt-h-sub") (file-accessible-directory-p "rt-h-a"))"#,
+        r#"(with-temp-buffer (insert-file-contents "rt-h-a") (buffer-string))"#,
+        r#"(with-temp-buffer (list (insert-file-contents "rt-h-a" t) buffer-file-name (verify-visited-file-modtime) (progn (set-visited-file-modtime) (verify-visited-file-modtime))))"#,
+        r#"(progn (write-region "x\n" nil "rt-h-new") (write-region "y\n" nil "rt-h-new" t) (with-temp-buffer (insert "z\n") (write-region nil nil "rt-h-vis" nil "rt-h-other")) (file-exists-p "rt-h-other"))"#,
+        r#"(list (file-locked-p "rt-h-a") (with-temp-buffer (insert-file-contents "rt-h-a" t) (insert "m") (lock-file buffer-file-name) (prog1 (file-locked-p buffer-file-name) (unlock-file buffer-file-name))))"#,
+        r#"(list (consp (file-system-info "rt-h-sub")) (file-name-case-insensitive-p "rt-h-a"))"#,
+        r#"(list (get-file-buffer "rt-h-a") (let ((b (find-file-noselect "rt-h-a"))) (prog1 (eq b (get-file-buffer "rt-h-a")) (kill-buffer b))))"#,
+        r#"(list (locate-file "rt-h-a" (list default-directory)) (file-newer-than-file-p "rt-h-a" "plain") (file-writable-p "rt-h-a") (file-modes "rt-h-a"))"#,
+        // validate_region orders the bounds, and turns a marker into its
+        // position, before the name expands: a handler sees positions, and
+        // a marker the expansion moves does not change what is written.
+        r#"(with-temp-buffer (insert "abcdef") (let ((m (copy-marker 3))) (defalias 'rt-move (lambda () (set-marker m 1))) (add-hook 'rt-expanding #'rt-move) (unwind-protect (list (write-region 6 2 "rt-h-rev") (write-region m 5 "rt-h-mark") (marker-position m)) (remove-hook 'rt-expanding #'rt-move))))"#,
+    ];
+    let cases: Vec<String> = handled.iter().map(|form| format!(
+        "(let ((file-name-handler-alist (cons '(\"rt-h\" . rt-h) file-name-handler-alist))) (setq rt-log nil) (let ((value {form})) (list value (reverse rt-log))))"))
+        .chain([
+            // Tramp's own completion handler, as a session that loaded tramp has it.
+            r#"(progn (require 'tramp) (list (find-file-name-handler "/home" 'expand-file-name) (file-symlink-p "/bin") (file-truename "/bin") (file-attribute-type (file-attributes "/bin")) (file-accessible-directory-p "/tmp") (file-name-case-insensitive-p "/home") (file-exists-p "/home") (file-directory-p "/tmp") (consp (file-system-info "/tmp")) (and (member "bin" (directory-files "/usr")) t) (with-temp-buffer (condition-case e (insert-file-contents "/tmp") (error (car e))))))"#.to_owned(),
+        ]).collect();
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let directory = format!("{}/", dir.display());
+    let mut failures = Vec::new();
+    for expression in &cases {
+        let source = format!("(progn {HANDLER} (setq default-directory {directory:?}) (string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err))))))");
+        fixture();
+        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = (String::from_utf8(output.stdout).unwrap(), snapshot(&dir));
+        fixture();
+        let value = vm.eval_source(&source).and_then(|v| v.display()).unwrap_or_else(|e| e);
+        let actual = (value, snapshot(&dir));
+        if actual != expected {
+            let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+                .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+            failures.push(format!("{expression}\n  GNU    {} {:?}\n  Romacs {} {:?}", text(&expected.0), expected.1, text(&actual.0), actual.1));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 // default-directory is GNU's per-buffer C variable (buffer.c:5426): always
 // local, inherited by new buffers, kept by kill-all-local-variables, and
 // what every file primitive expands against, so a `let' of it redirects

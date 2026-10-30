@@ -126,23 +126,26 @@ fn create(cx: &Leaf<'_>, path: &Path, identity: &[u8], force: bool) -> std::io::
     let _ = host::remove_file(nonce); result
 }
 
-// MODE: query 0, lock 1, unlock 2. All Lisp values crossing callbacks are saved.
-fn dispatch(cx: &mut Leaf<'_>, file: Value, mode: i64) -> Next {
+// MODE: query 0, lock 1, unlock 2; HANDLED returns from FILE's handler.
+// All Lisp values crossing callbacks are saved.
+fn dispatch(cx: &mut Leaf<'_>, file: Value, mode: i64, handled: crate::prim::Then) -> Next {
     let operation = cx.intern(match mode { 0 => "file-locked-p", 1 => "lock-file", _ => "unlock-file" });
     let handler = super::fileio::find_file_name_handler(cx, file, operation)?;
     if handler != Value::NIL {
-        return Ok(Step::Call { f: handler, args: vec![operation, file], then: if mode == 0 { query_done } else { nil_done }, saved: vec![] });
+        return Ok(Step::Call { f: handler, args: vec![operation, file], then: handled, saved: vec![] });
     }
     if mode == 1 && variable(cx, "create-lockfiles")? == Value::NIL {
         return supersession(cx, Value::NIL, &[file, Value::NIL]);
     }
-    let expansion = cx.intern("expand-file-name");
-    if super::fileio::find_file_name_handler(cx, file, expansion)? != Value::NIL {
-        return Err(Fault::Error("VM2 file lock expansion through a filename handler is unsupported".into()));
-    }
-    let name = super::fileio::expand_file_name(cx, file)?;
-    let name = cx.string(&name);
-    call(cx, "make-lock-file-name", vec![name], got_lock_name, vec![file, Value::integer(mode).unwrap()])
+    // make_lock_file_name: Fexpand_file_name, then the Lisp naming.
+    super::fileio::expanding(cx, file, lock_name_expanded, vec![file, Value::integer(mode).unwrap()])
+}
+fn lock_name_expanded(cx: &mut Leaf<'_>, name: Value, saved: &[Value]) -> Next {
+    // Bootstrap regime: before files.el defines the naming, a file has no
+    // lock name, as when make-lock-file-name returns nil.
+    let naming = cx.intern("make-lock-file-name");
+    if !cx.fboundp(naming) { return got_lock_name(cx, Value::NIL, saved); }
+    call(cx, "make-lock-file-name", vec![name], got_lock_name, saved.to_vec())
 }
 fn query_done(_: &mut Leaf<'_>, result: Value, _: &[Value]) -> Next { Ok(Step::Done(result)) }
 fn got_lock_name(cx: &mut Leaf<'_>, lock: Value, saved: &[Value]) -> Next {
@@ -234,7 +237,7 @@ fn lock_buffer(cx; optional file: Value) -> Step {
     let file = if file == Value::NIL { current_truename(cx)? } else { cx.string_view(file)?; file };
     let state = cx.buffer_modification(Value::NIL)?;
     if file == Value::NIL || state.modiff <= state.save_modiff { return Ok(Step::Done(Value::NIL)); }
-    dispatch(cx, file, 1)
+    dispatch(cx, file, 1, nil_done)
 }}
 defsubr! { name = "unlock-buffer", gnu = "filelock.c:744", effect = Global,
 fn unlock_buffer(cx) -> Step {
@@ -242,7 +245,17 @@ fn unlock_buffer(cx) -> Step {
     if state.modiff <= state.save_modiff { return Ok(Step::Done(Value::NIL)); }
     let file = current_truename(cx)?;
     if file == Value::NIL { return Ok(Step::Done(Value::NIL)); }
-    dispatch(cx, file, 2)
+    dispatch(cx, file, 2, nil_done)
+}}
+defsubr! { name = "lock-file", gnu = "filelock.c:677", effect = Global,
+fn lock_file(cx, file: Value) -> Step {
+    cx.string_view(file)?;
+    dispatch(cx, file, 1, query_done)
+}}
+defsubr! { name = "unlock-file", gnu = "filelock.c:700", effect = Global,
+fn unlock_file(cx, file: Value) -> Step {
+    cx.string_view(file)?;
+    dispatch(cx, file, 2, nil_done)
 }}
 defsubr! { name = "file-locked-p", gnu = "filelock.c:770", effect = Global,
-fn file_locked_p(cx, filename: Value) -> Step { dispatch(cx, filename, 0) }}
+fn file_locked_p(cx, filename: Value) -> Step { dispatch(cx, filename, 0, query_done) }}

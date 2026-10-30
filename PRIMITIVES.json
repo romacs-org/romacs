@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "7c56a401bf3e3a1955ee21ac5ab434f1a28f398a51a112dafa6c293652ec11a7",
+  "source_fingerprint": "90bcaeeac78f8f69a0914dd93c83a422ee91a7aeec41fc1da7a4c10b2ee23a33",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1063,
-  "parsed_vm2_only": 1063
+  "parsed_total": 1084,
+  "parsed_vm2_only": 1084
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -231,6 +231,11 @@
    "variant": "Primitive::Abs",
    "registered_at": "crates/romacs-vm/src/lib.rs:562"
   },
+  "access-file": {
+   "name": "access-file",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:682"
+  },
   "acos": {
    "name": "acos",
    "implementation": "vm2",
@@ -249,7 +254,7 @@
   "add-name-to-file": {
    "name": "add-name-to-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:602"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:601"
   },
   "add-text-properties": {
    "name": "add-text-properties",
@@ -798,6 +803,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/type_of.rs:9"
   },
+  "clear-buffer-auto-save-failure": {
+   "name": "clear-buffer-auto-save-failure",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:121"
+  },
   "clear-composition-cache": {
    "name": "clear-composition-cache",
    "implementation": "vm2",
@@ -949,7 +959,7 @@
   "copy-file": {
    "name": "copy-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:509"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:500"
   },
   "copy-hash-table": {
    "name": "copy-hash-table",
@@ -1130,7 +1140,7 @@
   "default-file-modes": {
    "name": "default-file-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:241"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:206"
   },
   "default-toplevel-value": {
    "name": "default-toplevel-value",
@@ -1233,7 +1243,7 @@
   "delete-directory-internal": {
    "name": "delete-directory-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:438"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:408"
   },
   "delete-field": {
    "name": "delete-field",
@@ -1243,12 +1253,12 @@
   "delete-file": {
    "name": "delete-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:165"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:130"
   },
   "delete-file-internal": {
    "name": "delete-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:423"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:393"
   },
   "delete-other-windows-internal": {
    "name": "delete-other-windows-internal",
@@ -1285,7 +1295,7 @@
   "directory-file-name": {
    "name": "directory-file-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:194"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:217"
   },
   "directory-files": {
    "name": "directory-files",
@@ -1295,12 +1305,12 @@
   "directory-files-and-attributes": {
    "name": "directory-files-and-attributes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:53"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:47"
   },
   "directory-name-p": {
    "name": "directory-name-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:380"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:410"
   },
   "discard-input": {
    "name": "discard-input",
@@ -1311,6 +1321,11 @@
    "name": "display-supports-face-attributes-p",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/face.rs:510"
+  },
+  "do-auto-save": {
+   "name": "do-auto-save",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:15"
   },
   "documentation": {
    "name": "documentation",
@@ -1519,10 +1534,20 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/field.rs:40"
   },
+  "file--close-stream": {
+   "name": "file--close-stream",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:162"
+  },
   "file-accessible-directory-p": {
    "name": "file-accessible-directory-p",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/file_accessible_directory.rs:4"
+  },
+  "file-acl": {
+   "name": "file-acl",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:847"
   },
   "file-attributes": {
    "name": "file-attributes",
@@ -1532,82 +1557,92 @@
   "file-directory-p": {
    "name": "file-directory-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:355"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:325"
   },
   "file-executable-p": {
    "name": "file-executable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:337"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:307"
   },
   "file-exists-p": {
    "name": "file-exists-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:334"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:304"
   },
   "file-locked-p": {
    "name": "file-locked-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:247"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:260"
   },
   "file-modes": {
    "name": "file-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:204"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:169"
   },
   "file-name-absolute-p": {
    "name": "file-name-absolute-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:358"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:388"
   },
   "file-name-all-completions": {
    "name": "file-name-all-completions",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:113"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:129"
   },
   "file-name-as-directory": {
    "name": "file-name-as-directory",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:174"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:197"
   },
   "file-name-case-insensitive-p": {
    "name": "file-name-case-insensitive-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:250"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:273"
   },
   "file-name-completion": {
    "name": "file-name-completion",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:133"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:154"
   },
   "file-name-concat": {
    "name": "file-name-concat",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:143"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:166"
   },
   "file-name-directory": {
    "name": "file-name-directory",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:214"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:237"
   },
   "file-name-nondirectory": {
    "name": "file-name-nondirectory",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:128"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:151"
+  },
+  "file-newer-than-file-p": {
+   "name": "file-newer-than-file-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:700"
   },
   "file-readable-p": {
    "name": "file-readable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:340"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:310"
   },
   "file-regular-p": {
    "name": "file-regular-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:343"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:313"
+  },
+  "file-selinux-context": {
+   "name": "file-selinux-context",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:901"
   },
   "file-symlink-p": {
    "name": "file-symlink-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:117"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:143"
   },
   "file-system-info": {
    "name": "file-system-info",
@@ -1617,7 +1652,7 @@
   "file-writable-p": {
    "name": "file-writable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:184"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:149"
   },
   "fillarray": {
    "name": "fillarray",
@@ -1632,7 +1667,7 @@
   "find-file-name-handler": {
    "name": "find-file-name-handler",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:405"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:418"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -2017,6 +2052,16 @@
    "variant": "Primitive::GotoChar",
    "registered_at": "crates/romacs-vm/src/lib.rs:594"
   },
+  "group-gid": {
+   "name": "group-gid",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/user_identity.rs:104"
+  },
+  "group-real-gid": {
+   "name": "group-real-gid",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/user_identity.rs:107"
+  },
   "handler-bind-1": {
    "name": "handler-bind-1",
    "implementation": "vm2",
@@ -2144,7 +2189,7 @@
   "insert-file-contents": {
    "name": "insert-file-contents",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:249"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:263"
   },
   "insert-file-contents-literally": {
    "name": "insert-file-contents-literally",
@@ -2489,7 +2534,7 @@
   "locate-file-internal": {
    "name": "locate-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:602"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:706"
   },
   "locate-library": {
    "name": "locate-library",
@@ -2500,7 +2545,12 @@
   "lock-buffer": {
    "name": "lock-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:232"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:235"
+  },
+  "lock-file": {
+   "name": "lock-file",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:250"
   },
   "log": {
    "name": "log",
@@ -2592,7 +2642,7 @@
   "make-directory-internal": {
    "name": "make-directory-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:153"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:118"
   },
   "make-finalizer": {
    "name": "make-finalizer",
@@ -2690,17 +2740,17 @@
   "make-symbolic-link": {
    "name": "make-symbolic-link",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:617"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:624"
   },
   "make-temp-file-internal": {
    "name": "make-temp-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:381"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:351"
   },
   "make-temp-name": {
    "name": "make-temp-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:285"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:255"
   },
   "make-variable-buffer-local": {
    "name": "make-variable-buffer-local",
@@ -3007,7 +3057,7 @@
   "next-read-file-uses-dialog-p": {
    "name": "next-read-file-uses-dialog-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:725"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:832"
   },
   "next-single-char-property-change": {
    "name": "next-single-char-property-change",
@@ -3662,7 +3712,7 @@
   "rename-file": {
    "name": "rename-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:253"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:218"
   },
   "replace-match": {
    "name": "replace-match",
@@ -3683,12 +3733,32 @@
   "restore-buffer-modified-p": {
    "name": "restore-buffer-modified-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/modification.rs:22"
+   "registered_at": "crates/romacs-vm/src/prims/modification.rs:21"
   },
   "reverse": {
    "name": "reverse",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/reverse.rs:4"
+  },
+  "romacs--auto-save-1": {
+   "name": "romacs--auto-save-1",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:41"
+  },
+  "romacs--auto-save-done": {
+   "name": "romacs--auto-save-done",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:72"
+  },
+  "romacs--auto-save-failure-time": {
+   "name": "romacs--auto-save-failure-time",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:81"
+  },
+  "romacs--auto-saved-tick": {
+   "name": "romacs--auto-saved-tick",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:107"
   },
   "romacs--call-process-run": {
    "name": "romacs--call-process-run",
@@ -3723,7 +3793,7 @@
   "romacs--code-converting-work": {
    "name": "romacs--code-converting-work",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:417"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:420"
   },
   "romacs--decode-output": {
    "name": "romacs--decode-output",
@@ -3738,12 +3808,12 @@
   "romacs--insert-file-contents-format": {
    "name": "romacs--insert-file-contents-format",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:833"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:879"
   },
   "romacs--insert-file-contents-undecide": {
    "name": "romacs--insert-file-contents-undecide",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:407"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:410"
   },
   "romacs--insert-printed": {
    "name": "romacs--insert-printed",
@@ -4086,15 +4156,20 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process.rs:511"
   },
+  "romacs--write-auto-save-list": {
+   "name": "romacs--write-auto-save-list",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:91"
+  },
   "romacs--write-region-body": {
    "name": "romacs--write-region-body",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:490"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:541"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/file_identity.rs:15"
+   "registered_at": "crates/romacs-vm/src/prims/file_identity.rs:35"
   },
   "romacs-json-read": {
    "name": "romacs-json-read",
@@ -4242,11 +4317,21 @@
    "variant": "Primitive::SetAdvertisedCallingConvention",
    "registered_at": "crates/romacs-vm/src/lib.rs:788"
   },
+  "set-binary-mode": {
+   "name": "set-binary-mode",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:155"
+  },
   "set-buffer": {
    "name": "set-buffer",
    "implementation": "vm2",
    "variant": "Primitive::SetBuffer",
    "registered_at": "crates/romacs-vm/src/lib.rs:587"
+  },
+  "set-buffer-auto-saved": {
+   "name": "set-buffer-auto-saved",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:113"
   },
   "set-buffer-modified-p": {
    "name": "set-buffer-modified-p",
@@ -4312,22 +4397,32 @@
   "set-default-file-modes": {
    "name": "set-default-file-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:246"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:211"
   },
   "set-default-toplevel-value": {
    "name": "set-default-toplevel-value",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/vars.rs:211"
   },
+  "set-file-acl": {
+   "name": "set-file-acl",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:878"
+  },
   "set-file-modes": {
    "name": "set-file-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:222"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:187"
+  },
+  "set-file-selinux-context": {
+   "name": "set-file-selinux-context",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:913"
   },
   "set-file-times": {
    "name": "set-file-times",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:646"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:664"
   },
   "set-frame-selected-window": {
    "name": "set-frame-selected-window",
@@ -4429,7 +4524,7 @@
   "set-visited-file-modtime": {
    "name": "set-visited-file-modtime",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:129"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:130"
   },
   "set-window-buffer": {
    "name": "set-window-buffer",
@@ -4595,52 +4690,52 @@
   "sqlite-available-p": {
    "name": "sqlite-available-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:91"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:100"
   },
   "sqlite-close": {
    "name": "sqlite-close",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:10"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:15"
   },
   "sqlite-columns": {
    "name": "sqlite-columns",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:66"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:75"
   },
   "sqlite-commit": {
    "name": "sqlite-commit",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:35"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:40"
   },
   "sqlite-execute": {
    "name": "sqlite-execute",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:15"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:20"
   },
   "sqlite-execute-batch": {
    "name": "sqlite-execute-batch",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:25"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:30"
   },
   "sqlite-finalize": {
    "name": "sqlite-finalize",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:76"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:85"
   },
   "sqlite-load-extension": {
    "name": "sqlite-load-extension",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:50"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:55"
   },
   "sqlite-more-p": {
    "name": "sqlite-more-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:71"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:80"
   },
   "sqlite-next": {
    "name": "sqlite-next",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:61"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:70"
   },
   "sqlite-open": {
    "name": "sqlite-open",
@@ -4650,32 +4745,32 @@
   "sqlite-pragma": {
    "name": "sqlite-pragma",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:45"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:50"
   },
   "sqlite-rollback": {
    "name": "sqlite-rollback",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:40"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:45"
   },
   "sqlite-select": {
    "name": "sqlite-select",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:20"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:25"
   },
   "sqlite-transaction": {
    "name": "sqlite-transaction",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:30"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:35"
   },
   "sqlite-version": {
    "name": "sqlite-version",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:81"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:90"
   },
   "sqlitep": {
    "name": "sqlitep",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:86"
+   "registered_at": "crates/romacs-vm/src/prims/sqlite.rs:95"
   },
   "sqrt": {
    "name": "sqrt",
@@ -4821,7 +4916,7 @@
   "substitute-in-file-name": {
    "name": "substitute-in-file-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:291"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:321"
   },
   "substring": {
    "name": "substring",
@@ -4905,7 +5000,7 @@
   "system-groups": {
    "name": "system-groups",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/user_identity.rs:142"
+   "registered_at": "crates/romacs-vm/src/prims/user_identity.rs:148"
   },
   "system-name": {
    "name": "system-name",
@@ -4915,7 +5010,7 @@
   "system-users": {
    "name": "system-users",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/user_identity.rs:132"
+   "registered_at": "crates/romacs-vm/src/prims/user_identity.rs:138"
   },
   "take": {
    "name": "take",
@@ -5110,10 +5205,20 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/obarray.rs:15"
   },
+  "unix-sync": {
+   "name": "unix-sync",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/autosave.rs:127"
+  },
   "unlock-buffer": {
    "name": "unlock-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:239"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:242"
+  },
+  "unlock-file": {
+   "name": "unlock-file",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:255"
   },
   "unwind-protect": {
    "name": "unwind-protect",
@@ -5154,7 +5259,7 @@
   "user-full-name": {
    "name": "user-full-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/user_identity.rs:104"
+   "registered_at": "crates/romacs-vm/src/prims/user_identity.rs:110"
   },
   "user-login-name": {
    "name": "user-login-name",
@@ -5210,7 +5315,7 @@
   "verify-visited-file-modtime": {
    "name": "verify-visited-file-modtime",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:63"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:64"
   },
   "vertical-motion": {
    "name": "vertical-motion",
@@ -5225,7 +5330,7 @@
   "visited-file-modtime": {
    "name": "visited-file-modtime",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:40"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:41"
   },
   "waiting-for-user-input-p": {
    "name": "waiting-for-user-input-p",
@@ -5555,7 +5660,7 @@
   "write-region": {
    "name": "write-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:421"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:434"
   },
   "yank-handle-category-property": {
    "name": "yank-handle-category-property",

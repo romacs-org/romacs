@@ -101,6 +101,12 @@ fn user_uid(cx) { Ok(cx.bigint(user_db::effective_uid().into())) }}
 defsubr! { name = "user-real-uid", gnu = "editfns.c:1167", effect = Reads,
 fn user_real_uid(cx) { Ok(cx.bigint(user_db::real_uid().into())) }}
 
+defsubr! { name = "group-gid", gnu = "editfns.c:1193", effect = Reads,
+fn group_gid(cx) { Ok(cx.bigint(user_db::effective_gid().into())) }}
+
+defsubr! { name = "group-real-gid", gnu = "editfns.c:1201", effect = Reads,
+fn group_real_gid(cx) { Ok(cx.bigint(user_db::real_gid().into())) }}
+
 defsubr! { name = "user-full-name", gnu = "editfns.c:1209", effect = Reads,
 fn user_full_name(cx; optional uid: Value) {
     if uid == Value::NIL {

@@ -2,8 +2,11 @@ use super::*;
 
 defsubr! { name = "file-system-info", gnu = "fileio.c:6659", effect = Global,
 fn file_system_info(cx, filename: Value) -> Step {
-    let path = super::fileio::expand_file_name(cx, filename)?;
-    let expanded = cx.string(&path);
+    super::fileio::expanding(cx, filename, filesystem_expanded, vec![])
+}}
+
+fn filesystem_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Next {
+    let path = cx.string_text(expanded)?;
     let operation = cx.intern("file-system-info");
     let handler = super::fileio::find_file_name_handler(cx, expanded, operation)?;
     if handler != Value::NIL {
@@ -20,7 +23,7 @@ fn file_system_info(cx, filename: Value) -> Step {
         result = cx.cons(value, result);
     }
     Ok(Step::Done(result))
-}}
+}
 
 fn filesystem_handler_returned(cx: &mut Leaf<'_>, result: Value, _: &[Value]) -> Next {
     if result == Value::NIL || cx.pair(result).is_some() { Ok(Step::Done(result)) }

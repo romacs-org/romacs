@@ -124,6 +124,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "auto-resize-tab-bars", gnu: "xdisp.c:38905", kind: Kind::Lisp(Init::True) },
     CVariable { name: "auto-resize-tool-bars", gnu: "xdisp.c:38918", kind: Kind::Lisp(Init::True) },
     CVariable { name: "auto-save-interval", gnu: "keyboard.c:13864", kind: Kind::Int(300) },
+    CVariable { name: "auto-save-include-big-deletions", gnu: "fileio.c:6964", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "auto-save-list-file-name", gnu: "fileio.c:6952", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "auto-save-no-message", gnu: "keyboard.c:13869", kind: Kind::Bool(false) },
     CVariable { name: "auto-save-timeout", gnu: "keyboard.c:13873", kind: Kind::Lisp(Init::Fixnum(30)) },

@@ -57,6 +57,10 @@
                                 (error "Unable to kill buffer whose indirect buffer `%s' cannot be killed"
                                        (buffer-name other))))))
                     (setq tail (cdr tail)))))
+            ;; unlock_buffer: a modified buffer's file is unlocked.
+            (if (and (buffer-live-p buffer) (buffer-modified-p buffer)
+                     (stringp (buffer-local-value 'buffer-file-truename buffer)))
+                (unlock-file (buffer-local-value 'buffer-file-truename buffer)))
             ;; kill_buffer_processes (process.c), once the hooks allowed the
             ;; kill; absent only in a VM without the process prelude.
             (if (and (buffer-live-p buffer) (fboundp 'romacs--kill-buffer-processes))

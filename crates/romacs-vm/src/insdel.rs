@@ -220,13 +220,24 @@ impl Vm {
             || before != Value::NIL
             || (unmodified && self.change_value(slots.first)? != Value::NIL)
             // lock_file for a visited file's first change.
-            || (unmodified
-                && self.change_value(slots.truename)? != Value::NIL
-                && self.change_value(slots.filename)? != Value::NIL)
+            || (unmodified && self.change_locks_file(buffer)?)
             // select-active-regions saves the region before it changes.
             || (self.change_value(slots.mark_active)? != Value::NIL
                 && self.change_value(slots.select_regions)? != Value::NIL);
         Ok(prepared)
+    }
+
+    /// Whether a change of BUFFER locks a visited file: its base's, when
+    /// indirect, names one in `buffer-file-truename' and `buffer-file-name'
+    /// (insdel.c:2160-2174).
+    fn change_locks_file(&mut self, buffer: Value) -> Faulty<bool> {
+        let slots = self.change_slots();
+        let base = match self.object_if(buffer) { Some(Object::Buffer(b)) if b.base != Value::NIL => b.base, _ => buffer };
+        let mut names = |slot| -> Faulty<bool> {
+            let value = if base == buffer { self.change_value(slot)? } else { self.value_in_buffer(slot, base).map_err(Fault::Error)? };
+            Ok(!matches!(value, Value::NIL | Value::UNBOUND))
+        };
+        Ok(names(slots.truename)? && names(slots.filename)?)
     }
 
     /// signal_after_change defers to combine-after-change-calls, which VM2

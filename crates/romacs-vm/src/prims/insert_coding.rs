@@ -52,7 +52,10 @@ const POINT: usize = 17;
 /// REPLACE: (FROM . TEXT), the decoded middle that replaces the buffer's
 /// differing text at FROM.
 const MIDDLE: usize = 18;
-const REGISTERS: usize = 19;
+/// The file name handler that inserted (nil: the native read), and its value.
+const HANDLER: usize = 19;
+const VAL: usize = 20;
+const REGISTERS: usize = 21;
 
 /// A read of an empty buffer prepares before its coding decision.
 const RESUME_UNDECIDED: i64 = 1;
@@ -110,7 +113,7 @@ pub(super) struct Read {
 
 /// VisitedModtime as register data: 0 unknown, -1 missing, else
 /// (SECONDS NANOS SIZE).
-fn modtime_value(cx: &mut Leaf<'_>, modtime: VisitedModtime) -> std::result::Result<Value, Fault> {
+pub(super) fn modtime_value(cx: &mut Leaf<'_>, modtime: VisitedModtime) -> std::result::Result<Value, Fault> {
     Ok(match modtime {
         VisitedModtime::Unknown => fixnum(0)?,
         VisitedModtime::Missing => fixnum(-1)?,
@@ -122,7 +125,7 @@ fn modtime_value(cx: &mut Leaf<'_>, modtime: VisitedModtime) -> std::result::Res
     })
 }
 
-fn modtime_of(cx: &Leaf<'_>, value: Value) -> VisitedModtime {
+pub(super) fn modtime_of(cx: &Leaf<'_>, value: Value) -> VisitedModtime {
     match value.integer_value() {
         Some(0) => return VisitedModtime::Unknown,
         Some(_) => return VisitedModtime::Missing,
@@ -739,17 +742,59 @@ fn spread_point(cx: &mut Leaf<'_>, r: &mut [Value]) -> std::result::Result<(), F
     Ok(())
 }
 
+/// fileio.c:4160-4167: HANDLER inserted for the expanded ORIG (SAVED:
+/// ORIG VISIT BEG END REPLACE EMPTY-UNDO HANDLER) and returned VAL; its
+/// count, when VAL is (NAME COUNT) with COUNT in range, goes on to
+/// `handled:' (fileio.c:5141), which neither records the visit's modtime
+/// nor unlocks, nor sets `last-coding-system-used'.
+pub(super) fn handled(cx: &mut Leaf<'_>, val: Value, saved: &[Value]) -> Next {
+    let mut r = vec![Value::NIL; REGISTERS];
+    r[ORIG] = saved[0];
+    r[VISIT..=REPLACE].copy_from_slice(&saved[1..5]);
+    r[FLAGS] = fixnum(if saved[5] != Value::NIL { EMPTY_UNDO } else { 0 })?;
+    r[HANDLER] = saved[6];
+    r[VAL] = val;
+    let shape = cx.buffer_shape()?;
+    let point = cx.point()?;
+    let count = cx.pair(val).and_then(|(_, tail)| cx.pair(tail)).and_then(|(n, _)| n.integer_value())
+        .filter(|n| (0..=shape.zv - point).contains(n));
+    r[INSERTED] = fixnum(count.unwrap_or(0))?;
+    visited(cx, r)
+}
+
 fn visited(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
     spread_point(cx, &mut r)?;
+    let native = r[HANDLER] == Value::NIL;
     if r[VISIT] != Value::NIL {
         if has(&r, EMPTY_UNDO) { cx.bset("buffer-undo-list", Value::NIL)?; }
-        cx.bset("buffer-file-name", r[ORIG])?;
-        let modtime = modtime_of(cx, r[MODTIME]);
-        cx.fileio_set_modtime(modtime)?;
+        if native {
+            cx.bset("buffer-file-name", r[ORIG])?;
+            let modtime = modtime_of(cx, r[MODTIME]);
+            cx.fileio_set_modtime(modtime)?;
+        }
         cx.set_buffer_modified(Value::NIL, true)?;
+        if native {
+            // fileio.c:5164-5167: Funlock_file the truename, then the name.
+            let truename = var(cx, "buffer-file-truename")?;
+            if truename != Value::NIL {
+                return Ok(Step::Call { f: cx.intern("unlock-file"), args: vec![truename], then: truename_unlocked, saved: r });
+            }
+            return truename_unlocked(cx, Value::NIL, &r);
+        }
     }
-    let lcsu = cx.intern("last-coding-system-used");
-    cx.variable_set(lcsu, r[CODING])?;
+    unlocked(cx, Value::NIL, &r)
+}
+
+fn truename_unlocked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: cx.intern("unlock-file"), args: vec![saved[ORIG]], then: unlocked, saved: saved.to_vec() })
+}
+
+fn unlocked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let r = saved.to_vec();
+    if r[HANDLER] == Value::NIL {
+        let lcsu = cx.intern("last-coding-system-used");
+        cx.variable_set(lcsu, r[CODING])?;
+    }
     let set_coding = cx.intern("after-insert-file-set-coding");
     if cx.fboundp(set_coding) {
         let args = vec![r[INSERTED], r[VISIT]];
@@ -805,6 +850,7 @@ fn formatted(cx: &mut Leaf<'_>, inserted: Value, saved: &[Value]) -> Next {
 /// (ORIG INSERTED).
 fn finish(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     restore_point(cx, r)?;
+    if r[VAL] != Value::NIL { return Ok(Step::Done(r[VAL])); }
     let errno = r[ERRNO].integer_value().unwrap_or(0) as i32;
     if errno != 0 {
         let error = std::io::Error::from_raw_os_error(errno);
