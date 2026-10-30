@@ -283,8 +283,8 @@ fn folds_case(_: &std::path::Path) -> bool {
 #[cfg(target_os = "linux")]
 fn containing_directory(mut path: &std::path::Path) -> Option<std::path::PathBuf> {
     loop {
-        match crate::host::symlink_metadata(path) {
-            Ok(m) if m.file_type().is_dir() => return Some(path.to_owned()),
+        match crate::host::entry_type(path) {
+            Ok(t) if std::fs::FileType::is_dir(&t) => return Some(path.to_owned()),
             Ok(_) => return path.parent().map(std::path::Path::to_owned),
             Err(_) => path = path.parent()?,
         }

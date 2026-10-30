@@ -731,13 +731,27 @@ impl DirEntry {
     pub fn file_type(&self) -> io::Result<FileType> {
         let result = self.0.file_type();
         if self.1 {
-            let observed = match &result {
-                Ok(t) => json!(if t.is_dir() { "dir" } else if t.is_file() { "file" } else if t.is_symlink() { "symlink" } else { "other" }),
-                Err(e) => errno(e),
-            };
-            probed("entry-type", &self.0.path(), observed);
+            probed("entry-type", &self.0.path(), entry_type_json(&result));
         }
         result
+    }
+}
+
+/// The type of the entry PATH names, not following a symlink: an lstat
+/// whose record is only the type, so the entry's times and size are not
+/// keyed facts.
+pub fn entry_type(path: &Path) -> io::Result<FileType> {
+    let result = std::fs::symlink_metadata(path).map(|m| m.file_type());
+    if building() {
+        probed("entry-type", path, entry_type_json(&result));
+    }
+    result
+}
+
+fn entry_type_json(result: &io::Result<FileType>) -> Json {
+    match result {
+        Ok(t) => json!(if t.is_dir() { "dir" } else if t.is_file() { "file" } else if t.is_symlink() { "symlink" } else { "other" }),
+        Err(e) => errno(e),
     }
 }
 
@@ -905,14 +919,7 @@ pub fn replay(record: &Json) -> Option<Json> {
                 "lstat" => { let _ = symlink_metadata(path()?); }
                 "fstat" | "open" => { if let Ok(input) = open_input(path()?, 0) { let _ = input.stat(); } }
                 "readlink" => { let _ = read_link(path()?); }
-                "entry-type" => {
-                    let path = path()?;
-                    let observed = match std::fs::symlink_metadata(&path) {
-                        Ok(m) => json!(if m.is_symlink() { "symlink" } else if m.is_dir() { "dir" } else if m.is_file() { "file" } else { "other" }),
-                        Err(e) => errno(&e),
-                    };
-                    probed("entry-type", &path, observed);
-                }
+                "entry-type" => { let _ = entry_type(&path()?); }
                 "statvfs" => { let _ = statvfs(&std::ffi::CString::new(path()?.into_os_string().into_vec()).ok()?); }
                 "fs-type" => { let _ = filesystem_type(&path()?); }
                 "dir-flags" => { let _ = directory_flags(&path()?); }

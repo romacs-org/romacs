@@ -364,7 +364,11 @@ fn a_case_query_records_the_filesystem_facts_restore_asks_again() {
         .filter(|r| r["probe"] == "fs-type" || r["probe"] == "dir-flags").collect();
     let kinds: Vec<&str> = facts.iter().map(|r| r["probe"].as_str().unwrap()).collect();
     assert_eq!(kinds, ["fs-type", "fs-type", "dir-flags"], "{trace}");
-    for record in facts {
+    // The directory changes after the build, as HOME and TMPDIR do: the
+    // query keyed its type, not its times, so every record still holds.
+    write(&dir.join("d/new"), "");
+    let records = trace["records"].as_array().unwrap();
+    for record in records.iter().filter(|r| host::keyed(r)) {
         let mut expected = record.clone();
         expected.as_object_mut().unwrap().remove("site");
         assert_eq!(host::replay(record), Some(expected));
