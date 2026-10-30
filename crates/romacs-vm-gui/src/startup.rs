@@ -198,6 +198,48 @@ impl Started {
 /// order: the host's paint reads it to find the selected window's snapshot.
 pub const SELECTED_TAIL: &str = "(length (memq (selected-window) (romacs-gui-leaves (romacs-gui-root))))";
 
+/// Startup's phases under the GUI's --trace-latency, one line each as they end:
+/// `romacs-startup: {"phase": NAME, "at_ms": since the process began,
+/// "ms": since the previous phase}`. The process began at its exec, as
+/// the kernel records it; `main` is the first phase.
+pub struct Phases { start: std::time::Instant, last: std::time::Instant }
+thread_local! { static PHASES: std::cell::RefCell<Option<Phases>> = const { std::cell::RefCell::new(None) }; }
+/// This thread's startup phases, from START; marks print only once begun
+/// (the GUI begins them under --trace-latency).
+pub fn begin_phases(start: std::time::Instant) { PHASES.with(|p| *p.borrow_mut() = Some(Phases::new(start))); }
+/// The end of PHASE on this thread's startup clock, if it keeps one.
+pub fn mark_phase(phase: &str) { PHASES.with(|p| if let Some(p) = p.borrow_mut().as_mut() { p.mark(phase) }); }
+impl Phases {
+    pub fn new(start: std::time::Instant) -> Self { Self { start, last: start } }
+    /// A clock of this process's exec: `main`'s now, less how long the
+    /// kernel says the process has run (/proc/self/stat's start time
+    /// against /proc/uptime, both in clock ticks).
+    pub fn from_exec() -> Self {
+        let now = std::time::Instant::now();
+        let ticks = |text: &str| -> Option<f64> {
+            let after = text.rsplit(") ").next()?;
+            after.split(' ').nth(19)?.parse::<f64>().ok()
+        };
+        let running = (|| {
+            let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+            let uptime: f64 = std::fs::read_to_string("/proc/uptime").ok()?.split(' ').next()?.parse().ok()?;
+            let hz = romacs_vm::host::clock_ticks_per_second() as f64;
+            Some(uptime - ticks(&stat)? / hz)
+        })().filter(|s| *s >= 0.0 && *s < 60.0).unwrap_or(0.0);
+        let start = now.checked_sub(std::time::Duration::from_secs_f64(running)).unwrap_or(now);
+        Self { start, last: start }
+    }
+    /// When this clock began: the process's exec, for a thread's own phases.
+    pub fn start(&self) -> std::time::Instant { self.start }
+    pub fn mark(&mut self, phase: &str) {
+        let now = std::time::Instant::now();
+        eprintln!("romacs-startup: {}", serde_json::json!({"phase": phase, "at_ms": (now - self.start).as_secs_f64() * 1000.0,
+                                               "ms": (now - self.last).as_secs_f64() * 1000.0}));
+        self.last = now;
+    }
+}
+
+
 /// GNU's `lisp/` for this process; see [`lisp_dir_from`].
 pub fn lisp_dir() -> std::path::PathBuf {
     lisp_dir_from(std::env::var_os("ROMACS_LISP_DIR"), std::env::var_os("ROMACS_RUNTIME_ROOT"))
@@ -404,7 +446,8 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     let files = take_queued();
     let dir = &lisp_root(dir)?;
     let loadup = initialize_chain(vm, launch, font, dir)?;
-    let session = initialize_session(vm, launch, loadup, dir)?;
+    install_session_definitions(vm, launch, dir)?;
+    let session = start_session(vm, launch, loadup, dir)?;
     open_workspace(vm, session, &files, dir)
 }
 
@@ -452,20 +495,49 @@ pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &s
 pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup) -> Result<Started, String> {
     let files = take_queued();
     let dir = lisp_root(&lisp_dir())?;
-    let session = initialize_session(vm, launch, loadup, &dir)?;
-    open_workspace(vm, session, &files, &dir)
+    let session = start_session(vm, launch, loadup, &dir)?;
+    let started = open_workspace(vm, session, &files, &dir);
+    mark_phase("workspace");
+    started
 }
 
-/// The launch after [`initialize_chain`]: the interactive session and
-/// Romacs's layers, up to the workspace.
-pub fn initialize_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup, dir: &std::path::Path) -> Result<Started, String> {
+/// Romacs's layers after the chain that only define: icomplete, which its
+/// completion defaults build on, and the session's command libraries. They
+/// read and set nothing of the process, so a world holds them with the
+/// chain (world.rs); a source boot takes them after it.
+pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path::Path) -> Result<(), String> {
+    if launch == Launch::GnuOnly {
+        return Ok(());
+    }
+    if launch == Launch::Loadup {
+        // GNU's icomplete, which rlisp/romacs-completion-defaults.el requires
+        // and whose own require signals when a runtime lacks it.
+        vm.eval_source("(require 'icomplete nil t)")?;
+    }
+    vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
+    mark_phase("session-definitions");
+    Ok(())
+}
+
+/// The interactive session, after the chain and
+/// [`install_session_definitions`]: this process's startup steps on this
+/// display, Romacs's defaults for GNU's minibuffer completion, which the
+/// user's init may override, the layers that set a delayed variable or
+/// enable a mode (what a world build refuses), and the journey keys, up to
+/// the workspace.
+pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup, dir: &std::path::Path) -> Result<Started, String> {
     if launch == Launch::Loadup {
         // What an interactive session on this display adds to the batch
-        // chain, then Romacs's defaults for GNU's minibuffer completion,
-        // which the user's init may override.
+        // chain, then the completion defaults.
         for name in ["romacs-gui-loadup.el", "romacs-completion-defaults.el"] {
             let file = loadup_bootstrap(dir).with_file_name(name);
             vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            mark_phase(name);
         }
     }
     // buffer.c's default is "%-" until bindings.el replaces it.
@@ -474,18 +546,14 @@ pub fn initialize_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Lo
         return Ok(Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line, files: vec![] });
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-find-file.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     initialize_editing(vm)?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
+    mark_phase("find-file+editing");
     let bindings = bind_journey_keys(vm, true)?;
+    mark_phase("journey-keys");
     Ok(Started { launch, loadup: Some(loadup), bindings, gnu_mode_line, files: vec![] })
 }
 
-/// The launch after [`initialize_session`]: the GUI's extensions and the
+/// The launch after [`start_session`]: the GUI's extensions and the
 /// mode line, with FILES kept for [`finish_loadup`], which visits them
 /// and shows the startup screen once the user's init has run.
 pub fn open_workspace(vm: &mut Vm, started: Started, files: &[std::path::PathBuf], dir: &std::path::Path) -> Result<Started, String> {

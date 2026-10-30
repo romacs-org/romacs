@@ -396,6 +396,20 @@ impl World {
         }
     }
 
+    /// The world made usable without mapping it: its manifest when it
+    /// already holds, else once a build made it so (built here, holding the
+    /// lock from the check through the spawn, or waited for). The reason it
+    /// could not be, otherwise, as `launch` would boot from source for.
+    pub fn prepare(&self, builder_args: impl FnOnce() -> Vec<OsString>) -> Result<Json, Json> {
+        if disabled() {
+            return Err(json!("ROMACS_WORLD=off"));
+        }
+        match self.usable() {
+            Ok((_, manifest)) => Ok(manifest),
+            Err(reason) => self.build_for(reason, builder_args, true, || {}).map(|(_, manifest)| manifest),
+        }
+    }
+
     /// The world's image, opened, and its manifest, when both hold: every
     /// record and the image's content.
     fn usable(&self) -> Result<(std::fs::File, Json), Json> {

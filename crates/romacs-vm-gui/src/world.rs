@@ -5,7 +5,7 @@
 //! window geometry, the launch font and the collection floor) and on keyed
 //! host facts. A restored launch attaches its hosts, runs
 //! `romacs-world-restart` and continues with the interactive session
-//! (`startup::initialize_session`) and the workspace.
+//! (`startup::start_session`) and the workspace.
 //!
 //! A live `--loadup` launch uses a world unless ROMACS_WORLD=off: in
 //! `--world-store`, or else in `$XDG_CACHE_HOME/romacs/worlds`
@@ -14,10 +14,11 @@
 //! it; later launches restore it. A build refused or failed on the same
 //! inputs is not tried again until one of them changes.
 //!
-//! The world ends at the chain, not after the session's own startup steps
-//! (rlisp/romacs-gui-loadup.el): Romacs's layers after them read and write
-//! the delayed variables and the inputs of those steps, which a world build
-//! refuses.
+//! The world ends after the chain and Romacs's definitions
+//! (`startup::install_session_definitions`), before the session's own
+//! startup steps (rlisp/romacs-gui-loadup.el): those read and write the
+//! delayed variables and the inputs of this process, which a world build
+//! refuses, so a restored launch takes them itself.
 use crate::startup;
 use romacs_vm::Vm;
 use romacs_vm::world::store::{Launch, World};
@@ -123,6 +124,19 @@ pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_w
     }
 }
 
+/// WORLD made usable for this launch's recipe, with no window: built here,
+/// or waited for, when it is missing or stale (`World::prepare`). Says how
+/// it ended on stderr as a launch says how it booted.
+pub fn prepare(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result<(), String> {
+    match world.prepare(|| builder_args(world, width, height, floor)) {
+        Ok(manifest) => {
+            eprintln!("romacs-world: {}", json!({"mode": "prepared", "key": manifest["key"]}));
+            Ok(())
+        }
+        Err(reason) => Err(format!("world not prepared: {reason}")),
+    }
+}
+
 /// A builder's arguments for WORLD's launch: what its recipe takes from the
 /// command line, the store absolute, since the builder runs in the store's
 /// pinned directory. Nothing else of this launch reaches it.
@@ -182,6 +196,7 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     vm.eval_source(INTERPROGRAM)?;
     let font = launch_font()?;
     let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, font.as_ref().map(|(s, _)| s.as_str()), dir)?;
+    startup::install_session_definitions(&mut vm, startup::Launch::Loadup, dir)?;
     vm.set_layout_host(None);
     // The fonts the world measured with, the default face's among them:
     // their files and Fontconfig's are keyed records, so a font added,
