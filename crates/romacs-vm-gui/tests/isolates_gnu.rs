@@ -116,7 +116,9 @@ fn a_ready_worker_that_will_not_take_the_job_gives_way_to_the_original() {
     // Sol r6: readiness is checked before submission; a full queue or a
     // process gone since the check runs GNU's definition, not an error.
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    // The commands remember the project; the list stays in the private HOME.
     let script = format!("(progn {PREAMBLE} (require 'project) (load {module:?}) (setq romacs-project-isolate 'source)
+      (setq project-list-file (expand-file-name \"projects.eld\" (getenv \"HOME\")))
       (let* ((pr (project-current nil {dir:?}))
              (worker (romacs-project--warm pr))
              (id (romacs--isolate-id worker))
