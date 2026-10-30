@@ -13,13 +13,20 @@ The backend is the owner's running dashboard at 127.0.0.1:9119, attached
 (`hermes-dashboard-transport-start-mode' remote), never started.  No
 credential is supplied: hermes's loopback handshake discovers the
 dashboard's session token, which stays in the engine's memory; the probe
-reports "<secret>" for any string holding it.  The workflows only read:
-the dashboard, the session browser, a session's history, its search and
-quitting back.  They never press a key that renames, pins, archives,
-deletes, exports or resumes a session, or that sends anything.
+reports "<secret>" for any string holding it, and nothing writes it.  The
+workflows only read: the dashboard, the session browser, a session's
+history, its search and quitting back.  They never press a key that
+renames, pins, archives, deletes, exports or resumes a session, or that
+sends anything -- but for the one write the owner authorized: the `chat'
+workflow opens a new chat, whose session the backend creates titled
+`romacs-parity-test' (hermes-chat-dashboard-session-title, set at creation,
+never a rename), sends `hello' and waits for the reply, once in each
+engine.  `chat-dry' runs its steps up to that send, writing nothing.
 
 usage: hermes_parity_live.py --romacs BIN [--gnu EMACS] --output DIR
                              [--workflow NAME]... [--perf]
+
+Without --workflow it runs the read-only ones; `chat' runs only by name.
 
 COMPARISON POLICY: as gnosis_parity_live.py's -- buffers, point, text,
 properties, overlays, modes, mode and header lines, windows, minibuffer,
@@ -30,7 +37,11 @@ hermes's own variables hold the token, and with neither engine asking
 before killing a buffer with a live process (see init_source).  The backend's data is live: the
 engines run each step seconds apart, so a session that gains a message in
 between shows up as a difference in the list; the history the workflow
-opens is an old, closed session's.
+opens is an old, closed session's.  In `chat' the reply's words are the
+model's and differ between the engines; its rows, faces, status rule and
+composer are compared as they are, and its arrival is the send step's
+time.  After every workflow neither engine may have logged `Error running
+timer' or `Error during redisplay' in *Messages* or on stderr.
 """
 from pathlib import Path
 import sys
@@ -40,6 +51,7 @@ from parity_live import (ROOT, C, Harness, M, MODE_IS, POPUP_HAS, PROMPT_IS, BUF
 import parity_live
 
 DASHBOARD_URL = 'http://127.0.0.1:9119'
+TEST_TITLE = 'romacs-parity-test'
 # The owner's checkouts, as ~/.config/emacs/init.el's straight recipes name them.
 SOURCES = [
     (Path.home() / 'Projects/emacs-lisp/emacs-hermes/lisp', '*.el'),
@@ -72,8 +84,13 @@ def init_source(engine, lisp):
 ;; The owner's hermes settings, with every instance the local dashboard.
 (setq hermes-instances '(("local" . {lisp_string(DASHBOARD_URL)}))
       hermes-dashboard-transport-url {lisp_string(DASHBOARD_URL)}
-      hermes-dashboard-transport-start-mode 'remote)
+      hermes-dashboard-transport-start-mode 'remote
+      ;; A session this harness creates is titled as a test's.
+      hermes-chat-dashboard-session-title {lisp_string(TEST_TITLE)})
 (require 'hermes)
+;; The owner's init.el numbers every buffer's lines, relative to point's.
+(setq display-line-numbers-type 'relative)
+(global-display-line-numbers-mode 1)
 ;; The owner's hermes (e8cf489) kills an http buffer that another live
 ;; connection still holds, so `kill-buffer' would ask about that process at
 ;; a moment request timing chooses, in GNU and Romacs alike.  Neither asks.
@@ -113,6 +130,20 @@ DETAIL_READY = (f'(and {MODE_IS("hermes-session-detail-mode")}'
                 ' (save-excursion (goto-char (point-min)) (search-forward "Messages: " nil t)))')
 ISEARCHING = '(and isearch-mode (equal isearch-string {}))'.format
 
+CHAT = '(eq (buffer-local-value (quote major-mode) (window-buffer (selected-window))) (quote hermes-chat-mode))'
+IN_CHAT = '(with-current-buffer (window-buffer (selected-window)) {})'.format
+# A turn has ended once the rule recorded its duration and none runs.
+REPLIED = IN_CHAT('(and hermes-chat--status-rule-last (not hermes-chat--status-rule-start) (not (hermes-chat--active-turn-p)))')
+# Up to the send: open a new chat from the dashboard with the default
+# profile and type the message.  Nothing here reaches the backend's sessions.
+CHAT_STEPS = [
+    dict(name='open', **mx('hermes'), ready=f'(and {BUFFER_IS(DASHBOARD)} {POPUP_HAS(lisp_string("Sessions"))})'),
+    key('new-chat', [T('c')], '(and (minibufferp (window-buffer (selected-window))) (string-prefix-p "Profile" (minibuffer-prompt)))'),
+    key('default-profile', [['-k', 'Return']], f'(and {CHAT} {IN_CHAT("(hermes-chat--input-position)")})', settle=3),
+    dict(name='type', keys=[T('hello')], keys_ready=IN_CHAT('(equal (buffer-substring-no-properties (hermes-chat--input-position) (point-max)) "hello")'),
+         trigger=[], ready='t'),
+]
+
 # Request steps settle 3s, for the requests a step starts in the background.
 WORKFLOWS = {
     # The dashboard, the session browser and its motion, the newest
@@ -145,9 +176,27 @@ WORKFLOWS = {
             settle=3),
         key('quit-sessions', [T('q')], BUFFER_IS(DASHBOARD)),
     ],
+    'chat-dry': CHAT_STEPS,
+    # The one write: RET sends `hello'; the step lasts until the reply ends.
+    'chat': CHAT_STEPS + [key('send', [['-k', 'Return']], REPLIED, settle=3)],
 }
+WRITES = {'chat'}
 
-HARNESS = Harness(WORKFLOWS, launch, seed='hermes-parity-')
+
+def check(engines):
+    """Errors either engine logged while the workflow ran: *Messages* lines
+    and stderr lines naming a timer or redisplay error."""
+    marks = ('Error running timer', 'Error during redisplay')
+    out = {'errors': []}
+    for engine in engines:
+        messages = engine.ask('(with-current-buffer (messages-buffer) (buffer-substring-no-properties (min parity-probe-messages-start (point-max)) (point-max)))')
+        log = (engine.root / 'engine.log').read_text(errors='replace') if (engine.root / 'engine.log').exists() else ''
+        found = [line for line in (messages.splitlines() + log.splitlines()) if any(m in line for m in marks)]
+        out[engine.name] = found
+        out['errors'] += [f'{engine.name}: {line}' for line in found]
+    return out
+
+HARNESS = Harness(WORKFLOWS, launch, seed='hermes-parity-', check=check, writes=WRITES)
 
 
 if __name__ == '__main__':

@@ -66,6 +66,9 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
                 :planes 24 :color-cells 16777216 :visual-class true-color
                 :color t :grayscale nil :display-type color :background-mode dark
                 :palette nil))
+        ;; pgtk_term_init (pgtkterm.c:7082): a window-system terminal runs at
+        ;; 19200 baud, so isearch shows no one-line slow-terminal window.
+        (setq baud-rate 19200)
         ;; startup.el command-line (startup.el:1479): the delayed settings take
         ;; their standard values in this session's context, as GNU computes them
         ;; at startup: `global-font-lock-mode', `abbrev-file-name',

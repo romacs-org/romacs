@@ -72,7 +72,7 @@ impl Vm {
         Ok((Value::NIL, Value::NIL))
     }
 
-    fn overlay_order_key(&self, overlay: Value) -> (i64, u32, std::cmp::Reverse<u32>, usize) {
+    pub(crate) fn overlay_order_key(&self, overlay: Value) -> (i64, u32, std::cmp::Reverse<u32>, usize) {
         let priority = self.overlay_property_named(overlay, "priority").unwrap().integer_value().unwrap_or(0);
         let (start, end) = self.overlay_range(overlay).unwrap().unwrap();
         (priority, start, std::cmp::Reverse(end), overlay.index(0).unwrap())

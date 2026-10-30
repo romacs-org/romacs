@@ -1,75 +1,173 @@
-//! The display elements of a window a host lays out (VM2-WTPS1). The
-//! host paints a window's buffer characters one glyph each, in the faces
-//! its snapshot gives them, a TAB as a stretch to its tab stop, and
-//! continues or truncates a row where GNU's iterator does, though never at
-//! a word boundary (`word-wrap'). Where the iterator's elements are exactly those
-//! characters, each becomes a `Shape::Pixel` glyph with the advance and
-//! height the host's own layout gives it, or a `Shape::PixelTab` from its
-//! face's space, so the motion measures in the host's pixels. Any other
-//! element (invisible or replaced text, overlay and prefix strings,
-//! display-table glyphs and escapes) is refused: the host would not show
-//! what GNU shows there.
+//! The display elements of a window a host lays out (VM2-WTPS1). A
+//! window's snapshot publishes the elements GNU's iterator delivers
+//! (`Leaf::shown_elements`): its buffer characters, `display' strings and
+//! spaces, overlay strings and ellipses, with invisible text left out, each
+//! in the face GNU shows it in. The host paints them one glyph each, a TAB
+//! and a space as stretches, and continues or truncates a row where GNU's
+//! iterator does, though never at a word boundary (`word-wrap'). The same
+//! elements measure here: each becomes a `Shape::Pixel` glyph with the
+//! advance and height the host's own layout gives it, or a
+//! `Shape::PixelTab` or `Shape::PixelStretch` from its face, so the motion
+//! measures in the host's pixels. What the host does not draw as GNU does
+//! (escapes and display-table glyphs, glyphless characters, line and wrap
+//! prefixes) is refused: the host would not show what GNU shows there.
 use super::*;
-use super::display_elements::Source;
+use super::display_elements::{Source, View};
 use super::display_motion::{Elem, Elements, Lines, Method, Shape, Slot, R};
-use crate::coordinates::{ByteOffset, CharOffset};
-use crate::data::Object;
+use romacs_layout_input::StretchWidth;
 
-/// The bytes one host measurement covers past the line it starts on.
-const CHUNK: usize = 8192;
+/// The elements one host measurement covers past the first it needs.
+const CHUNK: usize = 4096;
 
 fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixel-size {what} in a displayed window is unsupported")) }
+fn not_as_gnu() -> Fault { unsupported("of text the host does not lay out as GNU displays it") }
+
+/// The face a display element shows in: the buffer's at a position (GNU
+/// face_at_buffer_position), or a string's own at STRPOS over that
+/// (face_at_string_position, the buffer text's face as its base), over the
+/// text's alone for an OVERLAY's string (face_for_overlay_string).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FaceKey { Buffer(i64), String { string: Value, strpos: usize, charpos: i64, overlay: bool },
+    /// A display-table glyph's face over the buffer's (merge_faces).
+    Glyph { face: Value, charpos: i64 } }
+
+/// One element as a host shows it: its character, the face it shows in,
+/// the buffer position it is at, what it is there and whether it REPLACES
+/// the buffer's text there (the text itself, or what its `display' shows;
+/// not an overlay string's), so point can show on it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Shown { pub c: char, pub face: FaceKey, pub charpos: i64, pub kind: ShownKind, pub replaces: bool }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ShownKind {
+    /// The buffer's own character at CHARPOS.
+    Buffer,
+    /// A string's character or an ellipsis glyph at CHARPOS; CURSOR when
+    /// its `cursor' property asks for point there.
+    Other { cursor: bool },
+    /// A `(space ...)' a placeholder space stands for.
+    Stretch(StretchWidth),
+    /// A `:relative-width' FACTOR space, as wide as the host draws C.
+    Relative { factor: f64, c: char },
+}
+
+/// How the host shows ELEM: None where it shows nothing of it (outside
+/// the text area), else the character it paints, or `Err' where it does
+/// not show what GNU does.
+fn host_char(source: &mut Source<'_, '_>, e: &Elem) -> R<Option<Option<char>>> {
+    if !e.text_area { return Ok(None); }
+    Ok(Some(match (e.shape, e.method) {
+        (Shape::Glyph { c, .. }, Method::Buffer | Method::String) => char::from_u32(c),
+        (Shape::Tab, Method::Buffer | Method::String) => Some('\t'),
+        (Shape::Stretch { .. } | Shape::Align { .. }, _) => Some(' '),
+        // Measured as the glyph it is relative to.
+        (Shape::RelativeStretch { c, .. }, _) => char::from_u32(c),
+        (Shape::Glyph { c, .. }, Method::Vector { .. }) if e.ellipsis.is_some() => char::from_u32(c),
+        // An escape or a display table's glyphs stand for the character
+        // there, which the host draws itself.
+        (_, Method::Vector { last, .. }) => {
+            if !last { return Ok(Some(None)); }
+            let c = match e.strpos {
+                Some(k) if e.object != Value::NIL => source.leaf().vm.str_view(e.object).and_then(|v| v.chars().nth(k)),
+                _ => source.char_after(e.charpos)?,
+            };
+            return Ok(Some(c.and_then(char::from_u32)));
+        }
+        _ => None,
+    }))
+}
+
+fn face_key(e: &Elem) -> FaceKey {
+    if let Some(face) = e.ellipsis.filter(|&f| f != Value::NIL) { return FaceKey::Glyph { face, charpos: e.charpos }; }
+    match e.strpos {
+        Some(strpos) if e.object != Value::NIL => FaceKey::String { string: e.object, strpos, charpos: e.charpos, overlay: !e.from_display },
+        _ => FaceKey::Buffer(e.charpos),
+    }
+}
+
+fn stretch_width(shape: Shape) -> Option<StretchWidth> {
+    match shape {
+        Shape::Stretch { width, zero_ok } => Some(StretchWidth::Width { width, zero_ok }),
+        Shape::Align { target } => Some(StretchWidth::AlignTo(target)),
+        _ => None,
+    }
+}
+
+impl<'a> Leaf<'a> {
+    /// The elements VIEW's window shows from FROM, a line start, through
+    /// the last before TO (and the strings at TO, when it is ZV), as a
+    /// snapshot publishes them for the host to paint.
+    pub(super) fn shown_elements(&mut self, view: View, from: i64, to: i64) -> R<Vec<Shown>> {
+        let zv = view.zv;
+        let cursor = self.intern("cursor");
+        let mut source = Source::new(self, view, from)?;
+        let mut out = vec![];
+        for index in 0.. {
+            let Some(e) = source.slot(index)?.elem else { break };
+            if e.charpos > to || e.charpos == to && (to < zv || e.method == Method::Buffer) { break; }
+            let Some(Some(c)) = host_char(&mut source, &e)? else { continue };
+            // A space replaces when the buffer's display made it, not a string's.
+            let (kind, replaces) = match stretch_width(e.shape) {
+                Some(width) => (ShownKind::Stretch(width), e.object == Value::NIL),
+                None if let Shape::RelativeStretch { factor, .. } = e.shape => (ShownKind::Relative { factor, c }, e.object == Value::NIL),
+                None if e.object == Value::NIL && e.ellipsis.is_none() && matches!(e.method, Method::Buffer | Method::Vector { .. }) => (ShownKind::Buffer, true),
+                None => {
+                    let asks = match e.strpos { Some(k) if e.object != Value::NIL && !e.from_display =>
+                        source.leaf().vm.property_textget(e.object, k as i64, cursor)? != Value::NIL, _ => false };
+                    (ShownKind::Other { cursor: asks }, e.from_display)
+                }
+            };
+            out.push(Shown { c, face: face_key(&e), charpos: e.charpos, kind, replaces });
+        }
+        Ok(out)
+    }
+}
 
 pub(super) struct Hosted<'l, 'a> {
     source: Source<'l, 'a>,
-    /// The position the elements start from (`Source::reset`).
-    origin: i64,
-    /// The characters from BASE on the host measured: advance, own row
-    /// height, and whether the host paints them in the face GNU would.
-    base: i64,
-    glyphs: Vec<(i64, i64, bool)>,
+    /// The host's advance and own row height for the elements from BASE
+    /// on, by index since the last reset.
+    base: usize,
+    glyphs: Vec<(i64, i64)>,
     /// The default face's row height, which every host row reaches.
     pub default_height: i64,
 }
 
 impl<'l, 'a> Hosted<'l, 'a> {
     pub(super) fn new(source: Source<'l, 'a>) -> Self {
-        Hosted { source, origin: 0, base: 0, glyphs: vec![], default_height: 0 }
+        Hosted { source, base: 0, glyphs: vec![], default_height: 0 }
     }
     pub(super) fn source(&mut self) -> &mut Source<'l, 'a> { &mut self.source }
     /// Deliver from START, a line start, again.
     pub(super) fn reset(&mut self, start: i64) -> R<()> {
-        self.origin = start;
+        (self.base, self.glyphs) = (0, vec![]);
         self.source.reset(start)
     }
-    /// The host's advance and own height for the character at POS.
-    pub(super) fn glyph(&mut self, pos: i64) -> R<(i64, i64)> {
-        if pos < self.base || pos >= self.base + self.glyphs.len() as i64 { self.measure(pos)?; }
-        let (width, height, exact) = self.glyphs.get((pos - self.base) as usize).copied()
-            .ok_or_else(|| Fault::Error("host measurement misses a character".into()))?;
-        if !exact { return Err(unsupported("of a face the host does not paint")); }
-        Ok((width, height))
+    /// The host's advance and own height for element INDEX.
+    pub(super) fn glyph(&mut self, index: usize) -> R<(i64, i64)> {
+        if index < self.base || index >= self.base + self.glyphs.len() { self.measure(index)?; }
+        self.glyphs.get(index - self.base).copied().ok_or_else(|| Fault::Error("host measurement misses an element".into()))
     }
-    /// Ask the host for the characters from POS's line start through
-    /// the end of the line CHUNK bytes on, in the current buffer.
-    fn measure(&mut self, pos: i64) -> R<()> {
-        let vm = &mut *self.source.leaf().vm;
-        let (range, base) = {
-            let Some(Object::Buffer(b)) = vm.object_if(vm.slots[vm.buffer_slot].value) else {
-                return Err(Fault::Error("text buffer required".into()));
+    /// Ask the host for the elements from INDEX through the end of the
+    /// line CHUNK elements on, or up to the first the iterator refuses,
+    /// which refuses when the motion reaches it.
+    fn measure(&mut self, index: usize) -> R<()> {
+        let mut shown = vec![];
+        for at in index.. {
+            let slot = match self.source.slot(at) {
+                Ok(slot) => slot,
+                Err(refused) if at == index => return Err(refused),
+                Err(_) => break,
             };
-            let accessible = b.accessible();
-            let text = b.as_str().as_bytes();
-            let at = b.byte_of_char(CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.0;
-            let start = text[accessible.start.0..at].iter().rposition(|&c| c == b'\n').map_or(accessible.start.0, |i| accessible.start.0 + i + 1);
-            let mut end = (at + CHUNK).min(accessible.end.0);
-            while end < accessible.end.0 && !b.as_str().is_char_boundary(end) { end += 1; }
-            let end = text[end..accessible.end.0].iter().position(|&c| c == b'\n').map_or(accessible.end.0, |i| end + i + 1);
-            (start..end, b.char_of_byte(ByteOffset(start)).map_err(Fault::Error)?.0 as i64 + 1)
-        };
-        let (measured, exact) = vm.host_measure_buffer(range).map_err(Fault::Error)?;
-        self.base = base;
-        self.glyphs = measured.glyphs.into_iter().zip(exact).map(|((w, h), exact)| (i64::from(w), i64::from(h), exact)).collect();
+            let Some(e) = slot.elem else { break };
+            let c = match host_char(&mut self.source, &e)? { Some(Some(c)) => c, _ => ' ' };
+            shown.push((c, face_key(&e)));
+            if at - index >= CHUNK && c == '\n' { break; }
+        }
+        let window = self.source.window();
+        let measured = self.source.leaf().vm.host_measure_elements(window, &shown).map_err(Fault::Error)?;
+        self.base = index;
+        self.glyphs = measured.glyphs.into_iter().map(|(w, h)| (i64::from(w), i64::from(h))).collect();
         self.default_height = i64::from(measured.face_heights[0]);
         Ok(())
     }
@@ -79,39 +177,24 @@ impl<'l, 'a> Hosted<'l, 'a> {
         self.default_height = i64::from(height);
         Ok((i64::from(advance), i64::from(height)))
     }
-    /// ELEM is the buffer's character at its position, the one after the
-    /// element before INDEX's, as the host paints it.
-    fn plain(&mut self, index: usize, e: &Elem) -> R<bool> {
-        let c = match e.shape { Shape::Glyph { c, .. } => c, Shape::Tab => 9, _ => return Ok(false) };
-        if e.method != Method::Buffer || !e.text_area || e.from_display || e.strpos.is_some() || e.object != Value::NIL
-            || self.source.char_after(e.charpos)? != Some(c) {
-            return Ok(false);
-        }
-        Ok(self.follows(index, e.charpos)?)
-    }
-    /// POS is the position after the element before INDEX, or ORIGIN:
-    /// no text between them was skipped, invisible or replaced.
-    fn follows(&mut self, index: usize, pos: i64) -> R<bool> {
-        Ok(if index == 0 { pos == self.origin }
-            else { self.source.slot(index - 1)?.elem.is_some_and(|p| p.charpos + 1 == pos) })
-    }
 }
 
 impl Elements for Hosted<'_, '_> {
+    fn line_at(&mut self, index: usize) -> R<i64> { self.source.line_at(index) }
     fn slot(&mut self, index: usize) -> R<Slot> {
         let slot = self.source.slot(index)?;
-        let Some(e) = slot.elem else {
-            // The end must follow the last element too: hidden text before
-            // ZV is text the host still paints.
-            if !self.follows(index, self.source.zv())? { return Err(unsupported("of text the host does not lay out as GNU displays it")); }
-            return Ok(slot);
-        };
-        if !self.plain(index, &e)? { return Err(unsupported("of text the host does not lay out as GNU displays it")); }
-        let (width, height) = self.glyph(e.charpos)?;
+        let Some(e) = slot.elem else { return Ok(slot) };
+        let Some(c) = host_char(&mut self.source, &e)? else { return Ok(slot) };
+        if c.is_none() || matches!(e.method, Method::Vector { .. }) && e.ellipsis.is_none() { return Err(not_as_gnu()); }
+        let (width, height) = self.glyph(index)?;
         let height = height.max(self.default_height);
         let shape = match e.shape {
             Shape::Glyph { c, .. } => Shape::Pixel { c, width, height },
-            _ => Shape::PixelTab { space: width, height },
+            Shape::Tab => Shape::PixelTab { space: width, height },
+            // produce_stretch_glyph: NUMVAL (prop) * it2.pixel_width.
+            Shape::RelativeStretch { factor, .. } => Shape::PixelStretch {
+                width: StretchWidth::Width { width: (factor * width as f64) as i64, zero_ok: false }, unnumbered: None, height },
+            shape => Shape::PixelStretch { width: stretch_width(shape).ok_or_else(not_as_gnu)?, unnumbered: e.unnumbered.and_then(stretch_width), height },
         };
         Ok(Slot { pre: slot.pre, elem: Some(Elem { shape, ..e }) })
     }
