@@ -272,10 +272,11 @@ def perf_result(process):
 
 # --- private trees and Lisp -------------------------------------------------
 
-def private_tree(engine, base, tools):
+def private_tree(engine, base, tools, prefix=None):
     """A fresh private root for ENGINE: HOME, XDG, TMPDIR, the probe's
-    directory and the compositor environment.  Returns (ROOT, HOME, ENV)."""
-    root = Path(tempfile.mkdtemp(prefix=f'{engine}-', dir=base))
+    directory and the compositor environment, named PREFIX (default
+    ENGINE-) and a random suffix.  Returns (ROOT, HOME, ENV)."""
+    root = Path(tempfile.mkdtemp(prefix=prefix or f'{engine}-', dir=base))
     root.chmod(0o700)
     home = root / 'home'
     for directory in ('home', 'work', 'probe', 'tmp', 'home/.config', 'home/.cache', 'home/.local/share',
