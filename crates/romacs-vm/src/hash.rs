@@ -991,12 +991,19 @@ impl Vm {
             return Err(HashFault::Error("Hash table data is not a list", None));
         }
         // list_length: FOR_EACH_TAIL, then CHECK_LIST_END on the final tail.
+        // FOR_EACH_TAIL signals a list that reaches itself (circular_list).
         let mut items = vec![];
-        let mut tail = data;
+        let (mut tail, mut slow) = (data, data);
         while tail.tag() == 3 {
             let (car, cdr) = self.cons_pair(tail).map_err(HashFault::Internal)?;
             items.push(car);
             tail = cdr;
+            if items.len() % 2 == 0 {
+                slow = self.cons_pair(slow).map_err(HashFault::Internal)?.1;
+                if slow == tail && tail.tag() == 3 {
+                    return Err(HashFault::Error("circular-list", Some(data)));
+                }
+            }
         }
         if tail != Value::NIL {
             return Err(HashFault::Wrong("listp", tail));
@@ -1034,6 +1041,7 @@ impl Vm {
                     Value::integer(n as i64).unwrap(),
                 ],
             ),
+            HashFault::Error("circular-list", Some(list)) => ("circular-list", vec![list]),
             HashFault::Error(message, datum) => {
                 let text = self.allocate_object(data::Object::String(Box::new(
                     data::LispString::new(message),
