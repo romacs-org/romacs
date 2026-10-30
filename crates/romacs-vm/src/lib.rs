@@ -959,8 +959,13 @@ struct Function {
     /// is the dialect's alone, nil or (t). Code images and older cache
     /// entries do not record it.
     dynamic: Option<bool>,
+    /// The lambda list as written, GNU's interpreted-closure slot 0
+    /// (`(aref CLOSURE 0)', which `help-function-arglist' reads). Code
+    /// images and source-cache entries holding a generated symbol do not
+    /// record it.
+    params: Option<Vec<Form>>,
 }
-romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic });
+romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, params });
 /// The unexpanded body of a function defined in GNU's non-eager load regime
 /// (src/lread.c:2183: `internal-macroexpand-for-load' not yet fbound).
 ///
@@ -2048,6 +2053,7 @@ impl Vm {
             sites: b.sites,
             lazy: None,
             dynamic: (visible == 0).then_some(self.dynamic_scope),
+            params: Some(args.to_vec()),
         });
         Ok((id, names))
     }
@@ -2129,6 +2135,7 @@ impl Vm {
             sites: vec![],
             dynamic: names.is_empty().then_some(self.dynamic_scope),
             lazy: Some(Arc::new(lazy)),
+            params: Some(args.to_vec()),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
         let site = b.sites.len();

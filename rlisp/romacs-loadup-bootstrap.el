@@ -90,6 +90,9 @@
 (load "indent.el" nil t t)
 ;; GNU cl-generic, loaded through Romacs's type-query bridge.
 (require 'romacs-cl-generic)
+;; cl-print's closure method walks body slots VM2 closures do not expose
+;; (VM2-CLOSEQ1).
+(with-eval-after-load 'cl-print (require 'romacs-cl-print))
 (load "simple.el" nil t t)
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)

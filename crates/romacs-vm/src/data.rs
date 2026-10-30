@@ -743,6 +743,13 @@ impl Vm {
                 // CLOSURE_CONSTANTS of a closure made where no lexical
                 // binding is visible: the dialect's empty environment, as
                 // nadvice reads it (VM2-CLOSEQ1).
+                // An ordinary closure's lambda list, slot 0 (VM2-CLOSEQ1).
+                if p == Aref && x.tag() == 4 && index == 0 {
+                    let function = self.closures[x.index(4)?].function;
+                    if let Some(params) = self.functions[function].params.clone() {
+                        return self.literal(&Form::List(params));
+                    }
+                }
                 if p == Aref && x.tag() == 4 && index == 2 {
                     let function = self.closures[x.index(4)?].function;
                     if let Some(dynamic) = self.functions[function].dynamic {

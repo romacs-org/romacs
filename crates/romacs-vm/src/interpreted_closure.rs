@@ -202,9 +202,21 @@ mod tests {
                 "(lambda () (:documentation 'kind) 1)",
                 "(lambda () (interactive \"p\") 1)",
             ] {
-                let value = vm.eval_source_raw(&format!("(let ((f {source})) (list (condition-case nil (length f) (wrong-type-argument 'opaque)) (condition-case nil (aref f 0) (wrong-type-argument 'opaque)) (funcall f)))")).unwrap();
+                let value = vm.eval_source_raw(&format!("(let ((f {source})) (list (condition-case nil (length f) (wrong-type-argument 'opaque)) (condition-case nil (aref f 1) (wrong-type-argument 'opaque)) (funcall f)))")).unwrap();
                 assert_eq!(vm.display(value).unwrap(), "(opaque opaque 1)");
             }
+        }
+    }
+    #[test]
+    fn ordinary_closures_answer_their_lambda_list() {
+        for lazy in [false, true] {
+            let mut vm = Vm::new();
+            vm.lazy_regime = lazy;
+            check(
+                &mut vm,
+                "(progn (defalias 'listed (lambda (a &optional b &rest c) (list a b c))) (list (aref (symbol-function 'listed) 0) (aref (let ((y 1)) (lambda (x) (+ x y))) 0) (aref (lambda () 1) 0) (listed 1)))",
+                "((a &optional b &rest c) (x) nil (1 nil nil))",
+            );
         }
     }
 }
@@ -389,6 +401,7 @@ impl Vm {
                     required,
                     rest,
                     sites: vec![],
+                    params: Some(lazy.args.clone()),
                     lazy: Some(Arc::new(lazy)),
                     dynamic: names.is_empty().then_some(a[2] == Value::NIL),
                 });
