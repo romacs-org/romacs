@@ -30,6 +30,24 @@ const CONCURRENT: &str = "concurrent_first_launches_share_one_builder_and_say_th
 const PAGES: &str = "capture_reads_no_heap_byte_so_a_page_zeroed_by_a_store_is_data";
 const ANCESTORS: &str = "a_store_is_refused_under_a_home_or_cache_others_could_replace";
 const UMASK: &str = "a_store_made_under_umask_000_is_private_all_the_way_down";
+const RESERVED: &str = "an_images_range_is_reserved_before_anything_else_maps_and_the_restore_succeeds";
+const TAKEN: &str = "an_image_whose_range_was_taken_before_the_process_started_is_refused_and_says_why";
+
+/// Before the runtime's first allocation, so before the arena reserves its
+/// window: a page mapped at the address ROMACS_WORLD_IMAGE_TEST_PREMAP
+/// names (hexadecimal), as a library's or the loader's own mapping would be.
+#[used]
+#[unsafe(link_section = ".init_array")]
+static PREMAP: unsafe extern "C" fn() = premap;
+unsafe extern "C" fn premap() {
+    let at = unsafe { libc::getenv(c"ROMACS_WORLD_IMAGE_TEST_PREMAP".as_ptr()) };
+    if at.is_null() {
+        return;
+    }
+    let at = unsafe { libc::strtoull(at, std::ptr::null_mut(), 16) } as usize;
+    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED_NOREPLACE;
+    unsafe { libc::mmap(at as *mut libc::c_void, 4096, libc::PROT_NONE, flags, -1, 0) };
+}
 
 /// Test NAME in a process of its own, in ROLE, with STORE.
 fn child_of(name: &str, role: &str, store: &Path) -> Command {
@@ -55,6 +73,7 @@ fn act_in_role() -> bool {
             launch(&store.unwrap())
         }
         Ok("probe") => probe(),
+        Ok("launch-reserved") => launch_reserved(&store.unwrap()),
         Ok("pages") => pages(&store.unwrap()),
         _ => return false,
     }
@@ -157,10 +176,46 @@ fn launch(store: &Path) {
     }
 }
 
-/// Adopt the file the parent named: what the arena made of it.
+/// Adopt the file the parent named: what the arena made of it, and of a
+/// second adoption.
 fn probe() {
     let file = std::fs::File::open(std::env::var_os("ROMACS_WORLD_IMAGE_TEST_FILE").unwrap()).unwrap();
-    println!("WORLD-IMAGE {}", json!({"restore": format!("{:?}", arena::adopt(&file))}));
+    let first = format!("{:?}", arena::adopt(&file));
+    let again = format!("{:?}", arena::adopt(&file));
+    println!("WORLD-IMAGE {}", json!({"restore": first, "again": again, "failure": arena::map_failure(),
+                                       "kept": arena::mapped_image().is_some()}));
+}
+
+/// Where the image in STORE was made: its arena's base, from its header.
+fn image_base(store: &Path) -> usize {
+    let bytes = std::fs::read(image(store)).unwrap();
+    usize::from_le_bytes(bytes[8..16].try_into().unwrap())
+}
+
+/// Whether a page can be mapped at AT: the error that refuses it, if any.
+fn mapping_at(at: usize) -> Option<i32> {
+    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED_NOREPLACE;
+    let mapped = unsafe { libc::mmap(at as *mut libc::c_void, 4096, libc::PROT_NONE, flags, -1, 0) };
+    if mapped == libc::MAP_FAILED {
+        return std::io::Error::last_os_error().raw_os_error();
+    }
+    unsafe { libc::munmap(mapped, 4096) };
+    None
+}
+
+/// Launch as `launch` does, after showing what the arena made of the
+/// address space: the window reserved, the image's range disjoint from
+/// the first arena's and taken by nothing, as the mapping something of the
+/// process would make there finds it; and after, whether the image's base
+/// is still taken: by the image, or by what refused it.
+fn launch_reserved(store: &Path) {
+    let base = image_base(store);
+    let (first, reserve) = arena::current_range().unwrap();
+    let disjoint = base + reserve <= first || first + reserve <= base;
+    println!("WORLD-IMAGE {}", json!({"reserved": arena::window_reserved(), "disjoint": disjoint,
+                                       "taken": mapping_at(base) == Some(libc::EEXIST)}));
+    launch(store);
+    println!("WORLD-IMAGE {}", json!({"taken_after": mapping_at(base) == Some(libc::EEXIST)}));
 }
 
 /// Adopt FILE as an image in a child: what its arena made of it.
@@ -215,9 +270,63 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     std::fs::write(&short, &bytes[..bytes.len() - 4096]).unwrap();
     let other = scratch.join("other.rwi");
     std::fs::write(&other, vec![7u8; 8192]).unwrap();
-    assert_eq!(probe_file(&store, &short), r#"{"restore":"Format"}"#);
-    assert_eq!(probe_file(&store, &other), r#"{"restore":"Format"}"#);
-    assert_eq!(probe_file(&store, &whole), r#"{"restore":"Mapped"}"#);
+    assert_eq!(probe_file(&store, &short), r#"{"again":"Format","failure":null,"kept":false,"restore":"Format"}"#);
+    assert_eq!(probe_file(&store, &other), r#"{"again":"Format","failure":null,"kept":false,"restore":"Format"}"#);
+    // Adopted once per process: a second adoption is refused, says so, and
+    // the first image stays the process's.
+    assert_eq!(probe_file(&store, &whole), r#"{"again":"Map","failure":["adopted already",0],"kept":true,"restore":"Mapped"}"#);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// What a child printed of its outcomes: every outcome line.
+fn outcomes(command: &mut Command) -> Vec<String> {
+    let output = command.output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}{}", String::from_utf8_lossy(&output.stderr));
+    text.lines().filter_map(|l| l.split_once("WORLD-IMAGE ").map(|(_, o)| o.to_owned())).collect()
+}
+
+#[test]
+fn an_images_range_is_reserved_before_anything_else_maps_and_the_restore_succeeds() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(RESERVED);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(RESERVED, "launch", &store)), restored());
+    // In a process started afterwards, with the image's range in its
+    // reservation: nothing of the process can map there, and the image
+    // maps over the reservation, which no mapping made since can refuse.
+    for _ in 0..3 {
+        let printed = outcomes(&mut child_of(RESERVED, "launch-reserved", &store));
+        assert_eq!(printed, [json!({"reserved": true, "disjoint": true, "taken": true}).to_string(), restored(),
+                             json!({"taken_after": true}).to_string()]);
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn an_image_whose_range_was_taken_before_the_process_started_is_refused_and_says_why() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(TAKEN);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(TAKEN, "launch", &store)), restored());
+    use std::os::unix::fs::MetadataExt;
+    let inode = std::fs::metadata(image(&store)).unwrap().ino();
+    // A page mapped at the image's base before the process's first
+    // allocation: the window cannot be reserved, and the image's range is
+    // mapped only where nothing is, which finds the page. The launch boots
+    // from source, says at which step and why, leaves the page where it
+    // was, and the image as it is: a later process restores it.
+    let base = image_base(&store);
+    let printed = outcomes(child_of(TAKEN, "launch-reserved", &store).env("ROMACS_WORLD_IMAGE_TEST_PREMAP", format!("{base:x}")));
+    assert_eq!(printed, [json!({"reserved": false, "disjoint": true, "taken": true}).to_string(),
+                         json!({"mode": "source", "reason": {"image": "Map", "step": "image", "error": "File exists (os error 17)"}}).to_string(),
+                         json!({"taken_after": true}).to_string()]);
+    assert_eq!(std::fs::metadata(image(&store)).unwrap().ino(), inode, "the image was kept");
+    assert_eq!(outcome(&mut child_of(TAKEN, "launch", &store)), restored());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
