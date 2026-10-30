@@ -43,6 +43,8 @@ thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
     static CONFINED: Cell<bool> = const { Cell::new(false) };
+    static FLAGS_READER: RefCell<Option<std::sync::mpsc::Sender<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>>> =
+        const { RefCell::new(None) };
 }
 
 pub fn mode() -> Mode {
@@ -729,13 +731,27 @@ impl DirEntry {
     pub fn file_type(&self) -> io::Result<FileType> {
         let result = self.0.file_type();
         if self.1 {
-            let observed = match &result {
-                Ok(t) => json!(if t.is_dir() { "dir" } else if t.is_file() { "file" } else if t.is_symlink() { "symlink" } else { "other" }),
-                Err(e) => errno(e),
-            };
-            probed("entry-type", &self.0.path(), observed);
+            probed("entry-type", &self.0.path(), entry_type_json(&result));
         }
         result
+    }
+}
+
+/// The type of the entry PATH names, not following a symlink: an lstat
+/// whose record is only the type, so the entry's times and size are not
+/// keyed facts.
+pub fn entry_type(path: &Path) -> io::Result<FileType> {
+    let result = std::fs::symlink_metadata(path).map(|m| m.file_type());
+    if building() {
+        probed("entry-type", path, entry_type_json(&result));
+    }
+    result
+}
+
+fn entry_type_json(result: &io::Result<FileType>) -> Json {
+    match result {
+        Ok(t) => json!(if t.is_dir() { "dir" } else if t.is_file() { "file" } else if t.is_symlink() { "symlink" } else { "other" }),
+        Err(e) => errno(e),
     }
 }
 
@@ -798,25 +814,41 @@ pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
     result
 }
 
-/// Whether the filesystem holding PATH folds case, as CLASSIFY observes it:
-/// one keyed fact. The listings and stats that answer it are not recorded,
-/// since the build consumed only the answer, and restore asks again.
-pub fn case_insensitive(path: &Path, classify: fn(&Path) -> Result<bool, &'static str>) -> Result<bool, &'static str> {
-    if !building() {
-        return classify(path);
+/// The type of the filesystem holding PATH: statfs's `f_type`, a magic
+/// number of linux/magic.h. A keyed probe.
+pub fn filesystem_type(path: &Path) -> io::Result<u32> {
+    let result = path_c_string(path).and_then(|name| {
+        let mut buf = std::mem::MaybeUninit::<libc::statfs>::uninit();
+        match unsafe { libc::statfs(name.as_ptr(), buf.as_mut_ptr()) } {
+            // f_type is a signed word; the magic numbers are 32 bits.
+            0 => Ok(unsafe { buf.assume_init() }.f_type as u32),
+            _ => Err(io::Error::last_os_error()),
+        }
+    });
+    if building() {
+        if let Err(e) = &result { confined(path, e); }
+        probed("fs-type", path, result.as_ref().map_or_else(errno, |t| json!(t)));
     }
-    MODE.with(|m| m.set(Mode::Off));
-    let result = classify(path);
-    MODE.with(|m| m.set(Mode::Build));
-    // Confinement may hide what answers the probe: a build cannot know its
-    // answer is the host's.
-    if result.is_err() && CONFINED.with(Cell::get) {
-        refuse("confined", json!({"case probe": path_json(path), "error": result.err()}));
-        return result;
-    }
-    let observed = match result { Ok(answer) => json!(answer), Err(reason) => json!({"error": reason}) };
-    if keyed_path(path, "case probe") {
-        record("case", json!({"path": path_json(path), "result": observed}));
+    result
+}
+
+/// The inode flags of DIRECTORY, opened without following a symlink
+/// (FS_IOC_GETFLAGS, linux/fs.h). A keyed probe. Landlock refuses a confined
+/// build a directory open outside its read roots, though the flags read
+/// nothing beneath it, so that thread asks the one `keep_flags_reader`
+/// started before it confined itself.
+pub fn directory_flags(directory: &Path) -> io::Result<u32> {
+    let reader = FLAGS_READER.with(|r| r.borrow().clone());
+    let result = match reader {
+        Some(reader) => {
+            let (reply, answer) = std::sync::mpsc::channel();
+            reader.send((directory.to_owned(), reply)).map_err(|_| io::Error::other("flags reader gone"))
+                .and_then(|()| answer.recv().map_err(|_| io::Error::other("flags reader gone"))?)
+        }
+        None => read_directory_flags(directory),
+    };
+    if building() {
+        probed("dir-flags", directory, result.as_ref().map_or_else(errno, |f| json!(f)));
     }
     result
 }
@@ -847,6 +879,40 @@ pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
         probed("acl", path, observed);
     }
     result
+}
+
+fn read_directory_flags(directory: &Path) -> io::Result<u32> {
+    let name = path_c_string(directory)?;
+    let fd = unsafe { libc::open(name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    // The kernel reads and writes an int, whatever the request's size says.
+    let mut flags: libc::c_int = 0;
+    use std::os::fd::AsRawFd;
+    match unsafe { libc::ioctl(fd.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut flags) } {
+        0 => Ok(flags as u32),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+fn path_c_string(path: &Path) -> io::Result<std::ffi::CString> {
+    std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))
+}
+
+/// Start the thread that reads directory flags for this one
+/// (`directory_flags`), before this thread confines itself: it answers that
+/// one query and makes no other.
+pub(crate) fn keep_flags_reader() -> io::Result<()> {
+    let (reader, queries) = std::sync::mpsc::channel::<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>();
+    std::thread::Builder::new().name("romacs-flags-reader".into()).spawn(move || {
+        for (directory, reply) in queries {
+            let _ = reply.send(read_directory_flags(&directory));
+        }
+    })?;
+    FLAGS_READER.with(|r| *r.borrow_mut() = Some(reader));
+    Ok(())
 }
 
 /// Set the POSIX access ACL of the file PATH names to VALUE, in its
@@ -883,8 +949,8 @@ fn decoded(field: &Json) -> Option<Vec<u8>> {
 
 /// The record a keyed RECORD's query makes now, its site aside: the host's
 /// present answer to the same question, asked the same way (§6.4). None for
-/// a record that asks the host nothing. CASE answers a case probe.
-pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> Option<Json> {
+/// a record that asks the host nothing.
+pub fn replay(record: &Json) -> Option<Json> {
     let kind = record["kind"].as_str()?;
     let path = || decoded(&record["path"]).map(|bytes| PathBuf::from(OsString::from_vec(bytes)));
     use std::os::unix::ffi::OsStringExt;
@@ -902,15 +968,10 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
                 "lstat" => { let _ = symlink_metadata(path()?); }
                 "fstat" | "open" => { if let Ok(input) = open_input(path()?, 0) { let _ = input.stat(); } }
                 "readlink" => { let _ = read_link(path()?); }
-                "entry-type" => {
-                    let path = path()?;
-                    let observed = match std::fs::symlink_metadata(&path) {
-                        Ok(m) => json!(if m.is_symlink() { "symlink" } else if m.is_dir() { "dir" } else if m.is_file() { "file" } else { "other" }),
-                        Err(e) => errno(&e),
-                    };
-                    probed("entry-type", &path, observed);
-                }
+                "entry-type" => { let _ = entry_type(&path()?); }
                 "statvfs" => { let _ = statvfs(&std::ffi::CString::new(path()?.into_os_string().into_vec()).ok()?); }
+                "fs-type" => { let _ = filesystem_type(&path()?); }
+                "dir-flags" => { let _ = directory_flags(&path()?); }
                 "acl" => { let _ = posix_acl(&path()?); }
                 access => {
                     let mut words = access.strip_prefix("access ")?.split(' ');
@@ -962,7 +1023,6 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
                     let _ = user_by_name(&std::ffi::CString::new(decoded(&key["name"])?).ok()?, 1 << 16);
                 }
             }
-            "case" => { let _ = case_insensitive(&path()?, case); }
             _ => return None,
         }
         Some(())
@@ -980,7 +1040,7 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
 /// Whether RECORD is a keyed query restore must ask again: the other kinds
 /// say what the build did, not what the host answered.
 pub fn keyed(record: &Json) -> bool {
-    matches!(record["kind"].as_str(), Some("file-read" | "probe" | "dir-list" | "canon" | "env" | "host" | "user-db" | "case"))
+    matches!(record["kind"].as_str(), Some("file-read" | "probe" | "dir-list" | "canon" | "env" | "host" | "user-db"))
 }
 
 // Process facts.
@@ -1677,7 +1737,7 @@ mod tests {
             let trace = leave_build().expect("a build trace");
             let record = trace["records"].as_array().unwrap().iter()
                 .find(|r| r["kind"] == "user-db" && r["key"] == key).expect("the walk is recorded").clone();
-            let mut answer = replay(&record, |_| Ok(false)).expect("the walk replays");
+            let mut answer = replay(&record).expect("the walk replays");
             let mut recorded = record;
             recorded.as_object_mut().unwrap().remove("site");
             answer.as_object_mut().unwrap().remove("site");
