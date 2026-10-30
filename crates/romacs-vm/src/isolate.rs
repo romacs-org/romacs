@@ -399,11 +399,14 @@ impl Vm {
         }
     }
 
-    /// The worker's wait status once it has exited, reaping it.
+    /// The worker's wait status once it has exited, reaping it. A death
+    /// seen here is published as the wait's is: one Died frame, whichever
+    /// path reaps first, so a waiter after the reap still learns of it.
     pub(crate) fn isolate_reap(&mut self, id: u64) -> Result<Option<i32>> {
         let worker = self.isolates.workers.get_mut(&id).ok_or_else(|| format!("no isolate {id}"))?;
-        if worker.status.is_none() {
-            worker.status = crate::subprocess::wait_status(worker.pid, 0);
+        if worker.status.is_none() && let Some(status) = crate::subprocess::wait_status(worker.pid, 0) {
+            worker.status = Some(status);
+            worker.peer.inbox.push_back(Frame { kind: Kind::Died, generation: 0, payload: Payload::Status(status) });
         }
         Ok(worker.status)
     }

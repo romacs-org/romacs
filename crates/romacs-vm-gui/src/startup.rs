@@ -557,11 +557,6 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-find-file.el"))?;
     initialize_editing(vm)?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-project.el"))?;
     mark_phase("find-file+editing");
     let bindings = bind_journey_keys(vm, true)?;
