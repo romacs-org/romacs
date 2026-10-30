@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "a1e8aebf345436b2dbefe6fa5dfb199335c185cc28fec53d6e11010d0b23343d",
+    "input_hash": "bbe18205120e7c6d8e8a920259f6250f9c46b0987b8746775427a4d150a4ab99",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 5141
+    "vm2_universe": 5145
   },
   "schema": 2,
   "vm2": {
-    "count": 1108,
+    "count": 1110,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -181,6 +181,7 @@
       "coding-system-priority-list",
       "coding-system-put",
       "color-values-from-color-spec",
+      "combine-after-change-execute",
       "command-error-default-function",
       "command-modes",
       "command-remapping",
@@ -633,6 +634,7 @@
       "obarrayp",
       "optimize-char-table",
       "or",
+      "other-buffer",
       "overlay-buffer",
       "overlay-end",
       "overlay-get",
