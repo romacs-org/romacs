@@ -10,7 +10,7 @@ fn scene() -> WindowSnapshot {
         buffer_version: 1,
         mode_line: None,
         mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false,
+        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None,
         text: TextSlice {
             utf8: "Ωμέγα Hello\nΔ".into(),
             face_runs: vec![FaceRun {
@@ -124,4 +124,43 @@ fn a_window_start_on_a_continuation_row_keeps_the_rows_above() {
     assert_eq!(z(&s), (84.0, 23.0), "from the line start");
     s.start_byte = 9;
     assert_eq!(z(&s), (84.0, 0.0), "from the continuation row");
+}
+
+/// A placeholder space the snapshot names a stretch paints as one: a
+/// `:width' as given, an `:align-to' to its target from the line's start,
+/// and on a continued row one that would pass the last visible x ends a
+/// pixel before it (GNU produce_stretch_glyph). A stretch row ends with
+/// the newline after it, and the window end counts the stretch.
+#[test]
+fn stretches_paint_as_gnus_window_system_stretches() {
+    use romacs_layout_input::{Stretch, StretchWidth};
+    let mut snapshot = scene();
+    snapshot.text = TextSlice { utf8: "a b\nc d\n \nz".into(), face_runs: vec![] };
+    snapshot.stretches = vec![
+        Stretch { byte: 1, width: StretchWidth::Width { width: 30, zero_ok: true } },
+        Stretch { byte: 5, width: StretchWidth::AlignTo(200) },
+        Stretch { byte: 8, width: StretchWidth::AlignTo(10_000) },
+    ];
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let stretches: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Stretch { x, y, width, .. } => Some((*x, *y, *width)),
+        _ => None,
+    }).collect();
+    let chars: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
+        _ => None,
+    }).collect();
+    let (a, c, z) = (chars[0], chars[2], chars[4]);
+    let backslash = 400.0 - frame.char_width;
+    assert_eq!(stretches[0], (a.1 + frame.char_width, a.2, 30.0));
+    assert_eq!(chars[1], ('b', a.1 + frame.char_width + 30.0, a.2));
+    assert_eq!(stretches[1], (c.1 + frame.char_width, c.2, 200.0 - frame.char_width));
+    assert_eq!(chars[3], ('d', 200.0, c.2));
+    // The text area less the continuation glyph, less a pixel.
+    assert_eq!(stretches[2].2, backslash - 1.0);
+    assert_eq!((z.0, z.1, z.2 > stretches[2].1), ('z', 0.0, true));
+    assert_eq!(chars.len(), 5, "no continuation glyph: {chars:?}");
+    // Not on its placeholder, or out of order: refused.
+    snapshot.stretches = vec![Stretch { byte: 0, width: StretchWidth::AlignTo(10) }];
+    assert!(romacs_layout2::layout(&snapshot, 1).is_err());
 }

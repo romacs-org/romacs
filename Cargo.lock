@@ -4656,6 +4656,7 @@ dependencies = [
  "romacs-layout2",
  "romacs-renderer-wgpu",
  "romacs-snapshot",
+ "romacs-test-fonts",
  "romacs-vm",
  "serde_json",
  "wgpu",

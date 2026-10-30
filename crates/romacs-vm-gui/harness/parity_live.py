@@ -352,7 +352,7 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None)
     (home / '.config/romacs').mkdir()
     (home / '.config/romacs/init.el').write_text(init)
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
-    for key in ('ROMACS_GNU_SOURCE',):
+    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR'):
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')
@@ -517,11 +517,15 @@ def run_step(engines, step, perf_enabled, seed):
 class Harness:
     """What one harness supplies: its WORKFLOWS (name -> steps), LAUNCH
     (engine, base, args -> started Engine), the SNAPSHOT form the probe
-    evaluates, the random SEED prefix of each step, and an optional string
-    REWRITE its policy adds to `normalise'."""
+    evaluates, the random SEED prefix of each step, an optional string
+    REWRITE its policy adds to `normalise', and an optional CHECK
+    (engines -> {'errors': [...], ...}) run after a workflow's last step,
+    whose errors fail it.  WRITES names the workflows that change the
+    backend's data, which run only when named."""
 
-    def __init__(self, workflows, launch, snapshot='(parity-probe-snapshot)', seed='parity-', rewrite=None):
+    def __init__(self, workflows, launch, snapshot='(parity-probe-snapshot)', seed='parity-', rewrite=None, check=None, writes=()):
         self.workflows, self.launch, self.snapshot, self.seed, self.rewrite = workflows, launch, snapshot, seed, rewrite
+        self.check, self.writes = check, set(writes)
 
 
 def run_workflow(harness, name, args, base, report):
@@ -549,6 +553,10 @@ def run_workflow(harness, name, args, base, report):
             if args.keep_snapshots:
                 record['snapshots'] = snapshots
         entry['status'] = 'PASS' if not any(s['differences'] for s in entry['steps']) else 'DIFFER'
+        if harness.check:
+            entry['check'] = harness.check(engines)
+            if entry['check'].get('errors'):
+                entry['status'] = 'FAIL'
     except Exception as error:  # noqa: BLE001
         entry['error'] = repr(error)
         for engine in engines:
@@ -599,7 +607,7 @@ def main(harness, description, add_arguments=lambda parser: None):
     report = {'romacs': args.romacs, 'romacs_sha256': hashlib.sha256(Path(args.romacs).read_bytes()).hexdigest(),
               'gnu': GNU, 'grid': GRID, 'workflows': []}
     try:
-        for name in args.workflow or list(harness.workflows):
+        for name in args.workflow or [n for n in harness.workflows if n not in harness.writes]:
             entry = run_workflow(harness, name, args, base, report)
             print(name, entry['status'], entry.get('error', ''), flush=True)
             (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')

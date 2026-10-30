@@ -1630,6 +1630,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod clipboard;
+    mod keyboard;
     mod filesave;
     mod charset;
     mod coding;
@@ -1655,6 +1656,7 @@ mod leaf {
     mod syntax_scan;
     pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
+    mod font;
     mod value_order;
     mod completion;
     mod backtrace;
@@ -1671,14 +1673,15 @@ mod leaf {
     mod display_motion;
     mod display_elements;
     mod display_hosted;
+    pub(crate) use display_hosted::{FaceKey, Shown, ShownKind};
     mod text_pixel_size;
     mod bidi;
-    pub(crate) use text_pixel_size::TextSizeArgs;
+    pub(crate) use text_pixel_size::{TextSizeArgs, LineLabels};
     mod session;
     mod world;
     mod finalizer;
 }
-pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
 
 /// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
 pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {
@@ -1686,6 +1689,17 @@ pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point:
         Fault::Error(text) => text,
         _ => "the host's layout cannot choose this window start".into(),
     })
+}
+
+/// The display elements WINDOW shows of its buffer from FROM, a line
+/// start, to TO, as a host paints them (Leaf::window_shown_elements).
+pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i64) -> std::result::Result<Vec<Shown>, Fault> {
+    Leaf::new(vm).window_shown_elements(window, from, to)
+}
+
+/// The line numbers WINDOW shows from its start (Leaf::window_line_numbers).
+pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
+    Leaf::new(vm).window_line_numbers(window)
 }
 
 /// cmds.c beginning-of-line and end-of-line's target: the line boundary

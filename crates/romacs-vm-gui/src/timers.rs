@@ -21,12 +21,24 @@ pub struct Idle {
     pub delay: Option<Duration>,
 }
 
-pub fn idle(vm: &mut Vm) -> Result<Idle, String> {
-    let (ran, rest) = vm.eval_source(
+/// With AUTO_SAVE, the idle auto-save (rlisp/vm/keyboard.el) is checked
+/// too, once the command loop's Lisp half is installed, and its delay joins
+/// the timers'. A save that ran is redisplayed, as read_char's is: its
+/// hooks may change buffers. The loop leaves it out while a paint it has
+/// not retired is in flight, which it polls every millisecond: GNU
+/// auto-saves after redisplay.
+pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
+    let (ran, rest) = vm.eval_source(if auto_save {
+        "(let* ((message (current-message)) (output (romacs--process-idle)) (check (romacs--timer-check-idle))
+                (save (and (fboundp 'romacs--idle-auto-save) (romacs--idle-auto-save)))
+                (delay (if (numberp save) (if (cdr check) (min save (cdr check)) save) (cdr check))))
+           (list (or output (car check) (eq save t)) (not (eq message (current-message)))
+                 (and delay (ceiling (* delay 1e6)))))"
+    } else {
         "(let* ((message (current-message)) (output (romacs--process-idle)) (check (romacs--timer-check-idle)))
            (list (or output (car check)) (not (eq message (current-message)))
-                 (and (cdr check) (ceiling (* (cdr check) 1e6)))))",
-    )?.cons_pair()?;
+                 (and (cdr check) (ceiling (* (cdr check) 1e6)))))"
+    })?.cons_pair()?;
     let ran = !ran.is_nil();
     let (message, rest) = rest.cons_pair()?;
     let message = !message.is_nil();
@@ -73,38 +85,38 @@ mod tests {
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil)");
-        assert_eq!(idle(&mut vm).unwrap(), Idle { ran: false, message: false, delay: None });
+        assert_eq!(idle(&mut vm, true).unwrap(), Idle { ran: false, message: false, delay: None });
         vm.timer_stop_idle();
         // Ordinary timers: the ripe one runs once; the next delay is the far one's.
         printed(&mut vm, "(run-with-timer 0 nil (lambda () (push 'ordinary probe)))
                           (run-with-timer 60 nil #'ignore)
                           (run-with-idle-timer 0.05 nil (lambda () (push (list 'idle (and (current-idle-time) t)) probe)))");
         assert_eq!(printed(&mut vm, "(current-idle-time)"), "nil", "a command is not idle");
-        let first = idle(&mut vm).unwrap();
+        let first = idle(&mut vm, true).unwrap();
         assert!(first.ran && !first.message, "{first:?}");
         assert_eq!(printed(&mut vm, "probe"), "(ordinary)");
         // Idle now: the idle timer is due 0.05s after idleness began.
-        let waiting = idle(&mut vm).unwrap();
+        let waiting = idle(&mut vm, true).unwrap();
         assert!(!waiting.ran && waiting.delay.is_some_and(|d| d <= Duration::from_millis(50)), "{waiting:?}");
         std::thread::sleep(waiting.delay.unwrap());
-        assert!(idle(&mut vm).unwrap().ran);
+        assert!(idle(&mut vm, true).unwrap().ran);
         assert_eq!(printed(&mut vm, "probe"), "((idle t) ordinary)", "an idle timer sees idleness");
-        let after = idle(&mut vm).unwrap();
+        let after = idle(&mut vm, true).unwrap();
         assert!(!after.ran && after.delay.is_some_and(|d| d > Duration::from_secs(59)), "runs once per idleness: {after:?}");
         // A key ends idleness; the next idle period may run the idle timer again.
         vm.timer_stop_idle();
         assert_eq!(printed(&mut vm, "(current-idle-time)"), "nil");
         printed(&mut vm, "(setq probe nil) (run-with-idle-timer 0 t (lambda () (push 'again probe)))");
-        assert!(idle(&mut vm).unwrap().ran);
+        assert!(idle(&mut vm, true).unwrap().ran);
         assert_eq!(printed(&mut vm, "probe"), "(again)");
-        assert!(!idle(&mut vm).unwrap().ran, "a repeating idle timer waits for the next idleness");
+        assert!(!idle(&mut vm, true).unwrap().ran, "a repeating idle timer waits for the next idleness");
         vm.timer_stop_idle();
-        assert!(idle(&mut vm).unwrap().ran);
+        assert!(idle(&mut vm, true).unwrap().ran);
         assert_eq!(printed(&mut vm, "probe"), "(again again)");
         // An error is reported as timer-event-handler does and the loop goes on.
         vm.timer_stop_idle();
         printed(&mut vm, "(setq timer-idle-list nil) (run-with-timer 0 nil (lambda () (error \"boom\")))");
-        let failed = idle(&mut vm).unwrap();
+        let failed = idle(&mut vm, true).unwrap();
         assert!(failed.ran && failed.message, "{failed:?}");
         assert_eq!(printed(&mut vm, "(current-message)"), "\"Error running timer: (error \\\"boom\\\")\"");
         // read_char's own wait (rlisp/vm/keyboard.el): a prompt idles and runs
@@ -149,7 +161,7 @@ mod tests {
             (run-with-timer 0 nil (lambda () (let ((noninteractive nil)) (setq probe (sit-for 5)))))
             (set-buffer (get-buffer-create \"unread\")) (erase-buffer) (set-window-buffer nil (current-buffer))");
         vm.timer_stop_idle();
-        assert!(idle(&mut vm).unwrap().ran);
+        assert!(idle(&mut vm, true).unwrap().ran);
         assert_eq!(printed(&mut vm, "(list probe unread-command-events)"), "(nil ((t . 120)))");
         assert!(crate::command::unread_pending(&mut vm).unwrap());
         let outcome = crate::command::run(&mut vm).unwrap();
@@ -274,7 +286,7 @@ mod tests {
         let (_terminals, terminal) = crossbeam_channel::bounded::<()>(1);
         let mut woke = vec![];
         for _ in 0..4 {
-            if idle(&mut vm).unwrap().ran { continue; }
+            if idle(&mut vm, true).unwrap().ran { continue; }
             if printed(&mut vm, "got") != "nil" { break; }
             let processes = vm.process_wait_fds();
             woke.push(matches!(crate::terminal_wait::wait(&input, &terminal, Some(Duration::from_secs(5)), &processes),
@@ -317,7 +329,7 @@ mod tests {
         vm.set_host_input(None);
         vm.timer_stop_idle();
         let (start, before) = (std::time::Instant::now(), printed(&mut vm, "bytes"));
-        assert!(idle(&mut vm).unwrap().ran, "the idle step read the output");
+        assert!(idle(&mut vm, true).unwrap().ran, "the idle step read the output");
         assert!(start.elapsed() < Duration::from_millis(500), "the idle step returned after {:?}", start.elapsed());
         assert_ne!(printed(&mut vm, "bytes"), before);
         printed(&mut vm, "(delete-process \"stream\")");

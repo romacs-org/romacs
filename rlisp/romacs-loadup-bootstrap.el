@@ -97,6 +97,10 @@
 ;; VM2 code is compiled when defined: `byte-compile' of a function value
 ;; returns it (VM2-BYTECOMP1).
 (require 'romacs-bytecomp)
+;; GNU cl-print reads an interpreted function's slots, which Romacs's
+;; closures keep private (VM2-ERT-BATCH1): whenever cl-print loads (debug.el's
+;; *Backtrace*, ERT), they print through the owned method instead.
+(with-eval-after-load 'cl-print (require 'romacs-cl-print))
 (load "minibuffer.el" nil t t)
 (load "frame.el" nil t t)
 (load "startup.el" nil t t)
@@ -135,13 +139,18 @@
 ;; loadup.el's PGTK block (loadup.el:357).  GNU's C provides `pgtk' in a
 ;; pure-GTK build (pgtkterm.c:7550), which pinned GNU is; Romacs's
 ;; Wayland-native display stands where that window system would.  Its
-;; display queries are Romacs's own and `window-system' stays nil, so no
-;; pgtk- primitive is reached (VM2-WINSYS1).
+;; frames are `pgtk' frames once the GUI session opens it (VM2-WIN5), so
+;; pgtk-win.el's backend methods run there, over the pgtk primitives
+;; romacs-pgtk.el provides; the display queries are Romacs's own
+;; (VM2-WINSYS1).
 (provide 'pgtk)
 (load "pgtk-dnd.el" nil t t)
 (load "touch-screen.el" nil t t)
 (load "term/common-win.el" nil t t)
 (load "term/pgtk-win.el" nil t t)
+(load "romacs-pgtk.el" nil t t)
+;; menu.c's popup menus and dialogs, as GNU's text menus (VM2-MENU1).
+(load "romacs-menu.el" nil t t)
 (load "progmodes/elisp-mode.el" nil t t)
 (load "emacs-lisp/float-sup.el" nil t t)
 (load "vc/vc-hooks.el" nil t t)

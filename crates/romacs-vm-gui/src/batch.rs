@@ -37,7 +37,8 @@ pub fn run(args: Vec<String>, quick: bool) -> Result<(), String> {
 /// `-l', `-f', `--eval' and the others), then `(kill-emacs t)'
 /// (startup.el:1748-1751). An error that reaches top level goes to
 /// `command-error-function' as keyboard.c cmd_error sends it, whose batch
-/// default prints it and ends the session with status 255.
+/// default prints it and ends the session with status 255; top_level_1's
+/// handler is GNU's C `error', so the debugger may run first.
 fn run_emacs(args: Vec<String>, quick: bool) -> Result<(), String> {
     let (quick, args) = command_line_options(args, quick);
     super::spawn_evaluator(move || -> Result<(), String> {
@@ -59,7 +60,7 @@ fn run_emacs(args: Vec<String>, quick: bool) -> Result<(), String> {
                           command-line-default-directory default-directory)
                     {quick}
                     (condition-case err (command-line-1 (cdr command-line-args))
-                      (error (funcall command-error-function err \"\" nil) (kill-emacs -1)))
+                      ((debug t) (funcall command-error-function err \"\" nil) (kill-emacs -1)))
                     (kill-emacs t))",
             args.join(" ")))?;
         Err("kill-emacs returned".into())

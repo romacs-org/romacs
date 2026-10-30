@@ -24,6 +24,7 @@ mod oclosure;
 mod host_input;
 mod bidi;
 mod layout_host;
+mod display_host;
 mod session_host;
 mod terminal_host;
 mod process_jobs;
@@ -38,6 +39,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
+pub use display_host::{DisplayHost, FontEntity, FontQuery, OpenedFont, OtfTable};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
@@ -1231,6 +1233,8 @@ pub struct Vm {
     host_input: Option<Box<dyn host_input::HostInput>>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
+    /// The embedder's window system while one is attached (display_host.rs).
+    display: Option<display_host::Display>,
     /// The embedder's end of the session while one is attached (session_host.rs).
     session_host: Option<session_host::SessionHost>,
     /// keyboard.c timer_idleness_start_time: when the command loop began
@@ -1483,6 +1487,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     suspended_code,
     host_input,
     layout_host,
+    display,
     session_host,
     terminal_host,
     subprocesses,
@@ -1554,6 +1559,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             layout_host: None,
+            display: None,
             session_host: None,
             idle_since: None,
             keymap_generation: 0,
