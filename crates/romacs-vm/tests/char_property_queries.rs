@@ -76,3 +76,17 @@ fn barf_if_buffer_read_only_in_a_unibyte_buffer() {
                    (condition-case e (barf-if-buffer-read-only 99) (error e)) \
                    (condition-case e (barf-if-buffer-read-only 0) (error e)))))");
 }
+
+// `font-lock-mode' makes `char-property-alias-alist' buffer-local, so an
+// Eshell prompt's `font-lock-face' reads as its `face' (font-core.el:165).
+#[test]
+fn buffer_local_property_aliases_and_defaults_apply() {
+    agree("(with-temp-buffer (insert \"ab\") (put-text-property 1 2 'font-lock-face 'bold) \
+           (let ((o (make-overlay 2 3))) (overlay-put o 'font-lock-face 'italic) \
+             (set (make-local-variable 'char-property-alias-alist) '((face font-lock-face))) \
+             (set (make-local-variable 'default-text-properties) '(p 7)) \
+             (list (get-text-property 1 'face) (get-char-property 2 'face) (overlay-get o 'face) \
+                   (text-property-any 1 3 'face 'bold) (next-single-property-change 1 'face) (get-text-property 2 'p) \
+                   (with-temp-buffer (insert (propertize \"x\" 'font-lock-face 'bold)) \
+                     (list (get-text-property 1 'face) (get-text-property 1 'p))))))");
+}

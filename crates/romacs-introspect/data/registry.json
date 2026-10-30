@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "799b1be4c4f51a418b84e2b27eef3cf263769c3d009a6d086c910e2b85b8e285",
+    "input_hash": "a851cbeddebb22194b96e355295de4e4646a015ffc190a5249740b91f550f77c",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4820
+    "vm2_universe": 4830
   },
   "schema": 2,
   "vm2": {
-    "count": 1053,
+    "count": 1056,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -258,6 +258,7 @@
       "ding",
       "directory-file-name",
       "directory-files",
+      "directory-files-and-attributes",
       "directory-name-p",
       "discard-input",
       "display-supports-face-attributes-p",
@@ -506,6 +507,7 @@
       "make-char",
       "make-char-table",
       "make-directory-internal",
+      "make-finalizer",
       "make-frame-invisible",
       "make-frame-visible",
       "make-hash-table",
@@ -775,6 +777,7 @@
       "romacs--set-local-toplevel-cell",
       "romacs--signal-description",
       "romacs--startup-phase",
+      "romacs--take-doomed-finalizers",
       "romacs--term-close",
       "romacs--term-create",
       "romacs--term-follow",

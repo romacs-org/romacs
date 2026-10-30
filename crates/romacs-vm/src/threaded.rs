@@ -2672,13 +2672,21 @@ unsafe fn take_step(
                 leave_native(e);
                 if e.vm.may_collect(1) {
                     poll_collect(e);
-                    *r.add((*pc).a) = e.vm.garbage_collect_statistics();
+                    let statistics = e.vm.garbage_collect_statistics();
+                    // garbage_collect's run_finalizers, before it returns.
+                    match e.vm.finalizer_runner() {
+                        Some(runner) => (runner, vec![statistics], prim::prims::garbage_collect::finalizers_ran as prim::Then, Vec::new()),
+                        None => {
+                            *r.add((*pc).a) = statistics;
+                            return Continue::At(r, pc.add(1));
+                        }
+                    }
                 } else {
                     // A frame below holds untraced Values (`Vm::may_collect`):
                     // GNU's garbage_collection_inhibited early return.
                     *r.add((*pc).a) = Value::NIL;
+                    return Continue::At(r, pc.add(1));
                 }
-                return Continue::At(r, pc.add(1));
             }
             Ok(prim::Step::Done(value)) => {
                 leave_native(e);

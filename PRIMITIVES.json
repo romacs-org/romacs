@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "5bf46a4b64cb558edc67a6b2329969851fa9a9d45dbe207d6e185a556ef683d1",
+  "source_fingerprint": "77fd9f01ff24831586fd681edd78151fb7e065c2e6afd36c2defe457ec966a37",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1045,
-  "parsed_vm2_only": 1045
+  "parsed_total": 1048,
+  "parsed_vm2_only": 1048
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1280,17 +1280,22 @@
   "directory-file-name": {
    "name": "directory-file-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:188"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:194"
   },
   "directory-files": {
    "name": "directory-files",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filename.rs:40"
   },
+  "directory-files-and-attributes": {
+   "name": "directory-files-and-attributes",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:53"
+  },
   "directory-name-p": {
    "name": "directory-name-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:354"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:380"
   },
   "discard-input": {
    "name": "discard-input",
@@ -1527,42 +1532,42 @@
   "file-name-absolute-p": {
    "name": "file-name-absolute-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:332"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:358"
   },
   "file-name-all-completions": {
    "name": "file-name-all-completions",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:87"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:113"
   },
   "file-name-as-directory": {
    "name": "file-name-as-directory",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:168"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:174"
   },
   "file-name-case-insensitive-p": {
    "name": "file-name-case-insensitive-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:244"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:250"
   },
   "file-name-completion": {
    "name": "file-name-completion",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:107"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:133"
   },
   "file-name-concat": {
    "name": "file-name-concat",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:137"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:143"
   },
   "file-name-directory": {
    "name": "file-name-directory",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:208"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:214"
   },
   "file-name-nondirectory": {
    "name": "file-name-nondirectory",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:122"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:128"
   },
   "file-readable-p": {
    "name": "file-readable-p",
@@ -1577,7 +1582,7 @@
   "file-symlink-p": {
    "name": "file-symlink-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:111"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:117"
   },
   "file-system-info": {
    "name": "file-system-info",
@@ -2558,6 +2563,11 @@
    "name": "make-directory-internal",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filesave.rs:153"
+  },
+  "make-finalizer": {
+   "name": "make-finalizer",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:9"
   },
   "make-frame-invisible": {
    "name": "make-frame-invisible",
@@ -3958,6 +3968,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/call_test.rs:15"
   },
+  "romacs--take-doomed-finalizers": {
+   "name": "romacs--take-doomed-finalizers",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:17"
+  },
   "romacs--term-close": {
    "name": "romacs--term-close",
    "implementation": "vm2",
@@ -4738,7 +4753,7 @@
   "substitute-in-file-name": {
    "name": "substitute-in-file-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:265"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:291"
   },
   "substring": {
    "name": "substring",

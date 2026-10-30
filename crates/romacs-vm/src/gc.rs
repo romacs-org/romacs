@@ -392,6 +392,27 @@ impl Vm {
             _ => true,
         }
     }
+    /// `romacs--run-finalizers' when a collection has doomed finalizers
+    /// and the prelude defines it.
+    pub(crate) fn finalizer_runner(&mut self) -> Option<Value> {
+        if self.doomed_finalizers.is_empty() { return None; }
+        let runner = Value::reference(self.slot("romacs--run-finalizers") + 1, 7);
+        let slot = runner.payload() as usize - 1;
+        (self.slots[slot].function != Value::NIL && self.slots[slot].function != Value::UNBOUND).then_some(runner)
+    }
+    /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
+    /// finalizers marking has not reached move to the doomed queue and are
+    /// marked, with their functions, to survive until they run. True when
+    /// any was doomed.
+    fn doom_finalizers(&mut self, marks: &[Vec<bool>; 4], pending: &mut Vec<Value>) -> bool {
+        let (live, doomed): (Vec<Value>, Vec<Value>) = std::mem::take(&mut self.finalizers)
+            .into_iter()
+            .partition(|&f| Self::image_value(f) || marks[3][f.payload() as usize - 1]);
+        self.finalizers = live;
+        pending.extend_from_slice(&doomed);
+        self.doomed_finalizers.extend_from_slice(&doomed);
+        !doomed.is_empty()
+    }
     /// GNU `sweep_weak_table (h, false)`, run whenever the worklist drains:
     /// an entry whose keep rule already holds makes its other half live.
     /// Marking only grows, so the rounds reach a fixpoint; weak tables reached
@@ -462,6 +483,7 @@ impl Vm {
                     data::Object::Terminal(t) => t.storage_bytes(),
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
                     data::Object::Sqlite(h) => h.storage_bytes(),
+                    data::Object::Finalizer(_) => 0,
                     data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
                     data::Object::Bytes(v) => v.len(),
@@ -511,6 +533,7 @@ impl Vm {
                     data::Object::Terminal(t) => t.storage_bytes(),
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
                     data::Object::Sqlite(h) => h.storage_bytes(),
+                    data::Object::Finalizer(_) => 0,
                     data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(true),
                     data::Object::Bytes(v) => v.capacity(),
@@ -564,6 +587,7 @@ impl Vm {
         pending.extend_from_slice(&self.stack);
         pending.extend(self.suspended_stacks.iter().flatten().copied());
         pending.extend_from_slice(&self.external_roots);
+        pending.extend_from_slice(&self.doomed_finalizers);
         for code in &self.suspended_code {
             // SAFETY: each entry's engine is suspended in a nested call.
             unsafe { code.visit_values(&mut |v| pending.push(*v)) };
@@ -635,8 +659,12 @@ impl Vm {
         // Weak hash tables reached by marking; their entries are not traced
         // until `weak_round` (the ephemeron fixpoint) decides which survive.
         let mut weak_tables = vec![];
+        // GNU dooms finalizers once, after the roots and before the weak
+        // tables' contents are marked.
+        let mut finalizers_doomed = false;
         while !pending.is_empty()
             || !code_pending.is_empty()
+            || (!std::mem::replace(&mut finalizers_doomed, true) && self.doom_finalizers(&marks, &mut pending))
             || self.weak_round(&marks, &weak_tables, &obarray_symbols_live, &mut pending, &mut local_live)
         {
             while let Some(id) = code_pending.pop() {
@@ -740,6 +768,7 @@ impl Vm {
                     data::Object::Terminal(t) => t.visit_values(&mut |v| pending.push(*v)),
                     data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| pending.push(*v)),
                     data::Object::Sqlite(_) => {}
+                    data::Object::Finalizer(function) => pending.push(*function),
                     data::Object::Process(p) => p.visit_values(&mut |v| pending.push(*v)),
                     data::Object::Vector(values) | data::Object::Record(values) => pending.extend_from_slice(values),
                     data::Object::CharTable(t) => t.visit_values_seen(&mut native_nodes, &mut |v| pending.push(*v)),
@@ -957,6 +986,7 @@ impl Vm {
         self.forwarded.visit_values(&mut |v| rewrite(v));
         for v in &mut self.standard_case_tables { rewrite(v); }
         rewrite(&mut self.command_point.1);
+        for v in self.finalizers.iter_mut().chain(self.doomed_finalizers.iter_mut()) { rewrite(v); }
         self.charsets.rewrite(&rewrite);
         for (_, v, buffer, _) in &mut self.dynamic {
             rewrite(v);
@@ -984,6 +1014,7 @@ impl Vm {
                     data::Object::Terminal(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| rewrite(v)),
                     data::Object::Sqlite(_) => {}
+                    data::Object::Finalizer(function) => rewrite(function),
                     data::Object::Process(p) => p.visit_values(&mut |v| rewrite(v)),
                     data::Object::Buffer(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::ByteBuffer(t) => t.visit_values(&mut |v| rewrite(v)),
