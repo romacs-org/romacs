@@ -336,7 +336,7 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None)
     (home / '.config/romacs').mkdir()
     (home / '.config/romacs/init.el').write_text(init)
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
-    for key in ('ROMACS_GNU_SOURCE',):
+    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR'):
         if os.environ.get(key):
             env[key] = os.environ[key]
     return (cls or Engine)('romacs', [romacs, '--loadup'], root, lisp, env, timeout).start(tools)
