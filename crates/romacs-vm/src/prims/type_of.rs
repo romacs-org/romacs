@@ -39,6 +39,7 @@ fn classify(cx: &mut Leaf<'_>, object: Value, precise: bool) -> Out {
         Kind::WindowConfiguration => "window-configuration",
         Kind::Sqlite => "sqlite",
         Kind::Process => "process",
+        Kind::Finalizer => "finalizer",
         Kind::Subr if precise => if crate::prim::name(object).and_then(super::special_forms::special_form_min).is_some() { "special-form" } else { "primitive-function" },
         Kind::Subr => "subr",
         Kind::Closure => "interpreted-function",

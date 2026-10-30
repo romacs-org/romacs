@@ -191,11 +191,14 @@ impl Leaf<'_> {
         let buffer = self.current_buffer()?;
         let unmodified = !self.vm.buffer_state(buffer).map_err(Fault::Error)?.modified();
         let (point, _, _) = self.vm.point_extent()?;
-        match &mut self.vm.objects[index] {
+        let marks = self.vm.family_record(index);
+        let edited = match &mut self.vm.objects[index] {
             data::Object::Buffer(target) => target.replace(target.point..target.point, &bytes),
             data::Object::ByteBuffer(target) => target.replace(target.point..target.point, &bytes),
             _ => unreachable!(),
-        }.map_err(Fault::Error)?;
+        };
+        self.vm.family_fetch(marks);
+        edited.map_err(Fault::Error)?;
         // insert_1_both's record_insert, and prepare's deactivate-mark.
         let (after, _, _) = self.vm.point_extent()?;
         self.vm.record_insert(index, point, after - point, unmodified).map_err(Fault::Error)?;

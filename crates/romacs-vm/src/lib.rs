@@ -84,6 +84,7 @@ mod posix_tz;
 mod tzfile;
 mod undo;
 mod insdel;
+mod indirect;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
@@ -1256,7 +1257,7 @@ pub struct Vm {
     expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
     buffer_slot: usize,
-    multibyte_slot: usize,
+    pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
     defun_start_epoch: u64,
@@ -1333,6 +1334,12 @@ pub struct Vm {
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
+    /// alloc.c's `finalizers': every finalizer not yet found unreachable.
+    /// Not roots; the collector dooms those it does not reach.
+    finalizers: Vec<Value>,
+    /// alloc.c's `doomed_finalizers': unreachable finalizers kept alive
+    /// until `romacs--run-finalizers' calls their functions.
+    doomed_finalizers: Vec<Value>,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1450,6 +1457,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     caches,
     stack,
     external_roots,
+    finalizers,
+    doomed_finalizers,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1601,6 +1610,8 @@ impl Vm {
             caches: vec![],
             stack: vec![],
             external_roots: vec![],
+            finalizers: vec![],
+            doomed_finalizers: vec![],
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),
@@ -2877,8 +2888,18 @@ impl Vm {
             // 1730-1760): one may have killed it, made another or let its
             // private slot be reused. With none left the default takes it.
             let target = self.owner_local_binding(base, owner).unwrap_or(base);
-            // set-buffer-local-toplevel-value may have saved any object.
-            let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
+            // set-buffer-local-toplevel-value may have saved any object; an
+            // integer binding refuses a non-integer and keeps its value.
+            let value = match self.localized_forwarded(base) {
+                Some(forwarded::Fwd::Int(_)) if value.integer_value().is_none() => {
+                    let (predicate, condition) = (self.intern("integerp"), self.intern("wrong-type-argument"));
+                    let data = self.list_value(&[predicate, value]);
+                    self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                    return Err(forwarded::fault_text(crate::prim::Fault::Wrong("integerp", value)));
+                }
+                Some(forwarded::Fwd::Bool(_)) => if value == Value::NIL { Value::NIL } else { Value::TRUE },
+                _ => value,
+            };
             self.slots[target].value = value;
             return Ok(());
         }
@@ -3066,6 +3087,7 @@ impl Vm {
                             | data::Object::Terminal(_)
                             | data::Object::WindowConfiguration(_)
                             | data::Object::Sqlite(_)
+                            | data::Object::Finalizer(_)
                             | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
@@ -3108,6 +3130,8 @@ impl Vm {
                 data::Object::Terminal(_) => Ok("#<terminal initial>".into()),
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Sqlite(h) => Ok(h.describe()),
+                // print.c PVEC_FINALIZER.
+                data::Object::Finalizer(function) => Ok(if *function == Value::NIL { "#<finalizer used>" } else { "#<finalizer>" }.into()),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
                 data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),

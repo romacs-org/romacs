@@ -51,7 +51,6 @@ fn file_mode_string(mode: u32) -> Vec<u8> {
 
 defsubr! { name = "file-attributes", gnu = "dired.c:953", effect = Global,
 fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
-    use std::os::unix::fs::MetadataExt;
     // GNU catches all expansion conditions and returns nil.
     let path = match super::fileio::expand_file_name(cx, filename) {
         Ok(path) => path,
@@ -65,15 +64,22 @@ fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
         if id_format != Value::NIL { args.push(id_format); }
         return Ok(Step::Call { f: handler, args, then: returned, saved: vec![] });
     }
+    Ok(Step::Done(local_file_attributes(cx, &path, id_format)?))
+}}
+
+/// dired.c file_attributes of the local file PATH, already expanded: nil
+/// when it cannot be read.
+pub(super) fn local_file_attributes(cx: &mut Leaf<'_>, path: &str, id_format: Value) -> std::result::Result<Value, Fault> {
+    use std::os::unix::fs::MetadataExt;
     let integer = cx.intern("integer");
     let named = id_format != Value::NIL && id_format != integer;
-    let metadata = match crate::host::symlink_metadata(&path) {
+    let metadata = match crate::host::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(_) => return Ok(Step::Done(Value::NIL)),
+        Err(_) => return Ok(Value::NIL),
     };
     let file_type = if metadata.file_type().is_dir() { Value::TRUE }
     else if metadata.file_type().is_symlink() {
-        let target = match crate::host::read_link(&path) { Ok(target) => target, Err(_) => return Ok(Step::Done(Value::NIL)) };
+        let target = match crate::host::read_link(path) { Ok(target) => target, Err(_) => return Ok(Value::NIL) };
         let target = target.to_str().ok_or_else(|| Fault::Error("VM2 file-attributes non-UTF-8 symlink target decoding unsupported".into()))?;
         cx.make_string(target.as_bytes().to_vec(), !target.is_ascii())
     } else { Value::NIL };
@@ -89,8 +95,8 @@ fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
     let device = cx.bigint(metadata.dev().into());
     let mut list = Value::NIL;
     for value in [file_type, links, uid, gid, atime, mtime, ctime, size, mode, Value::TRUE, inode, device].into_iter().rev() { list = cx.cons(value, list); }
-    Ok(Step::Done(list))
-}}
+    Ok(list)
+}
 
 fn symlink_expanded(cx: &mut Leaf<'_>, filename: Value, _: &[Value]) -> Next {
     cx.string_bytes(filename)?;

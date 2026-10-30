@@ -178,6 +178,7 @@ mod leaf {
         WindowConfiguration,
         Sqlite,
         Process,
+        Finalizer,
         Invalid,
     }
 
@@ -1433,6 +1434,7 @@ mod leaf {
                     Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
+                    Some(data::Object::Finalizer(_)) => Kind::Finalizer,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -1644,6 +1646,7 @@ mod leaf {
     mod search;
     mod skip_chars;
     mod word_motion;
+    mod field;
     mod syntax_scan;
     pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
@@ -1668,6 +1671,7 @@ mod leaf {
     pub(crate) use text_pixel_size::TextSizeArgs;
     mod session;
     mod world;
+    mod finalizer;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
 
@@ -1677,6 +1681,13 @@ pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point:
         Fault::Error(text) => text,
         _ => "the host's layout cannot choose this window start".into(),
     })
+}
+
+/// cmds.c beginning-of-line and end-of-line's target: the line boundary
+/// N lines on, constrained to point's field (Leaf::line_field_position).
+pub(crate) fn line_field_position(vm: &mut Vm, n: Value, end: bool) -> std::result::Result<i64, Fault> {
+    let position = Leaf::new(vm).line_field_position(n, end)?;
+    Ok(position.integer_value().expect("constrain-to-field yields a position"))
 }
 
 /// Where the screen lines a window shows end over the host's layout

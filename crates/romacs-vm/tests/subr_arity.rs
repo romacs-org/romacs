@@ -33,7 +33,7 @@ fn subr_arity_reports_current_native_handler_bounds() {
         ("plist-get", "(2 . 2)"),
         ("buffer-size", "(0 . 0)"),
         ("search-forward", "(1 . 4)"),
-        ("copy-marker", "(1 . 2)"),
+        ("copy-marker", "(0 . 2)"),
         ("overlays-at", "(1 . 1)"),
         ("set-window-vscroll", "(3 . 3)"),
         ("local-variable-if-set-p", "(1 . 1)"),

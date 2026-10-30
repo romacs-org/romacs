@@ -214,8 +214,14 @@ impl Vm {
                 prefix + (point - prefix).min(inserted_end - prefix)
             };
             if prefix != end || prefix != inserted_end {
-                text.replace(ByteOffset(prefix)..ByteOffset(end), &snapshot.text.as_bytes()[prefix..inserted_end])?;
+                let index = buffer.index(0)? - 1;
+                let marks = self.family_record(index);
+                let Object::Buffer(text) = &mut self.objects[index] else { unreachable!("terminal buffer") };
+                let edited = text.replace(ByteOffset(prefix)..ByteOffset(end), &snapshot.text.as_bytes()[prefix..inserted_end]);
+                self.family_fetch(marks);
+                edited?;
             }
+            let Object::Buffer(text) = &mut self.objects[buffer.index(0)? - 1] else { unreachable!("terminal buffer") };
             let mut next_point = next_point.min(snapshot.text.len());
             while !snapshot.text.is_char_boundary(next_point) { next_point -= 1; }
             let accessible = text.accessible();

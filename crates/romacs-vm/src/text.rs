@@ -1,7 +1,7 @@
 //! UTF-8 rope storage; properties and restrictions remain byte-canonical.
 //! The cached ASCII property changes conversion cost, never the payload type.
 use crate::properties::Properties;
-use crate::{Result, Value, coordinates::*};
+use crate::{Result, Value, coordinates::*, indirect::Shared};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -42,8 +42,11 @@ impl ChunkCursor {
         (byte + at, at)
     }
 }
+/// The text of a buffer and its indirect buffers (GNU's `struct
+/// buffer_text`): the characters, their properties and the caches that
+/// read them. Each buffer's view of it is a [`Text`].
 #[derive(Clone)]
-pub struct Text {
+pub struct TextBody {
     rope: ropey_stable::Rope,
     bytes_len: usize,
     chars_len: usize,
@@ -57,56 +60,89 @@ pub struct Text {
     cold_order: std::cell::RefCell<std::collections::VecDeque<usize>>,
     #[cfg(test)]
     scanned_bytes: std::cell::Cell<usize>,
-    restriction: Range<ByteOffset>,
     pub(crate) properties: Properties,
-    pub(crate) state: crate::bytes::BufferState,
-    pub(crate) point: ByteOffset,
-    pub(crate) syntax_table: Value,
-    /// The buffer's category table; nil means the standard one (category.c).
-    pub(crate) category_table: Value,
     #[cfg(test)]
     coordinate_steps: std::cell::Cell<usize>,
     #[cfg(test)]
     property_edit_visits: usize,
 }
-romacs_snapshot::snapshot_struct!(Text { rope, bytes_len, chars_len, tail, tail_chars, flat, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, restriction, properties, state, point, syntax_table, category_table, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits });
+romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits });
+/// One buffer's view of its text: the shared [`TextBody`], and this
+/// buffer's own point, narrowing, syntax and category tables and identity.
+#[derive(Clone)]
+pub struct Text {
+    body: Shared<TextBody>,
+    restriction: Range<ByteOffset>,
+    pub(crate) state: crate::bytes::BufferState,
+    pub(crate) point: ByteOffset,
+    pub(crate) syntax_table: Value,
+    /// The buffer's category table; nil means the standard one (category.c).
+    pub(crate) category_table: Value,
+}
+romacs_snapshot::snapshot_struct!(Text { body, restriction, state, point, syntax_table, category_table });
+impl std::ops::Deref for Text {
+    type Target = TextBody;
+    fn deref(&self) -> &TextBody {
+        &self.body
+    }
+}
+impl std::ops::DerefMut for Text {
+    fn deref_mut(&mut self) -> &mut TextBody {
+        &mut self.body
+    }
+}
 impl Text {
     pub fn new(bytes: &[u8]) -> Result<Self> {
         let s = std::str::from_utf8(bytes).map_err(|_| "invalid Unicode text")?;
         let rope = ropey_stable::Rope::from_str(s);
         let chars_len = rope.len_chars();
         Ok(Self {
-            rope,
-            bytes_len: s.len(),
-            chars_len,
-            tail: String::new(),
-            tail_chars: 0,
-            flat: std::sync::OnceLock::new(),
-            is_ascii: s.is_ascii(),
-            coordinate: std::cell::Cell::new((0, 0)),
-            chunk: std::cell::RefCell::new(ChunkCursor::default()),
-            cold_chunks: std::cell::RefCell::new(std::collections::BTreeMap::new()),
-            cold_order: std::cell::RefCell::new(std::collections::VecDeque::new()),
-            #[cfg(test)]
-            scanned_bytes: std::cell::Cell::new(0),
+            body: Shared::new(TextBody {
+                rope,
+                bytes_len: s.len(),
+                chars_len,
+                tail: String::new(),
+                tail_chars: 0,
+                flat: std::sync::OnceLock::new(),
+                is_ascii: s.is_ascii(),
+                coordinate: std::cell::Cell::new((0, 0)),
+                chunk: std::cell::RefCell::new(ChunkCursor::default()),
+                cold_chunks: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+                cold_order: std::cell::RefCell::new(std::collections::VecDeque::new()),
+                #[cfg(test)]
+                scanned_bytes: std::cell::Cell::new(0),
+                properties: Properties::new(),
+                #[cfg(test)]
+                coordinate_steps: std::cell::Cell::new(0),
+                #[cfg(test)]
+                property_edit_visits: 0,
+            }),
             restriction: ByteOffset(0)..ByteOffset(s.len()),
-            properties: Properties::new(),
             state: Default::default(),
             point: ByteOffset(0),
             syntax_table: Value::NIL,
             category_table: Value::NIL,
-            #[cfg(test)]
-            coordinate_steps: std::cell::Cell::new(0),
-            #[cfg(test)]
-            property_edit_visits: 0,
         })
     }
-    pub fn as_str(&self) -> &str {
-        self.flat.get_or_init(|| {
-            let mut text = self.rope.to_string();
-            text.push_str(&self.tail);
-            text
-        })
+    /// A view of this text for a new indirect buffer: the same body and
+    /// modification counts, with this view's point and narrowing (GNU
+    /// `make-indirect-buffer` starts at its base's) and its own identity.
+    pub(crate) fn share(&self) -> Self {
+        let mut state = crate::bytes::BufferState::default();
+        state.modification = self.state.modification.share();
+        Self {
+            body: self.body.share(),
+            restriction: self.restriction.clone(),
+            state,
+            point: self.point,
+            syntax_table: Value::NIL,
+            category_table: Value::NIL,
+        }
+    }
+    /// Whether THIS and OTHER are views of one body.
+    #[cfg(test)]
+    pub(crate) fn shares_body(&self, other: &Self) -> bool {
+        self.body.same(&other.body)
     }
     pub(crate) fn binary(&self) -> crate::bytes::ByteBuffer {
         crate::bytes::ByteBuffer {
@@ -152,6 +188,160 @@ impl Text {
             }
         }
         Ok(text)
+    }
+    pub fn accessible(&self) -> Range<ByteOffset> {
+        self.restriction.clone()
+    }
+    pub fn narrow(&mut self, r: Range<ByteOffset>) -> Result<()> {
+        self.validate_range(&r)?;
+        self.point = self.point.clamp(r.start, r.end);
+        self.restriction = r;
+        Ok(())
+    }
+    pub fn widen(&mut self) {
+        self.restriction = ByteOffset(0)..ByteOffset(self.len_bytes());
+    }
+    /// Set this view's narrowing and point, where another view's edit of
+    /// the shared body moved them (`Vm::family_fetch`).
+    pub(crate) fn set_view(&mut self, restriction: Range<ByteOffset>, point: ByteOffset) {
+        debug_assert!(restriction.start <= point && point <= restriction.end && restriction.end.0 <= self.len_bytes());
+        self.restriction = restriction;
+        self.point = point;
+    }
+    #[inline(never)]
+    pub(crate) fn append_utf8(&mut self, s: &str) -> bool {
+        if s.len() > 512 || self.point.0 != self.len_bytes() {
+            return false;
+        }
+        let chars = s.chars().count();
+        if chars > 128 {
+            return false;
+        }
+        if s.is_empty() {
+            return true;
+        }
+        self.body.append_body(s, chars);
+        self.point.0 += s.len();
+        self.restriction.end.0 += s.len();
+        self.state.record_text_change(chars);
+        true
+    }
+    pub fn replace(&mut self, r: Range<ByteOffset>, inserted: &[u8]) -> Result<()> {
+        self.validate_range(&r)?;
+        let s = std::str::from_utf8(inserted).map_err(|_| "invalid Unicode text")?;
+        if r.is_empty() && s.is_empty() {
+            return Ok(());
+        }
+        // All retained state is byte-canonical. Conversion is only for index ranks.
+        let shift = |p: ByteOffset| {
+            ByteOffset(if p < r.start {
+                p.0
+            } else if p <= r.end {
+                r.start.0 + s.len()
+            } else {
+                p.0 - (r.end.0 - r.start.0) + s.len()
+            })
+        };
+        let changed = self.body.replace_body(&r, s);
+        self.point = shift(self.point);
+        let old = self.restriction.clone();
+        self.restriction = (if old.start <= r.start {
+            old.start
+        } else {
+            shift(old.start)
+        })..shift(old.end);
+        self.state.record_text_change(changed);
+        Ok(())
+    }
+    /// Rewrite the one character of R as REPLACEMENT, of another byte
+    /// length, its properties stretched over the new text and point and
+    /// the restriction kept at their characters. The caller records the
+    /// change and moves the anchors (`AnnotatedBuffer::rewrite_character').
+    pub(crate) fn rewrite_unanchored(&mut self, r: Range<ByteOffset>, replacement: &str) -> Result<()> {
+        self.validate_range(&r)?;
+        let shift = |p: ByteOffset| if p < r.end { p } else { ByteOffset(p.0 - (r.end.0 - r.start.0) + replacement.len()) };
+        self.point = shift(self.point);
+        self.restriction = shift(self.restriction.start)..shift(self.restriction.end);
+        self.body.rewrite_body(r, replacement);
+        Ok(())
+    }
+    /// This view's own values; the body's are its owner's to visit.
+    pub(crate) fn visit_view_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        visit(&mut self.syntax_table);
+        visit(&mut self.category_table);
+    }
+}
+impl TextBody {
+    /// `Text::append_utf8`'s edit of the body: S, of CHARS characters,
+    /// after its end.
+    fn append_body(&mut self, s: &str, chars: usize) {
+        self.invalidate_reads();
+        if self.tail.len() + s.len() > 1024 {
+            self.flush_tail();
+        }
+        self.tail.push_str(s);
+        self.tail_chars += chars;
+        self.bytes_len += s.len();
+        self.chars_len += chars;
+        self.is_ascii &= s.is_ascii();
+    }
+    /// `Text::replace`'s edit of the body: R replaced by S. Returns the
+    /// characters changed, deleted and inserted.
+    fn replace_body(&mut self, r: &Range<ByteOffset>, s: &str) -> usize {
+        self.flush_tail();
+        // The edit API already validated UTF-8 boundaries; use the rope's native
+        // scalar summaries without perturbing the read-coordinate cursor.
+        let start = CharOffset(if self.is_ascii {
+            r.start.0
+        } else {
+            self.rope.byte_to_char(r.start.0)
+        });
+        let end = CharOffset(if self.is_ascii {
+            r.end.0
+        } else {
+            self.rope.byte_to_char(r.end.0)
+        });
+        let property_work = self.properties.replace(r.clone(), s.len());
+        #[cfg(test)]
+        {
+            self.property_edit_visits = property_work;
+        }
+        #[cfg(not(test))]
+        let _ = property_work;
+        self.invalidate_reads();
+        if start != end {
+            self.rope.remove(start.0..end.0);
+        }
+        if !s.is_empty() {
+            self.rope.insert(start.0, s);
+        }
+        self.bytes_len = self.rope.len_bytes();
+        self.chars_len = self.rope.len_chars();
+        self.is_ascii = self.bytes_len == self.chars_len;
+        end.0 - start.0 + s.chars().count()
+    }
+    /// `Text::rewrite_unanchored`'s edit of the body.
+    fn rewrite_body(&mut self, r: Range<ByteOffset>, replacement: &str) {
+        self.flush_tail();
+        let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
+        let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
+        self.properties.resize_character(r, replacement.len());
+        self.invalidate_reads();
+        self.rope.remove(start..end);
+        self.rope.insert(start, replacement);
+        self.bytes_len = self.rope.len_bytes();
+        self.chars_len = self.rope.len_chars();
+        self.is_ascii = self.bytes_len == self.chars_len;
+    }
+    pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        self.properties.visit_values(visit);
+    }
+    pub fn as_str(&self) -> &str {
+        self.flat.get_or_init(|| {
+            let mut text = self.rope.to_string();
+            text.push_str(&self.tail);
+            text
+        })
     }
     /// Raw stored annotations, including explicit nil; no visual defaults.
     #[cfg(test)]
@@ -506,44 +696,6 @@ impl Text {
             .chunks()
             .chain((!self.tail.is_empty()).then_some(self.tail.as_str()))
     }
-    pub fn accessible(&self) -> Range<ByteOffset> {
-        self.restriction.clone()
-    }
-    pub fn narrow(&mut self, r: Range<ByteOffset>) -> Result<()> {
-        self.validate_range(&r)?;
-        self.point = self.point.clamp(r.start, r.end);
-        self.restriction = r;
-        Ok(())
-    }
-    pub fn widen(&mut self) {
-        self.restriction = ByteOffset(0)..ByteOffset(self.len_bytes());
-    }
-    #[inline(never)]
-    pub(crate) fn append_utf8(&mut self, s: &str) -> bool {
-        if s.len() > 512 || self.point.0 != self.len_bytes() {
-            return false;
-        }
-        let chars = s.chars().count();
-        if chars > 128 {
-            return false;
-        }
-        if s.is_empty() {
-            return true;
-        }
-        self.invalidate_reads();
-        if self.tail.len() + s.len() > 1024 {
-            self.flush_tail();
-        }
-        self.tail.push_str(s);
-        self.tail_chars += chars;
-        self.bytes_len += s.len();
-        self.chars_len += chars;
-        self.is_ascii &= s.is_ascii();
-        self.point.0 += s.len();
-        self.restriction.end.0 += s.len();
-        self.state.record_text_change(chars);
-        true
-    }
     fn flush_tail(&mut self) {
         if !self.tail.is_empty() {
             self.rope
@@ -551,62 +703,6 @@ impl Text {
             self.tail.clear();
             self.tail_chars = 0;
         }
-    }
-    pub fn replace(&mut self, r: Range<ByteOffset>, inserted: &[u8]) -> Result<()> {
-        self.validate_range(&r)?;
-        let s = std::str::from_utf8(inserted).map_err(|_| "invalid Unicode text")?;
-        if r.is_empty() && s.is_empty() {
-            return Ok(());
-        }
-        self.flush_tail();
-        // The edit API already validated UTF-8 boundaries; use the rope's native
-        // scalar summaries without perturbing the read-coordinate cursor.
-        let start = CharOffset(if self.is_ascii {
-            r.start.0
-        } else {
-            self.rope.byte_to_char(r.start.0)
-        });
-        let end = CharOffset(if self.is_ascii {
-            r.end.0
-        } else {
-            self.rope.byte_to_char(r.end.0)
-        });
-        // All retained state is byte-canonical. Conversion is only for index ranks.
-        let shift = |p: ByteOffset| {
-            ByteOffset(if p < r.start {
-                p.0
-            } else if p <= r.end {
-                r.start.0 + s.len()
-            } else {
-                p.0 - (r.end.0 - r.start.0) + s.len()
-            })
-        };
-        let property_work = self.properties.replace(r.clone(), s.len());
-        #[cfg(test)]
-        {
-            self.property_edit_visits = property_work;
-        }
-        #[cfg(not(test))]
-        let _ = property_work;
-        self.point = shift(self.point);
-        let old = self.restriction.clone();
-        self.restriction = (if old.start <= r.start {
-            old.start
-        } else {
-            shift(old.start)
-        })..shift(old.end);
-        self.invalidate_reads();
-        if start != end {
-            self.rope.remove(start.0..end.0);
-        }
-        if !s.is_empty() {
-            self.rope.insert(start.0, s);
-        }
-        self.bytes_len = self.rope.len_bytes();
-        self.chars_len = self.rope.len_chars();
-        self.is_ascii = self.bytes_len == self.chars_len;
-        self.state.record_text_change(end.0 - start.0 + s.chars().count());
-        Ok(())
     }
     /// Overwrite the characters of R with as many characters of the same
     /// total byte length, keeping text properties, point and markers, as
@@ -620,27 +716,6 @@ impl Text {
         self.invalidate_reads();
         self.rope.remove(start..end);
         self.rope.insert(start, replacement);
-        self.chars_len = self.rope.len_chars();
-        self.is_ascii = self.bytes_len == self.chars_len;
-        Ok(())
-    }
-    /// Rewrite the one character of R as REPLACEMENT, of another byte
-    /// length, its properties stretched over the new text and point and
-    /// the restriction kept at their characters. The caller records the
-    /// change and moves the anchors (`AnnotatedBuffer::rewrite_character').
-    pub(crate) fn rewrite_unanchored(&mut self, r: Range<ByteOffset>, replacement: &str) -> Result<()> {
-        self.validate_range(&r)?;
-        self.flush_tail();
-        let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
-        let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
-        let shift = |p: ByteOffset| if p < r.end { p } else { ByteOffset(p.0 - (r.end.0 - r.start.0) + replacement.len()) };
-        self.point = shift(self.point);
-        self.restriction = shift(self.restriction.start)..shift(self.restriction.end);
-        self.properties.resize_character(r, replacement.len());
-        self.invalidate_reads();
-        self.rope.remove(start..end);
-        self.rope.insert(start, replacement);
-        self.bytes_len = self.rope.len_bytes();
         self.chars_len = self.rope.len_chars();
         self.is_ascii = self.bytes_len == self.chars_len;
         Ok(())
@@ -682,11 +757,6 @@ impl Text {
     pub fn display_width(&self, r: Range<ByteOffset>) -> Result<DisplayColumn> {
         Ok(DisplayColumn(UnicodeWidthStr::width(self.slice(r)?)))
     }
-    pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        visit(&mut self.syntax_table);
-        visit(&mut self.category_table);
-        self.properties.visit_values(visit);
-    }
     pub(crate) fn storage_bytes(&self, capacity: bool) -> usize {
         let properties = self.properties.storage_bytes();
         // Pinned Ropey 1.6.1 allocates exactly 1024 bytes per Arc<Node>
@@ -699,7 +769,6 @@ impl Text {
         let leaves = self.rope.chunks().count().max(1);
         let rope_storage_bound = (2 * leaves - 1) * 1024;
         properties
-            + self.state.storage_bytes(capacity)
             + self
                 .cold_chunks
                 .borrow()
@@ -724,35 +793,35 @@ mod tests {
     #[test]
     fn modification_tracks_edits_noops_failures_and_representation_changes() {
         let mut text = crate::text::Text::new(b"").unwrap();
-        let initial = text.state.modification;
+        let initial = *text.state.modification;
         assert!(text.append_utf8(""));
         text.replace(ByteOffset(0)..ByteOffset(0), b"").unwrap();
-        assert_eq!(text.state.modification, initial);
+        assert_eq!(*text.state.modification, initial);
         assert!(text.replace(ByteOffset(0)..ByteOffset(0), &[0xff]).is_err());
-        assert_eq!(text.state.modification, initial);
+        assert_eq!(*text.state.modification, initial);
         assert!(text.append_utf8("λ"));
         assert_eq!(text.state.modification.modiff, 2);
         assert_eq!(text.state.modification.chars_modiff, 2);
         // Replacing identical bytes is still a delete/insert operation.
         text.replace(ByteOffset(0)..ByteOffset(2), "λ".as_bytes()).unwrap();
         assert_eq!(text.state.modification.modiff, 4);
-        let before = text.state.modification;
+        let before = *text.state.modification;
         assert!(text.replace(ByteOffset(1)..ByteOffset(2), b"").is_err());
-        assert_eq!(text.state.modification, before);
+        assert_eq!(*text.state.modification, before);
         let mut binary = text.binary();
-        assert_eq!(binary.state.modification, before);
+        assert_eq!(*binary.state.modification, before);
         binary.replace(ByteOffset(0)..ByteOffset(0), b"").unwrap();
-        assert_eq!(binary.state.modification, before);
+        assert_eq!(*binary.state.modification, before);
         binary.replace(ByteOffset(0)..ByteOffset(2), b"abcd").unwrap();
         assert_eq!(binary.state.modification.modiff, 7);
         assert_eq!(binary.state.modification.chars_modiff, 7);
         binary.state.modification.set_modified(false);
         binary.state.modification.autosave_modiff = 8;
         let decoded = crate::text::Text::decode_binary(&binary).unwrap();
-        assert_eq!(decoded.state.modification, binary.state.modification);
+        assert_eq!(*decoded.state.modification, *binary.state.modification);
         let wrapped: crate::annotations::AnnotatedBuffer = decoded.into();
-        assert_eq!(wrapped.state.modification, binary.state.modification);
-        assert_eq!(wrapped.clone().state.modification, binary.state.modification);
+        assert_eq!(*wrapped.state.modification, *binary.state.modification);
+        assert_eq!(*wrapped.clone().state.modification, *binary.state.modification);
     }
     // Adapt the legacy untyped acceptance seam at one explicit boundary.
     struct Text(crate::text::Text);

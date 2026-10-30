@@ -116,3 +116,8 @@ and its comparison policy in its docstring:
   the running dashboard at 127.0.0.1:9119 (dashboard, session browser and
   search, a session's history), its token discovered by hermes and never
   reported.
+* `eshell_parity_live.py`: `M-x eshell` from *scratch* through Eshell's own
+  `ls`, `echo`, `cd` and `pwd`, `cat` of a file several screens long, an
+  external `printf`, `C-c C-c` on an external `sleep 5`, `M-p`, `C-c C-u`
+  and `exit`, both engines in one small work directory.  `--debug-on-error`
+  sets `debug-on-error` in both inits.

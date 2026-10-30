@@ -1304,16 +1304,27 @@ impl Vm {
     }
 
     pub(super) fn source_form(&self, value: Value, depth: usize) -> Result<Form> {
-        self.datum_form(value, depth, false)
+        self.datum_form(value, depth, Datum::Source)
     }
     /// Like `source_form`, but an object with no source spelling becomes
     /// `Form::Object` instead of an error: GNU evaluates the object itself
     /// (src/eval.c eval_sub). Object constants own traced roots until every
     /// clone of the form is dropped. These VM-local handles are not persistent.
     pub(super) fn expansion_form(&self, value: Value, depth: usize) -> Result<Form> {
-        self.datum_form(value, depth, true)
+        self.datum_form(value, depth, Datum::Expansion)
     }
-    fn datum_form(&self, value: Value, depth: usize, objects: bool) -> Result<Form> {
+    /// Like `expansion_form`, for the datum `eval' evaluates: every
+    /// `(quote X)' in it carries X itself, so the form reads and writes the
+    /// identical structure (src/eval.c eval_sub returns the quoted object).
+    pub(super) fn eval_datum_form(&self, value: Value) -> Result<Form> {
+        self.datum_form(value, 0, Datum::Eval(0))
+    }
+    /// VALUE quoted as `eval' quotes it: the identical object.
+    pub(super) fn eval_quoted_form(&self, value: Value) -> Form {
+        Form::List(vec![Form::Sym("quote".into()), Form::Object(crate::handle::FormObject::new(self, value))])
+    }
+    fn datum_form(&self, value: Value, depth: usize, mode: Datum) -> Result<Form> {
+        let objects = mode != Datum::Source;
         if depth > 256 {
             return Err("source nesting limit exceeded".into());
         }
@@ -1354,18 +1365,40 @@ impl Vm {
                 Object::RawString(_) => Ok(Form::Object(crate::handle::FormObject::new(self, value))),
                 Object::Vector(a) => Ok(Form::Vector(
                     a.iter()
-                        .map(|v| self.datum_form(*v, depth + 1, objects))
+                        .map(|v| self.datum_form(*v, depth + 1, mode))
                         .collect::<Result<_>>()?,
                 )),
                 _ if objects => Ok(Form::Object(crate::handle::FormObject::new(self, value))),
                 _ => Err("source datum required".into()),
             },
             3 => {
+                let symbol_is = |name: &str, v: Value| self.names.get(name).is_some_and(|&slot| v == Value::reference(slot + 1, 7));
+                let head = self.cons_pair(value).map(|(head, _)| head).unwrap_or(Value::NIL);
+                if mode == Datum::Eval(0)
+                    && symbol_is("quote", head)
+                    && let Ok((_, rest)) = self.cons_pair(value)
+                    && let Ok((quoted, Value::NIL)) = self.cons_pair(rest)
+                    && (quoted.tag() == 3 || (quoted.tag() == 0 && quoted != Value::NIL))
+                {
+                    return Ok(self.eval_quoted_form(quoted));
+                }
+                // Inside a backquote template a quote may hold its commas;
+                // a comma's operand is evaluated again.
+                let mode = match mode {
+                    Datum::Eval(level) if symbol_is("`", head) => Datum::Eval(level + 1),
+                    Datum::Eval(level) if level > 0 && (symbol_is(",", head) || symbol_is(",@", head)) => Datum::Eval(level - 1),
+                    mode => mode,
+                };
+                let mut mode = mode;
                 let mut values = vec![];
                 let mut tail = value;
                 while tail.tag() == 3 {
                     let (car, cdr) = self.cons_pair(tail)?;
-                    values.push(self.datum_form(car, depth + 1, objects)?);
+                    values.push(self.datum_form(car, depth + 1, mode)?);
+                    // `(a . ,x)' reads as (a \, x): what follows is the operand.
+                    if let Datum::Eval(level) = mode && level > 0 && values.len() > 1 && (symbol_is(",", car) || symbol_is(",@", car)) {
+                        mode = Datum::Eval(level - 1);
+                    }
                     tail = cdr;
                     if values.len() > self.list_limit() {
                         return Err("circular source list".into());
@@ -1376,7 +1409,7 @@ impl Vm {
                 } else {
                     Ok(Form::Dotted(
                         values,
-                        Box::new(self.datum_form(tail, depth + 1, objects)?),
+                        Box::new(self.datum_form(tail, depth + 1, mode)?),
                     ))
                 }
             }
@@ -1446,6 +1479,13 @@ impl Vm {
         Ok(())
     }
 }
+
+/// What a datum becomes source for: compiler source, a macro expansion
+/// (objects with no spelling carried as themselves) or `eval''s datum
+/// (quoted structure carried as itself too, outside backquote templates;
+/// the level is the backquote nesting).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Datum { Source, Expansion, Eval(u32) }
 
 #[cfg(test)]
 mod tests {

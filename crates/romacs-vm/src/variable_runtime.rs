@@ -153,7 +153,7 @@ impl Vm {
         })
     }
 
-    fn allocate_local_binding_slot(&mut self) -> usize {
+    pub(crate) fn allocate_local_binding_slot(&mut self) -> usize {
         if let Some(slot) = self.free_local_binding_slots.pop() {
             return slot;
         }
@@ -223,7 +223,8 @@ impl Vm {
         self.slots[slot].local = table;
         self.slots[slot].explicit_local = explicit;
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
-        if let Some(VariableRedirect::Forwarded(fwd @ forwarded::Fwd::Bool(_))) = self.variable_redirects[slot] {
+        if let Some(VariableRedirect::Forwarded(fwd @ (forwarded::Fwd::Bool(_) | forwarded::Fwd::Int(_) | forwarded::Fwd::Obj(_)))) = self.variable_redirects[slot] {
+            if fwd == forwarded::Fwd::Int(self.forwarded.eval_limit_index as u16) { self.forwarded.eval_limit_symbol = slot; }
             self.variable_redirects[slot] = Some(VariableRedirect::LocalizedForwarded(fwd));
         } else if !matches!(self.variable_redirects[slot], Some(VariableRedirect::Forwarded(_) | VariableRedirect::LocalizedForwarded(_) | VariableRedirect::Alias(_))) {
             self.variable_redirects[slot] = Some(VariableRedirect::Localized);
@@ -269,13 +270,17 @@ impl Vm {
         });
         if !create || explicit || shadowed { return Ok(slot); }
         let local = self.allocate_local_binding_slot();
-        self.slots[local].value = if let Some(fwd) = self.localized_boolean(slot) { self.forwarded_value(fwd)? } else { self.slots[slot].value };
+        self.slots[local].value = if let Some(fwd) = self.localized_forwarded(slot) { self.forwarded_value(fwd)? } else { self.slots[slot].value };
         self.declaration_hash_put(table, buffer, Value::reference(local+1, 7))?;
         Ok(local)
     }
     /// SLOT's value in BUFFER, as `buffer-local-value' reads it: its
     /// buffer-local value there, else its default.  UNBOUND when void.
     pub(crate) fn value_in_buffer(&mut self, slot: usize, buffer: Value) -> Result<Value> {
+        // Always local (PER_BUFFER_IDX -1): BUFFER's representation.
+        if slot == self.multibyte_slot {
+            return Ok(if matches!(self.object(buffer)?, data::Object::ByteBuffer(_)) { Value::NIL } else { Value::TRUE });
+        }
         if let Some(fwd) = self.forwarding(slot) {
             // A fenced variable's forwarding is the one the fence keeps, so
             // its fence is checked here, for BUFFER.
@@ -290,7 +295,7 @@ impl Vm {
             if let Some(local) = self.declaration_hash_get(table, buffer)? {
                 return Ok(self.slots[local.index(7)? - 1].value);
             }
-            if let Some(fwd) = self.localized_boolean(slot) {
+            if let Some(fwd) = self.localized_forwarded(slot) {
                 return self.forwarded_default(fwd);
             }
         }
@@ -329,7 +334,7 @@ impl Vm {
             if local == base {
                 return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
             }
-            self.slots[local].value = if value == Value::NIL { Value::NIL } else { Value::TRUE };
+            self.slots[local].value = Self::localized_value(fwd, value).map_err(forwarded::fault_text)?;
             return Ok(());
         }
         let local = self.variable_binding_slot(slot, true)?;
@@ -367,8 +372,10 @@ impl Vm {
         }
         Ok(())
     }
-    pub(super) fn promote_boolean_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
-        if self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
+    /// Give the forwarded global built-in at SLOT its local-binding table.
+    pub(super) fn promote_forwarded_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
+        if matches!(self.forwarding(slot), Some(forwarded::Fwd::Bool(_)))
+            && self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
             return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
         }
         if self.local_table(slot)?.is_none() {
@@ -418,7 +425,10 @@ impl Vm {
         if let Some(fwd) = forwarded {
             return self.store_forwarded_binding(base, fwd, value, binding.3).map_err(forwarded::fault_text);
         }
-        self.slots[local].value = if self.localized_boolean(base).is_some() { if value == Value::NIL { Value::NIL } else { Value::TRUE } } else { value };
+        self.slots[local].value = match self.localized_forwarded(base) {
+            Some(fwd) => Self::localized_value(fwd, value).map_err(forwarded::fault_text)?,
+            None => value,
+        };
         Ok(())
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
@@ -490,9 +500,8 @@ impl Vm {
             MakeVariableBufferLocal if self.forwarding(slot).is_some() => {
                 match self.forwarding(slot) {
                     Some(forwarded::Fwd::Buffer(_)) => Ok(symbol),
-                    Some(forwarded::Fwd::Bool(_)) => { self.promote_boolean_local(slot, false)?; Ok(symbol) }
                     Some(forwarded::Fwd::Fence(_)) => self.fenced(slot, crate::world::Access::Write, |vm| vm.variable_primitive(p, start, n)),
-                    _ => Err(forwarded::unlocalizable(&self.symbol_names[slot])),
+                    _ => { self.promote_forwarded_local(slot, false)?; Ok(symbol) }
                 }
             }
             MakeVariableBufferLocal => {
@@ -508,6 +517,7 @@ impl Vm {
             }
             // GNU data.c:2494: all BUFFER_OBJFWD slots become local if set.
             LocalVariableIfSetP if self.forwarding(slot).is_some() => Ok(truth(matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_))))),
+            LocalVariableIfSetP if slot == self.multibyte_slot => Ok(Value::TRUE),
             LocalVariableIfSetP => {
                 let local = self.variable_binding_slot(slot, false)? != slot;
                 let automatic = self.local_table(slot)?.is_some() && !self.slots[slot].explicit_local;
