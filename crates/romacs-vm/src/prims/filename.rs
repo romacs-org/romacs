@@ -38,11 +38,48 @@ pub(super) fn utf8_file_names(cx: &mut Leaf<'_>, operation: &str) -> std::result
 }
 
 defsubr! { name = "directory-files", gnu = "dired.c:379", effect = Global,
-fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, nosort: Value, count: Value) {
+fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, nosort: Value, count: Value) -> Step {
     if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
-    let path = super::fileio::expand_file_name(cx, directory)?;
-    let expanded = cx.string(&path);
-    super::fileio::refuse_handler(cx, expanded, "directory-files")?;
+    super::fileio::expanding(cx, directory, files_expanded, vec![full, pattern, nosort, count, Value::NIL, Value::NIL])
+}}
+
+// Each entry with its attributes in ID-FORMAT: (NAME . ATTRIBUTES).
+defsubr! { name = "directory-files-and-attributes", gnu = "dired.c:407", effect = Global,
+fn directory_files_and_attributes(cx, directory: Value; optional full: Value, pattern: Value, nosort: Value,
+                                  id_format: Value, count: Value) -> Step {
+    if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
+    super::fileio::expanding(cx, directory, files_expanded, vec![full, pattern, nosort, count, Value::TRUE, id_format])
+}}
+
+/// dired.c:404-411 and 440-450: the expanded DIRECTORY's handler lists,
+/// else directory_files_internal, whose Fdirectory_file_name calls its own.
+/// SAVED: FULL PATTERN NOSORT COUNT ATTRS ID-FORMAT.
+fn files_expanded(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]) -> Next {
+    let [full, pattern, nosort, count, attrs, id_format] = saved[..6] else { unreachable!() };
+    let call = if attrs == Value::NIL {
+        super::fileio::handler(cx, directory, "directory-files", vec![directory, full, pattern, nosort, count])?
+    } else {
+        super::fileio::handler(cx, directory, "directory-files-and-attributes", vec![directory, full, pattern, nosort, id_format, count])?
+    };
+    if let Some(call) = call { return call; }
+    match super::savejourney::directory_file_name(cx, directory)? {
+        Step::Done(file) => list_directory(cx, directory, file, saved),
+        Step::Call { f, args, .. } => {
+            let saved = saved.iter().copied().chain([directory]).collect();
+            Ok(Step::Call { f, args, then: files_dir_named, saved })
+        }
+        _ => unreachable!("directory-file-name returns or calls its handler"),
+    }
+}
+
+fn files_dir_named(cx: &mut Leaf<'_>, file: Value, saved: &[Value]) -> Next {
+    list_directory(cx, saved[6], file, &saved[..6])
+}
+
+fn list_directory(cx: &mut Leaf<'_>, directory: Value, file: Value, saved: &[Value]) -> Next {
+    let [full, pattern, nosort, count, attrs, id_format] = saved[..6] else { unreachable!() };
+    let path = cx.string_text(directory)?;
+    let directory_file = cx.string_text(file)?;
     let count = if count == Value::NIL { usize::MAX } else {
         let n = count.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", count))?;
         usize::try_from(n).unwrap_or(usize::MAX)
@@ -50,8 +87,7 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
     if pattern != Value::NIL { cx.string_text(pattern)?; }
     utf8_file_names(cx, "directory-files")?;
     // Open even when COUNT is zero: GNU validates the directory first.
-    let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
-    let entries = crate::host::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", directory_file, e))?;
+    let entries = crate::host::read_dir(&directory_file).map_err(|e| directory_error(cx, "Opening directory", &directory_file, e))?;
     // Rust omits dot entries. Their enumeration order is not specified by GNU;
     // count is applied before sorting, and NOSORT returns reverse enumeration.
     let names = [std::ffi::OsString::from("."), std::ffi::OsString::from("..")]
@@ -67,18 +103,24 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
             if cx.file_name_match(pattern, value)?.is_none() { continue; }
         }
         if matched.len() == count { break; }
-        matched.push(if full != Value::NIL {
+        let shown = if full != Value::NIL {
             format!("{}{name}", if path.ends_with('/') { path.clone() } else { format!("{path}/") })
-        } else { name });
+        } else { name.clone() };
+        matched.push((shown, name));
     }
     if nosort == Value::NIL { matched.sort(); } else { matched.reverse(); }
     let mut result = Value::NIL;
-    for name in matched.into_iter().rev() {
-        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+    for (shown, name) in matched.into_iter().rev() {
+        let mut value = cx.make_string(shown.as_bytes().to_vec(), !shown.is_ascii());
+        if attrs != Value::NIL {
+            // dired.c file_attributes: fstatat on the directory's entry.
+            let attributes = super::savejourney::native_attributes(cx, &format!("{directory_file}/{name}"), id_format)?;
+            value = cx.cons(value, attributes);
+        }
         result = cx.cons(value, result);
     }
-    Ok(result)
-}}
+    Ok(Step::Done(result))
+}
 
 // Ffile_name_all_completions: the entries of DIRECTORY that begin with FILE
 // (ignoring case under `completion-ignore-case') and match every
@@ -86,6 +128,11 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
 // reverse enumeration order. "./" and "../" are entries too.
 defsubr! { name = "file-name-all-completions", gnu = "dired.c:486", effect = Global,
 fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
+    completion_expanding(cx, directory, all_completions_expanded, vec![file])
+}}
+
+fn all_completions_expanded(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]) -> Next {
+    let file = saved[0];
     let (path, _) = match completion_directory(cx, "file-name-all-completions", file, directory, None)? {
         Ok(found) => found,
         Err(handled) => return Ok(handled),
@@ -98,7 +145,7 @@ fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
         result = cx.cons(value, result);
     }
     Ok(Step::Done(result))
-}}
+}
 
 // Ffile_name_completion: the longest common prefix of the completions of FILE
 // in DIRECTORY, t for a sole exact match, nil for none. The scan is here;
@@ -106,6 +153,11 @@ fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
 // `default-directory' bound to DIRECTORY, is Lisp (rlisp/vm/dired.el).
 defsubr! { name = "file-name-completion", gnu = "dired.c:451", effect = Global,
 fn file_name_completion(cx, file: Value, directory: Value; optional predicate: Value) -> Step {
+    completion_expanding(cx, directory, completion_expanded, vec![file, predicate])
+}}
+
+fn completion_expanded(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]) -> Next {
+    let [file, predicate] = saved[..2] else { unreachable!() };
     let (path, directory) = match completion_directory(cx, "file-name-completion", file, directory, Some(predicate))? {
         Ok(found) => found,
         Err(handled) => return Ok(handled),
@@ -136,7 +188,7 @@ fn file_name_completion(cx, file: Value, directory: Value; optional predicate: V
     let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
     let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: completion_loop, saved: args })
-}}
+}
 
 const LISP_HALF: &str = include_str!("../../../../rlisp/vm/dired.el");
 const COMPLETION_LOOP: &str = "romacs--file-name-completion";
@@ -145,13 +197,17 @@ fn completion_loop(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     Ok(Step::Call { f: cx.intern(COMPLETION_LOOP), args: saved.to_vec(), then: completed_by_handler, saved: vec![] })
 }
 
-/// DIRECTORY expanded, as its path and a string, after FILE's and its
+/// Fexpand_file_name (DIRECTORY, Qnil) for THEN.
+fn completion_expanding(cx: &mut Leaf<'_>, directory: Value, then: crate::prim::Then, saved: Vec<Value>) -> Next {
+    if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
+    super::fileio::expanding(cx, directory, then, saved)
+}
+
+/// The expanded DIRECTORY as its path and itself, after FILE's and its
 /// checks; or, as Err, the call to a file-name handler for OPERATION.
 fn completion_directory(cx: &mut Leaf<'_>, operation: &str, file: Value, directory: Value, predicate: Option<Value>)
     -> std::result::Result<std::result::Result<(String, Value), Step>, Fault> {
-    if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
-    let path = super::fileio::expand_file_name(cx, directory)?;
-    let directory = cx.string(&path);
+    let path = cx.string_text(directory)?;
     let symbol = cx.intern(operation);
     for name in [directory, file] {
         cx.string_view(name)?;

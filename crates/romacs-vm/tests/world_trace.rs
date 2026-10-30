@@ -193,10 +193,10 @@ fn keyed_environment_reads_record_form_and_value() {
 #[test]
 fn machine_and_user_facts_are_host_records() {
     let dir = scratch("host");
-    let file = write(&dir.join("host.el"), "(system-name)\n(user-uid)\n(user-real-uid)\n(num-processors)\ninvocation-name\n");
+    let file = write(&dir.join("host.el"), "(system-name)\n(user-uid)\n(user-real-uid)\n(group-gid)\n(group-real-gid)\n(num-processors)\ninvocation-name\n");
     let (_, trace) = build(&[file]);
     let facts: Vec<_> = items(&trace, "records", "host").iter().map(|r| r["fact"].as_str().unwrap().to_owned()).collect();
-    for fact in ["system-name", "euid", "uid", "exe"] {
+    for fact in ["system-name", "euid", "uid", "egid", "gid", "exe"] {
         assert!(facts.iter().any(|f| f == fact), "{fact}: {facts:?}");
     }
     assert!(facts.iter().any(|f| f.starts_with("processors")), "{facts:?}");

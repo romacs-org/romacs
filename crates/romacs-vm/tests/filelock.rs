@@ -121,6 +121,8 @@ fn handlers_use_file_operations_not_buffer_operations() {
     assert_eq!(eval(&mut vm, "(defun fl-handler (op file) (setq fl-seen (list op file)) 'handled)"), "fl-handler");
     assert_eq!(eval(&mut vm, "(let ((file-name-handler-alist '((\"remote:\" . fl-handler)))) (list (file-locked-p \"remote:a\") fl-seen))"), "(handled (file-locked-p \"remote:a\"))");
     assert_eq!(eval(&mut vm, "(let ((file-name-handler-alist '((\"remote:\" . fl-handler)))) (set-buffer-modified-p t) (list (lock-buffer \"remote:a\") fl-seen))"), "(nil (lock-file \"remote:a\"))");
+    // Flock_file returns its handler's value; Flock_buffer and Funlock_file nil.
+    assert_eq!(eval(&mut vm, "(let ((file-name-handler-alist '((\"remote:\" . fl-handler)))) (list (lock-file \"remote:a\") (unlock-file \"remote:b\") fl-seen))"), "(handled nil (unlock-file \"remote:b\"))");
     let p = dir("handler").join("target"); let q = quoted(&p);
     assert_eq!(eval(&mut vm, &format!("(write-region \"\" nil {q} nil t)")), "nil");
     eval(&mut vm, "(set-buffer-modified-p t)");

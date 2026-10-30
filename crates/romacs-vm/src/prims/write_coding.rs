@@ -58,6 +58,13 @@ fn at(r: &mut [Value], stage: Stage) {
 /// Start the choice for registers R (FLAGS zero).
 pub(super) fn choose(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
     debug_assert_eq!(r.len(), REGISTERS);
+    // fileio.c:5355: an auto-save other than into the visited file writes
+    // utf-8-emacs with Unix line ends.
+    if super::fileio::auto_saving(cx)?.is_some() && !super::fileio::auto_saving_into_visited(cx)? {
+        r[VAL] = cx.intern("utf-8-emacs-unix");
+        at(&mut r, Stage::Finish);
+        return advance(cx, r);
+    }
     let csw = var(cx, "coding-system-for-write")?;
     if csw != Value::NIL {
         r[VAL] = csw;

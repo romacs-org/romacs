@@ -119,6 +119,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "auto-resize-tab-bars", gnu: "xdisp.c:38905", kind: Kind::Lisp(Init::True) },
     CVariable { name: "auto-resize-tool-bars", gnu: "xdisp.c:38918", kind: Kind::Lisp(Init::True) },
     CVariable { name: "auto-save-interval", gnu: "keyboard.c:13864", kind: Kind::Int(300) },
+    CVariable { name: "auto-save-include-big-deletions", gnu: "fileio.c:6964", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "auto-save-list-file-name", gnu: "fileio.c:6952", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "auto-save-no-message", gnu: "keyboard.c:13869", kind: Kind::Bool(false) },
     CVariable { name: "auto-save-timeout", gnu: "keyboard.c:13873", kind: Kind::Lisp(Init::Fixnum(30)) },
@@ -634,6 +635,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-file-truename", gnu: "buffer.c:5446", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     CVariable { name: "buffer-read-only", gnu: "buffer.c:5458", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "buffer-file-format", gnu: "buffer.c:5837", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "buffer-auto-save-file-format", gnu: "buffer.c:5842", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     // define-minor-mode records a buffer's enabled minor modes here, and
     // command-completion-default-include-p reads them; nil in a new buffer.
     CVariable { name: "local-minor-modes", gnu: "buffer.c:5249", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
@@ -645,6 +647,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // rename-buffer renames a non-visiting buffer's auto-save file.
     CVariable { name: "buffer-auto-save-file-name", gnu: "buffer.c:5452", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // auto-save reads and resets it; files.el and gnosis read it.
+    // backup-buffer backs a file up once per visit, then sets it.
+    CVariable { name: "buffer-backed-up", gnu: "buffer.c:5461", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "buffer-saved-size", gnu: "buffer.c:5465", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
@@ -1069,7 +1073,7 @@ impl Vm {
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
         matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "local-minor-modes" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name")
+            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "local-minor-modes" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name" | "buffer-backed-up")
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {

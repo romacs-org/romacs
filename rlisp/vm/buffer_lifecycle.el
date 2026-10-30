@@ -44,6 +44,10 @@
         (unless (integerp previous-point) (set-marker previous-point nil)))
       (if allow
           (progn
+            ;; unlock_buffer: a modified buffer's file is unlocked.
+            (if (and (buffer-live-p buffer) (buffer-modified-p buffer)
+                     (stringp (buffer-local-value 'buffer-file-truename buffer)))
+                (unlock-file (buffer-local-value 'buffer-file-truename buffer)))
             ;; kill_buffer_processes (process.c), once the hooks allowed the
             ;; kill; absent only in a VM without the process prelude.
             (if (and (buffer-live-p buffer) (fboundp 'romacs--kill-buffer-processes))
