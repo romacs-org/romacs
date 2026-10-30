@@ -231,7 +231,9 @@ fn observable_divergent_primitives_include_maphash_and_report_what_was_excluded(
         observable_only: true,
     }]);
     assert!(a.names.contains(&"maphash".to_string()));
-    assert!(!a.names.contains(&"car".to_string()));
+    // `car` is sealed (VM2-SEALED1), so it is divergent now; logcount is not.
+    assert!(found("logcount").divergences.is_empty());
+    assert!(!a.names.contains(&"logcount".to_string()));
     let all = Index::embedded().query(&[SetQuery::Divergent {
         observable_only: false,
     }]);
@@ -267,7 +269,9 @@ fn observable_divergent_primitives_include_maphash_and_report_what_was_excluded(
 fn untested_set_is_lexical_and_says_so() {
     let ix = Index::embedded();
     let a = ix.query(&[SetQuery::NoTestMentions]);
-    assert!(!a.names.contains(&"car".to_string()));
+    // `car` is sealed (VM2-SEALED1), so it is divergent now; logcount is not.
+    assert!(found("logcount").divergences.is_empty());
+    assert!(!a.names.contains(&"logcount".to_string()));
     assert!(!a.names.is_empty());
     for n in a.names.iter().take(20) {
         let Lookup::Found(d) = ix.describe(n) else {
