@@ -126,6 +126,7 @@ impl RenderApp {
             lost_flag.store(true, std::sync::atomic::Ordering::SeqCst);
         });
 
+        crate::paint_host::trace_gpu("installing");
         let phys = window.surface_size();
         let raw_scale_factor = window.scale_factor();
         let effective_scale = super::state::effective_window_scale_factor(raw_scale_factor);

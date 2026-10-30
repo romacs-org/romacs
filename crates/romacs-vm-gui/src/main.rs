@@ -390,6 +390,8 @@ const USAGE: &str = "\
 usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE...]
   --loadup              run GNU's loadup chain; a live launch boots from its world
   --world-store DIR     keep worlds in DIR (default $XDG_CACHE_HOME/romacs/worlds)
+  --world-build         make the world a live --loadup launch would boot from
+                        usable, with no window, and exit (what an installer runs)
   --world-reset         forget the store's failed and refused builds, so the next
                         launch builds again
   --world-reset=all     remove the store's worlds and files altogether
@@ -422,8 +424,10 @@ fn run() -> Result<(), String> {
     let mut launch = startup::Launch::Workspace;
     let mut world_store = None;
     let mut world_reset = None;
+    let mut world_build = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--world-build" => world_build = true,
             "--world-store" => world_store = Some(std::path::absolute(args.next().ok_or("missing world store")?).map_err(|e| e.to_string())?),
             // Waiting for a missing world to build is what a launch does
             // now; the flag stays accepted for the scripts that passed it.
@@ -470,7 +474,19 @@ fn run() -> Result<(), String> {
     TRACE_LATENCY.store(trace_latency, std::sync::atomic::Ordering::Relaxed);
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
+    // Startup phases, on the clock of this process's exec, under the trace.
+    let mut phases = trace_latency.then(startup::Phases::from_exec);
+    if let Some(phases) = &mut phases { phases.mark("main"); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
+    // --world-build: the world this launch would boot from, made usable
+    // (built here, or waited for), with no window; then exit. What an
+    // installer runs so a user's first launch restores.
+    if world_build {
+        if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
+        if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
+        let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
+        return world::prepare(&world::open(store, width, height, floor)?, width, height, floor);
+    }
     // A live --loadup launch boots from its world, in --world-store or by
     // default in the user's cache (world::default_store), unless
     // ROMACS_WORLD=off. Its builder builds here, before any window; a launch
@@ -490,8 +506,11 @@ fn run() -> Result<(), String> {
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (host, sender) =
         PaintHost::wayland(std::path::Path::new(&socket), width, height, if live { "romacs — VM" } else { "VM G1a" }.into())?;
+    if let Some(phases) = &mut phases { phases.mark("window"); }
     let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let start = phases.as_ref().map(startup::Phases::start);
     let worker = spawn_evaluator(move || {
+        if let Some(start) = start { startup::begin_phases(start); }
         let sender = std::sync::Arc::new(sender);
         let mut first_presentation = 1;
         let world = world_store.and_then(|store| match world::open(store, width, height, floor) {
@@ -501,6 +520,7 @@ fn run() -> Result<(), String> {
                 None
             }
         });
+        startup::mark_phase("world-open");
         let restored = world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
             // Said first, so a launcher sees it whether or not a window can.
             eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": PREPARING}));
@@ -515,6 +535,7 @@ fn run() -> Result<(), String> {
                 eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted}));
             }
         }); });
+        startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
                      first_presentation, prune)
@@ -753,6 +774,7 @@ fn evaluate(
     after_first_frame: Option<impl FnOnce()>,
 ) -> Result<(), String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
+    startup::mark_phase("layout-engine");
     let (mut vm, carry) = match restored {
         Some((vm, carry)) => {
             let mut vm = *vm;
@@ -761,6 +783,7 @@ fn evaluate(
         }
         None => (Vm::new(), None),
     };
+    startup::mark_phase("vm");
     // Measuring primitives ask the engine that paints (VM2-WTPS1).
     vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
     // The window's session ends with `kill-emacs': its hook has run, so the
@@ -803,10 +826,12 @@ fn evaluate(
         } else if let Some(carry) = carry {
             // As a fresh process takes the per-process startup steps.
             vm.eval_source("(romacs-world-restart)")?;
+            startup::mark_phase("world-restart");
             startup::resume_loadup(&mut vm, launch, carry.loadup)?
         } else {
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
+        startup::mark_phase("session-lisp");
         if quick && launch == startup::Launch::Loadup {
             vm.eval_source(startup::QUICK_START)?;
         }
@@ -818,11 +843,13 @@ fn evaluate(
                 }
             }
         }
+        startup::mark_phase("user-init");
         if launch == startup::Launch::Loadup {
             if let Err(error) = startup::finish_loadup(&mut vm, &started) {
                 eprintln!("romacs: startup after init failed: {error}");
             }
         }
+        startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
         if let Some(loadup) = &started.loadup {
             for line in loadup.table().lines() { eprintln!("romacs-loadup: {line}"); }
@@ -853,10 +880,12 @@ fn evaluate(
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
     }
     let initial = frame(&mut vm, g1, width, height)?;
+    startup::mark_phase("initial-frame");
     let mut pending = std::collections::VecDeque::new();
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
     let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending, true, &mut paint_timings)?;
+    startup::mark_phase("first-paint");
     let mut live_presentation = presentation::Presentation::new();
     let mut terminal_modal = false;
     reply(json!({"ready":true,"presentation":last_presentation()}))?;

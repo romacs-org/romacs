@@ -135,6 +135,7 @@ pub use source_cache::{DIRECT_NODE_LIMIT, PreparedHandle, SourceCacheStats};
 mod bootstrap;
 mod capture;
 mod loader;
+pub use loader::{Step as LoadStep, StepStatus as LoadStepStatus};
 mod autoload;
 mod eval_form;
 mod productivity;

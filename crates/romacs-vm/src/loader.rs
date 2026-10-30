@@ -6,11 +6,53 @@ use std::path::{Path, PathBuf};
 pub(super) struct Loader {
     pub(super) propagate: usize,
     active: Vec<PathBuf>,
-    steps: Vec<serde_json::Value>,
+    /// Every file a step was recorded in, once, in first-step order.
+    files: Vec<PathBuf>,
+    steps: Vec<Step>,
     completed_files: usize,
     completed_forms: usize,
 }
-romacs_snapshot::snapshot_struct!(Loader { propagate, active, steps, completed_files, completed_forms });
+romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms });
+impl Loader {
+    /// PATH's index in `files`, added at the end when new.
+    fn file_index(&mut self, path: &Path) -> usize {
+        self.files.iter().rposition(|p| p == path).unwrap_or_else(|| {
+            self.files.push(path.to_owned());
+            self.files.len() - 1
+        })
+    }
+}
+/// One top-level form the loader read, as the load report tells it: the
+/// file (`Vm::load_step_file`), the form's place and what became of it.
+/// A form that signalled keeps its error and its text; a completed one
+/// keeps neither, so a session's record stays small.
+#[derive(Clone, Debug)]
+pub struct Step {
+    file: usize,
+    /// 1-based, in its file.
+    pub ordinal: usize,
+    /// Byte offset of the form in its file.
+    pub byte: usize,
+    /// 1-based line of the form.
+    pub line: usize,
+    pub status: StepStatus,
+    pub error: Option<String>,
+    pub source: Option<String>,
+}
+romacs_snapshot::snapshot_struct!(Step { file, ordinal, byte, line, status, error, source });
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StepStatus {
+    /// Read and entered, not yet finished.
+    Entered,
+    Ok,
+    Error,
+}
+romacs_snapshot::snapshot_enum!(StepStatus { StepStatus::Entered => (), StepStatus::Ok => (), StepStatus::Error => () });
+impl StepStatus {
+    fn name(self) -> &'static str {
+        match self { StepStatus::Entered => "entered", StepStatus::Ok => "ok", StepStatus::Error => "error" }
+    }
+}
 impl Vm {
     pub(super) fn source_string_if(&self, v: Value) -> Option<&str> {
         if v.tag() != 0 {
@@ -57,8 +99,25 @@ impl Vm {
         self.slots[slot].value = value;
         Ok(())
     }
+    /// The loader's record as JSON: the counters and every step, with a
+    /// failed step's `error` and `source`.
     pub fn load_report(&self) -> serde_json::Value {
-        serde_json::json!({"completed_files":self.loader.completed_files,"completed_forms":self.loader.completed_forms,"steps":self.loader.steps})
+        let steps: Vec<serde_json::Value> = self.loader.steps.iter().map(|step| {
+            let mut json = serde_json::json!({"file": self.load_step_file(step), "ordinal": step.ordinal, "byte": step.byte,
+                                              "line": step.line, "status": step.status.name()});
+            if let Some(error) = &step.error { json["error"] = error.clone().into(); }
+            if let Some(source) = &step.source { json["source"] = source.clone().into(); }
+            json
+        }).collect();
+        serde_json::json!({"completed_files":self.loader.completed_files,"completed_forms":self.loader.completed_forms,"steps":steps})
+    }
+    /// Every top-level form the loader has read this session, in order.
+    pub fn load_steps(&self) -> &[Step] {
+        &self.loader.steps
+    }
+    /// The file STEP's form is in.
+    pub fn load_step_file(&self, step: &Step) -> &Path {
+        &self.loader.files[step.file]
     }
     /// fns.c Fprovide up to its load hooks: record FEATURE (always noting it
     /// for the autoload queue) and SUBFEATURES.
@@ -402,6 +461,7 @@ impl Vm {
         // The last form's value is rooted across reading the next one, which
         // can call Lisp (a `\N{NAME}' character).
         let last = self.root_frame(&[Value::NIL]);
+        let step_file = self.loader.file_index(&path);
         let result = (|| {
             let mut at = 0;
             let mut ordinal = 0;
@@ -430,7 +490,7 @@ impl Vm {
                 line += source[counted..at + begin].iter().filter(|b| **b == b'\n').count();
                 counted = at + begin;
                 let step = self.loader.steps.len();
-                self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":line,"source":form_source,"status":"entered"}));
+                self.loader.steps.push(Step { file: step_file, ordinal, byte: at + begin, line, status: StepStatus::Entered, error: None, source: None });
                 let site = crate::host::enter_site(|| crate::host::Site {
                     file: path.to_string_lossy().into_owned(), line,
                     head: form_source.trim_start().lines().next().unwrap_or("").chars().take(80).collect(),
@@ -444,11 +504,13 @@ impl Vm {
                     Ok(v) => {
                         self.set_rooted(&last, 0, v);
                         self.loader.completed_forms += 1;
-                        self.loader.steps[step]["status"] = "ok".into();
+                        self.loader.steps[step].status = StepStatus::Ok;
                     }
                     Err(e) => {
-                        self.loader.steps[step]["status"] = "error".into();
-                        self.loader.steps[step]["error"] = e.clone().into();
+                        let failed = &mut self.loader.steps[step];
+                        failed.status = StepStatus::Error;
+                        failed.error = Some(e.clone());
+                        failed.source = Some(form_source.to_string());
                         return Err(format!(
                             "{}: line {} form {}: {}: {e}",
                             path.display(),

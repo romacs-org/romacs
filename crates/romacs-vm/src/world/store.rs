@@ -88,6 +88,18 @@ pub enum Launch<T> {
     Chain { reason: Json },
 }
 
+/// Why the arena refused an image, for a launch's reason: a range the
+/// process could not map says at which step and with what error.
+fn refusal(refused: arena::Restore) -> Json {
+    match arena::map_failure() {
+        Some((step, errno)) if refused == arena::Restore::Map => {
+            let error = (errno != 0).then(|| std::io::Error::from_raw_os_error(errno).to_string());
+            json!({"image": "Map", "step": step, "error": error})
+        }
+        _ => json!({"image": format!("{refused:?}")}),
+    }
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -391,7 +403,21 @@ impl World {
                 }
                 None => Launch::Chain { reason: json!({"image": "made for another key"}) },
             },
-            refused => Launch::Chain { reason: json!({"image": format!("{refused:?}")}) },
+            refused => Launch::Chain { reason: refusal(refused) },
+        }
+    }
+
+    /// The world made usable without mapping it: its manifest when it
+    /// already holds, else once a build made it so (built here, holding the
+    /// lock from the check through the spawn, or waited for). The reason it
+    /// could not be, otherwise, as `launch` would boot from source for.
+    pub fn prepare(&self, builder_args: impl FnOnce() -> Vec<OsString>) -> Result<Json, Json> {
+        if disabled() {
+            return Err(json!("ROMACS_WORLD=off"));
+        }
+        match self.usable() {
+            Ok((_, manifest)) => Ok(manifest),
+            Err(reason) => self.build_for(reason, builder_args, true, || {}).map(|(_, manifest)| manifest),
         }
     }
 
