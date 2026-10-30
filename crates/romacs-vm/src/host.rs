@@ -43,6 +43,8 @@ thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
     static CONFINED: Cell<bool> = const { Cell::new(false) };
+    static FLAGS_READER: RefCell<Option<std::sync::mpsc::Sender<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>>> =
+        const { RefCell::new(None) };
 }
 
 pub fn mode() -> Mode {
@@ -798,6 +800,79 @@ pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
     result
 }
 
+/// The type of the filesystem holding PATH: statfs's `f_type`, a magic
+/// number of linux/magic.h. A keyed probe.
+pub fn filesystem_type(path: &Path) -> io::Result<u32> {
+    let result = path_c_string(path).and_then(|name| {
+        let mut buf = std::mem::MaybeUninit::<libc::statfs>::uninit();
+        match unsafe { libc::statfs(name.as_ptr(), buf.as_mut_ptr()) } {
+            // f_type is a signed word; the magic numbers are 32 bits.
+            0 => Ok(unsafe { buf.assume_init() }.f_type as u32),
+            _ => Err(io::Error::last_os_error()),
+        }
+    });
+    if building() {
+        if let Err(e) = &result { confined(path, e); }
+        probed("fs-type", path, result.as_ref().map_or_else(errno, |t| json!(t)));
+    }
+    result
+}
+
+/// The inode flags of DIRECTORY, opened without following a symlink
+/// (FS_IOC_GETFLAGS, linux/fs.h). A keyed probe. Landlock refuses a confined
+/// build a directory open outside its read roots, though the flags read
+/// nothing beneath it, so that thread asks the one `keep_flags_reader`
+/// started before it confined itself.
+pub fn directory_flags(directory: &Path) -> io::Result<u32> {
+    let reader = FLAGS_READER.with(|r| r.borrow().clone());
+    let result = match reader {
+        Some(reader) => {
+            let (reply, answer) = std::sync::mpsc::channel();
+            reader.send((directory.to_owned(), reply)).map_err(|_| io::Error::other("flags reader gone"))
+                .and_then(|()| answer.recv().map_err(|_| io::Error::other("flags reader gone"))?)
+        }
+        None => read_directory_flags(directory),
+    };
+    if building() {
+        probed("dir-flags", directory, result.as_ref().map_or_else(errno, |f| json!(f)));
+    }
+    result
+}
+
+fn read_directory_flags(directory: &Path) -> io::Result<u32> {
+    let name = path_c_string(directory)?;
+    let fd = unsafe { libc::open(name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    // The kernel reads and writes an int, whatever the request's size says.
+    let mut flags: libc::c_int = 0;
+    use std::os::fd::AsRawFd;
+    match unsafe { libc::ioctl(fd.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut flags) } {
+        0 => Ok(flags as u32),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+fn path_c_string(path: &Path) -> io::Result<std::ffi::CString> {
+    std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))
+}
+
+/// Start the thread that reads directory flags for this one
+/// (`directory_flags`), before this thread confines itself: it answers that
+/// one query and makes no other.
+pub(crate) fn keep_flags_reader() -> io::Result<()> {
+    let (reader, queries) = std::sync::mpsc::channel::<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>();
+    std::thread::Builder::new().name("romacs-flags-reader".into()).spawn(move || {
+        for (directory, reply) in queries {
+            let _ = reply.send(read_directory_flags(&directory));
+        }
+    })?;
+    FLAGS_READER.with(|r| *r.borrow_mut() = Some(reader));
+    Ok(())
+}
+
 // Replay.
 
 /// The bytes a record's `encoded` field holds.
@@ -839,6 +914,8 @@ pub fn replay(record: &Json) -> Option<Json> {
                     probed("entry-type", &path, observed);
                 }
                 "statvfs" => { let _ = statvfs(&std::ffi::CString::new(path()?.into_os_string().into_vec()).ok()?); }
+                "fs-type" => { let _ = filesystem_type(&path()?); }
+                "dir-flags" => { let _ = directory_flags(&path()?); }
                 access => {
                     let mut words = access.strip_prefix("access ")?.split(' ');
                     let mode = words.next()?.parse().ok()?;

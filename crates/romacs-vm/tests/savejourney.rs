@@ -170,9 +170,9 @@ fn filename_case_special_file_answers_as_gnu() {
         "nil"
     );
 }
-/// GNU on GNU/Linux answers from the platform and never lists a directory,
-/// so neither a directory's size nor its entries change the answer: a
-/// directory beyond any listing bound answers as an ordinary one does.
+/// No directory is listed, so a directory beyond any listing bound answers
+/// as an ordinary one does; on a filesystem that does not fold case the
+/// measurement is GNU's nil.
 #[test]
 fn filename_case_matches_gnu_beside_a_huge_directory() {
     let fixture = Fixture::new();
@@ -200,6 +200,51 @@ fn filename_case_matches_gnu_beside_a_huge_directory() {
         "(let ((default-directory {})) (file-name-case-insensitive-p \"entry-7\"))",
         serde_json::to_string(&format!("{}/", huge.display())).unwrap());
     assert_eq!(eval(&mut vm, &relative), "nil", "RELATIVE_UNDER_HUGE_DIRECTORY");
+}
+/// A real casefold directory, made without root: a tmpfs mounted with
+/// casefold in a private user and mount namespace (Linux 6.13), where this
+/// test runs itself again. A `+F' directory, its files and its missing
+/// names fold case; a plain directory beside it and the mount's root do
+/// not. Pinned GNU assumes nil for all of them (VM2-SAVE-CASE).
+#[test]
+fn filename_case_measures_a_real_casefold_directory() {
+    const NAME: &str = "filename_case_measures_a_real_casefold_directory";
+    let Some(mount) = std::env::var_os("ROMACS_CASEFOLD_MOUNT") else {
+        let fixture = Fixture::new();
+        let output = std::process::Command::new("unshare")
+            .args(["-rm", "sh", "-c", "mount -t tmpfs -o casefold=utf8-12.1.0 none \"$1\" && exec \"$2\" --exact \"$3\" --nocapture", "sh"])
+            .arg(&fixture.0).arg(std::env::current_exe().unwrap()).arg(NAME)
+            .env("ROMACS_CASEFOLD_MOUNT", &fixture.0)
+            .output().expect("unshare is required");
+        let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+        assert!(output.status.success() && text(&output.stdout).contains("1 passed"),
+                "casefold namespace run failed: {}\n{}", text(&output.stdout), text(&output.stderr));
+        return;
+    };
+    use std::os::fd::AsRawFd;
+    let mount = std::path::PathBuf::from(mount);
+    let (fold, plain) = (mount.join("fold"), mount.join("plain"));
+    std::fs::create_dir(&fold).unwrap();
+    std::fs::create_dir(&plain).unwrap();
+    let directory = std::fs::File::open(&fold).unwrap();
+    let mut flags: libc::c_int = 0;
+    assert_eq!(unsafe { libc::ioctl(directory.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut flags) }, 0);
+    flags |= 0x4000_0000;
+    assert_eq!(unsafe { libc::ioctl(directory.as_raw_fd(), libc::FS_IOC_SETFLAGS, &flags) }, 0, "chattr +F");
+    std::fs::write(fold.join("Abc"), b"").unwrap();
+    assert!(fold.join("ABC").exists(), "the directory folds case");
+    let names = [fold.clone(), fold.join("Abc"), fold.join("missing/nested"), plain.clone(), plain.join("x"), mount.clone()];
+    let calls: Vec<String> = names.iter().map(|name| format!(
+        "(condition-case e (file-name-case-insensitive-p {}) (error e))",
+        serde_json::to_string(name).unwrap())).collect();
+    let source = format!("(list {})", calls.join(" "));
+    let output = std::process::Command::new(pinned_gnu())
+        .args(["--batch", "-Q", "--eval", &format!("(prin1 {source})")])
+        .output().expect("pinned GNU is required");
+    assert!(output.status.success(), "GNU oracle failed: {output:?}");
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "(nil nil nil nil nil nil)", "GNU_ASSUMES_NIL");
+    let mut vm = Vm::new();
+    assert_eq!(eval(&mut vm, &source), "(t t t nil nil nil)", "CASEFOLD_MEASURED");
 }
 #[test]
 fn filename_case_handler_gets_expanded_name() {

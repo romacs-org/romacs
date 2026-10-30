@@ -38,7 +38,9 @@ fn handled(abi: i64) -> u64 {
 }
 
 /// Confine this thread: read and execute beneath each of READ, write each
-/// file of WRITE, nothing else. A root that does not exist is skipped.
+/// file of WRITE, nothing else, but for directory flags, which an
+/// unconfined thread reads for it (`host::directory_flags`). A root that
+/// does not exist is skipped.
 pub fn confine(read: &[PathBuf], write: &[PathBuf]) -> io::Result<()> {
     restrict(read, write, None)
 }
@@ -70,6 +72,7 @@ fn restrict(read: &[PathBuf], write: &[PathBuf], store: Option<&Path>) -> io::Re
     if let Some(store) = store {
         allow(&ruleset, store, READ_FILE | READ_DIR | WRITE_FILE | REMOVE_FILE | MAKE_REG | (handled & TRUNCATE))?;
     }
+    crate::host::keep_flags_reader()?;
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
         return Err(io::Error::last_os_error());
     }

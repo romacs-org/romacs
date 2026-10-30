@@ -258,11 +258,99 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
     if handler != Value::NIL {
         return Ok(Step::Call { f: handler, args: vec![operation, expanded], then: returned, saved: vec![] });
     }
-    Ok(Step::Done(if FILESYSTEMS_FOLD_CASE { Value::TRUE } else { Value::NIL }))
+    let path = cx.string_text(expanded)?.to_owned();
+    Ok(Step::Done(if folds_case(std::path::Path::new(&path)) { Value::TRUE } else { Value::NIL }))
 }}
 
-/// fileio.c `file_name_case_insensitive_err': filesystems are
-/// case-sensitive on every supported system but MS-Windows (and MS-DOS and
-/// Cygwin). GNU asks no directory on GNU/Linux, so neither the answer nor
-/// its cost depends on what a directory holds.
-const FILESYSTEMS_FOLD_CASE: bool = cfg!(windows);
+// Deliberately differs from pinned GNU, whose GNU/Linux answer is nil by
+// platform assumption (fileio.c `file_name_case_insensitive_err'): the
+// filesystem is measured, by its type and its directory's casefold flag. No
+// directory is listed, so its size cannot matter, and every failure answers
+// GNU's nil.
+#[cfg(target_os = "linux")]
+fn folds_case(path: &std::path::Path) -> bool {
+    let Some(directory) = containing_directory(path) else { return false };
+    classify_case(crate::host::filesystem_type(&directory), || crate::host::directory_flags(&directory))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn folds_case(_: &std::path::Path) -> bool {
+    cfg!(windows)
+}
+
+/// PATH when it is a directory, else the directory its name is in: the
+/// nearest that exists, as GNU's walk up the tree finds on trouble.
+#[cfg(target_os = "linux")]
+fn containing_directory(mut path: &std::path::Path) -> Option<std::path::PathBuf> {
+    loop {
+        match crate::host::symlink_metadata(path) {
+            Ok(m) if m.file_type().is_dir() => return Some(path.to_owned()),
+            Ok(_) => return path.parent().map(std::path::Path::to_owned),
+            Err(_) => path = path.parent()?,
+        }
+    }
+}
+
+// Filesystem magic numbers (statfs(2); linux/magic.h, else the driver).
+const MSDOS_SUPER_MAGIC: u32 = 0x4d44; // vfat and msdos
+const EXFAT_SUPER_MAGIC: u32 = 0x2011_bab0;
+const NTFS_SB_MAGIC: u32 = 0x5346_544e; // fs/ntfs, case-insensitive unless case_sensitive=yes
+const HFS_SUPER_MAGIC: u32 = 0x4244;
+const HFSPLUS_SUPER_MAGIC: u32 = 0x482b;
+const EXT4_SUPER_MAGIC: u32 = 0xef53; // ext2, ext3 and ext4
+const F2FS_SUPER_MAGIC: u32 = 0xf2f5_2010;
+const TMPFS_MAGIC: u32 = 0x0102_1994; // casefold since Linux 6.13
+/// linux/fs.h: "case-insensitive name lookup" on this directory.
+const FS_CASEFOLD_FL: u32 = 0x4000_0000;
+
+/// Whether a filesystem of type FS_TYPE folds case: by its type, or, where
+/// folding is a per-directory attribute, by the directory's FLAGS, asked
+/// only there. Any error answers nil, as GNU does when it cannot tell.
+fn classify_case(fs_type: std::io::Result<u32>, flags: impl FnOnce() -> std::io::Result<u32>) -> bool {
+    match fs_type {
+        Ok(MSDOS_SUPER_MAGIC | EXFAT_SUPER_MAGIC | NTFS_SB_MAGIC | HFS_SUPER_MAGIC | HFSPLUS_SUPER_MAGIC) => true,
+        Ok(EXT4_SUPER_MAGIC | F2FS_SUPER_MAGIC | TMPFS_MAGIC) => flags().is_ok_and(|f| f & FS_CASEFOLD_FL != 0),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod case_tests {
+    use super::*;
+    fn error(errno: i32) -> std::io::Result<u32> { Err(std::io::Error::from_raw_os_error(errno)) }
+    fn unasked() -> std::io::Result<u32> { panic!("flags asked of a filesystem without casefold") }
+
+    #[test]
+    fn a_folding_filesystem_type_answers_t_without_flags() {
+        for magic in [MSDOS_SUPER_MAGIC, EXFAT_SUPER_MAGIC, NTFS_SB_MAGIC, HFS_SUPER_MAGIC, HFSPLUS_SUPER_MAGIC] {
+            assert!(classify_case(Ok(magic), unasked), "{magic:#x}");
+        }
+    }
+
+    #[test]
+    fn other_filesystem_types_answer_nil_without_flags() {
+        // btrfs, xfs, ntfs3 (case-sensitive unless mounted nocase), CIFS,
+        // SMB2 (the server and mount options decide), FUSE.
+        for magic in [0x9123_683e, 0x5846_5342, 0x7366_746e, 0xff53_4d42, 0xfe53_4d42, 0x6573_5546] {
+            assert!(!classify_case(Ok(magic), unasked), "{magic:#x}");
+        }
+    }
+
+    #[test]
+    fn a_casefold_capable_filesystem_answers_from_the_directory_flag() {
+        for magic in [EXT4_SUPER_MAGIC, F2FS_SUPER_MAGIC, TMPFS_MAGIC] {
+            assert!(classify_case(Ok(magic), || Ok(FS_CASEFOLD_FL | 0x80000)), "{magic:#x}");
+            assert!(!classify_case(Ok(magic), || Ok(0x80000)), "{magic:#x}");
+            for errno in [libc::ENOTTY, libc::EPERM, libc::EACCES, libc::ELOOP] {
+                assert!(!classify_case(Ok(magic), || error(errno)), "{magic:#x} {errno}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_statfs_error_answers_nil() {
+        for errno in [libc::EACCES, libc::ENOENT, libc::ENOSYS] {
+            assert!(!classify_case(error(errno), unasked), "{errno}");
+        }
+    }
+}
