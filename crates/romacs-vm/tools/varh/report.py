@@ -14,18 +14,12 @@ ORDER = ["PASS", "PASS-REGIME", "VALUE", "DATA", "CONDITION", "SIGNAL-VS-VALUE",
 
 # One-line explanation per pinned row (hand-written; the class is the oracle's).
 PIN_WHY = {
-    "per-buffer/042": "make-local-variable of an object built-in (help-char): VM2 signals, GNU localizes (SYMBOL_LOCALIZED over the forward)",
     "per-buffer/043": "make-local-variable of a bool built-in: VM2 signals, GNU localizes",
-    "per-buffer/044": "make-local-variable of an int built-in: VM2 signals, GNU localizes",
-    "per-buffer/048": "same unmodelled localization, then set-default must skip the local buffer",
-    "per-buffer/049": "same, bool kind",
-    "per-buffer/050": "same, int kind",
+    "per-buffer/049": "set-default of a localized bool built-in to a non-Boolean (71): VM2 refuses (VM2-CVAR2), GNU stores it",
     "local-variable-if-set-p/012": "VM2 BUG: local-variable-if-set-p has arity 1; GNU (subr-arity) is (1 . 2)",
     "local-variable-if-set-p/013": "same arity bug (per-buffer variable)",
     "local-variable-if-set-p/014": "same arity bug (control: ordinary defvar'd variable; fails at 6eb76ddc too)",
     "local-variable-if-set-p/015": "same arity bug (control: make-variable-buffer-local'd variable)",
-    "local-variable-if-set-p/028": "make-local-variable of int built-in refused by VM2 (caught), so local-variable-if-set-p stays nil; GNU t",
-    "local-variable-if-set-p/032": "make-variable-buffer-local of int built-in refused by VM2 (caught); GNU makes it automatically local: t",
 }
 
 

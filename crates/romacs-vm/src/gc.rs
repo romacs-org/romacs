@@ -544,6 +544,8 @@ impl Vm {
     /// `roots`; compaction rewrites them. Never share private Values across VMs.
     /// Runtime register, global, binding and inline-cache roots are added here.
     pub(super) fn collect_marked(&mut self, roots: &mut [Value]) {
+        // Buffers move and local bindings go (`Vm::eval_limit_local').
+        self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);
         let before = self.heap_objects();
