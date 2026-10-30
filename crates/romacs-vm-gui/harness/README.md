@@ -116,3 +116,87 @@ and its comparison policy in its docstring:
   the running dashboard at 127.0.0.1:9119 (dashboard, session browser and
   search, a session's history), its token discovered by hermes and never
   reported.
+
+# Paired-session bench: agents drive GNU and Romacs side by side
+
+`bench/bench.py` is an MCP server for agents.  `bench_start` launches pinned
+GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
+HOME, both on the owner's session (`bench/owner.py`: init.el's editing,
+completion (fido-vertical), org, dired, project, vc, vc-plus, eat, eshell,
+gnosis and hermes blocks, without straight).  Each engine serves
+`rlisp/romacs-mcp.el` with the session tools from
+`rlisp/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
+expose the same tools with the same result shapes:
+
+* `romacs_send_keys`: `kbd` keys or literal text, fed through
+  `unread-command-events`.  By default it waits for each key to be consumed
+  and the command loop to go idle, like typing; `burst` queues all keys at
+  once.
+* `romacs_wait_idle`: answers once input is drained, the loop has waited for
+  input `settle` seconds, no one-shot timer is due within `horizon`, and no
+  process changed status or buffer for `settle` seconds, or at `timeout`.
+  It says which of these held.
+* `romacs_observe`: the selected window and buffer, the window tree, and
+  each window's start, point, mode and header lines and displayed rows.
+  Invisible text is dropped; display and overlay strings are included, so
+  icomplete's candidates show.  Face runs are optional.  Also the
+  minibuffer, the echo area, `*Messages*` lines since a cursor, the last
+  command-loop error, an optional backtrace, the modes and the buffer list.
+
+Both tools that wait answer later through `romacs-mcp-defer`, so the command
+loop keeps running while they wait.  The bench starts the endpoint with
+`romacs-mcp-start-loopback`: 127.0.0.1 on an ephemeral port, and the peer's
+first line must be a per-session token.  Romacs's GUI host refuses local
+network processes, so `romacs-mcp-start` cannot listen there.
+
+The bench's own tools take `engine` (`gnu`, `romacs` or `both`):
+`bench_start`, `bench_send_keys` (events or wtype), `bench_wait_idle`,
+`bench_observe`, `bench_eval`, `bench_screenshot`, `bench_compare` (verdict
+same / differs / romacs-error with the differences, under the policy in
+the docstring) and `bench_stop`.  Every call is appended to the session's
+`recording.jsonl`, and its full result to `results.jsonl`.
+
+Data safety: the project is a `git clone --no-hardlinks` copy and the org
+file a copy, both in the private HOME.  The gnosis database is a reflink copy
+of the copy named by `--gnosis-db`, never the live database.  Hermes attaches
+to the running dashboard at 127.0.0.1:9119.  A key that sends a hermes prompt
+must carry `effect=hermes-prompt`.  The bench allows one per engine per
+session, and replay skips such keys unless `--allow-effect hermes-prompt` is
+given.
+
+```sh
+source ~/.cache/claude-scratch/bin/romacs-env.sh   # pinned GNU, ROMACS_GNU_SOURCE
+export ROMACS_BENCH_ROMACS=$CARGO_TARGET_DIR/gate/romacs-vm-gui
+export ROMACS_BENCH_OUTPUT=~/.cache/romacs-bench ROMACS_BENCH_GNOSIS_DB=/path/to/copy/gnosis.db
+export ROMACS_BENCH_ORG=/path/to/notes.org   # copied to ~/Documents/<its name> in each private HOME
+# Claude Code
+claude mcp add romacs-bench -e ROMACS_BENCH_ROMACS -e ROMACS_GNU_ORACLE -e ROMACS_GNU_SOURCE \
+  -e ROMACS_BENCH_OUTPUT -e ROMACS_BENCH_GNOSIS_DB -e ROMACS_BENCH_ORG -- python3 -B "$PWD/crates/romacs-vm-gui/harness/bench/bench.py" mcp
+# Codex: ~/.codex/config.toml
+#   [mcp_servers.romacs-bench]
+#   command = "python3"
+#   args = ["-B", "/path/to/romacs/crates/romacs-vm-gui/harness/bench/bench.py", "mcp"]
+#   env = { ROMACS_BENCH_ROMACS = "...", ROMACS_GNU_ORACLE = "...", ROMACS_GNU_SOURCE = "...",
+#           ROMACS_BENCH_OUTPUT = "...", ROMACS_BENCH_GNOSIS_DB = "...", ROMACS_BENCH_ORG = "..." }
+#   tool_timeout_sec = 600
+# Without an MCP client: a daemon and one call at a time
+python3 -B crates/romacs-vm-gui/harness/bench/bench.py daemon --control $XDG_RUNTIME_DIR/bench.sock
+python3 -B crates/romacs-vm-gui/harness/bench/bench.py call --control $XDG_RUNTIME_DIR/bench.sock \
+  bench_send_keys '{"keys": "C-x C-f", "wait": 10, "step": "find-file"}'
+# Re-drive a recording against a new binary, the GNU side cached from a run
+python3 -B crates/romacs-vm-gui/harness/bench/bench.py replay \
+  crates/romacs-vm-gui/harness/bench/recordings/daily-journey.jsonl \
+  --output OUT --gnu-cache RUN/session-*/results.jsonl
+```
+
+The first time `bench_start` runs for a package set, the pinned GNU
+byte-compiles that set, which takes minutes.  After that, a start takes
+about 10 s for GNU and 25-35 s for Romacs.  `recordings/daily-journey.jsonl`
+is the first recorded agent session, the owner's daily journey: find-file
+and minibuffer motion, editing, project commands, org, a gnosis review,
+one hermes project-chat prompt, help and search commands, and quitting.
+It has 103 compared steps.  Replaying it with the GNU side cached takes
+about 5 minutes.  It keeps observations out of the repository: only the
+calls and their verdicts are recorded, and a run's `results.jsonl` stays
+local.  Gnosis due cards and model replies depend on the day, so on
+replay those steps can diverge for reasons outside Romacs.
