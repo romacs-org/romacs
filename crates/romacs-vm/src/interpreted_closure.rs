@@ -217,6 +217,10 @@ mod tests {
                 "(progn (defalias 'listed (lambda (a &optional b &rest c) (list a b c))) (list (aref (symbol-function 'listed) 0) (aref (let ((y 1)) (lambda (x) (+ x y))) 0) (aref (lambda () 1) 0) (listed 1)))",
                 "((a &optional b &rest c) (x) nil (1 nil nil))",
             );
+            // A parameter only the lambda list names survives collection.
+            vm.eval_source_raw("(setq uninterned-parameter (eval (list 'lambda (list (intern \"argument-name\" (obarray-make))) 1) t)) (funcall uninterned-parameter 0)").unwrap();
+            vm.collect(&mut []);
+            check(&mut vm, "(symbol-name (car (aref uninterned-parameter 0)))", "\"argument-name\"");
         }
     }
 }
