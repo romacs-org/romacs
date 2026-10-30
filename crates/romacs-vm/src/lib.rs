@@ -84,6 +84,7 @@ mod posix_tz;
 mod tzfile;
 mod undo;
 mod insdel;
+mod indirect;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};

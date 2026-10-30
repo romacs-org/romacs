@@ -30,12 +30,10 @@ fn char_before(cx; optional position: Value) {
     cx.character_before(position)
 }}
 
-// VM2 has no indirect buffers (no make-indirect-buffer), so no buffer has
-// a base buffer.
 defsubr! { name = "buffer-base-buffer", gnu = "buffer.c:1342", effect = Reads,
 fn buffer_base_buffer(cx; optional buffer: Value) {
-    cx.decode_buffer(buffer)?;
-    Ok(Value::NIL)
+    let buffer = cx.decode_buffer(buffer)?;
+    Ok(cx.buffer_base(buffer))
 }}
 
 /// GNU Fbarf_if_buffer_read_only (buffer.c:2465): signal `buffer-read-only'

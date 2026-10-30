@@ -279,6 +279,19 @@ GNU pin: `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea`, `src/search.c:2344`.
   <!-- symbols: insert-file-contents, set-auto-coding-function -->
 
 
+- **VM2-INDIRECT1 — indirect buffers share only multibyte text.** GNU makes
+  an indirect buffer of any buffer and lets `set-buffer-multibyte` convert a
+  base buffer's text for all its indirect buffers. VM2 shares a multibyte
+  (UTF-8) buffer's text only: `make-indirect-buffer` of a unibyte buffer
+  signals `VM2 has no indirect buffer of a unibyte buffer`, and making a base
+  buffer unibyte while it has indirect buffers (by `set-buffer-multibyte` or
+  `insert-file-contents`'s coding toggle) signals `VM2 cannot make a buffer
+  sharing its text unibyte`, before anything changes. In an indirect buffer
+  `set-buffer-multibyte` signals GNU's own error. No caller is known to make
+  an indirect buffer of unibyte text; comint, org and markdown-ts use
+  multibyte ones (`tests/indirect_buffer.rs`).
+  <!-- symbols: make-indirect-buffer, set-buffer-multibyte -->
+
 - **VM2-BUFLIFE1 — missing process subsystem.** Pinned GNU
   `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea` runs the default
   `process-kill-buffer-query-function` and returns t when killing a normal

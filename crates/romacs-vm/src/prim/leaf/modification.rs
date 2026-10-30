@@ -10,8 +10,8 @@ impl Leaf<'_> {
             }
         };
         Ok(match &self.vm.objects[index] {
-            data::Object::Buffer(b) => b.state.modification,
-            data::Object::ByteBuffer(b) => b.state.modification,
+            data::Object::Buffer(b) => *b.state.modification,
+            data::Object::ByteBuffer(b) => *b.state.modification,
             _ => unreachable!(),
         })
     }

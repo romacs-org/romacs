@@ -819,6 +819,13 @@ pub(crate) fn file_identity(path: &str) -> Option<(u64, u64)> {
 
 impl PerBuffer {
     pub(crate) fn editor_mark(&self) -> Option<Value> { self.4 }
+    /// Forget the visited file's identity and modification time, as a
+    /// buffer that visits nothing has them.
+    pub(crate) fn reset_visit(&mut self) {
+        self.1 = VisitedModtime::default();
+        self.2 = None;
+        self.3 = None;
+    }
     pub(crate) fn set_editor_mark(&mut self, marker: Value) { self.4 = Some(marker); }
     pub(crate) fn get(&self, i: u16) -> Option<Value> {
         self.0.get(i as usize).copied().flatten()
@@ -1077,6 +1084,7 @@ impl Vm {
         }
     }
     pub(super) fn forwarded_buffer_value(&mut self, buffer: usize, i: u16) -> Value {
+        let buffer = self.per_buffer_owner(buffer, i);
         if let Some(value) = self.per_buffer(buffer).and_then(|p| p.get(i)) { return value; }
         if self.per_buffer_always_local(i) {
             let value = self.per_buffer_initial(i);
@@ -1108,7 +1116,20 @@ impl Vm {
     }
     pub(crate) fn set_undo_list_of(&mut self, buffer: usize, value: Value) {
         let i = self.undo_list_index();
+        let buffer = self.per_buffer_owner(buffer, i);
         if let Some(locals) = self.per_buffer_mut(buffer) { locals.set(i, value); }
+    }
+    /// The buffer whose slot I buffer BUFFER reads and writes: its own,
+    /// but an indirect buffer's undo list is its base's, as GNU's
+    /// set_buffer_internal_2 hands the one list between them (Bug#18180).
+    fn per_buffer_owner(&mut self, buffer: usize, i: u16) -> usize {
+        if i != self.undo_list_index() {
+            return buffer;
+        }
+        match self.objects.get(buffer) {
+            Some(data::Object::Buffer(b)) if b.base != Value::NIL && b.state.live => b.base.index(0).expect("base buffer") - 1,
+            _ => buffer,
+        }
     }
     fn undo_list_index(&mut self) -> u16 {
         if self.undo_list_slot == u16::MAX {
@@ -1247,6 +1268,7 @@ impl Vm {
                 // GNU writes the buffer's slot whether or not its flag is
                 // set; an unflagged slot always mirrors the default, so VM2
                 // keeps only flagged (local) values.
+                let buffer = self.per_buffer_owner(buffer, i);
                 if self.per_buffer_local_p(buffer, i) {
                     self.per_buffer_mut(buffer).expect("live buffer").set(i, value);
                 }
@@ -1370,7 +1392,10 @@ impl Vm {
                 self.forwarded.ints[i as usize] = n;
             }
             Fwd::Buffer(i) if let_default => self.forwarded.defaults[i as usize] = old,
-            Fwd::Buffer(i) => self.per_buffer_mut(local.expect("live owner")).expect("live buffer").set(i, old),
+            Fwd::Buffer(i) => {
+                let owner = self.per_buffer_owner(local.expect("live owner"), i);
+                self.per_buffer_mut(owner).expect("live buffer").set(i, old)
+            }
         }
         Ok(())
     }
@@ -1480,3 +1505,21 @@ pub(super) fn unlocalizable(name: &str) -> String {
 #[cfg(test)]
 #[path = "forwarded_tests.rs"]
 mod forwarded_tests;
+
+impl Vm {
+    /// GNU `bset_<field> (b, VALUE)` for buffer INDEX: its own slot of the
+    /// per-buffer variable NAME, or its Lisp local of NAME when it has one.
+    pub(crate) fn set_per_buffer_of(&mut self, index: usize, name: &str, value: Value) {
+        if let Some(Fwd::Buffer(i)) = self.forwarded.lookup(name) {
+            if let Some(locals) = self.per_buffer_mut(index) { locals.set(i, value); }
+        } else if let Some(&slot) = self.names.get(name) {
+            let (table, buffer) = (self.slots[slot].local, Value::reference(index + 1, 0));
+            if table != Value::NIL
+                && let Some(binding) = self.declaration_hash_get(table, buffer).ok().flatten()
+                && let Ok(local) = binding.index(7)
+            {
+                self.slots[local - 1].value = value;
+            }
+        }
+    }
+}
