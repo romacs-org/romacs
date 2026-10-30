@@ -79,6 +79,14 @@ impl Leaf<'_> {
         if self.is_category_table(table) { Ok(table) } else { Err(Fault::Wrong("category-table-p", table)) }
     }
 
+    /// TABLE, checked, for reading: private or frozen.
+    pub(crate) fn category_table_ref(&self, table: Value) -> std::result::Result<&crate::char_table::CharTable, Fault> {
+        match self.vm.object(table).map_err(Fault::Error)? {
+            data::Object::CharTable(t) => Ok(t),
+            _ => unreachable!("checked category table"),
+        }
+    }
+
     /// TABLE, checked, for writing; a frozen table refuses (`frozen.rs`).
     pub(crate) fn category_table(&mut self, table: Value) -> std::result::Result<&mut crate::char_table::CharTable, Fault> {
         match self.object_mut(table)? {
@@ -88,12 +96,12 @@ impl Leaf<'_> {
     }
 
     pub(crate) fn category_docstring(&mut self, table: Value, category: usize) -> super::super::Out {
-        let docs = self.category_table(table)?.extras[0];
+        let docs = self.category_table_ref(table)?.extras[0];
         self.vector_get(docs, Value::integer(category as i64 - 32).unwrap())
     }
 
     pub(crate) fn set_category_docstring(&mut self, table: Value, category: usize, doc: Value) -> std::result::Result<(), Fault> {
-        let docs = self.category_table(table)?.extras[0];
+        let docs = self.category_table_ref(table)?.extras[0];
         self.vector_set(docs, Value::integer(category as i64 - 32).unwrap(), doc).map(|_| ())
     }
 
@@ -130,7 +138,7 @@ impl Leaf<'_> {
 
     /// copy_category_table: fresh sets everywhere, a fresh docstring vector.
     pub(crate) fn copy_category_table(&mut self, table: Value) -> super::super::Out {
-        let mut copy = self.category_table(table)?.clone();
+        let mut copy = self.category_table_ref(table)?.clone();
         let mut entries = Vec::new();
         copy.map_entries(&mut |value| entries.push(*value));
         let mut copies = Vec::with_capacity(entries.len());

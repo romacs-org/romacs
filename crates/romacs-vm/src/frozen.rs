@@ -59,6 +59,10 @@ const KIND_BIGNUM: u8 = 5;
 const KIND_BOOL_VECTOR: u8 = 6;
 const KIND_HASH_TABLE: u8 = 7;
 const KIND_CHAR_TABLE: u8 = 8;
+/// A string's flags: multibyte, and a `LispString` (with properties) rather
+/// than a bytes object.
+const STRING_MULTIBYTE: u8 = 1;
+const STRING_OBJECT: u8 = 2;
 pub(crate) const READ_ONLY: &str = "Attempt to modify read-only object";
 
 /// The region id of a frozen payload (0 for the executable image).
@@ -215,11 +219,18 @@ impl<'a> Walk<'a> {
         Refusal { object: self.nodes[node].value, path }
     }
 
+    fn symbol_named(&self, v: Value, name: &str) -> bool {
+        v.index_if(7).and_then(|i| i.checked_sub(1)).and_then(|slot| self.vm.symbol_names.get(slot)).is_some_and(|n| n == name)
+    }
+
     /// Whether the object V refers to can be frozen, by kind.
-    fn freezable(object: &Object) -> bool {
+    fn freezable(&self, object: &Object) -> bool {
         match object {
             Object::String(_) | Object::RawString(_) | Object::Bytes(_) | Object::Vector(_) | Object::Record(_)
-            | Object::Float(_) | Object::Bignum(_) | Object::BoolVector(_) | Object::CharTable(_) => true,
+            | Object::Float(_) | Object::Bignum(_) | Object::BoolVector(_) => true,
+            // A syntax table is a char-table whose purpose says so (GNU's
+            // own) or the native one; both refuse, as the design states.
+            Object::CharTable(t) => !self.symbol_named(t.purpose, "syntax-table"),
             Object::HashTable(t) => t.weakness == hash::Weakness::None && !t.local_bindings,
             Object::SyntaxTable(_) | Object::Window(_) | Object::Frame(_) | Object::Terminal(_) | Object::WindowConfiguration(_)
             | Object::Sqlite(_) | Object::Process(_) | Object::Finalizer(_) | Object::SubCharTable(_) | Object::MapKeymapCursor(_)
@@ -259,7 +270,7 @@ impl<'a> Walk<'a> {
                     if self.memo.contains_key(&value.0) { continue; }
                     let node = self.nodes.len();
                     self.nodes.push(Node { value, parent, label });
-                    let Some(object) = self.vm.object_if(value).filter(|o| Self::freezable(o)) else { return Err(self.refusal(node)) };
+                    let Some(object) = self.vm.object_if(value).filter(|o| self.freezable(o)) else { return Err(self.refusal(node)) };
                     self.memo.insert(value.0, Edge::Object(self.object_nodes.len()));
                     self.object_nodes.push(node);
                     match object {
@@ -355,7 +366,7 @@ impl<'a> Walk<'a> {
         match object {
             Object::String(s) | Object::RawString(s) => {
                 w.u8(KIND_STRING);
-                w.u8(u8::from(s.is_multibyte()));
+                w.u8(u8::from(s.is_multibyte()) | STRING_OBJECT);
                 w.bytes(s.bytes());
                 let runs = s.properties.runs(coordinates::ByteOffset(0)..coordinates::ByteOffset(s.bytes().len()));
                 w.u32(runs.len() as u32);
@@ -441,7 +452,7 @@ struct Decoded {
 }
 
 enum DecodedObject {
-    String { multibyte: bool, bytes: Vec<u8>, runs: Vec<(usize, usize, Vec<(String, Edge)>)> },
+    String { multibyte: bool, object: bool, bytes: Vec<u8>, runs: Vec<(usize, usize, Vec<(String, Edge)>)> },
     Vector(Vec<Edge>),
     Record(Vec<Edge>),
     Float(f64),
@@ -477,7 +488,8 @@ fn decode(bytes: &[u8]) -> Result<Decoded> {
         let mut r = Reader { bytes: &bytes[start..end], at: 0 };
         let object = match r.u8()? {
             KIND_STRING => {
-                let multibyte = r.u8()? == 1;
+                let flags = r.u8()?;
+                let (multibyte, object) = (flags & STRING_MULTIBYTE != 0, flags & STRING_OBJECT != 0);
                 let text = r.bytes()?.to_vec();
                 let mut runs = vec![];
                 for _ in 0..r.u32()? {
@@ -491,7 +503,7 @@ fn decode(bytes: &[u8]) -> Result<Decoded> {
                     runs.push((from, to, values));
                 }
                 if multibyte && !internal_encoding(&text) { return Err("frozen multibyte string is not internal encoding".into()); }
-                DecodedObject::String { multibyte, bytes: text, runs }
+                DecodedObject::String { multibyte, object, bytes: text, runs }
             }
             kind @ (KIND_VECTOR | KIND_RECORD) => {
                 let n = r.count()?;
@@ -502,7 +514,7 @@ fn decode(bytes: &[u8]) -> Result<Decoded> {
             KIND_FLOAT => DecodedObject::Float(f64::from_bits(r.u64()?)),
             KIND_BIGNUM => DecodedObject::Bignum(r.bytes()?.to_vec()),
             KIND_BOOL_VECTOR => {
-                let len = r.count()?;
+                let len = usize::try_from(r.u64()?).map_err(|_| "frozen bool-vector length overflow")?;
                 let bits = r.bytes()?.to_vec();
                 if bits.len() != len.div_ceil(8) { return Err("frozen bool-vector length mismatch".into()); }
                 DecodedObject::BoolVector { len, bytes: bits }
@@ -633,6 +645,12 @@ impl Vm {
         READ_ONLY.into()
     }
 
+    /// The same signal as a leaf's fault, for writers that return one.
+    pub(crate) fn read_only_fault(&mut self, object: Value) -> prim::Fault {
+        let (condition, data) = self.read_only_signal(object);
+        prim::Fault::Signal(condition, data)
+    }
+
     pub(crate) fn read_only_signal(&mut self, object: Value) -> (Value, Value) {
         let message = self.allocate_object(Object::String(Box::new(data::LispString::new(READ_ONLY))));
         let condition = self.intern("error");
@@ -748,11 +766,11 @@ impl Vm {
         let mut objects = Vec::with_capacity(decoded.objects.len());
         for object in &decoded.objects {
             objects.push(match object {
-                DecodedObject::String { multibyte, bytes, runs } => {
-                    if !multibyte {
+                DecodedObject::String { multibyte, object, bytes, runs } => {
+                    if !object {
                         Object::Bytes(bytes.clone())
                     } else {
-                        let mut string = data::LispString::from_bytes(bytes.clone(), true);
+                        let mut string = data::LispString::from_bytes(bytes.clone(), *multibyte);
                         for (from, to, values) in runs {
                             for (key, edge) in values {
                                 string.properties.put(coordinates::ByteOffset(*from)..coordinates::ByteOffset(*to), key, value(*edge));
@@ -809,10 +827,14 @@ impl Vm {
     }
 }
 
-/// Why a freeze or thaw did not happen.
+/// Why a freeze, thaw or send did not happen.
 pub(crate) enum FreezeError {
     Refused(Refusal),
     Failed(String),
+    /// The peer's queue (its socket buffer) is full (`isolate.rs`).
+    QueueFull,
+    /// The peer is gone (`isolate.rs`).
+    PeerGone,
 }
 
 impl Vm {
@@ -828,6 +850,8 @@ impl Vm {
                 prim::Fault::Signal(condition, data)
             }
             FreezeError::Failed(text) => prim::Fault::Error(text),
+            FreezeError::QueueFull => { let c = self.intern("isolate-queue-full"); prim::Fault::Signal(c, Value::NIL) }
+            FreezeError::PeerGone => { let c = self.intern("isolate-died"); prim::Fault::Signal(c, Value::NIL) }
         }
     }
 }

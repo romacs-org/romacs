@@ -218,7 +218,7 @@ impl Vm {
             let pos = tree.resolve(a).unwrap();
             assert!(tree.set(a, pos, b));
         }
-        let Object::Marker(m) = &mut self.objects[x.index(0)? - 1] else {
+        let Object::Marker(m) = self.object_mut(x)? else {
             unreachable!()
         };
         m.bias = b;
@@ -294,7 +294,7 @@ impl Vm {
             self.marker_anchors_mut(m.buffer)?.remove(a);
         }
         let anchor = destination.map(|p| self.marker_anchors_mut(buffer).unwrap().create(p, m.bias).unwrap());
-        let Object::Marker(target) = &mut self.objects[v.index(0)? - 1] else {
+        let Object::Marker(target) = self.object_mut(v)? else {
             unreachable!()
         };
         target.buffer = if anchor.is_some() { buffer } else { Value::NIL };
@@ -351,7 +351,7 @@ impl Vm {
                 b.evaporating.remove(&a);
             }
         }
-        let Object::Overlay(o) = &mut self.objects[v.index(0)? - 1] else {
+        let Object::Overlay(o) = self.object_mut(v)? else {
             unreachable!()
         };
         o.buffer = Value::NIL;
@@ -409,7 +409,7 @@ impl Vm {
             if evaporates {
                 target.evaporating.insert(a, v);
             }
-            let Object::Overlay(o) = &mut self.objects[v.index(0)? - 1] else {
+            let Object::Overlay(o) = self.object_mut(v)? else {
                 unreachable!()
             };
             o.buffer = buffer;
@@ -896,7 +896,7 @@ impl Vm {
             OverlayGet => self.overlay_get(x, args[1]),
             OverlayPut => {
                 self.overlay(x)?;
-                let Object::Overlay(o) = &mut self.objects[x.index(0)? - 1] else {
+                let Object::Overlay(o) = self.object_mut(x)? else {
                     unreachable!()
                 };
                 if let Some((_, v)) = o.properties.iter_mut().find(|(k, _)| *k == args[1]) {

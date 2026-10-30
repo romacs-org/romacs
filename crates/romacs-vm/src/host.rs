@@ -1658,16 +1658,26 @@ pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
 // Isolates (`isolate.rs`): worker processes, their control sockets, the
 // descriptors they pass, and the signals between them.
 
-/// A connected pair of close-on-exec `SOCK_SEQPACKET` sockets: one packet
-/// per `send_packet`, received whole or not at all.
+/// FD nonblocking: a worker's inherited control socket.
+pub fn set_nonblocking(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0 { return Err(io::Error::last_os_error()); }
+    status(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }.min(0))
+}
+
+/// A connected pair of close-on-exec, nonblocking `SOCK_SEQPACKET` sockets:
+/// one packet per `send_packet`, received whole or not at all; a full
+/// buffer makes a send fail with `WouldBlock` rather than wait.
 pub fn socketpair() -> io::Result<(OwnedFd, OwnedFd)> {
     effect(|| "socketpair".into())?;
     let mut fds = [0; 2];
-    status(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC, 0, fds.as_mut_ptr()) })?;
+    status(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK, 0, fds.as_mut_ptr()) })?;
     Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
 }
 
-/// BYTES as one packet on SOCKET, with FD passed beside it (`SCM_RIGHTS`).
+/// BYTES as one packet on SOCKET, with FD passed beside it (`SCM_RIGHTS`);
+/// `WouldBlock` when the peer's buffer is full (a bounded queue).
 pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option<std::os::fd::BorrowedFd<'_>>) -> io::Result<()> {
     use std::os::fd::AsRawFd;
     effect(|| "sendmsg".into())?;

@@ -240,7 +240,7 @@ impl Vm {
         }
         // GNU kill-buffer resets ordinary locals but retains the visited filename.
         // Reuse the native per-buffer storage without retaining other Lisp locals.
-        let fields = match &self.objects[value.index(0)? - 1] {
+        let fields = match self.object(value)? {
             Object::Buffer(b) => &b.per_buffer,
             Object::ByteBuffer(b) => &b.per_buffer,
             _ => unreachable!(),

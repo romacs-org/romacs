@@ -96,7 +96,10 @@ fn kill_leaves_no_zombie_and_settles_futures() {
 #[test]
 fn a_worker_that_is_not_this_executable_is_refused_and_a_dead_one_reported() {
     let mut vm = vm();
-    assert_eq!(eval(&mut vm, "(let ((isolate-worker-program \"/bin/true\") (events nil)) (push (lambda (_iso event _data) (push event events)) isolate-error-functions) (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 5) (isolate-error (car e))) events (isolate-list)))"), "(isolate-died (isolate-died) nil)");
+    // The submission may already find the worker gone (isolate-died at the
+    // spawn) or its death arrives at the await; either way the death is
+    // reported once and the worker forgotten.
+    assert_eq!(eval(&mut vm, "(let ((isolate-worker-program \"/bin/true\") (events nil)) (push (lambda (_iso event _data) (push event events)) isolate-error-functions) (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 5) (isolate-error (car e))) (progn (romacs--isolate-pump 0.5) events) (isolate-list)))"), "(isolate-died (isolate-died) nil)");
     assert_eq!(eval(&mut vm, "(let ((isolate-boot 'world) (isolate-world nil)) (condition-case e (isolate-spawn '+ 1 2) (isolate-world-unavailable 'unavailable)))"), "unavailable");
     assert_eq!(eval(&mut vm, "(let ((isolate-boot 'source)) (condition-case e (isolate-spawn '+ 1 2) (isolate-world-unavailable 'unavailable)))"), "unavailable");
     // A worker killed from outside resolves its futures as died.
@@ -108,5 +111,61 @@ fn a_worker_that_is_not_this_executable_is_refused_and_a_dead_one_reported() {
 fn seeds_are_thawed_copies_the_worker_may_mutate() {
     let mut vm = vm();
     assert_eq!(eval(&mut vm, "(let ((isolate-inherited-variables '(seed-list))) (setq seed-list (list 1 2)) (isolate-await (isolate-spawn '(lambda () (list (frozen-p seed-list) (progn (setcar seed-list 9) seed-list))))))"), "(nil (9 2))");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn sends_to_a_full_queue_signal_instead_of_blocking() {
+    // Sol r1 S2: the transport is nonblocking; a full socket buffer is
+    // `isolate-queue-full', never a wait.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((iso (isolate-create)) (busy (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn '(lambda () (while t)) :isolate iso))) (sent 0) (t0 (float-time)) (big (make-string 3000 ?x))) (condition-case e (while (< sent 100000) (isolate-send iso big) (setq sent (1+ sent))) (isolate-queue-full (setq sent (- sent)))) (isolate-kill iso) (list (< sent 0) (< (- (float-time) t0) 2.0)))");
+    assert_eq!(out, "(t t)");
+}
+
+#[test]
+fn cancelling_a_finished_future_does_not_hit_the_next_job() {
+    // Sol r1 S3: a future whose result had arrived but was not yet delivered
+    // must not interrupt the job running after it.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((iso (isolate-create)) (a (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn 'list 'quick :isolate iso))) (b (isolate-spawn '(lambda () (let ((n 0)) (while (< n 4000000) (setq n (1+ n))) 'slow-done)) :isolate iso))) (romacs--isolate-wait 0.3) (isolate-future-cancel a) (list (isolate-await a) (isolate-await b 20)))");
+    assert_eq!(out, "((quick) slow-done)");
+}
+
+#[test]
+fn a_cancelled_queued_job_never_runs() {
+    // Sol r1 S4: the worker classifies the cancel that arrived with the job
+    // before running it.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((iso (isolate-create)) (a (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn '(lambda () (romacs--isolate-wait 0.3) 'first) :isolate iso))) (b (isolate-spawn '(lambda () (setq journey-ran t)) :isolate iso))) (isolate-future-cancel b) (list (isolate-await a) (condition-case e (isolate-await b 5) (quit 'cancelled)) (isolate-await (isolate-spawn '(lambda () (boundp 'journey-ran)) :isolate iso))))");
+    assert_eq!(out, "(first cancelled nil)");
+}
+
+#[test]
+fn identical_jobs_share_one_pooled_worker_and_the_pool_is_bounded() {
+    // Sol r1 S5: the preparation's requires are the worker's baseline, not a
+    // taint; the pool bound holds, with isolate-queue-full past it.
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (isolate-await (isolate-spawn 'list 'a)) (isolate-await (isolate-spawn 'list 'b)) (length (isolate-list)))"), "1");
+    assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (let ((f (isolate-spawn '(lambda () (while t))))) (romacs--isolate-wait 0.2) (list (condition-case e (isolate-spawn 'list 'other :require '(other-feature)) (isolate-queue-full 'full)) (length (isolate-list)))))"), "(full 1)");
+    eval(&mut vm, "(isolate-kill-all)");
+    // A job that loads a feature retires its worker: the next job gets a fresh one.
+    assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (let ((iso (isolate-future-isolate (isolate-spawn '(lambda () (provide 'journey-feature)))))) (isolate-await (isolate-spawn 'list)) (list (aref iso 6) (eq iso (isolate-future-isolate (isolate-spawn 'list))) (length (isolate-list)))))"), "(t nil 1)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn an_unsendable_job_signals_and_leaves_no_pending_future() {
+    // Sol r1 S6.
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (list (condition-case e (isolate-spawn 'identity (current-buffer)) (error (car (cdr e)))) (progn (isolate-await (isolate-spawn 'list)) (length (aref (car (isolate-list)) 5)))))"), "(\"Cannot freeze\" 0)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_workers_condition_ancestry_is_installed_whole() {
+    // Sol r1 S10: a subtype of a worker-defined subtype matches every ancestor.
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(list (condition-case e (isolate-await (isolate-spawn '(lambda () (define-error 'journey-parent \"p\" 'file-error) (define-error 'journey-child \"c\" 'journey-parent) (signal 'journey-child '(1))))) (file-error (list 'file-error (car e)))) (condition-case e (isolate-await (isolate-spawn '(lambda () (signal 'journey-child '(2))))) (error (list 'error (car e)))) (get 'journey-child 'error-conditions))"), "((file-error journey-child) (error journey-child) (journey-child journey-parent file-error error))");
     eval(&mut vm, "(isolate-kill-all)");
 }

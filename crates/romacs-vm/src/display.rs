@@ -1474,7 +1474,7 @@ impl Vm {
         // by character position if Lisp changed its text. As in GNU's restore,
         // a saved point beyond the new ZV falls back to the buffer's true end.
         let buffer = self.slots[buffer_slot].value;
-        let Object::Buffer(b) = &mut self.objects[buffer.index(0)? - 1] else {
+        let Object::Buffer(b) = self.object_mut(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
         let accessible = b.accessible();

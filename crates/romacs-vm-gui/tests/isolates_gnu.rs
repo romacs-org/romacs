@@ -56,6 +56,33 @@ fn a_killed_workers_reported_child_is_reached_and_a_reaped_one_is_retired() {
 }
 
 #[test]
+fn a_worker_killed_from_outside_has_its_reported_child_reached() {
+    // Sol r1 S7: a death the parent did not cause still signals the groups
+    // of the children the worker reported.
+    let script = format!("(progn {PREAMBLE}
+      (let* ((iso (isolate-create :allow-source-boot t))
+             (id (romacs--isolate-id iso))
+             (child (isolate-await (isolate-spawn '(lambda () (process-id (make-process :name \"sleeper\" :command '(\"sleep\" \"30\") :connection-type 'pipe))) :isolate iso)))
+             (events nil))
+        (push (lambda (_iso event data) (push (list event (car (cdr data))) events)) isolate-error-functions)
+        (romacs--isolate-pump 0.3)
+        (romacs--isolate-signal id 9)
+        (let ((end (+ (float-time) 5))) (while (and (null events) (< (float-time) end)) (romacs--isolate-pump 0.1)))
+        (prin1 (list 'worker (romacs--isolate-pid id) 'child child 'events events 'live (isolate-list)))))");
+    let (ok, out, err) = batch(&script, Path::new("/"));
+    assert!(ok, "batch failed: {err}");
+    let words: Vec<&str> = out.trim().trim_matches(|c| c == '(' || c == ')').split_whitespace().collect();
+    let after = |key: &str| words.iter().position(|w| *w == key).map(|i| words[i + 1].trim_matches(|c| c == '(' || c == ')'));
+    let child: i64 = after("child").unwrap().parse().unwrap();
+    assert!(out.contains(&format!("events ((isolate-died (({child} . ok))))")), "{out}");
+    for _ in 0..100 {
+        if !process_exists(child) { return; }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!("orphan {child} survived the worker's death: {out}");
+}
+
+#[test]
 fn the_project_commands_give_the_synchronous_results() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     // The repository itself is the project: a git tree of several thousand files.

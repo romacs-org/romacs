@@ -98,6 +98,7 @@ impl Peer {
     fn receive(&mut self, mut report: impl FnMut(Kind, i32, Option<OwnedFd>)) -> std::io::Result<bool> {
         let received = match crate::host::recv_packet(self.socket.as_fd(), PACKET) {
             Ok(received) => received,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(true),
             // A peer that died mid-packet is a closed peer.
             Err(e) if matches!(e.raw_os_error(), Some(libc::ECONNRESET | libc::EPIPE)) => None,
             Err(e) => return Err(e),
@@ -212,6 +213,7 @@ impl Vm {
 
     /// In a worker: descriptor FD is the socket to the spawner (peer 0).
     pub(crate) fn isolate_adopt_parent(&mut self, socket: OwnedFd) {
+        let _ = crate::host::set_nonblocking(socket.as_fd());
         PARENT_SOCKET.store(socket.as_raw_fd(), std::sync::atomic::Ordering::SeqCst);
         self.isolates.parent = Some(Peer::new(socket));
     }
@@ -288,7 +290,11 @@ impl Vm {
             }
         };
         let peer = self.peer(id).map_err(crate::frozen::FreezeError::Failed)?;
-        peer.send(kind, generation, &payload).map_err(|e| crate::frozen::FreezeError::Failed(format!("isolate send: {e}")))
+        peer.send(kind, generation, &payload).map_err(|e| match e.kind() {
+            std::io::ErrorKind::WouldBlock => crate::frozen::FreezeError::QueueFull,
+            _ if matches!(e.raw_os_error(), Some(libc::EPIPE | libc::ECONNRESET | libc::ENOTCONN)) => crate::frozen::FreezeError::PeerGone,
+            _ => crate::frozen::FreezeError::Failed(format!("isolate send: {e}")),
+        })
     }
 
     /// The descriptors a wait on the isolates needs: every peer's socket
@@ -388,6 +394,16 @@ impl Vm {
     /// the leader alone was signalled), `(PID . ERRNO-TEXT)`.
     pub(crate) fn isolate_signal_children(&mut self, id: u64) -> Result<Value> {
         let worker = self.isolates.workers.get_mut(&id).ok_or_else(|| format!("no isolate {id}"))?;
+        // Reports still in the socket, from a worker that died or was killed.
+        while !worker.peer.closed {
+            let ready = crate::subprocess::poll(&[(worker.peer.socket.as_raw_fd(), libc::POLLIN)], Some(std::time::Duration::ZERO)).unwrap_or_default();
+            if ready.first().copied().unwrap_or(0) == 0 { break; }
+            let children = &mut worker.children;
+            if worker.peer.receive(|kind, pid, pidfd| match kind {
+                Kind::Child => { children.insert(pid, pidfd); }
+                _ => { children.remove(&pid); }
+            }).is_err() { break; }
+        }
         let children = std::mem::take(&mut worker.children);
         let mut outcomes = Vec::new();
         for (pid, pidfd) in children {

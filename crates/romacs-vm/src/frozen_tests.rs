@@ -97,6 +97,44 @@ fn every_mutator_refuses_with_gnus_read_only_error() {
 }
 
 #[test]
+fn writers_that_indexed_the_arena_directly_refuse_frozen_input() {
+    // Sol r1 S1: define-key, intern into a vector obarray, font-put and
+    // modify-syntax-entry used to index the object arena with the frozen
+    // payload and panic.
+    let mut vm = vm();
+    for (form, make) in [
+        ("(define-key f [?a] 'ignore)", "(freeze (make-keymap))"),
+        ("(intern \"frozen-obarray-probe\" f)", "(freeze (make-vector 7 0))"),
+        ("(set-char-table-range f ?a 1)", "(freeze (make-char-table 'test))"),
+    ] {
+        let got = caught(&mut vm, &format!("(let ((f {make})) {form})"));
+        assert!(got.starts_with("(signalled error \"Attempt to modify read-only object\" "), "{form} on {make}: {got}");
+    }
+    // A syntax table is refused at freeze, as the design states.
+    let syntax = caught(&mut vm, "(freeze (let ((c (make-char-table 'syntax-table))) c))");
+    assert!(syntax.contains("Cannot freeze"), "{syntax}");
+    // A frozen value of the wrong kind is a type error, as GNU's, never a panic.
+    assert!(caught(&mut vm, "(let ((f (freeze (vector 1 2)))) (set-marker f 1))").starts_with("(signalled "));
+}
+
+#[test]
+fn bool_vectors_and_category_tables_freeze_and_read() {
+    // Sol r1 S8: the bit length was validated as a byte count.
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(let ((f (freeze (let ((b (make-bool-vector 128 nil))) (aset b 127 t) b)))) (list (length f) (aref f 127) (aref f 0)))"), "(128 t nil)");
+    // Sol r1 S11: category-docstring and copy-category-table read a frozen table.
+    assert_eq!(eval(&mut vm, "(let* ((c (make-category-table)) (f (progn (define-category ?z \"zed\" c) (freeze c)))) (list (category-docstring ?z f) (category-table-p (copy-category-table f)) (condition-case e (define-category ?y \"why\" f) (error (car (cdr e))))))"), "(\"zed\" t \"Attempt to modify read-only object\")");
+}
+
+#[test]
+fn unibyte_strings_keep_their_properties_across_freeze_and_thaw() {
+    // Sol r1 S9: a unibyte string's properties were dropped on decode.
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(let* ((s (propertize (unibyte-string 97 98) 'face 'bold)) (f (freeze s)) (p (thaw f))) (list (get-text-property 0 'face s) (get-text-property 0 'face f) (get-text-property 0 'face p) (multibyte-string-p f) (equal f s)))"), "(bold bold bold nil t)");
+    assert_eq!(eval(&mut vm, "(let ((f (freeze (unibyte-string 200 201)))) (list (multibyte-string-p f) (aref f 0) (length f)))"), "(nil 200 2)");
+}
+
+#[test]
 fn inline_and_sealed_transports_behave_the_same() {
     let mut vm = vm();
     for size in [10usize, 100_000] {

@@ -76,24 +76,33 @@ ORIGINAL runs as GNU's does with INCLUDE-ALL, or without a worker."
         (funcall original include-all)
       (let* ((suggested (thing-at-point 'filename))
              (dirs (list (project-root project)))
-             (future (romacs-project--spawn project romacs-project--files-job project dirs)))
-        (isolate-on-done future
-                         (lambda (future)
-                           (romacs-project--find-file-continue future project suggested)))
-        (message "Finding files in %s..." (project-root project))
-        nil))))
+             (buffer (current-buffer))
+             (window (selected-window))
+             (future (condition-case nil
+                         (romacs-project--spawn project romacs-project--files-job project dirs)
+                       (isolate-queue-full nil))))
+        (if (null future)
+            (funcall original include-all)
+          (isolate-on-done future
+                           (lambda (future)
+                             (romacs-project--find-file-continue future project suggested buffer window)))
+          (message "Finding files in %s..." (project-root project))
+          nil)))))
 
-(defun romacs-project--find-file-continue (future project suggested)
-  "`project-find-file-in' from its file list, FUTURE's value."
+(defun romacs-project--find-file-continue (future project suggested buffer window)
+  "`project-find-file-in' from its file list, FUTURE's value, in the WINDOW
+and BUFFER it was invoked from, as the prompt and the visit would be."
   (condition-case err
-      (let* ((all-files (thaw (isolate-await future)))
-             (completion-ignore-case read-file-name-completion-ignore-case)
-             (default-directory (project-root project))
-             (file (project--read-file-name
-                    project "Find file" all-files nil 'file-name-history suggested)))
-        (if (string-empty-p file)
-            (user-error "You didn't specify the file")
-          (find-file file)))
+      (with-selected-window (if (window-live-p window) window (selected-window))
+        (with-current-buffer (if (buffer-live-p buffer) buffer (current-buffer))
+          (let* ((all-files (thaw (isolate-await future)))
+                 (completion-ignore-case read-file-name-completion-ignore-case)
+                 (default-directory (project-root project))
+                 (file (project--read-file-name
+                        project "Find file" all-files nil 'file-name-history suggested)))
+            (if (string-empty-p file)
+                (user-error "You didn't specify the file")
+              (find-file file)))))
     (quit nil)
     (error (message "%s" (error-message-string err)))))
 
@@ -108,12 +117,16 @@ ORIGINAL runs as GNU's does with a prefix argument, or without a worker."
       (let* ((root (project-root project))
              (buffer (current-buffer))
              (window (selected-window))
-             (future (romacs-project--spawn project romacs-project--matches-job regexp project)))
-        (isolate-on-done future
-                         (lambda (future)
-                           (romacs-project--show-matches future regexp project root buffer window)))
-        (message "Searching %s for %s..." root regexp)
-        nil))))
+             (future (condition-case nil
+                         (romacs-project--spawn project romacs-project--matches-job regexp project)
+                       (isolate-queue-full nil))))
+        (if (null future)
+            (funcall original regexp)
+          (isolate-on-done future
+                           (lambda (future)
+                             (romacs-project--show-matches future regexp project root buffer window)))
+          (message "Searching %s for %s..." root regexp)
+          nil)))))
 
 (defun romacs-project--show-matches (future regexp project root buffer window)
   "`project-find-regexp' from its matches, FUTURE's value, where it was invoked."

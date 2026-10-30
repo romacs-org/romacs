@@ -309,7 +309,7 @@ impl Vm {
         let marker = self.window(v)?.point;
         self.set_marker_object(marker, pos, buffer)?;
         let pos = self.marker_position_value(marker)?.as_integer()?;
-        let Object::Buffer(b) = &mut self.objects[buffer.index(0)? - 1] else {
+        let Object::Buffer(b) = self.object_mut(buffer)? else {
             return Err("buffer required".into());
         };
         b.point = b.byte_of_char(coordinates::CharOffset((pos - 1) as usize))?;
