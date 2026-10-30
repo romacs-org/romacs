@@ -84,6 +84,7 @@ mod posix_tz;
 mod tzfile;
 mod undo;
 mod insdel;
+mod indirect;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
@@ -461,6 +462,10 @@ enum Primitive {
     MatchData,
     ReSearchForward,
     ReSearchBackward,
+    PosixLookingAt,
+    PosixStringMatch,
+    PosixSearchForward,
+    PosixSearchBackward,
     SyntaxTable,
     StandardSyntaxTable,
     CopySyntaxTable,
@@ -525,7 +530,6 @@ enum Primitive {
     DeepEqual,
     Min,
     Append,
-    Prin1ToString,
     GetBuffer,
     ForwardLine,
     SwitchToBuffer,
@@ -722,6 +726,10 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("match-data", Primitive::MatchData),
     ("re-search-forward", Primitive::ReSearchForward),
     ("re-search-backward", Primitive::ReSearchBackward),
+    ("posix-looking-at", Primitive::PosixLookingAt),
+    ("posix-string-match", Primitive::PosixStringMatch),
+    ("posix-search-forward", Primitive::PosixSearchForward),
+    ("posix-search-backward", Primitive::PosixSearchBackward),
     ("syntax-table", Primitive::SyntaxTable),
     ("standard-syntax-table", Primitive::StandardSyntaxTable),
     ("copy-syntax-table", Primitive::CopySyntaxTable),
@@ -788,7 +796,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("equal", Primitive::DeepEqual),
     ("min", Primitive::Min),
     ("append", Primitive::Append),
-    ("prin1-to-string", Primitive::Prin1ToString),
     ("get-buffer", Primitive::GetBuffer),
     ("forward-line", Primitive::ForwardLine),
     ("switch-to-buffer", Primitive::SwitchToBuffer),
@@ -1256,7 +1263,7 @@ pub struct Vm {
     expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
     buffer_slot: usize,
-    multibyte_slot: usize,
+    pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
     defun_start_epoch: u64,
@@ -1333,6 +1340,12 @@ pub struct Vm {
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
+    /// alloc.c's `finalizers': every finalizer not yet found unreachable.
+    /// Not roots; the collector dooms those it does not reach.
+    finalizers: Vec<Value>,
+    /// alloc.c's `doomed_finalizers': unreachable finalizers kept alive
+    /// until `romacs--run-finalizers' calls their functions.
+    doomed_finalizers: Vec<Value>,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1450,6 +1463,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     caches,
     stack,
     external_roots,
+    finalizers,
+    doomed_finalizers,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1601,6 +1616,8 @@ impl Vm {
             caches: vec![],
             stack: vec![],
             external_roots: vec![],
+            finalizers: vec![],
+            doomed_finalizers: vec![],
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),
@@ -2201,6 +2218,23 @@ impl Vm {
             }
         }
     }
+    /// The special form HEAD's function names through a chain of symbol
+    /// aliases (GNU indirect_function), if it ends at one.
+    fn special_form_alias(&self, head: &str) -> Option<String> {
+        let mut slot = *self.names.get(head)?;
+        for _ in 0..self.slots.len() {
+            let function = self.slots[slot].function;
+            if let Some(name) = prim::name(function) {
+                return prim::prims::special_forms::special_form_min(name).map(|_| name.to_owned());
+            }
+            slot = function.index_if(7)?.checked_sub(1)?;
+            let name = &self.symbol_names[slot];
+            if prim::prims::special_forms::special_form_min(name).is_some() {
+                return Some(name.clone());
+            }
+        }
+        None
+    }
     fn expr_now(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
         if let Some(expanded) = self.expand_macro(f)? {
             return self.expr(b, &expanded);
@@ -2313,6 +2347,16 @@ impl Vm {
                     }
                 };
                 let rest = &a[1..];
+                // GNU eval_sub dispatches on the head's function: a symbol
+                // whose function is, through aliases, a special form is
+                // that form, as byte-run.el's `inline' is `progn'.
+                if prim::prims::special_forms::special_form_min(head).is_none()
+                    && let Some(form) = self.special_form_alias(head)
+                {
+                    let mut aliased = a.clone();
+                    aliased[0] = Form::Sym(form);
+                    return self.expr(b, &Form::List(aliased));
+                }
                 match head {
                     "save-excursion" => self.save_excursion(b, rest),
                     "save-restriction" => self.save_restriction(b, rest),
@@ -2877,8 +2921,18 @@ impl Vm {
             // 1730-1760): one may have killed it, made another or let its
             // private slot be reused. With none left the default takes it.
             let target = self.owner_local_binding(base, owner).unwrap_or(base);
-            // set-buffer-local-toplevel-value may have saved any object.
-            let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
+            // set-buffer-local-toplevel-value may have saved any object; an
+            // integer binding refuses a non-integer and keeps its value.
+            let value = match self.localized_forwarded(base) {
+                Some(forwarded::Fwd::Int(_)) if value.integer_value().is_none() => {
+                    let (predicate, condition) = (self.intern("integerp"), self.intern("wrong-type-argument"));
+                    let data = self.list_value(&[predicate, value]);
+                    self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                    return Err(forwarded::fault_text(crate::prim::Fault::Wrong("integerp", value)));
+                }
+                Some(forwarded::Fwd::Bool(_)) => if value == Value::NIL { Value::NIL } else { Value::TRUE },
+                _ => value,
+            };
             self.slots[target].value = value;
             return Ok(());
         }
@@ -2914,7 +2968,7 @@ impl Vm {
         use Primitive::*;
         if matches!(p, ClosureMetadata | ClosureDocument | MakeInterpretedClosure) { return self.interpreted_closure_primitive(p, start, n); }
         if p == TempBuffer { return self.eval_buffer_primitive(p, start, n); }
-        if matches!(p, DeepEqual | Min | Append | Prin1ToString) { return self.eval_data_primitive(p, start, n); }
+        if matches!(p, DeepEqual | Min | Append) { return self.eval_data_primitive(p, start, n); }
         if matches!(p, GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized) { return self.eval_buffer_primitive(p, start, n); }
         if (p as usize) >= SymbolValue as usize {
             return self.variable_primitive(p, start, n);
@@ -3066,6 +3120,7 @@ impl Vm {
                             | data::Object::Terminal(_)
                             | data::Object::WindowConfiguration(_)
                             | data::Object::Sqlite(_)
+                            | data::Object::Finalizer(_)
                             | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
@@ -3108,6 +3163,8 @@ impl Vm {
                 data::Object::Terminal(_) => Ok("#<terminal initial>".into()),
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Sqlite(h) => Ok(h.describe()),
+                // print.c PVEC_FINALIZER.
+                data::Object::Finalizer(function) => Ok(if *function == Value::NIL { "#<finalizer used>" } else { "#<finalizer>" }.into()),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
                 data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),

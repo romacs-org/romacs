@@ -51,10 +51,15 @@ Replies echo the ID, so bounding it keeps every error reply bounded.")
 (defvar romacs-mcp--listener nil)
 (defvar romacs-mcp--socket nil)
 (defvar romacs-mcp--socket-identity nil)
+(defvar romacs-mcp--token nil
+  "The line a loopback peer must send first, or nil for a local socket.")
 (defvar romacs-mcp--peers nil)
 (defvar romacs-mcp--queue nil)
 (defvar romacs-mcp--active nil)
 (defvar romacs-mcp--timer nil)
+(defvar romacs-mcp--deferred nil
+  "Admitted requests awaiting a deferred result, as (REQUEST ID POLL MODERN).")
+(defvar romacs-mcp--deferred-timer nil)
 (defvar romacs-mcp-tools nil
   "Plain alist of NAME and tool plist.
 Each plist has :description, :schema, :handler and optional :annotations.
@@ -177,8 +182,30 @@ Return a bounded printed value; effects are not rolled back on failure."
            (sort (copy-sequence (romacs-mcp--available-tools))
                  (lambda (a b) (string-lessp (car a) (car b)))))))
 
+(defun romacs-mcp-defer (poll)
+  "Return a tool result that POLL supplies later, for a handler to return.
+The endpoint answers other requests meanwhile and the command loop keeps
+running: a timer calls POLL with no arguments every 0.05 seconds until it
+returns non-nil, a list whose car is the tool's value.  An error POLL
+signals is the tool's error.  A closed or cancelled request stops polling."
+  (unless (functionp poll) (error "Invalid deferred MCP poll"))
+  (list 'romacs-mcp--deferred poll))
+
+(defun romacs-mcp--result (value failed modern)
+  "Return the MODERN or legacy tool envelope for VALUE, an error if FAILED."
+  (let* ((text (if (stringp value) value
+                 (decode-coding-string
+                  (json-serialize value :false-object :false :null-object :null)
+                  'utf-8)))
+         (result (romacs-mcp--object
+                  "content" (vector (romacs-mcp--object "type" "text" "text" text))
+                  "isError" (if failed t :false))))
+    (when modern (puthash "resultType" "complete" result))
+    result))
+
 (defun romacs-mcp--call (params modern)
-  "Call the tool named by PARAMS and return the MODERN or legacy envelope."
+  "Call the tool named by PARAMS and return the MODERN or legacy envelope.
+A handler's `romacs-mcp-defer' value is returned with MODERN appended."
   (let* ((tool (alist-get (gethash "name" params) (romacs-mcp--available-tools)
                           nil nil #'equal))
          (arguments (gethash "arguments" params (romacs-mcp--object))))
@@ -189,16 +216,10 @@ Return a bounded printed value; effects are not rolled back on failure."
                       (with-local-quit (funcall (plist-get tool :handler) arguments))
                     ((error quit)
                      (setq failed t)
-                     (error-message-string failure))))
-           (text (if (stringp value) value
-                   (decode-coding-string
-                    (json-serialize value :false-object :false :null-object :null)
-                    'utf-8)))
-           (result (romacs-mcp--object
-                    "content" (vector (romacs-mcp--object "type" "text" "text" text))
-                    "isError" (if failed t :false))))
-      (when modern (puthash "resultType" "complete" result))
-      result)))
+                     (error-message-string failure)))))
+      (if (eq (car-safe value) 'romacs-mcp--deferred)
+          (append value (list modern))
+        (romacs-mcp--result value failed modern)))))
 
 (defun romacs-mcp--modern-p (params)
   "Validate per-request modern metadata in PARAMS and return non-nil."
@@ -348,6 +369,38 @@ acknowledgement.  Close an unread peer."
           (when (eq timer (process-get peer 'send-timer))
             (process-put peer 'send-timer nil)))))))
 
+(defun romacs-mcp--poll-deferred ()
+  "Answer each deferred request whose poll has a result; drop dead ones."
+  (dolist (entry (copy-sequence romacs-mcp--deferred))
+    (pcase-let ((`(,request ,id ,poll ,modern) entry))
+      (if (or (plist-get request :cancelled)
+              (not (romacs-mcp--live-p (plist-get request :peer)
+                                       (plist-get request :generation))))
+          (setq romacs-mcp--deferred (delq entry romacs-mcp--deferred))
+        (let* ((failed nil)
+               (done (condition-case failure
+                         (with-local-quit (funcall poll))
+                       ((error quit)
+                        (setq failed t)
+                        (list (error-message-string failure))))))
+          (when done
+            (setq romacs-mcp--deferred (delq entry romacs-mcp--deferred))
+            (romacs-mcp--send request
+                              (romacs-mcp--object
+                               "jsonrpc" "2.0" "id" id
+                               "result" (romacs-mcp--result (car done) failed modern))))))))
+  (unless (or romacs-mcp--deferred (not romacs-mcp--deferred-timer))
+    (cancel-timer romacs-mcp--deferred-timer)
+    (setq romacs-mcp--deferred-timer nil)))
+
+(defun romacs-mcp--defer-request (request id poll modern)
+  "Keep REQUEST with ID until POLL yields its MODERN or legacy result."
+  (setq romacs-mcp--deferred
+        (nconc romacs-mcp--deferred (list (list request id poll modern))))
+  (unless romacs-mcp--deferred-timer
+    (setq romacs-mcp--deferred-timer
+          (run-at-time 0.05 0.05 #'romacs-mcp--poll-deferred))))
+
 (defun romacs-mcp--schedule ()
   "Schedule a bounded drain unless another drain owns admission."
   (when (and romacs-mcp--queue (not romacs-mcp--active) (not romacs-mcp--timer))
@@ -378,14 +431,18 @@ This is cooperative admission, not a handler, serialization or send deadline."
                      (peer (plist-get request :peer))
                      (message (plist-get request :message))
                      (id (and message (gethash "id" message :notification)))
-                     (response nil))
+                     (response nil) (deferred nil))
                 (setq romacs-mcp--active request)
                 (condition-case failure
                     (if (plist-get request :error)
                         (signal 'romacs-mcp-protocol-error (plist-get request :error))
-                      (setq response (romacs-mcp--object
-                                      "jsonrpc" "2.0" "id" id "result"
-                                      (romacs-mcp--dispatch peer message))))
+                      (let ((result (romacs-mcp--dispatch peer message)))
+                        (if (eq (car-safe result) 'romacs-mcp--deferred)
+                            (setq deferred t)
+                          (setq response (romacs-mcp--object
+                                          "jsonrpc" "2.0" "id" id "result" result)))
+                        (when deferred
+                          (romacs-mcp--defer-request request id (nth 1 result) (nth 2 result)))))
                   (romacs-mcp-protocol-error
                    (setq response
                          (romacs-mcp--object
@@ -396,7 +453,7 @@ This is cooperative admission, not a handler, serialization or send deadline."
                    (setq response (romacs-mcp--object
                                    "jsonrpc" "2.0" "id" (or id :null) "error"
                                    (romacs-mcp--object "code" -32603 "message" "Internal error")))))
-                (unless (eq id :notification) (romacs-mcp--send request response))))))
+                (unless (or deferred (eq id :notification)) (romacs-mcp--send request response))))))
       (setq romacs-mcp--active nil)
       (romacs-mcp--schedule))))
 
@@ -413,8 +470,9 @@ This is cooperative admission, not a handler, serialization or send deadline."
     (romacs-mcp--schedule)))
 
 (defun romacs-mcp--cancel (peer id)
-  "Mark pending or yielding active requests matching PEER and ID abandoned."
-  (dolist (request (cons romacs-mcp--active romacs-mcp--queue))
+  "Mark queued, active or deferred requests matching PEER and ID abandoned."
+  (dolist (request (append (list romacs-mcp--active) romacs-mcp--queue
+                           (mapcar #'car romacs-mcp--deferred)))
     (when (and request (eq peer (plist-get request :peer))
                (hash-table-p (plist-get request :message))
                (equal id (gethash "id" (plist-get request :message) :absent)))
@@ -461,14 +519,20 @@ This is cooperative admission, not a handler, serialization or send deadline."
   "Frame bounded UTF-8 CHUNK from PEER; never invoke a tool in this callback."
   (when (romacs-mcp--live-p peer (process-get peer 'generation))
     (let ((text (concat (process-get peer 'input) chunk)) (frames 0))
-      (if (> (string-bytes text) romacs-mcp--frame-limit)
+      ;; A loopback peer's first line is the token; it is not a frame.
+      (when (and (process-get peer 'token) (string-match "\n" text))
+        (if (equal (substring text 0 (match-beginning 0)) (process-get peer 'token))
+            (progn (process-put peer 'token nil)
+                   (setq text (substring text (match-end 0))))
+          (romacs-mcp--close peer)))
+      (if (or (not (process-live-p peer)) (> (string-bytes text) romacs-mcp--frame-limit))
           (romacs-mcp--close peer)
-        (while (and (process-live-p peer) (string-match "\n" text)
+        (while (and (process-live-p peer) (not (process-get peer 'token)) (string-match "\n" text)
                     (< frames romacs-mcp--peer-queue-limit))
           (let ((end (match-beginning 0)))
             (romacs-mcp--frame peer (substring text 0 end))
             (setq text (substring text (1+ end)) frames (1+ frames))))
-        (if (string-match-p "\n" text) (romacs-mcp--close peer)
+        (if (and (not (process-get peer 'token)) (string-match-p "\n" text)) (romacs-mcp--close peer)
           (process-put peer 'input text))))))
 
 (defun romacs-mcp--accept (listener peer _message)
@@ -478,6 +542,7 @@ This is cooperative admission, not a handler, serialization or send deadline."
       (romacs-mcp--close peer)
     (push peer romacs-mcp--peers)
     (process-put peer 'generation romacs-mcp--generation)
+    (process-put peer 'token romacs-mcp--token)
     (process-put peer 'input (encode-coding-string "" 'no-conversion))
     (set-process-query-on-exit-flag peer nil)
     (set-process-coding-system peer 'no-conversion 'no-conversion)
@@ -572,6 +637,33 @@ Loading the library alone never starts a listener."
     (add-hook 'kill-emacs-hook #'romacs-mcp-stop)
     (romacs-mcp-identity)))
 
+(defun romacs-mcp-start-loopback (token file)
+  "Start the endpoint on a loopback TCP port, for hosts without local sockets.
+Write the port to FILE, in a private owner directory.  A peer's first
+line must be TOKEN, a secret the caller shares with its clients through
+that directory; a peer sending anything else is closed.  Frames follow as
+on the local socket."
+  (unless (and (stringp file) (file-name-absolute-p file) (not (file-remote-p file)))
+    (user-error "MCP requires an absolute local port file"))
+  (unless (and (stringp token) (>= (length token) 32) (not (string-search "\n" token)))
+    (user-error "MCP loopback token must be one line of at least 32 characters"))
+  (when romacs-mcp--listener (user-error "MCP is already started"))
+  (server-ensure-safe-dir (file-name-directory file))
+  (cl-incf romacs-mcp--generation)
+  (let ((listener (make-network-process
+                   :name "romacs-mcp" :family 'ipv4 :host "127.0.0.1" :service 0
+                   :server t :noquery t :coding 'no-conversion
+                   :filter #'romacs-mcp--filter :sentinel #'romacs-mcp--sentinel
+                   :log #'romacs-mcp--accept)))
+    (setq romacs-mcp--listener listener romacs-mcp--token token)
+    (let ((temporary (concat file ".tmp")))
+      (with-temp-file temporary
+        (insert (format "%d\n" (process-contact listener :service))))
+      (set-file-modes temporary #o600)
+      (rename-file temporary file t))
+    (add-hook 'kill-emacs-hook #'romacs-mcp-stop)
+    (romacs-mcp-identity)))
+
 ;;;###autoload
 (defun romacs-mcp-stop ()
   "Retire admission and close only this endpoint's connections and socket.
@@ -579,14 +671,17 @@ Keep boot identity and companion receipts until the editor process exits."
   (interactive)
   (cl-incf romacs-mcp--generation)
   (when romacs-mcp--timer (cancel-timer romacs-mcp--timer))
-  (setq romacs-mcp--timer nil romacs-mcp--queue nil)
+  (when romacs-mcp--deferred-timer (cancel-timer romacs-mcp--deferred-timer))
+  (setq romacs-mcp--timer nil romacs-mcp--queue nil
+        romacs-mcp--deferred nil romacs-mcp--deferred-timer nil)
   (mapc #'romacs-mcp--close (copy-sequence romacs-mcp--peers))
   (when (process-live-p romacs-mcp--listener) (delete-process romacs-mcp--listener))
   (when (and romacs-mcp--socket
              (equal (romacs-mcp--socket-id romacs-mcp--socket) romacs-mcp--socket-identity)
              (file-exists-p romacs-mcp--socket))
     (delete-file romacs-mcp--socket))
-  (setq romacs-mcp--listener nil romacs-mcp--socket nil romacs-mcp--socket-identity nil)
+  (setq romacs-mcp--listener nil romacs-mcp--socket nil romacs-mcp--socket-identity nil
+        romacs-mcp--token nil)
   (remove-hook 'kill-emacs-hook #'romacs-mcp-stop))
 
 (romacs-mcp-register-tool

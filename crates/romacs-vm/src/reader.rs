@@ -576,10 +576,31 @@ impl Reader<'_, '_> {
             114 | 82 if (2..=36).contains(&number) => self.radix_integer(number as u32),
             114 | 82 => Err(self.syntax(&format!("integer, radix {number}"))),
             61 => {
+                // lread.c read0 `#N=': a placeholder cons stands for the
+                // object while it is read, so the object may refer to itself.
+                let placeholder = self.vm.list_value(&[Value::NIL]);
+                let slot = self.vm.external_roots.len();
+                self.vm.external_roots.push(placeholder);
+                self.labels.insert(number, slot);
                 let value = self.form(depth + 1)?;
-                let root = self.vm.external_roots.len() - 1;
-                self.labels.insert(number, root);
-                Ok(value)
+                let placeholder = self.vm.external_roots[slot];
+                if value == placeholder {
+                    return Err(self.syntax("nonsensical self-reference"));
+                }
+                match value.index_if(3).filter(|_| !Vm::image_value(value)) {
+                    // A cons: the placeholder becomes it, so references to
+                    // the placeholder are references to the object.
+                    Some(cons) => {
+                        let pair = self.vm.conses[cons];
+                        self.vm.conses[placeholder.payload() as usize] = pair;
+                        Ok(placeholder)
+                    }
+                    None => {
+                        self.vm.external_roots[slot] = value;
+                        self.substitute(value, placeholder);
+                        Ok(value)
+                    }
+                }
             }
             35 => self
                 .labels
@@ -588,6 +609,34 @@ impl Reader<'_, '_> {
                 .map(|r| self.vm.external_roots[r])
                 .ok_or_else(|| self.syntax("undefined numbered reference")),
             _ => Err(self.syntax("#")),
+        }
+    }
+    /// lread.c substitute_object_recurse: replace PLACEHOLDER by OBJECT
+    /// within OBJECT's conses, vectors and records, visiting each once.
+    fn substitute(&mut self, object: Value, placeholder: Value) {
+        let mut seen = std::collections::HashSet::new();
+        let mut pending = vec![object];
+        while let Some(v) = pending.pop() {
+            if Vm::image_value(v) || !seen.insert(v.0) {
+                continue;
+            }
+            let mut fix = |x: &mut Value| {
+                if *x == placeholder {
+                    *x = object;
+                } else {
+                    pending.push(*x);
+                }
+            };
+            if let Some(i) = v.index_if(3) {
+                let (mut car, mut cdr) = self.vm.conses[i];
+                fix(&mut car);
+                fix(&mut cdr);
+                self.vm.conses[i] = (car, cdr);
+            } else if let Some(i) = v.index_if(0).and_then(|i| i.checked_sub(1))
+                && let Some(Object::Vector(items) | Object::Record(items)) = self.vm.objects.get_mut(i)
+            {
+                items.iter_mut().for_each(fix);
+            }
         }
     }
     fn prefix(&mut self, name: &str, depth: usize) -> Result<Value> {
@@ -1304,16 +1353,27 @@ impl Vm {
     }
 
     pub(super) fn source_form(&self, value: Value, depth: usize) -> Result<Form> {
-        self.datum_form(value, depth, false)
+        self.datum_form(value, depth, Datum::Source)
     }
     /// Like `source_form`, but an object with no source spelling becomes
     /// `Form::Object` instead of an error: GNU evaluates the object itself
     /// (src/eval.c eval_sub). Object constants own traced roots until every
     /// clone of the form is dropped. These VM-local handles are not persistent.
     pub(super) fn expansion_form(&self, value: Value, depth: usize) -> Result<Form> {
-        self.datum_form(value, depth, true)
+        self.datum_form(value, depth, Datum::Expansion)
     }
-    fn datum_form(&self, value: Value, depth: usize, objects: bool) -> Result<Form> {
+    /// Like `expansion_form`, for the datum `eval' evaluates: every
+    /// `(quote X)' in it carries X itself, so the form reads and writes the
+    /// identical structure (src/eval.c eval_sub returns the quoted object).
+    pub(super) fn eval_datum_form(&self, value: Value) -> Result<Form> {
+        self.datum_form(value, 0, Datum::Eval(0))
+    }
+    /// VALUE quoted as `eval' quotes it: the identical object.
+    pub(super) fn eval_quoted_form(&self, value: Value) -> Form {
+        Form::List(vec![Form::Sym("quote".into()), Form::Object(crate::handle::FormObject::new(self, value))])
+    }
+    fn datum_form(&self, value: Value, depth: usize, mode: Datum) -> Result<Form> {
+        let objects = mode != Datum::Source;
         if depth > 256 {
             return Err("source nesting limit exceeded".into());
         }
@@ -1354,18 +1414,56 @@ impl Vm {
                 Object::RawString(_) => Ok(Form::Object(crate::handle::FormObject::new(self, value))),
                 Object::Vector(a) => Ok(Form::Vector(
                     a.iter()
-                        .map(|v| self.datum_form(*v, depth + 1, objects))
+                        .map(|v| self.datum_form(*v, depth + 1, mode))
                         .collect::<Result<_>>()?,
                 )),
                 _ if objects => Ok(Form::Object(crate::handle::FormObject::new(self, value))),
                 _ => Err("source datum required".into()),
             },
             3 => {
+                let symbol_is = |name: &str, v: Value| self.names.get(name).is_some_and(|&slot| v == Value::reference(slot + 1, 7));
+                let head = self.cons_pair(value).map(|(head, _)| head).unwrap_or(Value::NIL);
+                if mode == Datum::Eval(0)
+                    && symbol_is("quote", head)
+                    && let Ok((_, rest)) = self.cons_pair(value)
+                    && let Ok((quoted, Value::NIL)) = self.cons_pair(rest)
+                    && (quoted.tag() == 3 || (quoted.tag() == 0 && quoted != Value::NIL))
+                {
+                    return Ok(self.eval_quoted_form(quoted));
+                }
+                // `(quote X)' returns X itself (eval.c Fquote): an X with no
+                // tree spelling, one that contains itself (`#1=(a . #1#)'),
+                // is carried as that object.
+                if let Ok((head, rest)) = self.cons_pair(value)
+                    && let Some(slot) = head.index_if(7).and_then(|s| s.checked_sub(1))
+                    && self.symbol_names[slot] == "quote"
+                    && !self.generated_slots.contains_key(&slot)
+                    && !self.obarray_symbol_names.contains_key(&slot)
+                    && let Ok((datum, Value::NIL)) = self.cons_pair(rest)
+                    && !self.spellable(datum, depth + 1, &mut std::collections::HashSet::new())
+                {
+                    return Ok(Form::List(vec![
+                        self.datum_form(head, depth + 1, mode)?,
+                        Form::Object(crate::handle::FormObject::new(self, datum)),
+                    ]));
+                }
+                // Inside a backquote template a quote may hold its commas;
+                // a comma's operand is evaluated again.
+                let mode = match mode {
+                    Datum::Eval(level) if symbol_is("`", head) => Datum::Eval(level + 1),
+                    Datum::Eval(level) if level > 0 && (symbol_is(",", head) || symbol_is(",@", head)) => Datum::Eval(level - 1),
+                    mode => mode,
+                };
+                let mut mode = mode;
                 let mut values = vec![];
                 let mut tail = value;
                 while tail.tag() == 3 {
                     let (car, cdr) = self.cons_pair(tail)?;
-                    values.push(self.datum_form(car, depth + 1, objects)?);
+                    values.push(self.datum_form(car, depth + 1, mode)?);
+                    // `(a . ,x)' reads as (a \, x): what follows is the operand.
+                    if let Datum::Eval(level) = mode && level > 0 && values.len() > 1 && (symbol_is(",", car) || symbol_is(",@", car)) {
+                        mode = Datum::Eval(level - 1);
+                    }
                     tail = cdr;
                     if values.len() > self.list_limit() {
                         return Err("circular source list".into());
@@ -1376,7 +1474,7 @@ impl Vm {
                 } else {
                     Ok(Form::Dotted(
                         values,
-                        Box::new(self.datum_form(tail, depth + 1, objects)?),
+                        Box::new(self.datum_form(tail, depth + 1, mode)?),
                     ))
                 }
             }
@@ -1384,6 +1482,38 @@ impl Vm {
             4 | 6 if objects => Ok(Form::Object(crate::handle::FormObject::new(self, value))),
             _ => Err("source datum required".into()),
         }
+    }
+    /// Whether VALUE has a tree spelling for `datum_form': no cons or
+    /// vector within it contains itself, and nesting stays in its limit.
+    /// OPEN holds the conses and vectors enclosing VALUE.
+    fn spellable(&self, value: Value, depth: usize, open: &mut std::collections::HashSet<u64>) -> bool {
+        if depth > 256 {
+            return false;
+        }
+        let mut entered = vec![];
+        let mut children = vec![];
+        let mut tail = value;
+        while tail.tag() == 3 {
+            if !open.insert(tail.0) {
+                entered.iter().for_each(|v| { open.remove(v); });
+                return false;
+            }
+            entered.push(tail.0);
+            let Ok((car, cdr)) = self.cons_pair(tail) else { break };
+            children.push(car);
+            tail = cdr;
+        }
+        if let Some(Object::Vector(items)) = self.object_if(tail) {
+            if !open.insert(tail.0) {
+                entered.iter().for_each(|v| { open.remove(v); });
+                return false;
+            }
+            entered.push(tail.0);
+            children.extend_from_slice(items);
+        }
+        let spelled = children.iter().all(|&child| self.spellable(child, depth + 1, open));
+        entered.iter().for_each(|v| { open.remove(v); });
+        spelled
     }
     /// Compile source as one progn for readable IR inspection, without executing.
     /// Source-file eval still executes top-level forms sequentially.
@@ -1446,6 +1576,13 @@ impl Vm {
         Ok(())
     }
 }
+
+/// What a datum becomes source for: compiler source, a macro expansion
+/// (objects with no spelling carried as themselves) or `eval''s datum
+/// (quoted structure carried as itself too, outside backquote templates;
+/// the level is the backquote nesting).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Datum { Source, Expansion, Eval(u32) }
 
 #[cfg(test)]
 mod tests {

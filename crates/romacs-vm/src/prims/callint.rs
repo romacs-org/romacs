@@ -212,7 +212,8 @@ fn assq(cx: &Leaf<'_>, key: Value, alist: Value) -> std::result::Result<Value, F
 
 /// The interactive specs of the VM2 subrs that GNU defines as commands. The
 /// strings are GNU's own DEFUN intspec arguments (each recorded live through
-/// `interactive-form`, evidence `interactive-form.json`); `delete-backward-char`
+/// `interactive-form`, evidence `interactive-form.json`, and every GNU C
+/// command VM2 defines checked by `tests/journey_primitives.rs`); `delete-backward-char`
 /// and `emacs-lisp-mode` are Lisp in GNU (simple.el, elisp-mode.el) and VM2
 /// stand-ins here, with GNU's Lisp spec. GNU subrs not listed are not commands.
 fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
@@ -223,7 +224,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "goto-char" => "(goto-char--read-natnum-interactive \"Go to char: \")", "replace-region-contents" => "(list (if (use-region-p) (region-beginning) (point-min)) (if (use-region-p) (region-end) (point-max)) (get-buffer (read-buffer-to-switch \"Source buffer: \")))",
         "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region" | "base64-decode-region" => "r",
         "upcase-region" | "downcase-region" | "capitalize-region" | "upcase-initials-region" => "(list (region-beginning) (region-end) (region-noncontiguous-p))",
-        "widen" | "garbage-collect" | "redraw-display" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
+        "widen" | "garbage-collect" | "redraw-display" | "unix-sync" | "do-auto-save" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
         "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" | "start-kbd-macro" => "P", "end-kbd-macro" | "call-last-kbd-macro" => "p", "kill-buffer" => "bKill buffer: ",
         "search-forward" => "MSearch: ",
         "re-search-forward" => "sRE search: ",
@@ -231,6 +232,24 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "modify-syntax-entry" => "cSet syntax for character: \nsSet syntax for %s to: ",
         "make-variable-buffer-local" => "vMake Variable Buffer Local: ",
         "make-local-variable" => "vMake Local Variable: ",
+        "kill-local-variable" => "vKill Local Variable: ",
+        "forward-word" => "^p",
+        "search-backward" => "MSearch backward: ",
+        "posix-search-forward" => "sPosix search: ",
+        "posix-search-backward" => "sPosix search backward: ",
+        "indent-to" => "NIndent to column: ", "move-to-column" => "NMove to column: ",
+        "insert-char" => "(list (read-char-by-name \"Insert character (Unicode name or hex): \") (prefix-numeric-value current-prefix-arg) t))",
+        "kill-buffer" => "bKill buffer: ", "make-indirect-buffer" => "bMake indirect buffer (to buffer): \nBName of indirect buffer: ",
+        "rename-buffer" => "(list (read-string \"Rename buffer (to new name): \" nil 'buffer-name-history (buffer-name (current-buffer))) current-prefix-arg)",
+        "buffer-enable-undo" | "delete-other-windows-internal" | "iconify-frame" | "lower-frame" | "raise-frame"
+            | "make-frame-invisible" | "make-frame-visible" => "",
+        "select-frame" => "e",
+        "copy-file" => "fCopy file: \nGCopy %s to file: \np\nP",
+        "rename-file" => "fRename file: \nGRename %s to file: \np",
+        "add-name-to-file" => "fAdd name to file: \nGName to add to %s: \np",
+        "make-symbolic-link" => "FMake symbolic link to file: \nGMake symbolic link to file %s: \np",
+        "set-file-modes" => "(let ((file (read-file-name \"File: \"))) (list file (read-file-modes nil file)))",
+        "write-region" => "r\nFWrite region to file: \ni\ni\ni\np",
         // Lisp in GNU: (interactive) with no spec.
         "emacs-lisp-mode" => return Some(None),
         _ => return None,

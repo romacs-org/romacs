@@ -124,6 +124,16 @@ impl Leaf<'_> {
         self.vm
             .next_single_char_property_change_values(position, property, object, limit)
     }
+    pub(crate) fn previous_single_char_property_change(
+        &mut self,
+        position: Value,
+        property: Value,
+        object: Value,
+        limit: Value,
+    ) -> super::super::Out {
+        self.vm
+            .previous_single_char_property_change_values(position, property, object, limit)
+    }
     pub(crate) fn text_property_not_all(&mut self, start: Value, end: Value, property: Value, value: Value, object: Value) -> super::super::Out {
         self.vm.text_property_not_all_values(start, end, property, value, object)
     }

@@ -9,7 +9,7 @@
   "print.c"
  ],
  "gnu_def": "print.c:882",
- "rust": "src/prims/printing.rs:25",
+ "rust": "src/prims/printing.rs:43",
  "args": [
   "printing-probe-only",
   "printing-probe-only"

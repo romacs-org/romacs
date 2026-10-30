@@ -60,7 +60,8 @@ fn printing_callbacks_survive_collection_and_errors() {
 fn printing_errors_restore_current_buffer_and_keep_text_atomic() {
     let mut vm = Vm::new();
     let source = "(let ((outer (current-buffer)) (b (get-buffer-create \"print-error\"))) (unwind-protect (list (condition-case err (prin1 'object b '((unsupported . t))) (error (car err))) (eq outer (current-buffer)) (with-current-buffer b (buffer-string))) (kill-buffer b)))";
-    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(error t \"\")");
+    // An unknown override key is print_bind_overrides's (wrong-type-argument symbolp nil), as GNU's.
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(wrong-type-argument t \"\")");
 }
 
 /// print.c: on a terminal, `t` is the echo area. Successive prints extend

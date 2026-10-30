@@ -4,9 +4,10 @@ use super::*;
 // emacs.c Fkill_emacs: `kill-emacs-hook', in batch as safe_run_hooks runs
 // it (the command loop's Lisp half, prims/keyboard.rs), interactively
 // through `run-hook-query-error-with-timeout', which asks whether to go on
-// after an error; then shut_down_emacs auto-saves and the session host
-// ends the process with ARG's exit code. With no session host the VM is embedded in a process it does not
-// own, so it refuses; RESTART is refused too.
+// after an error; then shut_down_emacs auto-saves and unlocks the files,
+// and the session host ends the process with ARG's exit code. With no
+// session host the VM is embedded in a process it does not own, so it
+// refuses; RESTART is refused too.
 defsubr! { name = "kill-emacs", gnu = "emacs.c:2953", effect = Global,
 fn kill_emacs(cx; optional arg: Value, restart: Value) -> Step {
     if restart != Value::NIL { return Err(Fault::Error("VM2 kill-emacs RESTART is unsupported".into())); }
@@ -28,11 +29,34 @@ fn run_hook(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
 }
 
 /// shut_down_emacs's Fdo_auto_save (Qt, Qnil) (emacs.c:3156), through the
-/// subr's symbol (fileio.c's, prims/autosave.rs), then the exit.
+/// subr's symbol (fileio.c's, prims/autosave.rs), then unlock_all_files.
 fn auto_save(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let f = cx.intern("do-auto-save");
-    if cx.symbol_function(f)? == Value::NIL { return exit(cx, Value::NIL, saved); }
-    Ok(Step::Call { f, args: vec![Value::TRUE, Value::NIL], then: exit, saved: saved.to_vec() })
+    if cx.symbol_function(f)? == Value::NIL { return unlock_all_files(cx, Value::NIL, saved); }
+    Ok(Step::Call { f, args: vec![Value::TRUE, Value::NIL], then: unlock_all_files, saved: saved.to_vec() })
+}
+
+/// shut_down_emacs's unlock_all_files (filelock.c:663): each modified
+/// buffer's truename is unlocked, then the exit. SAVED: ARG, then the
+/// truenames left.
+fn unlock_all_files(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let field = cx.intern("buffer-file-truename");
+    let mut truenames = vec![saved[0]];
+    let mut buffers = cx.lifecycle_list();
+    while let Some((buffer, rest)) = cx.pair(buffers) {
+        buffers = rest;
+        if !cx.lifecycle_live_p(buffer) { continue; }
+        let truename = cx.buffer_local_read(field, buffer)?;
+        let state = cx.buffer_modification(buffer)?;
+        if cx.string_view(truename).is_ok() && state.save_modiff < state.modiff { truenames.push(truename); }
+    }
+    unlock_next(cx, Value::NIL, &truenames)
+}
+
+fn unlock_next(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let Some((&truename, _)) = saved[1..].split_first() else { return exit(cx, Value::NIL, saved) };
+    let rest: Vec<Value> = std::iter::once(saved[0]).chain(saved[2..].iter().copied()).collect();
+    Ok(Step::Call { f: cx.intern("unlock-file"), args: vec![truename], then: unlock_next, saved: rest })
 }
 
 /// Fkill_emacs's exit code: an integer ARG's, else success.

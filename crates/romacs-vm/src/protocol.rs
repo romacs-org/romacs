@@ -141,6 +141,7 @@ impl Vm {
                 data::Object::Terminal(_) => Ok(json!({"type":"terminal"})),
                 data::Object::WindowConfiguration(_) => Ok(json!({"type":"window-configuration"})),
                 data::Object::Sqlite(_) => Ok(json!({"type":"sqlite"})),
+                data::Object::Finalizer(_) => Ok(json!({"type":"finalizer"})),
                 data::Object::Process(_) => Ok(json!({"type":"process"})),
                 data::Object::Marker(_) => Ok(json!({"type":"marker"})),
                 data::Object::Overlay(_) => Ok(json!({"type":"overlay"})),

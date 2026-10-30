@@ -51,13 +51,38 @@ fn file_mode_string(mode: u32) -> Vec<u8> {
 
 defsubr! { name = "file-attributes", gnu = "dired.c:953", effect = Global,
 fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
-    use std::os::unix::fs::MetadataExt;
-    // GNU catches all expansion conditions and returns nil.
-    let path = match super::fileio::expand_file_name(cx, filename) {
-        Ok(path) => path,
-        Err(_) => return Ok(Step::Done(Value::NIL)),
-    };
-    let expanded = cx.string(&path);
+    // dired.c:974: internal_condition_case_2 (Fexpand_file_name, FILENAME,
+    // Qnil, Qt, Fidentity): any condition, a handler's among them, is the
+    // value, and a value that is not a string answers nil.
+    match super::expand_file_name::expand(cx, filename, Value::NIL) {
+        Ok(Some(expanded)) => attributes_expanded(cx, expanded, &[id_format]),
+        Ok(None) => {
+            let form = catching_expansion(cx, filename);
+            Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: attributes_expanded, saved: vec![id_format] })
+        }
+        Err(_) => Ok(Step::Done(Value::NIL)),
+    }
+}}
+
+/// (condition-case err (expand-file-name 'NAME nil) (t err))
+fn catching_expansion(cx: &mut Leaf<'_>, name: Value) -> Value {
+    let list = |cx: &mut Leaf<'_>, items: &[Value]| items.iter().rev().fold(Value::NIL, |tail, &head| cx.cons(head, tail));
+    let quote = cx.intern("quote");
+    let quoted = list(cx, &[quote, name]);
+    let expand = cx.intern("expand-file-name");
+    let call = list(cx, &[expand, quoted, Value::NIL]);
+    let err = cx.intern("err");
+    let catch_all = list(cx, &[Value::TRUE, err]);
+    let condition_case = cx.intern("condition-case");
+    list(cx, &[condition_case, err, call, catch_all])
+}
+
+fn attributes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    if !matches!(cx.kind(expanded), crate::prim::leaf::Kind::String | crate::prim::leaf::Kind::Bytes) {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let id_format = saved[0];
+    let path = cx.string_text(expanded)?;
     let operation = cx.intern("file-attributes");
     let handler = super::fileio::find_file_name_handler(cx, expanded, operation)?;
     if handler != Value::NIL {
@@ -65,15 +90,22 @@ fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
         if id_format != Value::NIL { args.push(id_format); }
         return Ok(Step::Call { f: handler, args, then: returned, saved: vec![] });
     }
+    Ok(Step::Done(native_attributes(cx, &path, id_format)?))
+}
+
+/// The attributes of the file PATH names, not following a symlink, in
+/// ID-FORMAT; nil when it cannot be examined.
+pub(super) fn native_attributes(cx: &mut Leaf<'_>, path: &str, id_format: Value) -> Out {
+    use std::os::unix::fs::MetadataExt;
     let integer = cx.intern("integer");
     let named = id_format != Value::NIL && id_format != integer;
-    let metadata = match crate::host::symlink_metadata(&path) {
+    let metadata = match crate::host::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(_) => return Ok(Step::Done(Value::NIL)),
+        Err(_) => return Ok(Value::NIL),
     };
     let file_type = if metadata.file_type().is_dir() { Value::TRUE }
     else if metadata.file_type().is_symlink() {
-        let target = match crate::host::read_link(&path) { Ok(target) => target, Err(_) => return Ok(Step::Done(Value::NIL)) };
+        let target = match crate::host::read_link(path) { Ok(target) => target, Err(_) => return Ok(Value::NIL) };
         let target = target.to_str().ok_or_else(|| Fault::Error("VM2 file-attributes non-UTF-8 symlink target decoding unsupported".into()))?;
         cx.make_string(target.as_bytes().to_vec(), !target.is_ascii())
     } else { Value::NIL };
@@ -89,8 +121,8 @@ fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
     let device = cx.bigint(metadata.dev().into());
     let mut list = Value::NIL;
     for value in [file_type, links, uid, gid, atime, mtime, ctime, size, mode, Value::TRUE, inode, device].into_iter().rev() { list = cx.cons(value, list); }
-    Ok(Step::Done(list))
-}}
+    Ok(list)
+}
 
 fn symlink_expanded(cx: &mut Leaf<'_>, filename: Value, _: &[Value]) -> Next {
     cx.string_bytes(filename)?;
@@ -113,10 +145,7 @@ fn file_symlink_p(cx, filename: Value) -> Step {
     if cx.string_bytes(filename)?.contains(&0) {
         return Err(Fault::Wrong("filenamep", filename));
     }
-    let path = super::fileio::expand_file_name(cx, filename)?;
-    let multibyte = cx.string_view(filename)?.is_multibyte() || !path.is_ascii();
-    let expanded = cx.make_string(path.into_bytes(), multibyte);
-    symlink_expanded(cx, expanded, &[])
+    super::fileio::expanding(cx, filename, symlink_expanded, vec![])
 }}
 
 defsubr! { name = "file-name-nondirectory", gnu = "fileio.c:534", effect = Global,
@@ -245,14 +274,10 @@ defsubr! { name = "file-name-case-insensitive-p", gnu = "fileio.c:2688", effect 
 fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
     cx.string_bytes(filename)?;
     let filename = decoded_name(cx, filename)?;
-    let expansion = cx.intern("expand-file-name");
-    if super::fileio::find_file_name_handler(cx, filename, expansion)? != Value::NIL {
-        return Err(Fault::Error("VM2 file-name-case-insensitive-p expand-file-name handler is unsupported".into()));
-    }
-    let path = super::fileio::expand_file_name(cx, filename)?;
-    let multibyte = cx.string_view(filename)?.is_multibyte() || !path.is_ascii();
-    let expanded = if cx.string_text(filename)? == path { filename }
-        else { cx.make_string(path.into_bytes(), multibyte) };
+    super::fileio::expanding(cx, filename, case_expanded, vec![])
+}}
+
+fn case_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Next {
     let operation = cx.intern("file-name-case-insensitive-p");
     let handler = super::fileio::find_file_name_handler(cx, expanded, operation)?;
     if handler != Value::NIL {
@@ -262,7 +287,7 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
     let insensitive = crate::host::case_insensitive(std::path::Path::new(&path), filesystem_case_insensitive)
         .map_err(|reason| Fault::Error(format!("VM2 filesystem case sensitivity unknown: {reason}")))?;
     Ok(Step::Done(if insensitive { Value::TRUE } else { Value::NIL }))
-}}
+}
 
 // Deliberately differs from pinned GNU's Linux constant: observe existing
 // directory entries only. Never create a probe or infer from the OS name.

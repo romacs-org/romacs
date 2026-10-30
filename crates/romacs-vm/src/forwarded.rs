@@ -69,6 +69,11 @@ pub(crate) enum Predicate {
     Integerp,
     Stringp,
     Symbolp,
+    /// FWDPRED_Qfraction: a number in `fraction''s `range' (0.0 . 1.0).
+    Fraction,
+    /// FWDPRED_Qvertical_scroll_bar, FWDPRED_Qoverwrite_mode: one of the
+    /// `choice' list syms_of_buffer puts on the predicate symbol.
+    Choice(&'static [&'static str]),
 }
 
 /// EMACS_CONFIGURATION: this host's triple in config.guess's spelling.
@@ -83,7 +88,7 @@ const HOST_CONFIGURATION: &str = if cfg!(target_arch = "x86_64") {
 /// C variables that no Rust code reads: GNU's DEFVAR site and initial value,
 /// installed as ordinary special variables on first intern. Being plain
 /// value cells, they can be let-bound and made buffer-local like any Lisp
-/// variable (forwarded objects and integers cannot yet: VM2-CVAR1).
+/// variable.
 pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "inhibit-x-resources", gnu: "emacs.c:3596", kind: Kind::Bool(false) },
     // VM2 compiles every form lexically, so the variable reads t, as in a
@@ -119,6 +124,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "auto-resize-tab-bars", gnu: "xdisp.c:38905", kind: Kind::Lisp(Init::True) },
     CVariable { name: "auto-resize-tool-bars", gnu: "xdisp.c:38918", kind: Kind::Lisp(Init::True) },
     CVariable { name: "auto-save-interval", gnu: "keyboard.c:13864", kind: Kind::Int(300) },
+    CVariable { name: "auto-save-include-big-deletions", gnu: "fileio.c:6964", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "auto-save-list-file-name", gnu: "fileio.c:6952", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "auto-save-no-message", gnu: "keyboard.c:13869", kind: Kind::Bool(false) },
     CVariable { name: "auto-save-timeout", gnu: "keyboard.c:13873", kind: Kind::Lisp(Init::Fixnum(30)) },
@@ -604,7 +610,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Automatically local in every buffer, unibyte ones included: url-http
     // sets its connection buffers' own (url-http.el:1393).
     CVariable { name: "mode-line-format", gnu: "buffer.c:5168", kind: Kind::PerBuffer { default: Init::Str("%-"), predicate: None } },
-    CVariable { name: "mode-name", gnu: "buffer.c:5255", kind: Kind::PerBuffer { default: Init::Str("Fundamental"), predicate: None } },
+    // Its default is nil; a new buffer's is "Fundamental" (per_buffer_initial).
+    CVariable { name: "mode-name", gnu: "buffer.c:5255", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "fill-column", gnu: "buffer.c:5259", kind: Kind::PerBuffer { default: Init::Fixnum(70), predicate: Some(Predicate::Integerp) } },
     // Chain: compile.el's easy-mmode docstrings fill through back-to-indentation.
     CVariable { name: "left-margin", gnu: "buffer.c:5279", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
@@ -612,9 +619,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "abbrev-mode", gnu: "buffer.c:5265", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // self-insert-command (rlisp/vm/prelude.el) reads both.
     CVariable { name: "auto-fill-function", gnu: "buffer.c:5433", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
-    // simple.el's delete-backward-char and self-insert paths read it; GNU
-    // checks a non-nil value against its `choice' list (VM2-CVAR-PRED1).
-    CVariable { name: "overwrite-mode", gnu: "buffer.c:5492", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // simple.el's delete-backward-char and self-insert paths read it.
+    CVariable { name: "overwrite-mode", gnu: "buffer.c:5492", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Choice(&["nil", "overwrite-mode-textual", "overwrite-mode-binary"])) } },
     CVariable { name: "ctl-arrow", gnu: "buffer.c:5294", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     // char-width and string-width read it (indent.c buffer_display_table).
     CVariable { name: "buffer-display-table", gnu: "buffer.c:5502", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
@@ -628,9 +634,30 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "indicate-buffer-boundaries", gnu: "buffer.c:5619", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "fringe-indicator-alist", gnu: "buffer.c:5644", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "fringe-cursor-alist", gnu: "buffer.c:5663", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
-    // GNU checks these two against `fraction' on set (VM2-CVAR-PRED1).
-    CVariable { name: "scroll-up-aggressively", gnu: "buffer.c:5678", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
-    CVariable { name: "scroll-down-aggressively", gnu: "buffer.c:5691", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "scroll-up-aggressively", gnu: "buffer.c:5678", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Fraction) } },
+    CVariable { name: "scroll-down-aggressively", gnu: "buffer.c:5691", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Fraction) } },
+    // The rest of buffer.c's DEFVAR_PER_BUFFERs, so every one exists with
+    // its default, predicate and local-if-set flag (init_buffer_once).
+    CVariable { name: "tab-line-format", gnu: "buffer.c:5151", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "local-abbrev-table", gnu: "buffer.c:5262", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "cache-long-scans", gnu: "buffer.c:5798", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "left-margin-width", gnu: "buffer.c:5539", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
+    CVariable { name: "right-margin-width", gnu: "buffer.c:5547", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
+    CVariable { name: "left-fringe-width", gnu: "buffer.c:5555", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Integerp) } },
+    CVariable { name: "right-fringe-width", gnu: "buffer.c:5564", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Integerp) } },
+    CVariable { name: "fringes-outside-margins", gnu: "buffer.c:5573", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "scroll-bar-width", gnu: "buffer.c:5581", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Integerp) } },
+    CVariable { name: "scroll-bar-height", gnu: "buffer.c:5586", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Integerp) } },
+    CVariable { name: "vertical-scroll-bar", gnu: "buffer.c:5591", kind: Kind::PerBuffer { default: Init::True, predicate: Some(Predicate::Choice(&["nil", "t", "left", "right"])) } },
+    CVariable { name: "horizontal-scroll-bar", gnu: "buffer.c:5601", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "text-conversion-style", gnu: "buffer.c:5951", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // Always local (PER_BUFFER_IDX -1): files.el's backup and save, window
+    // display bookkeeping (ibuffer reads the time), scroll commands.
+    CVariable { name: "buffer-backed-up", gnu: "buffer.c:5461", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "point-before-scroll", gnu: "buffer.c:5834", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "buffer-auto-save-file-format", gnu: "buffer.c:5842", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "buffer-display-count", gnu: "buffer.c:5863", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
+    CVariable { name: "buffer-display-time", gnu: "buffer.c:5868", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "cursor-type", gnu: "buffer.c:5905", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     CVariable { name: "line-spacing", gnu: "buffer.c:5928", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "cursor-in-non-selected-windows", gnu: "buffer.c:5939", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
@@ -656,7 +683,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Text edits record undo entries here (undo.c); t disables recording.
     CVariable { name: "buffer-undo-list", gnu: "buffer.c:5743", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // rename-buffer renames a non-visiting buffer's auto-save file.
-    CVariable { name: "buffer-auto-save-file-name", gnu: "buffer.c:5452", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "buffer-auto-save-file-name", gnu: "buffer.c:5452", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     // auto-save reads and resets it; files.el and gnosis read it.
     CVariable { name: "buffer-saved-size", gnu: "buffer.c:5465", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
@@ -695,7 +722,7 @@ pub(crate) struct Forwarded {
     unbound_symbol: Value,
     bools: Vec<bool>,
     ints: Vec<i64>,
-    eval_limit_index: usize,
+    pub(super) eval_limit_index: usize,
     /// `gc-cons-threshold' and `gc-cons-percentage', read by the collector's
     /// pacing (`Vm::collection_due').
     gc_cons: (usize, usize),
@@ -705,8 +732,17 @@ pub(crate) struct Forwarded {
     object_vars: Vec<usize>,
     buffer_vars: Vec<usize>,
     by_name: HashMap<&'static str, Fwd>,
+    /// `max-lisp-eval-depth''s symbol slot once a buffer may bind it
+    /// locally, else usize::MAX; and the current buffer's local binding as
+    /// last found (`Vm::eval_limit_local'): the buffer's bits, its private
+    /// slot or usize::MAX, and the `local_epoch' it was found at.
+    pub(super) eval_limit_symbol: usize,
+    pub(super) eval_limit_cache: (u64, usize, u64),
+    /// Advanced by every change of a local-binding table and by collection,
+    /// which moves buffers and reclaims bindings.
+    pub(super) local_epoch: u64,
 }
-romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, gc_cons, defaults, object_vars, buffer_vars, by_name });
+romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, gc_cons, defaults, object_vars, buffer_vars, by_name, eval_limit_symbol, eval_limit_cache, local_epoch });
 
 impl Default for Forwarded {
     fn default() -> Self {
@@ -717,6 +753,9 @@ impl Default for Forwarded {
             bools: vec![],
             ints: vec![],
             eval_limit_index: 0,
+            eval_limit_symbol: usize::MAX,
+            eval_limit_cache: (0, usize::MAX, u64::MAX),
+            local_epoch: 0,
             gc_cons: (0, 0),
             defaults: vec![],
             object_vars: vec![],
@@ -832,6 +871,13 @@ pub(crate) fn file_identity(path: &str) -> Option<(u64, u64)> {
 
 impl PerBuffer {
     pub(crate) fn editor_mark(&self) -> Option<Value> { self.4 }
+    /// Forget the visited file's identity and modification time, as a
+    /// buffer that visits nothing has them.
+    pub(crate) fn reset_visit(&mut self) {
+        self.1 = VisitedModtime::default();
+        self.2 = None;
+        self.3 = None;
+    }
     pub(crate) fn set_editor_mark(&mut self, marker: Value) { self.4 = Some(marker); }
     pub(crate) fn get(&self, i: u16) -> Option<Value> {
         self.0.get(i as usize).copied().flatten()
@@ -875,6 +921,8 @@ pub(crate) fn fault_text(fault: Fault) -> String {
     }
 }
 const WRONG_TYPE: &str = "forwarded variable wrong-type-argument ";
+/// data.c wrong_choice and wrong_range: `(error MESSAGE VALUE)'.
+const WRONG_VALUE: &str = "forwarded variable error ";
 const UNBINDABLE: &str = "Built-in variable may not be unbound : ";
 
 impl Vm {
@@ -922,17 +970,30 @@ impl Vm {
             }
         }
     }
-    pub(super) fn localized_boolean(&self, slot: usize) -> Option<Fwd> {
+    /// The C storage of a localized global built-in (GNU's blv over its
+    /// forwarding): its default lives there, its buffer-local values in the
+    /// local-binding table.
+    pub(super) fn localized_forwarded(&self, slot: usize) -> Option<Fwd> {
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::LocalizedForwarded(fwd @ Fwd::Bool(_))) => Some(fwd),
+            Some(VariableRedirect::LocalizedForwarded(fwd @ (Fwd::Bool(_) | Fwd::Int(_) | Fwd::Obj(_)))) => Some(fwd),
             _ => None,
         }
     }
+    /// VALUE as a buffer-local binding of FWD's variable holds it, as
+    /// store_symval_forwarding stores it: a Boolean's t or nil, an
+    /// integer only, any other object as it is.
+    pub(super) fn localized_value(fwd: Fwd, value: Value) -> std::result::Result<Value, Fault> {
+        match fwd {
+            Fwd::Bool(_) => Ok(if value == Value::NIL { Value::NIL } else { Value::TRUE }),
+            Fwd::Int(_) if value.integer_value().is_none() => Err(Fault::Wrong("integerp", value)),
+            _ => Ok(value),
+        }
+    }
     pub(super) fn native_forwarding(&mut self, slot: usize) -> Option<Fwd> {
-        self.localized_boolean(slot).or_else(|| self.access_forwarding(slot))
+        self.localized_forwarded(slot).or_else(|| self.access_forwarding(slot))
     }
     pub(super) fn check_boolean_default(&self, slot: usize, value: Value) -> Result<()> {
-        if self.localized_boolean(slot).is_some() && value != Value::NIL && value != Value::TRUE {
+        if matches!(self.localized_forwarded(slot), Some(Fwd::Bool(_))) && value != Value::NIL && value != Value::TRUE {
             return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
         }
         Ok(())
@@ -1082,7 +1143,8 @@ impl Vm {
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
         matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "local-minor-modes" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name")
+            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "local-minor-modes" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name"
+            | "buffer-backed-up" | "buffer-saved-size" | "point-before-scroll" | "buffer-auto-save-file-format" | "buffer-display-count" | "buffer-display-time")
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {
@@ -1090,6 +1152,7 @@ impl Vm {
         }
     }
     pub(super) fn forwarded_buffer_value(&mut self, buffer: usize, i: u16) -> Value {
+        let buffer = self.per_buffer_owner(buffer, i);
         if let Some(value) = self.per_buffer(buffer).and_then(|p| p.get(i)) { return value; }
         if self.per_buffer_always_local(i) {
             let value = self.per_buffer_initial(i);
@@ -1121,7 +1184,20 @@ impl Vm {
     }
     pub(crate) fn set_undo_list_of(&mut self, buffer: usize, value: Value) {
         let i = self.undo_list_index();
+        let buffer = self.per_buffer_owner(buffer, i);
         if let Some(locals) = self.per_buffer_mut(buffer) { locals.set(i, value); }
+    }
+    /// The buffer whose slot I buffer BUFFER reads and writes: its own,
+    /// but an indirect buffer's undo list is its base's, as GNU's
+    /// set_buffer_internal_2 hands the one list between them (Bug#18180).
+    fn per_buffer_owner(&mut self, buffer: usize, i: u16) -> usize {
+        if i != self.undo_list_index() {
+            return buffer;
+        }
+        match self.objects.get(buffer) {
+            Some(data::Object::Buffer(b)) if b.base != Value::NIL && b.state.live => b.base.index(0).expect("base buffer") - 1,
+            _ => buffer,
+        }
     }
     fn undo_list_index(&mut self) -> u16 {
         if self.undo_list_slot == u16::MAX {
@@ -1254,12 +1330,15 @@ impl Vm {
                         Some(Predicate::Stringp) if self.str_view(value).is_none() => {
                             return Err(Fault::Wrong("stringp", value));
                         }
+                        Some(Predicate::Fraction) => self.check_fraction(value)?,
+                        Some(Predicate::Choice(choice)) => self.check_choice(choice, value)?,
                         _ => {}
                     }
                 }
                 // GNU writes the buffer's slot whether or not its flag is
                 // set; an unflagged slot always mirrors the default, so VM2
                 // keeps only flagged (local) values.
+                let buffer = self.per_buffer_owner(buffer, i);
                 if self.per_buffer_local_p(buffer, i) {
                     self.per_buffer_mut(buffer).expect("live buffer").set(i, value);
                 }
@@ -1325,7 +1404,7 @@ impl Vm {
         let owner = self.slots[self.buffer_slot].value;
         // Only a per-buffer variable needs the current buffer; binding any
         // other forwarded variable must not create the initial one.
-        let let_default = self.localized_boolean(slot).is_some() || match fwd {
+        let let_default = self.localized_forwarded(slot).is_some() || match fwd {
             Fwd::Buffer(i) => {
                 let buffer = self.current_buffer_object()?;
                 !self.per_buffer_local_p(buffer, i)
@@ -1337,7 +1416,7 @@ impl Vm {
     /// GNU `do_specbind`'s store for a forwarded SLOT, once its binding is
     /// recorded: a failed store leaves that binding to restore OLD.
     pub(super) fn store_forwarded_binding(&mut self, slot: usize, fwd: Fwd, value: Value, let_default: bool) -> std::result::Result<(), Fault> {
-        let value = if self.localized_boolean(slot).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
+        let value = match self.localized_forwarded(slot) { Some(localized) => Self::localized_value(localized, value)?, None => value };
         if let_default {
             self.set_forwarded_default(slot, fwd, value, SetFlag::Bind)
         } else {
@@ -1383,7 +1462,10 @@ impl Vm {
                 self.forwarded.ints[i as usize] = n;
             }
             Fwd::Buffer(i) if let_default => self.forwarded.defaults[i as usize] = old,
-            Fwd::Buffer(i) => self.per_buffer_mut(local.expect("live owner")).expect("live buffer").set(i, old),
+            Fwd::Buffer(i) => {
+                let owner = self.per_buffer_owner(local.expect("live owner"), i);
+                self.per_buffer_mut(owner).expect("live buffer").set(i, old)
+            }
         }
         Ok(())
     }
@@ -1394,7 +1476,7 @@ impl Vm {
             return self.notify_watchers_at(slot, self.rooted(frame, 0), "unlet", Some(self.rooted(frame, 1)));
         }
         self.notify_watchers_at(slot, self.rooted(frame, 0), "set", Some(Value::NIL))?;
-        if !matches!(fwd, Fwd::Buffer(_)) && self.localized_boolean(slot).is_none() {
+        if !matches!(fwd, Fwd::Buffer(_)) && self.localized_forwarded(slot).is_none() {
             self.notify_watchers(slot, self.rooted(frame, 0), "unlet")?;
         }
         Ok(())
@@ -1402,8 +1484,8 @@ impl Vm {
     /// GNU `make-local-variable` on a forwarded variable (data.c:2245).
     pub(super) fn make_forwarded_local(&mut self, slot: usize, fwd: Fwd) -> Result<()> {
         match fwd {
-            Fwd::Bool(_) => {
-                self.promote_boolean_local(slot, true)?;
+            Fwd::Bool(_) | Fwd::Int(_) | Fwd::Obj(_) => {
+                self.promote_forwarded_local(slot, true)?;
                 self.make_local_variable(slot)
             }
             Fwd::Buffer(i) => {
@@ -1414,7 +1496,6 @@ impl Vm {
                 }
                 Ok(())
             }
-            Fwd::Obj(_) | Fwd::Int(_) => Err(unlocalizable(&self.symbol_names[slot])),
             Fwd::Fence(_) => self.fenced(slot, Access::Write, |vm| vm.make_local_variable(slot)),
         }
     }
@@ -1424,9 +1505,12 @@ impl Vm {
         let (condition, data) = if let Some(predicate) = error.strip_prefix(WRONG_TYPE) {
             let predicate = self.intern(predicate);
             ("wrong-type-argument", vec![predicate, value])
-        } else if error.starts_with(UNBINDABLE) || error.starts_with(UNLOCALIZABLE) {
+        } else if error.starts_with(UNBINDABLE) {
             let message = self.make_lisp_string(error.as_bytes().to_vec(), true);
             ("error", vec![message])
+        } else if let Some(message) = error.strip_prefix(WRONG_VALUE) {
+            let message = self.make_lisp_string(message.as_bytes().to_vec(), false);
+            ("error", vec![message, value])
         } else {
             return None;
         };
@@ -1439,8 +1523,7 @@ impl Vm {
 /// (all nil in C; GNU's -Q image fills `file-name-handler-alist',
 /// `file-coding-system-alist' and `set-auto-coding-function' from Lisp, VM2
 /// keeps nil). Declared special with GNU's C value so a `let' of one is
-/// dynamic and seen by the primitive, but NOT forwarded: forwarded object
-/// variables cannot be made buffer-local yet (VM2-CVAR1), and packages make
+/// dynamic and seen by the primitive, and buffer-local where packages make
 /// the change hooks and `deactivate-mark' local.
 const FILEIO_SPECIALS: [(&str, &str); 18] = [
     ("first-change-hook", "buffer.c:5738"),
@@ -1481,15 +1564,47 @@ impl Vm {
     }
 }
 
-const UNLOCALIZABLE: &str = "VM2 cannot make built-in variable buffer-local: ";
-/// GNU turns an object, boolean or integer built-in variable into
-/// SYMBOL_LOCALIZED with a forwarded realvalue (`make_blv`). VM2 does not
-/// model that combination yet and refuses instead (DIVERGENCES.md
-/// VM2-CVAR1), rather than silently creating a binding nothing would read.
-pub(super) fn unlocalizable(name: &str) -> String {
-    format!("{UNLOCALIZABLE}{name}")
-}
 
 #[cfg(test)]
 #[path = "forwarded_tests.rs"]
 mod forwarded_tests;
+
+impl Vm {
+    /// GNU `bset_<field> (b, VALUE)` for buffer INDEX: its own slot of the
+    /// per-buffer variable NAME, or its Lisp local of NAME when it has one.
+    pub(crate) fn set_per_buffer_of(&mut self, index: usize, name: &str, value: Value) {
+        if let Some(Fwd::Buffer(i)) = self.forwarded.lookup(name) {
+            if let Some(locals) = self.per_buffer_mut(index) { locals.set(i, value); }
+        } else if let Some(&slot) = self.names.get(name) {
+            let (table, buffer) = (self.slots[slot].local, Value::reference(index + 1, 0));
+            if table != Value::NIL
+                && let Some(binding) = self.declaration_hash_get(table, buffer).ok().flatten()
+                && let Ok(local) = binding.index(7)
+            {
+                self.slots[local - 1].value = value;
+            }
+        }
+    }
+    /// data.c check_fwd_predicate's FWDPRED_Qfraction: VALUE is a number
+    /// in 0.0..=1.0, else wrong_range's error.
+    fn check_fraction(&mut self, value: Value) -> std::result::Result<(), Fault> {
+        let number = match (value.integer_value(), self.object_if(value)) {
+            (Some(n), _) => n as f64,
+            (None, Some(data::Object::Float(f))) => *f,
+            _ => return Err(Fault::Wrong("numberp", value)),
+        };
+        if (0.0..=1.0).contains(&number) { return Ok(()); }
+        Err(Fault::Error(format!("{WRONG_VALUE}Value should be from 0.0 to 1.0")))
+    }
+    /// data.c check_choice: VALUE is one of CHOICE, else wrong_choice's
+    /// "One of A, B or C should be specified".
+    fn check_choice(&mut self, choice: &[&str], value: Value) -> std::result::Result<(), Fault> {
+        if choice.iter().any(|&name| self.intern(name) == value) { return Ok(()); }
+        let mut text = String::from("One of ");
+        for (i, name) in choice.iter().enumerate() {
+            text.push_str(name);
+            text.push_str(if i + 1 == choice.len() { " should be specified" } else if i + 2 == choice.len() { " or " } else { ", " });
+        }
+        Err(Fault::Error(format!("{WRONG_VALUE}{text}")))
+    }
+}

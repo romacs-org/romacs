@@ -1971,7 +1971,8 @@ unsafe fn prepared(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value 
 #[inline(always)]
 fn depth_room(e: &mut Engine<'_>) -> bool {
     let attempted = e.depth_base + e.frames.len() + 1;
-    let limit = e.vm.forwarded.eval_limit();
+    // A buffer-local limit makes the current buffer's binding the one read.
+    let limit = if e.vm.forwarded.eval_limit_symbol == usize::MAX { e.vm.forwarded.eval_limit() } else { e.vm.eval_limit() };
     if limit >= 100 && attempted as u64 <= limit as u64 && eval_depth::stack_pointer() >= e.native_floor {
         return true;
     }
@@ -2697,13 +2698,21 @@ unsafe fn take_step(
                 leave_native(e);
                 if e.vm.may_collect(1) {
                     poll_collect(e);
-                    *r.add((*pc).a) = e.vm.garbage_collect_statistics();
+                    let statistics = e.vm.garbage_collect_statistics();
+                    // garbage_collect's run_finalizers, before it returns.
+                    match e.vm.finalizer_runner() {
+                        Some(runner) => (runner, vec![statistics], prim::prims::garbage_collect::finalizers_ran as prim::Then, Vec::new()),
+                        None => {
+                            *r.add((*pc).a) = statistics;
+                            return Continue::At(r, pc.add(1));
+                        }
+                    }
                 } else {
                     // A frame below holds untraced Values (`Vm::may_collect`):
                     // GNU's garbage_collection_inhibited early return.
                     *r.add((*pc).a) = Value::NIL;
+                    return Continue::At(r, pc.add(1));
                 }
-                return Continue::At(r, pc.add(1));
             }
             Ok(prim::Step::Done(value)) => {
                 leave_native(e);
@@ -3097,7 +3106,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::command_primitive
         }
         TempBuffer => Vm::eval_buffer_primitive,
-        DeepEqual | Min | Append | Prin1ToString => Vm::eval_data_primitive,
+        DeepEqual | Min | Append => Vm::eval_data_primitive,
         GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive
@@ -3671,9 +3680,14 @@ fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
         let (x, y) = vm.objects.split_at_mut(a);
         (&y[0], &mut x[b])
     };
+    // An edit of shared text moves the other buffers' positions: the
+    // general path does that.
     let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
         return None;
     };
+    if text.base != Value::NIL || !text.indirect.is_empty() {
+        return None;
+    }
     let length = chars.len();
     if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
         return None;

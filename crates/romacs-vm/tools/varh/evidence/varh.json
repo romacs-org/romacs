@@ -6596,17 +6596,11 @@
   }
  ],
  "pinned": {
-  "per-buffer/042": "SIGNAL-VS-VALUE",
-  "per-buffer/044": "SIGNAL-VS-VALUE",
-  "per-buffer/048": "SIGNAL-VS-VALUE",
   "per-buffer/049": "SIGNAL-VS-VALUE",
-  "per-buffer/050": "SIGNAL-VS-VALUE",
   "local-variable-if-set-p/012": "SIGNAL-VS-VALUE",
   "local-variable-if-set-p/013": "SIGNAL-VS-VALUE",
   "local-variable-if-set-p/014": "SIGNAL-VS-VALUE",
   "local-variable-if-set-p/015": "SIGNAL-VS-VALUE",
-  "local-variable-if-set-p/028": "VALUE",
-  "local-variable-if-set-p/032": "VALUE",
   "defvar/036": "VALUE",
   "defvar/038": "VALUE"
  }
