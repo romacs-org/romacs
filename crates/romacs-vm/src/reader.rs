@@ -576,10 +576,31 @@ impl Reader<'_, '_> {
             114 | 82 if (2..=36).contains(&number) => self.radix_integer(number as u32),
             114 | 82 => Err(self.syntax(&format!("integer, radix {number}"))),
             61 => {
+                // lread.c read0 `#N=': a placeholder cons stands for the
+                // object while it is read, so the object may refer to itself.
+                let placeholder = self.vm.list_value(&[Value::NIL]);
+                let slot = self.vm.external_roots.len();
+                self.vm.external_roots.push(placeholder);
+                self.labels.insert(number, slot);
                 let value = self.form(depth + 1)?;
-                let root = self.vm.external_roots.len() - 1;
-                self.labels.insert(number, root);
-                Ok(value)
+                let placeholder = self.vm.external_roots[slot];
+                if value == placeholder {
+                    return Err(self.syntax("nonsensical self-reference"));
+                }
+                match value.index_if(3).filter(|_| !Vm::image_value(value)) {
+                    // A cons: the placeholder becomes it, so references to
+                    // the placeholder are references to the object.
+                    Some(cons) => {
+                        let pair = self.vm.conses[cons];
+                        self.vm.conses[placeholder.payload() as usize] = pair;
+                        Ok(placeholder)
+                    }
+                    None => {
+                        self.vm.external_roots[slot] = value;
+                        self.substitute(value, placeholder);
+                        Ok(value)
+                    }
+                }
             }
             35 => self
                 .labels
@@ -588,6 +609,34 @@ impl Reader<'_, '_> {
                 .map(|r| self.vm.external_roots[r])
                 .ok_or_else(|| self.syntax("undefined numbered reference")),
             _ => Err(self.syntax("#")),
+        }
+    }
+    /// lread.c substitute_object_recurse: replace PLACEHOLDER by OBJECT
+    /// within OBJECT's conses, vectors and records, visiting each once.
+    fn substitute(&mut self, object: Value, placeholder: Value) {
+        let mut seen = std::collections::HashSet::new();
+        let mut pending = vec![object];
+        while let Some(v) = pending.pop() {
+            if Vm::image_value(v) || !seen.insert(v.0) {
+                continue;
+            }
+            let mut fix = |x: &mut Value| {
+                if *x == placeholder {
+                    *x = object;
+                } else {
+                    pending.push(*x);
+                }
+            };
+            if let Some(i) = v.index_if(3) {
+                let (mut car, mut cdr) = self.vm.conses[i];
+                fix(&mut car);
+                fix(&mut cdr);
+                self.vm.conses[i] = (car, cdr);
+            } else if let Some(i) = v.index_if(0).and_then(|i| i.checked_sub(1))
+                && let Some(Object::Vector(items) | Object::Record(items)) = self.vm.objects.get_mut(i)
+            {
+                items.iter_mut().for_each(fix);
+            }
         }
     }
     fn prefix(&mut self, name: &str, depth: usize) -> Result<Value> {
@@ -1361,6 +1410,22 @@ impl Vm {
                 _ => Err("source datum required".into()),
             },
             3 => {
+                // `(quote X)' returns X itself (eval.c Fquote): an X with no
+                // tree spelling, one that contains itself (`#1=(a . #1#)'),
+                // is carried as that object.
+                if let Ok((head, rest)) = self.cons_pair(value)
+                    && let Some(slot) = head.index_if(7).and_then(|s| s.checked_sub(1))
+                    && self.symbol_names[slot] == "quote"
+                    && !self.generated_slots.contains_key(&slot)
+                    && !self.obarray_symbol_names.contains_key(&slot)
+                    && let Ok((datum, Value::NIL)) = self.cons_pair(rest)
+                    && !self.spellable(datum, depth + 1, &mut std::collections::HashSet::new())
+                {
+                    return Ok(Form::List(vec![
+                        self.datum_form(head, depth + 1, objects)?,
+                        Form::Object(crate::handle::FormObject::new(self, datum)),
+                    ]));
+                }
                 let mut values = vec![];
                 let mut tail = value;
                 while tail.tag() == 3 {
@@ -1384,6 +1449,38 @@ impl Vm {
             4 | 6 if objects => Ok(Form::Object(crate::handle::FormObject::new(self, value))),
             _ => Err("source datum required".into()),
         }
+    }
+    /// Whether VALUE has a tree spelling for `datum_form': no cons or
+    /// vector within it contains itself, and nesting stays in its limit.
+    /// OPEN holds the conses and vectors enclosing VALUE.
+    fn spellable(&self, value: Value, depth: usize, open: &mut std::collections::HashSet<u64>) -> bool {
+        if depth > 256 {
+            return false;
+        }
+        let mut entered = vec![];
+        let mut children = vec![];
+        let mut tail = value;
+        while tail.tag() == 3 {
+            if !open.insert(tail.0) {
+                entered.iter().for_each(|v| { open.remove(v); });
+                return false;
+            }
+            entered.push(tail.0);
+            let Ok((car, cdr)) = self.cons_pair(tail) else { break };
+            children.push(car);
+            tail = cdr;
+        }
+        if let Some(Object::Vector(items)) = self.object_if(tail) {
+            if !open.insert(tail.0) {
+                entered.iter().for_each(|v| { open.remove(v); });
+                return false;
+            }
+            entered.push(tail.0);
+            children.extend_from_slice(items);
+        }
+        let spelled = children.iter().all(|&child| self.spellable(child, depth + 1, open));
+        entered.iter().for_each(|v| { open.remove(v); });
+        spelled
     }
     /// Compile source as one progn for readable IR inspection, without executing.
     /// Source-file eval still executes top-level forms sequentially.
