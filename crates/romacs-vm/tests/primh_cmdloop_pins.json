@@ -1,42 +1,42 @@
 {
   "call-interactively/0288": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil nil)) (error (list 'sig e))))"
   },
   "call-interactively/0292": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) t nil)) (error (list 'sig e))))"
   },
   "call-interactively/0296": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym nil)) (error (list 'sig e))))"
   },
   "call-interactively/0300": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw nil)) (error (list 'sig e))))"
   },
   "call-interactively/0314": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 'sym) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))"
   },
   "call-interactively/0411": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))"
   },
   "call-interactively/0415": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))"
@@ -108,163 +108,163 @@
     "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((x 7)) (let ((f (lambda (a) (interactive (list x)) a))) (fset 'interactive-form (lambda (g) '(interactive (list (+ x 1))))) (call-interactively f))) t)) (error (list 'sig e))))"
   },
   "call-interactively/0549": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(ok (1 2 1 2 . #2))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))"
   },
   "funcall-interactively/0342": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil)) (error (list 'sig e))))"
   },
   "funcall-interactively/0343": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) t)) (error (list 'sig e))))"
   },
   "funcall-interactively/0344": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 0)) (error (list 'sig e))))"
   },
   "funcall-interactively/0345": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1)) (error (list 'sig e))))"
   },
   "funcall-interactively/0346": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 2)) (error (list 'sig e))))"
   },
   "funcall-interactively/0347": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) -1)) (error (list 'sig e))))"
   },
   "funcall-interactively/0348": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) most-positive-fixnum)) (error (list 'sig e))))"
   },
   "funcall-interactively/0349": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1.5)) (error (list 'sig e))))"
   },
   "funcall-interactively/0350": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym)) (error (list 'sig e))))"
   },
   "funcall-interactively/0351": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw)) (error (list 'sig e))))"
   },
   "funcall-interactively/0352": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"\"))) (error (list 'sig e))))"
   },
   "funcall-interactively/0353": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"abc\"))) (error (list 'sig e))))"
   },
   "funcall-interactively/0354": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"λx\"))) (error (list 'sig e))))"
   },
   "funcall-interactively/0355": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 1 2 3))) (error (list 'sig e))))"
   },
   "funcall-interactively/0356": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 'a (list 'b)))) (error (list 'sig e))))"
   },
   "funcall-interactively/0357": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 2))) (error (list 'sig e))))"
   },
   "funcall-interactively/0358": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 (cons 2 3)))) (error (list 'sig e))))"
   },
   "funcall-interactively/0359": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (vector 1 2))) (error (list 'sig e))))"
   },
   "funcall-interactively/0360": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))"
   },
   "funcall-interactively/0486": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil)) (let ((r (funcall-interactively a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "funcall-interactively/0487": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 1)) (let ((r (funcall-interactively a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "funcall-interactively/0488": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 most-positive-fixnum)) (let ((r (funcall-interactively a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "funcall-interactively/0489": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw)) (let ((r (funcall-interactively a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "funcall-interactively/0490": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (copy-sequence \"λx\"))) (let ((r (funcall-interactively a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "funcall-interactively/0491": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (cons 1 2))) (let ((r (funcall-interactively a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "funcall-interactively/0492": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (invalid-function (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (funcall-interactively a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
@@ -276,7 +276,7 @@
     "source": "(prin1-to-string (condition-case e (list 'ok (funcall-interactively (lambda () (called-interactively-p 'any)))) (error (list 'sig e))))"
   },
   "funcall-interactively/0516": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(ok (1 2 1 2 . #2))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))"
@@ -288,7 +288,7 @@
     "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-adv (lambda (x) (interactive \"p\") x)) (advice-add 'cl-adv :around (lambda (f &rest a) (apply f a))) (interactive-form 'cl-adv))) (error (list 'sig e))))"
   },
   "interactive-form/0155": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(ok (1 2 1 2 . #2))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))"
@@ -354,7 +354,7 @@
     "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (lambda (x) x))) (error (list 'sig e))))"
   },
   "prefix-numeric-value/0048": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(ok (1 2 1 2 . #2))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))"
@@ -390,163 +390,163 @@
     "source": "(prin1-to-string (condition-case e (list 'ok (reverse (lambda (x) x))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0342": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0343": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) t)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0344": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 0)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0345": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0346": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 2)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0347": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) -1)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0348": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) most-positive-fixnum)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0349": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1.5)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0350": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0351": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw)) (error (list 'sig e))))"
   },
   "run-hook-with-args/0352": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"\"))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0353": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"abc\"))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0354": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"λx\"))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0355": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 1 2 3))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0356": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 'a (list 'b)))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0357": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 2))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0358": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 (cons 2 3)))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0359": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (vector 1 2))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0360": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0486": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0487": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0488": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 most-positive-fixnum)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0489": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0490": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (copy-sequence \"λx\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0491": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (cons 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0492": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))"
   },
   "run-hook-with-args/0552": {
-    "accepted": "VM-ERROR circular list printing requires print-circle",
+    "accepted": "VM-ERROR (error \"circular list printing requires print-circle\")",
     "class": "PRINTER",
     "expected": "(ok (1 2 1 2 . #2))",
     "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))"

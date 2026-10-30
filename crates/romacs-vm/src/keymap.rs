@@ -312,17 +312,9 @@ impl Vm {
         // Only abbreviated keyboard modifiers (not `control-`, etc.) are
         // prefixes; solitary list modifiers accept both spellings.
         let name = self.key_event_name(event).ok_or("symbol event required")?.to_owned();
-        let mut base = name.as_str();
-        let mut modifiers = 0;
-        while let Some((prefix, rest)) = base.split_once('-') {
-            if !matches!(prefix, "A" | "C" | "H" | "M" | "S" | "s" | "up" | "down" | "drag" | "double" | "triple") {
-                break;
-            }
-            modifiers |= Self::key_event_modifier(prefix).unwrap();
-            base = rest;
-        }
-        if base == name { return Ok(event); }
-        Ok(self.modified_key_event_symbol(base, modifiers))
+        let (modifiers, base) = parse_event_modifiers(name.as_bytes());
+        if base == 0 { return Ok(event); }
+        Ok(self.modified_key_event_symbol(&name[base..], modifiers))
     }
     fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
         // GNU keyboard.c:7832-7888: collect modifier bits before converting
@@ -564,4 +556,27 @@ impl Vm {
             _ => unreachable!(),
         }
     }
+}
+
+/// keyboard.c parse_modifiers_uncached: the modifier bits NAME's prefixes
+/// spell (each an abbreviation followed by `-'), with `click' for a bare
+/// mouse button or wheel event, and the byte NAME's base starts at.
+pub(crate) fn parse_event_modifiers(name: &[u8]) -> (i64, usize) {
+    const PREFIXES: [&str; 11] = ["A", "C", "H", "M", "S", "s", "drag", "down", "double", "triple", "up"];
+    let bit = |prefix| Vm::key_event_modifier(prefix).expect("a modifier prefix");
+    let (mut modifiers, mut i) = (0, 0);
+    while i + 1 < name.len() {
+        let Some(prefix) = PREFIXES.iter().find(|p| name[i..].starts_with(p.as_bytes()) && name.get(i + p.len()) == Some(&b'-'))
+        else { break };
+        modifiers |= bit(prefix);
+        i += prefix.len() + 1;
+    }
+    let base = &name[i..];
+    let clicks = bit("double") | bit("triple");
+    if modifiers & (clicks | bit("down") | bit("drag")) == 0
+        && base.len() == 7 && base.starts_with(b"mouse-") && base[6].is_ascii_digit()
+        || modifiers & clicks == 0 && base.len() > 6 && base.starts_with(b"wheel-") {
+        modifiers |= bit("click");
+    }
+    (modifiers, i)
 }

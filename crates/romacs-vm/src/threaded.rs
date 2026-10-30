@@ -3072,7 +3072,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::command_primitive
         }
         TempBuffer => Vm::eval_buffer_primitive,
-        DeepEqual | Min | Append | Prin1ToString => Vm::eval_data_primitive,
+        DeepEqual | Min | Append => Vm::eval_data_primitive,
         GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive

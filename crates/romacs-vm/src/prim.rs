@@ -257,6 +257,11 @@ mod leaf {
             let slot = self.vm.slot(name);
             self.vm.slots[slot].value = value;
         }
+        /// Fget: SYMBOL's KEY property, read as `symbol-plist' reads it.
+        pub(crate) fn symbol_property(&mut self, symbol: Value, key: Value) -> std::result::Result<Value, Fault> {
+            let plist = self.observed_symbol_plist(symbol)?;
+            Ok(self.vm.plist_lookup(plist, key))
+        }
         pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
             self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
         }
