@@ -61,6 +61,38 @@ impl Leaf<'_> {
         self.vm.fence_random();
         self.vm.random.bits()
     }
+    /// Fmake_indirect_buffer (buffer.c:807) up to its Lisp: NAME's
+    /// checks, BASE-BUFFER's, the buffer and, with CLONE, BASE's state.
+    /// Returns the buffer and the base whose text it shares.
+    pub(crate) fn indirect_buffer(&mut self, base: Value, name: Value, clone: bool, inhibit: bool) -> std::result::Result<(Value, Value), Fault> {
+        let text = self.string_text(name).map_err(|_| Fault::Wrong("stringp", name))?;
+        if self.vm.named_buffer(&text).is_some() || (text == "*scratch*" && self.vm.scratch_unmade()) {
+            return Err(Fault::Error(format!("Buffer name ‘{text}’ is in use")));
+        }
+        let found = self.lifecycle_get(base)?;
+        if found == Value::NIL {
+            return Err(Fault::Error(format!("No such buffer: ‘{}’", self.string_text(base)?)));
+        }
+        if !self.lifecycle_live_p(found) {
+            return Err(Fault::Error("Base buffer has been killed".into()));
+        }
+        if text.is_empty() {
+            return Err(Fault::Error("Empty string for buffer name is not allowed".into()));
+        }
+        let buffer = self.vm.make_indirect_buffer(found, &text, inhibit).map_err(Fault::Error)?;
+        let base = self.buffer_base(buffer);
+        if clone {
+            self.vm.clone_indirect_state(buffer, base).map_err(Fault::Error)?;
+        }
+        Ok((buffer, base))
+    }
+    /// Fbuffer_base_buffer: BUFFER's base buffer, or nil.
+    pub(crate) fn buffer_base(&self, buffer: Value) -> Value {
+        match self.vm.object_if(buffer) {
+            Some(Object::Buffer(b)) => b.base,
+            _ => Value::NIL,
+        }
+    }
     pub fn lifecycle_killable(&self, buffer: Value) -> bool {
         self.lifecycle_live_p(buffer)
             && !self

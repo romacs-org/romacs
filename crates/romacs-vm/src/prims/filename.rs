@@ -85,7 +85,7 @@ fn list_directory(cx: &mut Leaf<'_>, directory: Value, file: Value, saved: &[Val
         usize::try_from(n).unwrap_or(usize::MAX)
     };
     if pattern != Value::NIL { cx.string_text(pattern)?; }
-    utf8_file_names(cx, "directory-files")?;
+    utf8_file_names(cx, if attrs == Value::NIL { "directory-files" } else { "directory-files-and-attributes" })?;
     // Open even when COUNT is zero: GNU validates the directory first.
     let entries = crate::host::read_dir(&directory_file).map_err(|e| directory_error(cx, "Opening directory", &directory_file, e))?;
     // Rust omits dot entries. Their enumeration order is not specified by GNU;

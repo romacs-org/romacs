@@ -104,32 +104,6 @@ impl Leaf<'_> {
         Value::integer(column as i64).map_err(Fault::Error)
     }
 
-    pub fn fieldless_constraint(&mut self, new: Value, old: Value) -> super::super::Out {
-        let position = |leaf: &Self, value: Value| match leaf.marker_position(value) {
-            Some(Some(n)) => Ok(n),
-            Some(None) => Ok(0),
-            None => value.integer_value().ok_or(Fault::Wrong("integer-or-marker-p", value)),
-        };
-        let new = if new == Value::NIL { self.point()? } else { position(self, new)? };
-        let old = position(self, old)?;
-        let result = Value::integer(new).map_err(Fault::Error)?;
-        let inhibit = self.intern("inhibit-field-text-motion");
-        if new == old || self.variable_value(inhibit)?.is_some_and(|v| v != Value::NIL) {
-            return Ok(result);
-        }
-        let shape = self.buffer_shape()?;
-        let field = self.intern("field");
-        for pos in [Some(new), Some(old), (new > shape.begv).then(|| new - 1), (old > shape.begv).then(|| old - 1)].into_iter().flatten() {
-            let position = Value::integer(pos).map_err(Fault::Error)?;
-            if pos < 1 || pos > shape.z { return Err(Fault::Range1(position)); }
-            let value = self.character_property(position, field)?;
-            if value != Value::NIL {
-                return Err(Fault::Error("VM2 field-boundary motion is not implemented".into()));
-            }
-        }
-        Ok(result)
-    }
-
     fn character_property(&mut self, pos: Value, key: Value) -> super::super::Out {
         // Threaded activations exclude the final 4096 stack slots. This
         // non-evaluating property query uses two of them without reallocating

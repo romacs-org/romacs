@@ -1371,3 +1371,22 @@ fn default_directory_and_expansion_match_gnu() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// What a GNU test file sees before it loads: GNU's dump preloads indent,
+// font-lock, paragraphs, fringe (`define-fringe-bitmap' without a window
+// system), image and vc-hooks, and startup's command-line initializes the
+// delayed standard values. `cl-deftype' dispatch is cl-lib's
+// method, which GNU's cl-lib.elc defines because cl-generic is dumped.
+#[test]
+fn ert_bootstrap_preloads_match_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped(&root);
+    let source = "(progn (require 'cl-lib) (cl-deftype rt-digit () '(integer 0 9)) (cl-defgeneric rt-kind (x)) (cl-defmethod rt-kind ((_x rt-digit)) 'digit) (cl-defmethod rt-kind (_x) 'other) (prin1-to-string (list (mapcar #'fboundp '(define-fringe-bitmap font-lock-add-keywords move-to-left-margin)) (mapcar #'boundp '(use-hard-newlines vc-directory-exclusion-list)) (consp image-load-path) custom-delayed-init-variables (rt-kind 3) (rt-kind 30))))";
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let printed = vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| e);
+    let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
+    assert_eq!(actual, expected);
+}

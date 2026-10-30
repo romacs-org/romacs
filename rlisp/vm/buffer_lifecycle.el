@@ -44,6 +44,19 @@
         (unless (integerp previous-point) (set-marker previous-point nil)))
       (if allow
           (progn
+            ;; A base buffer's indirect buffers die before it, and one that
+            ;; survives its kill keeps the base alive (buffer.c:2019).
+            (if (and (buffer-live-p buffer) (not (buffer-base-buffer buffer)))
+                (let ((tail (buffer-list)))
+                  (while tail
+                    (let ((other (car tail)))
+                      (if (eq (buffer-base-buffer other) buffer)
+                          (progn
+                            (kill-buffer other)
+                            (if (buffer-live-p other)
+                                (error "Unable to kill buffer whose indirect buffer `%s' cannot be killed"
+                                       (buffer-name other))))))
+                    (setq tail (cdr tail)))))
             ;; unlock_buffer: a modified buffer's file is unlocked.
             (if (and (buffer-live-p buffer) (buffer-modified-p buffer)
                      (stringp (buffer-local-value 'buffer-file-truename buffer)))
@@ -53,4 +66,18 @@
             (if (and (buffer-live-p buffer) (fboundp 'romacs--kill-buffer-processes))
                 (romacs--kill-buffer-processes buffer))
             (romacs--kill-buffer-finish buffer))
-        nil))))
+        nil)))
+  (defun romacs--indirect-buffer-made (buffer base clone inhibit)
+    ;; Fmake_indirect_buffer after its buffer exists (buffer.c:938): a
+    ;; clone forgets its base's save query and file number and runs its
+    ;; hook in BUFFER; then the buffer list's hook runs.
+    (if clone
+        (save-current-buffer
+          (set-buffer buffer)
+          (set 'buffer-save-without-query nil)
+          (set 'buffer-file-number nil)
+          (if (local-variable-p 'buffer-stale-function base)
+              (kill-local-variable 'buffer-stale-function))
+          (run-hooks 'clone-indirect-buffer-hook)))
+    (or inhibit (run-hooks 'buffer-list-update-hook))
+    buffer))

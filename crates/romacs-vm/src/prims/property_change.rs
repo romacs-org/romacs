@@ -11,6 +11,11 @@ fn next_single_char_property_change(cx, position: Value, property: Value; option
     cx.next_single_char_property_change(position, property, object, limit)
 }}
 
+defsubr! { name = "previous-single-char-property-change", gnu = "textprop.c:857", effect = Reads,
+fn previous_single_char_property_change(cx, position: Value, property: Value; optional object: Value, limit: Value) {
+    cx.previous_single_char_property_change(position, property, object, limit)
+}}
+
 defsubr! { name = "text-property-not-all", gnu = "textprop.c:1857", effect = Reads,
 fn text_property_not_all(cx, start: Value, end: Value, property: Value, value: Value; optional object: Value) {
     cx.text_property_not_all(start, end, property, value, object)

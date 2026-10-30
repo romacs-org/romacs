@@ -23,16 +23,19 @@ fn restore_buffer_modified_p(cx, flag: Value) -> Step {
     restore(cx, flag, false, flag)
 }}
 
-/// Frestore_buffer_modified_p: a visited file's truename is locked when
-/// the buffer becomes modified and unlocked when it stops being so, unless
-/// modification hooks are inhibited; then FLAG is the state. RETURNS is
-/// the value.
+/// Frestore_buffer_modified_p: the visited file's truename of the buffer,
+/// or of its base when indirect, is locked when the buffer becomes
+/// modified and unlocked when it stops being so, unless modification hooks
+/// are inhibited; then FLAG is the state. RETURNS is the value.
 fn restore(cx: &mut Leaf<'_>, flag: Value, redisplay: bool, returns: Value) -> Next {
     let saved = vec![flag, if redisplay { Value::TRUE } else { Value::NIL }, returns];
     if super::fileio::var(cx, "inhibit-modification-hooks")? == Value::NIL {
-        let truename = super::fileio::var(cx, "buffer-file-truename")?;
+        let buffer = cx.current_buffer()?;
+        let base = match cx.buffer_base(buffer) { Value::NIL => buffer, base => base };
+        let (truename, name) = (cx.intern("buffer-file-truename"), cx.intern("buffer-file-name"));
+        let truename = cx.buffer_local_read(truename, base)?;
         // Testing `buffer-file-name' makes binding it to nil effective.
-        if truename != Value::NIL && super::fileio::var(cx, "buffer-file-name")? != Value::NIL {
+        if truename != Value::NIL && cx.buffer_local_read(name, base)? != Value::NIL {
             let state = cx.buffer_modification(Value::NIL)?;
             let already = state.save_modiff < state.modiff;
             let operation = match (already, flag != Value::NIL) { (false, true) => Some("lock-file"), (true, false) => Some("unlock-file"), _ => None };

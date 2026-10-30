@@ -176,3 +176,19 @@ fn conflict_callback_can_decline_or_steal() {
     assert_eq!(eval(&mut vm, "(unlock-buffer)"), "nil");
     assert!(std::fs::symlink_metadata(&lock).is_err());
 }
+#[test]
+fn indirect_buffer_edits_lock_the_base_file_as_pinned_gnu() {
+    let p = dir("indirect").join("target"); let q = quoted(&p);
+    let source = format!("(progn (write-region \"\" nil {q} nil t) (setq buffer-file-truename {q}) \
+        (let ((r nil)) (with-current-buffer (make-indirect-buffer (current-buffer) \"fl-indirect\") \
+          (insert \"x\") (push (file-locked-p {q}) r) (set-buffer-modified-p nil) (push (file-locked-p {q}) r) \
+          (set-buffer-modified-p t) (push (file-locked-p {q}) r) (set-buffer-modified-p nil)) (nreverse r)))");
+    let output = std::process::Command::new(pinned_gnu()).args(["--batch", "-Q", "--eval", &format!("(prin1 {source})")])
+        .output().expect("pinned GNU is required");
+    assert!(output.status.success(), "GNU failed: {output:?}");
+    let gnu = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(gnu, "(t nil t)");
+    let mut vm = Vm::new(); prepare(&mut vm, &p.with_file_name(".#target"));
+    assert_eq!(eval(&mut vm, &source), gnu);
+    assert!(std::fs::symlink_metadata(p.with_file_name(".#target")).is_err());
+}

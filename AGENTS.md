@@ -1,12 +1,15 @@
 # Romacs
 
-Romacs is being built as a malleable Lisp machine with first-class support for
-agents. People and agents should be able to inspect, program, and reshape their
-environment through Lisp. Editing is one application of the machine.
+Romacs is a Lisp machine emulator written in Rust, with Emacs Lisp as its
+runtime, and with first-class support for agents. People and agents should be
+able to inspect, program, and reshape the whole machine through Lisp. Editing
+is one application of the machine.
 
-Rust provides the runtime and platform machinery. Lisp should carry commands,
-policy, composition, and customization wherever practical. Broad GNU Elisp
-compatibility provides useful programs and semantics; it does not require
+Rust emulates the machine: object memory and collection, the evaluator, loading,
+processes, and the display and input host. Elisp is its runtime: GNU's Lisp
+corpus and Romacs's own Lisp run on it as programs, and Lisp should carry
+commands, policy, composition, and customization wherever practical. Broad GNU
+Elisp compatibility provides useful programs and semantics; it does not require
 copying GNU Emacs's internal architecture.
 
 ## Development
@@ -38,6 +41,11 @@ copying GNU Emacs's internal architecture.
   Lisp.
 - Back structural and performance claims with measurements on the owner's
   hardware.
+- Judge the machine as a whole. Measure runtime and representation work on
+  corpus workloads (loading GNU's Lisp and `rlisp/`, the GNU ERT suites) and on
+  general use (find-file and the minibuffer, project commands, dired, vc,
+  search, help, shells, org and text editing), not on one user's configuration
+  or one package.
 - Keep working behavior and user data intact while improving the machine.
 
 ## Testing loop
