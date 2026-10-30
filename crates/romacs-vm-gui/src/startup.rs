@@ -1465,10 +1465,11 @@ mod tests {
             assert_ne!(printed(&mut vm, &own_mode_line(name)), "GLOBAL", "{name}");
         }
         // The format is the labelled stand-in for bindings.el, expanded by
-        // GNU's engine: both windows show their own buffer and position.
+        // GNU's engine: both windows show their own buffer and position,
+        // and %z%Z their utf-8-unix coding.
         for window in &snapshot.windows[..2] {
             let band = &window.snapshot.mode_line.as_ref().unwrap().utf8;
-            assert!(band.starts_with("---:"), "{band}");
+            assert!(band.starts_with("-UU:"), "{band}");
             assert!(band.contains("[stand-in: no bindings.el]"), "{band}");
             assert!(band.contains(" L"), "{band}");
         }
