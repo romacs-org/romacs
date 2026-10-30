@@ -34,7 +34,9 @@ def main():
  p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--evidence',required=True);a=p.parse_args()
  rows=[]
  for s in CASES:
-  oracle=subprocess.check_output([GNU,'-Q','--batch','--eval','(setq lexical-binding t)','--eval',f'(prin1 (eval (read {json.dumps(s,ensure_ascii=False)}) t))'],text=True)
+  # Byte-compiled, as Romacs compiles every form: a byte-op call such as
+  # (char-after 1) is the primitive, not the function cell (VM2-SEALED1).
+  oracle=subprocess.check_output([GNU,'-Q','--batch','--eval','(setq lexical-binding t byte-compile-warnings nil native-comp-enable-subr-trampolines nil)','--eval',f'(prin1 (funcall (byte-compile (lambda () {s}))))'],text=True)
   got=subprocess.run([a.binary],input=read_form(s),capture_output=True)
   row=dict(source=s,transport=json.loads(read_form(s)),expected=oracle,got=got.stdout.decode().strip(),error=got.stderr.decode(),passed=got.returncode==0 and got.stdout.decode().strip()==oracle)
   rows.append(row)

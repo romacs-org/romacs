@@ -99,8 +99,8 @@
         "s"
       ]
     ],
-    "expected": "969",
-    "got": "969",
+    "expected": "2865",
+    "got": "2865",
     "error": "",
     "passed": true
   },
@@ -165,8 +165,8 @@
         "s"
       ]
     ],
-    "expected": "15",
-    "got": "15",
+    "expected": "3",
+    "got": "3",
     "error": "",
     "passed": true
   },
