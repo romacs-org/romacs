@@ -169,3 +169,31 @@ fn a_workers_condition_ancestry_is_installed_whole() {
     assert_eq!(eval(&mut vm, "(list (condition-case e (isolate-await (isolate-spawn '(lambda () (define-error 'journey-parent \"p\" 'file-error) (define-error 'journey-child \"c\" 'journey-parent) (signal 'journey-child '(1))))) (file-error (list 'file-error (car e)))) (condition-case e (isolate-await (isolate-spawn '(lambda () (signal 'journey-child '(2))))) (error (list 'error (car e)))) (get 'journey-child 'error-conditions))"), "((file-error journey-child) (error journey-child) (journey-child journey-parent file-error error))");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+#[test]
+fn a_cancel_behind_cpu_bound_work_still_cancels_the_queued_job() {
+    // Sol r2 S4: the worker reads what arrived before each queued job.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((iso (isolate-create)) (a (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn '(lambda () (let ((n 0)) (while (< n 3000000) (setq n (1+ n)))) 'first) :isolate iso))) (b (isolate-spawn '(lambda () (setq journey-ran t)) :isolate iso))) (isolate-future-cancel b) (list (isolate-await a) (condition-case e (isolate-await b 5) (quit 'cancelled)) (isolate-await (isolate-spawn '(lambda () (boundp 'journey-ran)) :isolate iso))))");
+    assert_eq!(out, "(first cancelled nil)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_job_queued_behind_a_feature_change_runs_on_a_worker_without_it() {
+    // Sol r2 S5: the retired worker hands its queued jobs back; they run on
+    // a worker with the features they were queued for.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature) 'provided))) (first (isolate-future-isolate a)) (b (isolate-spawn '(lambda () (featurep 'journey-feature))))) (list (isolate-await a) (isolate-await b 10) (eq (isolate-future-isolate b) first) (aref first 6))))");
+    assert_eq!(out, "(provided nil nil t)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn every_reply_arrives_when_the_parent_is_slow_to_read() {
+    // Sol r2 S13: a worker's replies wait for buffer space instead of being lost.
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((iso (isolate-create)) (futures nil)) (isolate-await (isolate-spawn 'list :isolate iso)) (dotimes (i 64) (push (isolate-spawn '(lambda (n) (make-string 3000 (+ ?a (% n 26)))) i :isolate iso) futures)) (romacs--isolate-wait 1.0) (let ((lengths (mapcar (lambda (f) (length (isolate-await f 20))) futures))) (list (length lengths) (apply #'min lengths) (apply #'max lengths))))");
+    assert_eq!(out, "(64 3000 3000)");
+    eval(&mut vm, "(isolate-kill-all)");
+}

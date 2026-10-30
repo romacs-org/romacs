@@ -72,6 +72,9 @@ In the spawner SENDER is the worker's isolate; in a worker it is `parent'.")
 (defvar romacs--isolate-serving nil "In a worker: whether its loop runs.")
 (defvar romacs--isolate-nested 0 "In a worker: how deep inside a job the frame loop runs.")
 (defvar romacs--isolate-cancelled nil "In a worker: generations interrupted before they ran.")
+(defvar romacs--isolate-retired nil
+  "In a worker: a job changed the features, so queued jobs go back to the
+spawner to run on a worker with the features they were queued for.")
 
 (define-error 'isolate-error "Isolate error")
 (define-error 'isolate-world-unavailable "No world for a worker isolate" 'isolate-error)
@@ -80,16 +83,18 @@ In the spawner SENDER is the worker's isolate; in a worker it is `parent'.")
 (define-error 'isolate-queue-full "Isolate queue full" 'isolate-error)
 (define-error 'isolate-timeout "Isolate wait timed out" 'isolate-error)
 (define-error 'isolate-refused "Isolate refused" 'isolate-error)
+(define-error 'isolate-retired "Isolate retired" 'isolate-error)
 
 ;;;; Records
 
 ;; An isolate: [isolate ID NAME STATE REQUIRE PENDING TAINTED DEADLINE
-;; PROGRAM].  STATE is `live', `killed' or `dead'; PENDING an alist of
+;; PROGRAM HELLO].  STATE is `live', `killed' or `dead'; PENDING an alist of
 ;; (GENERATION . FUTURE) in order of submission, the first running; TAINTED
 ;; once a job changed the worker's features (not reused); DEADLINE
-;; (GENERATION . TIME) after an interrupt; PROGRAM what the worker runs.
+;; (GENERATION . TIME) after an interrupt; PROGRAM what the worker runs;
+;; HELLO once the worker's hello arrived (it catches signals from then).
 (defun romacs--isolate-make (id name require program)
-  (record 'isolate id name 'live require nil nil nil program))
+  (record 'isolate id name 'live require nil nil nil program nil))
 (defun isolate-p (object) "Non-nil for an isolate." (eq (type-of object) 'isolate))
 (defun romacs--isolate-id (isolate) (aref isolate 1))
 (defun isolate-name (isolate) "ISOLATE's name, or nil." (aref isolate 2))
@@ -100,10 +105,12 @@ In the spawner SENDER is the worker's isolate; in a worker it is `parent'.")
   (and (romacs--isolate-parent-p) 'parent))
 (defun isolate-main-p () "Non-nil in the VM that spawns workers, not in one." (not (romacs--isolate-parent-p)))
 
-;; A future: [isolate-future ISOLATE GENERATION STATE VALUE CALLBACKS].
-;; STATE is `pending', `done', `error', `cancelled', `killed' or `died'.
-(defun romacs--isolate-future (isolate generation)
-  (record 'isolate-future isolate generation 'pending nil nil))
+;; A future: [isolate-future ISOLATE GENERATION STATE VALUE CALLBACKS JOB].
+;; STATE is `pending', `done', `error', `cancelled', `killed' or `died';
+;; JOB (FUNCTION ARGS BINDINGS REQUIRE DIRECTORY) is what was queued, for a
+;; resubmission when its worker retires before running it.
+(defun romacs--isolate-future (isolate generation job)
+  (record 'isolate-future isolate generation 'pending nil nil job))
 (defun isolate-future-p (object) "Non-nil for a future." (eq (type-of object) 'isolate-future))
 (defun isolate-future-isolate (future) "The isolate FUTURE runs on." (aref future 1))
 (defun isolate-future-done-p (future) "Non-nil once FUTURE is resolved." (not (eq (aref future 3) 'pending)))
@@ -210,16 +217,28 @@ features.  FRESH asks for a new worker outside the pool's bound."
   (when (>= (length (aref isolate 5)) isolate-queue-limit)
     (signal 'isolate-queue-full (list isolate)))
   (setq romacs--isolate-generation (1+ romacs--isolate-generation))
-  (let ((future (romacs--isolate-future isolate romacs--isolate-generation)))
+  (let* ((job (list function args bindings require directory))
+         (future (romacs--isolate-future isolate romacs--isolate-generation job)))
     ;; What cannot be sent signals here: an argument that cannot freeze
     ;; (`Cannot freeze'), a full queue (`isolate-queue-full'), a worker gone
     ;; (`isolate-died', whose death the next wait point reports).
     (condition-case err
-        (romacs--isolate-post (romacs--isolate-id isolate) 'job romacs--isolate-generation
-                              (list function args bindings require directory))
+        (romacs--isolate-post (romacs--isolate-id isolate) 'job romacs--isolate-generation job)
       (isolate-died (signal 'isolate-died (list isolate))))
     (aset isolate 5 (append (aref isolate 5) (list (cons romacs--isolate-generation future))))
     future))
+
+(defun romacs--isolate-resubmit (future)
+  "Queue FUTURE's job again, on a worker with the features it was queued
+for: its worker retired before running it."
+  (let* ((job (aref future 6))
+         (require (nth 3 job))
+         (isolate (romacs--isolate-acquire require nil t)))
+    (setq romacs--isolate-generation (1+ romacs--isolate-generation))
+    (romacs--isolate-post (romacs--isolate-id isolate) 'job romacs--isolate-generation job)
+    (aset future 1 isolate)
+    (aset future 2 romacs--isolate-generation)
+    (aset isolate 5 (append (aref isolate 5) (list (cons romacs--isolate-generation future))))))
 
 (defun isolate-spawn (function &rest args)
   "Run (apply FUNCTION ARGS) in a worker isolate; its future.
@@ -284,6 +303,7 @@ have sent), its futures settle, the event is reported, and it is forgotten."
         (let ((kind (car frame)) (generation (nth 1 frame)) (value (nth 2 frame)))
           (cond
            ((eq kind 'hello)
+            (aset isolate 9 t)
             (unless (romacs--isolate-hello-ok-p value (aref isolate 8))
               (romacs--isolate-signal id 9)
               (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
@@ -294,7 +314,13 @@ have sent), its futures settle, the event is reported, and it is forgotten."
               (when entry
                 (aset isolate 5 (delq entry (aref isolate 5)))
                 (aset isolate 7 nil)
-                (romacs--isolate-resolve (cdr entry) (if (eq kind 'result) 'done 'error) (car value)))))
+                (if (and (eq kind 'error) (eq (car (car value)) 'isolate-retired))
+                    ;; Queued behind a job that changed the features: it
+                    ;; runs on a worker with the features it was queued for.
+                    (condition-case err
+                        (romacs--isolate-resubmit (cdr entry))
+                      (error (romacs--isolate-resolve (cdr entry) 'error (list (car err) (cdr err) nil (get (car err) 'error-conditions)))))
+                  (romacs--isolate-resolve (cdr entry) (if (eq kind 'result) 'done 'error) (car value))))))
            ((eq kind 'message)
             (run-hook-with-args 'isolate-message-functions isolate value))
            ((eq kind 'died)
@@ -336,11 +362,17 @@ Isolate traffic and timers are pumped meanwhile, never the keyboard."
       (when (fboundp 'romacs--timer-check) (romacs--timer-check))))
   (romacs--isolate-future-value future))
 
-(defun romacs--isolate-interrupt-generation (isolate generation)
-  "Interrupt ISOLATE's job GENERATION: the frame naming it, then SIGUSR1."
+(defun romacs--isolate-interrupt-generation (isolate generation &optional queued)
+  "Interrupt ISOLATE's job GENERATION: the frame naming it, then SIGUSR1.
+The worker takes the signal only while running that generation; the frame
+cancels the job before it runs otherwise. QUEUED sets no kill deadline.
+A worker whose hello has not arrived does not catch signals yet and runs
+no job: it gets the frame alone."
   (romacs--isolate-post (romacs--isolate-id isolate) 'interrupt generation nil)
-  (romacs--isolate-signal (romacs--isolate-id isolate) 10)
-  (aset isolate 7 (cons generation (+ (float-time) isolate-interrupt-timeout))))
+  (when (aref isolate 9)
+    (romacs--isolate-signal (romacs--isolate-id isolate) 10))
+  (unless queued
+    (aset isolate 7 (cons generation (+ (float-time) isolate-interrupt-timeout)))))
 
 (defun isolate-future-cancel (future)
   "Cancel FUTURE: interrupt its worker if it is running this job, else drop it.
@@ -352,10 +384,11 @@ the job running after it is not hit in its place."
       (let ((pending (aref isolate 5)))
         (if (and pending (eq (cdr (car pending)) future))
             (romacs--isolate-interrupt-generation isolate (aref future 2))
-          ;; Queued: the worker skips it when its turn comes.
+          ;; Queued: the worker skips it when its turn comes, or quits it if
+          ;; it has just started.
           (aset isolate 5 (delq (rassq future pending) pending))
           (condition-case nil
-              (romacs--isolate-post (romacs--isolate-id isolate) 'interrupt (aref future 2) nil)
+              (romacs--isolate-interrupt-generation isolate (aref future 2) t)
             (error nil))
           (romacs--isolate-resolve future 'cancelled nil))))))
 
@@ -451,9 +484,14 @@ gone gets nothing."
          (before (length features))
          (romacs--isolate-nested (1+ romacs--isolate-nested))
          (outcome
-          (if (memq generation romacs--isolate-cancelled)
-              (progn (setq romacs--isolate-cancelled (delq generation romacs--isolate-cancelled))
-                     (list 'error (list 'quit nil nil '(quit))))
+          (cond
+           ((memq generation romacs--isolate-cancelled)
+            (setq romacs--isolate-cancelled (delq generation romacs--isolate-cancelled))
+            (list 'error (list 'quit nil nil '(quit))))
+           ;; This worker's features are not what the job was queued for.
+           (romacs--isolate-retired
+            (list 'error (list 'isolate-retired nil nil '(isolate-retired isolate-error error))))
+           (t
             ;; The job runs under its generation: an interrupt naming it
             ;; quits here, once (the safepoint clears the mark as it quits).
             (romacs--isolate-running generation)
@@ -471,31 +509,44 @@ gone gets nothing."
                     (list 'error (list 'quit nil nil '(quit))))
               (error (romacs--isolate-running nil)
                      (list 'error (list (car err) (romacs--isolate-transportable (cdr err)) nil
-                                        (get (car err) 'error-conditions))))))))
+                                        (get (car err) 'error-conditions)))))))))
     ;; The preparation loads the worker's baseline features; a later job
-    ;; that loads more retires the worker from the pool.
-    (romacs--isolate-reply generation outcome
-                           (and (not (eq function 'romacs--isolate-prepare)) (/= before (length features))))))
+    ;; that loads more retires the worker: the spawner reuses it no more and
+    ;; the jobs queued behind go back to run elsewhere.
+    (let ((changed (and (not (eq function 'romacs--isolate-prepare)) (/= before (length features)))))
+      (when changed (setq romacs--isolate-retired t))
+      (romacs--isolate-reply generation outcome changed))))
 
-(defun romacs--isolate-serve-frames ()
-  "Take every frame from the parent: note interrupts and bye and queue
-messages first, then run the jobs that arrived (deferred inside a job),
-so a job and its cancellation that arrived together cancel."
-  (let (frame jobs)
+(defun romacs--isolate-note-control-frames ()
+  "Take every frame that arrived: interrupts, bye and messages now, jobs
+onto the queue."
+  (let (frame)
     (while (setq frame (romacs--isolate-take 0))
       (let ((kind (car frame)))
-        (cond ((eq kind 'job) (push frame jobs))
+        (cond ((eq kind 'job)
+               (setq romacs--isolate-deferred (nconc romacs--isolate-deferred (list frame))))
               ((eq kind 'message)
                (setq romacs--isolate-inbox (nconc romacs--isolate-inbox (list (nth 2 frame)))))
               ((eq kind 'interrupt)
                ;; For a job not yet run; one running took it at a safepoint.
                (push (nth 1 frame) romacs--isolate-cancelled))
               ((eq kind 'bye)
-               (setq romacs--isolate-serving nil)))))
-    (dolist (frame (nreverse jobs))
-      (if (> romacs--isolate-nested 0)
-          (setq romacs--isolate-deferred (nconc romacs--isolate-deferred (list frame)))
-        (romacs--isolate-run-job (nth 1 frame) (nth 2 frame))))))
+               (setq romacs--isolate-serving nil)))))))
+
+(defun romacs--isolate-run-queued ()
+  "Run the queued jobs in order, reading what arrived before each: a
+cancellation sent behind a job cancels it before it runs."
+  (while (and romacs--isolate-deferred romacs--isolate-serving)
+    (romacs--isolate-wait 0)
+    (romacs--isolate-note-control-frames)
+    (let ((frame (pop romacs--isolate-deferred)))
+      (romacs--isolate-run-job (nth 1 frame) (nth 2 frame)))))
+
+(defun romacs--isolate-serve-frames ()
+  "Take every frame from the parent; run the queued jobs unless inside one."
+  (romacs--isolate-note-control-frames)
+  (when (= romacs--isolate-nested 0)
+    (romacs--isolate-run-queued)))
 
 (defun romacs--isolate-serve ()
   "The worker's loop: serve the parent's jobs until bye or termination."
@@ -503,11 +554,10 @@ so a job and its cancellation that arrived together cancel."
   (while (and romacs--isolate-serving (not (romacs--isolate-terminated-p)))
     ;; A signal between jobs: its frame, if any, names a queued job.
     (romacs--isolate-interrupted-p)
-    (while romacs--isolate-deferred
-      (let ((frame (pop romacs--isolate-deferred)))
-        (romacs--isolate-run-job (nth 1 frame) (nth 2 frame))))
-    (romacs--isolate-wait nil)
-    (romacs--isolate-serve-frames)))
+    (romacs--isolate-run-queued)
+    (when (and romacs--isolate-serving (null romacs--isolate-deferred))
+      (romacs--isolate-wait nil)
+      (romacs--isolate-serve-frames))))
 
 (provide 'isolate)
 ;;; isolate.el ends here

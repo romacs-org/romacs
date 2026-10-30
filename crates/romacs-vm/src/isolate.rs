@@ -77,7 +77,10 @@ impl Peer {
         Peer { socket, inbox: VecDeque::new(), closed: false }
     }
 
-    fn send(&self, kind: Kind, generation: u64, payload: &Payload) -> std::io::Result<()> {
+    /// Send a frame; with WAIT, a full peer buffer is waited for (the
+    /// worker's replies are mandatory), giving up on termination or a
+    /// closed peer.
+    fn send(&self, kind: Kind, generation: u64, payload: &Payload, wait: bool) -> std::io::Result<()> {
         let mut bytes = Vec::with_capacity(HEADER + 64);
         bytes.push(kind as u8);
         bytes.extend_from_slice(&generation.to_le_bytes());
@@ -90,22 +93,43 @@ impl Peer {
             Payload::Frozen(Backing::Inline(inline)) => bytes.extend_from_slice(inline),
             Payload::Frozen(Backing::Sealed(file)) => { bytes[9] = FLAG_SEALED; fd = Some(file.as_fd()); }
         }
-        crate::host::send_packet(self.socket.as_fd(), &bytes, fd)
+        loop {
+            match crate::host::send_packet(self.socket.as_fd(), &bytes, fd) {
+                Err(e) if wait && e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if crate::host::terminate_pending() { return Err(e); }
+                    let ready = crate::subprocess::poll(&[(self.socket.as_raw_fd(), libc::POLLOUT)], Some(std::time::Duration::from_millis(200)))?;
+                    if ready.first().is_some_and(|r| r & (libc::POLLERR | libc::POLLHUP) != 0) { return Err(e); }
+                }
+                other => return other,
+            }
+        }
+    }
+
+    /// Read every packet the socket holds now (`receive` each).
+    fn drain(&mut self, mut report: impl FnMut(Kind, i32, Option<OwnedFd>)) -> std::io::Result<()> {
+        while !self.closed {
+            match self.receive(&mut report) {
+                Ok(Received::Frame) => {}
+                Ok(Received::Nothing) | Ok(Received::Closed) => break,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
     }
 
     /// Read one packet into the inbox: the frame, or a child report, which
-    /// REPORT takes. False once the peer has closed.
-    fn receive(&mut self, mut report: impl FnMut(Kind, i32, Option<OwnedFd>)) -> std::io::Result<bool> {
+    /// REPORT takes.
+    fn receive(&mut self, report: &mut impl FnMut(Kind, i32, Option<OwnedFd>)) -> std::io::Result<Received> {
         let received = match crate::host::recv_packet(self.socket.as_fd(), PACKET) {
             Ok(received) => received,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(Received::Nothing),
             // A peer that died mid-packet is a closed peer.
             Err(e) if matches!(e.raw_os_error(), Some(libc::ECONNRESET | libc::EPIPE)) => None,
             Err(e) => return Err(e),
         };
         let Some((bytes, mut fds)) = received else {
             self.closed = true;
-            return Ok(false);
+            return Ok(Received::Closed);
         };
         if bytes.len() < HEADER { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "short isolate frame")); }
         let kind = Kind::of(bytes[0]).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "unknown isolate frame"))?;
@@ -116,7 +140,7 @@ impl Peer {
             Kind::Child | Kind::Retire => {
                 let pid = i32::from_le_bytes(body.get(..4).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "short child frame"))?.try_into().unwrap());
                 report(kind, pid, fds.pop());
-                return Ok(true);
+                return Ok(Received::Frame);
             }
             Kind::Hello => Payload::Text(String::from_utf8_lossy(body).into_owned()),
             Kind::Bye | Kind::Interrupt => Payload::None,
@@ -131,9 +155,11 @@ impl Peer {
             Kind::Died => unreachable!("never sent"),
         };
         self.inbox.push_back(Frame { kind, generation, payload });
-        Ok(true)
+        Ok(Received::Frame)
     }
 }
+
+enum Received { Frame, Nothing, Closed }
 
 /// A worker this VM spawned.
 pub(crate) struct Worker {
@@ -242,11 +268,7 @@ impl Vm {
         // No spawner to name a generation: the signal is taken as it is.
         let Some(parent) = self.isolates.parent.as_mut() else { return true };
         let Some(running) = self.isolates.running else { return false };
-        while !parent.closed {
-            let ready = crate::subprocess::poll(&[(parent.socket.as_raw_fd(), libc::POLLIN)], Some(std::time::Duration::ZERO)).unwrap_or_default();
-            if ready.first().copied().unwrap_or(0) == 0 { break; }
-            if parent.receive(|_, _, _| {}).is_err() { break; }
-        }
+        let _ = parent.drain(|_, _, _| {});
         let before = parent.inbox.len();
         parent.inbox.retain(|frame| frame.kind != Kind::Interrupt || frame.generation != running);
         let targeted = parent.inbox.len() != before;
@@ -290,7 +312,8 @@ impl Vm {
             }
         };
         let peer = self.peer(id).map_err(crate::frozen::FreezeError::Failed)?;
-        peer.send(kind, generation, &payload).map_err(|e| match e.kind() {
+        // A worker's frames to its spawner are mandatory: they wait.
+        peer.send(kind, generation, &payload, id == 0).map_err(|e| match e.kind() {
             std::io::ErrorKind::WouldBlock => crate::frozen::FreezeError::QueueFull,
             _ if matches!(e.raw_os_error(), Some(libc::EPIPE | libc::ECONNRESET | libc::ENOTCONN)) => crate::frozen::FreezeError::PeerGone,
             _ => crate::frozen::FreezeError::Failed(format!("isolate send: {e}")),
@@ -325,12 +348,12 @@ impl Vm {
         let ready: Vec<RawFd> = fds.iter().zip(ready).filter(|(_, r)| *r != 0).map(|((fd, _), _)| *fd).collect();
         if ready.is_empty() { return Ok(false); }
         if let Some(parent) = &mut self.isolates.parent && ready.contains(&parent.socket.as_raw_fd()) {
-            parent.receive(|_, _, _| {}).map_err(|e| e.to_string())?;
+            parent.drain(|_, _, _| {}).map_err(|e| e.to_string())?;
         }
         for worker in self.isolates.workers.values_mut() {
             if ready.contains(&worker.peer.socket.as_raw_fd()) {
                 let children = &mut worker.children;
-                worker.peer.receive(|kind, pid, pidfd| match kind {
+                worker.peer.drain(|kind, pid, pidfd| match kind {
                     Kind::Child => { children.insert(pid, pidfd); }
                     _ => { children.remove(&pid); }
                 }).map_err(|e| e.to_string())?;
@@ -395,15 +418,11 @@ impl Vm {
     pub(crate) fn isolate_signal_children(&mut self, id: u64) -> Result<Value> {
         let worker = self.isolates.workers.get_mut(&id).ok_or_else(|| format!("no isolate {id}"))?;
         // Reports still in the socket, from a worker that died or was killed.
-        while !worker.peer.closed {
-            let ready = crate::subprocess::poll(&[(worker.peer.socket.as_raw_fd(), libc::POLLIN)], Some(std::time::Duration::ZERO)).unwrap_or_default();
-            if ready.first().copied().unwrap_or(0) == 0 { break; }
-            let children = &mut worker.children;
-            if worker.peer.receive(|kind, pid, pidfd| match kind {
-                Kind::Child => { children.insert(pid, pidfd); }
-                _ => { children.remove(&pid); }
-            }).is_err() { break; }
-        }
+        let children = &mut worker.children;
+        let _ = worker.peer.drain(|kind, pid, pidfd| match kind {
+            Kind::Child => { children.insert(pid, pidfd); }
+            _ => { children.remove(&pid); }
+        });
         let children = std::mem::take(&mut worker.children);
         let mut outcomes = Vec::new();
         for (pid, pidfd) in children {
@@ -469,7 +488,7 @@ impl Vm {
     pub fn serve_isolate(&mut self, socket: OwnedFd, boot: &str) -> std::result::Result<(), String> {
         self.isolate_adopt_parent(socket);
         let text = hello(boot);
-        self.isolates.parent.as_ref().expect("adopted").send(Kind::Hello, 0, &Payload::Text(text)).map_err(|e| e.to_string())?;
+        self.isolates.parent.as_ref().expect("adopted").send(Kind::Hello, 0, &Payload::Text(text), true).map_err(|e| e.to_string())?;
         self.eval_source("(romacs--isolate-serve)").map(|_| ())
     }
 }
