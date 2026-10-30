@@ -259,7 +259,12 @@ impl Leaf<'_> {
                     } else {
                         // replace_range_2: one character for others,
                         // keeping its text properties.
-                        b.rewrite_character(from..to, &text).map_err(Fault::Error)?;
+                        let marks = self.vm.family_record(index);
+                        let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!("text buffer") };
+                        let edited = b.rewrite_character(from..to, &text);
+                        self.vm.family_fetch(marks);
+                        edited.map_err(Fault::Error)?;
+                        let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!("text buffer") };
                         b.state.record_text_change(out.len() + 1);
                         added += out.len() as i64 - 1;
                     }

@@ -193,7 +193,7 @@ impl Vm {
             _ => Err("marker required".into()),
         }
     }
-    fn overlay(&self, v: Value) -> Result<&Overlay> {
+    pub(crate) fn overlay(&self, v: Value) -> Result<&Overlay> {
         match self.object(v)? {
             Object::Overlay(o) => Ok(o),
             _ => Err("overlay required".into()),
@@ -422,10 +422,17 @@ impl Vm {
         Ok(v)
     }
     pub(super) fn finish_annotation_edit(&mut self, buffer: Value) -> Result<()> {
+        // A deletion empties the overlays of every buffer sharing the text
+        // (adjust_overlays_for_delete, buffer.c:3621).
+        let family = self.text_family(buffer.index(0)? - 1);
+        let buffers: Vec<Value> = if family.is_empty() { vec![buffer] }
+            else { family.into_iter().map(|i| Value::reference(i + 1, 0)).collect() };
         let mut expired = Vec::new();
-        for &v in self.annotated(buffer)?.evaporating.values() {
-            if self.overlay_range(v)?.is_some_and(|(a, b)| a == b) {
-                expired.push(v);
+        for member in buffers {
+            for &v in self.annotated(member)?.evaporating.values() {
+                if self.overlay_range(v)?.is_some_and(|(a, b)| a == b) {
+                    expired.push(v);
+                }
             }
         }
         expired.sort_unstable_by_key(|v| v.0);
@@ -721,7 +728,7 @@ impl Vm {
                     (3..=4).contains(&n)
                 }
             }
-            CopyMarker => (1..=2).contains(&n),
+            CopyMarker => n <= 2,
             MarkerPosition | MarkerBuffer | MarkerInsertionType | DeleteOverlay | OverlayStart
             | OverlayEnd | OverlaysAt | NextOverlayChange => n == 1,
             SetMarkerInsertionType | OverlayGet | OverlaysIn => n == 2,
@@ -757,6 +764,11 @@ impl Vm {
                 self.set_marker_object(x, args[1], buffer)
             }
             CopyMarker => {
+                // Fcopy_marker: no MARKER makes a marker pointing nowhere.
+                if x == Value::NIL {
+                    let bias = if n == 2 { bias(args[1]) } else { Bias::Left };
+                    return Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer: Value::NIL, anchor: None, bias }))));
+                }
                 let pos = if x.as_integer().is_ok() {
                     x
                 } else {
@@ -818,10 +830,15 @@ impl Vm {
                         }
                     }
                 }
-                let b = self.annotated_mut(buffer)?;
-                let at = b.point;
-                b.replace_with_bias(at..at, &bytes, true)?;
-                b.properties.copy_into(at, &properties);
+                let marks = self.family_record(index);
+                let edited = self.annotated_mut(buffer).and_then(|b| {
+                    let at = b.point;
+                    b.replace_with_bias(at..at, &bytes, true)?;
+                    b.properties.copy_into(at, &properties);
+                    Ok(())
+                });
+                self.family_fetch(marks);
+                edited?;
                 self.finish_annotation_edit(buffer)?;
                 Ok(Value::NIL)
             }

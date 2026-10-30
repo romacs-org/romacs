@@ -53,20 +53,34 @@ fn kill_buffer(cx; optional arg: Value) -> Step {
         else { cx.lifecycle_buffer(arg, false, false)?.0 };
     if !cx.lifecycle_killable(buffer) { return Ok(Step::Done(Value::NIL)); }
     let inhibit = if cx.buffer_state(buffer).unwrap().inhibit_buffer_hooks { Value::TRUE } else { Value::NIL };
-    // The Lisp half is defined by the first kill, as GNU's C is there
-    // from the start; later kills call it.
-    let helper = cx.intern("romacs--kill-buffer");
+    lifecycle_lisp(cx, "romacs--kill-buffer", vec![buffer, inhibit])
+}}
+
+defsubr! { name = "make-indirect-buffer", gnu = "buffer.c:807", effect = Global,
+fn make_indirect_buffer(cx, base_buffer: Value, name: Value; optional clone: Value, inhibit_buffer_hooks: Value) -> Step {
+    let inhibit = inhibit_buffer_hooks != Value::NIL;
+    let (buffer, base) = cx.indirect_buffer(base_buffer, name, clone != Value::NIL, inhibit)?;
+    let flags = [clone, inhibit_buffer_hooks].map(|flag| if flag == Value::NIL { Value::NIL } else { Value::TRUE });
+    lifecycle_lisp(cx, "romacs--indirect-buffer-made", vec![buffer, base, flags[0], flags[1]])
+}}
+
+/// Call HELPER, of the buffer lifecycle's Lisp half, with ARGS. The first
+/// call that needs the half defines it, as GNU's C is there from the
+/// start; later calls call it.
+fn lifecycle_lisp(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>) -> Next {
+    let helper = cx.intern(helper);
     if cx.fboundp(helper) {
-        return Ok(Step::Call { f: helper, args: vec![buffer, inhibit], then: return_result, saved: vec![] });
+        return Ok(Step::Call { f: helper, args, then: return_result, saved: vec![] });
     }
     let source = cx.string(include_str!("../../../../rlisp/vm/buffer_lifecycle.el"));
     let parsed = cx.read_from_string(source, Value::NIL, Value::NIL)?;
     let form = cx.pair(parsed).expect("reader result").0;
     let f = cx.intern("eval");
-    Ok(Step::Call { f, args: vec![form, Value::TRUE], then: kill_helper, saved: vec![buffer, inhibit] })
-}}
-fn kill_helper(_: &mut Leaf<'_>, helper: Value, saved: &[Value]) -> Next {
-    Ok(Step::Call { f: helper, args: saved.to_vec(), then: return_result, saved: vec![] })
+    let saved = std::iter::once(helper).chain(args).collect();
+    Ok(Step::Call { f, args: vec![form, Value::TRUE], then: lifecycle_helper, saved })
+}
+fn lifecycle_helper(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: saved[0], args: saved[1..].to_vec(), then: return_result, saved: vec![] })
 }
 
 defsubr! { name = "romacs--kill-buffer-finish", gnu = "buffer.c:2003", effect = Global,

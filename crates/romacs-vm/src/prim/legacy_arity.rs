@@ -129,7 +129,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | CacheEntries | MakeMarker | SyntaxTable | StandardSyntaxTable | SelectedWindow
         | SelectedFrame | CurrentGlobalMap | EmacsLispMode | Daemonp
         | DaemonInitialized => (0, Some(0)),
-        ReadHostEvent => (0, Some(2)),
+        ReadHostEvent | CopyMarker => (0, Some(2)),
         FormatModeLine => (1, Some(4)),
         CharAfter | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine | CopySyntaxTable
         | WindowBuffer | WindowStart | WindowPoint | FramePixelWidth | FramePixelHeight
@@ -140,7 +140,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
             (0, Some(1))
         }
         Eval | Provide | Featurep
-        | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | CopyMarker | LookingAt
+        | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | LookingAt
         | MatchString | Macroexpand | Signal => (1, Some(2)),
         Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
         SplitWindowInternal => (4, Some(5)),

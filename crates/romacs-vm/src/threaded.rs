@@ -3646,9 +3646,14 @@ fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
         let (x, y) = vm.objects.split_at_mut(a);
         (&y[0], &mut x[b])
     };
+    // An edit of shared text moves the other buffers' positions: the
+    // general path does that.
     let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
         return None;
     };
+    if text.base != Value::NIL || !text.indirect.is_empty() {
+        return None;
+    }
     let length = chars.len();
     if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
         return None;

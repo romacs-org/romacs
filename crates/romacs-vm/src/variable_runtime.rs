@@ -153,7 +153,7 @@ impl Vm {
         })
     }
 
-    fn allocate_local_binding_slot(&mut self) -> usize {
+    pub(crate) fn allocate_local_binding_slot(&mut self) -> usize {
         if let Some(slot) = self.free_local_binding_slots.pop() {
             return slot;
         }

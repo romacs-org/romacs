@@ -1,5 +1,6 @@
 //! Lisp annotation resolution. Raw per-key presence remains a storage concern.
 use crate::{coordinates::*, data::Object, *};
+use crate::indirect::Shared;
 
 const YANK_EXCLUDED: &[&str] = &[
     "category",
@@ -1109,29 +1110,41 @@ use std::ops::{Deref, DerefMut, Range};
 #[derive(Clone)]
 pub(crate) struct AnnotatedBuffer {
     text: Text,
-    pub anchors: AnchorTree,
+    /// The markers and overlay ends of the text, shared with the buffer's
+    /// indirect buffers as GNU's marker chain is (`BUF_MARKERS`).
+    pub anchors: Shared<AnchorTree>,
     pub intervals: crate::intervals::IntervalIndex,
-    pub reversed_pairs: std::collections::HashMap<Anchor, Anchor>,
+    /// Overlay starts whose overlay would turn over at an insertion, of
+    /// every buffer sharing the text: GNU adjusts every member's overlays
+    /// for an insertion in any (`adjust_overlays_for_insert`).
+    pub reversed_pairs: Shared<std::collections::HashMap<Anchor, Anchor>>,
     pub evaporating: std::collections::HashMap<Anchor, Value>,
     pub local_keymap: Value,
     pub(crate) case_tables: [Value; 4],
     /// GNU's per-buffer variable slots (`struct buffer`, forwarded.rs).
     pub per_buffer: crate::forwarded::PerBuffer,
+    /// The base buffer of an indirect buffer, else nil (`base_buffer`).
+    pub(crate) base: Value,
+    /// A base buffer's live indirect buffers (GNU counts them in
+    /// `indirections` and finds them in the buffer list).
+    pub(crate) indirect: Vec<Value>,
 }
-romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer });
+romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect });
 impl From<Text> for AnnotatedBuffer {
     fn from(text: Text) -> Self {
         let extent =
             u32::try_from(text.len_bytes()).expect("buffer exceeds anchor coordinate limit");
         Self {
             text,
-            anchors: AnchorTree::new(extent),
+            anchors: Shared::new(AnchorTree::new(extent)),
             intervals: Default::default(),
             reversed_pairs: Default::default(),
             evaporating: Default::default(),
             local_keymap: Value::NIL,
             case_tables: [Value::NIL; 4],
             per_buffer: Default::default(),
+            base: Value::NIL,
+            indirect: Vec::new(),
         }
     }
 }
@@ -1147,6 +1160,16 @@ impl DerefMut for AnnotatedBuffer {
     }
 }
 impl AnnotatedBuffer {
+    /// A new buffer sharing this one's text, markers and modification
+    /// counts (Fmake_indirect_buffer), at its point and narrowing; all else
+    /// is a new buffer's.
+    pub(crate) fn share_text(&self) -> Self {
+        Self {
+            anchors: self.anchors.share(),
+            reversed_pairs: self.reversed_pairs.share(),
+            ..Self::from(self.text.share())
+        }
+    }
     pub(crate) fn put_property(&mut self, range: Range<ByteOffset>, key: &str, value: Value) {
         let mut at = range.start;
         let mut changed = false;
@@ -1248,21 +1271,32 @@ impl AnnotatedBuffer {
         f(&mut self.local_keymap);
         for root in &mut self.case_tables { f(root); }
         self.per_buffer.visit_values(f);
-        self.text.visit_values(f);
+        self.text.visit_view_values(f);
+        // An indirect buffer holds its base alive; the text they share is
+        // the base's to visit, once, as collection rewrites what it visits.
+        f(&mut self.base);
+        for buffer in &mut self.indirect { f(buffer); }
+        if self.base == Value::NIL { self.text.visit_values(f); }
         self.intervals.visit_values(f);
         for v in self.evaporating.values_mut() {
             f(v);
         }
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
-        self.text.storage_bytes(capacity)
-            + self.anchors.storage_bytes(capacity)
+        // The shared text is charged to its base buffer alone.
+        let shared = if self.base != Value::NIL { 0 } else {
+            self.text.storage_bytes(capacity)
+                + self.anchors.storage_bytes(capacity)
+                + (if capacity {
+                    self.reversed_pairs.capacity() * 2
+                } else {
+                    self.reversed_pairs.len()
+                }) * (size_of::<(Anchor, Anchor)>() + 1)
+        };
+        shared
+            + self.text.state.storage_bytes(capacity)
+            + self.indirect.capacity() * size_of::<Value>()
             + self.intervals.storage_bytes(capacity)
-            + (if capacity {
-                self.reversed_pairs.capacity() * 2
-            } else {
-                self.reversed_pairs.len()
-            }) * (size_of::<(Anchor, Anchor)>() + 1)
             + (if capacity {
                 self.evaporating.capacity()
             } else {

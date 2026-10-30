@@ -466,10 +466,8 @@ fn append_tracks_extent_across_empty_and_registered_anchor_states() {
     assert!(buffer.anchors.remove(right));
     assert!(buffer.append_utf8("Ж"));
     assert_eq!(buffer.anchors.extent() as usize, buffer.len_bytes());
-    let last = buffer
-        .anchors
-        .create(buffer.anchors.extent(), Bias::Right)
-        .unwrap();
+    let extent = buffer.anchors.extent();
+    let last = buffer.anchors.create(extent, Bias::Right).unwrap();
     assert!(buffer.append_utf8("!"));
     assert_eq!(
         buffer.anchors.resolve(last),

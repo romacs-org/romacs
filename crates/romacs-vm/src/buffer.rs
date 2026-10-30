@@ -96,17 +96,27 @@ impl Vm {
             actual = format!("{name}<{suffix}>");
             suffix += 1;
         }
-        let mut buffer: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
-        buffer.state.name = Some(actual.clone());
+        let buffer: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
+        self.register_buffer(buffer, &actual)
+    }
+    /// A new live buffer of BUFFER's storage named NAME, which no live
+    /// buffer has: standard case tables, the current buffer's directory, at
+    /// the end of the buffer list.
+    pub(crate) fn register_buffer(&mut self, mut buffer: crate::annotations::AnnotatedBuffer, name: &str) -> Result<Value> {
+        buffer.state.name = Some(name.to_owned());
         buffer.case_tables = self.buffer_standard_case_roots()?;
+        let indirect = buffer.base != Value::NIL;
         let directory = self.inherited_directory();
         let value = self.allocate_object(Object::Buffer(Box::new(buffer)));
         self.set_directory_of(value.index(0)? - 1, directory);
-        let slot = self.slot(&format!("#:vm2-buffer:{actual}"));
+        let slot = self.slot(&format!("#:vm2-buffer:{name}"));
         self.slots[slot].value = value;
-        // Fget_buffer_create: no undo for buffers whose names start with a space.
-        let undo = if actual.starts_with(' ') { Value::TRUE } else { Value::NIL };
-        self.set_undo_list_of(value.index(0)? - 1, undo);
+        // Fget_buffer_create: no undo for buffers whose names start with a
+        // space. An indirect buffer shares its base's (Bug#18180).
+        if !indirect {
+            let undo = if name.starts_with(' ') { Value::TRUE } else { Value::NIL };
+            self.set_undo_list_of(value.index(0)? - 1, undo);
+        }
         let mut order = self.buffer_order();
         order.push(value);
         self.set_buffer_order(&order);
@@ -166,6 +176,7 @@ impl Vm {
         if !self.buffer_state(value)?.live || self.objects.iter().any(|object| {
             matches!(object, Object::Window(w) if w.mini && w.buffer == value)
         }) { return Ok(()); }
+        self.kill_indirect_buffers(value)?;
         for (name, slot) in &self.names {
             if name.starts_with("#:vm2-buffer:") && self.slots[*slot].value == value {
                 self.slots[*slot].value = Value::UNBOUND;
@@ -214,6 +225,7 @@ impl Vm {
                 self.slots[self.buffer_slot].value = replacement;
             }
         }
+        self.leave_base(value)?;
         let tables: Vec<Value> = self.slots.iter().map(|s| s.local)
             .filter(|&v| v != Value::NIL).collect();
         for table in tables { self.declaration_hash_remove(table, value)?; }
@@ -250,12 +262,16 @@ impl Vm {
         let index = value.index(0)? - 1;
         self.objects[index] = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer::empty(state, retained))),
-            _ => {
+            Object::Buffer(b) => {
                 let mut empty: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
                 empty.state = state;
                 empty.per_buffer = retained;
+                // A killed indirect buffer still names its base, as GNU's
+                // keeps `base_buffer`; its own text is this empty one.
+                empty.base = b.base;
                 Object::Buffer(Box::new(empty))
             }
+            _ => unreachable!("buffer"),
         };
         self.display_state.version += 1;
         Ok(())
@@ -479,6 +495,7 @@ impl Vm {
         } else {
             None
         };
+        let marks = if matches!(p, Insert | DeleteRegion) { self.family_record(index) } else { None };
         let Object::Buffer(t) = &mut self.objects[index] else {
             unreachable!()
         };
@@ -528,13 +545,15 @@ impl Vm {
             }
             Insert => {
                 let at = t.point;
-                t.replace(at..at, &inserted)?;
-                t.properties.copy_into(at, &inserted_properties);
-                Ok(Value::NIL)
+                let edited = t.replace(at..at, &inserted);
+                if edited.is_ok() { t.properties.copy_into(at, &inserted_properties); }
+                self.family_fetch(marks);
+                edited.map(|()| Value::NIL)
             }
             DeleteRegion => {
-                let r = region(args[0], args[1])?;
-                t.replace(r, b"")?;
+                let edited = match region(args[0], args[1]) { Ok(r) => t.replace(r, b""), Err(error) => Err(error) };
+                self.family_fetch(marks);
+                edited?;
                 self.finish_annotation_edit(self.slots[self.buffer_slot].value)?;
                 Ok(Value::NIL)
             }
@@ -720,6 +739,9 @@ impl Vm {
     }
     fn convert_buffer_utf8(&mut self, text: bool) -> Result<Value> {
         let index = self.buffer_index()?;
+        if matches!(&self.objects[index], Object::Buffer(t) if t.base != Value::NIL) {
+            return Err("Cannot do ‘set-buffer-multibyte’ on an indirect buffer".into());
+        }
         // This is an explicit text/byte boundary, not a second text encoding.
         // Conversion preserves octets and byte-canonical metadata or fails atomically.
         let replacement = match (&self.objects[index], text) {
@@ -736,7 +758,7 @@ impl Vm {
                     && (1..text.len()).any(|i| (text[i] & 0xc0) == 0x80 && b.anchors.any_between(i as u32, i as u32)) {
                     return Err("cannot decode buffer with a marker inside a character".into());
                 }
-                a.anchors = b.anchors.clone();
+                *a.anchors = b.anchors.clone();
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
@@ -752,6 +774,10 @@ impl Vm {
     /// T's unibyte storage: the same bytes, per-buffer variables and
     /// markers.  Overlays have no unibyte storage (VM2-MD2).
     fn unibyte_buffer(t: &crate::annotations::AnnotatedBuffer) -> Result<bytes::ByteBuffer> {
+        // DIVERGENCES.md VM2-INDIRECT1.
+        if t.base != Value::NIL || !t.indirect.is_empty() {
+            return Err("VM2 cannot make a buffer sharing its text unibyte".into());
+        }
         if !t.intervals.is_empty() {
             return Err("cannot encode buffer with overlays".into());
         }
@@ -759,7 +785,7 @@ impl Vm {
         b.state = t.state.clone();
         b.per_buffer = t.per_buffer.clone();
         b.case_tables = t.case_tables;
-        b.anchors = t.anchors.clone();
+        b.anchors = (*t.anchors).clone();
         Ok(b)
     }
     /// The bytes TEXT, an octet or a string, puts in a unibyte buffer: a
