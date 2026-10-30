@@ -178,6 +178,7 @@ mod leaf {
         WindowConfiguration,
         Sqlite,
         Process,
+        Finalizer,
         Invalid,
     }
 
@@ -1433,6 +1434,7 @@ mod leaf {
                     Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
+                    Some(data::Object::Finalizer(_)) => Kind::Finalizer,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -1669,6 +1671,7 @@ mod leaf {
     pub(crate) use text_pixel_size::TextSizeArgs;
     mod session;
     mod world;
+    mod finalizer;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
 

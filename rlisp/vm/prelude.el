@@ -644,4 +644,19 @@ Redisplay calls this in the buffer of a window showing START to END."
               (setq globals (cdr globals)))))
         (setq functions (cdr functions))))))
 
+;;; Finalizers
+
+(defun romacs--run-finalizers (&optional value)
+  "alloc.c run_finalizers: call the function of each finalizer the
+collections since the last run found unreachable, once each, with quits
+inhibited; a signal is logged to *Messages*, as `add_to_log' does.
+Return VALUE, the statistics of the collection that ran it."
+  (dolist (function (romacs--take-doomed-finalizers))
+    (let ((inhibit-quit t))
+      (condition-case err
+          (funcall function)
+        (t (let ((inhibit-message t))
+             (message "finalizer failed: %S" err))))))
+  value)
+
 ;;; prelude.el ends here

@@ -766,6 +766,21 @@ impl Vm {
         self.hash_call(p, start, n, &mut error, &mut signal)
             .ok_or_else(|| error.unwrap_or_else(|| "hash table error".into()))
     }
+    /// The `eq' table TABLE's value for KEY, read without rehashing: a
+    /// table a moving collection left stale is scanned instead.
+    pub(super) fn eq_hash_get(&self, table: Value, key: Value) -> Option<Value> {
+        let t = self.table(table).ok()?;
+        if t.stale || t.test != Test::Eq {
+            return t.entries().find(|(_, k, _)| *k == key).map(|(_, _, v)| v);
+        }
+        let mut at = t.chain(self.hash_key(t.test, key).0);
+        while at != END {
+            let slot = at as usize;
+            if t.keys[slot] == key { return Some(t.values[slot]); }
+            at = t.next[slot];
+        }
+        None
+    }
     pub(super) fn declaration_hash_get(
         &mut self,
         table: Value,

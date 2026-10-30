@@ -130,3 +130,30 @@ fn gc_cons_threshold_and_percentage_pace_collection() {
     vm.set_collection_floor(1);
     assert!(churn(&mut vm, 200_000) >= 2, "a floor of 1 collects as the heap doubles");
 }
+
+// generator.el's `iter-defun' iterators close themselves through a
+// finalizer (Eshell's `for' and subcommands are iterators).
+#[test]
+fn finalizers_run_once_after_the_collection_that_finds_them_unreachable() {
+    let setup = "(progn (defvar fin-log nil) \
+        (fset 'fin-make (lambda (tag) (make-finalizer (lambda () (setq fin-log (cons tag fin-log)))) nil)) \
+        (fin-make 0) (fin-make 1) (fin-make 2) \
+        (defvar fin-kept (make-finalizer (lambda () (setq fin-log (cons 'kept fin-log))))) \
+        (fset 'fin-boom (lambda () (make-finalizer (lambda () (setq fin-log (cons 'boom fin-log)) (error \"boom\"))) nil)) \
+        (fin-boom) t)";
+    let check = "(list (progn (garbage-collect) (sort (mapcar (lambda (x) (format \"%s\" x)) fin-log) 'string-lessp)) \
+              (progn (setq fin-log nil) (garbage-collect) fin-log) \
+              (type-of fin-kept) (prin1-to-string fin-kept) \
+              (condition-case e (make-finalizer 1) (error e)))";
+    let expected = "((\"0\" \"1\" \"2\" \"boom\") nil finalizer \"#<finalizer>\" (wrong-type-argument functionp 1))";
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", setup, "--eval", &format!("(prin1 {check})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "pinned GNU");
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(setup).unwrap();
+    let printed = vm.eval_source(&format!("(prin1-to-string {check})")).unwrap().display().unwrap();
+    assert_eq!(printed, serde_json::to_string(expected).unwrap(), "candidate");
+}

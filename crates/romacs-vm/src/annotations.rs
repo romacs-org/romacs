@@ -672,12 +672,17 @@ impl Vm {
         let name = self.symbol_names.get(slot).ok_or("symbol required")?;
         if self.names.get(name) == Some(&slot) { Ok(name.as_str()) } else { Err("symbol required".into()) }
     }
+    /// The value of the plain variable NAME in the current buffer: its
+    /// buffer-local binding there, else its default; nil when void.
     pub(super) fn annotation_variable(&self, name: &str) -> Value {
-        self.names
-            .get(name)
-            .map(|i| self.slots[*i].value)
-            .filter(|v| *v != Value::UNBOUND)
-            .unwrap_or(Value::NIL)
+        let Some(&slot) = self.names.get(name) else { return Value::NIL };
+        let table = self.slots[slot].local;
+        let local = (table != Value::NIL)
+            .then(|| self.eq_hash_get(table, self.slots[self.buffer_slot].value))
+            .flatten()
+            .and_then(|binding| binding.index(7).ok());
+        let value = self.slots[local.map_or(slot, |index| index - 1)].value;
+        if value == Value::UNBOUND { Value::NIL } else { value }
     }
     pub(super) fn annotation_plist(&self, mut plist: Value, key: Value) -> Result<Option<Value>> {
         for _ in 0..=self.list_limit() {

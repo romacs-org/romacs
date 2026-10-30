@@ -232,3 +232,30 @@ fn macroexp_el_loads_past_its_eval_when_compile_add_hook_form() {
     // The startup hook now holds GNU's closure, callable as a function.
     assert_eq!(shown(&mut vm, "(functionp (car emacs-startup-hook))"), "t");
 }
+
+// esh-cmd.el's `eshell-do-eval' records its progress by rewriting the
+// quoted command form it is handed inside the form `eval' runs (the
+// `condition-case' of `eshell-do-command'); a copy loses the rewrite and
+// an external command reruns forever.
+#[test]
+fn eval_keeps_quoted_structure_identical() {
+    let source = "(let* ((c (list 1 2)) (v (vector 1)) (s (copy-sequence \"ab\"))) \
+        (list (eq c (eval (list 'progn (list 'quote c)) t)) \
+              (progn (eval (list 'condition-case 'e (list 'setcar (list 'quote c) 7) '(error nil)) t) c) \
+              (progn (eval (list 'funcall (list 'quote (lambda (x) (setcdr x '(8)))) (list 'quote c)) nil) c) \
+              (eq v (eval (list 'identity (list 'quote v)) t)) \
+              (eq s (car (eval (list 'list (list 'quote s)) t))) \
+              (eval (list 'quote c) t) \
+              (eval '(let ((x 42)) `(quote (,x)) ) t) \
+              (funcall (eval '(lambda (y) `(a ',y)) t) 5) \
+              (eq c (car (eval (list '\\` (list (list '\\, (list 'quote c)))) t))) \
+              (eq c (cdr (eval (list '\\` (cons 'a (list '\\, (list 'quote c)))) t)))))";
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(oracle).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(expected, "(t (7 8) (7 8) t t (7 8) '(42) (a '5) t t)", "pinned GNU");
+    let mut vm = Vm::new();
+    let same = format!("(equal {source} (car (read-from-string {expected:?})))");
+    assert_eq!(shown(&mut vm, &same), "t", "candidate: {}", shown(&mut vm, source));
+}
