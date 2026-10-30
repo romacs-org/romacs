@@ -229,18 +229,21 @@ fn inline_survives_forced_moving_collection() {
 }
 
 #[test]
-fn inline_primitive_redefinition_invalidates_expression() {
+fn inline_sealed_primitive_ignores_redefinition() {
+    // (1+ x) is GNU's Badd1: the inlined body stays valid across the
+    // redefinition of `1+' (VM2-SEALED1), as the compiled caller does in GNU.
     let mut vm = Vm::new();
     text(
         &mut vm,
         "(defun in-g (x) (1+ x)) (defun in-run () (in-g 2)) (in-run) (in-run)",
     );
     assert!(vm.inline_hits > 0);
+    let hits = vm.inline_hits;
     assert_eq!(
         text(&mut vm, "(fset '1+ (lambda (x) 99)) (in-run) (in-run)"),
-        "99"
+        "3"
     );
-    assert!(vm.speculative_misses > 0);
+    assert!(vm.inline_hits > hits, "the sealed body must still be inlined");
 }
 
 #[test]

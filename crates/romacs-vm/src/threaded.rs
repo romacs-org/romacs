@@ -456,11 +456,13 @@ fn inline_body(vm: &Vm, function: usize) -> Option<InlineBody> {
                 resolved = Some((dst, slot));
             }
             Op::Direct(dst, slot, _, start, argc)
-            | Op::Prepared(dst, _, slot, _, start, argc) if body.is_none() => {
+            | Op::Prepared(dst, _, slot, _, start, argc)
+            | Op::Sealed(dst, slot, start, argc) if body.is_none() => {
                 if let Op::Prepared(_, snapshot, _, _, _, _) = *op {
                     if resolved != Some((snapshot, slot)) { return None; }
                 }
-                let target = vm.slots[slot].function;
+                let sealed = matches!(*op, Op::Sealed(..));
+                let target = if sealed { sealed::target(&vm.symbol_names[slot], argc)? } else { vm.slots[slot].function };
                 let primitive = prim::legacy(target)?;
                 let arity = match primitive {
                     Primitive::Inc | Primitive::Dec | Primitive::Null => 1,
@@ -472,7 +474,7 @@ fn inline_body(vm: &Vm, function: usize) -> Option<InlineBody> {
                     | Primitive::Eq => 2,
                     _ => return None,
                 };
-                if argc != arity || vm.macros.contains(&slot) {
+                if argc != arity || !sealed && vm.macros.contains(&slot) {
                     return None;
                 }
                 body = Some(InlineBody {
@@ -1478,7 +1480,8 @@ fn lower_function(
                         reg
                     });
                     match op {
-                        Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Prepared(_, _, _, _, start, count) => {
+                        Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Prepared(_, _, _, _, start, count)
+                        | Op::Sealed(_, _, start, count) => {
                             observes |= (start..start + count).contains(&rest_reg);
                         }
                         Op::Closure(_, _, site) => {
@@ -1548,9 +1551,23 @@ fn lower(vm: &Vm, op: Op) -> Inst {
         }
         Op::Prepared(a, _, b, c, d, e) => {
             i = lower(vm, Op::Direct(a, b, c, d, e));
-            i.prepared_handler = i.handler;
             i.handler = prepared;
             i.op = op;
+            // A kernel serves the primitive the cell holds now; `prepared`
+            // runs it only while the snapshot still names that primitive.
+            let target = vm.slots[b].function;
+            if let Some(k) = kernel(target, e) {
+                i.value = target;
+                i.prepared_handler = k;
+            }
+        }
+        Op::Sealed(a, b, d, e) => {
+            i.a = a;
+            i.b = b;
+            i.d = d;
+            i.e = e;
+            i.value = sealed::target(&vm.symbol_names[b], e).expect("sealed call of a byte-op primitive");
+            i.handler = kernel(i.value, e).unwrap_or(sealed_call);
         }
         Op::Global(a, b) => {
             i.handler = global;
@@ -1594,49 +1611,56 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.c = c;
             i.d = d;
             i.e = e;
-            let target = vm.slots[b].function;
-            if target.tag() == 6 && prim::generated(target).is_none() {
-                i.value = target;
-                i.handler = match (prim::legacy(target).expect("legacy primitive"), e) {
-                    (Primitive::Car, 1) => traversal::car,
-                    (Primitive::Cdr, 1) => traversal::cdr,
-                    (Primitive::Null, 1) => traversal::null,
-                    (Primitive::Eq, 2) => traversal::eq,
-                    (Primitive::Memq, 2) => traversal::memq,
-                    (Primitive::Assq, 2) => traversal::assq,
-                    (Primitive::PlistGet, 2) => traversal::plist_get,
-                    (Primitive::Nth, 2) => traversal::nth,
-                    (Primitive::Setcar, 2) => traversal::setcar,
-                    (Primitive::Setcdr, 2) => traversal::setcdr,
-                    (Primitive::Add, 2) => add,
-                    (Primitive::Sub, 2) => sub,
-                    (Primitive::Mul, 2) => mul,
-                    (Primitive::Inc, 1) => inc,
-                    (Primitive::Dec, 1) => dec,
-                    (Primitive::Less, 2) => less,
-                    (Primitive::Equal, 2) => equal,
-                    (Primitive::Cons, 2) => cons,
-                    (Primitive::Remainder, 2) => remainder,
-                    (Primitive::Aref, 2) | (Primitive::Length, 1) => sequence_read,
-                    (Primitive::CharAfter, 0 | 1)
-                    | (
-                        Primitive::Point
-                        | Primitive::PointMin
-                        | Primitive::PointMax
-                        | Primitive::BufferSize,
-                        0,
-                    )
-                    | (Primitive::GotoChar, 1) => buffer_read,
-                    _ => direct,
-                };
-            } else if e == 1 && prim::generated(target).is_some_and(|d| d.name == "insert") {
-                i.value = target;
-                i.handler = insert_string;
-            }
         }
         _ => {}
     }
     i
+}
+/// The specialized handler for a call of primitive TARGET with ARGC
+/// arguments, if one exists. A kernel computes the common case in place and
+/// calls TARGET itself (`sealed_call`) for the rest; it never reads the
+/// function cell, so its caller must know the cell question is settled.
+fn kernel(target: Value, argc: usize) -> Option<Handler> {
+    if let Some(d) = prim::generated(target) {
+        return match (d.name, argc) {
+            ("insert", 1) => Some(insert_string),
+            ("listp", 1) => Some(listp),
+            ("numberp", 1) => Some(numberp),
+            ("cdr-safe", 1) => Some(cdr_safe),
+            _ => None,
+        };
+    }
+    Some(match (prim::legacy(target)?, argc) {
+        (Primitive::Car, 1) => traversal::car,
+        (Primitive::Cdr, 1) => traversal::cdr,
+        (Primitive::Null, 1) => traversal::null,
+        (Primitive::Eq, 2) => traversal::eq,
+        (Primitive::Memq, 2) => traversal::memq,
+        (Primitive::Assq, 2) => traversal::assq,
+        (Primitive::PlistGet, 2) => traversal::plist_get,
+        (Primitive::Nth, 2) => traversal::nth,
+        (Primitive::Setcar, 2) => traversal::setcar,
+        (Primitive::Setcdr, 2) => traversal::setcdr,
+        (Primitive::Add, 2) => add,
+        (Primitive::Sub, 2) => sub,
+        (Primitive::Mul, 2) => mul,
+        (Primitive::Inc, 1) => inc,
+        (Primitive::Dec, 1) => dec,
+        (Primitive::Less, 2) => less,
+        (Primitive::Equal, 2) => equal,
+        (Primitive::Cons, 2) => cons,
+        (Primitive::Remainder, 2) => remainder,
+        (Primitive::Consp, 1) => consp,
+        (Primitive::Symbolp, 1) => symbolp,
+        (Primitive::Stringp, 1) => stringp,
+        (Primitive::Integerp, 1) => integerp,
+        (Primitive::CarSafe, 1) => car_safe,
+        (Primitive::Aref, 2) | (Primitive::Length, 1) => sequence_read,
+        (Primitive::CharAfter, 0 | 1)
+        | (Primitive::Point | Primitive::PointMin | Primitive::PointMax | Primitive::BufferSize, 0)
+        | (Primitive::GotoChar, 1) => buffer_read,
+        _ => return None,
+    })
 }
 // Keep observation scratch out of dispatch handlers. Inlining this register
 // walk into next gives handlers address-taken locals that prevent sibling calls
@@ -1662,7 +1686,8 @@ unsafe fn observe_rest(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
             reg
         });
         match op {
-            Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Prepared(_, _, _, _, start, count) => {
+            Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Prepared(_, _, _, _, start, count)
+            | Op::Sealed(_, _, start, count) => {
                 observed |= (start..start + count).contains(&rest.reg);
             }
             Op::Closure(_, _, site) => {
@@ -1931,14 +1956,23 @@ unsafe fn prepared(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value 
     unsafe {
         let Op::Prepared(_, snapshot, _, _, _, _) = (*pc).op else { unreachable!() };
         let target = *r.add(snapshot);
-        // Keep direct-call speculation when the snapshot still names the cell.
-        // A changed cell must NOT replace the function already resolved.
-        if target == e.vm.slots[(*pc).b].function {
+        // A kernel (`value` set) serves exactly the primitive it was lowered
+        // for; otherwise keep direct-call speculation while the snapshot still
+        // names the cell. A changed cell must NOT replace the function already
+        // resolved.
+        let primitive = (*pc).value;
+        if target == primitive || primitive == Value::NIL && target == e.vm.slots[(*pc).b].function {
             ((*pc).prepared_handler)(e, r, pc)
         } else {
             invoke(e, r, pc, target, (*pc).d, (*pc).e)
         }
     }
+}
+/// The general call of the primitive an instruction was lowered for: the
+/// `Sealed` handler without a kernel, and every kernel's fallback.
+#[inline(never)]
+unsafe fn sealed_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe { invoke(e, r, pc, (*pc).value, (*pc).d, (*pc).e) }
 }
 /// Check the prospective activation, independently of register storage.
 /// The common case (limit >= 100, depth and native stack within bounds) is
@@ -1946,7 +1980,8 @@ unsafe fn prepared(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value 
 #[inline(always)]
 fn depth_room(e: &mut Engine<'_>) -> bool {
     let attempted = e.depth_base + e.frames.len() + 1;
-    let limit = e.vm.forwarded.eval_limit();
+    // A buffer-local limit makes the current buffer's binding the one read.
+    let limit = if e.vm.forwarded.eval_limit_symbol == usize::MAX { e.vm.forwarded.eval_limit() } else { e.vm.eval_limit() };
     if limit >= 100 && attempted as u64 <= limit as u64 && eval_depth::stack_pointer() >= e.native_floor {
         return true;
     }
@@ -2000,7 +2035,7 @@ unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
     unsafe {
         let function = if std::ptr::eq(pc, &K_CODE[0]) { *r.add(K_F) } else {
             match (*pc).op {
-                Op::Direct(_, slot, ..) | Op::Prepared(_, _, slot, ..) => Value::reference(slot + 1, 7),
+                Op::Direct(_, slot, ..) | Op::Prepared(_, _, slot, ..) | Op::Sealed(_, slot, ..) => Value::reference(slot + 1, 7),
                 Op::Call(_, function, ..) => *r.add(function),
                 _ => target,
             }
@@ -2672,13 +2707,21 @@ unsafe fn take_step(
                 leave_native(e);
                 if e.vm.may_collect(1) {
                     poll_collect(e);
-                    *r.add((*pc).a) = e.vm.garbage_collect_statistics();
+                    let statistics = e.vm.garbage_collect_statistics();
+                    // garbage_collect's run_finalizers, before it returns.
+                    match e.vm.finalizer_runner() {
+                        Some(runner) => (runner, vec![statistics], prim::prims::garbage_collect::finalizers_ran as prim::Then, Vec::new()),
+                        None => {
+                            *r.add((*pc).a) = statistics;
+                            return Continue::At(r, pc.add(1));
+                        }
+                    }
                 } else {
                     // A frame below holds untraced Values (`Vm::may_collect`):
                     // GNU's garbage_collection_inhibited early return.
                     *r.add((*pc).a) = Value::NIL;
+                    return Continue::At(r, pc.add(1));
                 }
-                return Continue::At(r, pc.add(1));
             }
             Ok(prim::Step::Done(value)) => {
                 leave_native(e);
@@ -3072,7 +3115,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::command_primitive
         }
         TempBuffer => Vm::eval_buffer_primitive,
-        DeepEqual | Min | Append | Prin1ToString => Vm::eval_data_primitive,
+        DeepEqual | Min | Append => Vm::eval_data_primitive,
         GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive
@@ -3559,13 +3602,10 @@ macro_rules! numeric {
         unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             unsafe {
                 let i = &*pc;
-                if e.vm.slots.get_unchecked(i.b).function != i.value {
-                    return direct(e, r, pc);
-                }
                 let x = *r.add(i.d);
                 let y = if i.e == 2 { *r.add(i.d + 1) } else { Value(5) };
                 if x.tag() != 1 || y.tag() != 1 {
-                    return direct(e, r, pc);
+                    return sealed_call(e, r, pc);
                 }
                 let result: Option<Value> = ($body)(x, y);
                 match result {
@@ -3573,7 +3613,7 @@ macro_rules! numeric {
                         *r.add(i.a) = v;
                         advance(e, r, pc)
                     }
-                    None => direct(e, r, pc),
+                    None => sealed_call(e, r, pc),
                 }
             }
         }
@@ -3609,11 +3649,8 @@ numeric!(equal, |x: Value, y: Value| Some(if x == y {
 unsafe fn insert_string(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        if e.vm.slots[i.b].function != i.value {
-            return direct(e, r, pc);
-        }
         match quiet_insert(e.vm, *r.add(i.d)) {
-            None => direct(e, r, pc),
+            None => sealed_call(e, r, pc),
             Some(false) => fail(e, "an insertion's undo record or deactivate-mark failed"),
             Some(true) => {
                 *r.add(i.a) = Value::NIL;
@@ -3646,9 +3683,14 @@ fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
         let (x, y) = vm.objects.split_at_mut(a);
         (&y[0], &mut x[b])
     };
+    // An edit of shared text moves the other buffers' positions: the
+    // general path does that.
     let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
         return None;
     };
+    if text.base != Value::NIL || !text.indirect.is_empty() {
+        return None;
+    }
     let length = chars.len();
     if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
         return None;
@@ -3662,13 +3704,10 @@ fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
 unsafe fn remainder(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        if e.vm.slots[i.b].function != i.value {
-            return direct(e, r, pc);
-        }
         let x = *r.add(i.d);
         let y = *r.add(i.d + 1);
         if x.tag() != 1 || y.tag() != 1 || y.0 as i64 >> 2 == 0 {
-            return direct(e, r, pc);
+            return sealed_call(e, r, pc);
         }
         *r.add(i.a) = Value::fixnum((x.0 as i64 >> 2) % (y.0 as i64 >> 2)).unwrap();
         advance(e, r, pc)
@@ -3677,15 +3716,12 @@ unsafe fn remainder(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value
 unsafe fn sequence_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        if e.vm.slots[i.b].function != i.value {
-            return direct(e, r, pc);
-        }
         let x = *r.add(i.d);
         if x == Value::NIL || x.tag() != 0 {
-            return direct(e, r, pc);
+            return sealed_call(e, r, pc);
         }
         let Some(object) = e.vm.objects.get(x.payload() as usize - 1) else {
-            return direct(e, r, pc);
+            return sealed_call(e, r, pc);
         };
         let result = if i.e == 1 {
             match object {
@@ -3696,7 +3732,7 @@ unsafe fn sequence_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
         } else {
             let y = *r.add(i.d + 1);
             if y.tag() != 1 {
-                return direct(e, r, pc);
+                return sealed_call(e, r, pc);
             }
             let at = (y.0 as i64 >> 2) as usize;
             match object {
@@ -3708,7 +3744,7 @@ unsafe fn sequence_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
             }
         };
         let Some(value) = result else {
-            return direct(e, r, pc);
+            return sealed_call(e, r, pc);
         };
         *r.add(i.a) = value;
         advance(e, r, pc)
@@ -3717,12 +3753,9 @@ unsafe fn sequence_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
 unsafe fn buffer_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        if e.vm.slots[i.b].function != i.value {
-            return direct(e, r, pc);
-        }
         let x = if i.e == 0 { Value::NIL } else { *r.add(i.d) };
         let Some(value) = buffer_read_value(e.vm, i.value, x) else {
-            return direct(e, r, pc);
+            return sealed_call(e, r, pc);
         };
         *r.add(i.a) = value;
         advance(e, r, pc)
@@ -3788,12 +3821,62 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
     };
     Some(number.map(|n| Value::fixnum(n).unwrap()).unwrap_or(Value::NIL))
 }
+/// A type predicate kernel: BODY maps the argument to a bool with no
+/// fallback, as GNU's `Bconsp` and friends do.
+macro_rules! predicate {
+    ($name:ident, |$vm:ident, $x:ident| $body:expr) => {
+        unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+            unsafe {
+                let i = &*pc;
+                let $x = *r.add(i.d);
+                let $vm: &Vm = e.vm;
+                *r.add(i.a) = if $body { Value::TRUE } else { Value::NIL };
+                advance(e, r, pc)
+            }
+        }
+    };
+}
+predicate!(consp, |_vm, x| x.tag() == 3);
+predicate!(listp, |_vm, x| x == Value::NIL || x.tag() == 3);
+predicate!(symbolp, |_vm, x| x == Value::NIL || x == Value::TRUE || x.tag() == 7 && x != Value::UNBOUND);
+predicate!(integerp, |vm, x| x.tag() == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_))));
+predicate!(numberp, |vm, x| x.tag() == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_) | data::Object::Float(_))));
+predicate!(stringp, |vm, x| is_string(vm, x));
+/// Out of line, returning a register-sized value: a wide or address-taken
+/// result in the handler keeps a native frame across its dispatch (the
+/// bounded-stack regression: `tests/traversal.rs`).
+#[inline(never)]
+fn is_string(vm: &Vm, x: Value) -> bool {
+    vm.str_view(x).is_some()
+}
+/// `car-safe'/`cdr-safe' of X: the half of a cons, nil for anything else;
+/// None when the cons cannot be read here.
+#[inline(never)]
+fn safe_half(vm: &Vm, x: Value, cdr: bool) -> Option<Value> {
+    if x.tag() != 3 {
+        return Some(Value::NIL);
+    }
+    traversal::pair(vm, x).map(|(a, d)| if cdr { d } else { a })
+}
+macro_rules! safe_half {
+    ($name:ident, $cdr:expr) => {
+        unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+            unsafe {
+                let i = &*pc;
+                let Some(value) = safe_half(e.vm, *r.add(i.d), $cdr) else {
+                    return sealed_call(e, r, pc);
+                };
+                *r.add(i.a) = value;
+                advance(e, r, pc)
+            }
+        }
+    };
+}
+safe_half!(car_safe, false);
+safe_half!(cdr_safe, true);
 unsafe fn cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        if e.vm.slots.get_unchecked(i.b).function != i.value {
-            return direct(e, r, pc);
-        }
         let index = e.vm.conses.len();
         if index == e.vm.conses.capacity() {
             return grow_cons(e, r, pc);
@@ -3991,7 +4074,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 | Op::Unless(..)
                 | Op::Return(..)
                 | Op::Call(..)
-                | Op::Direct(..) | Op::ResolveHead(..) | Op::Prepared(..) => unreachable!("lowering assigns hot handlers"),
+                | Op::Direct(..) | Op::ResolveHead(..) | Op::Prepared(..) | Op::Sealed(..) => unreachable!("lowering assigns hot handlers"),
             }
             Ok(())
         })();
@@ -4032,13 +4115,16 @@ mod register_tests {
             } else {
                 2
             };
-            let inst = lower(&vm, Op::Direct(0, slot, 0, 1, argc));
+            let prepared = lower(&vm, Op::Prepared(0, 3, slot, 0, 1, argc));
             assert!(
-                !std::ptr::fn_addr_eq(inst.handler, direct as Handler),
+                !std::ptr::fn_addr_eq(prepared.prepared_handler, direct as Handler),
                 "{name} still uses generic dispatch"
             );
-            let prepared = lower(&vm, Op::Prepared(0, 3, slot, 0, 1, argc));
-            assert!(std::ptr::fn_addr_eq(prepared.prepared_handler, inst.handler),
+            if name == "plist-get" {
+                continue;
+            }
+            let sealed = lower(&vm, Op::Sealed(0, slot, 1, argc));
+            assert!(std::ptr::fn_addr_eq(prepared.prepared_handler, sealed.handler),
                 "HEAD_ORDER_SPECIALIZATION_LOST: {name}");
         }
     }

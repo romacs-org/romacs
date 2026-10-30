@@ -2,10 +2,15 @@
 use super::*;
 
 defsubr! { name = "sqlite-open", gnu = "sqlite.c:280", effect = Global,
-fn sqlite_open(cx; optional file: Value, readonly: Value, disable_uri: Value) {
-    let file = if file == Value::NIL { None } else { Some(super::fileio::expand_file_name(cx, file)?.into_bytes()) };
-    cx.sqlite_open(file, readonly, disable_uri)
+fn sqlite_open(cx; optional file: Value, readonly: Value, disable_uri: Value) -> Step {
+    if file == Value::NIL { return Ok(Step::Done(cx.sqlite_open(None, readonly, disable_uri)?)); }
+    super::fileio::expanding(cx, file, open_expanded, vec![readonly, disable_uri])
 }}
+
+fn open_expanded(cx: &mut Leaf<'_>, file: Value, saved: &[Value]) -> Next {
+    let path = cx.string_text(file)?.into_bytes();
+    Ok(Step::Done(cx.sqlite_open(Some(path), saved[0], saved[1])?))
+}
 
 defsubr! { name = "sqlite-close", gnu = "sqlite.c:329", effect = Global,
 fn sqlite_close(cx, db: Value) {
@@ -48,15 +53,19 @@ fn sqlite_pragma(cx, db: Value, pragma: Value) {
 }}
 
 defsubr! { name = "sqlite-load-extension", gnu = "sqlite.c:711", effect = Global,
-fn sqlite_load_extension(cx, db: Value, module: Value) {
+fn sqlite_load_extension(cx, db: Value, module: Value) -> Step {
     cx.sqlite_database(db)?;
     if !matches!(cx.kind(module), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", module)); }
     if !cx.sqlite_extension_allowed(&cx.string_text(module)?) {
         return Err(cx.sqlite_extension_refused());
     }
-    let path = super::fileio::expand_file_name(cx, module)?;
-    cx.sqlite_load_extension(db, path.as_bytes())
+    super::fileio::expanding(cx, module, extension_expanded, vec![db])
 }}
+
+fn extension_expanded(cx: &mut Leaf<'_>, module: Value, saved: &[Value]) -> Next {
+    let path = cx.string_text(module)?;
+    Ok(Step::Done(cx.sqlite_load_extension(saved[0], path.as_bytes())?))
+}
 
 defsubr! { name = "sqlite-next", gnu = "sqlite.c:792", effect = Global,
 fn sqlite_next(cx, set: Value) {

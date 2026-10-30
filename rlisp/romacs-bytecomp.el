@@ -21,6 +21,19 @@
 
 ;;; Code:
 
+(defun romacs-bytecomp--eval-when-compile (&rest body)
+  "Bytecomp's `eval-when-compile' handler for the front end below.
+GNU's compiles each of BODY's top-level forms to byte code and runs it
+(`byte-compile-eval'), which VM2 cannot (VM2-BYTECODE1); evaluate each
+form's expansion instead, in turn and in the dialect being compiled, and
+give the last value quoted, as GNU does."
+  (let ((result nil))
+    (byte-compile-recurse-toplevel
+     (macroexp-progn body)
+     (lambda (form)
+       (setq result (eval (macroexpand-all form macroexpand-all-environment) lexical-binding))))
+    (list 'quote result)))
+
 (defun romacs-bytecomp--front-end (fun lexical)
   "Run `byte-compile''s front end on the `(lambda ...)' list FUN.
 LEXICAL is the dialect it compiles in.  Return FUN macroexpanded, or
@@ -33,7 +46,9 @@ bytecomp is loaded."
   (eval `(displaying-byte-compile-warnings
           (byte-compile-close-variables
            (let* ((lexical-binding ,lexical)
-                  (expanded (macroexpand-all ',fun byte-compile-macro-environment)))
+                  (expanded (macroexpand-all
+                             ',fun (cons '(eval-when-compile . romacs-bytecomp--eval-when-compile)
+                                         byte-compile-macro-environment))))
              (cconv-closure-convert expanded byte-compile-bound-variables)
              expanded)))
         t))

@@ -10,6 +10,8 @@ impl Leaf<'_> {
     }
     pub(crate) fn has_buffer_local(&mut self, symbol: Value, buffer: Value) -> std::result::Result<bool, Fault> {
         let Some(slot) = self.local_symbol(symbol)? else { return Ok(false) };
+        // enable-multibyte-characters is always local (buffer.c:5300).
+        if slot == self.vm.multibyte_slot { return Ok(true); }
         if let Some(fwd) = self.vm.forwarding(slot) {
             return Ok(matches!(fwd, Fwd::Buffer(i) if self.vm.per_buffer_local_p(buffer.index(0).unwrap() - 1, i)));
         }

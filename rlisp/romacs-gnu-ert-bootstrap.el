@@ -67,6 +67,34 @@
 ;; simple.el's undo-auto--undoable-change runs on every undoable change and
 ;; sets its boundary timer with run-at-time, as GNU's loadup provides it.
 (load "emacs-lisp/timer.el" nil t t)
+;; More of GNU's dump (loadup.el:249, 258-260, 280, 293-296, 377), each
+;; one a GNU test file reaches.  fringe.el supplies `define-fringe-bitmap'
+;; where no window system defines it, as GNU's loaddefs does.
+(load "indent.el" nil t t)
+(load "font-core.el" nil t t)
+(load "emacs-lisp/syntax.el" nil t t)
+(load "font-lock.el" nil t t)
+(load "textmodes/paragraphs.el" nil t t)
+(load "fringe.el" nil t t)
+(load "image.el" nil t t)
+(load "vc/vc-hooks.el" nil t t)
+
+;; GNU batch runs startup before the test file loads; the adapter does not
+;; call `command-line', so take its runtime steps here.  normal-top-level
+;; (startup.el:585-592): the per-user directory the delayed standard values
+;; build on.  command-line (startup.el:1477-1484): preloaded variables whose
+;; standard value depends on the runtime (`image-load-path' and friends).
+(setq startup--xdg-config-home-emacs
+      (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
+        (if xdg-config-home
+            (concat xdg-config-home "/emacs/")
+          startup--xdg-config-default)))
+(setq user-emacs-directory
+      (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
+(let ((user-emacs-directory-warning nil))
+  (when (listp custom-delayed-init-variables)
+    (mapc #'custom-reevaluate-setting (reverse custom-delayed-init-variables))))
+(setq custom-delayed-init-variables t)
 
 (provide 'romacs-gnu-ert-bootstrap)
 ;;; romacs-gnu-ert-bootstrap.el ends here

@@ -1,7 +1,8 @@
 //! Non-collecting word motion through the ordinary current syntax table.
 //!
-//! Scope: syntax word runs, including Unicode and syntax text properties.
-//! GNU field constraints, words-include-escapes, script/category transitions,
+//! Scope: syntax word runs, including Unicode and syntax text properties,
+//! constrained to point's field as syntax.c Fforward_word constrains them.
+//! GNU words-include-escapes, script/category transitions,
 //! and find-word-boundary-function-table callbacks are not implemented here.
 //! The regex default boundary lookup is also a no-op, not a script provider.
 use super::*;
@@ -19,6 +20,7 @@ impl Leaf<'_> {
         if count == 0 {
             return Ok(Value::TRUE);
         }
+        let origin = Value::integer(self.point()?).map_err(Fault::Error)?;
         let source = self.vm.word_motion_syntax()?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let syntax = crate::regexp::VmSyntax::new(self.vm, source);
@@ -77,7 +79,13 @@ impl Leaf<'_> {
             }
             _ => unreachable!("buffer_index validates"),
         }
-        Ok(if remaining == 0 { Value::TRUE } else { Value::NIL })
+        // Avoid jumping out of an input field.
+        let reached = Value::integer(self.point()?).map_err(Fault::Error)?;
+        let kept = self.constrain_to_field(reached, origin, Value::NIL, Value::NIL, Value::NIL)?;
+        if kept != reached {
+            self.goto_char_position(kept.integer_value().expect("a position"))?;
+        }
+        Ok(if remaining == 0 && kept == reached { Value::TRUE } else { Value::NIL })
     }
 
     /// syntax.c skip_syntaxes: move point across characters whose syntax

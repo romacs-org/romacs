@@ -25,10 +25,22 @@ fn same_call_site_invalidates_after_redefinition() {
 #[test]
 fn primitive_cache_invalidates_too() {
     let mut vm = Vm::new();
+    let call = compile(&mut vm, json!(["abs", -9]));
+    assert_eq!(vm.execute(call).unwrap().as_integer().unwrap(), 9);
+    eval(&mut vm, json!(["defun", "abs", ["a"], ["-", "a", 1]]));
+    assert_eq!(vm.execute(call).unwrap().as_integer().unwrap(), -10);
+}
+
+#[test]
+fn byte_op_calls_are_sealed_to_the_primitive() {
+    // GNU compiles (+ 9 4) to Bplus and never reads the cell; so does Romacs
+    // (DIVERGENCES.md VM2-SEALED1). funcall still reads the cell.
+    let mut vm = Vm::new();
     let call = compile(&mut vm, json!(["+", 9, 4]));
     assert_eq!(vm.execute(call).unwrap().as_integer().unwrap(), 13);
     eval(&mut vm, json!(["defun", "+", ["a", "b"], ["-", "a", "b"]]));
-    assert_eq!(vm.execute(call).unwrap().as_integer().unwrap(), 5);
+    assert_eq!(vm.execute(call).unwrap().as_integer().unwrap(), 13);
+    assert_eq!(eval(&mut vm, json!(["funcall", ["quote", "+"], 9, 4])), "5");
 }
 
 #[test]
@@ -75,7 +87,7 @@ fn ir_query_is_readable_stable_and_does_not_execute() {
     let dump = vm.dump_ir(code).unwrap();
     assert!(dump.contains("symbol s0 = +"));
     assert!(dump.contains("const 20"));
-    assert!(dump.contains("cache c0"));
+    assert!(dump.contains("sealed s0"), "{dump}");
     assert_eq!(dump, vm.dump_ir(code).unwrap());
     let q = compile(&mut vm, json!("q"));
     assert!(vm.execute(q).is_err());

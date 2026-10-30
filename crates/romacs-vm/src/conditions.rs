@@ -1,6 +1,6 @@
 //! Typed condition identities and ancestry, with a mutable Lisp property projection.
 //! Symbol IDs never move. Projection graphs are strong, forwarding GC edges;
-//! destructive cons edits invalidate derived ancestry instead of creating two truths.
+//! ancestry is derived only while no Lisp list projects it (`put` drops it).
 use super::*;
 #[path = "conditions_builtin.rs"]
 mod builtins;
@@ -36,11 +36,6 @@ impl Registry {
                 visit(key);
                 visit(value);
             }
-        }
-    }
-    pub(super) fn invalidate(&mut self) {
-        for entry in self.entries.values_mut() {
-            entry.ancestry = None;
         }
     }
     pub(super) fn put(&mut self, symbol: SymbolId, property: Value, value: Value) {

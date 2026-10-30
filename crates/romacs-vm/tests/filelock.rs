@@ -121,6 +121,8 @@ fn handlers_use_file_operations_not_buffer_operations() {
     assert_eq!(eval(&mut vm, "(defun fl-handler (op file) (setq fl-seen (list op file)) 'handled)"), "fl-handler");
     assert_eq!(eval(&mut vm, "(let ((file-name-handler-alist '((\"remote:\" . fl-handler)))) (list (file-locked-p \"remote:a\") fl-seen))"), "(handled (file-locked-p \"remote:a\"))");
     assert_eq!(eval(&mut vm, "(let ((file-name-handler-alist '((\"remote:\" . fl-handler)))) (set-buffer-modified-p t) (list (lock-buffer \"remote:a\") fl-seen))"), "(nil (lock-file \"remote:a\"))");
+    // Flock_file returns its handler's value; Flock_buffer and Funlock_file nil.
+    assert_eq!(eval(&mut vm, "(let ((file-name-handler-alist '((\"remote:\" . fl-handler)))) (list (lock-file \"remote:a\") (unlock-file \"remote:b\") fl-seen))"), "(handled nil (unlock-file \"remote:b\"))");
     let p = dir("handler").join("target"); let q = quoted(&p);
     assert_eq!(eval(&mut vm, &format!("(write-region \"\" nil {q} nil t)")), "nil");
     eval(&mut vm, "(set-buffer-modified-p t)");
@@ -173,4 +175,20 @@ fn conflict_callback_can_decline_or_steal() {
     eval(&mut vm, "(set-buffer-modified-p t)");
     assert_eq!(eval(&mut vm, "(unlock-buffer)"), "nil");
     assert!(std::fs::symlink_metadata(&lock).is_err());
+}
+#[test]
+fn indirect_buffer_edits_lock_the_base_file_as_pinned_gnu() {
+    let p = dir("indirect").join("target"); let q = quoted(&p);
+    let source = format!("(progn (write-region \"\" nil {q} nil t) (setq buffer-file-truename {q}) \
+        (let ((r nil)) (with-current-buffer (make-indirect-buffer (current-buffer) \"fl-indirect\") \
+          (insert \"x\") (push (file-locked-p {q}) r) (set-buffer-modified-p nil) (push (file-locked-p {q}) r) \
+          (set-buffer-modified-p t) (push (file-locked-p {q}) r) (set-buffer-modified-p nil)) (nreverse r)))");
+    let output = std::process::Command::new(pinned_gnu()).args(["--batch", "-Q", "--eval", &format!("(prin1 {source})")])
+        .output().expect("pinned GNU is required");
+    assert!(output.status.success(), "GNU failed: {output:?}");
+    let gnu = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(gnu, "(t nil t)");
+    let mut vm = Vm::new(); prepare(&mut vm, &p.with_file_name(".#target"));
+    assert_eq!(eval(&mut vm, &source), gnu);
+    assert!(std::fs::symlink_metadata(p.with_file_name(".#target")).is_err());
 }

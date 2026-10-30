@@ -138,7 +138,8 @@ impl Vm {
                     | Op::SetGlobal(s, _)
                     | Op::Bind(s, _)
                     | Op::Define(s, _)
-                    | Op::DefineMacro(s, _) => *s = slots[*s],
+                    | Op::DefineMacro(s, _)
+                    | Op::Sealed(_, s, _, _) => *s = slots[*s],
                     Op::Direct(_, s, c, _, _) | Op::Prepared(_, _, s, c, _, _) => {
                         *s = slots[*s];
                         *c = cache_ids[*c];
@@ -247,6 +248,9 @@ fn valid_artifact(a: &Artifact) -> bool {
                         && c < a.caches
                         && n <= 4096
                         && start.checked_add(n).is_some_and(|end| end <= f.regs)
+                }
+                Op::Sealed(d, x, start, n) => {
+                    r(d) && s(x) && n <= 4096 && start.checked_add(n).is_some_and(|end| end <= f.regs)
                 }
             };
             if !valid {

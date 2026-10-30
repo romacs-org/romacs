@@ -178,6 +178,7 @@ mod leaf {
         WindowConfiguration,
         Sqlite,
         Process,
+        Finalizer,
         Invalid,
     }
 
@@ -256,6 +257,11 @@ mod leaf {
         pub(crate) fn set_internal_value(&mut self, name: &str, value: Value) {
             let slot = self.vm.slot(name);
             self.vm.slots[slot].value = value;
+        }
+        /// Fget: SYMBOL's KEY property, read as `symbol-plist' reads it.
+        pub(crate) fn symbol_property(&mut self, symbol: Value, key: Value) -> std::result::Result<Value, Fault> {
+            let plist = self.observed_symbol_plist(symbol)?;
+            Ok(self.vm.plist_lookup(plist, key))
         }
         pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
             self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
@@ -1433,6 +1439,7 @@ mod leaf {
                     Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
+                    Some(data::Object::Finalizer(_)) => Kind::Finalizer,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -1644,6 +1651,7 @@ mod leaf {
     mod search;
     mod skip_chars;
     mod word_motion;
+    mod field;
     mod syntax_scan;
     pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
@@ -1669,6 +1677,7 @@ mod leaf {
     pub(crate) use text_pixel_size::{TextSizeArgs, LineLabels};
     mod session;
     mod world;
+    mod finalizer;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
 
@@ -1689,6 +1698,13 @@ pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i
 /// The line numbers WINDOW shows from its start (Leaf::window_line_numbers).
 pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
     Leaf::new(vm).window_line_numbers(window)
+}
+
+/// cmds.c beginning-of-line and end-of-line's target: the line boundary
+/// N lines on, constrained to point's field (Leaf::line_field_position).
+pub(crate) fn line_field_position(vm: &mut Vm, n: Value, end: bool) -> std::result::Result<i64, Fault> {
+    let position = Leaf::new(vm).line_field_position(n, end)?;
+    Ok(position.integer_value().expect("constrain-to-field yields a position"))
 }
 
 /// Where the screen lines a window shows end over the host's layout

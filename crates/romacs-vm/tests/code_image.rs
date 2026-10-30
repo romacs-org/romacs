@@ -788,10 +788,10 @@ fn snapshot_preserves_redefined_primitive_function_cells() {
     let mut source = Vm::new();
     let setup = compile(
         &mut source,
-        json!(["defun", "+", ["x", "y"], ["-", "x", "y"]]),
+        json!(["defun", "abs", ["x"], ["-", "x", 2]]),
     );
     source.execute(setup).unwrap();
-    let entry = compile(&mut source, json!(["+", 42, 2]));
+    let entry = compile(&mut source, json!(["abs", 42]));
     let key = source.publish_code_image(&store.0, entry, [0; 32]).unwrap();
     let (mut vm, id) = Vm::from_code_image(store.open(&key), [0; 32])
         .expect("snapshot must preserve mutable primitive function cells");

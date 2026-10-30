@@ -22,4 +22,5 @@ with tempfile.TemporaryDirectory(prefix="handler-local-oracle-", dir=os.environ[
         source = source.replace("@HOME@", json.dumps(os.environ["HOME"]))
         result = subprocess.run([str(binary), "-Q", "--batch", "--eval", "(prin1 " + source + ")"], text=True, capture_output=True, check=True)
         assert result.stdout == case["expected"], (case["id"], result.stdout, case["expected"])
+        assert (root / "input").read_text() == case.get("file", "hello\n"), (case["id"], (root / "input").read_text())
 print(f"verified {len(cases)} pinned GNU rows")

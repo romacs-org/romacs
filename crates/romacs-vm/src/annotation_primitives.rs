@@ -193,7 +193,7 @@ impl Vm {
             _ => Err("marker required".into()),
         }
     }
-    fn overlay(&self, v: Value) -> Result<&Overlay> {
+    pub(crate) fn overlay(&self, v: Value) -> Result<&Overlay> {
         match self.object(v)? {
             Object::Overlay(o) => Ok(o),
             _ => Err("overlay required".into()),
@@ -422,10 +422,17 @@ impl Vm {
         Ok(v)
     }
     pub(super) fn finish_annotation_edit(&mut self, buffer: Value) -> Result<()> {
+        // A deletion empties the overlays of every buffer sharing the text
+        // (adjust_overlays_for_delete, buffer.c:3621).
+        let family = self.text_family(buffer.index(0)? - 1);
+        let buffers: Vec<Value> = if family.is_empty() { vec![buffer] }
+            else { family.into_iter().map(|i| Value::reference(i + 1, 0)).collect() };
         let mut expired = Vec::new();
-        for &v in self.annotated(buffer)?.evaporating.values() {
-            if self.overlay_range(v)?.is_some_and(|(a, b)| a == b) {
-                expired.push(v);
+        for member in buffers {
+            for &v in self.annotated(member)?.evaporating.values() {
+                if self.overlay_range(v)?.is_some_and(|(a, b)| a == b) {
+                    expired.push(v);
+                }
             }
         }
         expired.sort_unstable_by_key(|v| v.0);
@@ -721,7 +728,7 @@ impl Vm {
                     (3..=4).contains(&n)
                 }
             }
-            CopyMarker => (1..=2).contains(&n),
+            CopyMarker => n <= 2,
             MarkerPosition | MarkerBuffer | MarkerInsertionType | DeleteOverlay | OverlayStart
             | OverlayEnd | OverlaysAt | NextOverlayChange => n == 1,
             SetMarkerInsertionType | OverlayGet | OverlaysIn => n == 2,
@@ -757,6 +764,11 @@ impl Vm {
                 self.set_marker_object(x, args[1], buffer)
             }
             CopyMarker => {
+                // Fcopy_marker: no MARKER makes a marker pointing nowhere.
+                if x == Value::NIL {
+                    let bias = if n == 2 { bias(args[1]) } else { Bias::Left };
+                    return Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer: Value::NIL, anchor: None, bias }))));
+                }
                 let pos = if x.as_integer().is_ok() {
                     x
                 } else {
@@ -818,10 +830,15 @@ impl Vm {
                         }
                     }
                 }
-                let b = self.annotated_mut(buffer)?;
-                let at = b.point;
-                b.replace_with_bias(at..at, &bytes, true)?;
-                b.properties.copy_into(at, &properties);
+                let marks = self.family_record(index);
+                let edited = self.annotated_mut(buffer).and_then(|b| {
+                    let at = b.point;
+                    b.replace_with_bias(at..at, &bytes, true)?;
+                    b.properties.copy_into(at, &properties);
+                    Ok(())
+                });
+                self.family_fetch(marks);
+                edited?;
                 self.finish_annotation_edit(buffer)?;
                 Ok(Value::NIL)
             }
@@ -1160,6 +1177,110 @@ impl Vm {
         let result = self.property_single_change(position, property, object, limit, false);
         self.slots[self.buffer_slot].value = current;
         result
+    }
+
+    /// textprop.c Fprevious_single_char_property_change: walking back from
+    /// POSITION over text-property and overlay boundaries, the first where
+    /// PROPERTY's char-property value before it differs from the value
+    /// before POSITION; else LIMIT (default BEGV).
+    pub(crate) fn previous_single_char_property_change_values(
+        &mut self,
+        position: Value,
+        property: Value,
+        object: Value,
+        limit: Value,
+    ) -> crate::prim::Out {
+        use crate::prim::Fault;
+        if self.str_view(object).is_some() {
+            let found = self.previous_property_change_values(position, Some(property), object, limit)?;
+            return match () {
+                _ if found != Value::NIL => Ok(found),
+                _ if limit == Value::NIL => Ok(Value::integer(0).unwrap()),
+                _ if limit.integer_value().is_some() => Ok(limit),
+                _ => Err(Fault::Wrong("fixnump", limit)),
+            };
+        }
+        let object = self.property_query_object(object)?;
+        if !matches!(self.object_if(object), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
+            return Err(Fault::Wrong("bufferp", object));
+        }
+        self.require_live_buffer(object).map_err(Fault::Error)?;
+        let current = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = object;
+        let result = self.previous_single_char_property_change_here(position, property, limit);
+        self.slots[self.buffer_slot].value = current;
+        result
+    }
+
+    fn previous_single_char_property_change_here(&mut self, position: Value, property: Value, limit: Value) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let integer = |n: i64| Value::integer(n).map_err(Fault::Error);
+        let object = self.slots[self.buffer_slot].value;
+        let position = self.text_property_position(position)?;
+        let Object::Buffer(b) = self.object(object).map_err(Fault::Error)? else {
+            return Err(Fault::Error("property-change queries in unibyte buffers are not implemented".into()));
+        };
+        let begv = b.char_of_byte(b.accessible().start).map_err(Fault::Error)?.0 as i64 + 1;
+        let limit = if limit == Value::NIL { begv } else { self.text_property_position(limit)? };
+        if position <= limit {
+            return integer(limit.max(begv));
+        }
+        let initial = self.char_property_accessible(position - i64::from(position >= 0), property)?;
+        // Fprevious_char_property_change's steps: each is the nearest
+        // overlay endpoint or text-property boundary before the last, never
+        // below BEGV, so BEGV ends the walk.
+        let boundaries = self.char_property_boundaries_before(object, position, limit.max(begv))?;
+        for at in boundaries.into_iter().chain([begv]) {
+            if at <= limit { break; }
+            if self.char_property_accessible(at - 1, property)? != initial {
+                return integer(at);
+            }
+        }
+        integer(limit)
+    }
+
+    /// Fget_char_property in the current buffer: POSITION's PROPERTY from
+    /// overlays and text properties, args-out-of-range outside BEGV..ZV.
+    pub(crate) fn char_property_accessible(&mut self, position: i64, property: Value) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let object = self.slots[self.buffer_slot].value;
+        let (begv, zv) = match self.object(object).map_err(Fault::Error)? {
+            Object::Buffer(b) => {
+                let r = b.accessible();
+                (b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1, b.char_of_byte(r.end).map_err(Fault::Error)?.0 as i64 + 1)
+            }
+            Object::ByteBuffer(b) => (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+            _ => return Err(Fault::Error("buffer required".into())),
+        };
+        let at = Value::integer(position).map_err(Fault::Error)?;
+        if position < begv || position > zv {
+            return Err(Fault::Range1(at));
+        }
+        self.get_char_property_values(at, property, object).map_err(Fault::Error)
+    }
+
+    /// The positions above LOW and below POSITION in a text buffer where a
+    /// text property run or an overlay starts or ends, nearest first.
+    fn char_property_boundaries_before(&self, object: Value, position: i64, low: i64) -> std::result::Result<Vec<i64>, crate::prim::Fault> {
+        use crate::prim::Fault;
+        let b = self.annotated(object).map_err(Fault::Error)?;
+        let range = b.accessible();
+        let byte = |n: i64| b.byte_of_char(CharOffset((n.clamp(1, b.len_chars() as i64 + 1) - 1) as usize)).map_err(Fault::Error);
+        let (from, to) = (byte(low)?, byte(position)?.min(range.end));
+        let mut bytes = Vec::new();
+        let mut at = from;
+        while at < to {
+            at = b.properties.next_change(at, to);
+            if at < to { bytes.push(at.0 as u32); }
+        }
+        b.intervals.visit(from.0 as u32, to.0 as u32, false, &b.anchors, |_, start, end| {
+            bytes.extend([start, end].into_iter().filter(|&e| e > from.0 as u32 && e < to.0 as u32));
+        });
+        bytes.sort_unstable_by(|a, b| b.cmp(a));
+        bytes.dedup();
+        bytes.into_iter()
+            .map(|at| b.char_of_byte(ByteOffset(at as usize)).map(|c| c.0 as i64 + 1).map_err(Fault::Error))
+            .collect()
     }
 
     fn property_single_change(

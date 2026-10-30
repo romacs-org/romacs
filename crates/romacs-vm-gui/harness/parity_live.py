@@ -272,10 +272,11 @@ def perf_result(process):
 
 # --- private trees and Lisp -------------------------------------------------
 
-def private_tree(engine, base, tools):
+def private_tree(engine, base, tools, prefix=None):
     """A fresh private root for ENGINE: HOME, XDG, TMPDIR, the probe's
-    directory and the compositor environment.  Returns (ROOT, HOME, ENV)."""
-    root = Path(tempfile.mkdtemp(prefix=f'{engine}-', dir=base))
+    directory and the compositor environment, named PREFIX (default
+    ENGINE-) and a random suffix.  Returns (ROOT, HOME, ENV)."""
+    root = Path(tempfile.mkdtemp(prefix=prefix or f'{engine}-', dir=base))
     root.chmod(0o700)
     home = root / 'home'
     for directory in ('home', 'work', 'probe', 'tmp', 'home/.config', 'home/.cache', 'home/.local/share',
@@ -313,30 +314,32 @@ def lisp_copy(base, name, sources, compile_):
     return target
 
 
-def gnu_engine(root, home, env, init, lisp, timeout, tools):
+def gnu_engine(root, home, env, init, lisp, timeout, tools, cls=None):
     """Pinned GNU pgtk on INIT, as the owner's ~/.config/emacs/init.el;
     LISP is the package directory its paths are normalised from.  GNU's
     native compiler, which Romacs lacks, compiles nothing: neither the
     packages (the harness byte-compiles them) nor the trampolines advising
-    a primitive needs (*Native-compile-Log*)."""
+    a primitive needs (*Native-compile-Log*).  CLS, if given, is the
+    Engine subclass to start."""
     (home / '.config/emacs').mkdir()
     (home / '.config/emacs/early-init.el').write_text(
         ';; -*- lexical-binding: t -*-\n(setq package-enable-at-startup nil native-comp-jit-compilation nil'
         ' native-comp-enable-subr-trampolines nil)\n')
     (home / '.config/emacs/init.el').write_text(init)
     (home / '.config/emacs/custom.el').write_text('')
-    return Engine('gnu', [GNU, '--font', 'Iosevka-14'], root, lisp, env, timeout).start(tools)
+    return (cls or Engine)('gnu', [GNU, '--font', 'Iosevka-14'], root, lisp, env, timeout).start(tools)
 
 
-def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools):
-    """`romacs-vm-gui --loadup' on INIT, as ~/.config/romacs/init.el."""
+def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None):
+    """`romacs-vm-gui --loadup' on INIT, as ~/.config/romacs/init.el; CLS as
+    `gnu_engine'."""
     (home / '.config/romacs').mkdir()
     (home / '.config/romacs/init.el').write_text(init)
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
     for key in ('ROMACS_GNU_SOURCE',):
         if os.environ.get(key):
             env[key] = os.environ[key]
-    return Engine('romacs', [romacs, '--loadup'], root, lisp, env, timeout).start(tools)
+    return (cls or Engine)('romacs', [romacs, '--loadup'], root, lisp, env, timeout).start(tools)
 
 
 # --- normalisation and comparison --------------------------------------------

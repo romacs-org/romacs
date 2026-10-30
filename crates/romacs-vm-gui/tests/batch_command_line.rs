@@ -29,6 +29,15 @@ fn cases(lib: &Path) -> Vec<Case> {
         case(&["-Q", "--batch", "-L", "lib", "--eval", "(progn (require 't-batch) (princ (featurep 't-batch)))"], false),
         case(&["--batch", "-Q", "--eval", "(error \"boom %d\" 1)"], true),
         case(&["-Q", "--batch"], false),
+        // fileio.c's stream DEFUNs on the process's own streams: stdin
+        // closed, stdout flushed and still written.
+        case(&["-Q", "--batch", "--eval", "(progn (princ \"a\") (princ (list (set-binary-mode 'stdout t) (file--close-stream 'stdin) (unix-sync))))"], false),
+        // files.el's save-buffer on a visit: the first save backs the
+        // file up to bk~ and sets `buffer-backed-up'; the second keeps that
+        // backup. The directory is under `temporary-file-directory', which
+        // the default predicate exempts.
+        case(&["-Q", "--batch", "--eval",
+               "(let ((backup-enable-predicate #'always)) (with-temp-file \"bk\" (insert \"one\\n\")) (with-current-buffer (find-file-noselect \"bk\") (insert \"two\\n\") (save-buffer) (insert \"three\\n\") (save-buffer) (princ (list buffer-backed-up (local-variable-p 'buffer-backed-up) (with-temp-buffer (insert-file-contents \"bk~\") (buffer-string))))))"], false),
         // command-line's timestamps, which kill-emacs-hook functions read.
         case(&["-Q", "--batch", "--eval", "(princ (list (consp before-init-time) (time-less-p before-init-time after-init-time)))"], false),
     ]

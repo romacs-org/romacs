@@ -112,9 +112,11 @@ fn selection_replacement_also_runs_inside_recursive_prompts() {
     assert_eq!(printed(&mut vm,"(read-string \"Choose: \")"),"\"Zcd\"","PROMPT_TYPING_REPLACES_ONLY_SELECTED_INPUT");
     input(&mut vm,"abcd\u{2}\u{2}\u{2}\u{2}\0\u{6}\u{6}\u{7f}\r");
     assert_eq!(printed(&mut vm,"(read-string \"Choose: \")"),"\"cd\"","PROMPT_BACKSPACE_DELETES_ONLY_SELECTED_INPUT");
-    for code in ['Z', '\u{7f}', '\u{4}'] {
+    // C-a stops at the input's start, after the read-only prompt, so the
+    // selection holds only input (pinned GNU's answers).
+    for (code, expected) in [('Z', "\"Zcd\""), ('\u{7f}', "\"cd\""), ('\u{4}', "\"cd\"")] {
         input(&mut vm, &format!("abcd\u{1}\0\u{6}\u{6}{code}\r"));
-        assert_eq!(printed(&mut vm,"(read-string \"Choose: \")"),"\"abcd\"","SELECTION_MUST_NOT_REPLACE_READONLY_PROMPT");
+        assert_eq!(printed(&mut vm,"(read-string \"Choose: \")"),expected,"PROMPT_BEGINNING_SELECTS_ONLY_INPUT");
     }
     assert_eq!(printed(&mut vm,"(list (buffer-string) (point) (minibuffer-depth))"),"(\"first λ\\nsecond\\n\" 5 0)","PROMPT_SELECTION_RESTORES_CALLER_STATE");
 }

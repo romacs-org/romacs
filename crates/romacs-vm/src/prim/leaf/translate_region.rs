@@ -152,8 +152,12 @@ impl Leaf<'_> {
                 // inside or at the old end ends up after it.
                 let pt = b.char_of_byte(b.point).map_err(Fault::Error)?.0;
                 let (start, old_end) = (base + at, base + at + len);
-                b.replace_with_bias(to..to, &bytes, true).map_err(Fault::Error)?;
-                b.replace_with_bias(from..to, &[], false).map_err(Fault::Error)?;
+                let marks = self.vm.family_record(index);
+                let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!() };
+                let edited = b.replace_with_bias(to..to, &bytes, true).and_then(|()| b.replace_with_bias(from..to, &[], false));
+                self.vm.family_fetch(marks);
+                edited.map_err(Fault::Error)?;
+                let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!() };
                 let new_end = start + replacement.len();
                 let new_pt = if pt >= old_end { pt + replacement.len() - len } else if pt > start { new_end } else { pt };
                 b.point = b.byte_of_char(CharOffset(new_pt)).map_err(Fault::Error)?;

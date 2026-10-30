@@ -821,6 +821,55 @@ pub fn case_insensitive(path: &Path, classify: fn(&Path) -> Result<bool, &'stati
     result
 }
 
+/// The POSIX access ACL of the file PATH names, following a symlink: its
+/// `system.posix_acl_access' attribute, or None when it has none (its
+/// mode bits are then its ACL). A keyed probe.
+pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
+    const NAME: &CStr = c"system.posix_acl_access";
+    let result = (|| {
+        let name = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+        loop {
+            let size = unsafe { libc::getxattr(name.as_ptr(), NAME.as_ptr(), std::ptr::null_mut(), 0) };
+            if size < 0 {
+                let error = io::Error::last_os_error();
+                return if error.raw_os_error() == Some(libc::ENODATA) { Ok(None) } else { Err(error) };
+            }
+            let mut value = vec![0u8; size as usize];
+            let read = unsafe { libc::getxattr(name.as_ptr(), NAME.as_ptr(), value.as_mut_ptr().cast(), value.len()) };
+            if read >= 0 { value.truncate(read as usize); return Ok(Some(value)); }
+            // The attribute grew between the two calls: ask its size again.
+            if io::Error::last_os_error().raw_os_error() != Some(libc::ERANGE) { return Err(io::Error::last_os_error()); }
+        }
+    })();
+    if building() {
+        if let Err(e) = &result { confined(path, e); }
+        let observed = match &result { Ok(Some(value)) => encoded(value), Ok(None) => json!(null), Err(e) => errno(e) };
+        probed("acl", path, observed);
+    }
+    result
+}
+
+/// Set the POSIX access ACL of the file PATH names to VALUE, in its
+/// `system.posix_acl_access' form.
+pub fn set_posix_acl(path: &Path, value: &[u8]) -> io::Result<()> {
+    effect(|| format!("set ACL of {}", bytes(path)))?;
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    status(unsafe { libc::setxattr(name.as_ptr(), c"system.posix_acl_access".as_ptr(), value.as_ptr().cast(), value.len(), 0) })
+}
+
+/// sync(2): every pending disk update, the whole system's.
+pub fn sync_all() -> io::Result<()> {
+    effect(|| "sync".into())?;
+    unsafe { libc::sync() };
+    Ok(())
+}
+
+/// Close this process's standard stream FD (0, 1 or 2).
+pub fn close_standard_stream(fd: i32) -> io::Result<()> {
+    effect(|| format!("close standard stream {fd}"))?;
+    status(unsafe { libc::close(fd) })
+}
+
 // Replay.
 
 /// The bytes a record's `encoded` field holds.
@@ -862,6 +911,7 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
                     probed("entry-type", &path, observed);
                 }
                 "statvfs" => { let _ = statvfs(&std::ffi::CString::new(path()?.into_os_string().into_vec()).ok()?); }
+                "acl" => { let _ = posix_acl(&path()?); }
                 access => {
                     let mut words = access.strip_prefix("access ")?.split(' ');
                     let mode = words.next()?.parse().ok()?;
@@ -890,6 +940,8 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
                 "exe" => { let _ = current_exe(); }
                 "uid" => { uid(); }
                 "euid" => { euid(); }
+                "gid" => { gid(); }
+                "egid" => { egid(); }
                 "system-name" => { let _ = system_name(); }
                 "processors Current" => { processors(Processors::Current); }
                 "processors Online" => { processors(Processors::Online); }
@@ -898,10 +950,14 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
             },
             "user-db" => {
                 let key = &record["key"];
-                if let Some(uid) = key["uid"].as_u64() {
+                if let Some(list) = key.as_str() {
+                    match list { "users" => { account_names(false); } "groups" => { account_names(true); } _ => return None }
+                } else if let Some(uid) = key["uid"].as_u64() {
                     let _ = user_by_uid(uid as u32, 1 << 16);
                 } else if let Some(gid) = key["gid"].as_u64() {
                     let _ = group_by_gid(gid as u32, 1 << 16);
+                } else if key.get("group").is_some() {
+                    let _ = group_by_name(&std::ffi::CString::new(decoded(&key["group"])?).ok()?, 1 << 16);
                 } else {
                     let _ = user_by_name(&std::ffi::CString::new(decoded(&key["name"])?).ok()?, 1 << 16);
                 }
@@ -973,10 +1029,27 @@ pub fn euid() -> u32 {
     euid
 }
 
+pub fn gid() -> u32 {
+    let gid = unsafe { libc::getgid() };
+    if building() {
+        host_fact("gid", json!(gid));
+    }
+    gid
+}
+
+pub fn egid() -> u32 {
+    let egid = unsafe { libc::getegid() };
+    if building() {
+        host_fact("egid", json!(egid));
+    }
+    egid
+}
+
 // User database.
 
 /// A passwd entry's fields, as the C library's bytes.
 pub struct Passwd {
+    pub uid: u32,
     /// pw_name, absent when the entry has none.
     pub name: Option<Vec<u8>>,
     pub gecos: Vec<u8>,
@@ -996,7 +1069,7 @@ fn passwd(buffer: usize, lookup: impl Fn(*mut libc::passwd, *mut libc::c_char, u
     }
     let bytes = |p: *const libc::c_char| if p.is_null() { Vec::new() } else { unsafe { CStr::from_ptr(p) }.to_bytes().to_vec() };
     let field = |p: *const libc::c_char| (!p.is_null()).then(|| bytes(p));
-    Ok(Passwd { name: field(entry.pw_name), gecos: bytes(entry.pw_gecos), dir: field(entry.pw_dir) })
+    Ok(Passwd { uid: entry.pw_uid, name: field(entry.pw_name), gecos: bytes(entry.pw_gecos), dir: field(entry.pw_dir) })
 }
 
 pub fn user_by_uid(uid: u32, buffer: usize) -> Result<Passwd, i32> {
@@ -1015,7 +1088,7 @@ pub fn user_by_name(name: &CStr, buffer: usize) -> Result<Passwd, i32> {
 fn user_db(key: Json, result: &Result<Passwd, i32>) {
     if building() {
         let result = match result {
-            Ok(p) => json!(sha256(&[p.name.as_deref(), Some(&p.gecos), p.dir.as_deref()].map(|f| f.map(<[u8]>::to_vec)).iter()
+            Ok(p) => json!(sha256(&[Some(p.uid.to_string().as_bytes()), p.name.as_deref(), Some(&p.gecos), p.dir.as_deref()].map(|f| f.map(<[u8]>::to_vec)).iter()
                 .flat_map(|f| f.as_ref().map_or(vec![0xff], |f| [f.as_slice(), &[0]].concat())).collect::<Vec<u8>>())),
             Err(status) => json!({"status": status}),
         };
@@ -1040,6 +1113,41 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
         record("user-db", json!({"key": {"gid": gid}, "result": observed}));
     }
     result
+}
+
+/// The group NAME names: its gid.
+pub fn group_by_name(name: &CStr, buffer: usize) -> Result<u32, i32> {
+    let mut buffer = vec![0 as libc::c_char; buffer];
+    let mut entry = std::mem::MaybeUninit::<libc::group>::uninit();
+    let mut found = std::ptr::null_mut();
+    let status = unsafe { libc::getgrnam_r(name.as_ptr(), entry.as_mut_ptr(), buffer.as_mut_ptr(), buffer.len(), &mut found) };
+    let result = if status != 0 || found.is_null() { Err(status) } else { Ok(unsafe { (*found).gr_gid }) };
+    if building() {
+        let observed = match &result { Ok(gid) => json!(gid), Err(status) => json!({"status": status}) };
+        record("user-db", json!({"key": {"group": encoded(name.to_bytes())}, "result": observed}));
+    }
+    result
+}
+
+/// The names getpwent (users) or getgrent (groups) walks the whole database
+/// for, in its order, then endpwent or endgrent, as dired.c Fsystem_users and
+/// Fsystem_groups do (so NSS sources count). The walk's cursor is the C
+/// library's, shared by the process, so one walk runs at a time.
+pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
+    static WALK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _walk = WALK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let next = || unsafe {
+        let name = if groups { libc::getgrent().as_ref().map(|g| g.gr_name) } else { libc::getpwent().as_ref().map(|p| p.pw_name) };
+        name.map(|name| (!name.is_null()).then(|| CStr::from_ptr(name).to_bytes().to_vec()))
+    };
+    let mut names = Vec::new();
+    unsafe { if groups { libc::setgrent() } else { libc::setpwent() } }
+    while let Some(name) = next() { names.extend(name); }
+    unsafe { if groups { libc::endgrent() } else { libc::endpwent() } }
+    if building() {
+        record("user-db", json!({"key": if groups { "groups" } else { "users" }, "result": sha256(&names.join(&0))}));
+    }
+    names
 }
 
 // Machine.
@@ -1559,6 +1667,23 @@ pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
 
 #[cfg(test)]
 mod tests {
+    /// A build's walk of the account database replays as the same walk.
+    #[test]
+    fn account_name_walks_replay() {
+        for (groups, key) in [(false, "users"), (true, "groups")] {
+            enter_build(Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] });
+            begin_recipe();
+            account_names(groups);
+            let trace = leave_build().expect("a build trace");
+            let record = trace["records"].as_array().unwrap().iter()
+                .find(|r| r["kind"] == "user-db" && r["key"] == key).expect("the walk is recorded").clone();
+            let mut answer = replay(&record, |_| Ok(false)).expect("the walk replays");
+            let mut recorded = record;
+            recorded.as_object_mut().unwrap().remove("site");
+            answer.as_object_mut().unwrap().remove("site");
+            assert_eq!(answer["result"], recorded["result"], "{key}");
+        }
+    }
     use super::*;
 
     #[test]
