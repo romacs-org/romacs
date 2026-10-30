@@ -515,13 +515,19 @@ a command signalled out of it: `post-command-hook' runs for that command."
   (unless (consp last-command-event)
     (setq last-repeatable-command real-this-command)))
 
+(defun romacs--command-loop-top ()
+  "The top of keyboard.c command_loop_1's loop, before it waits for keys:
+the selected window's buffer is current and no command is running, so
+idle timers and redisplay see `this-command' nil."
+  (set-buffer (window-buffer (selected-window)))
+  (setq deactivate-mark nil this-command nil real-this-command nil
+        this-original-command nil this-command-keys-shift-translated nil))
+
 (defun romacs--command-loop-step ()
   "One pass of keyboard.c command_loop_1's loop: read a key sequence and
 run its command between `pre-command-hook' and `post-command-hook'.
 Return the keys read, nil at the end of an executing keyboard macro."
-  (set-buffer (window-buffer (selected-window)))
-  (setq deactivate-mark nil this-command nil real-this-command nil
-        this-original-command nil this-command-keys-shift-translated nil)
+  (romacs--command-loop-top)
   (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil)))
         cmd previous-buffer previous-tick)
     (set-buffer (window-buffer (selected-window)))
@@ -584,14 +590,16 @@ from the unread queues, a keyboard macro, then the host, and run its
 command as command_loop_1 does.  Value: (COMMAND . ERROR), COMMAND
 `this-command' and ERROR nil or the (CONDITION . DATA) it signalled,
 which the host reports as cmd_error would.  The loop then resumes, so
-`post-command-hook' runs for that command too."
-  (condition-case data
-      (progn (romacs--command-loop-step) (cons this-command nil))
-    (t (prog1 (cons this-command data)
-         (unless (memq 'minibuffer-quit (get (car data) 'error-conditions))
-           (setq executing-kbd-macro nil romacs--executing-macro nil))
-         (setq quit-flag nil inhibit-quit nil)
-         (romacs--command-loop-resume)))))
+`post-command-hook' runs for that command too.  The host waits for the
+next input at the top of the loop."
+  (prog1 (condition-case data
+             (progn (romacs--command-loop-step) (cons this-command nil))
+           (t (prog1 (cons this-command data)
+                (unless (memq 'minibuffer-quit (get (car data) 'error-conditions))
+                  (setq executing-kbd-macro nil romacs--executing-macro nil))
+                (setq quit-flag nil inhibit-quit nil)
+                (romacs--command-loop-resume))))
+    (romacs--command-loop-top)))
 
 (defun romacs--cmd-error (data)
   "keyboard.c cmd_error: report DATA through `command-error-function' and
