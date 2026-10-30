@@ -7,5 +7,5 @@ error[E0277]: the trait bound `fn(): SnapshotSafe` is not satisfied
 note: required by a bound in `capture`
  --> src/world/image.rs
   |
-  | pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, Strin...
+  | pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, Stri...
   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `capture`

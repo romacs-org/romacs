@@ -24,6 +24,7 @@ mod terminal_wait;
 mod batch;
 mod user_init;
 mod measure;
+mod fonts;
 mod timers;
 mod world;
 
@@ -745,6 +746,8 @@ fn evaluate(
     };
     // Measuring primitives ask the engine that paints (VM2-WTPS1).
     vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
+    // Its window system, which the session opens (fonts.rs).
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?)));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     // A completed background command wakes the same wait as a terminal.

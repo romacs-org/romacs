@@ -158,24 +158,11 @@ fn internal_lisp_face_attribute_values(cx, attribute: Value) {
     Ok(Value::NIL)
 }}
 
-// font.c weight_table, slant_table and width_table: the C defaults of
-// font-weight-table, font-slant-table and font-width-table, matched exactly
-// and then case-insensitively by font_style_to_value.
-const WEIGHTS: &[&str] = &["thin", "ultra-light", "ultralight", "extra-light", "extralight", "light",
-    "semi-light", "semilight", "demilight", "regular", "normal", "unspecified", "book", "medium",
-    "semi-bold", "semibold", "demibold", "demi-bold", "demi", "bold", "extra-bold", "extrabold",
-    "ultra-bold", "ultrabold", "black", "heavy", "ultra-heavy", "ultraheavy"];
-const SLANTS: &[&str] = &["reverse-oblique", "ro", "reverse-italic", "ri", "normal", "r", "unspecified",
-    "italic", "i", "ot", "oblique", "o"];
-const WIDTHS: &[&str] = &["ultra-condensed", "ultracondensed", "extra-condensed", "extracondensed",
-    "condensed", "compressed", "narrow", "semi-condensed", "semicondensed", "demicondensed", "normal",
-    "medium", "regular", "unspecified", "semi-expanded", "semiexpanded", "demiexpanded", "expanded",
-    "extra-expanded", "extraexpanded", "ultra-expanded", "ultraexpanded", "wide"];
-
-fn style_name(cx: &mut Leaf<'_>, value: Value, table: &[&str], message: &str) -> std::result::Result<(), Fault> {
+// A style font.c's tables (prims/font.rs) know (font_style_to_value).
+fn style_name(cx: &mut Leaf<'_>, value: Value, slot: usize, message: &str) -> std::result::Result<(), Fault> {
     if cx.kind(value) != Kind::Symbol { return Err(Fault::Wrong("symbolp", value)); }
     let name = cx.symbol_name(value)?;
-    if table.iter().any(|entry| entry.eq_ignore_ascii_case(&name)) { Ok(()) } else { Err(signal(cx, message, value)) }
+    if super::font::style_value(cx, slot, &name, false).is_some() { Ok(()) } else { Err(signal(cx, message, value)) }
 }
 
 fn string_nonempty(cx: &Leaf<'_>, value: Value) -> bool {
@@ -365,9 +352,9 @@ fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut valu
             }
             Some(":height")
         }
-        ":weight" => { if !special(value) { style_name(cx, value, WEIGHTS, "Invalid face weight")?; } Some(":weight") }
-        ":slant" => { if !special(value) { style_name(cx, value, SLANTS, "Invalid face slant")?; } Some(":slant") }
-        ":width" => { if !special(value) { style_name(cx, value, WIDTHS, "Invalid face width")?; } Some(":width") }
+        ":weight" => { if !special(value) { style_name(cx, value, super::font::WEIGHT, "Invalid face weight")?; } Some(":weight") }
+        ":slant" => { if !special(value) { style_name(cx, value, super::font::SLANT, "Invalid face slant")?; } Some(":slant") }
+        ":width" => { if !special(value) { style_name(cx, value, super::font::WIDTH, "Invalid face width")?; } Some(":width") }
         ":underline" => {
             if !special(value) && !valid_underline(cx, value) { return Err(signal(cx, "Invalid face underline", value)); }
             Some(":underline")

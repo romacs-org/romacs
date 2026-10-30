@@ -1655,6 +1655,7 @@ mod leaf {
     mod syntax_scan;
     pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
+    mod font;
     mod value_order;
     mod completion;
     mod backtrace;

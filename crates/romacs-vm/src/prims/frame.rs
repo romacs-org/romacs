@@ -109,8 +109,20 @@ fn frame_alist(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<Vec<(Valu
             store(&mut alist, key, value);
         }
     }
-    let tty = cx.string("tty");
-    store(&mut alist, cx.intern("font"), tty);
+    // The frame's font: the initial terminal's "tty", else the display's
+    // font for the default face, named as GNU's pgtk names it.
+    match super::font::frame_font(cx)? {
+        Some(name) => {
+            let name = cx.string(&name);
+            store(&mut alist, cx.intern("font"), name);
+            let backend = cx.intern(super::font::BACKEND);
+            let backends = cx.cons(backend, Value::NIL);
+            store(&mut alist, cx.intern("font-backend"), backends);
+            let window_system = cx.windows().window_system(Value::NIL)?;
+            store(&mut alist, cx.intern("window-system"), window_system);
+        }
+        None => { let tty = cx.string("tty"); store(&mut alist, cx.intern("font"), tty); }
+    }
     store(&mut alist, name_key, name);
     let (cols, lines) = cx.windows().frame_text_size();
     store(&mut alist, cx.intern("height"), Value::integer(lines).unwrap());
@@ -170,11 +182,7 @@ fn modify_frame_parameters(cx, frame: Value, alist: Value) {
     Ok(Value::NIL)
 }}
 defsubr! { name = "window-system", gnu = "frame.c:415", effect = Reads,
-fn window_system(cx; optional frame: Value) {
-    // VM2 frames are initial-terminal frames (DIVERGENCES.md VM2-WIN5).
-    cx.windows().check_live_frame(frame)?;
-    Ok(Value::NIL)
-}}
+fn window_system(cx; optional frame: Value) { cx.windows().window_system(frame) }}
 defsubr! { name = "current-message", gnu = "editfns.c:3288", effect = Reads,
 fn current_message(cx) {
     // In batch, message writes to stderr and the echo area stays empty.
@@ -183,23 +191,6 @@ fn current_message(cx) {
     let echo = cx.intern(crate::prim::ECHO_AREA_MESSAGE);
     Ok(cx.variable_value(echo)?.unwrap_or(Value::NIL))
 }}
-defsubr! { name = "internal-char-font", gnu = "font.c:4762", effect = Reads,
-fn internal_char_font(cx, position: Value; optional ch: Value) {
-    if position == Value::NIL {
-        if !ch.integer_value().is_some_and(|c| (0..=0x3fffff).contains(&c)) { return Err(Fault::Wrong("characterp", ch)); }
-    } else {
-        let shape = cx.buffer_shape()?;
-        let at = position.integer_value().or_else(|| cx.marker_position(position).flatten())
-            .ok_or(Fault::Wrong("integer-or-marker-p", position))?;
-        if !(shape.begv <= at && at < shape.zv) {
-            return Err(Fault::Range3(position, Value::integer(shape.begv).unwrap(), Value::integer(shape.zv).unwrap()));
-        }
-        if ch != Value::NIL && !ch.integer_value().is_some_and(|c| c >= 0) { return Err(Fault::Wrong("wholenump", ch)); }
-    }
-    // A frame without a window system answers terminal_glyph_code; the
-    // initial terminal has no glyph codes (VM2 frames, VM2-WIN5).
-    Ok(Value::NIL)
-}}
 defsubr! { name = "internal-handle-focus-in", gnu = "keyboard.c:7891", effect = Reads,
 fn internal_handle_focus_in(cx, event: Value) {
     // GNU queues a switch-frame event when the focused frame is not the
@@ -207,7 +198,7 @@ fn internal_handle_focus_in(cx, event: Value) {
     // selected, so there is never one to queue.
     let focus_in = cx.intern("focus-in");
     let frame = cx.pair(event).filter(|&(head, _)| head == focus_in).and_then(|(_, rest)| cx.pair(rest)).map(|(frame, _)| frame);
-    if !frame.is_some_and(|frame| cx.windows().frame_p(frame) == Value::TRUE) {
+    if !frame.is_some_and(|frame| cx.windows().frame_p(frame) != Value::NIL) {
         return Err(Fault::Error("Invalid focus-in event".into()));
     }
     Ok(Value::NIL)
@@ -291,23 +282,3 @@ fn frame_or_buffer_changed_p(cx; optional variable: Value) {
 
 defsubr! { name = "frame-initial-p", gnu = "terminal.c:482", effect = Reads,
 fn frame_initial_p(cx; optional frame: Value) { cx.windows().frame_initial_p(frame) }}
-
-defsubr! { name = "font-info", gnu = "font.c:5594", effect = Reads,
-fn font_info(cx, name: Value; optional frame: Value) {
-    // A VM2 frame's one font is the initial terminal's "tty" (VM2-WIN5),
-    // whose metrics are the frame's canonical character, which the host
-    // lays out: [OPENED-NAME FULL-NAME SIZE HEIGHT BASELINE-OFFSET
-    // RELATIVE-COMPOSE DEFAULT-ASCENT MAX-WIDTH ASCENT DESCENT SPACE-WIDTH
-    // AVERAGE-WIDTH FILENAME CAPABILITY].  Any other font does not open,
-    // so its information is nil, as Ffont_info answers then.
-    if !cx.string_view(name).is_ok_and(|n| n.bytes() == b"tty") {
-        if cx.kind(name) != leaf::Kind::String { return Err(Fault::Wrong("stringp", name)); }
-        return Ok(Value::NIL);
-    }
-    let width = cx.windows().frame_char_size(frame, true)?;
-    let height = cx.windows().frame_char_size(frame, false)?;
-    let zero = Value::integer(0).map_err(Fault::Error)?;
-    let format = cx.intern("x");
-    let capability = cx.cons(format, Value::NIL);
-    Ok(cx.vector(&[name, name, height, height, zero, zero, zero, width, height, zero, width, width, Value::NIL, capability]))
-}}

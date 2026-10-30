@@ -460,9 +460,13 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
 /// Romacs's layers, up to the workspace.
 pub fn initialize_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup, dir: &std::path::Path) -> Result<Started, String> {
     if launch == Launch::Loadup {
-        // What an interactive session on this display adds to the batch
-        // chain, then Romacs's defaults for GNU's minibuffer completion,
-        // which the user's init may override.
+        // The session leaves the batch chain's initial terminal for the
+        // GUI's display, if one is attached (fonts.rs), as GNU's
+        // window-system initialization does; then what an interactive
+        // session on this display adds to the batch chain, and Romacs's
+        // defaults for GNU's minibuffer completion, which the user's init
+        // may override.
+        vm.open_display();
         for name in ["romacs-gui-loadup.el", "romacs-completion-defaults.el"] {
             let file = loadup_bootstrap(dir).with_file_name(name);
             vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
