@@ -516,11 +516,24 @@ mod tests {
         assert_eq!(format!("{first:?}"), expected, "scroll-up keeps the old page's last lines");
     }
 
+    /// A package's `make-display-table' leaves `standard-display-table' an
+    /// empty table; vertical motion (next-line) still runs on the host's
+    /// layout rather than refusing.
+    #[test]
+    fn an_empty_standard_display_table_leaves_motion_to_the_host() {
+        let mut h = hosted();
+        // disp-table.el's display tables, which this VM has not loaded.
+        h.eval("(put 'display-table 'char-table-extra-slots 18)");
+        h.eval("(progn (erase-buffer) (insert \"ab\\ncd\\n\") (goto-char 1) (set-window-start nil 1))");
+        assert_eq!(h.eval("(let ((standard-display-table (make-char-table 'display-table))) (list (vertical-motion 1) (point)))"), "(1 4)");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]
     fn displayed_window_refuses_what_the_host_does_not_lay_out() {
         let mut h = hosted();
+        h.eval("(put 'display-table 'char-table-extra-slots 18)");
         let long = "(make-string (+ (window-body-width) 2) ?x)";
         for (refused, twin, what) in [
             // The host continues lines at the window edge, never at a word.
@@ -539,6 +552,11 @@ mod tests {
             ("(insert \"a\" (propertize \"b\" 'display \"\"))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(insert (propertize \"ab\" 'invisible t))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(insert \"a\\u0085b\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
+            // A display table refuses only the glyphs the host would not paint.
+            ("(setq buffer-display-table (make-char-table 'display-table)) (aset buffer-display-table ?b [?B]) (insert \"abc\")".into(),
+             "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "of text the host does not lay out as GNU displays it"),
+            ("(setq buffer-display-table (make-char-table 'display-table)) (set-char-table-extra-slot buffer-display-table 1 ?|) (insert \"abc\")".into(),
+             "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "with a display table's truncation or continuation glyph"),
         ] {
             for (form, refuse) in [(refused.as_str(), true), (twin.as_str(), false)] {
                 // Hosted since setup's paint.

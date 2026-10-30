@@ -419,13 +419,18 @@ impl Leaf<'_> {
         if wrap == Wrap::Word && var(self, "word-wrap-by-category")? != Value::NIL {
             return Err(unsupported("with `word-wrap-by-category'"));
         }
-        let glyph = self.special_glyph_width(if wrap == Wrap::Truncate { 0 } else { 1 })?;
+        let slot = if wrap == Wrap::Truncate { 0 } else { 1 };
+        let glyph = self.special_glyph_width(slot)?;
         let border = i64::from(!area.rightmost);
         let zv_after_newline = match self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) {
             Some(Object::Buffer(b)) => b.as_str()[..b.accessible().end.0].ends_with('\n'),
             _ => false,
         };
-        if area.hosted && self.display_table()?.is_some() { return Err(unsupported("with a display table in a displayed window")); }
+        // The host ends a row at its own `$' or `\' (hosted_context); a
+        // character the table maps is refused where the motion meets it.
+        if area.hosted && self.special_glyph(slot)? != Value::NIL {
+            return Err(unsupported("with a display table's truncation or continuation glyph in a displayed window"));
+        }
         Ok(Ctx {
             last_visible_x: area.columns - area.left_margin - area.right_margin - glyph - border,
             wrap,
@@ -439,13 +444,7 @@ impl Leaf<'_> {
     /// The truncation (SLOT 0) or continuation (SLOT 1) glyph's columns:
     /// the display table's glyph, else `$' or `\'.
     fn special_glyph_width(&mut self, slot: usize) -> std::result::Result<i64, Fault> {
-        let glyph = match self.display_table()? {
-            Some(table) => match self.vm.object_if(table) {
-                Some(Object::CharTable(t)) => t.extras.get(slot).copied().unwrap_or(Value::NIL),
-                _ => Value::NIL,
-            },
-            None => Value::NIL,
-        };
+        let glyph = self.special_glyph(slot)?;
         let c = match self.pair(glyph) {
             Some((c, _)) => c.integer_value(),
             None => glyph.integer_value().filter(|&g| g >= 0).map(|g| g & 0x3fffff),
@@ -455,6 +454,17 @@ impl Leaf<'_> {
             Some(c) => self.character_width(c as u32),
             None => Ok(1),
         }
+    }
+
+    /// The display table's glyph in SLOT, nil without one.
+    fn special_glyph(&mut self, slot: usize) -> std::result::Result<Value, Fault> {
+        Ok(match self.display_table()? {
+            Some(table) => match self.vm.object_if(table) {
+                Some(Object::CharTable(t)) => t.extras.get(slot).copied().unwrap_or(Value::NIL),
+                _ => Value::NIL,
+            },
+            None => Value::NIL,
+        })
     }
 
     /// The tab, header and mode lines MODE-LINES asks for. VM2 draws no
