@@ -171,6 +171,7 @@ inner edges are the same."
 
 (defun pgtk-backend-display-class (&optional _terminal)
   "Return the name of the GDK backend display class of TERMINAL."
+  (interactive "")
   (if (getenv "WAYLAND_DISPLAY") "GdkWaylandDisplay" "GdkX11Display"))
 
 (defun x-gtk-launch-uri (frame uri)
