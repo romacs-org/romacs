@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "799b1be4c4f51a418b84e2b27eef3cf263769c3d009a6d086c910e2b85b8e285",
+    "input_hash": "4e2f559563814869b36d07d42ab1f6527ccfa17ea6a7f25c37cf231fdd2cea42",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4820
+    "vm2_universe": 4890
   },
   "schema": 2,
   "vm2": {
-    "count": 1053,
+    "count": 1062,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -319,6 +319,7 @@
       "fillarray",
       "find-coding-systems-region-internal",
       "find-file-name-handler",
+      "find-font",
       "find-operation-coding-system",
       "fixnump",
       "float",
@@ -328,7 +329,14 @@
       "flush-standard-output",
       "fmakunbound",
       "following-char",
+      "font-at",
+      "font-family-list",
+      "font-get",
       "font-info",
+      "font-put",
+      "font-spec",
+      "font-xlfd-name",
+      "fontp",
       "force-mode-line-update",
       "force-window-update",
       "format",
@@ -480,6 +488,7 @@
       "line-number-display-width",
       "line-pixel-height",
       "list",
+      "list-fonts",
       "listp",
       "load",
       "local-variable-if-set-p",

@@ -22,6 +22,8 @@ fn candidate(weight: u16, width: u16) -> ListedFace {
         slant: FontSlantKind::Normal,
         width,
         spacing: None,
+        foundry: None,
+        fc_style: (80, 0, 100),
     }
 }
 

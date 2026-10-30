@@ -17,6 +17,7 @@
 //! why the renderer's font helpers live here too.
 
 pub mod cluster;
+pub mod entity;
 pub mod font_match;
 #[cfg(target_os = "linux")]
 mod fontconfig_catalog;

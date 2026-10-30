@@ -118,11 +118,10 @@ If FRAME is t, report on the defaults for face FACE (for new frames).
   The font default for a face is either nil, or a list
   of the form (bold), (italic) or (bold italic).
 If FRAME is omitted or nil, use the selected frame.
-xfaces.c Fface_font: Romacs's frame is a terminal frame, which realizes no
-font, so a frame's answer is nil once FACE is known.  On a graphic
-display the frame's font is the default face's, so for `default' the
-answer is the frame's `font' parameter, as GNU's is until that face's
-font changes."
+xfaces.c Fface_font: Romacs's faces realize no font objects, so a frame's
+answer is nil once FACE is known.  On a graphic display the frame's font
+is the default face's, so for `default' the answer is the frame's `font'
+parameter, as GNU's is until that face's font changes (VM2-DISPLAY1)."
   ;; resolve_face_name: a string names the face of that symbol.
   (when (stringp face) (setq face (intern face)))
   (if (eq frame t)
