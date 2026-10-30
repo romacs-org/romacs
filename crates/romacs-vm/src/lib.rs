@@ -89,6 +89,7 @@ mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
+mod frozen;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
@@ -1267,6 +1268,11 @@ pub struct Vm {
     expanded_macros: Vec<(usize, u64)>,
     expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
+    /// Frozen regions by id (`frozen.rs`); index 0 is the image above.
+    regions: Vec<Option<Box<frozen::Region>>>,
+    region_free: Vec<usize>,
+    /// Three quarters of the region ids are live: collect at the next entry.
+    region_collect: bool,
     buffer_slot: usize,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
@@ -1487,6 +1493,9 @@ romacs_snapshot::snapshot_fields!(Vm {
     subprocesses,
     process_jobs,
     image,
+    regions,
+    region_free,
+    region_collect,
     fence,
     execution,
     spare_programs,
@@ -1507,7 +1516,12 @@ impl Vm {
     pub fn set_collection_floor(&mut self, objects: usize) {
         self.gc_floor = Some(objects.max(1));
     }
+    /// The collector's measure of the heap: private objects plus the
+    /// weight of the frozen regions attached (`frozen.rs`).
     pub fn heap_objects(&self) -> usize {
+        self.private_objects() + self.region_weight()
+    }
+    pub(crate) fn private_objects(&self) -> usize {
         self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
     }
     pub fn new() -> Self {
@@ -1573,6 +1587,9 @@ impl Vm {
             expanded_macros: vec![],
             expanded_symbols: NameSet::default(),
             image: None,
+            regions: vec![None],
+            region_free: Vec::new(),
+            region_collect: false,
             buffer_slot: 0,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
@@ -3107,7 +3124,7 @@ impl Vm {
                     // Three sources: mapped UTF-8 strings, heap strings/vectors,
                     // and byte strings. Text counts scalars; byte strings count
                     // octets. Buffers are not sequences.
-                    return Value::integer(if Self::image_value(a[0]) {
+                    return Value::integer(if Self::image_string(a[0]) {
                         self.string_value(a[0])?.chars().count()
                     } else {
                         match self.object(a[0])? {
@@ -3158,7 +3175,7 @@ impl Vm {
         if depth > 100 {
             return Err("display depth exceeded".into());
         }
-        if v != Value::NIL && v.tag() == 0 && !Self::image_value(v) {
+        if v != Value::NIL && v.tag() == 0 && !Self::image_string(v) {
             return match self.object(v)? {
                 data::Object::Float(n) => Ok(numbers::print_float(*n)),
                 data::Object::Bignum(n) => Ok(n.to_string()),
@@ -3228,7 +3245,7 @@ impl Vm {
             Ok("nil".into())
         } else if v == Value::TRUE {
             Ok("t".into())
-        } else if v.tag() == 0 && Self::image_value(v) {
+        } else if Self::image_string(v) {
             Ok(serde_json::to_string(self.string_value(v)?).unwrap())
         } else if v.tag() == 1 {
             Ok(v.as_integer()?.to_string())

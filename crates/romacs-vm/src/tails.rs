@@ -10,7 +10,7 @@
 //! keys its compiled fast paths on `Primitive::{Car, Cdr, Cons, Eq, Null, Memq,
 //! Nth, Length}` (threaded.rs `Op::Direct`) and the generated `defsubr!` path is
 //! uncached (PRIMITIVE-DOCTRINE U4, unmeasured). `nreverse` stays because the
-//! image contract needs a raw VM error ("cannot mutate immutable image") and a
+//! image contract needs GNU's read-only error behind a raw VM error and a
 //! generated `Fault` can only become a Lisp condition. `substring` has neither
 //! constraint and lives in `prims/fns_core.rs`.
 use super::*;
@@ -100,7 +100,7 @@ impl Vm {
             // fns.c Fnreverse: SEQ itself (already partly reversed) is the datum.
             // The image refusal is VM2's own contract, not a GNU condition:
             // leave it to the generic path rather than invent a type error.
-            Nreverse if error.contains("immutable image") => None,
+            Nreverse if error == crate::frozen::READ_ONLY => None,
             Nreverse => {
                 let x = arg(self, 0);
                 Some(if error.contains("circular") {
@@ -154,7 +154,7 @@ impl Vm {
             let (mut slow, mut fast, mut power, mut lam) = (seq, seq, 1usize, 0usize);
             while fast.tag() == 3 {
                 if Self::image_value(fast) {
-                    return Err("cannot mutate immutable image".into());
+                    return Err(self.refuse_read_only(seq));
                 }
                 fast = self.conses[fast.index(3)?].1;
                 lam += 1;
@@ -201,6 +201,9 @@ impl Vm {
                 out
             };
             return Ok(self.make_lisp_string(bytes, multibyte));
+        }
+        if Self::image_value(seq) {
+            return Err(self.refuse_read_only(seq));
         }
         let index = seq.index_if(0).and_then(|i| i.checked_sub(1));
         if let Some(data::Object::Vector(v)) = index.and_then(|i| self.objects.get_mut(i)) {

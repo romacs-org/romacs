@@ -336,10 +336,7 @@ impl Vm {
                 match previous {
                     None => head = rest,
                     Some(cell) => {
-                        if Self::image_value(cell) {
-                            return Err("cannot mutate immutable image".into());
-                        }
-                        self.conses[cell.index(3)?].1 = rest;
+                        self.cons_mut(cell)?.1 = rest;
                     }
                 }
             } else {

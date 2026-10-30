@@ -38,6 +38,7 @@ impl Vm {
     ) -> Result<String> {
         self.require_live_function(entry)?;
         if self.image.is_some()
+            || !self.regions_empty()
             || !self.cells.is_empty()
             || !self.dynamic.is_empty()
             || !self.stack.is_empty()
@@ -412,7 +413,7 @@ impl Vm {
         copies: &mut HashMap<u64, Value>,
         pending: &mut Vec<(Value, usize)>,
     ) -> Result<Value> {
-        if !Self::image_value(value) {
+        if !Self::image_value(value) || crate::frozen::region_of(value.payload() as usize) != 0 {
             return Ok(value);
         }
         if let Some(&private) = copies.get(&value.0) {

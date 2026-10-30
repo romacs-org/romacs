@@ -313,7 +313,7 @@ impl Vm {
         Ok(y)
     }
     fn message_string(&self, value: Value) -> Result<&str> {
-        if Self::image_value(value) {
+        if Self::image_string(value) {
             return self.string_value(value);
         }
         match self.object(value)? {

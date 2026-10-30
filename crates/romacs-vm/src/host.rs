@@ -1620,6 +1620,41 @@ pub fn pidfd_open(pid: i32) -> Option<OwnedFd> {
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd as libc::c_int) })
 }
 
+/// A memfd holding BYTES, sealed against writing, shrinking and growing
+/// once written: the backing of a large frozen region (`frozen.rs`), which
+/// another process may map or read knowing the bytes cannot change.
+pub fn sealed_memfd(bytes: &[u8]) -> io::Result<File> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    effect(|| "memfd".into())?;
+    let fd = unsafe { libc::memfd_create(c"romacs-frozen".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    file.write_all(bytes)?;
+    status(unsafe { libc::fcntl(file.as_raw_fd(), libc::F_ADD_SEALS, SEALS) })?;
+    Ok(file)
+}
+
+const SEALS: libc::c_int = libc::F_SEAL_WRITE | libc::F_SEAL_SHRINK | libc::F_SEAL_GROW;
+
+/// FILE's bytes, when `sealed_memfd`'s seals are on it; a descriptor another
+/// process sent is refused otherwise, since its bytes could change under
+/// the reader.
+pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileExt;
+    let seals = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GET_SEALS) };
+    if seals < 0 || seals & SEALS != SEALS {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "frozen region descriptor is not sealed"));
+    }
+    let len = usize::try_from(file.metadata()?.len()).map_err(|_| io::Error::other("frozen region too large"))?;
+    let mut bytes = vec![0; len];
+    file.read_exact_at(&mut bytes, 0)?;
+    Ok(bytes)
+}
+
 /// emacs_pipe: a close-on-exec pipe (read end, write end).
 pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     effect(|| "pipe".into())?;
