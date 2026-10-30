@@ -240,6 +240,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "indent-to" => "NIndent to column: ", "move-to-column" => "NMove to column: ",
         "insert-char" => "(list (read-char-by-name \"Insert character (Unicode name or hex): \") (prefix-numeric-value current-prefix-arg) t))",
         "kill-buffer" => "bKill buffer: ",
+        "make-indirect-buffer" => "bMake indirect buffer (to buffer): \nBName of indirect buffer: ",
         "rename-buffer" => "(list (read-string \"Rename buffer (to new name): \" nil 'buffer-name-history (buffer-name (current-buffer))) current-prefix-arg)",
         "buffer-enable-undo" | "delete-other-windows-internal" | "iconify-frame" | "lower-frame" | "raise-frame"
             | "make-frame-invisible" | "make-frame-visible" => "",
