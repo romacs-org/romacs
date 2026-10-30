@@ -13,13 +13,12 @@
 |---|---|---|---|---|
 | VM2-GUI-SIMPLE-SCOPE | GUI GNU loadup | GNU's dumped image normally supplies all of simple.el. | When simple.el stops at an unrelated unsupported declaration, the GUI separately evaluates the exact source forms for the line-motion command dependency group. Existing definitions are never replaced; the original partial-file result and each supplemental source line remain reported. | Decouples C-a/C-e from generic-function bootstrap without native command stand-ins or edits to GNU Lisp; scoped source-loading and original command-loop tests cover it. |
 
-## Observable by a package: field motion boundary
+## Observable by a package: columns and minibuffer identity
 
 | # | Scope | GNU | VM2 | Reason / evidence |
 |---|---|---|---|---|
 | VM2-CURRENT-COLUMN | `current-column`, `current-indentation`, `move-to-column`, `indent-to` | GNU accounts for display tables, invisibility and composition, and `current-column` caches its last answer by point and modification count (so a `tab-width` change alone can leave it stale). | Native Unicode text width, tab stops and caret controls are counted without moving point; display-property overrides are not projected, and non-UTF-8 byte text refuses. | Plain-text command-motion slice, not a complete display-table implementation. |
 | VM2-MINIBUFFER-PRED | minibufferp | GNU retains every initialized minibuffer and recognizes active enclosing recursive levels. | The predicate recognizes native minibuffer-window buffer identities and current activation. Hidden buffers from enclosing recursive levels are not tracked by this predicate. | Uses the current native window model rather than buffer-name heuristics. |
-| VM2-FIELD-MOTION | constrain-to-field | GNU constrains motion using sticky field properties and escape/line/capture arguments. | Field-free buffers, equal positions and inhibit-field-text-motion implement the native unconstrained branch. A detected field signals `VM2 field-boundary motion is not implemented`, rather than crossing it silently. | Bounded command-motion support; `prims/field.rs` tests preserve point, argument errors and explicit refusal. |
 
 
 ## Observable by a package: save batch (WIP, not accepted)

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "5bf46a4b64cb558edc67a6b2329969851fa9a9d45dbe207d6e185a556ef683d1",
+  "source_fingerprint": "6241553070dd138de37c694493c0d5bffd6a51d418897f5899a00d3e6f58d947",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1045,
-  "parsed_vm2_only": 1045
+  "parsed_total": 1051,
+  "parsed_vm2_only": 1051
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -934,7 +934,7 @@
   "constrain-to-field": {
    "name": "constrain-to-field",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/field.rs:7"
+   "registered_at": "crates/romacs-vm/src/prims/field.rs:8"
   },
   "copy-alist": {
    "name": "copy-alist",
@@ -1009,7 +1009,7 @@
   "current-column": {
    "name": "current-column",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/field.rs:4"
+   "registered_at": "crates/romacs-vm/src/prims/field.rs:5"
   },
   "current-global-map": {
    "name": "current-global-map",
@@ -1234,6 +1234,11 @@
    "name": "delete-directory-internal",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filesave.rs:438"
+  },
+  "delete-field": {
+   "name": "delete-field",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/field.rs:45"
   },
   "delete-file": {
    "name": "delete-file",
@@ -1488,6 +1493,26 @@
    "name": "ffloor",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:124"
+  },
+  "field-beginning": {
+   "name": "field-beginning",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/field.rs:13"
+  },
+  "field-end": {
+   "name": "field-end",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/field.rs:19"
+  },
+  "field-string": {
+   "name": "field-string",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/field.rs:37"
+  },
+  "field-string-no-properties": {
+   "name": "field-string-no-properties",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/field.rs:40"
   },
   "file-accessible-directory-p": {
    "name": "file-accessible-directory-p",
@@ -3213,6 +3238,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:156"
   },
+  "previous-single-char-property-change": {
+   "name": "previous-single-char-property-change",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/property_change.rs:14"
+  },
   "previous-single-property-change": {
    "name": "previous-single-property-change",
    "implementation": "vm2",
@@ -4878,12 +4908,12 @@
   "text-property-any": {
    "name": "text-property-any",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/property_change.rs:19"
+   "registered_at": "crates/romacs-vm/src/prims/property_change.rs:24"
   },
   "text-property-not-all": {
    "name": "text-property-not-all",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/property_change.rs:14"
+   "registered_at": "crates/romacs-vm/src/prims/property_change.rs:19"
   },
   "text-quoting-style": {
    "name": "text-quoting-style",
