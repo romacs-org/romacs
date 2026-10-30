@@ -465,9 +465,13 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
 /// Romacs's layers, up to the workspace.
 pub fn initialize_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup, dir: &std::path::Path) -> Result<Started, String> {
     if launch == Launch::Loadup {
-        // What an interactive session on this display adds to the batch
-        // chain, then Romacs's defaults for GNU's minibuffer completion,
-        // which the user's init may override.
+        // The session leaves the batch chain's initial terminal for the
+        // GUI's display, if one is attached (fonts.rs), as GNU's
+        // window-system initialization does; then what an interactive
+        // session on this display adds to the batch chain, and Romacs's
+        // defaults for GNU's minibuffer completion, which the user's init
+        // may override.
+        vm.open_display();
         for name in ["romacs-gui-loadup.el", "romacs-completion-defaults.el"] {
             let file = loadup_bootstrap(dir).with_file_name(name);
             vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
@@ -2147,8 +2151,9 @@ mod tests {
     /// canonical character: `window-font-width' and `window-font-height',
     /// which read `font-info' on a multi-font display, are the frame's
     /// character size as pinned GNU pgtk's are for its default font (10 and
-    /// 25 for Iosevka-14), a font that does not open has no information,
-    /// and isearch, which sizes its prompt by them, finds as GNU's does.
+    /// 25 for Iosevka-14), for every face as for `default', a font that
+    /// does not open has no information, and isearch, which sizes its
+    /// prompt by them, finds as GNU's does.
     #[test]
     fn loadup_measures_the_frame_font_for_isearch() {
         let answer = on_evaluator(|| {
@@ -2159,10 +2164,11 @@ mod tests {
             finish_loadup(&mut vm, &started).unwrap();
             printed(&mut vm, "(list (display-multi-font-p) (window-font-width) (window-font-height)
                 (aref (font-info (face-font 'default)) 11) (font-info \"-no-such-font-*\")
+                (window-font-width nil 'fixed-pitch) (window-font-height nil 'bold) (face-font 'italic nil ?a)
                 (with-temp-buffer (switch-to-buffer (current-buffer)) (insert \"abc steam def\") (goto-char 1)
                   (isearch-mode t) (isearch-process-search-string \"steam\" \"steam\") (isearch-done) (point)))")
         });
-        assert_eq!(answer, "(t 10 25 10 nil 10)");
+        assert_eq!(answer, "(t 10 25 10 nil 10 25 \"tty\" 10)");
     }
 
     /// `--loadup` with no launch font: the default face keeps the frame's

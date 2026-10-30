@@ -10,7 +10,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, tab_advance};
+use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -24,7 +24,7 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face.clone()],
+        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, faces: vec![face.clone()],
     }
 }
 
@@ -217,6 +217,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![] });
     }
     validate_runs(&snapshot.text, snapshot.faces.len())?;
+    if snapshot.stretches.windows(2).any(|w| w[0].byte >= w[1].byte)
+        || snapshot.stretches.iter().any(|s| text.get(s.byte..s.byte + 1) != Some(" ")) {
+        return Err("stretches out of order or not on a placeholder space".into());
+    }
+    let mut stretches = snapshot.stretches.iter().peekable();
     let bands = [(&snapshot.header_line, snapshot.header_line_face), (&snapshot.mode_line, snapshot.mode_line_face)];
     for (band, face) in bands {
         let Some(band) = band else { continue };
@@ -229,7 +234,13 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
     let mut slices = vec![(&snapshot.text, 0)];
     slices.extend(bands.iter().filter_map(|(band, face)| Some(((*band).as_ref()?, face.0 as usize))));
-    let face_text = face_text(snapshot.faces.len(), &slices);
+    let mut face_text = face_text(snapshot.faces.len(), &slices);
+    if let Some(numbers) = &snapshot.line_numbers {
+        if numbers.face.0 as usize >= snapshot.faces.len() || numbers.current.0 as usize >= snapshot.faces.len() {
+            return Err("invalid line-number face".into());
+        }
+        for face in [numbers.face, numbers.current] { face_text[face.0 as usize].push_str("0123456789 "); }
+    }
     // A band's own face sets its height even where no character uses it.
     let band_faces: Vec<usize> = bands.iter().filter(|(band, _)| band.is_some()).map(|(_, face)| face.0 as usize).collect();
     let metrics = realize_faces(&snapshot.faces, &face_text, |index| band_faces.contains(&index), frame, resolver, face_base)?;
@@ -261,7 +272,21 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     let default_id = FaceId::new(face_base);
     let last_x = snapshot.width as f32 - advance(frame, default_id, special, metrics[0].2);
     let line_start = text[..snapshot.start_byte].rfind('\n').map_or(0, |at| at + 1);
-    let mut x = 0.0;
+    // Line numbers take each row's first glyphs, its line's label or as
+    // many blanks, in cells of their face.
+    // (x, the label when the row starts its line, whether point's line).
+    let gutter = |byte: usize| -> (f32, Option<&str>, bool) {
+        let Some(numbers) = &snapshot.line_numbers else { return (0.0, None, false) };
+        let cell = metrics[numbers.face.0 as usize].2;
+        let at = numbers.labels.partition_point(|(b, ..)| *b <= byte);
+        match at.checked_sub(1).map(|i| &numbers.labels[i]) {
+            Some((b, label, current)) if *b == byte => (label.len() as f32 * cell, Some(label.as_str()), *current),
+            Some((_, label, current)) => (label.len() as f32 * cell, None, *current),
+            None => (numbers.columns as f32 * cell, None, false),
+        }
+    };
+    let mut x0 = gutter(line_start).0;
+    let mut x = x0;
     let mut y = -(snapshot.vscroll_px as f32);
     let mut row_height = metrics[0].1;
     let mut end_byte = snapshot.start_byte;
@@ -283,9 +308,10 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         // that row's width counts toward `continued' first.
         let mut starting = !drawing && byte >= snapshot.start_byte;
         let top = -(snapshot.vscroll_px as f32);
-        if starting && (x == 0.0 || ch == '\n') {
+        if starting && (x == x0 || ch == '\n') {
             (drawing, starting) = (true, false);
-            (x, y, row_height, hpos) = (0.0, top, metrics[0].1, 0);
+            x0 = gutter(byte).0;
+            (x, y, row_height, hpos) = (x0, top, metrics[0].1, 0);
         }
         if drawing && y >= body_height { break; }
         if drawing || starting { end_byte = byte + ch.len_utf8(); }
@@ -297,22 +323,28 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 rows.push(Row { start: row_start, y, height: row_height });
                 row_start = byte + 1;
             }
-            x = 0.0;
+            x0 = gutter(byte + 1).0;
+            x = x0;
             y += row_height;
             row_height = metrics[0].1;
             (continued, hpos, hidden) = (0.0, 0, false);
             continue;
         }
+        while stretches.next_if(|s| s.byte < byte).is_some() {}
+        let stretch = stretches.next_if(|s| s.byte == byte).map(|s| s.width);
         if hidden { continue; }
         let index = face_at(&snapshot.text, byte, 0);
         let id = FaceId::new(face_base + index as u32);
         let (ascent, height, cell, space) = metrics[index];
-        let shown = shown(ch);
-        let width = |frame: &FrameGlyphBuffer, x: f32| match &shown {
-            Shown::Tab => tab_advance(f64::from(x), f64::from(space), snapshot.tab_width) as f32,
+        let shown = match stretch { Some(width) => Shown::Stretch(width), None => shown(ch) };
+        // X on the row and from the line's start (`continued' before it);
+        // a TAB stops as from after the line number (x_produce_glyphs).
+        let width = |frame: &FrameGlyphBuffer, x: f32, line_x: f32, x0: f32| match &shown {
+            Shown::Tab => tab_advance(f64::from(line_x - x0), f64::from(space), snapshot.tab_width) as f32,
+            Shown::Stretch(width) => stretch_advance(*width, f64::from(x), f64::from(line_x), (!truncate).then_some(f64::from(last_x))) as f32,
             Shown::Glyphs(glyphs) => glyphs.chars().map(|glyph| advance(frame, id, glyph, cell)).sum(),
         };
-        let mut advance_px = width(frame, x + continued);
+        let mut advance_px = width(frame, x, x + continued, x0);
         if !truncate && hpos > 0 && x + advance_px > last_x {
             if drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
@@ -322,17 +354,19 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             }
             // A TAB that does not fit continues from the text area's edge.
             continued += if matches!(shown, Shown::Tab) { last_x } else { x };
-            (x, y, row_height, hpos) = (0.0, y + row_height, metrics[0].1, 0);
+            x0 = gutter(byte).0;
+            (x, y, row_height, hpos) = (x0, y + row_height, metrics[0].1, 0);
             if starting { (drawing, starting, y) = (true, false, top); }
-            advance_px = width(frame, continued);
+            advance_px = width(frame, x0, x0 + continued, x0);
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }
         if starting {
             // A start inside a row (the motion refuses one): the row
             // breaks there.
             continued += x;
-            (drawing, x, y, row_height, hpos) = (true, 0.0, top, metrics[0].1, 0);
-            advance_px = width(frame, continued);
+            x0 = gutter(byte).0;
+            (drawing, x, y, row_height, hpos) = (true, x0, top, metrics[0].1, 0);
+            advance_px = width(frame, x0, x0 + continued, x0);
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }
         row_height = row_height.max(height);
@@ -350,6 +384,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 // (`x-stretch-cursor' nil).
                 advance_px.min(metrics[0].2)
             }
+            // A stretch that is not positive is no glyph (nglyphs 0).
+            Shown::Stretch(_) => {
+                if visible && advance_px > 0.0 { frame.add_stretch(ox + x, oy + y, advance_px, height, color(snapshot.faces[index].background), id, false); }
+                advance_px.clamp(0.0, metrics[0].2)
+            }
             Shown::Glyphs(glyphs) => {
                 let (mut at, mut first) = (x, None);
                 for c in glyphs.chars() {
@@ -362,8 +401,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             }
         };
         if at_point { point_rect = Some((x, y, cursor, row_height, ascent)); }
+        if !matches!(shown, Shown::Stretch(_)) || advance_px > 0.0 { hpos += 1; }
         x += advance_px;
-        hpos += 1;
     }
     if snapshot.point_byte == text.len() && end_byte == text.len() {
         point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0));
@@ -373,6 +412,24 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         visible_end = text.len() + 1;
     }
     if end_byte == text.len() && y < body_height { rows.push(Row { start: row_start, y, height: row_height }); }
+    // A row starting a numbered line shows its label; any other, blanks,
+    // in the face of line numbers.
+    if let Some(numbers) = &snapshot.line_numbers {
+        for row in rows.iter().filter(|r| r.y < body_height && r.y + r.height > 0.0) {
+            // A continuation row of point's line keeps its face, in blanks.
+            let (x0, label, current) = gutter(row.start);
+            let index = if current { numbers.current.0 } else { numbers.face.0 } as usize;
+            let id = FaceId::new(face_base + index as u32);
+            let (ascent, height, cell, _) = metrics[index];
+            let blanks = " ".repeat((x0 / cell).round() as usize);
+            let mut at = 0.0;
+            for c in label.unwrap_or(blanks.as_str()).chars() {
+                let width = advance(frame, id, c, cell);
+                if at < snapshot.width as f32 { glyph_of(frame, c, ox + at, oy + row.y, width, (ascent, height), id)?; }
+                at += width;
+            }
+        }
+    }
     if let (Some((active, color)), Some((x, y, width, height, ascent))) = (cursor, point_rect) {
         // No cursor may bleed into the mode line or another window.
         if x >= 0.0 && x < snapshot.width as f32 && y >= 0.0 && y + height <= body_height {
@@ -455,8 +512,9 @@ fn glyph_of(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, width: f32, 
 
 /// How a buffer character other than newline is drawn: a TAB as a
 /// stretch, another control character as GNU's escape (`^X`, or `\NNN`
-/// for one beyond ASCII), anything else as itself.
-enum Shown { Tab, Glyphs(Glyphs) }
+/// for one beyond ASCII), anything else as itself; a placeholder space
+/// the snapshot names a stretch, as that stretch.
+enum Shown { Tab, Stretch(StretchWidth), Glyphs(Glyphs) }
 
 /// At most four glyphs, the longest escape (`\NNN`), held without
 /// allocating.
@@ -471,6 +529,7 @@ impl Glyphs {
     fn chars(&self) -> impl Iterator<Item = char> + '_ { self.chars[..self.len].iter().copied() }
 }
 
+#[inline]
 fn shown(ch: char) -> Shown {
     let digit = |shift: u32| char::from_digit((ch as u32 >> shift) & 7, 8).unwrap_or('0');
     match ch {
@@ -500,7 +559,7 @@ fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
         for (byte, ch) in slice.utf8.char_indices() {
             let face = &mut text[face_at(slice, byte, *default)];
             match shown(ch) {
-                Shown::Tab => face.push(' '),
+                Shown::Tab | Shown::Stretch(_) => face.push(' '),
                 Shown::Glyphs(glyphs) => face.extend(glyphs.chars()),
             }
         }
@@ -607,7 +666,7 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
         let index = face_at(&input.text, byte, 0);
         let (_, _, cell, space) = metrics[index];
         let width = match shown(ch) {
-            Shown::Tab => space,
+            Shown::Tab | Shown::Stretch(_) => space,
             Shown::Glyphs(shown) => shown.chars().map(|glyph| advance(&frame, FaceId::new(index as u32), glyph, cell)).sum(),
         };
         glyphs.push((pixels(width)?, face_heights[index]));

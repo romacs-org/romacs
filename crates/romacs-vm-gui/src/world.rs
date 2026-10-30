@@ -38,8 +38,12 @@ pub fn launch_font() -> Result<Option<(String, u32)>, String> {
     let points = std::env::var("ROMACS_GUI_FONT_SIZE").unwrap_or_else(|_| "14".into())
         .parse::<u32>().map_err(|e| e.to_string())?;
     if !(6..=72).contains(&points) { return Err("font size must be 6..72 points".into()); }
-    let source = format!("(defface default '((t (:foreground \"#d4c5a0\" :background \"#000000\" :family {} :height {}))) \"Launch font\")",
-                         serde_json::to_string(&family).map_err(|e| e.to_string())?, points * 10);
+    // As GNU's `--font FAMILY-POINTS': the default face's font, and the
+    // frame's `font-parameter' naming the font as given.
+    let source = format!("(progn (defface default '((t (:foreground \"#d4c5a0\" :background \"#000000\" :family {} :height {}))) \"Launch font\")
+  (modify-frame-parameters nil '((font-parameter . {}))))",
+                         serde_json::to_string(&family).map_err(|e| e.to_string())?, points * 10,
+                         serde_json::to_string(&format!("{family}-{points}")).map_err(|e| e.to_string())?);
     Ok(Some((source, points)))
 }
 
