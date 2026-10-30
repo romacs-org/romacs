@@ -584,6 +584,32 @@ impl Vm {
         Ok(n)
     }
 
+    /// GNU `decode_mode_spec_coding` (`xdisp.c:29346`) for the buffer's
+    /// `buffer-file-coding-system`: its mnemonic, then with EOL_FLAG its
+    /// end-of-line mnemonic.
+    fn ml_coding(&mut self, eol_flag: bool) -> Result<String> {
+        let multibyte = self.ml_symbol_value("enable-multibyte-characters")?.is_some_and(|v| !is_nil(&v));
+        let slot = self.slot("buffer-file-coding-system");
+        let coding = self.variable_value(slot)?;
+        let parts = self.coding_mnemonic_and_eol(coding)?;
+        let mnemonic = match parts {
+            _ if !multibyte => ' ',
+            None => '-',
+            Some((mnemonic, _)) => mnemonic.integer_value().and_then(|c| char::from_u32(c as u32)).unwrap_or('-'),
+        };
+        if !eol_flag {
+            return Ok(mnemonic.to_string());
+        }
+        let eol = parts.map_or("eol-mnemonic-undecided", |(_, eol)| eol);
+        let eol = match self.ml_symbol_value(eol)? {
+            Some(Form::String(s)) => s,
+            Some(Form::Bytes(b)) => String::from_utf8_lossy(&b).into_owned(),
+            Some(Form::Int(c)) => u32::try_from(c).ok().and_then(char::from_u32).map_or("(*invalid*)".into(), String::from),
+            _ => "(*invalid*)".into(),
+        };
+        Ok(format!("{mnemonic}{eol}"))
+    }
+
     /// GNU `decode_mode_spec` for the current (window's) buffer.
     fn decode_mode_spec(&mut self, state: &SpecState, c: char, field: i64, target: Target) -> Result<String> {
         let width = field.min(4 * state.frame_cols as i64);
@@ -660,17 +686,8 @@ impl Vm {
                 ]);
                 if self.eval_datum_raw(&form).is_ok_and(|v| v != Value::NIL) { "@" } else { "-" }.into()
             }
-            // No coding systems in VM2: GNU's "not yet decided" mnemonics
-            // (`decode_mode_spec_coding`, `xdisp.c:29346`).
-            'z' => "-".into(),
-            'Z' => {
-                let mnemonic = self.ml_symbol_value("eol-mnemonic-undecided")?;
-                format!("-{}", if matches!(mnemonic, Some(Form::String(_) | Form::Bytes(_))) {
-                    string_of(mnemonic)
-                } else {
-                    ":".into()
-                })
-            },
+            // A window frame names the buffer's coding system alone.
+            'z' | 'Z' => self.ml_coding(c == 'Z')?,
             _ => String::new(),
         })
     }

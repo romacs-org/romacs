@@ -1934,6 +1934,28 @@ impl Vm {
             }
         }
     }
+    /// CODING_SYSTEM_SPEC's mnemonic and the variable naming its EOL type's
+    /// mnemonic (`decode_mode_spec_coding`, `xdisp.c:29346`), or None for a
+    /// system not yet decided (no spec).
+    pub(crate) fn coding_mnemonic_and_eol(&mut self, name: Value) -> crate::Result<Option<(Value, &'static str)>> {
+        let parts = no_collection(self, |vm| {
+            let mut cx = Leaf::new(vm);
+            let spec = cx.coding_spec(name)?;
+            if cx.kind(spec) != leaf::Kind::Vector { return Ok(None) }
+            let attrs = cx.vector_get(spec, Value::integer(0).unwrap())?;
+            let eol = cx.vector_get(spec, Value::integer(2).unwrap())?;
+            let eol = if eol == Value::NIL || cx.kind(eol) == leaf::Kind::Vector { "eol-mnemonic-undecided" }
+                else if eol == cx.intern("unix") { "eol-mnemonic-unix" }
+                else if eol == cx.intern("dos") { "eol-mnemonic-dos" }
+                else { "eol-mnemonic-mac" };
+            Ok(Some((cx.vector_get(attrs, Value::integer(2).unwrap())?, eol)))
+        });
+        parts.map_err(|fault| {
+            let (condition, data) = self.fault(fault);
+            self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+            "coding system lookup signalled".into()
+        })
+    }
     /// load-with-code-conversion for a source without a coding cookie that
     /// is not UTF-8: the detection walk over the coding priority, as
     /// `insert-file-contents' decides, then the chosen system's decoding,

@@ -399,13 +399,25 @@ fn gnus_standard_mode_line_head_formats_as_gnu() {
 }
 
 /// Pinned GNU 45b0f7699df, gtb-fix/gnu.txt: <Foo|/tmp/foo>;
-/// %Z keeps EOL after GNU's coding prefix (VM2's disclosed prefix is "-").
+/// %Z keeps EOL after the undecided coding's "-".
 #[test]
 fn unibyte_percent_strings_are_preserved() {
     let mut vm = probe();
-    eval(&mut vm, r#"(setq mode-name (concat "Fo" "o") buffer-file-name (concat "/tmp/" "foo") eol-mnemonic-undecided (concat "E" "OL"))"#);
+    eval(&mut vm, r#"(setq mode-name (concat "Fo" "o") buffer-file-name (concat "/tmp/" "foo") eol-mnemonic-undecided (concat "E" "OL") buffer-file-coding-system nil)"#);
     for (format, expected) in [(r#"("<%m>")"#, "<Foo>"), (r#"("<%f>")"#, "</tmp/foo>"), (r#"("<%Z>")"#, "<-EOL>")] {
         assert_eq!(band(&mut vm, format), expected, "{format}");
+    }
+}
+
+/// decode_mode_spec_coding (xdisp.c:29346): %z is the buffer's coding
+/// mnemonic, %Z adds its EOL type's. Pinned GNU 45b0f7699df (pgtk) answers
+/// these, and "<U|U:>" for utf-8-unix, "<U|U(DOS)>" for utf-8-dos.
+#[test]
+fn coding_mnemonics_follow_the_buffer_coding_system() {
+    let mut vm = probe();
+    for (coding, expected) in [("no-conversion", "<=|=:>"), ("undecided", "<-|-:>"), ("nil", "<-|-:>")] {
+        eval(&mut vm, &format!("(setq buffer-file-coding-system '{coding})"));
+        assert_eq!(band(&mut vm, r#"("<%z|%Z>")"#), expected, "{coding}");
     }
 }
 
