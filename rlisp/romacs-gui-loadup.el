@@ -60,6 +60,14 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
                 :planes 24 :color-cells 16777216 :visual-class true-color
                 :color t :grayscale nil :display-type color :background-mode dark
                 :palette nil))
+        ;; pgtk_term_init (pgtkterm.c:7082): a window system's output speed,
+        ;; which `fileloop-continue' compares to report each file it scans.
+        (setq baud-rate 19200)
+        ;; bindings.el `mode-line-frame-control' names a frame only off a
+        ;; window system, where GNU shows " F1  ".  This frame is graphical
+        ;; though `window-system' is nil (VM2-WIN5), so it identifies as a
+        ;; window frame does, as term/w32-win.el sets for its frames.
+        (setq-default mode-line-frame-identification "  ")
         ;; startup.el command-line (startup.el:1479): the delayed settings take
         ;; their standard values in this session's context, as GNU computes them
         ;; at startup: `global-font-lock-mode', `abbrev-file-name',

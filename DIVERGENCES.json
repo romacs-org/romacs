@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "028976761983f961c1b162effe17ebbeb8b2326a459d35d8be194973b0c66820",
+  "input_hash": "b988ee34d2d3437a583206e9d8884c8ae2ee03b95686c8293349e9a76e5d73ef",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 287,
-  "symbols": 677,
+  "symbols": 679,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -128,6 +128,9 @@
   ],
   "base64-decode-region": [
    179
+  ],
+  "baud-rate": [
+   196
   ],
   "before-change-functions": [
    175
@@ -1416,6 +1419,9 @@
    156,
    194,
    241
+  ],
+  "mode-line-frame-identification": [
+   196
   ],
   "mode-line-in-non-selected-windows": [
    154
@@ -5714,7 +5720,9 @@
     "frame-char-height",
     "frame-char-width",
     "frame-native-width",
-    "frame-native-height"
+    "frame-native-height",
+    "mode-line-frame-identification",
+    "baud-rate"
    ],
    "symbols_derived": false
   },
