@@ -72,3 +72,26 @@ fn batch_command_line_matches_pinned_gnu() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Startup from a HOME and directory whose parent holds more entries than a
+/// listing bound: GNU asks no directory whether names fold case, so loadup
+/// and startup's `abbreviate-file-name` answer as beside any other.
+#[test]
+fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
+    let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let dir = std::env::temp_dir().join(format!("romacs-batch-huge-{}", std::process::id()));
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    for index in 0..4100 {
+        std::fs::write(dir.join(format!("entry-{index}")), b"").unwrap();
+    }
+    let args: Vec<String> = ["-Q", "--batch", "--eval",
+        "(princ (format \"%S\\n\" (list (file-name-case-insensitive-p default-directory) (abbreviate-file-name default-directory) (file-name-case-insensitive-p \"../entry-7\"))))"]
+        .iter().map(|a| a.to_string()).collect();
+    let expected = run(&gnu, &home, &args);
+    let actual = run(romacs, &home, &args);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!((expected.0, expected.1.as_str()), (Some(0), "(nil \"~/\" nil)\n"), "GNU {expected:?}");
+    assert_eq!((actual.0, actual.1.as_str()), (expected.0, expected.1.as_str()), "Romacs stderr {}", actual.2);
+}

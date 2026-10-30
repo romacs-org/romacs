@@ -83,8 +83,8 @@ crates/romacs-vm/src/world/mod.rs:146 slot:initial-environment clears the enviro
 crates/romacs-vm/src/world/mod.rs:146 slot:process-environment clears the environment lists before a world capture; restore rebuilds them
 crates/romacs-vm/src/world/mod.rs:276 dynamic:saved reads the bound variable, not the saved value
 crates/romacs-vm/src/world/mod.rs:366 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/world/sandbox.rs:54 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
-crates/romacs-vm/src/world/sandbox.rs:60 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
-crates/romacs-vm/src/world/sandbox.rs:81 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
-crates/romacs-vm/src/world/sandbox.rs:93 libc::file an O_PATH handle that names a Landlock root; reads nothing
-crates/romacs-vm/src/world/sandbox.rs:101 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
+crates/romacs-vm/src/world/sandbox.rs:53 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
+crates/romacs-vm/src/world/sandbox.rs:59 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
+crates/romacs-vm/src/world/sandbox.rs:77 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
+crates/romacs-vm/src/world/sandbox.rs:89 libc::file an O_PATH handle that names a Landlock root; reads nothing
+crates/romacs-vm/src/world/sandbox.rs:97 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing

@@ -798,29 +798,6 @@ pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
     result
 }
 
-/// Whether the filesystem holding PATH folds case, as CLASSIFY observes it:
-/// one keyed fact. The listings and stats that answer it are not recorded,
-/// since the build consumed only the answer, and restore asks again.
-pub fn case_insensitive(path: &Path, classify: fn(&Path) -> Result<bool, &'static str>) -> Result<bool, &'static str> {
-    if !building() {
-        return classify(path);
-    }
-    MODE.with(|m| m.set(Mode::Off));
-    let result = classify(path);
-    MODE.with(|m| m.set(Mode::Build));
-    // Confinement may hide what answers the probe: a build cannot know its
-    // answer is the host's.
-    if result.is_err() && CONFINED.with(Cell::get) {
-        refuse("confined", json!({"case probe": path_json(path), "error": result.err()}));
-        return result;
-    }
-    let observed = match result { Ok(answer) => json!(answer), Err(reason) => json!({"error": reason}) };
-    if keyed_path(path, "case probe") {
-        record("case", json!({"path": path_json(path), "result": observed}));
-    }
-    result
-}
-
 // Replay.
 
 /// The bytes a record's `encoded` field holds.
@@ -834,8 +811,8 @@ fn decoded(field: &Json) -> Option<Vec<u8>> {
 
 /// The record a keyed RECORD's query makes now, its site aside: the host's
 /// present answer to the same question, asked the same way (§6.4). None for
-/// a record that asks the host nothing. CASE answers a case probe.
-pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> Option<Json> {
+/// a record that asks the host nothing.
+pub fn replay(record: &Json) -> Option<Json> {
     let kind = record["kind"].as_str()?;
     let path = || decoded(&record["path"]).map(|bytes| PathBuf::from(OsString::from_vec(bytes)));
     use std::os::unix::ffi::OsStringExt;
@@ -906,7 +883,6 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
                     let _ = user_by_name(&std::ffi::CString::new(decoded(&key["name"])?).ok()?, 1 << 16);
                 }
             }
-            "case" => { let _ = case_insensitive(&path()?, case); }
             _ => return None,
         }
         Some(())
@@ -924,7 +900,7 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
 /// Whether RECORD is a keyed query restore must ask again: the other kinds
 /// say what the build did, not what the host answered.
 pub fn keyed(record: &Json) -> bool {
-    matches!(record["kind"].as_str(), Some("file-read" | "probe" | "dir-list" | "canon" | "env" | "host" | "user-db" | "case"))
+    matches!(record["kind"].as_str(), Some("file-read" | "probe" | "dir-list" | "canon" | "env" | "host" | "user-db"))
 }
 
 // Process facts.

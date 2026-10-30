@@ -329,11 +329,10 @@ impl World {
     fn valid_manifest(&self) -> Result<Json, Json> {
         let text = host::read_store_file(self.file(".json")).map_err(|e| json!({"missing": e.to_string()}))?;
         let manifest: Json = serde_json::from_str(&text).map_err(|e| json!({"manifest": e.to_string()}))?;
-        let case = crate::prim::prims::savejourney::filesystem_case_insensitive;
         for record in manifest["records"].as_array().map(Vec::as_slice).unwrap_or_default() {
             let mut expected = record.clone();
             if let Some(fields) = expected.as_object_mut() { fields.remove("site"); }
-            match host::replay(record, case) {
+            match host::replay(record) {
                 Some(now) if now == expected => {}
                 now => return Err(json!({"stale": expected, "now": now})),
             }

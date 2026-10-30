@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "3aba07982af52e24165cdec6dfe91a1aa5922d85089b1090ca5ff9d81a80a6d6",
+  "input_hash": "f5bfa8035a0960d05977b3fd5776dba865ac159d18275f6d1aebfbc2f9d491b7",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -601,9 +601,6 @@
   "erase-buffer": [
    1
   ],
-  "error": [
-   11
-  ],
   "error-message-string": [
    146,
    147,
@@ -704,6 +701,9 @@
   ],
   "file-name-all-completions": [
    8
+  ],
+  "file-name-case-insensitive-p": [
+   11
   ],
   "file-name-handler-alist": [
    100
@@ -1783,7 +1783,6 @@
    249
   ],
   "set-auto-coding": [
-   11,
    268
   ],
   "set-buffer-redisplay": [
@@ -2404,15 +2403,14 @@
    "section": "Observable by a package: save batch (WIP, not accepted)",
    "observable": true,
    "planned": false,
-   "mechanism": "Actual filesystem sensitivity",
-   "gnu": "Pinned GNU Linux returns nil by platform assumption; other platforms may query pathconf.",
-   "romacs": "Read-only ASCII alternate-name/inode/directory-entry measurement returns actual classification. A unibyte non-ASCII name (ENCODE_FILE's output, which `set-auto-coding` passes on) names the file its UTF-8 bytes spell; other bytes are refused. A directory with no unambiguous ASCII witness defers to its nearest ancestor that has one, as GNU's walk up the tree does (`fileio.c:2710`); a directory or witness that changes under the probe is observed again (at most 8 times) until it is stable; unknown classes, unreadable directories, directories still changing after 8 observations, directories over 4096 entries, and no witness up to the root signal `error` with `VM2 filesystem case sensitivity unknown: REASON`. No probe files are created.",
-   "why": "Owner explicitly requires actual measurement rather than platform constant. No real case-insensitive mount has been qualified. `crates/romacs-vm/evidence/savejourney/case-detection.md`.",
+   "mechanism": "File-name case sensitivity",
+   "gnu": "`fileio.c:2647` answers from the platform: nil on GNU/Linux, where no `_PC_CASE_*` pathconf exists, without asking any directory; t on MS-Windows and Cygwin; macOS asks `pathconf (_PC_CASE_SENSITIVE)`, walking up while it cannot tell. Handlers run first.",
+   "romacs": "Handlers run first; then the platform's answer (nil on GNU/Linux, t on MS-Windows), with no directory listed or stat'd, as GNU on GNU/Linux. Remaining differences: a unibyte non-ASCII name (ENCODE_FILE's output, which `set-auto-coding` passes on) names the file its UTF-8 bytes spell and other bytes are refused; on macOS Romacs answers nil where GNU asks pathconf.",
+   "why": "An earlier directory-entry measurement listed every directory up the tree and signalled for a directory over 4096 entries, which broke startup from a large working, home or temporary directory; GNU's answer never depends on directory contents. Oracle test `filename_case_matches_gnu_beside_a_huge_directory` (`crates/romacs-vm/tests/savejourney.rs`).",
    "symbols": [
-    "set-auto-coding",
-    "error"
+    "file-name-case-insensitive-p"
    ],
-   "symbols_derived": true
+   "symbols_derived": false
   },
   {
    "id": "VM2-SAVE-DECODE",

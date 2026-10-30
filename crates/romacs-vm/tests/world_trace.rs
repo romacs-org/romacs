@@ -291,7 +291,7 @@ fn confinement_fails_and_lists_a_read_outside_the_roots() {
     let file = write(&dir.join("roots/read.el"), &format!(
         "(setq r (condition-case nil (with-temp-buffer (insert-file-contents {out}) 'read) (file-error 'failed)))\n", out = lisp(&outside)));
     // The pinned table's directories, empty and read-only, as the runner
-    // makes them: case sensitivity under cwd lists their parent.
+    // makes them: a case query under cwd answers without reading them.
     let store = dir.join("out.json.d");
     for name in ["cwd", "tmp", "bin"] {
         std::fs::create_dir_all(store.join("p").join(name)).unwrap();

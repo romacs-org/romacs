@@ -47,10 +47,7 @@ impl Fixture {
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
-        // A private parent with one stable caseable entry, so a fixture
-        // that defers to its parent measures there, not in shared TMPDIR.
         std::fs::create_dir(&path).unwrap();
-        std::fs::write(path.join("Witness"), b"stable").unwrap();
         let probe = path.join("probe");
         std::fs::create_dir(&probe).unwrap();
         Self(probe)
@@ -91,12 +88,12 @@ fn filename_case_encoded_unibyte_name() {
     );
 }
 #[test]
-fn filename_case_actual_file_directory_missing_and_type_contract() {
+fn filename_case_file_directory_missing_and_type_contract() {
     let fixture = Fixture::new();
     std::fs::write(fixture.0.join("a"), b"unchanged").unwrap();
     assert!(
         !fixture.0.join("A").exists(),
-        "fixture requires a measured case-sensitive directory"
+        "fixture requires a case-sensitive directory"
     );
     let before: Vec<_> = std::fs::read_dir(&fixture.0)
         .unwrap()
@@ -107,7 +104,7 @@ fn filename_case_actual_file_directory_missing_and_type_contract() {
         assert_eq!(
             fixture.call(&mut vm, name),
             "nil",
-            "MEASURED_SENSITIVE {name}"
+            "CASE_SENSITIVE {name}"
         );
     }
     assert_eq!(
@@ -135,16 +132,15 @@ fn filename_case_actual_file_directory_missing_and_type_contract() {
     );
 }
 #[test]
-// A directory with nothing to measure defers to its parent, as GNU's walk
-// up the tree does; the fixture's parent has caseable entries.
-fn filename_case_unknown_is_not_a_platform_constant() {
+// An empty directory, or one whose names have no case, answers as any other.
+fn filename_case_caseless_directory_answers_as_any_other() {
     let fixture = Fixture::new();
     let mut vm = Vm::new();
     for name in ["", "missing"] {
-        assert_eq!(fixture.call(&mut vm, name), "nil", "EMPTY_DIRECTORY_MEASURES_PARENT");
+        assert_eq!(fixture.call(&mut vm, name), "nil", "EMPTY_DIRECTORY");
     }
     std::fs::write(fixture.0.join("123"), b"unchanged").unwrap();
-    assert_eq!(fixture.call(&mut vm, "123"), "nil", "NO_CASEABLE_ENTRY_MEASURES_PARENT");
+    assert_eq!(fixture.call(&mut vm, "123"), "nil", "NO_CASEABLE_ENTRY");
 }
 #[test]
 fn filename_case_real_alternate_hardlink_is_not_case_folding() {
@@ -152,7 +148,7 @@ fn filename_case_real_alternate_hardlink_is_not_case_folding() {
     std::fs::write(fixture.0.join("a"), b"unchanged").unwrap();
     std::fs::hard_link(fixture.0.join("a"), fixture.0.join("A")).unwrap();
     let mut vm = Vm::new();
-    // The hardlinked pair is no witness; the parent directory measures.
+    // A hardlinked pair that differs only in case is not case folding.
     assert_eq!(fixture.call(&mut vm, "a"), "nil", "REAL_HARDLINK_IS_NOT_FOLDING");
     std::fs::remove_file(fixture.0.join("A")).unwrap();
     std::fs::write(fixture.0.join("A"), b"different inode").unwrap();
@@ -164,15 +160,46 @@ fn filename_case_real_alternate_hardlink_is_not_case_folding() {
 }
 #[cfg(unix)]
 #[test]
-fn filename_case_special_file_refuses() {
+fn filename_case_special_file_answers_as_gnu() {
     use std::os::unix::net::UnixListener;
     let fixture = Fixture::new();
     let _listener = UnixListener::bind(fixture.0.join("socket")).unwrap();
     let mut vm = Vm::new();
     assert_eq!(
         fixture.call(&mut vm, "socket"),
-        "(error \"VM2 filesystem case sensitivity unknown: unsupported file class\")"
+        "nil"
     );
+}
+/// GNU on GNU/Linux answers from the platform and never lists a directory,
+/// so neither a directory's size nor its entries change the answer: a
+/// directory beyond any listing bound answers as an ordinary one does.
+#[test]
+fn filename_case_matches_gnu_beside_a_huge_directory() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.0.join("a"), b"unchanged").unwrap();
+    let huge = fixture.0.join("huge");
+    std::fs::create_dir(&huge).unwrap();
+    for index in 0..4100 {
+        std::fs::write(huge.join(format!("entry-{index}")), b"").unwrap();
+    }
+    let names = ["", "a", "missing", "huge", "huge/entry-7", "huge/missing", "huge/missing/nested"];
+    let calls: Vec<String> = names.iter().map(|name| format!(
+        "(condition-case e (file-name-case-insensitive-p {}) (error e))",
+        serde_json::to_string(&fixture.0.join(name)).unwrap())).collect();
+    let source = format!("(list {})", calls.join(" "));
+    let output = std::process::Command::new(pinned_gnu())
+        .args(["--batch", "-Q", "--eval", &format!("(prin1 {source})")])
+        .output().expect("pinned GNU is required");
+    assert!(output.status.success(), "GNU oracle failed: {output:?}");
+    let expected = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(expected, "(nil nil nil nil nil nil nil)", "GNU_LINUX_ANSWERS_NIL");
+    let mut vm = Vm::new();
+    assert_eq!(eval(&mut vm, &source), expected, "HUGE_DIRECTORY_ANSWERS_AS_GNU");
+    // A relative name under the huge directory, as startup asks.
+    let relative = format!(
+        "(let ((default-directory {})) (file-name-case-insensitive-p \"entry-7\"))",
+        serde_json::to_string(&format!("{}/", huge.display())).unwrap());
+    assert_eq!(eval(&mut vm, &relative), "nil", "RELATIVE_UNDER_HUGE_DIRECTORY");
 }
 #[test]
 fn filename_case_handler_gets_expanded_name() {
