@@ -1946,7 +1946,8 @@ unsafe fn prepared(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value 
 #[inline(always)]
 fn depth_room(e: &mut Engine<'_>) -> bool {
     let attempted = e.depth_base + e.frames.len() + 1;
-    let limit = e.vm.forwarded.eval_limit();
+    // A buffer-local limit makes the current buffer's binding the one read.
+    let limit = if e.vm.forwarded.eval_limit_symbol == usize::MAX { e.vm.forwarded.eval_limit() } else { e.vm.eval_limit() };
     if limit >= 100 && attempted as u64 <= limit as u64 && eval_depth::stack_pointer() >= e.native_floor {
         return true;
     }

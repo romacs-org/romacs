@@ -163,14 +163,57 @@ fn noncanonical_localized_defaults_are_refused_without_mutation() {
         "(error t nil)"
     );
     assert_eq!(shown(&mut vm, "inhibit-modification-hooks"), "t");
-    for name in ["undo-limit", "minibuffer-local-map"] {
-        assert!(
-            shown(
-                &mut vm,
-                &format!("(condition-case e (make-local-variable '{name}) (error e))")
-            )
-            .contains("VM2 cannot make built-in variable buffer-local")
-        );
+}
+
+/// Integer and object built-ins localize as Booleans do (data.c:2178-2300):
+/// the C storage keeps the default, each buffer its own binding, an integer
+/// binding takes integers only, and evaluation reads the current buffer's
+/// `max-lisp-eval-depth' (GNU swaps it into the C variable at set-buffer).
+#[test]
+fn integer_and_object_builtins_localize_as_gnu() {
+    check(
+        "(with-temp-buffer (make-local-variable 'undo-limit) (setq undo-limit 5) (list undo-limit (default-value 'undo-limit) (with-temp-buffer undo-limit) (local-variable-p 'undo-limit) (local-variable-if-set-p 'undo-limit) (condition-case e (setq undo-limit 'x) (error e)) undo-limit (let ((undo-limit 7)) (list undo-limit (default-value 'undo-limit))) undo-limit (progn (set-default 'undo-limit 11) (list undo-limit (default-value 'undo-limit))) (progn (kill-local-variable 'undo-limit) (list undo-limit (local-variable-p 'undo-limit)))))",
+        "(5 160000 160000 t t (wrong-type-argument integerp x) 5 (7 160000) 5 (5 11) (11 nil))",
+    );
+    check(
+        "(with-temp-buffer (set (make-local-variable 'overlay-arrow-string) \"\") (list overlay-arrow-string (equal (default-value 'overlay-arrow-string) \"=>\") (equal (with-temp-buffer overlay-arrow-string) \"=>\") (buffer-local-value 'overlay-arrow-string (current-buffer)) (assq 'overlay-arrow-string (buffer-local-variables)) (progn (setq overlay-arrow-string 'any) overlay-arrow-string) (let ((overlay-arrow-string 3)) overlay-arrow-string) overlay-arrow-string (progn (kill-all-local-variables) (list (equal overlay-arrow-string \"=>\") (local-variable-p 'overlay-arrow-string)))))",
+        "(\"\" t t \"\" (overlay-arrow-string . \"\") any 3 any (t nil))",
+    );
+    check(
+        "(progn (make-variable-buffer-local 'undo-limit) (list (local-variable-if-set-p 'undo-limit) (with-temp-buffer (setq undo-limit 9) (list undo-limit (default-value 'undo-limit) (local-variable-p 'undo-limit) (with-temp-buffer (list undo-limit (local-variable-p 'undo-limit)))))))",
+        "(t (9 160000 t (160000 nil)))",
+    );
+    check(
+        "(with-temp-buffer (set (make-local-variable 'max-lisp-eval-depth) 120) (let ((f nil)) (setq f (lambda (n) (if (= n 0) 0 (1+ (funcall f (1- n)))))) (list (condition-case e (funcall f 200) (error (car e))) (with-temp-buffer (funcall f 200)) max-lisp-eval-depth (default-value 'max-lisp-eval-depth) (progn (kill-local-variable 'max-lisp-eval-depth) (funcall f 200)))))",
+        "(excessive-lisp-nesting 200 120 1600 200)",
+    );
+    // A temporary buffer's local leaves no binding behind.
+    check(
+        "(progn (with-temp-buffer (set (make-local-variable 'max-lisp-eval-depth) 3000)) (list max-lisp-eval-depth (local-variable-if-set-p 'max-lisp-eval-depth)))",
+        "(1600 nil)",
+    );
+    // A let binds the current buffer's binding, checked as a store.
+    check(
+        "(with-temp-buffer (set (make-local-variable 'undo-limit) 5) (list (let ((undo-limit 7)) (list undo-limit (default-value 'undo-limit))) undo-limit (condition-case e (let ((undo-limit 'y)) undo-limit) (error e)) undo-limit))",
+        "((7 160000) 5 (wrong-type-argument integerp y) 5)",
+    );
+    check(
+        "(progn (with-temp-buffer (set (make-local-variable 'undo-limit) 5)) (let ((undo-limit 9)) (with-temp-buffer (set (make-local-variable 'undo-limit) 3) (list undo-limit (default-value 'undo-limit)))))",
+        "(3 9)",
+    );
+    check(
+        "(with-temp-buffer (set (make-local-variable 'minibuffer-local-map) 'local) (list minibuffer-local-map (keymapp (default-value 'minibuffer-local-map)) (buffer-local-value 'minibuffer-local-map (current-buffer)) (assq 'minibuffer-local-map (buffer-local-variables))))",
+        "(local t local (minibuffer-local-map . local))",
+    );
+    // An object binding is a collector root.
+    let mut vm = Vm::new();
+    vm.set_collection_floor(1);
+    assert_eq!(
+        shown(&mut vm, "(with-temp-buffer (set (make-local-variable 'undo-outer-limit) (list 'payload (cons 1 2))) (garbage-collect) (list undo-outer-limit (default-value 'undo-outer-limit)))"),
+        "((payload (1 . 2)) 24000000)"
+    );
+    for name in ["minibuffer-local-map", "max-lisp-eval-depth"] {
+        check(&format!("(with-temp-buffer (make-local-variable '{name}) (local-variable-p '{name}))"), "t");
     }
 }
 

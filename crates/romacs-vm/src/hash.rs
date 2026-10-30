@@ -790,6 +790,8 @@ impl Vm {
         Ok(found.and_then(|slot| self.table_mut(index).entry(slot)))
     }
     pub(super) fn declaration_hash_remove(&mut self, table: Value, key: Value) -> Result<()> {
+        // Local-binding tables are declaration tables (`Vm::eval_limit_local').
+        self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         let (i, found, _, _) = self.table_lookup(table, key).map_err(|_| "hash table required")?;
         if let Some(slot) = found {
             let value = self.table_mut(i).values[slot];
@@ -808,6 +810,7 @@ impl Vm {
         key: Value,
         value: Value,
     ) -> Result<()> {
+        self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         let (i, found, hash, moving) = self
             .table_lookup(table, key)
             .map_err(|_| "hash table required")?;

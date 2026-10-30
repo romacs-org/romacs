@@ -1257,7 +1257,7 @@ pub struct Vm {
     expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
     buffer_slot: usize,
-    multibyte_slot: usize,
+    pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
     defun_start_epoch: u64,
@@ -2878,8 +2878,18 @@ impl Vm {
             // 1730-1760): one may have killed it, made another or let its
             // private slot be reused. With none left the default takes it.
             let target = self.owner_local_binding(base, owner).unwrap_or(base);
-            // set-buffer-local-toplevel-value may have saved any object.
-            let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
+            // set-buffer-local-toplevel-value may have saved any object; an
+            // integer binding refuses a non-integer and keeps its value.
+            let value = match self.localized_forwarded(base) {
+                Some(forwarded::Fwd::Int(_)) if value.integer_value().is_none() => {
+                    let (predicate, condition) = (self.intern("integerp"), self.intern("wrong-type-argument"));
+                    let data = self.list_value(&[predicate, value]);
+                    self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                    return Err(forwarded::fault_text(crate::prim::Fault::Wrong("integerp", value)));
+                }
+                Some(forwarded::Fwd::Bool(_)) => if value == Value::NIL { Value::NIL } else { Value::TRUE },
+                _ => value,
+            };
             self.slots[target].value = value;
             return Ok(());
         }
