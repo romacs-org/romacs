@@ -16,13 +16,16 @@
 ;; exists once cl-lib does.  Loading cl-generic.el from source requires
 ;; cl-lib first (its `eval-when-compile'), so that guard was false here:
 ;; evaluate cl-lib.el's own form now that cl-generic is defined.
+;; The fixed directory keeps the world builder's fence on the launch's
+;; `default-directory' untouched.
 (when (featurep 'cl-lib)
   (with-temp-buffer
-    (insert-file-contents (locate-file-internal "emacs-lisp/cl-lib.el" load-path))
-    (goto-char (point-min))
-    (search-forward "\n(when (fboundp 'cl-generic-define-method)")
-    (goto-char (1+ (match-beginning 0)))
-    (eval (read (current-buffer)) t)))
+    (let ((default-directory "/"))
+      (insert-file-contents (locate-file-internal "emacs-lisp/cl-lib.el" load-path))
+      (goto-char (point-min))
+      (search-forward "\n(when (fboundp 'cl-generic-define-method)")
+      (goto-char (1+ (match-beginning 0)))
+      (eval (read (current-buffer)) t))))
 
 (provide 'romacs-cl-generic)
 ;;; romacs-cl-generic.el ends here
