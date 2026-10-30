@@ -1199,6 +1199,12 @@ fn count_processors(set: Processors) -> u64 {
 
 // Time.
 
+/// The kernel's clock ticks per second (`_SC_CLK_TCK`), the unit of
+/// /proc's process times.
+pub fn clock_ticks_per_second() -> u64 {
+    u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok().filter(|&n| n > 0).unwrap_or(100)
+}
+
 /// A time-zone file's bytes: `/etc/localtime`, a TZ file or a zoneinfo entry.
 pub fn zone_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     read_file(path)

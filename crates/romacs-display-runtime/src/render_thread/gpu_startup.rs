@@ -90,9 +90,12 @@ impl PendingGpu {
                 .unwrap();
             return Ok(Self::Adapters { window, reply });
         }
+        crate::paint_host::trace_gpu("adapters-start");
         let reply = spawn("gpu-adapters", proxy, move || {
             let instance = wgpu::Instance::new(descriptor);
+            crate::paint_host::trace_gpu("instance");
             let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()));
+            crate::paint_host::trace_gpu("adapters");
             Ok((instance, adapters))
         })?;
         Ok(Self::Adapters { window, reply })
@@ -139,12 +142,15 @@ impl PendingGpu {
                     .find(|adapter| adapter.is_surface_supported(&surface))
                     .ok_or_else(|| "no GPU adapter supports the native surface".to_owned())?;
                 let worker_adapter = adapter.clone();
+                crate::paint_host::trace_gpu("adapter-chosen");
                 let reply = spawn("gpu-device", proxy.clone(), move || {
-                    pollster::block_on(romacs_renderer_wgpu::request_renderer_device(
+                    let device = pollster::block_on(romacs_renderer_wgpu::request_renderer_device(
                         &worker_adapter,
                         "Romacs Render Thread Device",
                     ))
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| error.to_string());
+                    crate::paint_host::trace_gpu("device");
+                    device
                 })?;
                 Ok(GpuPoll::Pending(Self::Device {
                     window,
