@@ -459,3 +459,31 @@ mod tests {
         assert_eq!(printed(&mut vm, "(romacs--timer-time [t 0 1 0 nil x nil nil 0 nil])"), "nil");
     }
 }
+
+/// keyboard.c modifier_names: the symbol for each modifier bit.
+const MODIFIER_NAMES: [(u32, &str); 12] = [(0, "up"), (1, "down"), (2, "drag"), (3, "click"), (4, "double"), (5, "triple"),
+    (22, "alt"), (23, "super"), (24, "hyper"), (25, "shift"), (26, "control"), (27, "meta")];
+
+// keyboard.c parse_modifiers: parse SYMBOL's name once, caching
+// (BASE MASK) on its `event-symbol-element-mask' and (BASE MODIFIERS...)
+// on its `event-symbol-elements', and return the latter.
+defsubr! { name = "internal-event-symbol-parse-modifiers", gnu = "keyboard.c:7609", effect = Global,
+fn internal_event_symbol_parse_modifiers(cx, symbol: Value) {
+    let (mask_key, elements_key) = (cx.intern("event-symbol-element-mask"), cx.intern("event-symbol-elements"));
+    let cached = cx.symbol_property(symbol, mask_key)?;
+    if cx.pair(cached).is_none() {
+        let name = cx.symbol_name(symbol)?;
+        let (modifiers, start) = crate::keymap::parse_event_modifiers(name.as_bytes());
+        let base = cx.intern(&name[start..]);
+        let mask = Value::integer(modifiers).expect("modifier bits are a fixnum");
+        let mask = cx.cons(mask, Value::NIL);
+        let mask = cx.cons(base, mask);
+        cx.put_symbol_property(symbol, mask_key, mask)?;
+        // lispy_modifier_list: consed from the lowest bit, so highest first.
+        let elements = MODIFIER_NAMES.iter().filter(|(bit, _)| modifiers & 1 << bit != 0)
+            .fold(Value::NIL, |list, (_, name)| { let name = cx.intern(name); cx.cons(name, list) });
+        let elements = cx.cons(base, elements);
+        cx.put_symbol_property(symbol, elements_key, elements)?;
+    }
+    cx.symbol_property(symbol, elements_key)
+}}

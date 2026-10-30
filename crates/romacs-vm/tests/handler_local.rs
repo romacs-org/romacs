@@ -14,9 +14,10 @@ fn unrelated_handlers_allow_local_operations() {
         let source = case["source"].as_str().unwrap().replace("@DIR@", &directory).replace("@FILE@", &file).replace("@HOME@", &serde_json::to_string(&std::env::var("HOME").unwrap()).unwrap());
         let actual = vm.eval_source(&source).map(|v| v.display().unwrap()).unwrap_or_else(|e| format!("ERROR {e}"));
         let expected = case.get("candidate_expected").unwrap_or(&case["expected"]).as_str().unwrap();
-        if case["id"].as_str().unwrap().ends_with("-selected") {
-            assert_eq!(std::fs::read_to_string(root.join("input")).unwrap(), "hello\n", "REFUSAL_BEFORE_WRITE: {}", case["id"]);
-        }
+        // The file as GNU leaves it: a handler that signals stops the
+        // operation where GNU calls it, before or after the write.
+        let file_after = case.get("file").map_or("hello\n", |f| f.as_str().unwrap());
+        assert_eq!(std::fs::read_to_string(root.join("input")).unwrap(), file_after, "FILE_AFTER: {}", case["id"]);
         if actual != expected {
             failures.push(format!("{}: {actual}", case["id"]));
         }

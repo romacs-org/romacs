@@ -1,7 +1,8 @@
 #+title: Romacs
 
-Romacs is an AI lisp machine.  Combining Emacs Lisp's freedom with a Rust core
-built for speed.
+Romacs is a Lisp machine emulator written in Rust, with Emacs Lisp as its
+runtime.  People and agents program the whole machine in Lisp; editing is one
+application running on it.
 
 #+BEGIN_QUOTE
 All original content in this project has been written with AI Agents
@@ -18,6 +19,11 @@ Keep Emacs's malleability without preserving every historical constraint.
 Rust handles the machinery; Elisp keeps commands, keybindings and policy
 editable without a rebuild. The goal is broad GNU Elisp compatibility,
 not a replica of GNU Emacs's internals.
+
+Rust emulates the machine: object memory and collection, the evaluator,
+loading, processes, and the display and input host.  Elisp is the runtime:
+GNU's Lisp corpus (=gnu-lisp/=) and Romacs's own Lisp (=rlisp/=) run on it
+as programs, and compatibility is judged by what those programs do.
 
 A user should be limited only by his imagination by what he can do
 with romacs.

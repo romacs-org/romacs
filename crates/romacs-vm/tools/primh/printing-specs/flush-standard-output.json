@@ -9,7 +9,7 @@
   "print.c"
  ],
  "gnu_def": "print.c:917",
- "rust": "src/prims/printing.rs:47",
+ "rust": "src/prims/printing.rs:90",
  "args": [],
  "probes": [
   "(flush-standard-output)",

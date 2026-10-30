@@ -41,11 +41,47 @@ pub(super) fn native_stack_floor() -> usize {
 }
 
 impl Vm {
+    /// The private slot of the current buffer's local binding of
+    /// `max-lisp-eval-depth', if it has one: GNU swaps that binding into the
+    /// C variable at set-buffer, so evaluation reads it.
+    fn eval_limit_local(&mut self) -> Option<usize> {
+        let symbol = self.forwarded.eval_limit_symbol;
+        if symbol == usize::MAX {
+            return None;
+        }
+        let buffer = self.slots[self.buffer_slot].value;
+        let (seen, local, epoch) = self.forwarded.eval_limit_cache;
+        if seen == buffer.0 && epoch == self.forwarded.local_epoch {
+            return (local != usize::MAX).then_some(local);
+        }
+        let table = self.slots[symbol].local;
+        let local = (table != Value::NIL)
+            .then(|| self.declaration_hash_get(table, buffer).ok().flatten())
+            .flatten()
+            .and_then(|binding| binding.index(7).ok())
+            .map(|slot| slot - 1);
+        self.forwarded.eval_limit_cache = (buffer.0, local.unwrap_or(usize::MAX), self.forwarded.local_epoch);
+        local
+    }
+    /// `max-lisp-eval-depth' as evaluation reads it: the current buffer's
+    /// binding (its local one, else the C storage).
+    pub(super) fn eval_limit(&mut self) -> i64 {
+        match self.eval_limit_local() {
+            Some(local) => self.slots[local].value.integer_value().unwrap_or(0),
+            None => self.forwarded.eval_limit(),
+        }
+    }
+    fn set_eval_limit(&mut self, limit: i64) {
+        match self.eval_limit_local() {
+            Some(local) => self.slots[local].value = Value::integer(limit).expect("eval depth limit is a fixnum"),
+            None => self.forwarded.set_integer(MAX_DEPTH, limit),
+        }
+    }
     /// GNU eval.c:2604-2609: limits below 100 are raised, not merely read as 100.
     pub(super) fn eval_depth_limit(&mut self) -> usize {
-        let old = self.forwarded.eval_limit();
+        let old = self.eval_limit();
         let limit = if (self.eval_depth as u128) > old.max(0) as u128 && old < 100 { 100 } else { old };
-        if limit != old { self.forwarded.set_integer(MAX_DEPTH, limit); }
+        if limit != old { self.set_eval_limit(limit); }
         usize::try_from(limit).unwrap_or(0)
     }
 
@@ -65,7 +101,7 @@ impl Vm {
     pub(super) fn max_ensure_room(&mut self, room: i64) -> Option<i64> {
         let depth = i64::try_from(self.eval_depth).unwrap_or(i64::MAX);
         let sum = depth.checked_add(room).unwrap_or(i64::MAX);
-        let old = self.forwarded.integer(MAX_DEPTH);
+        let old = self.eval_limit();
         let reserve = self.forwarded.integer(RESERVE);
         // Widen the difference: a negative user limit must not wrap before
         // the minimum with the (bounded) reserve has been taken.
@@ -74,7 +110,7 @@ impl Vm {
             return None;
         }
         let diff = i64::try_from(diff).expect("positive difference bounded by reserve");
-        self.forwarded.set_integer(MAX_DEPTH, old + diff);
+        self.set_eval_limit(old + diff);
         self.forwarded.set_integer(RESERVE, reserve - diff);
         Some(old)
     }
@@ -83,12 +119,12 @@ impl Vm {
     /// reserve; do not restore a saved pair (Lisp may have changed either).
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn restore_stack_limits(&mut self, old_depth: i64) {
-        let current = self.forwarded.integer(MAX_DEPTH);
+        let current = self.eval_limit();
         let reserve = self.forwarded.integer(RESERVE);
         let restored = i128::from(reserve) + i128::from(current) - i128::from(old_depth);
         let restored = i64::try_from(restored).expect("restored eval reserve fits intmax_t");
         self.forwarded.set_integer(RESERVE, restored);
-        self.forwarded.set_integer(MAX_DEPTH, old_depth);
+        self.set_eval_limit(old_depth);
     }
 }
 

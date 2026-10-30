@@ -451,9 +451,11 @@ fn unsupported_reads_refuse_and_leave_the_buffer_alone() {
         let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e {form} (error e)) (buffer-string) (point) last-coding-system-used))");
         assert_eq!(eval(&mut vm, &source), "((coding-system-error raw-text) \"keep\" 3 nil)", "{form}");
     }
+    // An expansion handler that returns no name is invalid (pinned GNU),
+    // before the buffer or the file is touched.
+    let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e (let ((file-name-handler-alist '((\"/crlf\\\\'\" . list)))) (insert-file-contents {crlf})) (error e)) (buffer-string) (point) last-coding-system-used))");
+    assert_eq!(eval(&mut vm, &source), "((error \"Invalid handler in ‘file-name-handler-alist’\") \"keep\" 3 nil)");
     for (form, message) in [
-        // The matching control must still refuse before touching the buffer or file.
-        (format!("(let ((file-name-handler-alist '((\"/crlf\\\\'\" . ignore)))) (insert-file-contents {crlf}))"), "expand-file-name matching file name handler"),
         (format!("(let ((selective-display t)) (write-region nil nil {crlf}))"), "write-region with selective-display t"),
         (format!("(let ((write-region-annotate-functions '(ignore))) (write-region \"x\" nil {crlf}))"), "write-region annotations"),
         (format!("(write-region \"x\" nil {crlf} nil nil nil t)"), "write-region MUSTBENEW confirmation"),
