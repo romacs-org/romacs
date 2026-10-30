@@ -483,8 +483,10 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
             windows[i].2 = windows[i].2.min(next);
         }
     }
-    let report = vm.load_report();
-    let steps = report["steps"].as_array().cloned().unwrap_or_default();
+    let steps: Vec<Done> = vm.load_steps().iter().map(|step| Done {
+        file: vm.load_step_file(step).to_string_lossy().into_owned(), ordinal: step.ordinal, line: step.line,
+        ok: step.status == romacs_vm::LoadStepStatus::Ok, error: step.error.clone(), source: step.source.clone(),
+    }).collect();
     let mut rows = vec![];
     for site in &sites {
         let entry = log_entry(vm, site.index)?;
@@ -496,19 +498,17 @@ fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Load
         };
         let outcome = match entry.as_deref() {
             None => NotReachedWhy::explain(&form_errors, site, &file_name),
-            Some("ok") => Outcome::Complete { forms: own.iter().filter(|s| s["status"] == "ok").count() },
+            Some("ok") => Outcome::Complete { forms: own.iter().filter(|s| s.ok).count() },
             Some("absent") => Outcome::Absent,
             Some("native") => Outcome::Native,
             Some(error) if own.is_empty() && path.is_none() && error.starts_with("(file-missing") => {
                 Outcome::Missing { error: error.to_owned() }
             }
             Some(error) => {
-                let ok = own.iter().filter(|s| s["status"] == "ok").count();
-                let failed = own.iter().find(|s| s["status"] != "ok");
+                let ok = own.iter().filter(|s| s.ok).count();
+                let failed = own.iter().find(|s| !s.ok);
                 let (line, source, step_error) = failed.map(|s| (
-                    s["line"].as_u64().unwrap_or(0) as usize,
-                    s["source"].as_str().unwrap_or("").to_owned(),
-                    s["error"].as_str().unwrap_or("").to_owned(),
+                    s.line, s.source.clone().unwrap_or_default(), s.error.clone().unwrap_or_default(),
                 )).unwrap_or((0, String::new(), String::new()));
                 let total = path.as_ref().map(|p| total_forms(vm, p)).unwrap_or(Total::Forms(0));
                 // No failing step: the loader's READER stopped before the form
@@ -704,7 +704,7 @@ impl NotReachedWhy {
 }
 
 fn steps_len(vm: &Vm) -> usize {
-    vm.load_report()["steps"].as_array().map_or(0, Vec::len)
+    vm.load_steps().len()
 }
 
 fn log_len(vm: &mut Vm) -> Result<usize, String> {
@@ -747,31 +747,42 @@ fn resolve(search: &[PathBuf], name: &str) -> Option<PathBuf> {
 }
 
 fn first_step(vm: &Vm, from: usize, to: usize, path: Option<&Path>) -> Option<usize> {
-    let path = path?.to_string_lossy().into_owned();
-    let report = vm.load_report();
-    let steps = report["steps"].as_array()?;
-    (from..to.min(steps.len())).find(|&i| steps[i]["file"] == path.as_str() && steps[i]["ordinal"] == 1)
+    let path = path?;
+    let steps = vm.load_steps();
+    (from..to.min(steps.len())).find(|&i| steps[i].ordinal == 1 && vm.load_step_file(&steps[i]) == path)
+}
+
+/// A loader step as the report reads it: its file's name, its place and
+/// outcome, with a failed form's error and text.
+#[derive(Clone, Debug)]
+struct Done {
+    file: String,
+    ordinal: usize,
+    line: usize,
+    ok: bool,
+    error: Option<String>,
+    source: Option<String>,
 }
 
 /// Split a site's step window into its own file's steps and nested files.
-fn split_steps(window: &[serde_json::Value], path: &Path) -> (Vec<serde_json::Value>, Vec<(String, usize, Option<String>)>) {
+fn split_steps(window: &[Done], path: &Path) -> (Vec<Done>, Vec<(String, usize, Option<String>)>) {
     let own_name = path.to_string_lossy();
     let mut own = vec![];
     let mut nested: Vec<(String, usize, Option<String>)> = vec![];
     let mut started = false;
     for step in window {
-        let file = step["file"].as_str().unwrap_or("");
+        let file = step.file.as_str();
         if file == own_name {
-            if step["ordinal"] == 1 && started { break; }
+            if step.ordinal == 1 && started { break; }
             started = true;
             own.push(step.clone());
         } else {
             let short = file.rsplit("/lisp/").next().unwrap_or(file).to_owned();
-            let ok = step["status"] == "ok";
-            let failure = (!ok).then(|| format!("line {} form {}: {}", step["line"], step["ordinal"],
-                                                 step["error"].as_str().unwrap_or("(entered, never finished)")));
+            let ok = step.ok;
+            let failure = (!ok).then(|| format!("line {} form {}: {}", step.line, step.ordinal,
+                                                 step.error.as_deref().unwrap_or("(entered, never finished)")));
             match nested.last_mut() {
-                Some(last) if last.0 == short && step["ordinal"] != 1 => {
+                Some(last) if last.0 == short && step.ordinal != 1 => {
                     if ok { last.1 += 1 } else if last.2.is_none() { last.2 = failure }
                 }
                 _ => nested.push((short, usize::from(ok), failure)),
