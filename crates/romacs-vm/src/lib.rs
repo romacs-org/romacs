@@ -90,6 +90,8 @@ mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
+mod isolate;
+pub use isolate::worker_socket as isolate_worker_socket;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
@@ -1273,6 +1275,8 @@ pub struct Vm {
     region_free: Vec<usize>,
     /// Three quarters of the region ids are live: collect at the next entry.
     region_collect: bool,
+    /// Worker isolates and, in a worker, the parent peer (`isolate.rs`).
+    isolates: isolate::Isolates,
     buffer_slot: usize,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
@@ -1496,6 +1500,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     regions,
     region_free,
     region_collect,
+    isolates,
     fence,
     execution,
     spare_programs,
@@ -1590,6 +1595,7 @@ impl Vm {
             regions: vec![None],
             region_free: Vec::new(),
             region_collect: false,
+            isolates: isolate::Isolates::default(),
             buffer_slot: 0,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,

@@ -29,13 +29,13 @@ pub struct Idle {
 /// auto-saves after redisplay.
 pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
     let (ran, rest) = vm.eval_source(if auto_save {
-        "(let* ((message (current-message)) (output (romacs--process-idle)) (check (romacs--timer-check-idle))
+        "(let* ((message (current-message)) (output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle))
                 (save (and (fboundp 'romacs--idle-auto-save) (romacs--idle-auto-save)))
                 (delay (if (numberp save) (if (cdr check) (min save (cdr check)) save) (cdr check))))
            (list (or output (car check) (eq save t)) (not (eq message (current-message)))
                  (and delay (ceiling (* delay 1e6)))))"
     } else {
-        "(let* ((message (current-message)) (output (romacs--process-idle)) (check (romacs--timer-check-idle)))
+        "(let* ((message (current-message)) (output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle)))
            (list (or output (car check)) (not (eq message (current-message)))
                  (and (cdr check) (ceiling (* (cdr check) 1e6)))))"
     })?.cons_pair()?;

@@ -1654,6 +1654,7 @@ mod leaf {
     mod invisible;
     mod buffer_locals;
     mod frozen;
+    mod isolate;
     mod casetab;
     mod casing;
     pub(crate) use casing::RegionCase;
@@ -2099,7 +2100,8 @@ impl Vm {
     /// loops written in Lisp over leaf cursors, so their state is registers.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
         self.eval_source_raw(prims::PRELUDE)?;
-        self.eval_source_raw(prims::PROCESS_PRELUDE)
+        self.eval_source_raw(prims::PROCESS_PRELUDE)?;
+        self.eval_source_raw(prims::ISOLATE_PRELUDE)
     }
 }
 

@@ -26,6 +26,7 @@ mod user_init;
 mod measure;
 mod timers;
 mod world;
+mod isolate_worker;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -452,6 +453,7 @@ fn run() -> Result<(), String> {
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()),
             "--batch" => return batch::run(args.collect(), quick),
+            "--isolate" => return isolate_worker::run(std::iter::once(arg).chain(args).collect()),
             "--" => {
                 startup::visit_at_startup("--");
                 for file in args.by_ref() { startup::visit_at_startup(&file); }
@@ -500,6 +502,7 @@ fn run() -> Result<(), String> {
                 None
             }
         });
+        let isolate_world = world.as_ref().map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
         let restored = world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
             // Said first, so a launcher sees it whether or not a window can.
             eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": PREPARING}));
@@ -516,7 +519,7 @@ fn run() -> Result<(), String> {
         }); });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     first_presentation, prune)
+                     isolate_world, first_presentation, prune)
         }));
         let result = match result {
             Ok(result) => result.map(|()| 0),
@@ -748,6 +751,7 @@ fn evaluate(
     load_user_init: bool,
     quick: bool,
     restored: Option<(Box<Vm>, world::Carry)>,
+    isolate_world: Option<(std::path::PathBuf, String)>,
     first_presentation: u64,
     after_first_frame: Option<impl FnOnce()>,
 ) -> Result<(), String> {
@@ -760,6 +764,14 @@ fn evaluate(
         }
         None => (Vm::new(), None),
     };
+    // How this VM booted, which its worker isolates repeat (rlisp/vm/isolate.el).
+    match (&carry, isolate_world, launch) {
+        (Some(_), Some((store, key)), _) => {
+            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}))", startup::lisp_string(&store.display().to_string()), key))?;
+        }
+        (_, _, startup::Launch::Loadup | startup::Launch::GnuOnly) => { vm.eval_source("(setq isolate-boot 'source)")?; }
+        _ => { vm.eval_source("(setq isolate-boot 'bare)")?; }
+    }
     // Measuring primitives ask the engine that paints (VM2-WTPS1).
     vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
     // The window's session ends with `kill-emacs': its hook has run, so the
