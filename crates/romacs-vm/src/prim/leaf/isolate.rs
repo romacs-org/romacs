@@ -62,6 +62,10 @@ impl Leaf<'_> {
         Ok(self.vm.isolate_pid(id).map_or(Value::NIL, |p| Value::integer(i64::from(p)).expect("pid fits")))
     }
 
+    pub(crate) fn isolate_frames(&self, id: u64) -> usize {
+        self.vm.isolate_inbox_len(id)
+    }
+
     pub(crate) fn isolate_ids(&mut self) -> Out {
         let ids: Vec<Value> = self.vm.isolate_ids().into_iter().map(|i| Value::integer(i as i64).expect("id fits")).collect();
         Ok(self.vm.list_value(&ids))

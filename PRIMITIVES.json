@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "90f0626b945ba9517e374d971ae469677e4593501563d5d6ff37f03d65543bdd",
+  "source_fingerprint": "5f83fc1b396910d353695432c235d6ecae4dfe913623ceecb87f035836274ac8",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1122,
-  "parsed_vm2_only": 1122
+  "parsed_total": 1123,
+  "parsed_vm2_only": 1123
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3918,32 +3918,37 @@
   "romacs--isolate-executable": {
    "name": "romacs--isolate-executable",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:127"
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:133"
+  },
+  "romacs--isolate-frames": {
+   "name": "romacs--isolate-frames",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:81"
   },
   "romacs--isolate-hello": {
    "name": "romacs--isolate-hello",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:121"
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:127"
   },
   "romacs--isolate-hello-ok-p": {
    "name": "romacs--isolate-hello-ok-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:115"
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:121"
   },
   "romacs--isolate-ids": {
    "name": "romacs--isolate-ids",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:81"
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:87"
   },
   "romacs--isolate-interrupted-p": {
    "name": "romacs--isolate-interrupted-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:101"
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:107"
   },
   "romacs--isolate-parent-p": {
    "name": "romacs--isolate-parent-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:87"
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:93"
   },
   "romacs--isolate-pid": {
    "name": "romacs--isolate-pid",
@@ -3963,7 +3968,7 @@
   "romacs--isolate-running": {
    "name": "romacs--isolate-running",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:94"
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:100"
   },
   "romacs--isolate-signal": {
    "name": "romacs--isolate-signal",
@@ -3988,7 +3993,7 @@
   "romacs--isolate-terminated-p": {
    "name": "romacs--isolate-terminated-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:108"
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:114"
   },
   "romacs--isolate-wait": {
    "name": "romacs--isolate-wait",

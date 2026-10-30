@@ -209,11 +209,13 @@ fn resubmitted_jobs_keep_their_snapshot_and_fit_the_pool() {
     let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-3) 'provided))) (b (isolate-spawn '(lambda () (featurep 'journey-feature-3)))) (c (isolate-spawn 'list 'third))) (list (isolate-await a) (isolate-await b 10) (isolate-await c 10) (length (isolate-list)))))");
     assert_eq!(out, "(provided nil (third) 1)");
     eval(&mut vm, "(isolate-kill-all)");
-    // Sol r3 S4: cancelling a job the pump has just queued again reaches its
-    // new worker. The retiring job is awaited first (its retirement reply
-    // for b then waits in the socket), and the cancel's own pump must move
-    // b to another worker and generation before cancelling it there.
-    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-4) 'provided))) (b (isolate-spawn '(lambda () (while t)))) (first (isolate-future-isolate b)) (generation (aref b 2))) (list (isolate-await a) (progn (romacs--isolate-wait 0.3) (isolate-future-cancel b) (list (not (eq (isolate-future-isolate b) first)) (> (aref b 2) generation))) (condition-case e (isolate-await b 10) (quit 'cancelled)) (isolate-await (isolate-spawn 'list 'after) 10))))");
-    assert_eq!(out, "(provided (t t) cancelled (after))");
+    // Sol r3 S4 / r5 S15: cancelling a job the cancel's own pump queues
+    // again reaches its new worker. Bare waits read frames without
+    // delivering them, until the first worker's four (hello, preparation,
+    // the retiring job's result, b's retirement) are held undelivered: b
+    // is still on its first worker and generation when the cancel starts;
+    // the cancel's pump then resubmits b, and the cancel must follow it.
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-4) 'provided))) (b (isolate-spawn '(lambda () (while t)))) (first (isolate-future-isolate b)) (generation (aref b 2))) (let ((end (+ (float-time) 10))) (while (and (< (romacs--isolate-frames (romacs--isolate-id first)) 4) (< (float-time) end)) (romacs--isolate-wait 0.2))) (list (list (eq (isolate-future-isolate b) first) (= (aref b 2) generation) (aref b 3) (romacs--isolate-frames (romacs--isolate-id first))) (progn (isolate-future-cancel b) (list (not (eq (isolate-future-isolate b) first)) (> (aref b 2) generation))) (isolate-await a) (condition-case e (isolate-await b 10) (quit 'cancelled)) (isolate-await (isolate-spawn 'list 'after) 10))))");
+    assert_eq!(out, "((t t pending 4) (t t) provided cancelled (after))");
     eval(&mut vm, "(isolate-kill-all)");
 }

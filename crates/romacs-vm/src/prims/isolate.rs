@@ -77,6 +77,12 @@ fn isolate_pid(cx, isolate: Value) {
     cx.isolate_pid(id(cx, isolate)?)
 }}
 
+// (romacs--isolate-frames ID): frames read from peer ID and not yet taken.
+defsubr! { name = "romacs--isolate-frames", gnu = "romacs:isolate", effect = Reads,
+fn isolate_frames(cx, isolate: Value) {
+    Value::integer(cx.isolate_frames(id(cx, isolate)?) as i64).map_err(Fault::Error)
+}}
+
 // (romacs--isolate-ids): the ids of the workers this VM spawned.
 defsubr! { name = "romacs--isolate-ids", gnu = "romacs:isolate", effect = Reads,
 fn isolate_ids(cx) {
