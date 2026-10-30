@@ -88,10 +88,21 @@ fn next_event(shared: &std::cell::RefCell<Shared>, input: &crossbeam_channel::Re
         let event = match queued {
             Next::Closed => return Ok(HostEvent::Closed),
             Next::Event(event) => event,
+            // A termination signal whose wake other work took still ends the prompt.
+            Next::Wait if romacs_vm::host::termination_signal(true).is_some() => {
+                shared.borrow_mut().closed = true;
+                return Ok(HostEvent::Closed);
+            }
             Next::Wait => {
                 let left = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
                 match crate::terminal_wait::wait(input, terminal, left, processes) {
                     crate::terminal_wait::Wake::Input(event) => event,
+                    // A termination signal ends the prompt as a closed frame
+                    // does; the loop then runs `kill-emacs' (main.rs terminate).
+                    crate::terminal_wait::Wake::Terminal if romacs_vm::host::termination_signal(true).is_some() => {
+                        shared.borrow_mut().closed = true;
+                        return Ok(HostEvent::Closed);
+                    }
                     crate::terminal_wait::Wake::Terminal => return Ok(HostEvent::Background),
                     crate::terminal_wait::Wake::Process => return Ok(HostEvent::Process),
                     crate::terminal_wait::Wake::Closed => return Err("input closed while reading".into()),

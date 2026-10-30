@@ -151,10 +151,15 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "current-key-remap-sequence", gnu: "keyboard.c:14482", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "ctags-program-name", gnu: "callproc.c:2167", kind: Kind::Lisp(Init::Str("ctags")) },
     CVariable { name: "cursor-in-echo-area", gnu: "dispnew.c:7538", kind: Kind::Bool(false) },
+    // The signal path's debugger (threaded_signal.rs debugger_wanted, and
+    // prims/prelude.el `romacs--maybe-call-debugger'); loadup.el sets
+    // `debugger' to `debug' once the full debugger can load.
+    CVariable { name: "debug-ignored-errors", gnu: "eval.c:4497", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debug-on-event", gnu: "keyboard.c:14381", kind: Kind::Lisp(Init::Symbol("sigusr2")) },
     CVariable { name: "debug-on-next-call", gnu: "eval.c:4515", kind: Kind::Bool(false) },
     CVariable { name: "debug-on-quit", gnu: "eval.c:4510", kind: Kind::Bool(false) },
     CVariable { name: "debug-on-signal", gnu: "eval.c:4552", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "debugger", gnu: "eval.c:4534", kind: Kind::Lisp(Init::Symbol("debug-early")) },
     CVariable { name: "debugger-may-continue", gnu: "eval.c:4523", kind: Kind::Bool(true) },
     CVariable { name: "default-frame-alist", gnu: "frame.c:7428", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "default-frame-scroll-bars", gnu: "frame.c:7453", kind: Kind::Lisp(Init::Symbol("right")) },
@@ -229,6 +234,11 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "input-method-previous-message", gnu: "keyboard.c:14277", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "installation-directory", gnu: "emacs.c:3564", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "internal--daemon-sockname", gnu: "process.c:8984", kind: Kind::Lisp(Init::Nil) },
+    // keyboard.c command_loop: normal-top-level says it after a return to
+    // top level once the command line is processed.
+    CVariable { name: "internal--top-level-message", gnu: "keyboard.c:13429", kind: Kind::Lisp(Init::Str("Back to top level")) },
+    // init_eval: less than `num-nonmacro-input-events' starts.
+    CVariable { name: "internal-when-entered-debugger", gnu: "eval.c:4573", kind: Kind::Int(-1) },
     CVariable { name: "interrupt-process-functions", gnu: "process.c:8970", kind: Kind::Lisp(Init::List(&[Init::Symbol("internal-default-interrupt-process")])) },
     CVariable { name: "inverse-video", gnu: "dispnew.c:7492", kind: Kind::Bool(false) },
     CVariable { name: "kbd-macro-termination-hook", gnu: "macros.c:414", kind: Kind::Lisp(Init::Nil) },
@@ -363,6 +373,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "timer-list", gnu: "keyboard.c:14247", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "timer-idle-list", gnu: "keyboard.c:14251", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-separator-image-expression", gnu: "keyboard.c:14122", kind: Kind::Lisp(Init::Nil) },
+    // What the command loop evaluates when a throw returns it to top level
+    // (rlisp/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.
+    CVariable { name: "top-level", gnu: "keyboard.c:13974", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-style", gnu: "xdisp.c:38992", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "toolkit-theme", gnu: "frame.c:7896", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tooltip-reuse-hidden-frame", gnu: "frame.c:7712", kind: Kind::Bool(false) },

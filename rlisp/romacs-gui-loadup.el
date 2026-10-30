@@ -36,6 +36,9 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
           (with-current-buffer (get-buffer-create messages-buffer-name)
             (messages-buffer-mode)
             (setq default-directory (or dir (expand-file-name "~/")))))
+        ;; startup.el normal-top-level (startup.el:584): the command line is
+        ;; processed once, so a later return to top level only says so.
+        (setq command-line-processed t)
         ;; startup.el normal-top-level (startup.el:591): the per-user directory.
         ;; Romacs's is $XDG_CONFIG_HOME/romacs/, else ~/.config/romacs/, the
         ;; directory of the init file the GUI loads (user_init.rs); loading that

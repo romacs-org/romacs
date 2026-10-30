@@ -97,6 +97,10 @@
 ;; VM2 code is compiled when defined: `byte-compile' of a function value
 ;; returns it (VM2-BYTECOMP1).
 (require 'romacs-bytecomp)
+;; GNU cl-print reads an interpreted function's slots, which Romacs's
+;; closures keep private (VM2-ERT-BATCH1): whenever cl-print loads (debug.el's
+;; *Backtrace*, ERT), they print through the owned method instead.
+(with-eval-after-load 'cl-print (require 'romacs-cl-print))
 (load "minibuffer.el" nil t t)
 (load "frame.el" nil t t)
 (load "startup.el" nil t t)

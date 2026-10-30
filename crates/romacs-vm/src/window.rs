@@ -1819,14 +1819,20 @@ impl<'a> Windows<'a> {
         Ok(self.get(window)?.cursor_off)
     }
     /// terminal.c Fframe_initial_p. VM2's one terminal is GNU's
-    /// output_initial kind, so every live frame is an initial frame.
+    /// output_initial kind, whose frame writes messages and printing to the
+    /// standard streams, until an embedder renders its echo area
+    /// (`Vm::set_echo_area_host`): then it is the session's display, as a
+    /// window system's frame is, and not initial. debug.el decides by this
+    /// whether to show *Backtrace* or print it.
     pub(crate) fn frame_initial_p(&mut self, frame: Value) -> Out {
         let frame = if frame == Value::NIL { self.frame() } else { frame };
+        let host = self.vm.slot(crate::prim::ECHO_AREA_HOST);
+        let initial = matches!(self.vm.slots[host].value, Value::NIL | Value::UNBOUND);
         if let Some(Object::Frame(f)) = self.vm.object_if(frame) {
-            return Ok(if f.live { Value::TRUE } else { Value::NIL });
+            return Ok(if f.live && initial { Value::TRUE } else { Value::NIL });
         }
         // decode_terminal yields NULL for anything else: nil, not an error.
-        Ok(if self.terminal(frame).is_some() { Value::TRUE } else { Value::NIL })
+        Ok(if self.terminal(frame).is_some() && initial { Value::TRUE } else { Value::NIL })
     }
     pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {
         if self.terminal(object).is_some() { Value::TRUE } else { Value::NIL }

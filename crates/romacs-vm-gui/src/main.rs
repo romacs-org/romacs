@@ -40,6 +40,9 @@ const SCENE: &str = include_str!("../scene.el");
 // evaluator off the default stack. Guarded by evaluator_stack_tests (R209).
 const EVALUATOR_STACK_SIZE: usize = 64 * 1024 * 1024;
 
+/// `kill-emacs''s exit status, unwinding the live evaluator (`evaluate').
+struct SessionEnd(i32);
+
 fn spawn_evaluator<F, T>(evaluate: F) -> Result<std::thread::JoinHandle<T>, String>
 where
     F: FnOnce() -> T + Send + 'static,
@@ -511,9 +514,20 @@ fn run() -> Result<(), String> {
                 eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted}));
             }
         }); });
-        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                              first_presentation, prune);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
+                     first_presentation, prune)
+        }));
+        let result = match result {
+            Ok(result) => result.map(|()| 0),
+            Err(payload) => match payload.downcast::<SessionEnd>() {
+                Ok(end) => Ok(end.0),
+                Err(payload) => std::panic::resume_unwind(payload),
+            },
+        };
         if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
+        // The status goes first: dropping the sender closes the window, and
+        // the window's end lets the main thread look for it.
         let _ = result_tx.send(result);
         drop(sender);
     })?;
@@ -522,7 +536,10 @@ fn run() -> Result<(), String> {
     match result_rx.try_recv() {
         Ok(result) => {
             worker.join().map_err(|_| "evaluator panicked")?;
-            result
+            match result? {
+                0 => Ok(()),
+                code => std::process::exit(code),
+            }
         }
         Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("evaluator panicked".into()),
         Err(std::sync::mpsc::TryRecvError::Empty) => Ok(()),
@@ -745,10 +762,17 @@ fn evaluate(
     };
     // Measuring primitives ask the engine that paints (VM2-WTPS1).
     vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
+    // The window's session ends with `kill-emacs': its hook has run, so the
+    // host unwinds the evaluator to the worker, which drops the VM (killing
+    // its children, as shut_down_emacs does) and exits with the status.
+    if live { vm.set_session_host(Some(Box::new(|code| std::panic::resume_unwind(Box::new(SessionEnd(code)))))); }
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
+    // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):
+    // the signal wakes the same wait.
+    if live { romacs_vm::host::catch_termination_signals(terminal_service.waker()).map_err(|e| e.to_string())?; }
     if live { vm.set_terminal_host(Some(Box::new(terminal_service)))?; }
     // The window shows an echo area: printing to `t' goes there, as on GNU's terminal.
     if live { vm.set_echo_area_host(true); }
@@ -844,6 +868,7 @@ fn evaluate(
     }); }
     loop {
         if live {
+            terminate(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })?;
             // Background callbacks are Lisp the loop runs, and may prompt.
             let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
             let (changed, closed) = lent.run(&host, |_| service_native(&mut vm));
@@ -997,6 +1022,9 @@ fn evaluate(
             }
         }
         if live {
+            // A paint retired this pass lets the idle auto-save in, though a
+            // repainting timer has already submitted the next.
+            let mut retired = false;
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
                 if let Ok(diagnostic) = sender.wait_for_render(in_flight, std::time::Duration::ZERO) {
                     let observed = Instant::now();
@@ -1012,6 +1040,7 @@ fn evaluate(
                             "render_semantics":"renderer-successful-submit-not-compositor-present"}));
                     }
                     live_presentation.completed(in_flight);
+                    retired = true;
                 } else if submitted.elapsed() >= std::time::Duration::from_secs(30) {
                     return Err(format!("no rendered atlas diagnostic for presentation {in_flight}"));
                 }
@@ -1048,8 +1077,9 @@ fn evaluate(
                 // after any ran, redisplay and check again before blocking.
                 // A timer may read input (`read-event' with a timeout, a
                 // prompt) as a command may, so it gets the same handoff.
+                let auto_save = retired || live_presentation.in_flight().is_none();
                 let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
-                let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm));
+                let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm, auto_save));
                 if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                     return shutdown_editor(&mut vm, sender);
                 }
@@ -1065,6 +1095,8 @@ fn evaluate(
                 // read_char's wait_reading_process_output also selects on
                 // the processes: one ready wakes the loop to read it.
                 let processes = vm.process_wait_fds();
+                // A termination signal whose wake other work took: back to the top.
+                if romacs_vm::host::termination_signal(true).is_some() { continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(()),
@@ -1112,8 +1144,17 @@ fn next_presentation(host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>) -> 
 
 /// A native close: GUI quit, lent like any Lisp the loop runs, whose
 /// confirmation may read input. Whether to shut down.
-fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, lent: Lent<'_>) -> Result<bool, String> {
+fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, mut lent: Lent<'_>) -> Result<bool, String> {
+    terminate(vm, host, Lent { queue: &mut *lent.queue, live: &mut *lent.live, width: &mut *lent.width, height: &mut *lent.height })?;
     lent.run(host, |live| live.window_close(vm)).0
+}
+
+/// emacs.c terminate_due_to_signal: a SIGTERM or SIGHUP the host noted runs
+/// `(kill-emacs SIGNAL)', whose hook and auto-save run before the session
+/// host exits with that status; a prompt it interrupted has unwound first.
+fn terminate(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, lent: Lent<'_>) -> Result<(), String> {
+    let Some(signal) = romacs_vm::host::termination_signal(false) else { return Ok(()) };
+    lent.run(host, |_| vm.eval_source(&format!("(kill-emacs {signal})"))).0.map(|_| ())
 }
 
 /// The outer loop's input state, lent to the prompt host (prompt.rs) for

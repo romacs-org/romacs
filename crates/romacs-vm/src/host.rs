@@ -1628,6 +1628,52 @@ pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
 }
 
+/// The SIGTERM or SIGHUP noted and not yet taken, else 0.
+static TERMINATION: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// The write end of the pipe the handler wakes `catch_termination_signals''s thread with.
+static TERMINATION_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+extern "C" fn note_termination(signal: libc::c_int) {
+    use std::sync::atomic::Ordering;
+    TERMINATION.store(signal, Ordering::SeqCst);
+    let fd = TERMINATION_PIPE.load(Ordering::SeqCst);
+    // Only async-signal-safe calls here: the store and write(2).
+    if fd >= 0 { let _ = unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) }; }
+}
+
+/// sysdep.c init_signals's SIGTERM and SIGHUP, for an embedder that ends
+/// its session as emacs.c terminate_due_to_signal does, with `kill-emacs':
+/// the handler notes the signal and a thread of its own calls WAKE, which
+/// a handler may not. `termination_signal' takes it.
+pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -> io::Result<()> {
+    use std::os::fd::IntoRawFd;
+    let (reader, writer) = pipe()?;
+    TERMINATION_PIPE.store(writer.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
+    std::thread::Builder::new().name("romacs-signals".into()).spawn(move || {
+        let mut byte = 0u8;
+        while unsafe { libc::read(std::os::fd::AsRawFd::as_raw_fd(&reader), (&raw mut byte).cast(), 1) } == 1 {
+            wake();
+        }
+    })?;
+    for signal in [libc::SIGTERM, libc::SIGHUP] {
+        effect(|| format!("handle signal {signal}"))?;
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = note_termination as *const () as usize;
+        action.sa_flags = libc::SA_RESTART;
+        unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+    }
+    Ok(())
+}
+
+/// The termination signal `catch_termination_signals' noted since the
+/// last call, taken; `pending' only looks.
+pub fn termination_signal(pending: bool) -> Option<i32> {
+    use std::sync::atomic::Ordering;
+    let signal = if pending { TERMINATION.load(Ordering::SeqCst) } else { TERMINATION.swap(0, Ordering::SeqCst) };
+    (signal != 0).then_some(signal)
+}
+
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
 pub fn eventfd() -> io::Result<OwnedFd> {
     effect(|| "eventfd".into())?;

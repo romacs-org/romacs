@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "feff44f0fc92e2e0739f31a0c97bf4fc4ac727047d670a36b49498a45e07bef7",
+    "input_hash": "9a69bce06f67fd1e0548ca7bd61f5bcef0417f8adeb5f5303a8e55b3ba5b4e9b",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 5019
+    "vm2_universe": 5052
   },
   "schema": 2,
   "vm2": {
-    "count": 1092,
+    "count": 1098,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -130,6 +130,8 @@
       "byte-to-position",
       "byte-to-string",
       "call-interactively",
+      "call-last-kbd-macro",
+      "cancel-kbd-macro-events",
       "capitalize",
       "capitalize-region",
       "car",
@@ -179,6 +181,7 @@
       "coding-system-priority-list",
       "coding-system-put",
       "color-values-from-color-spec",
+      "command-error-default-function",
       "command-modes",
       "command-remapping",
       "commandp",
@@ -277,6 +280,7 @@
       "encode-char",
       "encode-coding-string",
       "encode-time",
+      "end-kbd-macro",
       "end-of-line",
       "eobp",
       "eolp",
@@ -938,6 +942,8 @@
       "standard-case-table",
       "standard-category-table",
       "standard-syntax-table",
+      "start-kbd-macro",
+      "store-kbd-macro-event",
       "string",
       "string-as-multibyte",
       "string-as-unibyte",

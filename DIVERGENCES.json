@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "c8f024891d1b65bb6728991a1bb397a2cd7166bab2824d5fc7f4650d9c8215b0",
+  "input_hash": "f79d4b3b756fdfe08dc8a7c7695fb4b9463ab8e949475adc66f4633bc37a2623",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 288,
-  "symbols": 720,
+  "symbols": 727,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -338,7 +338,11 @@
    176
   ],
   "command-error-default-function": [
+   21,
    153
+  ],
+  "command-error-function": [
+   21
   ],
   "command-execute": [
    69
@@ -474,7 +478,19 @@
   "daemonp": [
    189
   ],
+  "debug-ignored-errors": [
+   21
+  ],
   "debug-on-error": [
+   21
+  ],
+  "debug-on-quit": [
+   21
+  ],
+  "debug-on-signal": [
+   21
+  ],
+  "debugger": [
    21
   ],
   "decode-coding-string": [
@@ -1055,6 +1071,9 @@
   "indirect-variable": [
    244
   ],
+  "inhibit-debugger": [
+   21
+  ],
   "inhibit-file-name-handlers": [
    268
   ],
@@ -1134,6 +1153,9 @@
   "internal-show-cursor": [
    243,
    246
+  ],
+  "internal-when-entered-debugger": [
+   21
   ],
   "interpreted-function-p": [
    42,
@@ -2101,6 +2123,7 @@
    261
   ],
   "signal-hook-function": [
+   21,
    94
   ],
   "skip-chars-backward": [
@@ -2671,7 +2694,7 @@
    "planned": false,
    "mechanism": "`do-auto-save`",
    "gnu": "`fileio.c:6315` runs `auto-save-hook` safely, writes `auto-save-list-file-name` with stdio, auto-saves each modified buffer (those without a `write-region` handler first) with `auto_saving` set (the visited file's mode, `utf-8-emacs` unless into the visited file, no lock, no fsync), reports an error through `display-warning`, disables a buffer that shrank a lot, and is also run by the command loop after `auto-save-interval` events or `auto-save-timeout` idle seconds (`record_auto_save` resets that count).",
-   "romacs": "The subr's loop is a Lisp transcription (`rlisp/vm/auto-save.el`) over native `romacs--auto-save-1` (auto_save_1), `romacs--auto-save-done`, `romacs--auto-save-failure-time` and `romacs--write-auto-save-list`; `write-region` honours the auto-saving state as GNU's does. The message stack is kept as the current message. The command loop does not auto-save by event count or idle time, so only explicit `do-auto-save` calls auto-save. Where GNU's C calls `write-region`, `file-modes` or `restore-buffer-modified-p` directly, Romacs calls them as Lisp functions, so advice on them applies.",
+   "romacs": "The subr's loop is a Lisp transcription (`rlisp/vm/auto-save.el`) over native `romacs--auto-save-1` (auto_save_1), `romacs--auto-save-done`, `romacs--auto-save-failure-time` and `romacs--write-auto-save-list`; `write-region` honours the auto-saving state as GNU's does. The message stack is kept as the current message. Where GNU's C calls `write-region`, `file-modes` or `restore-buffer-modified-p` directly, Romacs calls them as Lisp functions, so advice on them applies.",
    "why": "`tests/real_ert_load.rs` `fileio_defuns_match_gnu` compares an auto-save, its list file and modes with pinned GNU.",
    "symbols": [
     "do-auto-save",
@@ -2827,12 +2850,21 @@
    "section": "Native leaf batch boundaries",
    "observable": false,
    "planned": false,
-   "mechanism": "`debug-on-error` execution",
-   "gnu": "C variable controls debugger entry when applicable errors escape.",
-   "romacs": "Variable value/default/special/dynamic-binding contract is implemented, but the VM does not enter GNU's debugger.",
-   "why": "C variable port only, not a debugger subsystem. Recorded variable probes accompany internal-make-var-non-special in primh; target assertion LEAF_DEBUG_DEFAULT.",
+   "mechanism": "The debugger on the signal path, and the command loop's error report",
+   "gnu": "eval.c `signal_or_quit` considers the debugger for an error with `debug-on-signal`, when no handler catches it, or when the catching clause lists `debug` or is C's `error` (the command loop's and top level's); `maybe_call_debugger` then asks `inhibit-debugger`, `debug-on-error` (or `debug-on-quit`), `debug-ignored-errors` and once per input event, and `call_debugger` applies `debugger` to `(error ERROR)`. keyboard.c `cmd_error` passes the error, its macro context and `Vsignaling_function` (the frame below the top one at the signal, past `error`) to `command-error-function`, whose default rings the bell and prints the message to the echo area, *Messages* logging the caller before it",
+   "romacs": "The same rule in `threaded_signal.rs` `debugger_wanted` for every signal, those primitives raise included, with the rest in `romacs--call-debugger-p` (rlisp/vm/prelude.el) and the call in the signal path's own form, so the debugger's frame sits on the signalling one; the command loop's and batch top level's catch-all is `(debug t)` (rlisp/vm/keyboard.el, `crates/romacs-vm-gui/src/batch.rs`), and its report is `command-error-function` with the caller a `handler-bind` reads from the frames (`romacs--note-signaling-function`). Different: (1) a quit is never continued: a debugger returning from one lets it unwind, where GNU resumes code that `maybe_quit` stopped (C-g is no asynchronous quit, VM2-HOSTIN1); (2) batch top level prints no backtrace for each error (top_level_2's `debug-early--handler`, VM2-ERRTEXT1); (3) the caller *Messages* names comes from Romacs's frames, which record every primitive call: where pinned GNU's byte code inlines a primitive (`insert`, `forward-char`, `goto-char` in compiled code) or its native code calls one, GNU names the caller one level further out; a `signal` frame under `error` or `user-error` is skipped, as pinned GNU's native-compiled subr.el records none",
+   "why": "**Visible to the user** in *Messages* for (3). `crates/romacs-vm/tests/debugger_entry.rs` (32 cases against pinned GNU batch); `crates/romacs-vm-gui/harness/command_errors_live.py` against pinned GNU pgtk: command errors' echo, *Messages* and bells, M-: (car 1) and a `debug-on-error` command entering *Backtrace*, q and c",
    "symbols": [
-    "debug-on-error"
+    "debug-on-error",
+    "debug-on-signal",
+    "debug-on-quit",
+    "debug-ignored-errors",
+    "debugger",
+    "inhibit-debugger",
+    "internal-when-entered-debugger",
+    "signal-hook-function",
+    "command-error-function",
+    "command-error-default-function"
    ],
    "symbols_derived": false
   },
@@ -3658,7 +3690,7 @@
    "planned": false,
    "mechanism": "Command loop and keyboard macros: `execute-kbd-macro`, `recursive-edit`, `read-key-sequence`, `read-event`, `read-char`, `read-char-exclusive`",
    "gnu": "GNU's `command_loop_1`, `read_key_sequence` and `read_char` (`src/keyboard.c`) and `Fexecute_kbd_macro` (`src/macros.c:276`) are C. In batch with no unread event and no macro input left, `read_char` waits for the terminal indefinitely. `read_key_sequence` applies `input-decode-map`, `local-function-key-map`/`function-key-map` and `key-translation-map`, echoes keystrokes, runs `help-form` on the help character, and rewrites mouse down/drag events; `recent-keys` records every event shape",
-   "romacs": "VM2 runs them in Lisp (`rlisp/vm/keyboard.el`, installed with the minibuffer's half on first use) behind Rust entry points (`src/prims/keyboard.rs`), in GNU's order: hooks through `safe_run_hooks`, `command-execute`, `this-command-keys` bookkeeping, macro index and `kbd-macro-termination-hook`, `minibuffer-quit` only caught by the macro. Different: (1) with no unread event, no macro input and no host keyboard, a read signals `(end-of-file \"Error reading from stdin\")`, thrown out of the innermost recursive edit or minibuffer when there is one, instead of blocking; with SECONDS it returns nil at once and never waits on the host keyboard; (2) no echo, `help-form`, menus or down/drag rewriting; GNU's key translation maps (a pending prefix in any of them keeps the sequence open), unbound upper-case/shift fallback, mouse-area prefix keys, default bindings and remapping are kept, and `input-decode-map` and `local-function-key-map` are global rather than per terminal; (3) `recent-keys` records characters, symbol events and symbol commands only; (4) `read_char` takes `unread-post-input-method-events`, `unread-command-events` and `unread-input-method-events` in GNU's order, but no input method runs: `input-method-function` is never called; `input-pending-p` and `discard-input` see only `unread-command-events`; (5) without simple.el and subr.el (a bare VM) minimal `command-execute` and `undefined` stand in; (6) no point adjustment after a command, `delayed-warnings-hook`, PRIMARY selection update, or `defining-kbd-macro` recording; (7) a wait for the host keyboard runs one timer_check pass per round and checks requeued input and SECONDS before it blocks, so a timer that reschedules itself at once delays neither a key nor SECONDS; pinned GNU, `-nw` and batch, reads the key but answers SECONDS only once the rescheduling stops",
+   "romacs": "VM2 runs them in Lisp (`rlisp/vm/keyboard.el`, installed with the minibuffer's half on first use) behind Rust entry points (`src/prims/keyboard.rs`), in GNU's order: hooks through `safe_run_hooks`, `command-execute`, `this-command-keys` bookkeeping, macro index and `kbd-macro-termination-hook`, `minibuffer-quit` only caught by the macro. Different: (1) with no unread event, no macro input and no host keyboard, a read signals `(end-of-file \"Error reading from stdin\")`, thrown out of the innermost recursive edit or minibuffer when there is one, instead of blocking; with SECONDS it returns nil at once and never waits on the host keyboard; (2) no echo, `help-form`, menus or down/drag rewriting; GNU's key translation maps (a pending prefix in any of them keeps the sequence open), unbound upper-case/shift fallback, mouse-area prefix keys, default bindings and remapping are kept, and `input-decode-map` and `local-function-key-map` are global rather than per terminal; (3) `recent-keys` records characters, symbol events and symbol commands only; (4) `read_char` takes `unread-post-input-method-events`, `unread-command-events` and `unread-input-method-events` in GNU's order, but no input method runs: `input-method-function` is never called; `input-pending-p` sees `unread-command-events` and the host keyboard, `discard-input` only the former; (5) without simple.el and subr.el (a bare VM) minimal `command-execute` and `undefined` stand in; (6) no point adjustment after a command, `delayed-warnings-hook` or PRIMARY selection update; macros are defined as macros.c and record_char define them (`start-kbd-macro`, `end-kbd-macro`, `call-last-kbd-macro`, `store-kbd-macro-event`, `cancel-kbd-macro-events`, `discard-input` ending the definition), each command's keys joining the macro once it ran without leaving a prefix argument, so kmacro.el's C-x (, C-x ), C-x e, F3 and F4 work (`harness/command_errors_live.py` against pinned GNU pgtk); (7) a wait for the host keyboard runs one timer_check pass per round and checks requeued input and SECONDS before it blocks, so a timer that reschedules itself at once delays neither a key nor SECONDS; pinned GNU, `-nw` and batch, reads the key but answers SECONDS only once the rescheduling stops",
    "why": "**Package-observable** for code that reads past its macro input, relies on key translation or echo, or inspects recorded mouse events; (7) by `read-event` with SECONDS under such a timer, which returns on time. `crates/romacs-vm/tests/kbd_macro.rs`: 35 cases equal to pinned GNU batch and the end-of-input cases",
    "symbols": [
     "execute-kbd-macro",
@@ -3685,7 +3717,7 @@
    "planned": false,
    "mechanism": "Keyboard input read by a prompt in the middle of a command (GUI)",
    "gnu": "GNU `read_char` (`src/keyboard.c`) first takes `unread-command-events`, then a keyboard macro, then redisplays (skipped while input is pending, `detect_input_pending`) and blocks in `wait_reading_process_output`; `read_minibuf`'s recursive edit runs inside the suspended command on the native stack, and redisplay may run Lisp (mode-line `:eval`). C-g typed while Lisp runs sets `quit-flag` asynchronously and interrupts it. Deleting the last frame runs `handle-delete-frame`/`save-buffers-kill-emacs`. RET is the function key `return`, translated to 13 by `function-key-map`",
-   "romacs": "Same order: the command loop's `romacs--read-char` (`rlisp/vm/keyboard.el`, VM2-KBD1) takes `unread-command-events`, then the executing macro, then calls `romacs--read-host-event`, engine control like `eval` (`threaded.rs` `reentrant_load`): the suspended register stack leaves the collector's view and collection is inhibited for the wait, redisplay (`Vm::frame_snapshot`, mode-line `:eval` included) runs in its own engine, the embedder (`Vm::set_host_input`, `host_input.rs`; the GUI's `prompt.rs`) paints and blocks on its input channel; pending input skips the redisplay. Different: (1) two internal names are visible: function `romacs--read-host-event` and variable `romacs--host-input` (t while a host is attached); (2) **no asynchronous quit**: C-g is an ordinary key, seen only when a prompt reads it, so it cannot interrupt running Lisp; (3) closing the frame while a prompt waits signals `quit` (catchable); every later read in that command signals `quit` again without waiting, and the GUI exits when the command returns, with no `delete-frame-functions` or kill-emacs query; (4) none for Return: the GUI delivers it as the function key `return` (`native.rs`), as GNU's X and pgtk frames do, and `local-function-key-map` makes an unbound one RET (13) both here and in the GUI's command loop (`command.rs`), so C-j stays 10; (5) keys read from the host are recorded as VM2-KBD1 records them; (6) between commands the GUI's loop (`crates/romacs-vm-gui/src/main.rs`) runs the Lisp command loop for one command whenever a host key arrives or a Lisp unread queue holds an event, so a key Lisp read and pushed back (sit-for in a timer) runs as the next command, read as read_char reads it (VM2-KBD1)",
+   "romacs": "Same order: the command loop's `romacs--read-char` (`rlisp/vm/keyboard.el`, VM2-KBD1) takes `unread-command-events`, then the executing macro, then calls `romacs--read-host-event`, engine control like `eval` (`threaded.rs` `reentrant_load`): the suspended register stack leaves the collector's view and collection is inhibited for the wait, redisplay (`Vm::frame_snapshot`, mode-line `:eval` included) runs in its own engine, the embedder (`Vm::set_host_input`, `host_input.rs`; the GUI's `prompt.rs`) paints and blocks on its input channel; pending input skips the redisplay. Different: (1) two internal names are visible: function `romacs--read-host-event` and variable `romacs--host-input` (t while a host is attached); (2) **no asynchronous quit**: C-g is an ordinary key, seen only when a prompt reads it, so it cannot interrupt running Lisp; (3) closing the frame while a prompt waits signals `quit` (catchable), from a recursive edit or minibuffer by leaving it first (as end of input does, VM2-KBD1), so the command loop there, which reports every signal, does not read again; every later read in that command signals `quit` again without waiting, and the GUI exits when the command returns, with no `delete-frame-functions` or kill-emacs query; (4) none for Return: the GUI delivers it as the function key `return` (`native.rs`), as GNU's X and pgtk frames do, and `local-function-key-map` makes an unbound one RET (13) both here and in the GUI's command loop (`command.rs`), so C-j stays 10; (5) keys read from the host are recorded as VM2-KBD1 records them; (6) between commands the GUI's loop (`crates/romacs-vm-gui/src/main.rs`) runs the Lisp command loop for one command whenever a host key arrives or a Lisp unread queue holds an event, so a key Lisp read and pushed back (sit-for in a timer) runs as the next command, read as read_char reads it (VM2-KBD1)",
    "why": "**Package-observable**: (1) by `fboundp`/`boundp`; (2) by a long-running command (no `quit` arrives); (3) by `delete-frame-functions`/`kill-emacs-hook` not running; (5) as VM2-KBD1. Not observable: collection is deferred only for the duration of a wait (no Lisp allocates during it except redisplay's)",
    "symbols": [
     "romacs--read-host-event",
@@ -4106,7 +4138,7 @@
    "mechanism": "Lisp evaluation depth accounting and native stack exhaustion",
    "gnu": "GNU eval.c:2604-2609,3196-3201 checks the dynamically bound integer limit (default 1600, floor 100 on overflow), signals `(excessive-lisp-nesting DEPTH)`, and restores depth on unwind; bytecode.c:783-788 signals plain `error` at compiled call overflow. loadup.el:106 raises the limit to 4200 and :156 doubles it. eval.c:255-277 restores borrowed reserve from CURRENT limit/reserve values; signal_or_quit borrows 20 (eval.c:1969). Per level at limit 100, measured at the pin: interpreted code reaches 30 `eval`-reentry and 45 call levels, byte-compiled 48 and 96. GNU has no recoverable native-stack condition (a C stack overflow is caught and Emacs returns to top level, `keyboard.c:166-169,13426` \"Re-entering top level after C stack overflow\")",
    "romacs": "VM2 consults the forwarded limit at every Lisp activation and shares one budget across eval/load/macro engines; register storage grows and rebases; `eval`/load/lazy-compile/autoload reentry runs on heap stack segments grown on demand (`stacker`), so reentry depth is bounded by the Lisp counter, not by the thread stack. Separately (R193), every activation and every compiler `expr` step refuses when fewer than 256 KiB of native stack remain, with a recoverable `(error \"native stack exhausted during Lisp evaluation\")` or `... while compiling Lisp` (compiler recursion is refused, not grown). Accounting is GNU bytecode's: 50 and 99 levels at limit 100 (`tests/eval_depth.rs` `reentry_and_call_levels_follow_gnu_bytecode_accounting`). Measured sustainable depth (exactly 4200 and 8400 reached, then `excessive-lisp-nesting`): on the GUI evaluator's explicit 64 MiB stack for plain calls, `apply` and `run-hooks` recursion and `eval` reentry in debug, gate (optimized, no LTO) and release (LTO) builds; on a 2 MiB thread in debug and release for every shape. `signal-hook-function` borrows twenty levels from `lisp-eval-depth-reserve` (default 200), restoring on normal/error/throw exits",
-   "why": "**Package-observable:** (1) VM2 always signals `excessive-lisp-nesting`, also where GNU bytecode signals plain `error`; recursion reaches more levels than GNU's interpreter (50 vs 30, 99 vs 45). (2) GNU's debugger reserve borrower is not implemented. Returning `handler-bind` callbacks borrow 200 levels and restore the current limit/reserve after normal or nonlocal exit. (3) In the gap between the native guard and the Lisp limit -- reached only on small threads in optimized non-LTO builds (2 MiB: `apply` recursion refused before depth 4200, `run-hooks` before 8400; 8 MiB: 8400 reached) or with a raised limit (50000 levels on 2 MiB) -- code sees a plain `error` with that message instead of `excessive-lisp-nesting`, and a handler for `excessive-lisp-nesting` alone does not catch it; it is never a process abort. GNU's 4200/8400 loadup raises are effective at the GUI's 64 MiB. See `src/eval_depth.rs` and `tests/eval_depth.rs`.",
+   "why": "**Package-observable:** (1) VM2 always signals `excessive-lisp-nesting`, also where GNU bytecode signals plain `error`; recursion reaches more levels than GNU's interpreter (50 vs 30, 99 vs 45). (2) as GNU's, the debugger borrows 200 levels (VM2-LEAF-DEBUG), and returning `handler-bind` callbacks borrow 200 levels and restore the current limit/reserve after normal or nonlocal exit. (3) In the gap between the native guard and the Lisp limit -- reached only on small threads in optimized non-LTO builds (2 MiB: `apply` recursion refused before depth 4200, `run-hooks` before 8400; 8 MiB: 8400 reached) or with a raised limit (50000 levels on 2 MiB) -- code sees a plain `error` with that message instead of `excessive-lisp-nesting`, and a handler for `excessive-lisp-nesting` alone does not catch it; it is never a process abort. GNU's 4200/8400 loadup raises are effective at the GUI's 64 MiB. See `src/eval_depth.rs` and `tests/eval_depth.rs`.",
    "symbols": [
     "max-lisp-eval-depth",
     "lisp-eval-depth-reserve",
@@ -4282,7 +4314,7 @@
    "planned": false,
    "mechanism": "GUI open and save commands",
    "gnu": "`romacs FILE` and the desktop entry's `%F` visit FILE with `find-file` (startup.el `command-line-1`, files.el); GNU `find-buffer-visiting` checks expanded name, truename and revalidated file identifier. `C-x C-s` runs `save-buffer`, which makes backups, runs save hooks, checks visited modtime, routes conflicts through `ask-user-about-supersession-threat`, and clears modified state. GNU `kill-buffer` runs query functions, aborts on nil, runs the kill hook, detaches the buffer and repairs windows. Modification state compares SAVE_MODIFF with MODIFF, not text; real undo may explicitly restore clean via saved-modtime undo metadata",
-   "romacs": "While GNU files.el is unavailable the GUI uses explicitly named romacs adapters over native primitives. `romacs-gui-visit-file` uses native exact-name, saved-truename and revalidated device/inode identity, reusing hardlinks, symlinks, equivalent paths and direct Lisp native visits without losing edits. Failed GUI visits are cleared/killed rather than adopted as successful empty buffers. Startup consumes `+LINE[:COLUMN]` and `--`. Save is a no-op when native `buffer-modified-p` is nil; otherwise native stat-only `verify-visited-file-modtime` checks nanosecond time and recorded size, without disk-content reads. Conflicts install future-key y/n/C-g overwrite confirmation: y writes and refreshes metadata; n/C-g preserve both versions. Same modtime/size content changes are deliberately not interrogated, matching GNU. Removed files also prompt here, unlike GNU recreation policy. A dynamic mode-line `*`/`-` reflects native modification counters, including inverse edits to saved bytes. Existing GNU mode-line-format is preserved. C-x k now truly kills the captured buffer after y (clean buffers immediately), runs native query/hook lifecycle and honors vetoes; dead identities remain buffer objects, leave registries, detach markers/overlays and are replaced in windows. C-x C-c/native close confirm modified GUI visits, including hidden visits. Non-answer/prefix input or buffer switch cancels pending consent instead of GNU modal reprompting; GUI confirmation is an asynchronous adapter, not GNU userlock.el. Native kill lacks process/indirect/autosave/lock/update-hook lifecycle and GNU window-history policy (see crates/romacs-vm/GNU-DIVERGENCES.md). Native alias lookup is named `romacs-find-buffer-visiting`, not full GNU `find-buffer-visiting` predicate/handler support; noncurrent anonymous visits are not enumerated. No native undo record/replay, backups, save hooks or GNU interactive write echo. GNU display-column customization/ctl-arrow/C1 controls are not fully implemented for startup positions",
+   "romacs": "While GNU files.el is unavailable the GUI uses explicitly named romacs adapters over native primitives. `romacs-gui-visit-file` uses native exact-name, saved-truename and revalidated device/inode identity, reusing hardlinks, symlinks, equivalent paths and direct Lisp native visits without losing edits. Failed GUI visits are cleared/killed rather than adopted as successful empty buffers. Startup consumes `+LINE[:COLUMN]` and `--`. Save is a no-op when native `buffer-modified-p` is nil; otherwise native stat-only `verify-visited-file-modtime` checks nanosecond time and recorded size, without disk-content reads. Conflicts install future-key y/n/C-g overwrite confirmation: y writes and refreshes metadata; n/C-g preserve both versions. Same modtime/size content changes are deliberately not interrogated, matching GNU. Removed files also prompt here, unlike GNU recreation policy. A dynamic mode-line `*`/`-` reflects native modification counters, including inverse edits to saved bytes. Existing GNU mode-line-format is preserved. In the workspace without GNU Lisp (with it, C-x k is GNU's `kill-buffer`, which asks before killing a modified file buffer), C-x k now truly kills the captured buffer after y (clean buffers immediately), runs native query/hook lifecycle and honors vetoes; dead identities remain buffer objects, leave registries, detach markers/overlays and are replaced in windows. C-x C-c/native close confirm modified GUI visits, including hidden visits. Non-answer/prefix input or buffer switch cancels pending consent instead of GNU modal reprompting; GUI confirmation is an asynchronous adapter, not GNU userlock.el. Native kill lacks process/indirect/autosave/lock/update-hook lifecycle and GNU window-history policy (see crates/romacs-vm/GNU-DIVERGENCES.md). Native alias lookup is named `romacs-find-buffer-visiting`, not full GNU `find-buffer-visiting` predicate/handler support; noncurrent anonymous visits are not enumerated. No native undo record/replay, backups, save hooks or GNU interactive write echo. GNU display-column customization/ctl-arrow/C1 controls are not fully implemented for startup positions",
    "why": "**User-observable and package-observable**: ordinary supersession, confirmed/vetoed kill, hardlink reuse and counter-based modified indication are implemented. Packages can call native get-file-buffer, modified-state and kill primitives, but do not acquire GNU save-buffer/find-file/userlock/undo Lisp through these adapters. Exact timestamp, callback-list mutation, omitted kill subsystems and alias lookup limits remain observable. A reverse edit remains modified; a real GNU undo-to-save may become clean and cannot yet run in VM2. Interactive GNU write messages and FIFO no-reader/deadline behavior remain deliberate divergences described in VM2-FILEIO1.",
    "symbols": [
     "find-file",
@@ -6263,8 +6295,8 @@
    "planned": false,
    "mechanism": "`emacs --batch` command line and `kill-emacs`",
    "gnu": "GNU emacs.c takes `--batch`, startup.el `command-line` the leading options (`-Q`, `-q`, `--no-site-file`, ...), then `command-line-1` runs `-L`, `-l`, `-f`, `--eval` and the rest and `(kill-emacs t)` ends the session (`lisp/startup.el:1748-1751`); an uncaught error goes to `command-error-function`, whose batch default prints it and exits 255. `Fkill_emacs` (`src/emacs.c:2953`) runs `kill-emacs-hook` (safe_run_hooks in batch), stuffs a string ARG as terminal input, re-executes Emacs for RESTART, and exits with an integer ARG's code, else success",
-   "romacs": "`romacs-vm-gui [-Q] --batch ARGS...` runs the GNU-loadup chain `--loadup` shares with the batch package runner, on GNU's 80x25 batch frame, takes the same leading options, then GNU's own `command-line-1` over the rest, then `(kill-emacs t)`; errors reach `command-error-function` as keyboard.c cmd_error sends them. The rest of `command-line` is not run: no `site-run-file` load and no package activation (a batch session loads no init file either). `--batch RLISP_DIRECTORY` stays Romacs's stdin test runner. `kill-emacs` (`src/prims/emacs.rs`) runs the hook as safe_run_hooks in every session, exits 0 for a string ARG, refuses RESTART, and without a session host (a library embedder, `romacs-gnu-ert`) signals `VM2 kill-emacs without a session host is unsupported`; only the batch entry attaches one so far, so the GUI quits through its own `romacs-gui-quit`. `romacs-gnu-ert --invocation EMACS` names the executable its tests spawn as `invocation-name`. `-nw` (a terminal session) is not a batch command line and stays refused",
-   "why": "**Package-observable**: a spawned batch child starts in about 10 s (the chain from source) where GNU's takes 0.1 s, so a caller with a short deadline fails (gnosis waits 15 s for model preparation); `kill-emacs` in the GUI signals. `crates/romacs-vm-gui/tests/batch_command_line.rs` compares exit statuses and output with pinned GNU for `-L`/`-l`/`-f`/`--eval`, `command-line-args-left`, `kill-emacs-hook` and an uncaught error (its message; the batch backtrace is VM2-ERRTEXT1); `tests/kill_emacs.rs` covers the hook, codes and refusals",
+   "romacs": "`romacs-vm-gui [-Q] --batch ARGS...` runs the GNU-loadup chain `--loadup` shares with the batch package runner, on GNU's 80x25 batch frame, takes the same leading options, then GNU's own `command-line-1` over the rest, then `(kill-emacs t)`; errors reach `command-error-function` as keyboard.c cmd_error sends them. The rest of `command-line` is not run: no `site-run-file` load and no package activation (a batch session loads no init file either). `--batch RLISP_DIRECTORY` stays Romacs's stdin test runner. `kill-emacs` (`src/prims/emacs.rs`) runs the hook as safe_run_hooks in batch and through `run-hook-query-error-with-timeout` interactively, as GNU does, exits 0 for a string ARG, refuses RESTART, and without a session host (a library embedder, `romacs-gnu-ert`) signals `VM2 kill-emacs without a session host is unsupported`. The batch entry and the live GUI attach one; the GUI's drops the VM, hanging up its children as shut_down_emacs does, closes the window and exits with the status, so C-x C-c (`save-buffers-kill-emacs`) asks to save, runs `kill-emacs-query-functions` and `kill-emacs-hook` and exits as GNU does (`harness/command_errors_live.py`). The workspace GUI without GNU Lisp quits through its own `romacs-gui-quit`. `romacs-gnu-ert --invocation EMACS` names the executable its tests spawn as `invocation-name`. `-nw` (a terminal session) is not a batch command line and stays refused",
+   "why": "**Package-observable**: a spawned batch child starts in about 10 s (the chain from source) where GNU's takes 0.1 s, so a caller with a short deadline fails (gnosis waits 15 s for model preparation). `crates/romacs-vm-gui/tests/batch_command_line.rs` compares exit statuses and output with pinned GNU for `-L`/`-l`/`-f`/`--eval`, `command-line-args-left`, `kill-emacs-hook` and an uncaught error (its message; the batch backtrace is VM2-ERRTEXT1); `tests/kill_emacs.rs` covers the hook, codes and refusals",
    "symbols": [
     "kill-emacs",
     "kill-emacs-hook",
