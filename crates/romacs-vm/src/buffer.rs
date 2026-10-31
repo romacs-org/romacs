@@ -771,6 +771,7 @@ impl Vm {
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
+                a.local_keymap = b.local_keymap;
                 Some(Object::Buffer(Box::new(a)))
             }
             _ => None,
@@ -794,6 +795,7 @@ impl Vm {
         b.state = t.state.clone();
         b.per_buffer = t.per_buffer.clone();
         b.case_tables = t.case_tables;
+        b.local_keymap = t.local_keymap;
         b.anchors = (*t.anchors).clone();
         Ok(b)
     }
@@ -1039,6 +1041,7 @@ mod tests {
             syntax_table: Value::NIL,
             category_table: Value::NIL,
             case_tables: [Value::NIL; 4],
+            local_keymap: Value::NIL,
             bytes: vec![0xce, 0xbb],
             point: ByteOffset(1),
             restriction: ByteOffset(0)..ByteOffset(2),

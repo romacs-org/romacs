@@ -335,6 +335,7 @@ impl Leaf<'_> {
                 b.state = t.state.clone();
                 b.per_buffer = t.per_buffer.clone();
                 b.case_tables = t.case_tables;
+                b.local_keymap = t.local_keymap;
                 // Its markers, all at its start, live in the unibyte buffer
                 // meanwhile; the held buffer keeps its overlays.
                 let mut held = t.clone();
@@ -354,6 +355,7 @@ impl Leaf<'_> {
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
+                a.local_keymap = b.local_keymap;
                 a.syntax_table = b.syntax_table;
                 a.category_table = b.category_table;
                 data::Object::Buffer(Box::new(a))

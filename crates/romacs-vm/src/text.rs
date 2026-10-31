@@ -151,6 +151,7 @@ impl Text {
             syntax_table: self.syntax_table,
             category_table: self.category_table,
             case_tables: [Value::NIL; 4],
+            local_keymap: Value::NIL,
             point: self.point,
             restriction: self.restriction.clone(),
             anchors: crate::anchors::AnchorTree::new(u32::try_from(self.len_bytes()).expect("buffer exceeds anchor coordinate limit")),
