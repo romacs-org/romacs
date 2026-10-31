@@ -89,12 +89,14 @@ pub enum Launch<T> {
 }
 
 /// Why the arena refused an image, for a launch's reason: a range the
-/// process could not map says at which step and with what error.
+/// process could not map says at which step, with what error, and whether
+/// the range was reserved (not under an address-space limit, nor where
+/// something was mapped before the process's first allocation).
 fn refusal(refused: arena::Restore) -> Json {
     match arena::map_failure() {
-        Some((step, errno)) if refused == arena::Restore::Map => {
+        Some((step, errno, reserved)) if refused == arena::Restore::Map => {
             let error = (errno != 0).then(|| std::io::Error::from_raw_os_error(errno).to_string());
-            json!({"image": "Map", "step": step, "error": error})
+            json!({"image": "Map", "step": step, "error": error, "reserved": reserved})
         }
         _ => json!({"image": format!("{refused:?}")}),
     }
