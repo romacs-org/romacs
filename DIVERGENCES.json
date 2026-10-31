@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "a19c2939b3f9dd9f37a756cb1dd9c291e9211edb86cc8d3b55ed6ad09ebdbfdb",
+  "input_hash": "ef2fa6c4df6be6f0583ab65216704734c9032c0f9d5710f40df9039b0d66289d",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 296,
-  "symbols": 806,
+  "rows": 297,
+  "symbols": 807,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -69,7 +69,7 @@
    80
   ],
   "[:class:]": [
-   295
+   296
   ],
   "\\": [
    215
@@ -148,7 +148,8 @@
    57
   ],
   "autoload": [
-   256
+   256,
+   286
   ],
   "autoload-do-load": [
    256,
@@ -485,6 +486,9 @@
   "current-window-configuration": [
    200
   ],
+  "custom-reevaluate-setting": [
+   286
+  ],
   "custom-set": [
    150
   ],
@@ -555,8 +559,8 @@
    139,
    140,
    165,
-   287,
-   291
+   288,
+   292
   ],
   "define-category": [
    245
@@ -699,7 +703,7 @@
    279
   ],
   "downcase_char_code_emacs_compat": [
-   294
+   295
   ],
   "elt": [
    29,
@@ -714,7 +718,7 @@
    173
   ],
   "emacs_downcase_compat": [
-   294
+   295
   ],
   "enable-recursive-minibuffers": [
    265
@@ -827,23 +831,23 @@
    137,
    138,
    139,
-   287,
    288,
-   291
+   289,
+   292
   ],
   "face-family": [
    135,
-   290
+   291
   ],
   "face-font": [
    134,
-   289
+   290
   ],
   "face-remapping-alist": [
    129,
    138,
    139,
-   293
+   294
   ],
   "featurep": [
    98,
@@ -1435,7 +1439,8 @@
   ],
   "load-path": [
    98,
-   99
+   99,
+   286
   ],
   "load-source-file-function": [
    113
@@ -2105,11 +2110,12 @@
    256,
    268,
    269,
-   270
+   270,
+   286
   ],
   "reset": [
    137,
-   286
+   287
   ],
   "resize-mini-windows": [
    277
@@ -2254,10 +2260,10 @@
    133,
    134,
    135,
-   288,
    289,
    290,
-   292
+   291,
+   293
   ],
   "set-file-acl": [
    10
@@ -2339,10 +2345,10 @@
    100
   ],
   "skip-chars-backward": [
-   295
+   296
   ],
   "skip-chars-forward": [
-   295
+   296
   ],
   "sleep-for": [
    188
@@ -7847,6 +7853,24 @@
    "romacs": "A world image is the heap of the process that built it, mapped back at its own addresses (`world::arena`): the arena's address is random per world, not per process. Everything else a world process maps keeps address randomization, the executable too. The image addresses only read-only data of the builder's executable (literals, constant tables, vtables); a restored process maps a read-only copy of those segments where the builder had them and leaves the rest of that range inaccessible, so an image holds no code address that could be followed.",
    "why": "Not package-observable. Someone who can read the world store learns where a world process keeps its heap; `ROMACS_WORLD=off` boots from source, with a heap at a per-process random address. The store defends against accidental change, not against a writer with the user's own permissions: a world is refused and rebuilt after a truncated or partly written image, an interrupted build, an upgraded binary or library (keyed by content and by each library's build-id and mapped constant bytes), and corruption that changes a file's identity or times. It deliberately does not detect a same-user writer, who can already edit the user's init file, the store's images and the binaries themselves (one can, say, record an old digest under a damaged image's metadata); bit rot that leaves size and times unchanged, since the image and executable digests are cached by file identity; or writes to a mapped image or library after it was checked.",
    "symbols": [],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-WORLD3",
+   "source": "DIVERGENCES.md",
+   "section": "World snapshots",
+   "observable": false,
+   "planned": false,
+   "mechanism": "The libraries a user's init loads, in a VM restored from a world",
+   "gnu": "GNU dumps only its own preloaded Lisp; every library the init requires loads from source or bytecode in each session, and its load-time `defcustom`, `defvar` and `defconst` forms evaluate in that process (`executable-find`, `locate-user-emacs-file`, `(getenv ...)`).",
+   "romacs": "A live `--loadup` launch that loads the init restores the init's layer when the store holds one (`romacs_vm::world::layer`, `crates/romacs-vm-gui/src/world.rs`): the base world plus the libraries the init's recorded plan loads, replayed after the chain under each entry's recorded `load-path`. The plan is the `require` and autoload calls the init itself issued, recorded while it ran; a launch without a current layer boots from the base world, records the plan again and builds the layer ahead of the next launch. A layer's definition form that reads a per-process fact is kept and evaluated again at restore (`romacs--world-reseed-forms`: a `defcustom` through `custom-reevaluate-setting`, the others by their value form), as GNU's delayed init re-evaluates its dumped options; a definition a refused effect cuts short (a `make-directory`) is deferred whole. Any other form's such read, an effect, a signal or a timer left behind refuses its entry, which then loads from source as before. The startup function runs again in the builder after the libraries, as a restored process runs it after them, and must compute what it computed before them.",
+   "why": "**Package-observable** in four ways. A library's load-time code sees the standard value of a variable the init sets before requiring it, since the layer loaded the library first (the init's own `setq` still applies after). A hook function a library adds when it loads precedes, in `add-hook`'s order, the ones the init adds, where a source session has the init's first (`kill-emacs-hook`: the init's savers run before org-persist's). A library's load-time code runs with the chain's initial terminal, not the session's display: `window-system` and `display-graphic-p` answer nil there, where a source session's library finds the pgtk frame (`noninteractive` is nil in both). A `require` the init issues only under a condition that differs between sessions is replayed from the previous session's plan: the layer may hold a library this session's init would not have loaded; the next launch plans afresh. A library edit, a package update, a changed `load-path`, an edited init, another build or another base world rebuilds or bypasses the layer: every file a layer build read is a keyed record of its manifest, the plan's digest and the base world's key are in the layer's key, and the init's content digest is checked at the launch. `ROMACS_WORLD=off` boots from source.",
+   "symbols": [
+    "require",
+    "autoload",
+    "custom-reevaluate-setting",
+    "load-path"
+   ],
    "symbols_derived": false
   },
   {
