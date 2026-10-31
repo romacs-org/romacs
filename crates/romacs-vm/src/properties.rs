@@ -500,6 +500,38 @@ impl Tree {
                 .or_else(|| left.last_different(base, at, value)),
         }
     }
+    /// A copy of START..END of the runs, visiting only the subtrees
+    /// inside it.
+    fn copy_range(&self, start: usize, end: usize, work: &mut usize) -> Link {
+        let end = end.min(self.len());
+        if start >= end {
+            return None;
+        }
+        *work += 1;
+        if start == 0 && end == self.len() {
+            return Some(Box::new(self.clone()));
+        }
+        match self {
+            Self::Leaf(runs, ..) => {
+                let mut p = 0;
+                let mut out = Vec::new();
+                for r in runs {
+                    let (a, b) = (p.max(start), (p + r.len as usize).min(end));
+                    if a < b {
+                        out.push(Run { len: (b - a) as u32, ..*r });
+                    }
+                    p += r.len as usize;
+                }
+                Some(Box::new(Self::leaf(out)))
+            }
+            Self::Branch { left, right, .. } => {
+                let n = left.len();
+                let a = left.copy_range(start, end.min(n), work);
+                let b = right.copy_range(start.saturating_sub(n), end.saturating_sub(n), work);
+                Self::join(a, b, work)
+            }
+        }
+    }
     /// The run holding `at` and its start.
     fn run_at(&self, at: usize) -> Option<(usize, Run)> {
         let mut base = 0;
@@ -856,8 +888,7 @@ impl Properties {
                 continue;
             }
             let mut work = 0;
-            let (_, suffix) = Tree::split(root.clone(), range.start.0, &mut work);
-            let (part, _) = Tree::split(suffix, range.end.0.min(len) - range.start.0, &mut work);
+            let part = root.as_ref().and_then(|n| n.copy_range(range.start.0, range.end.0, &mut work));
             if part.as_ref().is_some_and(|n| n.present() != 0) {
                 out.layers.insert(key.clone(), part);
             }

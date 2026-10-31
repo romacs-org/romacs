@@ -240,3 +240,29 @@ fn previous_change_matches_the_per_byte_oracle() {
         }
     }
 }
+#[test]
+fn slice_matches_the_per_byte_oracle() {
+    let mut p = Properties::new();
+    let len = 600;
+    let mut seed = 5u64;
+    for i in 0..400 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let start = seed as usize % len;
+        let end = (start + 1 + ((seed >> 20) as usize % 30)).min(len);
+        let name = ["face", "fontified"][(seed >> 32) as usize % 2];
+        p.put(ByteOffset(start)..ByteOffset(end), name, Value::integer(i).unwrap());
+        let a = (seed >> 41) as usize % (len + 10);
+        let b = (a + ((seed >> 50) as usize % 300)).min(len + 10);
+        let part = p.slice(ByteOffset(a)..ByteOffset(b));
+        for tree in part.layers.values().flatten() {
+            check(tree);
+        }
+        for at in 0..b.saturating_sub(a) + 5 {
+            for name in ["face", "fontified"] {
+                let expected = if a + at < b { p.get_property(ByteOffset(a + at), name) } else { None };
+                assert_eq!(part.get_property(ByteOffset(at), name), expected, "operation {i} slice {a}..{b} at {at} {name}");
+            }
+        }
+        assert_eq!(part.properties_at(ByteOffset(0)), if a < b { p.properties_at(ByteOffset(a)) } else { vec![] });
+    }
+}
