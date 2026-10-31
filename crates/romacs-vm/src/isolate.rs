@@ -327,6 +327,9 @@ impl Vm {
         if let Some(parent) = &self.isolates.parent && !parent.closed {
             fds.push((parent.socket.as_raw_fd(), libc::POLLIN));
         }
+        if self.isolates.parent.is_some() && let Some(wake) = crate::host::isolate_wake_fd() {
+            fds.push((wake, libc::POLLIN));
+        }
         for worker in self.isolates.workers.values() {
             if !worker.peer.closed { fds.push((worker.peer.socket.as_raw_fd(), libc::POLLIN)); }
             if worker.status.is_none() && let Some(pidfd) = &worker.pidfd { fds.push((pidfd.as_raw_fd(), libc::POLLIN)); }
@@ -349,6 +352,10 @@ impl Vm {
         }
         let ready = crate::subprocess::poll(&fds, timeout).map_err(|e| e.to_string())?;
         let ready: Vec<RawFd> = fds.iter().zip(ready).filter(|(_, r)| *r != 0).map(|((fd, _), _)| *fd).collect();
+        if let Some(wake) = crate::host::isolate_wake_fd() && ready.contains(&wake) {
+            crate::host::drain_isolate_wake();
+        }
+        let interrupted = interrupted || crate::host::interrupt_pending();
         if ready.is_empty() { return Ok(interrupted); }
         if let Some(parent) = &mut self.isolates.parent && ready.contains(&parent.socket.as_raw_fd()) {
             parent.drain(|_, _, _| {}).map_err(|e| e.to_string())?;
