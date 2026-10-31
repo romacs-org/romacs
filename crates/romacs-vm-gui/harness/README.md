@@ -230,8 +230,12 @@ the machine:
   `M-:`;
 * quitting.
 
-It has 101 compared steps; a replay with the GNU side cached takes about 7
-minutes.  It leaves out list-packages, which would need the network.
+It has 94 compared steps; a replay with the GNU side cached takes about 5
+minutes.  Every call drives both engines with the same keys: a Romacs
+failure shows in the steps after it rather than being worked around, so
+the recording needs no change when it is fixed.  A `--gnu-cache` must come
+from a live run of this same recording, since compares are matched by
+order.  It leaves out list-packages, which would need the network.
 
 `recordings/daily-journey.jsonl`, on the `owner` profile, is the owner's
 daily journey: find-file
