@@ -8,7 +8,8 @@ use crate::syntax_scan::{self as scan, Halt, ParseState, Pos, Scanner};
 use std::collections::BTreeMap;
 
 enum Body<'a> {
-    Multibyte(&'a crate::text::Text, &'a str),
+    /// The text, its str, and a reader of its `syntax-table' properties.
+    Multibyte(&'a crate::text::Text, &'a str, crate::properties::KeyReader<'a>),
     Unibyte(&'a crate::bytes::ByteBuffer),
 }
 
@@ -23,7 +24,9 @@ struct View<'a> {
     body: Body<'a>,
     table: Value,
     properties: bool,
-    ascii: [i32; 128],
+    /// Memo of the ASCII codes this scan has read: a scan reads a few,
+    /// and each read walks the table and its parents.
+    ascii: [std::cell::Cell<Option<i32>>; 128],
     replay: Vec<i32>,
     read: std::cell::RefCell<Vec<i32>>,
 }
@@ -43,24 +46,23 @@ impl<'a> View<'a> {
         let body = match &vm.objects[index] {
             data::Object::Buffer(b) => {
                 let text: &crate::text::Text = b;
-                Body::Multibyte(text, text.as_str())
+                Body::Multibyte(text, text.as_str(), text.properties.reader("syntax-table"))
             }
             data::Object::ByteBuffer(b) => Body::Unibyte(b),
             _ => unreachable!("buffer_index validates"),
         };
-        let mut ascii = [0; 128];
-        for (c, code) in ascii.iter_mut().enumerate() { *code = entry_code(vm, table, c as u32); }
+        let ascii = std::array::from_fn(|_| std::cell::Cell::new(None));
         Self { vm, body, table, properties, ascii, replay: Vec::new(), read: Default::default() }
     }
     fn len(&self) -> usize {
         match self.body {
-            Body::Multibyte(_, text) => text.len(),
+            Body::Multibyte(_, text, _) => text.len(),
             Body::Unibyte(b) => b.bytes.len(),
         }
     }
     fn property(&self, byte: usize) -> Option<Value> {
         match self.body {
-            Body::Multibyte(t, _) => t.properties.get_property(ByteOffset(byte), "syntax-table"),
+            Body::Multibyte(_, _, ref reader) => reader.get(ByteOffset(byte)),
             Body::Unibyte(b) => b.properties.get(&ByteOffset(byte)).and_then(|p| p.get("syntax-table")).copied(),
         }
     }
@@ -69,7 +71,7 @@ impl<'a> View<'a> {
 impl scan::Text for View<'_> {
     fn char_at(&self, at: Pos) -> u32 {
         match self.body {
-            Body::Multibyte(t, _) => t.character_at(ByteOffset(at.byte)).ok().flatten().map_or(0, |c| c as u32),
+            Body::Multibyte(t, _, _) => t.character_at(ByteOffset(at.byte)).ok().flatten().map_or(0, |c| c as u32),
             Body::Unibyte(b) => b.bytes.get(at.byte).map_or(0, |&byte| {
                 if byte < 128 { u32::from(byte) } else { u32::from(byte) + crate::lstring::BYTE8_OFFSET }
             }),
@@ -78,21 +80,21 @@ impl scan::Text for View<'_> {
     fn inc(&self, at: Pos) -> Pos {
         let width = match self.body {
             // A placeholder's UTF-8 width is its raw byte's internal width.
-            Body::Multibyte(_, text) => text.get(at.byte..).and_then(|s| s.chars().next()).map_or(1, char::len_utf8),
+            Body::Multibyte(_, text, _) => text.get(at.byte..).and_then(|s| s.chars().next()).map_or(1, char::len_utf8),
             Body::Unibyte(_) => 1,
         };
         Pos { char: at.char + 1, byte: at.byte + width }
     }
     fn dec(&self, at: Pos) -> Pos {
         let mut byte = at.byte.saturating_sub(1).min(self.len());
-        if let Body::Multibyte(_, text) = self.body {
+        if let Body::Multibyte(_, text, _) = self.body {
             while byte > 0 && !text.is_char_boundary(byte) { byte -= 1; }
         }
         Pos { char: at.char - 1, byte }
     }
     fn pos(&self, charpos: i64) -> Pos {
         match self.body {
-            Body::Multibyte(t, text) => {
+            Body::Multibyte(t, text, _) => {
                 let chars = t.len_chars() as i64;
                 let c = charpos.clamp(1, chars + 1);
                 let byte = t.byte_of_char(CharOffset(c as usize - 1)).map_or(text.len(), |b| b.0);
@@ -114,7 +116,8 @@ impl scan::Text for View<'_> {
         syntax
     }
     fn table_syntax(&self, c: u32) -> i32 {
-        if c < 128 { self.ascii[c as usize] } else { entry_code(self.vm, self.table, c) }
+        let Some(memo) = self.ascii.get(c as usize) else { return entry_code(self.vm, self.table, c) };
+        memo.get().unwrap_or_else(|| { let code = entry_code(self.vm, self.table, c); memo.set(Some(code)); code })
     }
 }
 

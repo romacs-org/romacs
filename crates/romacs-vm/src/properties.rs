@@ -500,12 +500,58 @@ impl Tree {
                 .or_else(|| left.last_different(base, at, value)),
         }
     }
+    /// The run holding `at` and its start.
+    fn run_at(&self, at: usize) -> Option<(usize, Run)> {
+        let mut base = 0;
+        let mut node = self;
+        loop {
+            match node {
+                Self::Leaf(v, ..) => {
+                    for r in v {
+                        if at < base + r.len as usize {
+                            return Some((base, *r));
+                        }
+                        base += r.len as usize;
+                    }
+                    return None;
+                }
+                Self::Branch { left, right, .. } => {
+                    if at < base + left.len() {
+                        node = left;
+                    } else {
+                        base += left.len();
+                        node = right;
+                    }
+                }
+            }
+        }
+    }
     fn storage(&self) -> usize {
         size_of::<Self>()
             + match self {
                 Self::Leaf(v, ..) => v.capacity() * size_of::<Run>(),
                 Self::Branch { left, right, .. } => left.storage() + right.storage(),
             }
+    }
+}
+
+/// One key's values for many reads: [`Properties::get_property`] without
+/// the key's lookup, remembering the run it read last.
+pub(crate) struct KeyReader<'a> {
+    root: Option<&'a Tree>,
+    /// The last run read: its start, end and value.
+    run: std::cell::Cell<(usize, usize, Option<Value>)>,
+}
+impl KeyReader<'_> {
+    pub fn get(&self, at: ByteOffset) -> Option<Value> {
+        let (start, end, value) = self.run.get();
+        if start <= at.0 && at.0 < end {
+            return value;
+        }
+        let (start, run) = self.root?.run_at(at.0)?;
+        let value = (run.stamp != 0).then_some(run.value);
+        self.run.set((start, start + run.len as usize, value));
+        value
     }
 }
 
@@ -559,6 +605,10 @@ impl Properties {
             };
             state(a.0) == state(b.0)
         })
+    }
+    /// A reader of KEY's values.
+    pub fn reader(&self, key: &str) -> KeyReader<'_> {
+        KeyReader { root: self.layers.get(key).and_then(|root| root.as_deref()), run: std::cell::Cell::new((0, 0, None)) }
     }
     pub fn get_property(&self, at: ByteOffset, key: &str) -> Option<Value> {
         self.layers
