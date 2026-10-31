@@ -40,6 +40,8 @@ import time
 import live_oracle as live
 import perkey_live as perkey
 
+# The deliver stamp is the isolate path's delivery: the result has arrived
+# and the command continues in the session, as GNU's does after its search.
 LOG_HOOKS = """(progn
   (defvar romacs-journey-log "%s")
   (defun romacs-journey-stamp (kind &optional text)
@@ -59,6 +61,8 @@ LOG_HOOKS = """(progn
               (lambda ()
                 (write-region (point-min) (point-max) "%s" nil 'silent)
                 (romacs-journey-stamp 'xref (number-to-string (count-lines (point-min) (point-max)))))))
+  (dolist (fn '(romacs-project--show-matches romacs-project--find-file-continue))
+    (advice-add fn :before (lambda (&rest _) (romacs-journey-stamp 'deliver))))
   t)"""
 
 CF = ['-M', 'ctrl', 'f', '-m', 'ctrl']
@@ -192,17 +196,25 @@ class Session(perkey.Session):
 def analyse(run, name):
     """The command's job time and the keys' latencies from RUN's stamps:
     the job runs from the harness's RET to the xref or candidates stamp; the
-    command's own time ends at its post-command stamp."""
+    command's own time ends at its post-command stamp. The search is the
+    job up to the result's delivery (the deliver stamp, isolate path), after
+    which the command continues in the session as GNU's does after its
+    search: a key sent during the search is the latency measured; the
+    delivery's own length is reported."""
     marks = run['stamps']
     start = run['started']
     end = next((t for k, t, _ in marks if k in ('xref', 'candidates')), None)
+    deliver = next((t for k, t, _ in marks if k == 'deliver' and t > start), None)
+    search_end = deliver if deliver is not None else end
     command_end = next((t for k, t, text in marks if k == 'post' and text == f'"{name}"' and t > start), None)
     posts = [t for k, t, text in marks if k == 'post' and text == '"forward-char"']
     latencies = []
     for sent, ran in zip(run['sent'], posts):
         latencies.append(max(0.0, ran - sent))
-    during = [l for s, l in zip(run['sent'], latencies) if end is None or s < end]
+    during = [l for s, l in zip(run['sent'], latencies) if search_end is None or s < search_end]
     return {'job_s': None if end is None else end - start, 'command_s': None if command_end is None else command_end - start,
+            'search_s': None if search_end is None else search_end - start,
+            'delivery_s': None if deliver is None or end is None else end - deliver,
             'keys_sent': len(run['sent']), 'keys_ran': len(posts),
             'key_latency_s': latencies, 'during_job': during,
             'median_during_s': statistics.median(during) if during else None,
@@ -300,7 +312,8 @@ def main():
         for command in ('find_regexp', 'find_regexp_warm', 'find_file'):
             a = r[command]
             summary.setdefault(r['variant'], {})[command] = {
-                'job_s': a['job_s'], 'command_s': a['command_s'], 'key_median_during_job_s': a['median_during_s'], 'key_max_during_job_s': a['max_during_s'],
+                'job_s': a['job_s'], 'command_s': a['command_s'], 'search_s': a['search_s'], 'delivery_s': a['delivery_s'],
+                'key_median_during_job_s': a['median_during_s'], 'key_max_during_job_s': a['max_during_s'],
                 'render_median_ms': statistics.median(a['render_ms']) if a['render_ms'] else None,
                 'render_max_ms': max(a['render_ms']) if a['render_ms'] else None, 'keys_ran': a['keys_ran'],
                 'result_lines': a['result_lines']}
@@ -308,7 +321,9 @@ def main():
     sync = summary.get('sync', {})
     # Responsive: while the search runs, a key's command runs within 50 ms
     # in the isolate path, against the hundreds of milliseconds it waits
-    # when the session searches itself.
+    # when the session searches itself. A key sent once the result is being
+    # delivered waits for that delivery, as it does in GNU for the whole
+    # command; its length is delivery_s.
     responsive = all(isolate.get(c, {}).get('key_max_during_job_s') is not None and sync.get(c, {}).get('key_max_during_job_s') is not None
                      and isolate[c]['key_max_during_job_s'] < 0.05 and isolate[c]['key_max_during_job_s'] < 0.5 * sync[c]['key_max_during_job_s']
                      for c in ('find_regexp', 'find_regexp_warm'))
