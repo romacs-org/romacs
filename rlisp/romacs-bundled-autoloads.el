@@ -113,9 +113,14 @@
 (register-definition-prefixes "romacs-keymap" '("current-active-maps" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
 
 
+;;; Generated autoloads from romacs-layer.el
+
+(register-definition-prefixes "romacs-layer" '("romacs-layer"))
+
+
 ;;; Generated autoloads from romacs-loadup-bootstrap.el
 
-(register-definition-prefixes "romacs-loadup-bootstrap" '("romacs-"))
+(register-definition-prefixes "romacs-loadup-bootstrap" '("minibuffer--sort-by-" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-mail.el
@@ -211,9 +216,38 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 (register-definition-prefixes "romacs-oclosure" '("oclosure-type"))
 
 
+;;; Generated autoloads from romacs-orderless.el
+
+(autoload 'orderless-all-completions "romacs-orderless"
+"Split STRING into components and find entries TABLE matching all.
+The predicate PRED is used to constrain the entries in TABLE.  The
+matching portions of each candidate are highlighted.
+This function is part of the `orderless' completion style.
+
+(fn STRING TABLE PRED POINT)")
+(autoload 'orderless-try-completion "romacs-orderless"
+"Complete STRING to unique matching entry in TABLE.
+This uses `orderless-all-completions' to find matches for STRING
+in TABLE among entries satisfying PRED.  If there is only one
+match, it completes to that match.  If there are no matches, it
+returns nil.  In any other case it \"completes\" STRING to
+itself, without moving POINT.
+This function is part of the `orderless' completion style.
+
+(fn STRING TABLE PRED POINT)")
+(add-to-list 'completion-styles-alist '(orderless orderless-try-completion orderless-all-completions "Completion of multiple components, in any order."))
+(autoload 'orderless-ivy-re-builder "romacs-orderless"
+"Convert STR into regexps for use with ivy.
+This function is for integration of orderless with ivy, use it as
+a value in `ivy-re-builders-alist'.
+
+(fn STR)")
+(register-definition-prefixes "romacs-orderless" '("orderless-"))
+
+
 ;;; Generated autoloads from romacs-pgtk.el
 
-(register-definition-prefixes "romacs-pgtk" '("pgtk-" "romacs-pgtk--" "x-gtk-launch-uri"))
+(register-definition-prefixes "romacs-pgtk" '("pgtk-" "romacs-pgtk--" "x-g"))
 
 
 ;;; Generated autoloads from romacs-project.el
