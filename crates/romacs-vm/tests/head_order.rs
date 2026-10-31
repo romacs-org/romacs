@@ -41,15 +41,6 @@ fn head_order_matches_pinned_gnu() {
             assert!(vm.heap_stats().collections > 0, "HEAD_ORDER_GC_NOT_EXERCISED");
         }
         let expected = row["gnu"].as_str().unwrap();
-        if spec["scope"] == "negative-known-gap" && std::env::var_os("ROMACS_HEAD_ORDER_STRICT").is_none() {
-            assert_eq!(row["id"], "primitive-arity-before-args", "HEAD_ORDER_UNKNOWN_NEGATIVE");
-            // eval_sub also checks primitive arity before evaluating operands.
-            // This independent, pre-existing arity gap remains a NEGATIVE result;
-            // it is not one of this lane's exact head-resolution matches.
-            assert_eq!(actual, Ok("((wrong-number-of-arguments #<subr car> 2) 2)".to_owned()), "HEAD_ORDER_NEGATIVE_CHANGED");
-            assert_ne!(actual, Ok(expected.to_owned()), "HEAD_ORDER_NEGATIVE_NOW_MATCHES: remove the known-gap classification");
-            continue;
-        }
         if actual != Ok(expected.to_owned()) {
             failures.push(format!("{}: GNU {expected}; ours {actual:?}", row["id"]));
         }

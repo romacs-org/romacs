@@ -85,8 +85,8 @@ fn writers_invalidate_live_entries() {
         } else {
             assert_eq!(result, Ok("42".into()), "stale body after {writer}");
         }
-        // A macro cell is rejected by ResolveHead before Prepared can enter
-        // (or deoptimize) the old ordinary call site. The exact error above
+        // A macro cell is rejected by the site's cache refresh before the old
+        // ordinary call site can enter (or deoptimize). The exact error above
         // proves that no stale body ran; ordinary writers still must deopt.
         if !writer.contains("defmacro") {
             assert!(vm.speculative_misses > 0, "no deopt after {writer}");

@@ -2,7 +2,7 @@ use super::*;
 fn run(vm: &mut Vm, text: &str) -> Value { vm.eval_source_raw(text).unwrap() }
 #[test]
 fn obarray_compiled_call_retains_symbol_slot() {
-    for kind in 0..6 {
+    for kind in 0..4 {
         let mut vm = Vm::new();
         let table = vm.allocate_object(Object::Obarray(Box::new(Obarray::new(0, false))));
         let name = vm.make_lisp_string(b"code-owned".to_vec(), false);
@@ -11,10 +11,9 @@ fn obarray_compiled_call_retains_symbol_slot() {
         vm.slots[slot].value = Value::integer(42).unwrap();
         let op = match kind {
             0 => Op::Define(slot, 0), 1 => Op::DefineMacro(slot, 0),
-            2 => Op::ResolveHead(0, slot), 3 => Op::Direct(0, slot, 0, 0, 0),
-            4 => Op::Sealed(0, slot, 0, 0), _ => Op::Prepared(0, 0, slot, 0, 0, 0),
+            2 => Op::Direct(0, slot, 0, 0, 0), _ => Op::Sealed(0, slot, 0, 0),
         };
-        // Direct/Prepared also carry a cache index, independently traced.
+        // Direct also carries a cache index, independently traced.
         let id = vm.compile(&Form::Int(0)).unwrap();
         let function = Arc::get_mut(&mut vm.functions[id]).unwrap();
         function.code = vec![op];

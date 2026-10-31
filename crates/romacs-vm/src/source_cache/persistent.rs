@@ -46,7 +46,7 @@ impl Vm {
                     Op::Closure(_, id, _) => {
                         *id = id.checked_sub(first).ok_or("nonlocal IR function")?
                     }
-                    Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) => {
+                    Op::Direct(_, _, cache, _, _) => {
                         *cache = cache.checked_sub(first_cache).ok_or("nonlocal IR cache")?
                     }
                     _ => {}
@@ -134,13 +134,12 @@ impl Vm {
                 match op {
                     Op::DeclareSpecial(s)
                     | Op::Global(_, s)
-                    | Op::ResolveHead(_, s)
                     | Op::SetGlobal(s, _)
                     | Op::Bind(s, _)
                     | Op::Define(s, _)
                     | Op::DefineMacro(s, _)
                     | Op::Sealed(_, s, _, _) => *s = slots[*s],
-                    Op::Direct(_, s, c, _, _) | Op::Prepared(_, _, s, c, _, _) => {
+                    Op::Direct(_, s, c, _, _) => {
                         *s = slots[*s];
                         *c = cache_ids[*c];
                     }
@@ -156,7 +155,7 @@ impl Vm {
             .map(|(name, _)| (self.slot(name), false))
             .collect();
         calls.extend(a.functions.iter().flat_map(|f| &f.code).filter_map(|op| {
-            if let Op::Direct(_, s, _, _, _) | Op::Prepared(_, _, s, _, _, _) = *op {
+            if let Op::Direct(_, s, _, _, _) = *op {
                 Some((s, false))
             } else {
                 None
@@ -216,8 +215,7 @@ fn valid_artifact(a: &Artifact) -> bool {
                 Op::Const(d, v) => r(d) && v == Value::NIL && constants.contains(&(fi, pc)),
                 Op::Move(d, x) | Op::ReadCell(d, x) | Op::WriteCell(d, x) => r(d) && r(x),
                 Op::Cell(d) | Op::Return(d) => r(d),
-                Op::Global(d, x) | Op::ResolveHead(d, x) => r(d) && s(x),
-                Op::Prepared(d, t, x, c, start, n) => r(d) && r(t) && s(x) && c < a.caches && n <= 4096 && start.checked_add(n).is_some_and(|end| end <= f.regs),
+                Op::Global(d, x) => r(d) && s(x),
                 Op::SetGlobal(x, d) | Op::Bind(x, d) | Op::Define(x, d) | Op::DefineMacro(x, d) => {
                     s(x) && r(d)
                 }

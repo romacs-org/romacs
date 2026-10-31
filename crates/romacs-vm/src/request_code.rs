@@ -40,7 +40,7 @@ impl Vm {
     pub(super) fn install_code(&mut self, function: Function) -> usize {
         // The function's code now owns the cache slots its builder took.
         let caches: Vec<usize> = function.code.iter().filter_map(|op| match *op {
-            Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) => Some(cache),
+            Op::Direct(_, _, cache, _, _) => Some(cache),
             _ => None,
         }).collect();
         self.claim_caches(&caches);
@@ -227,7 +227,7 @@ impl Vm {
 
     pub(super) fn release_request_entry(&mut self, id: usize) {
         for op in &self.functions[id].code {
-            if let Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) = *op {
+            if let Op::Direct(_, _, cache, _, _) = *op {
                 self.caches[cache] = Cache {
                     version: 0,
                     target: Value::UNBOUND,
@@ -303,7 +303,7 @@ impl Vm {
             }
             if marked {
                 for op in &self.functions[id].code {
-                    if let Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) = *op {
+                    if let Op::Direct(_, _, cache, _, _) = *op {
                         used_caches[cache] = true;
                     }
                 }
@@ -506,7 +506,7 @@ mod tests {
         // The loaded function stays live through gr-art.
         let owned: Vec<usize> = vm.functions.iter().zip(&vm.request_code.live).filter(|&(_, &live)| live)
             .flat_map(|(f, _)| f.code.iter().filter_map(|op| match *op {
-                Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) => Some(cache),
+                Op::Direct(_, _, cache, _, _) => Some(cache),
                 _ => None,
             }))
             .collect();
@@ -522,7 +522,7 @@ mod tests {
     fn owned_caches(vm: &Vm) -> Vec<usize> {
         vm.functions.iter().zip(&vm.request_code.live).filter(|&(_, &live)| live)
             .flat_map(|(f, _)| f.code.iter().filter_map(|op| match *op {
-                Op::Direct(_, _, cache, _, _) | Op::Prepared(_, _, _, cache, _, _) => Some(cache),
+                Op::Direct(_, _, cache, _, _) => Some(cache),
                 _ => None,
             }))
             .collect()

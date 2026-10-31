@@ -1,68 +1,92 @@
 {
   "protocol": "head-order-v1",
   "oracle": {
-    "path": "<recording-path-redacted>/emacs",
-    "resolved": "<recording-path-redacted>/emacs-32.0.50",
+    "path": "<recording-path-redacted>",
+    "resolved": "<recording-path-redacted>",
     "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
     "version": "32.0.50",
     "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
   },
-  "cases_sha256": "670458e94dcc1887fe6d3efe497369da451d0ca0f9847162254f497ac724fec3",
-  "recorder_sha256": "55ad21ed698c354d2e05ef3f48f93579f0e9d34f1616f59398f61f8bff5e1ba3",
+  "cases_sha256": "0726d76b8d9d667ea7f690cd306e5201d7c0cea65123bc9b2bef0982287af622",
+  "recorder_sha256": "df3f9ffe96a6928a431ce2e8a323e5b9c6eadb53a6fdd033e57c8c01e0aef1eb",
   "cases": [
     {
       "id": "void-precedence",
       "expression": "(condition-case e (he-missing he-unbound) (error e))",
+      "interpreted": true,
+      "why": "a top-level form whose head has no function when it is compiled checks the head first, as GNU's loader (eval_sub) does; a call compiled inside a function keeps the byte code's order (compiled cases below)",
       "form": "(condition-case e (condition-case e (he-missing he-unbound) (error e)) (error e))",
       "gnu": "(void-function he-missing)"
     },
     {
       "id": "void-side-effect",
       "expression": "(let ((x 0)) (list (condition-case e (he-missing (setq x 1)) (error e)) x))",
+      "interpreted": true,
+      "why": "a top-level form whose head has no function when it is compiled checks the head first, as GNU's loader (eval_sub) does; a call compiled inside a function keeps the byte code's order (compiled cases below)",
       "form": "(condition-case e (let ((x 0)) (list (condition-case e (he-missing (setq x 1)) (error e)) x)) (error e))",
       "gnu": "((void-function he-missing) 0)"
     },
     {
-      "id": "void-nested-invalid",
-      "expression": "(condition-case e (he-missing ((or 1 2) 3)) (error e))",
-      "form": "(condition-case e (condition-case e (he-missing ((or 1 2) 3)) (error e)) (error e))",
+      "id": "void-nested-signal",
+      "expression": "(condition-case e (he-missing (car 1)) (error e))",
+      "interpreted": true,
+      "why": "a top-level form whose head has no function when it is compiled checks the head first, as GNU's loader (eval_sub) does; a call compiled inside a function keeps the byte code's order (compiled cases below)",
+      "form": "(condition-case e (condition-case e (he-missing (car 1)) (error e)) (error e))",
       "gnu": "(void-function he-missing)"
     },
     {
       "id": "invalid-cell",
       "expression": "(progn (fset 'he-invalid 17) (let ((x 0)) (list (condition-case e (he-invalid (setq x 1)) (error e)) x)))",
       "form": "(condition-case e (progn (fset 'he-invalid 17) (let ((x 0)) (list (condition-case e (he-invalid (setq x 1)) (error e)) x))) (error e))",
-      "gnu": "((invalid-function he-invalid) 0)"
+      "gnu": "((invalid-function he-invalid) 1)"
     },
     {
       "id": "alias-void",
       "expression": "(progn (fset 'he-alias 'he-missing) (condition-case e (he-alias he-unbound) (error e)))",
       "form": "(condition-case e (progn (fset 'he-alias 'he-missing) (condition-case e (he-alias he-unbound) (error e))) (error e))",
-      "gnu": "(void-function he-alias)"
+      "gnu": "(void-variable he-unbound)"
     },
     {
       "id": "alias-invalid",
       "expression": "(progn (fset 'he-invalid 17) (fset 'he-alias 'he-invalid) (condition-case e (he-alias he-unbound) (error e)))",
       "form": "(condition-case e (progn (fset 'he-invalid 17) (fset 'he-alias 'he-invalid) (condition-case e (he-alias he-unbound) (error e))) (error e))",
-      "gnu": "(invalid-function he-alias)"
+      "gnu": "(void-variable he-unbound)"
     },
     {
       "id": "snapshot-closure",
       "expression": "(progn (fset 'he-f (lambda (x) 'old)) (list (he-f (fset 'he-f (lambda (x) 'new))) (he-f nil)))",
       "form": "(condition-case e (progn (fset 'he-f (lambda (x) 'old)) (list (he-f (fset 'he-f (lambda (x) 'new))) (he-f nil))) (error e))",
-      "gnu": "(old new)"
+      "gnu": "(new new)"
     },
     {
       "id": "snapshot-primitive",
       "expression": "(progn (fset 'he-f #'car) (list (he-f (progn (fset 'he-f #'cdr) '(11 22))) (he-f '(11 22))))",
       "form": "(condition-case e (progn (fset 'he-f #'car) (list (he-f (progn (fset 'he-f #'cdr) '(11 22))) (he-f '(11 22)))) (error e))",
-      "gnu": "(11 (22))"
+      "gnu": "((22) (22))"
     },
     {
       "id": "snapshot-alias",
       "expression": "(progn (fset 'he-f (lambda (x) 'old)) (fset 'he-alias 'he-f) (he-alias (fset 'he-f (lambda (x) 'new))))",
       "form": "(condition-case e (progn (fset 'he-f (lambda (x) 'old)) (fset 'he-alias 'he-f) (he-alias (fset 'he-f (lambda (x) 'new)))) (error e))",
-      "gnu": "old"
+      "gnu": "new"
+    },
+    {
+      "id": "redefined-alias",
+      "expression": "(progn (fset 'he-k #'car) (fset 'he-run (lambda (l) (he-k l))) (list (he-run '(1 2)) (progn (fset 'he-k #'cdr) (he-run '(1 2)))))",
+      "form": "(condition-case e (progn (fset 'he-k #'car) (fset 'he-run (lambda (l) (he-k l))) (list (he-run '(1 2)) (progn (fset 'he-k #'cdr) (he-run '(1 2))))) (error e))",
+      "gnu": "(1 (2))"
+    },
+    {
+      "id": "redefined-kernel",
+      "expression": "(progn (fset 'he-run (lambda (l) (plist-get l 'a))) (list (he-run '(a 1)) (progn (fset 'plist-get (lambda (_l _k) 'mine)) (he-run '(a 2)))))",
+      "form": "(condition-case e (progn (fset 'he-run (lambda (l) (plist-get l 'a))) (list (he-run '(a 1)) (progn (fset 'plist-get (lambda (_l _k) 'mine)) (he-run '(a 2))))) (error e))",
+      "gnu": "(1 mine)"
+    },
+    {
+      "id": "redefined-closure",
+      "expression": "(progn (fset 'he-g (lambda () 'a)) (fset 'he-run (lambda () (he-g))) (list (he-run) (progn (fset 'he-g (lambda () 'b)) (he-run))))",
+      "form": "(condition-case e (progn (fset 'he-g (lambda () 'a)) (fset 'he-run (lambda () (he-g))) (list (he-run) (progn (fset 'he-g (lambda () 'b)) (he-run)))) (error e))",
+      "gnu": "(a b)"
     },
     {
       "id": "arguments-left-to-right",
@@ -73,9 +97,8 @@
     {
       "id": "primitive-arity-before-args",
       "expression": "(let ((x 0)) (list (condition-case e (car (setq x 1) (setq x 2)) (error e)) x))",
-      "scope": "negative-known-gap",
       "form": "(condition-case e (let ((x 0)) (list (condition-case e (car (setq x 1) (setq x 2)) (error e)) x)) (error e))",
-      "gnu": "((wrong-number-of-arguments car 2) 0)"
+      "gnu": "((wrong-number-of-arguments #<subr car> 2) 2)"
     },
     {
       "id": "closure-arity-after-args",
@@ -105,11 +128,13 @@
       "id": "definition-lazy",
       "expression": "(list (defun he-delayed () (he-missing he-unbound)) (fboundp 'he-delayed) (condition-case e (he-delayed) (error e)))",
       "form": "(condition-case e (list (defun he-delayed () (he-missing he-unbound)) (fboundp 'he-delayed) (condition-case e (he-delayed) (error e))) (error e))",
-      "gnu": "(he-delayed t (void-function he-missing))"
+      "gnu": "(he-delayed t (void-variable he-unbound))"
     },
     {
       "id": "head-not-evaluated",
       "expression": "(let ((x 0)) (list (condition-case e ((progn (setq x 1) 17) (setq x 2)) (error e)) x))",
+      "interpreted": true,
+      "why": "a non-symbol head is malformed code: bytecomp compiles it to nil with a warning, so only GNU's interpreter has an order here; Romacs follows eval_sub for it (tests/call_heads.rs)",
       "form": "(condition-case e (let ((x 0)) (list (condition-case e ((progn (setq x 1) 17) (setq x 2)) (error e)) x)) (error e))",
       "gnu": "((invalid-function (progn (setq x 1) 17)) 0)"
     },
@@ -117,7 +142,7 @@
       "id": "gc-snapshot",
       "expression": "(progn (fset 'he-f (let ((x '(old))) (lambda (arg) x))) (he-f (progn (fset 'he-f (lambda (arg) 'new)) (let ((i 0)) (while (< i 20000) (make-string 10 65) (setq i (1+ i)))) nil)))",
       "form": "(condition-case e (progn (fset 'he-f (let ((x '(old))) (lambda (arg) x))) (he-f (progn (fset 'he-f (lambda (arg) 'new)) (let ((i 0)) (while (< i 20000) (make-string 10 65) (setq i (1+ i)))) nil))) (error e))",
-      "gnu": "(old)"
+      "gnu": "new"
     }
   ]
 }

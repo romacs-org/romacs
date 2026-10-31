@@ -147,7 +147,7 @@ fn eval_and_compile_evaluates_its_body_at_expansion_as_gnu_does() {
 // subr.el stops at form 139 (radix reader, G1), so pcase-dolist is unbound,
 // and `eval_source` (which compiles the body eagerly, unlike GNU's lazy
 // `defun`) already signals on the definition. Measured 2026-10-20 on the
-// restored tree: `(void-function pcase-dolist)` after head-order repair. When this fails because the call now
+// restored tree: the argument the compiled body evaluates before its unbound head. When this fails because the call now
 // SUCCEEDS, assert GNU's answers above instead; never relax the pin.
 fn restore_state_needs_pcase_dolist_which_vm2_cannot_reach_yet() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -166,7 +166,9 @@ fn restore_state_needs_pcase_dolist_which_vm2_cannot_reach_yet() {
         (defun kill-local-variable (symbol) (setq restore-kills (cons symbol restore-kills)))
         (buffer-local-restore-state '((restore-a t . tail) atom (restore-b t 9 extra)))
         (list restore-a restore-b restore-kills)").map(|v| v.display().unwrap()));
-    assert_eq!(called, Err("(void-function pcase-dolist)".to_owned()),
+    // The body is compiled: its arguments run before the unbound head is read
+    // (DIVERGENCES VM2-BCALL1), so the backquote argument fails first.
+    assert_eq!(called, Err("(invalid-function (` ((, variable) (, local) (, value))))".to_owned()),
         "frontier moved: if this is GNU's (nil 9 (nil)), turn the ratchet into the GNU assertion");
 }
 
@@ -267,7 +269,9 @@ fn subr_cold_frontier_is_pinned() {
         assert_eq!(completed, expected, "BOOTSTRAP_CHAIN_MOVED {relative}: {result:?}");
         if relative == "gnu-lisp/files.el" {
             let error = result.unwrap_err();
-            assert!(error.contains("line 494 form 50:") && error.ends_with("(void-function bound-and-true-p)"), "FILES_MACRO_FRONTIER_MOVED {error}");
+            // The expander's compiled body reads the unbound `bound-and-true-p'
+            // after its argument, the void variable (DIVERGENCES VM2-BCALL1).
+            assert!(error.contains("line 494 form 50:") && error.ends_with("(void-variable emacs-lisp-docstring-fill-column)"), "FILES_MACRO_FRONTIER_MOVED {error}");
             // Native defgroup is a compiler form, not a callable function cell.
             assert_eq!(vm.eval_source("(fboundp 'defgroup)").unwrap().display().unwrap(), "nil", "FILES_DEFGROUP_ATTRIBUTION_CHANGED");
         } else { assert!(result.is_ok(), "{result:?}"); }

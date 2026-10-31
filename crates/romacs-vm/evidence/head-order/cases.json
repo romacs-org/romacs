@@ -1,15 +1,21 @@
 [
   {
     "id": "void-precedence",
-    "expression": "(condition-case e (he-missing he-unbound) (error e))"
+    "expression": "(condition-case e (he-missing he-unbound) (error e))",
+    "interpreted": true,
+    "why": "a top-level form whose head has no function when it is compiled checks the head first, as GNU's loader (eval_sub) does; a call compiled inside a function keeps the byte code's order (compiled cases below)"
   },
   {
     "id": "void-side-effect",
-    "expression": "(let ((x 0)) (list (condition-case e (he-missing (setq x 1)) (error e)) x))"
+    "expression": "(let ((x 0)) (list (condition-case e (he-missing (setq x 1)) (error e)) x))",
+    "interpreted": true,
+    "why": "a top-level form whose head has no function when it is compiled checks the head first, as GNU's loader (eval_sub) does; a call compiled inside a function keeps the byte code's order (compiled cases below)"
   },
   {
-    "id": "void-nested-invalid",
-    "expression": "(condition-case e (he-missing ((or 1 2) 3)) (error e))"
+    "id": "void-nested-signal",
+    "expression": "(condition-case e (he-missing (car 1)) (error e))",
+    "interpreted": true,
+    "why": "a top-level form whose head has no function when it is compiled checks the head first, as GNU's loader (eval_sub) does; a call compiled inside a function keeps the byte code's order (compiled cases below)"
   },
   {
     "id": "invalid-cell",
@@ -36,13 +42,24 @@
     "expression": "(progn (fset 'he-f (lambda (x) 'old)) (fset 'he-alias 'he-f) (he-alias (fset 'he-f (lambda (x) 'new))))"
   },
   {
+    "id": "redefined-alias",
+    "expression": "(progn (fset 'he-k #'car) (fset 'he-run (lambda (l) (he-k l))) (list (he-run '(1 2)) (progn (fset 'he-k #'cdr) (he-run '(1 2)))))"
+  },
+  {
+    "id": "redefined-kernel",
+    "expression": "(progn (fset 'he-run (lambda (l) (plist-get l 'a))) (list (he-run '(a 1)) (progn (fset 'plist-get (lambda (_l _k) 'mine)) (he-run '(a 2)))))"
+  },
+  {
+    "id": "redefined-closure",
+    "expression": "(progn (fset 'he-g (lambda () 'a)) (fset 'he-run (lambda () (he-g))) (list (he-run) (progn (fset 'he-g (lambda () 'b)) (he-run))))"
+  },
+  {
     "id": "arguments-left-to-right",
     "expression": "(let ((x 0)) (list (list (setq x 1) (setq x (+ x 1))) x))"
   },
   {
     "id": "primitive-arity-before-args",
-    "expression": "(let ((x 0)) (list (condition-case e (car (setq x 1) (setq x 2)) (error e)) x))",
-    "scope": "negative-known-gap"
+    "expression": "(let ((x 0)) (list (condition-case e (car (setq x 1) (setq x 2)) (error e)) x))"
   },
   {
     "id": "closure-arity-after-args",
@@ -66,7 +83,9 @@
   },
   {
     "id": "head-not-evaluated",
-    "expression": "(let ((x 0)) (list (condition-case e ((progn (setq x 1) 17) (setq x 2)) (error e)) x))"
+    "expression": "(let ((x 0)) (list (condition-case e ((progn (setq x 1) 17) (setq x 2)) (error e)) x))",
+    "interpreted": true,
+    "why": "a non-symbol head is malformed code: bytecomp compiles it to nil with a warning, so only GNU's interpreter has an order here; Romacs follows eval_sub for it (tests/call_heads.rs)"
   },
   {
     "id": "gc-snapshot",

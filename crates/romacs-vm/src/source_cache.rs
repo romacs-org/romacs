@@ -185,7 +185,7 @@ impl Vm {
                 .map(|&id| &self.functions[id])
                 .flat_map(|f| &f.code)
                 .filter_map(|op| {
-                    if let Op::Direct(_, s, _, _, _) | Op::Prepared(_, _, s, _, _, _) = *op {
+                    if let Op::Direct(_, s, _, _, _) = *op {
                         Some((s, self.call_is_macro(s)))
                     } else {
                         None

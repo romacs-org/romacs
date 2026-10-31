@@ -379,7 +379,7 @@ struct Inst {
     value: Value,
     op: Op,
     site: usize,
-    prepared_handler: Handler,
+    kernel: Handler,
 }
 type PrimitiveCall = fn(&mut Vm, Primitive, usize, usize) -> Result<Value>;
 #[derive(Clone, Copy)]
@@ -425,7 +425,6 @@ fn inline_body(vm: &Vm, function: usize) -> Option<InlineBody> {
     }
     let mut body = None;
     let mut result_reg = None;
-    let mut resolved = None;
     for (index, op) in f.code.iter().enumerate() {
         match *op {
             Op::Const(dst, value) => {
@@ -452,15 +451,8 @@ fn inline_body(vm: &Vm, function: usize) -> Option<InlineBody> {
                     }
                 }
             }
-            Op::ResolveHead(dst, slot) if resolved.is_none() && body.is_none() => {
-                resolved = Some((dst, slot));
-            }
             Op::Direct(dst, slot, _, start, argc)
-            | Op::Prepared(dst, _, slot, _, start, argc)
             | Op::Sealed(dst, slot, start, argc) if body.is_none() => {
-                if let Op::Prepared(_, snapshot, _, _, _, _) = *op {
-                    if resolved != Some((snapshot, slot)) { return None; }
-                }
                 let sealed = matches!(*op, Op::Sealed(..));
                 let target = if sealed { sealed::target(&vm.symbol_names[slot], argc)? } else { vm.slots[slot].function };
                 let primitive = prim::legacy(target)?;
@@ -1480,7 +1472,7 @@ fn lower_function(
                         reg
                     });
                     match op {
-                        Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Prepared(_, _, _, _, start, count)
+                        Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count)
                         | Op::Sealed(_, _, start, count) => {
                             observes |= (start..start + count).contains(&rest_reg);
                         }
@@ -1531,7 +1523,7 @@ fn lower(vm: &Vm, op: Op) -> Inst {
         value: Value::NIL,
         op,
         site: 0,
-        prepared_handler: direct,
+        kernel: direct,
     };
     match op {
         Op::Const(a, v) => {
@@ -1543,23 +1535,6 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.handler = mov;
             i.a = a;
             i.b = b;
-        }
-        Op::ResolveHead(a, b) => {
-            i.handler = resolve_head;
-            i.a = a;
-            i.b = b;
-        }
-        Op::Prepared(a, _, b, c, d, e) => {
-            i = lower(vm, Op::Direct(a, b, c, d, e));
-            i.handler = prepared;
-            i.op = op;
-            // A kernel serves the primitive the cell holds now; `prepared`
-            // runs it only while the snapshot still names that primitive.
-            let target = vm.slots[b].function;
-            if let Some(k) = kernel(target, e) {
-                i.value = target;
-                i.prepared_handler = k;
-            }
         }
         Op::Sealed(a, b, d, e) => {
             i.a = a;
@@ -1611,6 +1586,14 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.c = c;
             i.d = d;
             i.e = e;
+            // A kernel serves the primitive the cell holds now; `direct_kernel`
+            // runs it only while the site cache still holds that primitive.
+            let target = vm.slots[b].function;
+            if let Some(k) = kernel(target, e) {
+                i.handler = direct_kernel;
+                i.value = target;
+                i.kernel = k;
+            }
         }
         _ => {}
     }
@@ -1686,7 +1669,7 @@ unsafe fn observe_rest(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
             reg
         });
         match op {
-            Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Prepared(_, _, _, _, start, count)
+            Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count)
             | Op::Sealed(_, _, start, count) => {
                 observed |= (start..start + count).contains(&rest.reg);
             }
@@ -1932,39 +1915,18 @@ unsafe fn return_unbind(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
     }
     unsafe { ret(e, r, pc) }
 }
-// Resolution is reach-time, not compile-time. Autoload loading can rebase the
-// register stack; never retain the pre-load pointer or target across that call.
-unsafe fn resolve_head(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+/// A named call whose cell held a primitive with a kernel when lowered: the
+/// kernel while the site cache still holds that primitive (the cache is
+/// filled by `direct_generic`, which also serves the first call and any
+/// redefinition), as GNU's Bcall reads the cell after the arguments.
+unsafe fn direct_kernel(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
-        let function = Value::reference((*pc).b + 1, 7);
-        let Some(target) = t2_resolve(e, function) else { return Value::UNBOUND; };
-        if target.tag() == 3 && e.vm.autoload_object(target) {
-            return match autoload_then(e, r, function, target) {
-                Some(r) => resolve_head(e, r, pc),
-                None => Value::UNBOUND,
-            };
-        }
-        if !matches!(target.tag(), 4 | 6) && !lambda_list(e, target) {
-            let condition = uncallable_condition(e, target);
-            return raise(e, condition, &[function]);
-        }
-        *r.add((*pc).a) = target;
-        advance(e, r, pc)
-    }
-}
-unsafe fn prepared(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
-    unsafe {
-        let Op::Prepared(_, snapshot, _, _, _, _) = (*pc).op else { unreachable!() };
-        let target = *r.add(snapshot);
-        // A kernel (`value` set) serves exactly the primitive it was lowered
-        // for; otherwise keep direct-call speculation while the snapshot still
-        // names the cell. A changed cell must NOT replace the function already
-        // resolved.
-        let primitive = (*pc).value;
-        if target == primitive || primitive == Value::NIL && target == e.vm.slots[(*pc).b].function {
-            ((*pc).prepared_handler)(e, r, pc)
+        let i = &*pc;
+        let cache = e.vm.caches.get_unchecked(i.c);
+        if cache.version == e.vm.slots.get_unchecked(i.b).version && cache.target == i.value {
+            (i.kernel)(e, r, pc)
         } else {
-            invoke(e, r, pc, target, (*pc).d, (*pc).e)
+            direct_generic(e, r, pc)
         }
     }
 }
@@ -2035,7 +1997,7 @@ unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
     unsafe {
         let function = if std::ptr::eq(pc, &K_CODE[0]) { *r.add(K_F) } else {
             match (*pc).op {
-                Op::Direct(_, slot, ..) | Op::Prepared(_, _, slot, ..) | Op::Sealed(_, slot, ..) => Value::reference(slot + 1, 7),
+                Op::Direct(_, slot, ..) | Op::Sealed(_, slot, ..) => Value::reference(slot + 1, 7),
                 Op::Call(_, function, ..) => *r.add(function),
                 _ => target,
             }
@@ -2275,7 +2237,7 @@ unsafe fn resolve_entry(
                 }
             }
             let closure = &e.vm.closures[target.payload() as usize];
-            let world_version = if matches!((*pc).op, Op::Direct(..) | Op::Prepared(..))
+            let world_version = if matches!((*pc).op, Op::Direct(..))
                 && closure.captures.is_empty()
                 && e.vm.functions[function].required == e.vm.functions[function].arity
                 && !e.vm.functions[function].rest
@@ -2588,7 +2550,7 @@ const fn k_inst(handler: Handler) -> Inst {
         op: Op::Return(K_RES),
         // Never an entry-cache index: K_CODE calls do not use the site caches.
         site: usize::MAX,
-        prepared_handler: direct,
+        kernel: direct,
     }
 }
 static K_CODE: [Inst; 3] = [k_inst(t2_call), k_inst(t2_resume), k_inst(ret)];
@@ -4074,7 +4036,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 | Op::Unless(..)
                 | Op::Return(..)
                 | Op::Call(..)
-                | Op::Direct(..) | Op::ResolveHead(..) | Op::Prepared(..) | Op::Sealed(..) => unreachable!("lowering assigns hot handlers"),
+                | Op::Direct(..) | Op::Sealed(..) => unreachable!("lowering assigns hot handlers"),
             }
             Ok(())
         })();
@@ -4115,16 +4077,16 @@ mod register_tests {
             } else {
                 2
             };
-            let prepared = lower(&vm, Op::Prepared(0, 3, slot, 0, 1, argc));
+            let direct = lower(&vm, Op::Direct(0, slot, 0, 1, argc));
             assert!(
-                !std::ptr::fn_addr_eq(prepared.prepared_handler, direct as Handler),
+                std::ptr::fn_addr_eq(direct.handler, direct_kernel as Handler),
                 "{name} still uses generic dispatch"
             );
             if name == "plist-get" {
                 continue;
             }
             let sealed = lower(&vm, Op::Sealed(0, slot, 1, argc));
-            assert!(std::ptr::fn_addr_eq(prepared.prepared_handler, sealed.handler),
+            assert!(std::ptr::fn_addr_eq(direct.kernel, sealed.handler),
                 "HEAD_ORDER_SPECIALIZATION_LOST: {name}");
         }
     }

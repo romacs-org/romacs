@@ -42,7 +42,7 @@ fn ordered_real_ert_dependency_frontier() {
         .load_file(&root.join("emacs-lisp/cl-lib.el"))
         .unwrap_err();
     assert!(
-        error.contains("line 599 form 95") && error.contains("(void-function bound-and-true-p)"),
+        error.contains("line 599 form 95") && error.contains("(void-variable emacs-lisp-docstring-fill-column)"),
         "ORDERED_CL_LIB_FRONTIER: {error}"
     );
     // A separate dependency diagnosis, not permission to resume this failed chain.
