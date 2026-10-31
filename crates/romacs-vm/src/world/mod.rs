@@ -815,6 +815,7 @@ fn object_kind(object: &Object) -> &'static str {
         Object::Terminal(_) => "terminal",
         Object::WindowConfiguration(_) => "window-configuration",
         Object::Sqlite(_) => "sqlite",
+        Object::Treesit(_) => "treesit",
         Object::Process(_) => "process",
         Object::SubCharTable(_) => "sub-char-table",
         Object::MapKeymapCursor(_) => "keymap cursor",

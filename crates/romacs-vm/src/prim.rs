@@ -179,6 +179,9 @@ mod leaf {
         Sqlite,
         Process,
         Finalizer,
+        TreesitParser,
+        TreesitNode,
+        TreesitQuery,
         Invalid,
     }
 
@@ -1466,6 +1469,12 @@ mod leaf {
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
                     Some(data::Object::Finalizer(_)) => Kind::Finalizer,
+                    Some(data::Object::Treesit(t)) => match &**t {
+                        crate::treesit::Object::Parser(_) => Kind::TreesitParser,
+                        crate::treesit::Object::Node(_) => Kind::TreesitNode,
+                        crate::treesit::Object::Query(_) => Kind::TreesitQuery,
+                        crate::treesit::Object::Task(_) => Kind::Invalid,
+                    },
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -1703,6 +1712,7 @@ mod leaf {
     mod undo;
     mod insdel;
     mod sqlite;
+    pub(crate) mod treesit;
     mod process;
     pub(crate) use process::{CallOutput, Target};
     mod random;

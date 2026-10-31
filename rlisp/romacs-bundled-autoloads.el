@@ -88,6 +88,11 @@
 (register-definition-prefixes "romacs-frame" '("color-" "defined-colors" "display-" "find-composition-internal" "frame-" "romacs-" "tty-color-alist"))
 
 
+;;; Generated autoloads from romacs-gnu-ert-bootstrap.el
+
+(register-definition-prefixes "romacs-gnu-ert-bootstrap" '("shortdoc--groups"))
+
+
 ;;; Generated autoloads from romacs-gradients.el
 
 (register-definition-prefixes "romacs-gradients" '("romacs-"))
