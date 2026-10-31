@@ -46,7 +46,11 @@ fn expand_file_name(cx, name: Value; optional default_directory: Value) -> Step 
     check_name(cx, name)?;
     if let Some(call) = handled(cx, name, name, default_directory)? { return call; }
     let mut default = default_directory;
-    if default == Value::NIL {
+    // fileio.c reads the buffer's directory first and uses it only for a
+    // relative name; it is read here only then, so a world build's fence
+    // (`world`) sees no read an absolute or `~' name does not depend on.
+    let relative = !matches!(cx.string_bytes(name)?.first(), Some(b'/' | b'~'));
+    if default == Value::NIL && relative {
         let dir = var(cx, "default-directory")?;
         if stringp(cx, dir) {
             if cx.string_bytes(dir)?.first() == Some(&b'/') {
@@ -138,7 +142,7 @@ fn canonical_value(cx: &mut Leaf<'_>, name: Value, default: Value) -> std::resul
 /// an empty HOME included, is taken relative to the working directory
 /// Emacs started in (emacs_wd, environment::startup_directory), as
 /// splice_dir_file joins them.
-fn home_directory(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
+pub(crate) fn home_directory(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
     let c_string = |mut bytes: Vec<u8>| { if let Some(nul) = bytes.iter().position(|&b| b == 0) { bytes.truncate(nul) } bytes };
     let home = match super::environment::egetenv(cx, "HOME")? {
         Some(home) => c_string(home),

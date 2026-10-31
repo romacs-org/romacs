@@ -123,6 +123,10 @@ fn writes_of_fenced_values_refuse() {
         ("(makunbound 'fence-b)", 3, "write", "fence-b"),
         ("(set-default 'fence-a 1)", 3, "write", "fence-a"),
         ("(make-local-variable 'fence-a)", 3, "write", "fence-a"),
+        // A built-in's forwarding is the one the fence keeps: localizing it
+        // goes through the fence, and ends (it looped once).
+        ("(make-local-variable 'transient-mark-mode)", 3, "write", "transient-mark-mode"),
+        ("(make-variable-buffer-local 'mark-even-if-inactive)", 6, "write", "mark-even-if-inactive"),
         ("(setq process-environment nil)", 1, "write", "process-environment"),
         ("(setq default-directory \"/\")", 2, "write", "default-directory"),
     ]);

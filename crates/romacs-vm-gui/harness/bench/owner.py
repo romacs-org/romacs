@@ -416,5 +416,8 @@ def populate(home, project, org, gnosis_db):
 
 
 def lisp_dir(base, engine):
-    """The owner's package sources copied once under BASE; GNU's compiled."""
-    return parity_live.lisp_copy(base, f'owner-{engine}', sources(), engine == 'gnu')
+    """The owner's package sources copied once under BASE/lisp (a directory
+    of its own: a layer's plan lists a package directory's siblings);
+    GNU's compiled."""
+    (Path(base) / 'lisp').mkdir(exist_ok=True)
+    return parity_live.lisp_copy(Path(base) / 'lisp', f'owner-{engine}', sources(), engine == 'gnu')

@@ -426,9 +426,16 @@ fn run() -> Result<(), String> {
     let mut world_store = None;
     let mut world_reset = None;
     let mut world_build = false;
+    let mut init_layer = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--world-build" => world_build = true,
+            // A layer builder's: the init, the plan digest and the entries left out (world.rs).
+            "--init-layer" => {
+                let mut word = || args.next().ok_or("--init-layer needs INIT DIGEST EXCLUDED");
+                let (init, digest, excluded) = (word()?, word()?, word()?);
+                init_layer = Some(world::InitLayerArgs::parse(&init, &digest, &excluded)?);
+            }
             "--world-store" => world_store = Some(std::path::absolute(args.next().ok_or("missing world store")?).map_err(|e| e.to_string())?),
             // Waiting for a missing world to build is what a launch does
             // now; the flag stays accepted for the scripts that passed it.
@@ -487,7 +494,12 @@ fn run() -> Result<(), String> {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
         if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
-        return world::prepare(&world::open(store, width, height, floor)?, width, height, floor);
+        let base = world::open(store, width, height, floor)?;
+        world::prepare(&base, width, height, floor)?;
+        if let Some(init) = user_init::path().filter(|_| load_user_init) {
+            world::prepare_layer(&base, &init, width, height, floor);
+        }
+        return Ok(());
     }
     // A live --loadup launch boots from its world, in --world-store or by
     // default in the user's cache (world::default_store), unless
@@ -503,7 +515,7 @@ fn run() -> Result<(), String> {
         (false, _) => None,
     };
     if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
-        world::launch(&world::open(store.clone(), width, height, floor)?, width, height, floor, || {});
+        world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor, init_layer.as_ref())?;
     }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (host, sender) =
@@ -522,26 +534,37 @@ fn run() -> Result<(), String> {
                 None
             }
         });
-        let isolate_world = world.as_ref().map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+        // The init's layer, when the store holds one for the init this
+        // launch loads: restored instead of the base world.
+        let init = user_init::path().filter(|_| load_user_init && world.is_some());
+        let layer = world.as_ref().zip(init.as_deref()).and_then(|(base, init)| world::layer(base, init));
         startup::mark_phase("world-open");
-        let restored = world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
+        let restored_layer = layer.as_ref().and_then(world::restore_layer);
+        let from_layer = restored_layer.is_some();
+        let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
             // Said first, so a launcher sees it whether or not a window can.
             eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": PREPARING}));
             let painted = preparing_frame(&sender, width, height);
             if painted.is_ok() { first_presentation = 2; }
             eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing-frame", "painted": painted.is_ok(),
                                                                "error": painted.err()}));
-        }));
-        // Bounding the store waits for the first frame, on a thread of its own.
-        let prune = world.map(|world| move || { std::thread::spawn(move || {
-            if let Ok(deleted) = world.prune() && !deleted.is_empty() {
+        })));
+        // The world this launch booted from, which its worker isolates adopt.
+        let booted = world.as_ref().map(|base| if from_layer { &layer.as_ref().unwrap().world } else { base });
+        let isolate_world = booted.map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+        // Bounding the store waits for the first frame, on a thread of its
+        // own; a launch from the layer keeps the base it boots beside.
+        let prune = booted.cloned().map(|current| move || { std::thread::spawn(move || {
+            if let Ok(deleted) = current.prune() && !deleted.is_empty() {
                 eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted}));
             }
         }); });
+        if from_layer && let Some(base) = &world { base.keep(); }
+        let worlds = world.map(|base| world::Worlds { base, layer, from_layer, width, height, floor });
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, first_presentation, prune)
+                     isolate_world, worlds, first_presentation, prune)
         }));
         let result = match result {
             Ok(result) => result.map(|()| 0),
@@ -774,6 +797,7 @@ fn evaluate(
     quick: bool,
     restored: Option<(Box<Vm>, world::Carry)>,
     isolate_world: Option<(std::path::PathBuf, String)>,
+    worlds: Option<world::Worlds>,
     first_presentation: u64,
     after_first_frame: Option<impl FnOnce()>,
 ) -> Result<(), String> {
@@ -849,10 +873,14 @@ fn evaluate(
         }
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
+                // What the init loads is its layer's plan (world.rs).
+                if worlds.is_some() { vm.record_init_loads(); }
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
                 }
+                let plan = vm.take_init_loads(&path);
+                if let Some(worlds) = &worlds { world::after_init(worlds, plan); }
             }
         }
         startup::mark_phase("user-init");

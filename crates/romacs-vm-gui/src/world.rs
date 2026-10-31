@@ -19,11 +19,22 @@
 //! startup steps (rlisp/romacs-gui-loadup.el): those read and write the
 //! delayed variables and the inputs of this process, which a world build
 //! refuses, so a restored launch takes them itself.
+//!
+//! A launch that loads the user's init restores the init's layer instead
+//! when the store holds one (`romacs_vm::world::layer`): the base world
+//! with the libraries the init's recorded plan loads, keyed by the base
+//! and the plan, replayed after the chain. The launch checks the init is
+//! the one planned and leaves out the entries a build refused; a stale or
+//! missing layer boots from the base world, records the plan the init
+//! makes now, and builds the layer ahead of the next launch, on a thread
+//! of its own (`after_init`). `--world-build` prepares the layer with the
+//! base once a plan exists.
 use crate::startup;
 use romacs_vm::Vm;
+use romacs_vm::world::layer::{Plan, REFUSAL};
 use romacs_vm::world::store::{Launch, World};
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// What a GUI world carries beside its VM: the chain's report.
 pub struct Carry {
@@ -111,16 +122,12 @@ pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option
 /// failed lately (`romacs_vm::world::store`), boots from source. A builder
 /// process builds and exits here.
 pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_wait: impl FnOnce()) -> Option<(Box<Vm>, Carry)> {
-    match world.launch::<Carry>(|| builder_args(world, width, height, floor), true, on_wait) {
+    match world.launch::<Carry>(|| builder_args(world, width, height, floor, None), true, on_wait) {
         Launch::Restored { vm, carry, manifest } => {
             eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"]}));
             Some((vm, carry))
         }
-        Launch::Build => {
-            let result = build(world, width, height, floor);
-            if let Err(error) = &result { eprintln!("romacs-world: build failed: {error}"); }
-            std::process::exit(if result.is_ok() { 0 } else { 1 })
-        }
+        Launch::Build => build_and_exit(world, width, height, floor, None),
         Launch::Chain { reason } => {
             eprintln!("romacs-world: {}", json!({"mode": "source", "reason": reason}));
             None
@@ -128,11 +135,216 @@ pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_w
     }
 }
 
+/// This process is a builder: build BASE's world, or INIT's layer over it
+/// when a launch asked for one (`--init-layer`, the arguments
+/// `builder_args` gives), and exit. The plan is the store's for INIT less
+/// EXCLUDED, and must have DIGEST: a plan that changed since the launch
+/// resolved it is not built under its key.
+pub fn build_here(base: &World, width: u32, height: u32, floor: Option<usize>, init: Option<&InitLayerArgs>) -> Result<(), String> {
+    let Launch::Build = base.launch::<Carry>(Vec::new, false, || {}) else { return Err("not a world builder".into()) };
+    let Some(args) = init else { build_and_exit(base, width, height, floor, None) };
+    let full = Plan::read(&base.store, &args.init).ok_or_else(|| format!("no plan for {}", args.init.display()))?;
+    let plan = full.without(&args.excluded);
+    if plan.digest() != args.digest {
+        return Err(format!("the plan for {} changed since the launch resolved it", args.init.display()));
+    }
+    build_and_exit(&base.layered(plan.recipe()), width, height, floor, Some(plan))
+}
+
+/// Build WORLD, with PLAN's libraries for a layer, and exit with the outcome.
+fn build_and_exit(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Option<Plan>) -> ! {
+    let result = build(world, width, height, floor, plan.as_ref());
+    if let Err(error) = &result { eprintln!("romacs-world: build failed: {error}"); }
+    std::process::exit(if result.is_ok() { 0 } else { 1 })
+}
+
+/// What `--init-layer` names: the init, the resolved plan's digest and the
+/// entries left out.
+pub struct InitLayerArgs {
+    pub init: PathBuf,
+    pub digest: String,
+    pub excluded: Vec<usize>,
+}
+
+impl InitLayerArgs {
+    /// From the three words after `--init-layer`: the init, the digest and
+    /// the excluded entries as a comma-separated list, or `-` for none.
+    pub fn parse(init: &str, digest: &str, excluded: &str) -> Result<InitLayerArgs, String> {
+        let excluded = match excluded {
+            "-" => Vec::new(),
+            list => list.split(',').map(|n| n.parse::<usize>().map_err(|e| format!("--init-layer: {e}"))).collect::<Result<_, _>>()?,
+        };
+        Ok(InitLayerArgs { init: PathBuf::from(init), digest: digest.to_owned(), excluded })
+    }
+
+    fn words(&self) -> [std::ffi::OsString; 3] {
+        let excluded = if self.excluded.is_empty() { "-".to_owned() } else {
+            self.excluded.iter().map(usize::to_string).collect::<Vec<_>>().join(",")
+        };
+        [self.init.clone().into_os_string(), self.digest.clone().into(), excluded.into()]
+    }
+}
+
+/// An init's layer over its base world, as a launch resolved it: the plan
+/// the store keeps for the init, the entries left out (indices in that
+/// plan) because a build refused them, and the plan replayed.
+pub struct Layer {
+    pub world: World,
+    full: Plan,
+    excluded: Vec<usize>,
+    pub plan: Plan,
+}
+
+impl Layer {
+    fn args(&self) -> InitLayerArgs {
+        InitLayerArgs { init: self.full.init.clone(), digest: self.plan.digest(), excluded: self.excluded.clone() }
+    }
+}
+
+/// The layer a launch may restore for INIT over BASE: the plan the store
+/// keeps for INIT, when INIT still has the content it was planned from,
+/// resolved (`resolve`). None without a plan, or with an edited init.
+pub fn layer(base: &World, init: &Path) -> Option<Layer> {
+    let plan = Plan::read(&base.store, init)?;
+    if !plan.current() {
+        eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": "the init changed since its plan"}));
+        return None;
+    }
+    resolve(base, plan)
+}
+
+/// FULL's layer over BASE less the entries standing refusals name: each
+/// refused layer's entries are left out and the rest keyed again, until a
+/// key has no standing refusal. None when nothing is left, or a refusal
+/// names no entry (the build refused for another reason on these inputs).
+pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
+    let mut excluded: Vec<usize> = Vec::new();
+    for _ in 0..8 {
+        let plan = full.without(&excluded);
+        if plan.entries.is_empty() {
+            return None;
+        }
+        let world = base.layered(plan.recipe());
+        let Some(refusals) = world.standing_refusal() else { return Some(Layer { world, full, excluded, plan }) };
+        // The build replayed the trimmed plan: its entry indices are
+        // positions among the entries kept.
+        let kept: Vec<usize> = (0..full.entries.len()).filter(|i| !excluded.contains(i)).collect();
+        let named: Vec<usize> = refusals.iter().filter(|r| r["kind"] == REFUSAL)
+            .filter_map(|r| r["entry"].as_u64()).filter_map(|j| kept.get(j as usize).copied()).collect();
+        if named.is_empty() {
+            eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": {"refused": refusals}}));
+            return None;
+        }
+        excluded.extend(named);
+        excluded.sort_unstable();
+        excluded.dedup();
+    }
+    None
+}
+
+/// LAYER restored, when it is usable now; nothing is built at a launch.
+pub fn restore_layer(layer: &Layer) -> Option<(Box<Vm>, Carry)> {
+    match layer.world.restore_only::<Carry>() {
+        Ok(restored) => {
+            let key: String = layer.world.key.iter().map(|b| format!("{b:02x}")).collect();
+            eprintln!("romacs-world: {}", json!({"mode": "restored", "key": key, "layer": {"entries": layer.plan.entries.len(), "excluded": layer.excluded}}));
+            Some(restored)
+        }
+        Err(reason) => {
+            eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": reason}));
+            None
+        }
+    }
+}
+
+/// The worlds of a launch, for what follows the user's init.
+pub struct Worlds {
+    pub base: World,
+    pub layer: Option<Layer>,
+    /// The launch restored its layer, not its base.
+    pub from_layer: bool,
+    pub width: u32,
+    pub height: u32,
+    pub floor: Option<usize>,
+}
+
+/// The user's init has run and PLAN is what it loaded (None: nothing was
+/// recorded). Keep the plan when it differs from the store's in loads or
+/// in the init's content, and unless this launch restored the layer of
+/// these very loads, build that layer ahead of the next launch, on a
+/// thread of its own.
+pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
+    let Some(recorded) = plan else { return };
+    // An init that loads nothing has no layer.
+    if recorded.entries.is_empty() {
+        return;
+    }
+    // Restored from a layer, the init issued no autoload for a library the
+    // layer holds: the layer's plan stays, with any new load added.
+    let plan = match (&worlds.layer, worlds.from_layer) {
+        (Some(layer), true) => layer.plan.merged(&recorded),
+        _ => recorded,
+    };
+    let kept = Plan::read(&worlds.base.store, &plan.init);
+    if plan.supersedes(kept.as_ref()) {
+        if let Err(error) = plan.write(&worlds.base.store) {
+            eprintln!("romacs-world: {}", json!({"event": "layer", "error": format!("the plan cannot be kept: {error}")}));
+            return;
+        }
+        eprintln!("romacs-world: {}", json!({"event": "layer-plan", "entries": plan.entries.len()}));
+    }
+    if worlds.from_layer && worlds.layer.as_ref().is_some_and(|layer| layer.plan.same_loads(&plan)) {
+        return;
+    }
+    let (base, width, height, floor) = (worlds.base.clone(), worlds.width, worlds.height, worlds.floor);
+    std::thread::spawn(move || build_ahead(&base, plan, width, height, floor));
+}
+
+/// The layer of FULL over BASE made usable: built here, or waited for,
+/// and after a build that refused entries, built again without them, a
+/// few times over. Whether a layer is usable at the end.
+fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<usize>) -> bool {
+    for _ in 0..4 {
+        let Some(layer) = resolve(base, full.clone()) else { return false };
+        if layer.world.ready() {
+            return true;
+        }
+        let key: String = layer.world.key.iter().map(|b| format!("{b:02x}")).collect();
+        eprintln!("romacs-world: {}", json!({"event": "layer-build", "key": key, "entries": layer.plan.entries.len()}));
+        match layer.world.prepare(|| builder_args(&layer.world, width, height, floor, Some(&layer.args()))) {
+            Ok(_) => {
+                eprintln!("romacs-world: {}", json!({"event": "layer-built", "key": key}));
+                return true;
+            }
+            Err(reason) => {
+                eprintln!("romacs-world: {}", json!({"event": "layer-build-failed", "key": key, "reason": reason}));
+                if layer.world.standing_refusal().is_none() {
+                    return false;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// `--world-build`'s second half: INIT's layer over BASE made usable too,
+/// when the store holds INIT's plan and the init is the one planned.
+pub fn prepare_layer(base: &World, init: &Path, width: u32, height: u32, floor: Option<usize>) {
+    match Plan::read(&base.store, init) {
+        Some(plan) if plan.current() => {
+            let built = build_ahead(base, plan, width, height, floor);
+            eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": built}));
+        }
+        Some(_) => eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": false, "reason": "the init changed since its plan"})),
+        None => eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": false, "reason": "no plan: the init has not run"})),
+    }
+}
+
 /// WORLD made usable for this launch's recipe, with no window: built here,
 /// or waited for, when it is missing or stale (`World::prepare`). Says how
 /// it ended on stderr as a launch says how it booted.
 pub fn prepare(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result<(), String> {
-    match world.prepare(|| builder_args(world, width, height, floor)) {
+    match world.prepare(|| builder_args(world, width, height, floor, None)) {
         Ok(manifest) => {
             eprintln!("romacs-world: {}", json!({"mode": "prepared", "key": manifest["key"]}));
             Ok(())
@@ -144,11 +356,15 @@ pub fn prepare(world: &World, width: u32, height: u32, floor: Option<usize>) -> 
 /// A builder's arguments for WORLD's launch: what its recipe takes from the
 /// command line, the store absolute, since the builder runs in the store's
 /// pinned directory. Nothing else of this launch reaches it.
-fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>) -> Vec<std::ffi::OsString> {
+fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, layer: Option<&InitLayerArgs>) -> Vec<std::ffi::OsString> {
     let mut args: Vec<std::ffi::OsString> = vec!["--loadup".into(), "--world-store".into(), world.store.clone().into(),
                                                  "--geometry".into(), format!("{width}x{height}").into()];
     if let Some(floor) = floor {
         args.extend(["--gc-floor".into(), floor.to_string().into()]);
+    }
+    if let Some(layer) = layer {
+        args.push("--init-layer".into());
+        args.extend(layer.words());
     }
     args
 }
@@ -168,25 +384,29 @@ fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
     roots
 }
 
-/// The builder: the launch's steps up to the world's end, headless, on the
-/// evaluator's stack, then publish.
-fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result<(), String> {
+/// The builder: the launch's steps up to the world's end, with PLAN's
+/// libraries for a layer, headless, on the evaluator's stack, then publish.
+fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Option<&Plan>) -> Result<(), String> {
     let world = world.clone();
+    let plan = plan.cloned();
     crate::spawn_evaluator(move || -> Result<(), String> {
         // The fonts load before the build is confined.
         let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
         let dir = startup::lisp_root(&startup::lisp_dir())?;
-        world.begin_build(&world.build_roots(build_roots(&dir))).map_err(|e| e.to_string())?;
-        let len = world.build(|| build_world(width, height, floor, &dir, engine))?;
+        let mut roots = build_roots(&dir);
+        roots.extend(plan.iter().flat_map(Plan::directories));
+        world.begin_build(&world.build_roots(roots)).map_err(|e| e.to_string())?;
+        let len = world.build(|| build_world(width, height, floor, &dir, engine, plan.as_ref()))?;
         eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
         Ok(())
     })?.join().map_err(|_| "world builder panicked".to_owned())?
 }
 
-/// The build's steps once it records: up to the chain's end. The world's
-/// VM, its carry and no events, for `World::build` to publish.
+/// The build's steps once it records: up to the chain's end, then PLAN's
+/// libraries for a layer. The world's VM, its carry and its events (the
+/// plan replayed, with the entries refused), for `World::build` to publish.
 fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::Path,
-               engine: std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>) -> Result<(Vm, Carry, serde_json::Value), String> {
+               engine: std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>, plan: Option<&Plan>) -> Result<(Vm, Carry, serde_json::Value), String> {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.set_layout_host(Some(Box::new(crate::measure::Host { engine: engine.clone() })));
@@ -201,6 +421,14 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     let font = launch_font()?;
     let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, font.as_ref().map(|(s, _)| s.as_str()), dir)?;
     startup::install_session_definitions(&mut vm, startup::Launch::Loadup, dir)?;
+    let events = match plan {
+        Some(plan) => {
+            let refused = vm.world_layer_load(plan);
+            eprintln!("romacs-world: {}", json!({"event": "layer-load", "entries": plan.entries.len(), "refused": refused}));
+            json!({"init-layer": plan.json(), "refused": refused})
+        }
+        None => json!({}),
+    };
     vm.set_layout_host(None);
     // The fonts the world measured with, the default face's among them:
     // their files and Fontconfig's are keyed records, so a font added,
@@ -212,7 +440,7 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     for path in user_font_configuration(|name| std::env::var_os(name)) {
         let _ = romacs_vm::host::metadata(&path);
     }
-    Ok((vm, Carry { loadup }, json!({})))
+    Ok((vm, Carry { loadup }, events))
 }
 
 #[cfg(test)]
@@ -263,10 +491,17 @@ mod tests {
         let world = open(relative, 800, 600, Some(5000)).unwrap();
         assert!(world.store.is_absolute(), "{}", world.store.display());
         assert_eq!(std::fs::canonicalize(&world.store).unwrap(), std::fs::canonicalize(scratch.join("store")).unwrap());
-        let args = builder_args(&world, 800, 600, Some(5000));
+        let args = builder_args(&world, 800, 600, Some(5000), None);
         let store = world.store.clone().into_os_string();
         assert_eq!(args, ["--loadup", "--world-store", store.to_str().unwrap(), "--geometry", "800x600", "--gc-floor", "5000"]
             .map(std::ffi::OsString::from));
+        let layer = InitLayerArgs { init: PathBuf::from("/h/init.el"), digest: "abc".into(), excluded: vec![2, 5] };
+        let args = builder_args(&world, 800, 600, None, Some(&layer));
+        assert_eq!(&args[5..], ["--init-layer", "/h/init.el", "abc", "2,5"].map(std::ffi::OsString::from));
+        let parsed = InitLayerArgs::parse("/h/init.el", "abc", "2,5").unwrap();
+        assert_eq!((parsed.init.as_path(), parsed.digest.as_str(), parsed.excluded.as_slice()), (Path::new("/h/init.el"), "abc", &[2, 5][..]));
+        assert!(InitLayerArgs::parse("/h/init.el", "abc", "-").unwrap().excluded.is_empty());
+        assert!(InitLayerArgs::parse("/h/init.el", "abc", "x").is_err());
         let _ = std::fs::remove_dir_all(&scratch);
     }
 }
