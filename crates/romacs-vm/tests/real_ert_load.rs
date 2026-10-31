@@ -1246,6 +1246,9 @@ fn file_name_handlers_match_gnu() {
         .chain([
             // Tramp's own completion handler, as a session that loaded tramp has it.
             r#"(progn (require 'tramp) (list (find-file-name-handler "/home" 'expand-file-name) (file-symlink-p "/bin") (file-truename "/bin") (file-attribute-type (file-attributes "/bin")) (file-accessible-directory-p "/tmp") (file-name-case-insensitive-p "/home") (file-exists-p "/home") (file-directory-p "/tmp") (consp (file-system-info "/tmp")) (and (member "bin" (directory-files "/usr")) t) (with-temp-buffer (condition-case e (insert-file-contents "/tmp") (error (car e))))))"#.to_owned(),
+            // M-x's command-completion-default-include-p asks each command's
+            // completion predicate; tramp-loaddefs installs tramp's.
+            r#"(progn (require 'tramp) (list (function-get 'tramp-recompile-elpa 'completion-predicate) (command-completion-default-include-p 'tramp-recompile-elpa (current-buffer))))"#.to_owned(),
         ]).collect();
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let directory = format!("{}/", dir.display());
