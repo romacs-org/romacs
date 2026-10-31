@@ -256,8 +256,8 @@ and no window shows it yet.  A file the visitor refuses gives the
   ;; As GNU's basic-save-buffer-1 and -2: keep the coding the save used.
   (if buffer-file-coding-system-explicit
       (setcar buffer-file-coding-system-explicit last-coding-system-used))
-  (setq buffer-file-coding-system last-coding-system-used)
-  (romacs-gui-echo "Saved"))
+  ;; `write-region' has reported the file as GNU's save does ("Wrote FILE").
+  (setq buffer-file-coding-system last-coding-system-used))
 (defun romacs-gui-save-buffer ()
   "Save modified visited text; ask before overwriting a superseded file."
   (interactive)

@@ -1280,7 +1280,8 @@ mod tests {
         fileio_native_keys(&mut vm, &[24, 19, 121]);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "localagainfirst\nsecond\nthird\n", "MTIME_CONFIRMED_SAVE");
         assert_eq!(printed(&mut vm, "(verify-visited-file-modtime)"), "t");
-        assert_eq!(printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))"), "\"Saved\"", "MTIME_CONFIRMED_NOT_CANCELLED");
+        assert_eq!(printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))"),
+                   format!("\"Wrote {}\"", file.display()), "MTIME_CONFIRMED_NOT_CANCELLED");
         println!("C-x C-s saved unchanged metadata with CONTENT_READ_FORBIDDEN; supersession n/y through native command dispatch");
     }
 

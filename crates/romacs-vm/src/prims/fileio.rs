@@ -632,7 +632,21 @@ fn write_unlocked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     if visit != Value::NIL && into_visited {
         return Ok(Step::Call { f: cx.intern("unlock-file"), args: vec![saved[w::LOCKNAME]], then: written_nil, saved: vec![] });
     }
-    Ok(Step::Done(Value::NIL))
+    report_written(cx, saved[w::APPEND], visit, visit_file)
+}
+
+/// fileio.c:5859: an interactive write that is neither quiet (a VISIT
+/// other than nil, t or a string) nor an auto-save names the file it
+/// wrote, as `message' does.
+fn report_written(cx: &mut Leaf<'_>, append: Value, visit: Value, visit_file: Value) -> Next {
+    let quietly = visit != Value::NIL && visit != Value::TRUE && !stringp(cx, visit);
+    if quietly || auto_saving(cx)?.is_some() || var(cx, "noninteractive")? != Value::NIL {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let format = if append.integer_value().is_some() || cx.kind(append) == Kind::Float { "Updated %s" }
+        else if append != Value::NIL { "Added to %s" } else { "Wrote %s" };
+    let format = cx.string(format);
+    Ok(Step::Call { f: cx.intern("message"), args: vec![format, visit_file], then: written_nil, saved: vec![] })
 }
 
 fn written_nil(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
