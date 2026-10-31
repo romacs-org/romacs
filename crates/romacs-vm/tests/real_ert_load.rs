@@ -225,10 +225,10 @@ fn insert_file_contents_coding_matches_gnu() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-// What insert-file-contents cannot decode yet it refuses before the buffer
-// changes, with the decision's buffer state restored.
+// Cookie-less files decode as pinned GNU decodes them: detection, then the
+// ISO-2022 codec or raw bytes as eight-bit characters.
 #[test]
-fn insert_file_contents_refuses_unsupported_decoding_intact() {
+fn insert_file_contents_decodes_as_gnu() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-insert-refuse-{}", std::process::id()));
@@ -239,23 +239,26 @@ fn insert_file_contents_refuses_unsupported_decoding_intact() {
     std::fs::write(&latin, b"caf\xe9\n").unwrap();
     let probe = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (cadr (insert-file-contents {:?})) (buffer-substring-no-properties 1 (point-max)) (point) last-coding-system-used (get-text-property 3 'charset)))", latin.to_str().unwrap());
     assert_eq!(vm.eval_source(&probe).unwrap().display().unwrap(), "(5 \"kecafé\\nep\" 3 iso-latin-1-unix iso-8859-1)");
-    let cases: [(&[u8], &str); 3] = [
-        // GNU's walk finds iso-2022-7bit, which VM2 cannot decode yet.
-        (b"a\x1b$Bb\n", "insert-file-contents decoding with iso-2022-7bit"),
-        // GNU decodes these as no-conversion and utf-8, keeping raw bytes as
-        // eight-bit characters a VM2 buffer cannot hold.
-        (b"\xe9\0\xff\0", "insert-file-contents of raw bytes into a multibyte buffer"),
-        (b"\xc3", "insert-file-contents of raw bytes into a multibyte buffer"),
+    // GNU's walk finds iso-2022-7bit, decoded by the ISO-2022 codec; raw
+    // bytes GNU keeps as eight-bit characters land in the buffer the same
+    // way (VM2-RAWTEXT1). Pinned GNU's answers, the file name aside; the
+    // text without properties, as the codec marks the invalid JIS pair
+    // "b\n" with a charset property GNU does not (VM2-CODING-ISO2022-CHARSET).
+    let cases: [(&[u8], &str, &str); 3] = [
+        (b"a\x1b$Bb\n", "3) \"keab\nep\" 3 nil nil t", "3) 3 t t"),
+        (b"\xe9\0\xff\0", "4) \"ke\\351\u{0}\\377\u{0}ep\" 3 nil nil t", "4) 4 t t"),
+        (b"\xc3", "1) \"ke\\303ep\" 3 nil nil t", "1) 1 t t"),
     ];
-    for (index, (bytes, refusal)) in cases.into_iter().enumerate() {
+    for (index, (bytes, inserted, empty_result)) in cases.into_iter().enumerate() {
         let file = dir.join(format!("case-{index}.txt"));
         std::fs::write(&file, bytes).unwrap();
-        let probe = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (buffer-enable-undo) (let ((before buffer-undo-list) (lcsu last-coding-system-used)) (list (condition-case e (insert-file-contents {:?}) (error (cadr e))) (buffer-string) (point) (eq buffer-undo-list before) (eq last-coding-system-used lcsu) enable-multibyte-characters)))", file.to_str().unwrap());
-        let actual = vm.eval_source(&probe).unwrap().display().unwrap();
-        assert_eq!(actual, format!("(\"VM2 {refusal} is unsupported\" \"keep\" 3 t t t)"), "{bytes:?}");
-        let empty = format!("(with-temp-buffer (list (condition-case e (insert-file-contents {:?}) (error (cadr e))) (buffer-size) enable-multibyte-characters buffer-undo-list))", file.to_str().unwrap());
+        let name = format!("{:?}", file.to_str().unwrap());
+        let probe = format!("(prin1-to-string (with-temp-buffer (insert \"keep\") (goto-char 3) (buffer-enable-undo) (let ((before buffer-undo-list) (lcsu last-coding-system-used)) (list (condition-case e (insert-file-contents {name}) (error (cadr e))) (buffer-substring-no-properties (point-min) (point-max)) (point) (eq buffer-undo-list before) (eq last-coding-system-used lcsu) enable-multibyte-characters))))");
+        let actual: String = serde_json::from_str(&vm.eval_source(&probe).unwrap().display().unwrap()).unwrap();
+        assert_eq!(actual, format!("(({name} {inserted})"), "{bytes:?}");
+        let empty = format!("(with-temp-buffer (list (condition-case e (insert-file-contents {name}) (error (cadr e))) (buffer-size) enable-multibyte-characters buffer-undo-list))");
         let actual = vm.eval_source(&empty).unwrap().display().unwrap();
-        assert_eq!(actual, format!("(\"VM2 {refusal} is unsupported\" 0 t t)"), "empty {bytes:?}");
+        assert_eq!(actual, format!("(({name} {empty_result})"), "empty {bytes:?}");
     }
     // VM2-IFC-HELD1: the decision phase holds the empty buffer's markers, so
     // set-auto-coding-function may not make it multibyte; the markers survive.

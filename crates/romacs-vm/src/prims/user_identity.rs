@@ -95,6 +95,12 @@ fn user_real_login_name(cx) {
     Ok(cx.variable_value(symbol)?.unwrap_or(Value::NIL))
 }}
 
+defsubr! { name = "group-gid", gnu = "editfns.c:1046", effect = Reads,
+fn group_gid(cx) { Ok(cx.bigint(user_db::effective_gid().into())) }}
+
+defsubr! { name = "group-real-gid", gnu = "editfns.c:1056", effect = Reads,
+fn group_real_gid(cx) { Ok(cx.bigint(user_db::real_gid().into())) }}
+
 defsubr! { name = "user-uid", gnu = "editfns.c:1159", effect = Reads,
 fn user_uid(cx) { Ok(cx.bigint(user_db::effective_uid().into())) }}
 

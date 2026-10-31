@@ -113,13 +113,14 @@ fn matches_gnu(cases: &str, vm: fn() -> Vm) {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// A VM2 multibyte buffer holds Unicode text, so the raw bytes GNU decodes
-/// into one are refused before the buffer changes (VM2-BASE64-REGION1).
+/// The octets GNU decodes into a multibyte buffer go in as raw-byte
+/// characters (VM2-RAWTEXT1). Pinned GNU: (2 "x\377\357" 2 t).
 #[test]
-fn base64_decode_region_refuses_raw_bytes_in_a_multibyte_buffer() {
-    let source = "(with-temp-buffer (insert \"x_-8\") (goto-char 2) (list (condition-case e (base64-decode-region 2 5 t) (error e)) (buffer-string) (point) buffer-undo-list))";
+fn base64_decode_region_puts_raw_bytes_in_a_multibyte_buffer() {
+    let source = "(prin1-to-string (with-temp-buffer (insert \"x_-8\") (goto-char 2) (list (condition-case e (base64-decode-region 2 5 t) (error e)) (buffer-string) (point) buffer-undo-list)))";
     let actual = Vm::new().eval_source(source).and_then(|v| v.display()).unwrap();
-    assert_eq!(actual, "((error \"VM2 base64-decode-region of raw bytes into a multibyte buffer is unsupported\") \"x_-8\" 2 t)");
+    let printed: String = serde_json::from_str(&actual).unwrap();
+    assert_eq!(printed, "(2 \"x\\377\\357\" 2 t)");
 }
 
 /// A unibyte buffer refuses non-ASCII text as `insert' there refuses it,

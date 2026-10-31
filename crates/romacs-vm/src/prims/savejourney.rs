@@ -52,11 +52,10 @@ fn file_mode_string(mode: u32) -> Vec<u8> {
 defsubr! { name = "file-attributes", gnu = "dired.c:953", effect = Global,
 fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
     // GNU catches all expansion conditions and returns nil.
-    let path = match super::fileio::expand_file_name(cx, filename) {
+    let (path, expanded) = match super::fileio::expanded_path(cx, filename) {
         Ok(path) => path,
         Err(_) => return Ok(Step::Done(Value::NIL)),
     };
-    let expanded = cx.string(&path);
     let operation = cx.intern("file-attributes");
     let handler = super::fileio::find_file_name_handler(cx, expanded, operation)?;
     if handler != Value::NIL {
@@ -69,7 +68,7 @@ fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
 
 /// dired.c file_attributes of the local file PATH, already expanded: nil
 /// when it cannot be read.
-pub(super) fn local_file_attributes(cx: &mut Leaf<'_>, path: &str, id_format: Value) -> std::result::Result<Value, Fault> {
+pub(super) fn local_file_attributes(cx: &mut Leaf<'_>, path: &std::path::Path, id_format: Value) -> std::result::Result<Value, Fault> {
     use std::os::unix::fs::MetadataExt;
     let integer = cx.intern("integer");
     let named = id_format != Value::NIL && id_format != integer;
@@ -105,13 +104,13 @@ fn symlink_expanded(cx: &mut Leaf<'_>, filename: Value, _: &[Value]) -> Next {
     if handler != Value::NIL {
         return Ok(Step::Call { f: handler, args: vec![operation, filename], then: returned, saved: vec![] });
     }
-    let path = cx.string_text(filename)?;
+    let path = super::fileio::file_name_path(cx, filename)?;
     let target = match crate::host::read_link(path) {
         Ok(target) => target,
         Err(_) => return Ok(Step::Done(Value::NIL)),
     };
-    let target = target.to_str().ok_or_else(|| Fault::Error("VM2 file-symlink-p non-UTF-8 target decoding unsupported".into()))?;
-    Ok(Step::Done(cx.make_string(target.as_bytes().to_vec(), !target.is_ascii())))
+    use std::os::unix::ffi::OsStrExt;
+    Ok(Step::Done(super::fileio::file_name_value(cx, target.as_os_str().as_bytes())))
 }
 
 defsubr! { name = "file-symlink-p", gnu = "fileio.c:3162", effect = Global,
@@ -119,9 +118,7 @@ fn file_symlink_p(cx, filename: Value) -> Step {
     if cx.string_bytes(filename)?.contains(&0) {
         return Err(Fault::Wrong("filenamep", filename));
     }
-    let path = super::fileio::expand_file_name(cx, filename)?;
-    let multibyte = cx.string_view(filename)?.is_multibyte() || !path.is_ascii();
-    let expanded = cx.make_string(path.into_bytes(), multibyte);
+    let (_, expanded) = super::fileio::expanded_path(cx, filename)?;
     symlink_expanded(cx, expanded, &[])
 }}
 
@@ -234,17 +231,14 @@ fn returned(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
 }
 
 /// A unibyte non-ASCII NAME is an encoded file name (ENCODE_FILE's output,
-/// which `set-auto-coding-function' receives). VM2 file names are UTF-8, so
-/// its bytes name the same file as the multibyte string they spell.
+/// which `set-auto-coding-function' receives): DECODE_FILE under the UTF-8
+/// file-name coding, bytes that are not UTF-8 as raw-byte characters.
 fn decoded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fault> {
     let view = cx.string_view(name)?;
     if view.is_multibyte() || view.bytes().is_ascii() { return Ok(name); }
     let bytes = view.bytes().to_vec();
     super::filename::utf8_file_names(cx, "file-name-case-insensitive-p")?;
-    if std::str::from_utf8(&bytes).is_err() {
-        return Err(Fault::Error("VM2 file-name-case-insensitive-p of a non-UTF-8 unibyte file name is unsupported".into()));
-    }
-    Ok(cx.make_string(bytes, true))
+    Ok(super::fileio::file_name_value(cx, &bytes))
 }
 
 defsubr! { name = "file-name-case-insensitive-p", gnu = "fileio.c:2688", effect = Global,
@@ -255,17 +249,13 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
     if super::fileio::find_file_name_handler(cx, filename, expansion)? != Value::NIL {
         return Err(Fault::Error("VM2 file-name-case-insensitive-p expand-file-name handler is unsupported".into()));
     }
-    let path = super::fileio::expand_file_name(cx, filename)?;
-    let multibyte = cx.string_view(filename)?.is_multibyte() || !path.is_ascii();
-    let expanded = if cx.string_text(filename)? == path { filename }
-        else { cx.make_string(path.into_bytes(), multibyte) };
+    let (path, expanded) = super::fileio::expanded_path(cx, filename)?;
     let operation = cx.intern("file-name-case-insensitive-p");
     let handler = super::fileio::find_file_name_handler(cx, expanded, operation)?;
     if handler != Value::NIL {
         return Ok(Step::Call { f: handler, args: vec![operation, expanded], then: returned, saved: vec![] });
     }
-    let path = cx.string_text(expanded)?.to_owned();
-    let insensitive = crate::host::case_insensitive(std::path::Path::new(&path), filesystem_case_insensitive)
+    let insensitive = crate::host::case_insensitive(&path, filesystem_case_insensitive)
         .map_err(|reason| Fault::Error(format!("VM2 filesystem case sensitivity unknown: {reason}")))?;
     Ok(Step::Done(if insensitive { Value::TRUE } else { Value::NIL }))
 }}

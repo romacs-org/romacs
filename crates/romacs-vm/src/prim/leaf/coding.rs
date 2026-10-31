@@ -35,6 +35,11 @@ fn num(n: i64) -> Value {
 
 impl Leaf<'_> {
     pub(crate) fn coding_convert_string(&mut self, string: Value, coding: Value, nocopy: Value, buffer: Value, encode: bool) -> super::super::Out {
+        self.coding_convert(string, coding, nocopy, buffer, encode, true)
+    }
+    /// code_convert_string; ASCII_FAST is false once detection replaced
+    /// the system the caller named, whose ASCII optimization alone applies.
+    fn coding_convert(&mut self, string: Value, coding: Value, nocopy: Value, buffer: Value, encode: bool, ascii_fast: bool) -> super::super::Out {
         let source = self.string_view(string)?;
         self.coding_symbol(coding)?;
         let last = self.intern("last-coding-system-used");
@@ -56,36 +61,14 @@ impl Leaf<'_> {
         let inhibit = self.intern("inhibit-eol-conversion");
         let inhibit = self.variable_value(inhibit)?.unwrap_or(Value::NIL) != Value::NIL;
         let unix = self.intern("unix");
-        let fast = source.bytes().is_ascii() && self.vector_get(attrs, num(5))? != Value::NIL
+        let fast = ascii_fast && source.bytes().is_ascii() && self.vector_get(attrs, num(5))? != Value::NIL
             && (eol == unix || inhibit || !source.bytes().contains(&if encode { b'\n' } else { b'\r' }));
         if fast && (buffer == Value::NIL || buffer == Value::TRUE) {
             self.variable_set(last, name)?;
             return if nocopy != Value::NIL { Ok(string) } else { Ok(self.make_string(source.bytes().to_vec(), !encode)) };
         }
         let kind = self.vector_get(attrs, num(3))?;
-        let utf8 = kind == self.intern("utf-8");
-        let charset = kind == self.intern("charset");
-        let utf16 = kind == self.intern("utf-16");
-        // setup_coding_system (coding.c:5706): an undecided type encodes
-        // through encode_coding_raw_text; decoding it means detection.
-        let raw = kind == self.intern("raw-text") || (encode && kind == self.intern("undecided"));
-        // Shift-JIS and Big5 decode (coding.c decode_coding_sjis, _big5).
-        let sjis = !encode && kind == self.intern("shift-jis");
-        let big5 = !encode && kind == self.intern("big5");
-        if !utf8 && !charset && !utf16 && !raw && !sjis && !big5 {
-            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, UTF-16, charset, raw-text, and decoding Shift-JIS and Big5)".into()));
-        }
-        for index in [6, 7, 9, 10] {
-            if self.vector_get(attrs, num(index))? != Value::NIL {
-                return Err(Fault::Error("string coding translation tables and conversion hooks are not implemented".into()));
-            }
-        }
-        let bom = if utf8 || utf16 { self.vector_get(attrs, num(24))? } else { Value::NIL };
-        // Encoding with a BOM pair only writes the BOM; decoding detects.
-        if self.pair(bom).is_some() && !(utf16 && encode) {
-            return Err(Fault::Error("string coding BOM-pair detection is not implemented".into()));
-        }
-        let tokens = if encode && utf8 && !source.is_multibyte() {
+        let tokens = if encode && kind == self.intern("utf-8") && !source.is_multibyte() {
             coding_encode_unibyte(source.bytes())
         } else { source.chars().map(|code| {
             if !source.is_multibyte() { CodingToken::Byte(code as u8) }
@@ -93,6 +76,41 @@ impl Leaf<'_> {
             else if code < 128 { CodingToken::Byte(code as u8) }
             else { CodingToken::Character(code) }
         }).collect::<Vec<_>>() };
+        let bom = self.vector_get(attrs, num(24))?;
+        let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
+        let undecided = kind == self.intern("undecided");
+        // decode_coding's detect_coding: an undecided system, or a BOM pair,
+        // decodes as the system the text shows.
+        if !encode && (undecided || (self.pair(bom).is_some() && matches!(category, CATEGORY_UTF_8_AUTO | CATEGORY_UTF_16_AUTO))) {
+            let bytes = coding_detection_bytes(&tokens);
+            if let Some(found) = self.coding_detected_system(spec, attrs, &bytes)? {
+                return self.coding_convert(string, found, nocopy, buffer, false, false);
+            }
+        }
+        let is = |this: &mut Self, name: &str| kind == this.intern(name);
+        let utf8 = is(self, "utf-8");
+        let charset = is(self, "charset");
+        let utf16 = is(self, "utf-16");
+        let iso = is(self, "iso-2022");
+        let mule = is(self, "emacs-mule");
+        let sjis = is(self, "shift-jis");
+        let big5 = is(self, "big5");
+        // setup_coding_system (coding.c:5706): an undecided type encodes
+        // through encode_coding_raw_text, and decodes so when detection
+        // found nothing.
+        let raw = is(self, "raw-text") || undecided;
+        if !utf8 && !charset && !utf16 && !raw && !iso && !mule && !sjis && !big5 {
+            let type_name = self.symbol_name(kind)?;
+            return Err(Fault::Error(format!("VM2 string conversion for the {type_name} coding type is not implemented")));
+        }
+        for index in [6, 7, 9, 10] {
+            if self.vector_get(attrs, num(index))? != Value::NIL {
+                return Err(Fault::Error("string coding translation tables and conversion hooks are not implemented".into()));
+            }
+        }
+        // A BOM pair decodes as if the BOM were optional (detection found
+        // none) and encodes with one.
+        let bom = if utf8 || utf16 { bom } else { Value::NIL };
         // UTF-16 line ends are characters, found and converted after decoding.
         let tokens = if utf16 && !encode { self.coding_decode_utf16(attrs, bom, &tokens)? } else { tokens };
         let detected = if !encode && !inhibit && self.kind(eol) == Kind::Vector { coding_eol(&tokens) } else { None };
@@ -107,21 +125,31 @@ impl Leaf<'_> {
                 self.coding_encode_utf16(attrs, bom, &tokens, mode, &mut bytes)?;
                 return self.coding_string_result(buffer, last, precise, bytes, false, Vec::new());
             }
+            // consume_chars converts line ends before the encoder sees them.
+            let tokens = coding_encode_eol(tokens, mode);
             if charset {
                 self.coding_encode_charset(attrs, &tokens, &mut bytes)?;
+            } else if iso {
+                bytes.extend(self.coding_encode_iso_2022(attrs, &tokens, mode == 2)?);
+            } else if mule {
+                bytes.extend(self.coding_encode_emacs_mule(attrs, &tokens)?);
+            } else if sjis || big5 {
+                bytes.extend(self.coding_encode_double(attrs, &tokens, sjis)?);
             } else { for token in tokens { match token {
                 CodingToken::Byte(byte) => bytes.push(byte),
                 CodingToken::Character(code) => coding_emit(code, &mut bytes),
             }}}
-            (coding_encode_eol(bytes, mode), false)
+            (bytes, false)
         } else {
             let tokens = if utf8 {
                 coding_decode_utf8(&tokens, bom != Value::NIL, !inhibit && eol == self.intern("dos"))
                     .into_iter().map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect()
             } else { tokens };
             let tokens = coding_decode_eol(tokens, mode);
-            let tokens = if charset || sjis || big5 {
+            let tokens = if charset || sjis || big5 || iso || mule {
                 let (tokens, found) = if charset { self.coding_decode_charset(attrs, &tokens)? }
+                    else if iso { self.coding_decode_iso_2022(attrs, &tokens)? }
+                    else if mule { self.coding_decode_emacs_mule(&tokens)? }
                     else { self.coding_decode_double(attrs, &tokens, sjis)? };
                 runs = found;
                 tokens
@@ -140,9 +168,8 @@ impl Leaf<'_> {
         self.coding_string_result(buffer, last, precise, bytes, multibyte, runs)
     }
     fn coding_string_result(&mut self, buffer: Value, last: Value, precise: Value, bytes: Vec<u8>, multibyte: bool, runs: Vec<(usize, usize, usize)>) -> super::super::Out {
-        if buffer != Value::NIL && buffer != Value::TRUE {
-            return Err(Fault::Error("string coding output to buffers is not implemented".into()));
-        }
+        // A BUFFER destination receives the string (prims/coding.rs).
+        let _ = buffer;
         self.variable_set(last, precise)?;
         let result = self.make_string(bytes, multibyte);
         // produce_charset: each run of characters a non-ASCII charset decoded.
@@ -344,7 +371,7 @@ impl Leaf<'_> {
 }
 
 #[derive(Clone, Copy)]
-enum CodingToken { Byte(u8), Character(u32) }
+pub(super) enum CodingToken { Byte(u8), Character(u32) }
 
 fn coding_emit(code: u32, bytes: &mut Vec<u8>) {
     let mut encoded = [0; 5];
@@ -366,13 +393,31 @@ fn coding_eol(tokens: &[CodingToken]) -> Option<usize> {
     if crlf { Some(1) } else if cr { Some(2) } else { None }
 }
 
-fn coding_encode_eol(bytes: Vec<u8>, mode: usize) -> Vec<u8> {
-    let mut result = Vec::with_capacity(bytes.len());
-    for byte in bytes {
-        if byte == b'\n' && mode != 0 { result.push(b'\r'); }
-        if byte != b'\n' || mode != 2 { result.push(byte); }
+/// consume_chars's line ends: LF becomes CRLF (MODE 1) or CR (MODE 2).
+fn coding_encode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> {
+    if mode == 0 { return tokens; }
+    let mut result = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        if matches!(token, CodingToken::Byte(b'\n')) {
+            result.push(CodingToken::Byte(b'\r'));
+            if mode == 2 { continue; }
+        }
+        result.push(token);
     }
     result
+}
+
+/// The bytes detection reads: raw bytes as themselves; a character as its
+/// internal representation (DIVERGENCES.md VM2-CODING-DETECT-MULTIBYTE).
+fn coding_detection_bytes(tokens: &[CodingToken]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(tokens.len());
+    for &token in tokens {
+        match token {
+            CodingToken::Byte(byte) => bytes.push(byte),
+            CodingToken::Character(code) => coding_emit(code, &mut bytes),
+        }
+    }
+    bytes
 }
 
 fn coding_decode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> {
@@ -1539,6 +1584,33 @@ const EOL_SEEN_LF: u8 = 1;
 const EOL_SEEN_CR: u8 = 2;
 const EOL_SEEN_CRLF: u8 = 4;
 
+/// coding.c detect_eol over BYTES: the first line end's type, a mixture
+/// of CR and CRLF counting as CRLF and any other mixture as LF, looking at
+/// most at MAX_EOL_CHECK_COUNT line ends. UTF16 reads 16-bit units, whose
+/// high byte GNU always takes first (its byte-order test never holds).
+fn detect_eol(bytes: &[u8], utf16: bool) -> u8 {
+    let (mut seen, mut total, mut at) = (0u8, 0, 0);
+    let step = if utf16 { 2 } else { 1 };
+    while at + step <= bytes.len() {
+        let (high, c) = if utf16 { (bytes[at], bytes[at + 1]) } else { (0, bytes[at]) };
+        at += step;
+        if high != 0 || (c != b'\n' && c != b'\r') { continue }
+        let this = if c == b'\n' { EOL_SEEN_LF }
+            else if utf16 && (at + 1 >= bytes.len() || bytes[at] != 0 || bytes[at + 1] != b'\n') { EOL_SEEN_CR }
+            else if !utf16 && bytes.get(at) != Some(&b'\n') { EOL_SEEN_CR }
+            else { at += step; EOL_SEEN_CRLF };
+        if seen == 0 {
+            seen = this;
+        } else if seen != this {
+            if matches!((seen, this), (EOL_SEEN_CR, EOL_SEEN_CRLF) | (EOL_SEEN_CRLF, EOL_SEEN_CR)) { seen = EOL_SEEN_CRLF; }
+            else { seen = EOL_SEEN_LF; break }
+        }
+        total += 1;
+        if total == 3 { break }
+    }
+    seen
+}
+
 /// adjust_coding_eol_type's choice for the EOL bits seen: the index of the
 /// unix, dos or mac subsidiary, LF winning over CRLF over CR.
 fn eol_index(seen: u8) -> Option<usize> {
@@ -1873,6 +1945,11 @@ fn detect_emacs_mule(bytes: &[u8], head_ascii: usize, mule_bytes: &[u8; 256], in
 #[derive(Default)]
 struct DetectInfo { checked: u32, found: u32, rejected: u32 }
 
+/// What detect_scan saw: the detectors' masks, whether a null byte or an
+/// 8-bit byte occurred, the ASCII head, the EOL bits of the skip, and the
+/// detecting categories in priority order with their systems.
+struct DetectScan { info: DetectInfo, null_byte: bool, eight_bit: bool, head_ascii: usize, eol_seen: u8, order: Vec<(usize, Value)> }
+
 /// coding.c detect_coding_utf_8 over BYTES, of which the first HEAD_ASCII
 /// are ASCII. GNU detects before CODING_MODE_LAST_BLOCK is set, so a
 /// sequence cut short by the end of the text does not reject.
@@ -1965,9 +2042,60 @@ impl Leaf<'_> {
             if !detect_utf_8(bytes, head_ascii, &mut info) { return Ok((None, None)) }
             return Ok((Some(if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig }), None));
         }
+        if category == CATEGORY_UTF_16_AUTO && kind != self.intern("undecided") {
+            let systems = self.vector_get(attrs, num(24))?;
+            let Some((le, be)) = self.pair(systems) else { return Ok((None, None)) };
+            let mut info = DetectInfo::default();
+            if !detect_utf_16(bytes, &mut info) { return Ok((None, None)) }
+            return Ok((if info.found & 1 << CATEGORY_UTF_16_LE != 0 { Some(le) }
+                else if info.found & 1 << CATEGORY_UTF_16_BE != 0 { Some(be) } else { None }, None));
+        }
         if kind != self.intern("undecided") {
             return Ok((None, None));
         }
+        let (scan, chosen) = self.detect_scan(bytes, attrs, true)?;
+        let DetectScan { info, null_byte, eight_bit, head_ascii, eol_seen, order } = scan;
+        if !null_byte && !eight_bit && head_ascii >= bytes.len() && info.found == 0 {
+            return Ok((None, eol_index(eol_seen)));
+        }
+        let found = if let Some((category, system)) = chosen {
+            if category == CATEGORY_UTF_8_AUTO || category == CATEGORY_UTF_16_AUTO {
+                let attrs = self.coding_required(system)?;
+                let attrs = self.vector_get(attrs, num(0))?;
+                let systems = self.vector_get(attrs, num(24))?;
+                match self.pair(systems) {
+                    Some((sig, nosig)) if category == CATEGORY_UTF_8_AUTO => if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig },
+                    // coding.c: little-endian is the car, big-endian the cdr.
+                    Some((le, be)) => if info.found & 1 << CATEGORY_UTF_16_LE != 0 { le }
+                        else if info.found & 1 << CATEGORY_UTF_16_BE != 0 { be }
+                        else { return Ok((None, eol_index(eol_seen))) },
+                    None => system,
+                }
+            } else {
+                system
+            }
+        } else if null_byte {
+            self.intern("no-conversion")
+        } else if info.rejected & MASK_ANY == MASK_ANY {
+            self.intern("raw-text")
+        } else if info.rejected != 0 {
+            match order.iter().find(|(category, _)| info.rejected & 1 << category == 0) {
+                Some(&(_, system)) => system,
+                None => return Ok((None, eol_index(eol_seen))),
+            }
+        } else {
+            return Ok((None, eol_index(eol_seen)));
+        };
+        Ok((Some(found), eol_index(eol_seen)))
+    }
+
+    /// The scan detect_coding and detect_coding_system share for the
+    /// undecided system ATTRS over BYTES: the skip over ASCII (ISO-2022's
+    /// escapes detected there), then each category's detector in priority
+    /// order. With HIGHEST the first complete category found ends it, and
+    /// is returned.
+    fn detect_scan(&mut self, bytes: &[u8], attrs: Value, highest: bool) -> std::result::Result<(DetectScan, Option<(usize, Value)>), Fault> {
+        let refuse = |what: &str| Fault::Error(format!("VM2 coding detection of {what} is unsupported"));
         // inhibit_flag (encode_inhibit_flag (ATTR), VARIABLE).
         let inhibit = |this: &mut Self, index: i64, variable: &str| -> std::result::Result<bool, Fault> {
             let flag = this.vector_get(attrs, num(index))?;
@@ -2027,10 +2155,10 @@ impl Leaf<'_> {
             }
             at += 1;
         }
-        if !null_byte && !eight_bit && head_ascii >= bytes.len() && info.found == 0 {
-            return Ok((None, eol_index(eol_seen)));
-        }
         let mut chosen = None;
+        if !null_byte && !eight_bit && head_ascii >= bytes.len() && info.found == 0 {
+            return Ok((DetectScan { info, null_byte, eight_bit, head_ascii, eol_seen, order }, None));
+        }
         if head_ascii >= bytes.len() {
             // All bytes 7-bit: only an ISO-2022 category can have been found.
             chosen = order.iter().copied().find(|&(category, _)| info.found & 1 << category != 0);
@@ -2050,7 +2178,7 @@ impl Leaf<'_> {
                 } else if category >= CATEGORY_RAW_TEXT {
                     continue;
                 } else if info.checked & bit != 0 {
-                    if info.found & bit != 0 { chosen = Some((category, system)); break }
+                    if highest && info.found & bit != 0 { chosen = Some((category, system)); break }
                     continue;
                 }
                 let complete = match category {
@@ -2068,38 +2196,117 @@ impl Leaf<'_> {
                     CATEGORY_EMACS_MULE => detect_emacs_mule(bytes, head_ascii, &self.emacs_mule_bytes(), &mut info),
                     _ => return Err(refuse(&format!("the {} category", CATEGORIES[category]))),
                 };
-                if complete && info.found & bit != 0 { chosen = Some((category, system)); break }
+                if highest && complete && info.found & bit != 0 { chosen = Some((category, system)); break }
             }
         }
-        let found = if let Some((category, system)) = chosen {
-            if category == CATEGORY_UTF_8_AUTO || category == CATEGORY_UTF_16_AUTO {
-                let attrs = self.coding_required(system)?;
-                let attrs = self.vector_get(attrs, num(0))?;
-                let systems = self.vector_get(attrs, num(24))?;
-                match self.pair(systems) {
-                    Some((sig, nosig)) if category == CATEGORY_UTF_8_AUTO => if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig },
-                    // coding.c: little-endian is the car, big-endian the cdr.
-                    Some((le, be)) => if info.found & 1 << CATEGORY_UTF_16_LE != 0 { le }
-                        else if info.found & 1 << CATEGORY_UTF_16_BE != 0 { be }
-                        else { return Ok((None, eol_index(eol_seen))) },
-                    None => system,
-                }
-            } else {
-                system
+        Ok((DetectScan { info, null_byte, eight_bit, head_ascii, eol_seen, order }, chosen))
+    }
+
+
+    /// coding.c Fdetect_coding_string.
+    pub(crate) fn coding_detect_string(&mut self, string: Value, highest: Value) -> super::super::Out {
+        let source = self.string_view(string)?;
+        let bytes = if source.is_multibyte() {
+            let mut bytes = Vec::with_capacity(source.bytes().len());
+            for code in source.chars() {
+                if code >= crate::lstring::BYTE8_OFFSET + 128 { bytes.push((code - crate::lstring::BYTE8_OFFSET) as u8); }
+                else { coding_emit(code, &mut bytes); }
             }
-        } else if null_byte {
-            self.intern("no-conversion")
-        } else if info.rejected & MASK_ANY == MASK_ANY {
-            self.intern("raw-text")
-        } else if info.rejected != 0 {
-            match order.iter().find(|(category, _)| info.rejected & 1 << category == 0) {
-                Some(&(_, system)) => system,
-                None => return Ok((None, eol_index(eol_seen))),
+            bytes
+        } else { source.bytes().to_vec() };
+        self.coding_detect_system(&bytes, highest != Value::NIL)
+    }
+
+    /// coding.c detect_coding_system for `undecided' over BYTES: the
+    /// possible coding systems in priority order, each given the EOL type
+    /// the text shows, or with HIGHEST the first of them (nil if none).
+    pub(crate) fn coding_detect_system(&mut self, bytes: &[u8], highest: bool) -> super::super::Out {
+        let undecided = self.intern("undecided");
+        let spec = self.coding_required(undecided)?;
+        let attrs = self.vector_get(spec, num(0))?;
+        let (scan, chosen) = self.detect_scan(bytes, attrs, highest)?;
+        let DetectScan { mut info, null_byte, order, .. } = scan;
+        let systems = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let mut val: Vec<Value> = Vec::new();
+        if info.rejected & MASK_ANY == MASK_ANY || null_byte {
+            info.found = 1 << CATEGORY_RAW_TEXT;
+            val.push(self.intern("no-conversion"));
+        } else if info.rejected == 0 && info.found == 0 {
+            info.found = MASK_ANY;
+            val.push(self.vector_get(systems, num(20))?);
+        } else if highest {
+            if info.found != 0 {
+                // GNU keeps the loop's category, utf-16-auto's mask the
+                // byte order it found, and its system.
+                let (mut category, system) = chosen.or_else(|| order.last().copied()).unwrap_or((CATEGORY_RAW_TEXT, Value::NIL));
+                if category == CATEGORY_UTF_16_AUTO {
+                    category = if info.found & 1 << CATEGORY_UTF_16_LE != 0 { CATEGORY_UTF_16_LE } else { CATEGORY_UTF_16_BE };
+                }
+                info.found = 1 << category;
+                val.push(system);
+            } else if let Some(&(category, system)) = order.iter().find(|(category, _)| info.rejected & 1 << category == 0) {
+                info.found = 1 << category;
+                val.push(system);
             }
         } else {
-            return Ok((None, eol_index(eol_seen)));
+            let mask = info.rejected | info.found;
+            let mut extra = 0;
+            for &(category, system) in order.iter().rev() {
+                if mask & 1 << category == 0 {
+                    extra |= 1 << category;
+                    if system != Value::NIL { val = vec![system]; }
+                }
+            }
+            let found: Vec<Value> = order.iter().filter(|(category, _)| info.found & 1 << category != 0).map(|&(_, system)| system).collect();
+            val.splice(0..0, found);
+            info.found |= extra;
+        }
+        // Then the EOL format of each system that leaves it open.
+        let normal = (info.found & !MASK_UTF_16 != 0).then(|| if null_byte { EOL_SEEN_LF } else { detect_eol(bytes, false) });
+        let be = (info.found & (1 << CATEGORY_UTF_16_BE | 1 << CATEGORY_UTF_16_BE_NOSIG) != 0).then(|| detect_eol(bytes, true));
+        let le = (info.found & (1 << CATEGORY_UTF_16_LE | 1 << CATEGORY_UTF_16_LE_NOSIG) != 0).then(|| detect_eol(bytes, true));
+        for name in val.iter_mut() {
+            let spec = self.coding_required(*name)?;
+            let attrs = self.vector_get(spec, num(0))?;
+            let eol = self.vector_get(spec, num(2))?;
+            if self.kind(eol) != Kind::Vector { continue }
+            let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
+            let seen = match category {
+                CATEGORY_UTF_16_BE | CATEGORY_UTF_16_BE_NOSIG => be,
+                CATEGORY_UTF_16_LE | CATEGORY_UTF_16_LE_NOSIG => le,
+                _ => normal,
+            };
+            let index = match seen { Some(EOL_SEEN_LF) => 0, Some(EOL_SEEN_CRLF) => 1, Some(EOL_SEEN_CR) => 2, _ => continue };
+            *name = self.vector_get(eol, num(index))?;
+        }
+        Ok(if highest { val.first().copied().unwrap_or(Value::NIL) } else { self.coding_list(&val) })
+    }
+
+    /// detect_coding's choice for decoding BYTES with the system NAME
+    /// (spec SPEC, attributes ATTRS): the system found, given NAME's own
+    /// EOL type when NAME specifies one; None when NAME decodes itself.
+    pub(crate) fn coding_detected_system(&mut self, spec: Value, attrs: Value, bytes: &[u8]) -> std::result::Result<Option<Value>, Fault> {
+        let (found, eol_seen) = self.coding_detect(bytes, attrs)?;
+        let eols = self.vector_get(spec, num(2))?;
+        let Some(mut found) = found else {
+            // Nothing detected (ASCII): an undecided system still takes
+            // the EOL the scan saw (adjust_coding_eol_type), so ASCII text
+            // decodes as undecided-unix, as GNU reports it.
+            if self.vector_get(attrs, num(3))? == self.intern("undecided") && self.kind(eols) == Kind::Vector
+                && let Some(index) = eol_seen {
+                return Ok(Some(self.vector_get(eols, num(index as i64))?));
+            }
+            return Ok(None);
         };
-        Ok((Some(found), eol_index(eol_seen)))
+        if self.kind(eols) != Kind::Vector {
+            let found_spec = self.coding_required(found)?;
+            let found_eols = self.vector_get(found_spec, num(2))?;
+            if self.kind(found_eols) == Kind::Vector {
+                let index = ["unix", "dos", "mac"].iter().position(|e| eols == self.intern(e)).unwrap_or(0);
+                found = self.vector_get(found_eols, num(index as i64))?;
+            }
+        }
+        Ok(Some(found))
     }
 
     /// The ISO categories' systems, as detect_coding_iso_2022 sets them
@@ -2132,7 +2339,7 @@ impl Leaf<'_> {
     /// coding.c setup_iso_safe_charsets: the register each charset of the
     /// system's list (every ISO charset for a full-support system) is
     /// designated to, 255 where none.
-    fn iso_safe_charsets(&mut self, attrs: Value, flags: i64) -> std::result::Result<Vec<u8>, Fault> {
+    pub(super) fn iso_safe_charsets(&mut self, attrs: Value, flags: i64) -> std::result::Result<Vec<u8>, Fault> {
         let ids: Vec<usize> = if flags & ISO_FLAG_FULL_SUPPORT != 0 {
             self.vm.charsets.iso.iter().map(|(_, id)| *id).collect()
         } else {
@@ -2158,7 +2365,7 @@ impl Leaf<'_> {
 
     /// coding.c emacs_mule_bytes: 1 by default, the private leading codes,
     /// and each charset with an emacs-mule id (charset.c:1171).
-    fn emacs_mule_bytes(&self) -> [u8; 256] {
+    pub(super) fn emacs_mule_bytes(&self) -> [u8; 256] {
         let mut bytes = [1u8; 256];
         bytes[0x9A] = 3; bytes[0x9B] = 3; bytes[0x9C] = 4; bytes[0x9D] = 4;
         for &i in &self.vm.charsets.ids {

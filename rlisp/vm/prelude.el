@@ -490,6 +490,80 @@ using `string-make-multibyte' or `string-make-unibyte', which see."
          (buffer-substring b e))))
     nil))
 
+;; coding.c's region conversions: code_convert_region over the string
+;; conversions, and detect-coding-region over detect-coding-string.
+
+(defun romacs--coding-insert (buffer text)
+  "Insert TEXT at BUFFER's point, which stays before it; return its length.
+The insertion decode_coding_object and encode_coding_object make into
+a buffer other than the source."
+  (with-current-buffer buffer
+    (save-excursion (insert text)))
+  (length text))
+
+(defun romacs--code-convert-region (start end coding-system destination encode)
+  "coding.c code_convert_region: START..END converted by CODING-SYSTEM,
+encoded when ENCODE, into DESTINATION: nil replaces the text, t returns
+a string, a buffer receives the text at its point."
+  (if (null coding-system)
+      (setq coding-system 'no-conversion)
+    (check-coding-system coding-system))
+  (unless (or (memq destination '(nil t)) (bufferp destination))
+    (signal 'wrong-type-argument (list 'bufferp destination)))
+  (let* ((text (buffer-substring-no-properties start end))
+         (from (min (romacs--fixnum-coerce-marker start) (romacs--fixnum-coerce-marker end)))
+         (to (+ from (length text)))
+         (result (if encode
+                     (encode-coding-string text coding-system t)
+                   (decode-coding-string text coding-system t))))
+    (cond
+     ((eq destination t) result)
+     ((and destination (not (eq destination (current-buffer))))
+      (romacs--coding-insert destination result))
+     (t
+      ;; The replacement leaves markers at END after the new text and those
+      ;; at START before it; point keeps its place outside the old text
+      ;; and goes to START from inside it.  deactivate-mark is kept.  A
+      ;; refused deletion (read-only text) leaves the buffer as it was, as
+      ;; GNU's prepare_to_modify_buffer checks before it changes anything.
+      (let ((pt (point)) (deactivate deactivate-mark)
+            (group (prepare-change-group)) (done nil))
+        (activate-change-group group)
+        (unwind-protect
+            (progn
+              (goto-char to)
+              (insert-before-markers result)
+              (delete-region from to)
+              (setq done t))
+          (if done
+              (accept-change-group group)
+            (cancel-change-group group)
+            (goto-char pt)
+            (setq deactivate-mark deactivate)))
+        (goto-char (cond ((< pt from) pt)
+                         ((< pt to) from)
+                         (t (+ pt (- (length result) (length text))))))
+        (setq deactivate-mark deactivate))
+      (length result)))))
+
+(defun decode-coding-region (start end coding-system &optional destination)
+  "Decode the text between START and END which is encoded in CODING-SYSTEM.
+coding.c Fdecode_coding_region: DESTINATION nil replaces the text and
+returns its length, t returns the decoded string, a buffer receives it at
+point.  Sets `last-coding-system-used'."
+  (romacs--code-convert-region start end coding-system destination nil))
+
+(defun encode-coding-region (start end coding-system &optional destination)
+  "Encode the text between START and END by CODING-SYSTEM.
+coding.c Fencode_coding_region, as `decode-coding-region' for DESTINATION."
+  (romacs--code-convert-region start end coding-system destination t))
+
+(defun detect-coding-region (start end &optional highest)
+  "Detect the coding system of the text between START and END.
+coding.c Fdetect_coding_region: the possible coding systems in priority
+order, or with HIGHEST the first."
+  (detect-coding-string (buffer-substring-no-properties start end) highest))
+
 ;; fns.c's `secure-hash' and `md5': extract_data_from_object chooses and
 ;; encodes the data, and `romacs--secure-hash' digests it.
 

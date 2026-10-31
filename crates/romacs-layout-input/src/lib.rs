@@ -130,8 +130,17 @@ romacs_snapshot::snapshot_struct!(FaceRun { bytes, face });
 pub struct TextSlice {
     pub utf8: String,
     pub face_runs: Vec<FaceRun>,
+    /// Byte offsets into `utf8` of characters that are raw bytes
+    /// (GNU's eight-bit characters), shown as `\NNN`; sorted.
+    pub raw: Vec<u32>,
 }
-romacs_snapshot::snapshot_struct!(TextSlice { utf8, face_runs });
+romacs_snapshot::snapshot_struct!(TextSlice { utf8, face_runs, raw });
+impl TextSlice {
+    /// Whether the character at BYTE is a raw byte.
+    pub fn is_raw(&self, byte: usize) -> bool {
+        !self.raw.is_empty() && self.raw.binary_search(&(byte as u32)).is_ok()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowSnapshot {

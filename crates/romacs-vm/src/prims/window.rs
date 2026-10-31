@@ -281,6 +281,16 @@ fn show_buffer(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 }
 fn shown(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
 
+defsubr! { name = "window-display-table", gnu = "window.c:2365", effect = Reads,
+fn window_display_table(cx; optional window: Value) {
+    cx.windows().window_display_table(window)
+}}
+
+defsubr! { name = "set-window-display-table", gnu = "window.c:2376", effect = Global,
+fn set_window_display_table(cx, window: Value, table: Value) {
+    cx.windows().set_window_display_table(window, table)
+}}
+
 defsubr! { name = "set-window-dedicated-p", gnu = "window.c:2297", effect = Global,
 fn set_window_dedicated_p(cx, window: Value, flag: Value) {
     cx.windows().set_window_dedicated_p(window, flag)

@@ -245,21 +245,24 @@ fn find_file_tilde_errors_and_hooks() {
     );
     vm.eval_source("(setq good (current-buffer) good-point (point))")
         .unwrap();
+    // A file that is not UTF-8 is visited, its byte a raw-byte character
+    // (VM2-RAWTEXT1), as GNU visits it.
     std::fs::write(fixture.root.join("bad.txt"), [0xff]).unwrap();
     assert_eq!(
         printed(
             &mut vm,
-            "(condition-case e (find-file \"bad.txt\") (error 'refused))"
+            "(progn (find-file \"bad.txt\") (list (char-after 1) (buffer-size) (eq (romacs-find-buffer-visiting \"bad.txt\") (current-buffer))))"
         ),
-        "refused"
+        "(4194303 1 t)",
+        "FIND_FILE_RAW_BYTE"
     );
     assert_eq!(
         printed(
             &mut vm,
-            "(list (eq good (current-buffer)) (= good-point (point)) (romacs-find-buffer-visiting \"bad.txt\"))"
+            "(progn (kill-buffer) (switch-to-buffer good) (list (= good-point (point)) (romacs-find-buffer-visiting \"bad.txt\")))"
         ),
-        "(t t nil)",
-        "FIND_FILE_FAILED_READ_CLEANUP"
+        "(t nil)",
+        "FIND_FILE_RAW_BYTE_KILLED"
     );
     for path in ["/ssh:host:/file", "*.txt", "/:special"] {
         assert_eq!(

@@ -12,6 +12,7 @@ fn scene() -> WindowSnapshot {
         mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false,
         text: TextSlice {
+            raw: vec![],
             utf8: "Ωμέγα Hello\nΔ".into(),
             face_runs: vec![FaceRun {
                 bytes: 11..16,
@@ -79,7 +80,7 @@ fn malformed_snapshot_is_rejected() {
 fn tabs_stretch_to_tab_stops_and_controls_show_escapes() {
     let mut s = scene();
     s.tab_width = 4;
-    s.text = TextSlice { utf8: "a\tb\u{c}\u{85}\n\tc".into(), face_runs: vec![] };
+    s.text = TextSlice { utf8: "a\tb\u{c}\u{85}\n\tc".into(), face_runs: vec![], raw: vec![] };
     let frame = romacs_layout2::layout(&s, 1).unwrap();
     let shown: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
@@ -96,7 +97,7 @@ fn tabs_stretch_to_tab_stops_and_controls_show_escapes() {
 fn rows_continue_and_truncate_as_gnu_without_fringes() {
     let mut s = scene();
     s.width = 120; // ten 12px columns
-    s.text = TextSlice { utf8: "abcdefghijkl\nxy".into(), face_runs: vec![] };
+    s.text = TextSlice { utf8: "abcdefghijkl\nxy".into(), face_runs: vec![], raw: vec![] };
     let shown = |s: &WindowSnapshot| -> Vec<(char, f32, f32)> {
         romacs_layout2::layout(s, 1).unwrap().glyphs.iter().filter_map(|g| match g {
             FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
@@ -116,7 +117,7 @@ fn rows_continue_and_truncate_as_gnu_without_fringes() {
 fn a_window_start_on_a_continuation_row_keeps_the_rows_above() {
     let mut s = scene();
     s.width = 120; // ten 12px columns: a row holds nine before its `\'
-    s.text = TextSlice { utf8: "abcdefghijkl\tz".into(), face_runs: vec![] };
+    s.text = TextSlice { utf8: "abcdefghijkl\tz".into(), face_runs: vec![], raw: vec![] };
     let z = |s: &WindowSnapshot| romacs_layout2::layout(s, 1).unwrap().glyphs.iter().find_map(|g| match g {
         FrameGlyph::Char { char: 'z', x, y, .. } => Some((*x, *y)),
         _ => None,

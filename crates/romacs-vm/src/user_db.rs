@@ -15,6 +15,14 @@ pub(crate) fn effective_uid() -> u32 {
     crate::host::euid()
 }
 
+pub(crate) fn real_gid() -> u32 {
+    crate::host::gid()
+}
+
+pub(crate) fn effective_gid() -> u32 {
+    crate::host::egid()
+}
+
 const BUFFER: usize = 16 * 1024;
 
 fn account(entry: crate::host::Passwd) -> Account {

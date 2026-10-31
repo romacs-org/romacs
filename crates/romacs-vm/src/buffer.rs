@@ -63,7 +63,99 @@ mod model_tests {
     }
 }
 
+/// GNU buffer names are Lisp strings, raw bytes included; the model keys
+/// buffers by a Rust string, so a raw-byte character of byte B stands in a
+/// name as the character U+10FF00+B, which no real name uses
+/// (DIVERGENCES.md VM2-BUFNAME-RAW1). `buffer_name_text` and
+/// `buffer_name_value` convert at the Lisp boundary; `buffer_name_shown`
+/// gives the text GNU shows for it (`\NNN`).
+const RAW_NAME_BASE: u32 = 0x10ff00;
+
+pub(crate) fn buffer_name_from_view(view: &lstring::StrView<'_>) -> String {
+    if let Some(text) = view.as_str() {
+        return text.to_owned();
+    }
+    view.chars().map(|code| {
+        let raw = if code > lstring::MAX_5_BYTE_CHAR { Some(code - lstring::BYTE8_OFFSET) }
+            else if !view.is_multibyte() && code >= 0x80 { Some(code) } else { None };
+        match raw {
+            Some(byte) => char::from_u32(RAW_NAME_BASE + byte).expect("raw name placeholder"),
+            None => char::from_u32(code).unwrap_or('\u{fffd}'),
+        }
+    }).collect()
+}
+
+/// Whether NAME holds a raw-byte placeholder.
+fn buffer_name_has_raw(name: &str) -> bool {
+    name.chars().any(|c| u32::from(c) >= RAW_NAME_BASE + 0x80)
+}
+
+/// The text GNU displays for the name: a raw byte as `\NNN`.
+pub(crate) fn buffer_name_shown(name: &str) -> std::borrow::Cow<'_, str> {
+    if !buffer_name_has_raw(name) {
+        return std::borrow::Cow::Borrowed(name);
+    }
+    std::borrow::Cow::Owned(name.chars().map(|c| match u32::from(c) {
+        code if code >= RAW_NAME_BASE + 0x80 => format!("\\{:03o}", code - RAW_NAME_BASE),
+        _ => c.to_string(),
+    }).collect())
+}
+
+/// The properties of a unibyte string of OCTETS copied INTO at BASE for
+/// its multibyte form (`octets_to_multibyte`): each byte above 127 grows
+/// to a two-byte raw character, and the runs stretch with it.
+pub(crate) fn widened_properties(from: &properties::Properties, octets: &[u8], base: usize, into: &mut properties::Properties) {
+    if from.is_empty() { return; }
+    let widths: Vec<usize> = std::iter::once(0).chain(octets.iter().scan(0, |at, &b| { *at += if b < 128 { 1 } else { 2 }; Some(*at) })).collect();
+    for (range, values) in from.runs(ByteOffset(0)..ByteOffset(octets.len())) {
+        let range = ByteOffset(base + widths[range.start.0])..ByteOffset(base + widths[range.end.0]);
+        for (key, value) in values {
+            into.put(range.clone(), &key, value);
+        }
+    }
+}
+
 impl Vm {
+    /// ENCODE_FILE under a UTF-8 `file-name-coding-system': the host bytes
+    /// of the file name VALUE (a raw-byte character as its byte), or None
+    /// for another object.
+    pub(crate) fn file_name_bytes(&self, value: Value) -> Option<Vec<u8>> {
+        let view = self.str_view(value)?;
+        if !view.is_multibyte() || view.as_str().is_some() {
+            return Some(view.bytes().to_vec());
+        }
+        let mut out = Vec::with_capacity(view.bytes().len());
+        for code in view.chars() {
+            if code > lstring::MAX_5_BYTE_CHAR {
+                out.push((code - lstring::BYTE8_OFFSET) as u8);
+            } else {
+                let mut encoded = [0; 5];
+                let n = lstring::char_string(code, &mut encoded);
+                out.extend_from_slice(&encoded[..n]);
+            }
+        }
+        Some(out)
+    }
+    /// The Lisp string of the buffer name NAME.
+    pub(crate) fn buffer_name_value(&mut self, name: &str) -> Value {
+        if !buffer_name_has_raw(name) {
+            return self.allocate_object(Object::String(Box::new(data::LispString::new(name))));
+        }
+        let mut bytes = Vec::with_capacity(name.len());
+        for c in name.chars() {
+            let code = u32::from(c);
+            let code = if code >= RAW_NAME_BASE + 0x80 { code - RAW_NAME_BASE + lstring::BYTE8_OFFSET } else { code };
+            let mut encoded = [0; 5];
+            let n = lstring::char_string(code, &mut encoded);
+            bytes.extend_from_slice(&encoded[..n]);
+        }
+        self.make_lisp_string(bytes, true)
+    }
+    /// The model's name for the Lisp string VALUE, or None for another
+    /// object.
+    pub(crate) fn buffer_name_text(&self, value: Value) -> Option<String> {
+        self.str_view(value).map(|view| buffer_name_from_view(&view))
+    }
     pub(crate) fn buffer_state(&self, value: Value) -> Result<&bytes::BufferState> {
         match self.object(value)? {
             Object::Buffer(b) => Ok(&b.state),
@@ -405,7 +497,7 @@ impl Vm {
         }
         if p == SetBuffer {
             let mut v = args[0];
-            if let Some(name) = self.eval_buffer_name(v)? {
+            if let Some(name) = self.buffer_name_text(v) {
                 v = if name == "*scratch*" { self.create_named_buffer(&name, false)? }
                     else { self.named_buffer(&name).ok_or_else(|| format!("no buffer named {name}"))? };
             }
@@ -445,24 +537,7 @@ impl Vm {
         }
         let mut inserted_properties = properties::Properties::new();
         let inserted = if p == Insert {
-            let mut bytes = vec![];
-            for v in &self.stack[start..start + n] {
-                if let Some(code) = v.integer_value() {
-                    let ch = u32::try_from(code)
-                        .ok()
-                        .and_then(char::from_u32)
-                        .ok_or("invalid character")?;
-                    bytes.extend_from_slice(ch.encode_utf8(&mut [0; 4]).as_bytes());
-                } else {
-                    if !Self::image_value(*v)
-                        && let Ok(Object::String(s)) = self.object(*v)
-                    {
-                        inserted_properties.copy_into(ByteOffset(bytes.len()), &s.properties);
-                    }
-                    bytes.extend(self.string_bytes(*v)?);
-                }
-            }
-            bytes
+            self.insertion_text(&self.stack[start..start + n].to_vec(), &mut inserted_properties)?
         } else {
             vec![]
         };
@@ -559,8 +634,8 @@ impl Vm {
             }
             Substring => {
                 let r = region(args[0], args[1])?;
-                let string = Box::new(data::LispString::new(t.slice(r)?));
-                Ok(self.allocate_object(Object::String(string)))
+                let string = data::LispString::from_bytes(t.internal(r)?.into_owned(), true);
+                Ok(self.allocate_object(data::string_object(string)))
             }
             Narrow => {
                 let a = t.byte_of_char(position(args[0])?)?;
@@ -668,17 +743,7 @@ impl Vm {
             let view = self.str_view(v).ok_or("string required")?.to_owned();
             if p == DecodeUtf8 {
                 if view.is_multibyte() { return Ok(v); }
-                let mut bytes = Vec::new();
-                let mut tail = view.bytes();
-                while !tail.is_empty() {
-                    if let Some((_, width)) = lstring::decode_char(tail).filter(|_|tail[0] >= 0xc2 || tail[0] < 0x80) {
-                        bytes.extend_from_slice(&tail[..width]); tail = &tail[width..];
-                    } else {
-                        let code = if tail[0] >= 128 { tail[0] as u32 + lstring::BYTE8_OFFSET } else { tail[0] as u32 };
-                        let mut encoded = [0;5]; let n = lstring::char_string(code, &mut encoded);
-                        bytes.extend_from_slice(&encoded[..n]); tail = &tail[1..];
-                    }
-                }
+                let (bytes, _) = crate::text::octets_as_multibyte(view.bytes());
                 return Ok(self.make_lisp_string(bytes, true));
             }
             if !view.is_multibyte() { return Ok(v); }
@@ -703,12 +768,7 @@ impl Vm {
         let index = self.buffer_index()?;
         if p == BufferString {
             let o = match &self.objects[index] {
-                Object::Buffer(t) => {
-                    let accessible = t.accessible();
-                    let mut s = data::LispString::new(t.slice(accessible.clone())?);
-                    s.properties = t.properties.slice(accessible);
-                    Object::String(Box::new(s))
-                }
+                Object::Buffer(t) => data::string_object(t.lisp_string(t.accessible())?),
                 Object::ByteBuffer(b) => {
                     Object::Bytes(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
                 }
@@ -751,14 +811,20 @@ impl Vm {
                 if b.held.is_some() {
                     return Err("cannot decode buffer while insert-file-contents decides its coding".into());
                 }
-                let mut a: crate::annotations::AnnotatedBuffer = Text::decode_binary(b)?.into();
-                // The markers keep their bytes, which must start characters.
+                let (text, grown) = Text::decode_binary(b)?;
+                let mut a: crate::annotations::AnnotatedBuffer = text.into();
+                // The markers keep their bytes, moved past the raw bytes
+                // that grew (str_as_multibyte), and must start characters.
                 let text = a.as_str().as_bytes();
+                let map = |i: usize| i + grown.partition_point(|&g| g < i);
                 if !b.anchors.is_empty()
-                    && (1..text.len()).any(|i| (text[i] & 0xc0) == 0x80 && b.anchors.any_between(i as u32, i as u32)) {
+                    && (1..b.bytes.len()).any(|i| (text[map(i)] & 0xc0) == 0x80 && b.anchors.any_between(i as u32, i as u32)) {
                     return Err("cannot decode buffer with a marker inside a character".into());
                 }
                 *a.anchors = b.anchors.clone();
+                for &g in grown.iter().rev() {
+                    assert!(a.anchors.insert(g as u32 + 1, 1, true));
+                }
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
@@ -786,7 +852,45 @@ impl Vm {
         b.per_buffer = t.per_buffer.clone();
         b.case_tables = t.case_tables;
         b.anchors = (*t.anchors).clone();
+        // Each raw-byte character shrinks to its byte: the markers move
+        // as for the deletion of its second byte.
+        for &p in t.raw_offsets().iter().rev() {
+            assert!(b.anchors.delete(p + 1, p + 2));
+        }
         Ok(b)
+    }
+    /// insert_from_string's text for VALUES, characters and strings, in a
+    /// multibyte buffer: GNU's internal form, a unibyte string's bytes
+    /// above 127 as raw-byte characters (copy_text). PROPERTIES
+    /// receives each string's properties at its offset.
+    pub(crate) fn insertion_text(&self, values: &[Value], properties: &mut properties::Properties) -> Result<Vec<u8>> {
+        let mut bytes = vec![];
+        for &v in values {
+            if let Some(code) = v.integer_value() {
+                let code = u32::try_from(code).ok().filter(|&c| c <= lstring::MAX_CHAR).ok_or("invalid character")?;
+                let mut encoded = [0; 5];
+                let n = lstring::char_string(code, &mut encoded);
+                bytes.extend_from_slice(&encoded[..n]);
+                continue;
+            }
+            if Self::image_value(v) {
+                bytes.extend_from_slice(self.string_value(v)?.as_bytes());
+                continue;
+            }
+            match self.object(v)? {
+                Object::String(s) | Object::RawString(s) if s.is_multibyte() => {
+                    properties.copy_into(ByteOffset(bytes.len()), &s.properties);
+                    bytes.extend_from_slice(s.bytes());
+                }
+                Object::String(s) | Object::RawString(s) => {
+                    widened_properties(&s.properties, s.bytes(), bytes.len(), properties);
+                    bytes.extend(crate::text::octets_to_multibyte(s.bytes()));
+                }
+                Object::Bytes(b) => bytes.extend(crate::text::octets_to_multibyte(b)),
+                _ => return Err("string required".into()),
+            }
+        }
+        Ok(bytes)
     }
     /// The bytes TEXT, an octet or a string, puts in a unibyte buffer: a
     /// unibyte string's bytes and ASCII text as they are; other text
@@ -1122,15 +1226,18 @@ mod tests {
             vm.display(v).unwrap(),
             "[nil #u8(206 187 240 159 166 128) nil t \"λ🦀\" t]"
         );
-        let invalid = vm
+        // An invalid octet decodes as GNU's raw-byte character.
+        let raw = vm
             .compile(&form(serde_json::json!([
                 "with-temp-buffer",
                 ["buffer-encode-utf8"],
                 ["insert", 255],
-                ["buffer-decode-utf8"]
+                ["buffer-decode-utf8"],
+                ["char-after", 1]
             ])))
             .unwrap();
-        assert!(vm.execute_raw(invalid).is_err());
+        let v = vm.execute_raw(raw).unwrap();
+        assert_eq!(vm.display(v).unwrap(), "4194303");
     }
     #[test]
     fn byte_boundary_shim_preserves_non_utf8_through_gc() {

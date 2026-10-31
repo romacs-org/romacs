@@ -91,7 +91,7 @@ prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
 prim.rs variable_set set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/buffer_locals.rs kill_local notify 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/buffer_locals.rs reset_buffer_locals set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
-prim/leaf/coding.rs coding_convert_string variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/coding.rs coding_convert variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs coding_string_result variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs set_coding_system_priority variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs set_coding_category_order variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended

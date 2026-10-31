@@ -1,7 +1,7 @@
 {
  "protocol": "primh-v1",
  "primitive": "get-load-suffixes",
- "spec_sha256": "3987835b9d4df6129447f0d5152df11f50e786e5a6e9fb947d1f879b85c0455f",
+ "spec_sha256": "a22fd84619592bbb6b80c3bbd520d2e315da73eac09c609edf31e155decd7180",
  "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
  "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
  "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",

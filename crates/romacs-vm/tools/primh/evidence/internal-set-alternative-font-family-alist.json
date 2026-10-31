@@ -425,6 +425,6 @@
  "pinned": {
   "internal-set-alternative-font-family-alist/0045": "VALUE",
   "internal-set-alternative-font-family-alist/0046": "VALUE",
-  "internal-set-alternative-font-family-alist/0047": "SIGNAL-VS-VALUE"
+  "internal-set-alternative-font-family-alist/0047": "MISSING"
  }
 }

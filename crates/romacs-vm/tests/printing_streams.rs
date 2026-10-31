@@ -99,14 +99,14 @@ fn message_accepts_raw_bytes_as_gnu() {
 }
 
 /// With the log on, GNU inserts the raw byte into *Messages* as an eight-bit
-/// character. A VM2 multibyte buffer cannot hold one yet (D005), so the
-/// insertion refuses before anything is shown: the echo area keeps its
-/// previous message and never holds bytes it cannot print.
+/// character (VM2-RAWTEXT1); `message' returns its unibyte string and the
+/// echo area shows it.
 #[test]
-fn logged_raw_byte_message_refuses_before_reaching_the_echo_area() {
+fn logged_raw_byte_message_reaches_the_echo_area() {
     let mut vm = Vm::new();
     vm.set_echo_area_host(true);
     let source = "(progn (message \"before\") \
-                  (list (condition-case e (message \"%s\" (unibyte-string 233 120)) (error (car e))) (current-message)))";
-    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(error \"before\")");
+                  (list (condition-case e (message \"%s\" (unibyte-string 233 120)) (error (car e))) (current-message) \
+                        (with-current-buffer \"*Messages*\" (char-after (- (point-max) 3)))))";
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(#u8(233 120) #u8(233 120) 4194281)");
 }

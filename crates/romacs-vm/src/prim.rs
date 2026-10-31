@@ -381,7 +381,7 @@ mod leaf {
         }
         pub(crate) fn lifecycle_buffer(&mut self, arg: Value, create: bool, inhibit: bool) -> std::result::Result<(Value, bool), Fault> {
             if matches!(self.kind(arg), Kind::Buffer | Kind::ByteBuffer) { return Ok((arg, false)); }
-            let name = self.string_text(arg)?;
+            let name = self.vm.buffer_name_text(arg).ok_or(Fault::Wrong("stringp", arg))?;
             if let Some(buffer) = self.vm.named_buffer(&name) { return Ok((buffer, false)); }
             if !create { return Err(Fault::Error(format!("No buffer named {name}"))); }
             let buffer = self.vm.create_named_buffer(&name, false).map_err(|error| {
@@ -427,6 +427,18 @@ mod leaf {
             let i = self.vm.conses.len();
             self.vm.conses.push((car, cdr));
             Value::reference(i, 3)
+        }
+        /// ENCODE_FILE: the host bytes of the file name VALUE.
+        pub fn file_name_bytes(&self, value: Value) -> std::result::Result<Vec<u8>, Fault> {
+            self.vm.file_name_bytes(value).ok_or(Fault::Wrong("stringp", value))
+        }
+        /// The model's name for the buffer name string VALUE.
+        pub fn buffer_name_text(&self, value: Value) -> std::result::Result<String, Fault> {
+            self.vm.buffer_name_text(value).ok_or(Fault::Wrong("stringp", value))
+        }
+        /// The Lisp string of the model's buffer name NAME.
+        pub fn buffer_name_value(&mut self, name: &str) -> Value {
+            self.vm.buffer_name_value(name)
         }
         pub fn buffer_name_exists(&self, name: &str) -> bool {
             (name == "*scratch*" && self.vm.scratch_unmade()) || self.vm.names.get(&format!("#:vm2-buffer:{name}"))
@@ -578,7 +590,12 @@ mod leaf {
             let mut properties = crate::properties::Properties::new();
             for &(value, offset) in parts {
                 if let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(value) {
-                    properties.copy_into(crate::coordinates::ByteOffset(offset), &s.properties);
+                    if multibyte && !s.is_multibyte() {
+                        // A unibyte part widened: its runs stretch with it.
+                        crate::buffer::widened_properties(&s.properties, s.bytes(), offset, &mut properties);
+                    } else {
+                        properties.copy_into(crate::coordinates::ByteOffset(offset), &s.properties);
+                    }
                 }
             }
             if properties.is_empty() { return self.vm.make_lisp_string(bytes, multibyte); }
@@ -1663,6 +1680,7 @@ mod leaf {
     mod random;
     mod width;
     mod coding_safe;
+    mod coding_mule;
     mod display_motion;
     mod display_elements;
     mod display_hosted;

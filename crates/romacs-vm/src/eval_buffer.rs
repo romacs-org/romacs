@@ -70,7 +70,7 @@ impl Vm {
             }
             GetBuffer | SwitchToBuffer => {
                 let arg = self.stack[start];
-                let value = if let Some(name) = self.eval_buffer_name(arg)? {
+                let value = if let Some(name) = self.buffer_name_text(arg) {
                     if p == SwitchToBuffer && name.is_empty() {
                         return Err("empty buffer name".into());
                     }

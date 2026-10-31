@@ -6,7 +6,7 @@ fn refusal(message: &str) -> Fault {
     Fault::Error(format!("VM2 {message} is unsupported"))
 }
 
-fn directory_error(cx: &mut Leaf<'_>, operation: &str, path: &str, error: std::io::Error) -> Fault {
+fn directory_error(cx: &mut Leaf<'_>, operation: &str, path: Value, error: std::io::Error) -> Fault {
     let condition = match error.raw_os_error() {
         Some(libc::ENOENT) => "file-missing",
         Some(libc::EACCES) => "permission-denied",
@@ -16,7 +16,6 @@ fn directory_error(cx: &mut Leaf<'_>, operation: &str, path: &str, error: std::i
     let message = message
         .rsplit_once(" (os error ")
         .map_or(message.as_str(), |(s, _)| s);
-    let path = cx.string(path);
     let data = cx.cons(path, Value::NIL);
     let message = cx.string(message);
     let data = cx.cons(message, data);
@@ -42,7 +41,8 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
     let (_, matched) = directory_entries(cx, "directory-files", directory, full, pattern, nosort, count)?;
     let mut result = Value::NIL;
     for name in matched.into_iter().rev() {
-        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+        let multibyte = !name.is_ascii();
+        let value = cx.make_string(name, multibyte);
         result = cx.cons(value, result);
     }
     Ok(result)
@@ -53,12 +53,22 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
 defsubr! { name = "directory-files-and-attributes", gnu = "dired.c:420", effect = Global,
 fn directory_files_and_attributes(cx, directory: Value; optional full: Value, pattern: Value, nosort: Value, id_format: Value, count: Value) {
     let operation = "directory-files-and-attributes";
-    let (path, matched) = directory_entries(cx, operation, directory, full, pattern, nosort, count)?;
+    let (expanded, matched) = directory_entries(cx, operation, directory, full, pattern, nosort, count)?;
+    let path = cx.string_view(expanded)?;
+    let path = if path.is_multibyte() { path.bytes().to_vec() } else { crate::text::octets_as_multibyte(path.bytes()).0 };
     let mut result = Value::NIL;
     for name in matched.into_iter().rev() {
-        let file = if full != Value::NIL { name.clone() } else { format!("{}/{name}", path.trim_end_matches('/')) };
+        let multibyte = !name.is_ascii();
+        let value = cx.make_string(name.clone(), multibyte);
+        let file = if full != Value::NIL { value } else {
+            let mut file = path.strip_suffix(b"/").unwrap_or(&path).to_vec();
+            file.push(b'/');
+            file.extend_from_slice(&name);
+            let multibyte = !file.is_ascii();
+            cx.make_string(file, multibyte)
+        };
+        let file = super::fileio::file_name_path(cx, file)?;
         let attributes = super::savejourney::local_file_attributes(cx, &file, id_format)?;
-        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
         let entry = cx.cons(value, attributes);
         result = cx.cons(entry, result);
     }
@@ -69,41 +79,56 @@ fn directory_files_and_attributes(cx, directory: Value; optional full: Value, pa
 /// expansion and the entry names matching PATTERN, full names when FULL,
 /// at most COUNT, sorted unless NOSORT.
 fn directory_entries(cx: &mut Leaf<'_>, operation: &str, directory: Value, full: Value, pattern: Value, nosort: Value, count: Value)
-    -> std::result::Result<(String, Vec<String>), Fault> {
+    -> std::result::Result<(Value, Vec<Vec<u8>>), Fault> {
     if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
-    let path = super::fileio::expand_file_name(cx, directory)?;
-    let expanded = cx.string(&path);
+    let (host_path, expanded) = super::fileio::expanded_path(cx, directory)?;
     super::fileio::refuse_handler(cx, expanded, operation)?;
+    // The expansion's internal multibyte bytes, for the full names: a
+    // unibyte expansion is an encoded name, decoded (DECODE_FILE).
+    let path = cx.string_view(expanded)?;
+    let path = if path.is_multibyte() { path.bytes().to_vec() } else { crate::text::octets_as_multibyte(path.bytes()).0 };
     let count = if count == Value::NIL { usize::MAX } else {
         let n = count.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", count))?;
         usize::try_from(n).unwrap_or(usize::MAX)
     };
-    if pattern != Value::NIL { cx.string_text(pattern)?; }
+    if pattern != Value::NIL { cx.string_bytes(pattern)?; }
     utf8_file_names(cx, operation)?;
     // Open even when COUNT is zero: GNU validates the directory first.
-    let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
-    let entries = crate::host::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", directory_file, e))?;
+    use std::os::unix::ffi::OsStrExt;
+    let host_bytes = host_path.as_os_str().as_bytes();
+    let directory_file = if host_bytes == b"/" { host_bytes } else { host_bytes.strip_suffix(b"/").unwrap_or(host_bytes) };
+    let directory_file = std::path::Path::new(std::ffi::OsStr::from_bytes(directory_file));
+    let directory_value = super::fileio::file_name_value(cx, directory_file.as_os_str().as_bytes());
+    let entries = crate::host::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", directory_value, e))?;
     // Rust omits dot entries. Their enumeration order is not specified by GNU;
     // count is applied before sorting, and NOSORT returns reverse enumeration.
     let names = [std::ffi::OsString::from("."), std::ffi::OsString::from("..")]
         .into_iter().map(Ok).chain(entries.map(|entry| entry.map(|e| e.file_name())));
     // Materializing the iterator would read entries beyond COUNT; GNU stops
     // after the first additional matching entry.
-    let mut matched = Vec::new();
+    let mut matched: Vec<Vec<u8>> = Vec::new();
     for name in names {
-        let name = name.map_err(|e| directory_error(cx, "Reading directory", &path, e))?
-            .into_string().map_err(|_| refusal("non-UTF-8 directory entry"))?;
+        use std::os::unix::ffi::OsStrExt;
+        let name = name.map_err(|e| directory_error(cx, "Reading directory", expanded, e))?;
+        // DECODE_FILE: a name that is not UTF-8 keeps its bytes as raw-byte
+        // characters.
+        let name = crate::text::octets_as_multibyte(name.as_bytes()).0;
         if pattern != Value::NIL {
-            let value = cx.string(&name);
+            let value = cx.make_string(name.clone(), !name.is_ascii());
             if cx.file_name_match(pattern, value)?.is_none() { continue; }
         }
         if matched.len() == count { break; }
         matched.push(if full != Value::NIL {
-            format!("{}{name}", if path.ends_with('/') { path.clone() } else { format!("{path}/") })
+            let mut full = path.clone();
+            if full.last() != Some(&b'/') { full.push(b'/'); }
+            full.extend_from_slice(&name);
+            full
         } else { name });
     }
-    if nosort == Value::NIL { matched.sort(); } else { matched.reverse(); }
-    Ok((path, matched))
+    // Fsort with string-lessp: by character codes, raw bytes last.
+    let chars = |bytes: &[u8]| crate::lstring::StrView { bytes, chars: 0, multibyte: true }.chars().collect::<Vec<_>>();
+    if nosort == Value::NIL { matched.sort_by_key(|name| chars(name)); } else { matched.reverse(); }
+    Ok((expanded, matched))
 }
 
 // Ffile_name_all_completions: the entries of DIRECTORY that begin with FILE
@@ -112,15 +137,17 @@ fn directory_entries(cx: &mut Leaf<'_>, operation: &str, directory: Value, full:
 // reverse enumeration order. "./" and "../" are entries too.
 defsubr! { name = "file-name-all-completions", gnu = "dired.c:486", effect = Global,
 fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
-    let (path, _) = match completion_directory(cx, "file-name-all-completions", file, directory, None)? {
+    let (path, directory) = match completion_directory(cx, "file-name-all-completions", file, directory, None)? {
         Ok(found) => found,
         Err(handled) => return Ok(handled),
     };
     let mut result = Value::NIL;
-    for candidate in completion_candidates(cx, file, &path)? {
+    for candidate in completion_candidates(cx, file, &path, directory)? {
         if !candidate.regexps { continue; }
-        let name = if candidate.directoryp { format!("{}/", candidate.name) } else { candidate.name };
-        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+        let mut name = candidate.name;
+        if candidate.directoryp { name.push(b'/'); }
+        let multibyte = !name.is_ascii();
+        let value = cx.make_string(name, multibyte);
         result = cx.cons(value, result);
     }
     Ok(Step::Done(result))
@@ -145,9 +172,9 @@ fn file_name_completion(cx, file: Value, directory: Value; optional predicate: V
     }
     let file_bytes = cx.string_bytes(file)?.len();
     let mut entries = vec![];
-    for candidate in completion_candidates(cx, file, &path)? {
+    for candidate in completion_candidates(cx, file, &path, directory)? {
         let excludable = excludable(cx, &candidate, file_bytes, &ignored, fold)?;
-        let name = cx.make_string(candidate.name.as_bytes().to_vec(), !candidate.name.is_ascii());
+        let name = candidate.value;
         let flag = |b: bool| if b { Value::TRUE } else { Value::NIL };
         entries.push(cx.vector(&[name, flag(excludable), flag(candidate.regexps), flag(candidate.directoryp)]));
     }
@@ -174,10 +201,9 @@ fn completion_loop(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 /// DIRECTORY expanded, as its path and a string, after FILE's and its
 /// checks; or, as Err, the call to a file-name handler for OPERATION.
 fn completion_directory(cx: &mut Leaf<'_>, operation: &str, file: Value, directory: Value, predicate: Option<Value>)
-    -> std::result::Result<std::result::Result<(String, Value), Step>, Fault> {
+    -> std::result::Result<std::result::Result<(std::path::PathBuf, Value), Step>, Fault> {
     if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
-    let path = super::fileio::expand_file_name(cx, directory)?;
-    let directory = cx.string(&path);
+    let (path, directory) = super::fileio::expanded_path(cx, directory)?;
     let symbol = cx.intern(operation);
     for name in [directory, file] {
         cx.string_view(name)?;
@@ -191,9 +217,12 @@ fn completion_directory(cx: &mut Leaf<'_>, operation: &str, file: Value, directo
     Ok(Ok((path, directory)))
 }
 
-/// A directory entry that begins with the file being completed.
+/// A directory entry that begins with the file being completed: its
+/// decoded name (DECODE_FILE: not-UTF-8 bytes as raw-byte characters) as
+/// GNU's internal bytes and as a string.
 struct Candidate {
-    name: String,
+    name: Vec<u8>,
+    value: Value,
     directoryp: bool,
     /// It matches every `completion-regexp-list' regexp.
     regexps: bool,
@@ -202,12 +231,16 @@ struct Candidate {
 /// dired.c file_name_completion's scan of PATH: the entries that begin
 /// with FILE (ignoring case under `completion-ignore-case'), in
 /// enumeration order, "." and ".." first.
-fn completion_candidates(cx: &mut Leaf<'_>, file: Value, path: &str) -> std::result::Result<Vec<Candidate>, Fault> {
+fn completion_candidates(cx: &mut Leaf<'_>, file: Value, path: &std::path::Path, directory: Value) -> std::result::Result<Vec<Candidate>, Fault> {
     let fold = super::fileio::var(cx, "completion-ignore-case")? != Value::NIL;
-    let prefix = cx.string_bytes(file)?;
+    // FILE as host bytes (ENCODE_FILE), compared with each entry's bytes
+    // before decoding, as file_name_completion compares them.
+    let prefix = cx.file_name_bytes(file)?;
     let prefix_chars = cx.string_view(file)?.chars;
-    let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
-    let entries = crate::host::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", path, e))?;
+    use std::os::unix::ffi::OsStrExt;
+    let host_bytes = path.as_os_str().as_bytes();
+    let directory_file = if host_bytes == b"/" { host_bytes } else { host_bytes.strip_suffix(b"/").unwrap_or(host_bytes) };
+    let entries = crate::host::read_dir(std::path::Path::new(std::ffi::OsStr::from_bytes(directory_file))).map_err(|e| directory_error(cx, "Opening directory", directory, e))?;
     // Rust omits the dot entries, which GNU sees first on Linux file systems.
     let dots = [".", ".."].map(|name| Ok((std::ffi::OsString::from(name), Some(true))));
     let entries = entries.map(|entry| entry.map(|e| (e.file_name(), e.file_type().ok().filter(|t| !std::fs::FileType::is_symlink(t)).as_ref().map(std::fs::FileType::is_dir))));
@@ -216,17 +249,23 @@ fn completion_candidates(cx: &mut Leaf<'_>, file: Value, path: &str) -> std::res
     let mut matcher = None;
     let mut out = vec![];
     for entry in dots.into_iter().chain(entries) {
-        let (name, directoryp) = entry.map_err(|e| directory_error(cx, "Reading directory", path, e))?;
-        let name = std::os::unix::ffi::OsStringExt::into_vec(name);
-        if name.len() < prefix.len() || (!fold && !name.starts_with(&prefix)) { continue; }
-        let name = String::from_utf8(name).map_err(|_| refusal("non-UTF-8 directory entry"))?;
-        let value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+        let (name, directoryp) = entry.map_err(|e| directory_error(cx, "Reading directory", directory, e))?;
+        let os_name = std::os::unix::ffi::OsStringExt::into_vec(name);
+        if os_name.len() < prefix.len() || (!fold && !os_name.starts_with(&prefix)) { continue; }
+        let name = crate::text::octets_as_multibyte(&os_name).0;
+        let value = cx.make_string(name.clone(), !name.is_ascii());
         if fold && super::string_compare::prefix(cx, value, file, prefix_chars, true)?.0 != std::cmp::Ordering::Equal {
             continue;
         }
         // A symbolic link, or an entry of unknown type, is a directory when
         // NAME/ resolves.
-        let directoryp = directoryp.unwrap_or_else(|| cx.filesave_access(&format!("{directory_file}/{name}/"), libc::F_OK).is_ok());
+        let directoryp = directoryp.unwrap_or_else(|| {
+            let mut probe = directory_file.to_vec();
+            probe.push(b'/');
+            probe.extend_from_slice(&os_name);
+            probe.push(b'/');
+            cx.filesave_access(std::os::unix::ffi::OsStrExt::from_bytes(&probe), libc::F_OK).is_ok()
+        });
         let matched = !regexps || {
             if matcher.is_none() {
                 let (mut tail, mut patterns) = (super::fileio::var(cx, "completion-regexp-list")?, vec![]);
@@ -239,7 +278,7 @@ fn completion_candidates(cx: &mut Leaf<'_>, file: Value, path: &str) -> std::res
                 None => regexps_match(cx, value, fold)?,
             }
         };
-        out.push(Candidate { name, directoryp, regexps: matched });
+        out.push(Candidate { name, value, directoryp, regexps: matched });
     }
     Ok(out)
 }
@@ -260,9 +299,9 @@ fn regexps_match(cx: &mut Leaf<'_>, value: Value, fold: bool) -> std::result::Re
 /// that ends in one of the IGNORED extensions (a directory's ending in "/").
 fn excludable(cx: &mut Leaf<'_>, candidate: &Candidate, file_bytes: usize, ignored: &[Value], fold: bool)
     -> std::result::Result<bool, Fault> {
-    if candidate.directoryp && matches!(candidate.name.as_str(), "." | "..") { return Ok(true); }
+    if candidate.directoryp && matches!(candidate.name.as_slice(), b"." | b"..") { return Ok(true); }
     if candidate.name.len() <= file_bytes { return Ok(false); }
-    let name: Vec<u32> = candidate.name.chars().map(u32::from).collect();
+    let name: Vec<u32> = super::string_compare::codes(&cx.string_view(candidate.value)?);
     for &extension in ignored {
         let bytes = cx.string_bytes(extension)?;
         let mut codes = super::string_compare::codes(&cx.string_view(extension)?);
@@ -277,7 +316,7 @@ fn excludable(cx: &mut Leaf<'_>, candidate: &Candidate, file_bytes: usize, ignor
             let Some(skip) = name.len().checked_sub(codes.len()) else { continue };
             super::string_compare::compare(cx, &name[skip..], &codes, true)?.0 == std::cmp::Ordering::Equal
         } else {
-            candidate.name.as_bytes()[candidate.name.len() - length..] == bytes[..length]
+            candidate.name[candidate.name.len() - length..] == bytes[..length]
         };
         if tail { return Ok(true); }
     }

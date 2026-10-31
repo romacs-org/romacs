@@ -22,7 +22,7 @@ pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
 fn metrics_snapshot(face: &Face) -> WindowSnapshot {
     WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
-        text: TextSlice { utf8: String::new(), face_runs: vec![] }, mode_line: None,
+        text: TextSlice { utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
         vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, faces: vec![face.clone()],
     }
@@ -307,7 +307,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let index = face_at(&snapshot.text, byte, 0);
         let id = FaceId::new(face_base + index as u32);
         let (ascent, height, cell, space) = metrics[index];
-        let shown = shown(ch);
+        let shown = shown(ch, snapshot.text.is_raw(byte));
         let width = |frame: &FrameGlyphBuffer, x: f32| match &shown {
             Shown::Tab => tab_advance(f64::from(x), f64::from(space), snapshot.tab_width) as f32,
             Shown::Glyphs(glyphs) => glyphs.chars().map(|glyph| advance(frame, id, glyph, cell)).sum(),
@@ -471,13 +471,14 @@ impl Glyphs {
     fn chars(&self) -> impl Iterator<Item = char> + '_ { self.chars[..self.len].iter().copied() }
 }
 
-fn shown(ch: char) -> Shown {
+fn shown(ch: char, raw: bool) -> Shown {
     let digit = |shift: u32| char::from_digit((ch as u32 >> shift) & 7, 8).unwrap_or('0');
     match ch {
         '\t' => Shown::Tab,
         '\u{0}'..='\u{1f}' | '\u{7f}' => Shown::Glyphs(Glyphs::of(&['^', char::from((ch as u8) ^ 0x40)])),
-        // GNU's three octal digits: the code's low nine bits.
-        _ if ch.is_control() => Shown::Glyphs(Glyphs::of(&['\\', digit(6), digit(3), digit(0)])),
+        // GNU's three octal digits: the code's low nine bits; a raw byte's
+        // placeholder has the byte's code.
+        _ if raw || ch.is_control() => Shown::Glyphs(Glyphs::of(&['\\', digit(6), digit(3), digit(0)])),
         _ => Shown::Glyphs(Glyphs::of(&[ch])),
     }
 }
@@ -499,7 +500,7 @@ fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
     for (slice, default) in slices {
         for (byte, ch) in slice.utf8.char_indices() {
             let face = &mut text[face_at(slice, byte, *default)];
-            match shown(ch) {
+            match shown(ch, slice.is_raw(byte)) {
                 Shown::Tab => face.push(' '),
                 Shown::Glyphs(glyphs) => face.extend(glyphs.chars()),
             }
@@ -606,7 +607,7 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
         if ch == '\n' { glyphs.push((0, face_heights[0])); continue; }
         let index = face_at(&input.text, byte, 0);
         let (_, _, cell, space) = metrics[index];
-        let width = match shown(ch) {
+        let width = match shown(ch, input.text.is_raw(byte)) {
             Shown::Tab => space,
             Shown::Glyphs(shown) => shown.chars().map(|glyph| advance(&frame, FaceId::new(index as u32), glyph, cell)).sum(),
         };

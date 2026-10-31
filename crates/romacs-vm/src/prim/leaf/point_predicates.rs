@@ -71,7 +71,7 @@ impl Leaf<'_> {
                 let accessible = buffer.accessible();
                 let previous = if buffer.point > accessible.start {
                     let character = buffer.char_of_byte(buffer.point).map_err(Fault::Error)?;
-                    buffer.character_of_char(CharOffset(character.0 - 1)).map_err(Fault::Error)? == Some('\n')
+                    buffer.character_of_char(CharOffset(character.0 - 1)).map_err(Fault::Error)? == Some(u32::from(b'\n'))
                 } else { false };
                 let next = buffer.point < accessible.end
                     && buffer.character_at(buffer.point).map_err(Fault::Error)? == Some(10);

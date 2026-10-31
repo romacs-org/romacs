@@ -38,13 +38,12 @@ impl Leaf<'_> {
         if multibyte && crate::lstring::char_string(from_c, &mut [0; 5]) != crate::lstring::char_string(to_c, &mut [0; 5]) {
             return Err(Fault::Error("Characters in \u{2018}subst-char-in-region\u{2019} have different byte-lengths".into()));
         }
-        let from_ch = char::from_u32(from_c);
         // Character positions holding FROM.
         let hits: Vec<usize> = match &self.vm.objects[index] {
             data::Object::Buffer(b) => {
                 let mut hits = Vec::new();
                 for at in (lo - 1) as usize..(hi - 1) as usize {
-                    if from_ch.is_some() && b.character_of_char(CharOffset(at)).map_err(Fault::Error)? == from_ch { hits.push(at); }
+                    if b.character_of_char(CharOffset(at)).map_err(Fault::Error)? == Some(from_c) { hits.push(at); }
                 }
                 hits
             }
@@ -78,13 +77,15 @@ impl Leaf<'_> {
     pub fn subst_char_write(&mut self, hits: &[i64], to: Value, noundo: bool) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let to_c = to.integer_value().expect("checked character") as u32;
-        let text = char::from_u32(to_c).map(String::from).unwrap_or_default();
+        let mut encoded = [0; 5];
+        let width = crate::lstring::char_string(to_c, &mut encoded);
+        let text = &encoded[..width];
         for &at in hits {
             if !noundo { self.vm.record_change(index, at).map_err(Fault::Error)?; }
             match &mut self.vm.objects[index] {
                 data::Object::Buffer(b) => {
                     let byte = b.byte_of_char(CharOffset((at - 1) as usize)).map_err(Fault::Error)?;
-                    b.overwrite(byte..ByteOffset(byte.0 + text.len()), &text).map_err(Fault::Error)?;
+                    b.overwrite(byte..ByteOffset(byte.0 + text.len()), text).map_err(Fault::Error)?;
                 }
                 data::Object::ByteBuffer(b) => b.bytes[(at - 1) as usize] = to_c as u8,
                 _ => unreachable!(),

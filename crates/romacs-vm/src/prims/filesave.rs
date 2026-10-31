@@ -29,15 +29,15 @@ fn native_encoding(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
 
 /// Fexpand_file_name (VALUE, Qnil) for a primitive that cannot continue
 /// through Lisp: refused where GNU would call an expansion handler.
-fn name(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<(String, Value), Fault> {
+fn name(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
     let expanded = super::expand_file_name::expand(cx, value, Value::NIL)?
         .ok_or_else(|| refusal("filesave expand-file-name handler"))?;
     as_file(cx, expanded)
 }
 
-/// An expanded name as text and value.
-fn as_file(cx: &mut Leaf<'_>, expanded: Value) -> std::result::Result<(String, Value), Fault> {
-    Ok((cx.string_text(expanded)?, expanded))
+/// An expanded name as the host path and value.
+fn as_file(cx: &mut Leaf<'_>, expanded: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
+    Ok((super::fileio::file_name_path(cx, expanded)?, expanded))
 }
 
 /// Fdirectory_file_name of EXPANDED for BODY whose own arguments are the
@@ -52,7 +52,7 @@ fn dir_to_file(
     saved: &[Value],
     args: usize,
     always: bool,
-) -> std::result::Result<std::result::Result<(String, Value), Next>, Fault> {
+) -> std::result::Result<std::result::Result<(std::path::PathBuf, Value), Next>, Fault> {
     if saved.len() > args {
         if cx.string_bytes(expanded).is_err() {
             return Err(Fault::Error("Invalid handler in ‘file-name-handler-alist’".into()));
@@ -64,7 +64,7 @@ fn dir_to_file(
         return Ok(Ok(as_file(cx, expanded)?));
     }
     match super::savejourney::directory_file_name(cx, expanded)? {
-        Step::Done(file) => Ok(Ok((cx.string_text(file)?, file))),
+        Step::Done(file) => Ok(Ok(as_file(cx, file)?)),
         Step::Call { f, args, .. } => {
             let mut saved = saved.to_vec();
             saved.push(Value::TRUE);
@@ -189,17 +189,49 @@ fn file_writable_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Ne
     let (path, expanded) = as_file(cx, expanded)?;
     if let Some(call) = handler(cx, expanded, "file-writable-p", vec![expanded])? { return call; }
     native_encoding(cx)?;
-    let writable = match cx.filesave_access(&path, libc::W_OK) {
+    let writable = match cx.filesave_access(path.as_os_str(), libc::W_OK) {
         Ok(()) => true,
         Err(e) if e.raw_os_error() == Some(libc::ENOENT) => {
-            let slash = path.rfind('/').unwrap_or(0);
-            let dir = &path[..=slash];
+            use std::os::unix::ffi::OsStrExt;
+            let bytes = path.as_os_str().as_bytes();
+            let slash = bytes.iter().rposition(|&b| b == b'/').unwrap_or(0);
+            let dir = std::ffi::OsStr::from_bytes(&bytes[..=slash]);
             cx.filesave_access(dir, libc::W_OK | libc::X_OK).is_ok()
         }
         Err(_) => false,
     };
     Ok(Step::Done(if writable { Value::TRUE } else { Value::NIL }))
 }
+
+// As a GNU built without ACL support: no file has an ACL and none can be
+// set (fileio.c:3471-3518 with HAVE_ACL undefined).
+defsubr! { name = "file-acl", gnu = "fileio.c:3471", effect = Global,
+fn file_acl(cx, filename: Value) {
+    cx.string_bytes(filename)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "set-file-acl", gnu = "fileio.c:3497", effect = Global,
+fn set_file_acl(cx, filename: Value, acl: Value) {
+    cx.string_bytes(filename)?;
+    let _ = acl;
+    Ok(Value::NIL)
+}}
+
+// As a GNU built without SELinux: every file's context is unknown and
+// none can be set (fileio.c:3408-3466 with HAVE_LIBSELINUX undefined).
+defsubr! { name = "file-selinux-context", gnu = "fileio.c:3408", effect = Global,
+fn file_selinux_context(cx, filename: Value) {
+    cx.string_bytes(filename)?;
+    Ok((0..4).fold(Value::NIL, |tail, _| cx.cons(Value::NIL, tail)))
+}}
+
+defsubr! { name = "set-file-selinux-context", gnu = "fileio.c:3443", effect = Global,
+fn set_file_selinux_context(cx, filename: Value, context: Value) {
+    cx.string_bytes(filename)?;
+    let _ = context;
+    Ok(Value::NIL)
+}}
 
 defsubr! { name = "file-modes", gnu = "fileio.c:3644", effect = Global,
 fn file_modes(cx, filename: Value; optional flag: Value) -> Step {
@@ -324,7 +356,7 @@ fn check_file_access(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Nex
     let (path, expanded) = as_file(cx, expanded)?;
     if let Some(call) = handler(cx, expanded, operation, vec![expanded])? { return call; }
     native_encoding(cx)?;
-    Ok(Step::Done(if cx.filesave_access(&path, mode).is_ok() { Value::TRUE } else { Value::NIL }))
+    Ok(Step::Done(if cx.filesave_access(path.as_os_str(), mode).is_ok() { Value::TRUE } else { Value::NIL }))
 }
 
 fn access(cx: &mut Leaf<'_>, filename: Value, mode: i32) -> Next {
@@ -448,7 +480,7 @@ fn delete_directory_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]
 
 /// fileio.c expand_cp_target: NEWNAME expanded, or FILE's last component
 /// expanded against NEWNAME when NEWNAME is a directory name.
-fn cp_target(cx: &mut Leaf<'_>, file: Value, newname: Value) -> std::result::Result<(String, Value), Fault> {
+fn cp_target(cx: &mut Leaf<'_>, file: Value, newname: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
     if cx.string_bytes(newname)?.last() != Some(&b'/') {
         return name(cx, newname);
     }
@@ -479,7 +511,7 @@ fn may_replace(cx: &mut Leaf<'_>, ok: Value, name: Value, operation: &str) -> st
 fn create_name(
     cx: &mut Leaf<'_>,
     create: impl Fn() -> std::io::Result<()>,
-    path: &str,
+    path: &std::path::Path,
     name: Value,
     ok: Value,
     operation: &str,

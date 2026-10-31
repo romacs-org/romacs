@@ -72,7 +72,8 @@ impl Drop for Fixture {
 }
 /// `set-auto-coding' passes ENCODE_FILE's unibyte name to
 /// `auto-coding-alist-lookup', which asks about it: the encoded name answers
-/// as its multibyte spelling; bytes that are not UTF-8 are refused.
+/// as its multibyte spelling; bytes that are not UTF-8 are raw-byte
+/// characters of the name (DECODE_FILE).
 #[test]
 fn filename_case_encoded_unibyte_name() {
     let fixture = Fixture::new();
@@ -85,9 +86,10 @@ fn filename_case_encoded_unibyte_name() {
         eval(&mut vm, &format!("(list (file-name-case-insensitive-p {name}) (file-name-case-insensitive-p (unibyte-string {})))", bytes.join(" "))),
         "(nil nil)"
     );
+    // Pinned GNU: nil; the byte names a (missing) file with that byte.
     assert_eq!(
         eval(&mut vm, "(condition-case e (file-name-case-insensitive-p (unibyte-string 47 255)) (error e))"),
-        "(error \"VM2 file-name-case-insensitive-p of a non-UTF-8 unibyte file name is unsupported\")"
+        "nil"
     );
 }
 #[test]

@@ -42,6 +42,9 @@ pub(super) struct Window {
     /// (VM2-HSCROLL1).
     pub hscroll: i64,
     pub parameters: Vec<(Value, Value)>,
+    /// GNU `w->display_table` (`set-window-display-table`); the display
+    /// reads the buffer's and the standard table only (VM2-DISPTAB1).
+    pub display_table: Value,
     /// GNU `w->prev_buffers` and `w->next_buffers`: Lisp lists kept for
     /// window.el's buffer history (`window-prev-buffers`).
     pub prev_buffers: Value,
@@ -67,7 +70,7 @@ pub(super) struct Window {
     pub end_valid: bool,
     pub force_start: bool,
 }
-romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, vscroll_px, pending_vscroll, hscroll, parameters, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
+romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, vscroll_px, pending_vscroll, hscroll, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
 impl Window {
     fn new(id: u64, buffer: Value) -> Self {
         Self {
@@ -93,6 +96,7 @@ impl Window {
             hscroll: 0,
             right_margin: 0,
             parameters: vec![],
+            display_table: Value::NIL,
             prev_buffers: Value::NIL,
             next_buffers: Value::NIL,
             dedicated: Value::NIL,
@@ -132,6 +136,7 @@ impl Window {
             f(k);
             f(v);
         }
+        f(&mut self.display_table);
     }
     pub fn storage_bytes(&self) -> usize {
         size_of::<Self>()
@@ -1406,6 +1411,17 @@ impl<'a> Windows<'a> {
         let w = self.live(window)?;
         Ok(self.get(w)?.dedicated)
     }
+    /// Fwindow_display_table: the display table of a live WINDOW.
+    pub(crate) fn window_display_table(&mut self, window: Value) -> Out {
+        let w = self.live(window)?;
+        Ok(self.get(w)?.display_table)
+    }
+    /// Fset_window_display_table: TABLE, stored on a live WINDOW.
+    pub(crate) fn set_window_display_table(&mut self, window: Value, table: Value) -> Out {
+        let w = self.live(window)?;
+        self.vm.window_mut(w).map_err(internal)?.display_table = table;
+        Ok(table)
+    }
     /// Fset_window_dedicated_p: FLAG, stored on a live WINDOW.
     pub(crate) fn set_window_dedicated_p(&mut self, window: Value, flag: Value) -> Out {
         let w = self.live(window)?;
@@ -1426,7 +1442,7 @@ impl<'a> Windows<'a> {
             self.vm.display_state.repaint_window(id);
             return Ok(Value::TRUE);
         }
-        let buffer = match self.vm.str_view(object).and_then(|v| v.as_str()).map(str::to_owned) {
+        let buffer = match self.vm.buffer_name_text(object) {
             Some(name) => self.vm.named_buffer(&name).unwrap_or(Value::NIL),
             None => object,
         };
@@ -1848,8 +1864,7 @@ impl<'a> Windows<'a> {
         let buffer = if matches!(self.vm.object_if(buffer_or_name), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
             buffer_or_name
         } else {
-            let view = self.vm.str_view(buffer_or_name).ok_or(Fault::Wrong("stringp", buffer_or_name))?;
-            let name = view.as_str().ok_or(Fault::NotUnicode(buffer_or_name))?.to_owned();
+            let name = self.vm.buffer_name_text(buffer_or_name).ok_or(Fault::Wrong("stringp", buffer_or_name))?;
             self.vm.named_buffer(&name).unwrap_or(Value::NIL)
         };
         if buffer == Value::NIL {
@@ -1976,7 +1991,7 @@ impl<'a> Windows<'a> {
         }
         else if matches!(self.vm.object_if(buffer), Some(Object::Buffer(_) | Object::ByteBuffer(_))) { buffer }
         else {
-            let name = self.vm.str_view(buffer).and_then(|v| v.as_str()).ok_or(Fault::Wrong("stringp", buffer))?.to_owned();
+            let name = self.vm.buffer_name_text(buffer).ok_or(Fault::Wrong("stringp", buffer))?;
             let Some(buffer) = self.vm.named_buffer(&name) else { return Ok(Value::NIL); };
             buffer
         };

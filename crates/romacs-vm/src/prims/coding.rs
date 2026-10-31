@@ -201,8 +201,19 @@ fn convert_string(cx: &mut Leaf<'_>, encode: bool, string: Value, coding: Value,
 }
 
 fn converted_string(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    cx.coding_convert_string(saved[1], saved[2], saved[3], saved[4], saved[0] != Value::NIL).map(Step::Done)
+    let buffer = saved[4];
+    let result = cx.coding_convert_string(saved[1], saved[2], saved[3], buffer, saved[0] != Value::NIL)?;
+    if buffer == Value::NIL || buffer == Value::TRUE {
+        return Ok(Step::Done(result));
+    }
+    // code_convert_string into BUFFER: the text at its point; the length.
+    Ok(Step::Call { f: cx.intern("romacs--coding-insert"), args: vec![buffer, result], then: done, saved: vec![] })
 }
+
+fn done(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
+
+defsubr! { name = "detect-coding-string", gnu = "coding.c:9040", effect = Reads,
+fn detect_coding_string(cx, string: Value; optional highest: Value) { cx.coding_detect_string(string, highest) }}
 
 defsubr! { name = "encode-coding-string", gnu = "coding.c:10509", effect = Global,
 fn encode_coding_string(cx, string: Value, coding: Value; optional nocopy: Value, buffer: Value) -> Step {

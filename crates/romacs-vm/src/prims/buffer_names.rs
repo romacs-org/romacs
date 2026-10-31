@@ -18,12 +18,14 @@ fn generate(cx: &mut Leaf<'_>, name: Value, ignore: Value) -> Out {
         (text.bytes, text.chars)
     };
     let allowed = |bytes: &[u8], chars: usize| bytes == ignored.0 && chars == ignored.1;
-    let exists = |cx: &Leaf<'_>, bytes: &[u8]| std::str::from_utf8(bytes).ok()
-        .is_some_and(|text| cx.buffer_name_exists(text));
+    let multibyte = view.is_multibyte();
+    let exists = |cx: &Leaf<'_>, bytes: &[u8]| {
+        let candidate = crate::lstring::StrView { bytes, chars: 0, multibyte };
+        cx.buffer_name_exists(&crate::buffer::buffer_name_from_view(&candidate))
+    };
     if (ignore != Value::NIL && allowed(&view.bytes, view.chars)) || !exists(cx, &view.bytes) {
         return Ok(name);
     }
-    let multibyte = view.is_multibyte();
     let mut base = view.bytes;
     let mut chars = view.chars;
     if base.first() == Some(&b' ') {
@@ -47,7 +49,7 @@ fn generate(cx: &mut Leaf<'_>, name: Value, ignore: Value) -> Out {
 
 fn name_of(cx: &mut Leaf<'_>, buffer: Value) -> Value {
     match cx.buffer_state(buffer).and_then(|s| s.name.clone()) {
-        Some(name) => cx.string(&name),
+        Some(name) => cx.buffer_name_value(&name),
         None => Value::NIL,
     }
 }
@@ -59,7 +61,7 @@ fn rename_buffer(cx, newname: Value; optional unique: Value) -> Step {
     let old = name_of(cx, buffer);
     if !matches!(cx.kind(newname), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", newname)); }
     let requested = newname;
-    let text = cx.string_text(newname)?;
+    let text = cx.buffer_name_text(newname)?;
     if text.is_empty() { return Err(Fault::Error("Empty string is invalid as a buffer name".into())); }
     let existing = cx.lifecycle_get(newname)?;
     let name = if existing != Value::NIL {
@@ -72,7 +74,7 @@ fn rename_buffer(cx, newname: Value; optional unique: Value) -> Step {
             return Err(Fault::Signal(cx.intern("error"), data));
         }
         let generated = generate(cx, newname, old)?;
-        cx.string_text(generated)?
+        cx.buffer_name_text(generated)?
     } else { text };
     cx.rename_buffer_model(buffer, &name)?;
     // An auto-saved buffer that visits no file renames its auto-save file.

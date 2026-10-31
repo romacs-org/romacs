@@ -116,6 +116,13 @@ WORKFLOWS = {
         key('kill-input', [C('c'), C('u')], IDLE),
         typed('exit', 'exit', [K('Return')], f'(not (get-buffer {ESHELL}))'),
     ],
+    # External output that is not UTF-8: the raw byte lands in the buffer
+    # as GNU's eight-bit character (shown as \351).
+    'raw': [
+        dict(name='open', **mx('eshell'), ready=IDLE),
+        command('printf-raw', "printf 'a\\xe9b\\n'"),
+        typed('exit', 'exit', [K('Return')], f'(not (get-buffer {ESHELL}))'),
+    ],
 }
 
 HARNESS = Harness(WORKFLOWS, launch, '(eshell-parity-snapshot)', 'eshell-parity-')

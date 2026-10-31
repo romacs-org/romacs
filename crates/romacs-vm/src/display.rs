@@ -307,6 +307,7 @@ fn band_slice(table: &FaceTable, band: mode_line::Band) -> TextSlice {
             .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: table.handle(&face)? }))
             .collect(),
         utf8: band.text,
+        raw: vec![],
     }
 }
 
@@ -694,7 +695,7 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged }
+        let ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged }
             = self.window_text(window, height, None)?;
         self.display_state.bases.insert(id, base);
         // No version bump here: this runs once per WINDOW, and
@@ -707,7 +708,7 @@ impl Vm {
         self.display_state.width = width;
         self.display_state.height = height;
         // The mini-window shows its overlay strings (icomplete's candidates).
-        let (utf8, face_runs, start_byte, point_byte) = if mini {
+        let (utf8, face_runs, raw, start_byte, point_byte) = if mini {
             let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
             if spliced.has_strings() {
                 let mut strings = vec![];
@@ -715,15 +716,20 @@ impl Vm {
                     strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&table, &mut faces, &mut merged, *value) });
                 }
                 let runs = mini_window::display_face_runs(&face_runs, &spliced.segments, strings);
+                // Each buffer segment's raw bytes, where the splice put it.
+                let raw = spliced.segments.iter().filter(|s| !s.string).flat_map(|s| {
+                    let (display, from, len) = (s.display, s.buffer, s.len);
+                    raw.iter().filter(move |&&p| (from..from + len).contains(&(p as usize))).map(move |&p| p - from as u32 + display as u32)
+                }).collect();
                 let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
                 self.display_state.segments.insert(id, spliced.segments);
-                (spliced.text, runs, start, point)
+                (spliced.text, runs, raw, start, point)
             } else {
                 self.display_state.segments.remove(&id);
-                (utf8, face_runs, start_byte, point_byte)
+                (utf8, face_runs, raw, start_byte, point_byte)
             }
         } else {
-            (utf8, face_runs, start_byte, point_byte)
+            (utf8, face_runs, raw, start_byte, point_byte)
         };
         let snapshot = WindowSnapshot {
             id,
@@ -732,7 +738,7 @@ impl Vm {
             start_byte,
             point_byte,
             buffer_version: self.display_state.version,
-            text: TextSlice { utf8, face_runs },
+            text: TextSlice { utf8, face_runs, raw },
             mode_line: bands.mode_line.map(|band| band_slice(&table, band)),
             mode_line_face: table.handle(&band_face).ok_or("mode-line face required")?,
             header_line: bands.header_line.map(|band| band_slice(&table, band)),
@@ -781,7 +787,7 @@ impl Vm {
             (true, _) => {
                 let name = if header { self.header_line_face_name(window)? } else { self.mode_line_face_name(window)? };
                 let face = self.display_faces()?.handle(&name).ok_or("band face required")?;
-                (Some(TextSlice { utf8: " ".into(), face_runs: vec![] }), face)
+                (Some(TextSlice { utf8: " ".into(), face_runs: vec![], raw: vec![] }), face)
             }
         })
     }
@@ -898,6 +904,8 @@ impl Vm {
         let base = shown.start;
         let at_zv = shown.end >= accessible.end.0;
         let utf8 = b.as_str()[shown.clone()].to_owned();
+        // The raw bytes shown, as offsets into the published text.
+        let raw: Vec<u32> = b.raw_in(shown.clone()).iter().map(|&p| p - base as u32).collect();
         let start_byte = start_byte.clamp(shown.start, shown.end) - base;
         // Point outside the published bytes is not shown: no glyph is at it.
         let point_byte = point_byte.checked_sub(base).filter(|&p| p <= utf8.len()).unwrap_or(utf8.len());
@@ -931,7 +939,7 @@ impl Vm {
                 named = (end, self.face_handle(&table, &mut faces, &mut merged, value));
             }
             let mut face = named.1;
-            if ch.is_control() && ch != '\n' && ch != '\t' && let Some(escape) = escape { face = escape; }
+            if ((ch.is_control() && ch != '\n' && ch != '\t') || raw.binary_search(&(offset as u32)).is_ok()) && let Some(escape) = escape { face = escape; }
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
@@ -964,7 +972,7 @@ impl Vm {
                 })
             }
         }
-        Ok(ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, faces, base, at_zv, table, merged })
+        Ok(ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table, merged })
     }
     /// Record SNAPSHOT as its window's last publication.
     fn publish_window(&mut self, mut snapshot: WindowSnapshot) -> WindowSnapshot {
@@ -1416,7 +1424,7 @@ impl Vm {
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
         let buffer = self.slots[buffer_slot].value;
         // `buffer-name', not a search of every symbol for its registry slot.
-        let buffer_name = self.buffer_state(buffer)?.name.clone().unwrap_or_default();
+        let buffer_name = crate::buffer::buffer_name_shown(self.buffer_state(buffer)?.name.as_deref().unwrap_or_default()).into_owned();
         let window = self.slots[root].value;
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1) as usize;
         let point = self.window_point_value(window)?.as_integer()? as usize;
@@ -1454,11 +1462,12 @@ impl Vm {
         let line_start = text[begv_byte..point_byte].rfind('\n').map_or(begv_byte, |n| begv_byte + n + 1);
         // GNU current_column: tab stops, ^X control characters, wide characters.
         let mut column = 0;
-        for c in text[line_start..point_byte].chars() {
+        for (offset, c) in text[line_start..point_byte].char_indices() {
             column += match c {
                 '\t' => tab_width - column % tab_width,
                 '\u{0}'..='\u{1f}' | '\u{7f}' => if ctl_arrow { 2 } else { 4 },
                 '\u{80}'..='\u{9f}' => 4,
+                _ if b.is_raw_at(line_start + offset) => 4,
                 _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(0),
             };
         }
@@ -1574,7 +1583,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces: table.faces.clone(),
-            text: TextSlice { utf8: text, face_runs },
+            text: TextSlice { utf8: text, face_runs, raw: vec![] },
         };
         Ok((self.host_layout(&input)?, exact))
     }
@@ -1585,7 +1594,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces: vec![face],
-            text: TextSlice { utf8: c.to_string(), face_runs: vec![] },
+            text: TextSlice { utf8: c.to_string(), face_runs: vec![], raw: vec![] },
         };
         let measured = self.host_layout(&input)?;
         Ok((measured.glyphs[0].0, measured.face_heights[0]))
@@ -1619,7 +1628,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces,
-            text: TextSlice { utf8: " ".repeat(runs.len()), face_runs },
+            text: TextSlice { utf8: " ".repeat(runs.len()), face_runs, raw: vec![] },
         };
         let heights = self.host_layout(&input)?.face_heights;
         Ok(runs.into_iter().map(|i| heights[i]).max().unwrap_or(0))

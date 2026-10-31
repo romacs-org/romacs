@@ -810,26 +810,8 @@ impl Vm {
                     return Ok(Value::NIL);
                 }
                 let buffer = self.current_annotation_buffer()?;
-                let mut bytes = Vec::new();
                 let mut properties = properties::Properties::new();
-                for &v in args {
-                    if let Ok(n) = v.as_integer() {
-                        let c = u32::try_from(n)
-                            .ok()
-                            .and_then(char::from_u32)
-                            .ok_or("invalid character")?;
-                        bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
-                    } else {
-                        let text = self.annotation_string(v)?;
-                        bytes.extend_from_slice(text.as_bytes());
-                        if !Self::image_value(v)
-                            && let Ok(Object::String(s) | Object::RawString(s)) = self.object(v)
-                        {
-                            properties
-                                .copy_into(ByteOffset(bytes.len() - text.len()), &s.properties);
-                        }
-                    }
-                }
+                let bytes = self.insertion_text(args, &mut properties)?;
                 let marks = self.family_record(index);
                 let edited = self.annotated_mut(buffer).and_then(|b| {
                     let at = b.point;

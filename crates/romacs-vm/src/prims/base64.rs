@@ -175,10 +175,8 @@ fn base64url_encode_region(cx, beg: Value, end: Value; optional no_pad: Value) -
     encode_region(cx, beg, end, false, no_pad == Value::NIL, true)
 }}
 
-// The decoded octets go in as a unibyte string. GNU puts each octet above
-// 127 into a multibyte buffer as a raw-byte character, which a VM2
-// multibyte buffer cannot hold: that is refused before anything changes
-// (DIVERGENCES VM2-BASE64-REGION1).
+// The decoded octets go in as a unibyte string: a multibyte buffer takes
+// each octet above 127 as a raw-byte character, as GNU does.
 defsubr! { name = "base64-decode-region", gnu = "fns.c:4334", effect = Global,
 fn base64_decode_region(cx, beg: Value, end: Value; optional base64url: Value, ignore_invalid: Value) -> Step {
     let (from, to) = cx.validate_region(beg, end)?;
@@ -186,9 +184,6 @@ fn base64_decode_region(cx, beg: Value, end: Value; optional base64url: Value, i
     let bytes = cx.string_view(text)?.bytes().to_vec();
     let decoded = decode(&bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)
         .ok_or_else(|| Fault::Error("Invalid base64 data".into()))?;
-    if cx.casing_multibyte()? && !decoded.is_ascii() {
-        return Err(Fault::Error("VM2 base64-decode-region of raw bytes into a multibyte buffer is unsupported".into()));
-    }
     let length = decoded.len() as i64;
     let text = cx.make_string(decoded, false);
     replace_region(cx, from, to, text, length, true)

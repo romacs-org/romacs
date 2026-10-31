@@ -200,5 +200,7 @@ impl Vm {
 /// internal text through symkey.rs; a unibyte name must be ASCII.
 pub(super) fn symbol_key(bytes: &[u8], chars: usize) -> Option<String> {
     if let Ok(text) = std::str::from_utf8(bytes) && !text.contains(crate::symkey::ESC) { return Some(text.to_owned()); }
-    (chars < bytes.len() || bytes.is_ascii()).then(|| crate::symkey::from_internal(bytes))
+    if chars < bytes.len() || bytes.is_ascii() { return Some(crate::symkey::from_internal(bytes)); }
+    // A unibyte name: its bytes above 127 name raw-byte characters.
+    Some(crate::symkey::from_internal(&crate::text::octets_to_multibyte(bytes)))
 }

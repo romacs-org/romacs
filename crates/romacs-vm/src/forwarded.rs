@@ -832,7 +832,7 @@ impl Forwarded {
 /// and a `local_flags` bit each). `None`, or an index past the end, is "not
 /// local here": the buffer sees the default.
 #[derive(Clone, Default)]
-pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<String>, Option<Value>);
+pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>);
 romacs_snapshot::snapshot_tuple!(PerBuffer(f0, f1, f2, f3, f4));
 
 /// Native scalar state, not Lisp Values: safe through moving collection.
@@ -849,7 +849,7 @@ romacs_snapshot::snapshot_enum!(VisitedModtime {
     VisitedModtime::Known { seconds, nanos, size } => (seconds, nanos, size),
 });
 
-pub(crate) fn file_identity(path: &str) -> Option<(u64, u64)> {
+pub(crate) fn file_identity(path: impl AsRef<std::path::Path>) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
     let metadata = crate::host::metadata(path).ok()?;
     Some((metadata.dev(), metadata.ino()))
@@ -1232,7 +1232,9 @@ impl Vm {
     }
     /// Snapshot live visits without changing current-buffer or dynamic bindings.
     /// Callers are leaf primitives: no collection occurs while Values are held.
-    pub(crate) fn file_visits(&self) -> Vec<(Value, String, Option<(u64, u64)>, Option<String>)> {
+    /// Each visit's `buffer-file-name' as host bytes (ENCODE_FILE), its
+    /// identity and its saved truename.
+    pub(crate) fn file_visits(&self) -> Vec<(Value, Vec<u8>, Option<(u64, u64)>, Option<Vec<u8>>)> {
         let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-file-name") else { return Vec::new() };
         // In the buffer list's order, as get-file-buffer walks Vbuffer_alist.
         let mut buffers = self.buffer_order_snapshot();
@@ -1241,7 +1243,7 @@ impl Vm {
         buffers.into_iter().filter_map(|buffer| {
             let index = buffer.index(0).ok()?.checked_sub(1)?;
             let locals = self.per_buffer(index)?;
-            let name = self.eval_buffer_name(locals.get(i)?).ok()??;
+            let name = self.file_name_bytes(locals.get(i)?)?;
             Some((buffer, name, locals.2, locals.3.clone()))
         }).collect()
     }
@@ -1256,11 +1258,10 @@ impl Vm {
         };
         let buffer = self.current_buffer_object()?;
         if name == "buffer-file-name" {
-            let identity = self.eval_buffer_name(value).ok().flatten()
-                .and_then(|path| file_identity(&path));
-            let truename = self.eval_buffer_name(value).ok().flatten().map(|path| {
-                crate::host::canonicalize(&path).ok().and_then(|p| p.to_str().map(str::to_owned)).unwrap_or(path)
-            });
+            use std::os::unix::ffi::{OsStrExt, OsStringExt};
+            let path = self.file_name_bytes(value).map(|bytes| std::path::PathBuf::from(std::ffi::OsString::from_vec(bytes)));
+            let identity = path.as_ref().and_then(file_identity);
+            let truename = path.map(|path| crate::host::canonicalize(&path).unwrap_or(path).into_os_string().as_bytes().to_vec());
             let locals = self.per_buffer_mut(buffer).expect("live buffer");
             locals.2 = identity;
             locals.3 = truename;

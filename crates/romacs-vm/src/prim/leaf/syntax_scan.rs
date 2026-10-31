@@ -69,7 +69,7 @@ impl<'a> View<'a> {
 impl scan::Text for View<'_> {
     fn char_at(&self, at: Pos) -> u32 {
         match self.body {
-            Body::Multibyte(_, text) => text.get(at.byte..).and_then(|s| s.chars().next()).map_or(0, u32::from),
+            Body::Multibyte(t, _) => t.character_at(ByteOffset(at.byte)).ok().flatten().map_or(0, |c| c as u32),
             Body::Unibyte(b) => b.bytes.get(at.byte).map_or(0, |&byte| {
                 if byte < 128 { u32::from(byte) } else { u32::from(byte) + crate::lstring::BYTE8_OFFSET }
             }),
@@ -77,6 +77,7 @@ impl scan::Text for View<'_> {
     }
     fn inc(&self, at: Pos) -> Pos {
         let width = match self.body {
+            // A placeholder's UTF-8 width is its raw byte's internal width.
             Body::Multibyte(_, text) => text.get(at.byte..).and_then(|s| s.chars().next()).map_or(1, char::len_utf8),
             Body::Unibyte(_) => 1,
         };

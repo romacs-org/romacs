@@ -957,6 +957,22 @@ pub fn pid() -> u32 {
     std::process::id()
 }
 
+pub fn gid() -> u32 {
+    let gid = unsafe { libc::getgid() };
+    if building() {
+        host_fact("gid", json!(gid));
+    }
+    gid
+}
+
+pub fn egid() -> u32 {
+    let egid = unsafe { libc::getegid() };
+    if building() {
+        host_fact("egid", json!(egid));
+    }
+    egid
+}
+
 pub fn uid() -> u32 {
     let uid = unsafe { libc::getuid() };
     if building() {

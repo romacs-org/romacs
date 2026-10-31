@@ -157,9 +157,7 @@ impl Vm {
         let object = match &self.objects[buffer] {
             Object::Buffer(b) => {
                 let (a, z) = (b.byte_of_char(CharOffset((beg - 1) as usize))?, b.byte_of_char(CharOffset(beg as usize))?);
-                let mut s = data::LispString::new(b.slice(a..z)?);
-                s.properties = b.properties.slice(a..z);
-                Object::String(Box::new(s))
+                data::string_object(b.lisp_string(a..z)?)
             }
             Object::ByteBuffer(b) => Object::Bytes(vec![b.bytes[(beg - 1) as usize]]),
             _ => return Err("buffer required".into()),

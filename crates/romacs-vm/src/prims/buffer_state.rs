@@ -15,7 +15,7 @@ fn buffer_live_p(cx, object: Value) {
 
 defsubr! { name = "buffer-name", gnu = "buffer.c:1314", effect = Reads,
 fn buffer_name(cx; optional buffer: Value) {
-    let buffer = cx.decode_buffer(buffer)?; let name = cx.buffer_state(buffer).unwrap().name.clone(); Ok(match name { Some(name) => cx.string(&name), None => Value::NIL })
+    let buffer = cx.decode_buffer(buffer)?; let name = cx.buffer_state(buffer).unwrap().name.clone(); Ok(match name { Some(name) => cx.buffer_name_value(&name), None => Value::NIL })
 }}
 
 defsubr! { name = "buffer-file-name", gnu = "buffer.c:1334", effect = Reads,

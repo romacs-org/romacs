@@ -12,15 +12,15 @@ impl Leaf<'_> {
     /// and the line's absolute byte start.
     fn line_text(&mut self) -> std::result::Result<(String, usize, usize), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let (text, low, point) = match &self.vm.objects[index] {
+        let (text, low, point, raw) = match &self.vm.objects[index] {
             crate::data::Object::Buffer(b) => {
                 let r = b.accessible();
-                (&b.as_str()[r.start.0..r.end.0], r.start.0, b.point.0)
+                (&b.as_str()[r.start.0..r.end.0], r.start.0, b.point.0, b.raw_in(r.start.0..r.end.0).to_vec())
             }
             crate::data::Object::ByteBuffer(b) => {
                 let r = &b.restriction;
                 (std::str::from_utf8(&b.bytes[r.start.0..r.end.0])
-                    .map_err(|_| Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()))?, r.start.0, b.point.0)
+                    .map_err(|_| Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()))?, r.start.0, b.point.0, vec![])
             }
             _ => unreachable!(),
         };
@@ -30,7 +30,12 @@ impl Leaf<'_> {
         }
         let start = text[..point].rfind('\n').map_or(0, |at| at + 1);
         let end = text[point..].find('\n').map_or(text.len(), |at| point + at);
-        Ok((text[start..end].to_owned(), point - start, low + start))
+        // A raw byte shows as `\NNN': four columns, like a C1 control.
+        let line_start = low + start;
+        let line: String = text[start..end].char_indices()
+            .map(|(at, c)| if raw.binary_search(&((line_start + at) as u32)).is_ok() { '\u{80}' } else { c })
+            .collect();
+        Ok((line, point - start, low + start))
     }
     pub fn set_point_byte(&mut self, byte: usize) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -54,6 +59,7 @@ impl Leaf<'_> {
     /// Columns C occupies at COLUMN (as current-column counts them).
     fn char_columns(c: char, column: usize, tab: usize) -> usize {
         if c == '\t' { tab - column % tab }
+        else if ('\u{80}'..='\u{9f}').contains(&c) { 4 }
         else if c.is_control() { 2 }
         else { unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) }
     }

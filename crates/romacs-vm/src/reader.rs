@@ -977,6 +977,11 @@ impl Reader<'_, '_> {
                             }
                         })
                         .collect::<Vec<_>>();
+                    // A unibyte literal with bytes above 127 ("\351") is a
+                    // byte string; ASCII keeps its string slot.
+                    if !bytes.is_ascii() {
+                        return Ok(self.vm.make_lisp_string(bytes, false));
+                    }
                     Ok(self.vm.allocate_object(Object::String(Box::new(
                         crate::data::LispString::from_bytes(bytes, false),
                     ))))
@@ -1268,11 +1273,8 @@ impl Vm {
                 if at >= b.accessible().end.0 {
                     return Ok(None);
                 }
-                let c = b.as_str()[at..]
-                    .chars()
-                    .next()
-                    .ok_or("invalid buffer reader point")?;
-                (c as u32, c.len_utf8())
+                let c = b.character_at(ByteOffset(at))?.ok_or("invalid buffer reader point")? as u32;
+                (c, crate::lstring::char_string(c, &mut [0; 5]))
             }
             Object::ByteBuffer(b) => {
                 if at >= b.restriction.end.0 {
@@ -1289,9 +1291,7 @@ impl Vm {
     fn reader_buffer_unget(&mut self, source: Value, code: u32) -> Result<()> {
         let (buffer, at, marker) = self.reader_buffer_location(source)?;
         let width = match self.object(buffer)? {
-            Object::Buffer(_) => char::from_u32(code)
-                .ok_or("raw character cannot be unread into Unicode buffer")?
-                .len_utf8(),
+            Object::Buffer(_) => crate::lstring::char_string(code, &mut [0; 5]),
             _ => 1,
         };
         self.reader_buffer_position(

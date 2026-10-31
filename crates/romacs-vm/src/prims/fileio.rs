@@ -29,7 +29,7 @@ fn metadata_modtime(meta: &std::fs::Metadata) -> VisitedModtime {
     VisitedModtime::Known { seconds: meta.mtime(), nanos: meta.mtime_nsec(), size: Some(meta.len()) }
 }
 
-fn stat_modtime(path: &str) -> VisitedModtime {
+fn stat_modtime(path: &std::path::Path) -> VisitedModtime {
     match crate::host::metadata(path) {
         Ok(meta) => metadata_modtime(&meta),
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => VisitedModtime::Missing,
@@ -62,12 +62,11 @@ fn visited_file_modtime(cx) {
 
 defsubr! { name = "verify-visited-file-modtime", gnu = "fileio.c:6121", effect = Global,
 fn verify_visited_file_modtime(cx; optional buffer: Value) {
-    let (state, path) = cx.fileio_modtime(buffer)?;
-    let Some(path) = path else { return Ok(Value::TRUE) };
+    let (state, name) = cx.fileio_modtime(buffer)?;
+    let Some(name) = name else { return Ok(Value::TRUE) };
     if state == VisitedModtime::Unknown { return Ok(Value::TRUE) }
-    let name = cx.string(&path);
     refuse_handler(cx, name, "verify-visited-file-modtime")?;
-    let actual = stat_modtime(&path);
+    let actual = stat_modtime(&file_name_path(cx, name)?);
     let equal = match (state, actual) {
         (VisitedModtime::Known { seconds: s, nanos: n, size }, VisitedModtime::Known { seconds, nanos, size: actual_size }) =>
             s == seconds && n == nanos && (size.is_none() || size == actual_size),
@@ -130,9 +129,8 @@ defsubr! { name = "set-visited-file-modtime", gnu = "fileio.c:6177", effect = Gl
 fn set_visited_file_modtime(cx; optional time: Value) {
     let state = if time != Value::NIL { explicit_modtime(cx, time)? } else {
         let (_, filename) = cx.fileio_modtime(Value::NIL)?;
-        let Some(filename) = filename else { return Err(Fault::Wrong("stringp", Value::NIL)) };
-        let name = cx.string(&filename);
-        let (path, name) = expanded_name(cx, name)?;
+        let Some(name) = filename else { return Err(Fault::Wrong("stringp", Value::NIL)) };
+        let (path, name) = expanded_path(cx, name)?;
         refuse_handler(cx, name, "set-visited-file-modtime")?;
         let meta = match crate::host::metadata(path) {
             Ok(meta) => meta,
@@ -202,12 +200,40 @@ pub(super) fn expand_file_name(cx: &mut Leaf<'_>, name: Value) -> std::result::R
 /// `Fexpand_file_name (NAME, Qnil)' as text and as the Lisp string GNU
 /// returns: NAME itself when the expansion leaves it unchanged.
 fn expanded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<(String, Value), Fault> {
+    let (_, value) = expanded_path(cx, name)?;
+    Ok((cx.string_text(value)?, value))
+}
+
+/// `expanded_name` as the host path (ENCODE_FILE): a name with raw-byte
+/// characters names the file whose name has those bytes.
+pub(super) fn expanded_path(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
     if !stringp(cx, name) {
         return Err(Fault::Wrong("stringp", name));
     }
     let value = super::expand_file_name::expand(cx, name, Value::NIL)?
         .ok_or_else(|| refuse("expand-file-name matching file name handler"))?;
-    Ok((cx.string_text(value)?, value))
+    Ok((file_name_path(cx, value)?, value))
+}
+
+/// ENCODE_FILE under a UTF-8 `file-name-coding-system': the host bytes of
+/// the file name VALUE, a raw-byte character as its byte.
+pub(super) fn file_name_bytes(cx: &Leaf<'_>, value: Value) -> std::result::Result<Vec<u8>, Fault> {
+    cx.file_name_bytes(value)
+}
+
+pub(super) fn file_name_path(cx: &Leaf<'_>, value: Value) -> std::result::Result<std::path::PathBuf, Fault> {
+    use std::os::unix::ffi::OsStringExt;
+    Ok(std::ffi::OsString::from_vec(file_name_bytes(cx, value)?).into())
+}
+
+/// DECODE_FILE under a UTF-8 `file-name-coding-system': the Lisp string
+/// of the host name BYTES, invalid sequences as raw-byte characters;
+/// unibyte when ASCII, as decode_coding leaves ASCII.
+pub(super) fn file_name_value(cx: &mut Leaf<'_>, bytes: &[u8]) -> Value {
+    if bytes.is_ascii() {
+        return cx.make_string(bytes.to_vec(), false);
+    }
+    cx.make_string(crate::text::octets_as_multibyte(bytes).0, true)
 }
 
 /// GNU `file_offset' (fileio.c:3949): a non-negative integer, or a float
@@ -255,7 +281,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
     // fileio.c:4126 empty_undo_list_p.
     let empty_undo = visit != Value::NIL && var(cx, "buffer-undo-list")? == Value::NIL && shape.empty;
     // fileio.c:4153-4155: CHECK_STRING inside Fexpand_file_name.
-    let (path, orig) = expanded_name(cx, filename)?;
+    let (path, orig) = expanded_path(cx, filename)?;
     refuse_handler(cx, orig, "insert-file-contents")?;
     let visiting = visit != Value::NIL;
     if visiting {
@@ -335,7 +361,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
 /// writer (or a device) opens at once and reaches the non-regular refusal
 /// instead of blocking in open(2); the flag does not affect the regular files
 /// that are read.
-fn open_for_reading(path: &str) -> std::io::Result<crate::host::Input> {
+fn open_for_reading(path: &std::path::Path) -> std::io::Result<crate::host::Input> {
     let flags = libc::O_NONBLOCK;
     crate::host::open_input(path, flags)
 }
@@ -433,7 +459,7 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
         }
         region = Some((b, e));
     }
-    let (path, name) = expanded_name(cx, filename)?;
+    let (path, name) = expanded_path(cx, filename)?;
     let excl = symbol_is(cx, mustbenew, &["excl"]);
     if mustbenew != Value::NIL && !excl && crate::host::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_dir()) {
         // barf_or_query_if_file_exists checks directory before confirmation.
@@ -527,8 +553,8 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     cx.variable_set(lcsu, coding)?;
     // fileio.c:5629 Flock_file: VM2 creates no lock files (VM2-FILEIO1),
     // but the name is still checked as Flock_file's expand-file-name does.
-    expand_file_name(cx, lockname)?;
-    let (path, _) = expanded_name(cx, name)?;
+    expanded_path(cx, lockname)?;
+    let (path, _) = expanded_path(cx, name)?;
     let text = if stringp(cx, start) { start } else {
         // A Lisp call during the choice may have edited the buffer.
         let (b, e) = (start.integer_value().unwrap(), end.integer_value().unwrap());
@@ -691,8 +717,8 @@ fn locate_suffix(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
         refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
     }
     let found = match access_mode {
-        None => crate::host::probe(crate::host::Probe::IsFile, &candidate) && open_for_reading(&candidate).is_ok(),
-        Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(&candidate, mode).is_ok())
+        None => crate::host::probe(crate::host::Probe::IsFile, &candidate) && open_for_reading(std::path::Path::new(&candidate)).is_ok(),
+        Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(std::ffi::OsStr::new(&candidate), mode).is_ok())
             && !crate::host::probe(crate::host::Probe::IsDir, &candidate),
     };
     if found { return Ok(Step::Done(candidate_value)); }

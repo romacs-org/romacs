@@ -990,9 +990,7 @@ impl Vm {
             if range.start < t.accessible().start || range.end > t.accessible().end {
                 return Err("index out of range".into());
             }
-            let mut string = data::LispString::new(t.slice(range.clone())?);
-            string.properties = t.properties.slice(range);
-            return Ok(self.allocate_object(Object::String(Box::new(string))));
+            return Ok(self.allocate_object(data::string_object(t.lisp_string(range)?)));
         }
         if matches!(p, Get | Put) {
             if n != if p == Get { 2 } else { 3 } {
@@ -1200,7 +1198,7 @@ impl AnnotatedBuffer {
     }
     /// `Text::rewrite_unanchored' with the anchors: those at its start
     /// stay and those after it follow the new text.
-    pub(crate) fn rewrite_character(&mut self, range: Range<ByteOffset>, replacement: &str) -> Result<()> {
+    pub(crate) fn rewrite_character(&mut self, range: Range<ByteOffset>, replacement: &[u8]) -> Result<()> {
         let a = u32::try_from(range.start.0).map_err(|_| "buffer too large")?;
         let b = u32::try_from(range.end.0).map_err(|_| "buffer too large")?;
         let len = u32::try_from(replacement.len()).map_err(|_| "buffer too large")?;
