@@ -136,7 +136,7 @@ fn a_window_start_on_a_continuation_row_keeps_the_rows_above() {
 fn stretches_paint_as_gnus_window_system_stretches() {
     use romacs_layout_input::{Stretch, StretchWidth};
     let mut snapshot = scene();
-    snapshot.text = TextSlice { utf8: "a b\nc d\n \nz".into(), face_runs: vec![] };
+    snapshot.text = TextSlice { utf8: "a b\nc d\n \nz".into(), face_runs: vec![], raw: vec![] };
     snapshot.stretches = vec![
         Stretch { byte: 1, width: StretchWidth::Width { width: 30, zero_ok: true } },
         Stretch { byte: 5, width: StretchWidth::AlignTo(200) },
