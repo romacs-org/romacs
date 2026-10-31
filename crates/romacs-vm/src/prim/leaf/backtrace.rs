@@ -20,7 +20,7 @@ impl Leaf<'_> {
             return Ok(None);
         };
         let function = self.vm.backtrace.frames[i].function;
-        let args = self.vm.backtrace.arguments(i).to_vec();
+        let args = self.vm.backtrace_arguments(i).to_vec();
         let args = self.vm.list_value(&args);
         let next = i
             .checked_sub(1)

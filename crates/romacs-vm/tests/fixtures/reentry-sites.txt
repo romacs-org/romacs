@@ -190,7 +190,6 @@ threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are quoted ob
 threaded.rs reentrant_load call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
 threaded.rs reentrant_load loader_primitive 1 suspended  # inside call_suspended
 threaded.rs resolve_entry force_lazy 1 suspended  # registers are rebased from the result
-threaded.rs resolve_head autoload_then 1 suspended  # registers are rebased from the result
 threaded.rs return_unbind checked_unbind 1 suspended  # the return value is read from its register after
 threaded.rs route_escape checked_unbind 2 suspended  # the exit and its control stay engine state across the restores
 threaded.rs signal_hook call_in_signal 1 suspended  # CONDITION and DATA are the pending escape's, quoted into the form

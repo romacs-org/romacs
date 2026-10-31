@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Reproducible head-order mutants; logs MUST be outside this worktree."""
+"""Reproducible head-order mutants; logs MUST be outside this worktree.
+
+Each mutant breaks one piece of the compiled call order (arguments, then the
+function cell through the site cache: threaded.rs direct/direct_kernel/
+direct_generic) or of the loader order kept for a top-level form with an
+unbound head (lib.rs), and must be killed at the named corpus row."""
 import argparse
 import json
 import pathlib
@@ -15,40 +20,32 @@ out.mkdir(parents=True, exist_ok=True)
 lib = root / 'crates/romacs-vm/src/lib.rs'
 threaded = root / 'crates/romacs-vm/src/threaded.rs'
 mutants = [
-    ('argument-first', lib,
-     '                            b.emit(Op::ResolveHead(function, slot));',
-     '                            // Delayed by the argument-first mutant.',
-     'void-precedence'),
-    ('no-early-invalid', threaded,
-     '        if !matches!(target.tag(), 4 | 6) {\n            let condition = uncallable_condition(e, target);\n            return raise(e, condition, &[function]);\n        }',
-     '        // Mutant: leave validation until after arguments.',
-     'void-precedence'),
-    ('reread-cell', threaded,
-     '        let target = *r.add(snapshot);',
-     '        let target = e.vm.slots[(*pc).b].function;',
-     'snapshot-closure'),
+    ('no-loader-order', lib,
+     '                        let loader_guard = if target.is_none() && !sealed && b.loader_order\n',
+     '                        let loader_guard = if false\n',
+     'void-side-effect'),
+    ('stale-cache', threaded,
+     '        if cache.version != slot.version {\n            if e.vm.macros.contains(&i.b)',
+     '        if cache.version == 0 {\n            if e.vm.macros.contains(&i.b)',
+     'redefined-kernel'),
+    ('unguarded-kernel', threaded,
+     '        if cache.version == e.vm.slots.get_unchecked(i.b).version && cache.target == i.value {',
+     '        if cache.version != 0 {',
+     'redefined-kernel'),
+    ('stale-speculation', threaded,
+     '            && entry.world_version == e.vm.world_version\n',
+     '',
+     'redefined-closure'),
     ('lose-original-name', threaded,
-     '            return raise(e, condition, &[function]);',
+     '            return raise(e, condition, &[Value::reference(i.b + 1, 7)]);',
      '            return raise(e, condition, &[target]);',
-     'alias-invalid'),
+     'invalid-cell'),
 ]
 results = []
 for name, path, old, new, row in mutants:
     original = path.read_text()
-    # Scope the name mutant to ResolveHead, not unrelated invoke helpers.
-    if name == 'lose-original-name':
-        start = original.index('unsafe fn resolve_head(')
-        end = original.index('unsafe fn prepared(', start)
-        section = original[start:end]
-        assert section.count(old) == 1
-        changed = original[:start] + section.replace(old, new) + original[end:]
-    else:
-        assert original.count(old) == 1, (name, original.count(old))
-        changed = original.replace(old, new)
-    if name == 'argument-first':
-        anchor = '                        let r = b.reg();\n                        if let Some(f) = target {'
-        assert changed.count(anchor) == 1
-        changed = changed.replace(anchor, '                        if let Some((function, slot)) = prepared { b.emit(Op::ResolveHead(function, slot)); }\n' + anchor)
+    assert original.count(old) == 1, (name, original.count(old))
+    changed = original.replace(old, new)
     assert changed != original
     try:
         path.write_text(changed)

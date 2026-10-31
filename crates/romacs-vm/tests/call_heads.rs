@@ -52,3 +52,50 @@ fn dotted_call_forms_signal_as_gnu() {
     assert_eq!(eval("(condition-case e ((lambda (&rest x) x) 1 . 3) (error e))"), "(wrong-type-argument listp 3)");
     assert_eq!(eval("(condition-case e (1 2 . 3) (error e))"), "(invalid-function 1)");
 }
+
+// GNU's byte code (src/bytecode.c `Bcall`) evaluates the arguments, then
+// reads the function cell: a redefinition made by an argument is the function
+// called, and a void head signals only after the arguments ran. Pinned GNU
+// 32.0.50, byte-compiled: `(new 2)` and `((void-function undefined-fn) 1)`.
+// A top-level form whose head has no function when it is compiled keeps the
+// loader's order instead (GNU loads source through its interpreter): the
+// head is named before any argument runs. A redefinition of an unsealed
+// function takes effect at the next call of a compiled site, including one
+// lowered to a primitive kernel.
+#[test]
+fn named_call_reads_the_cell_after_its_arguments() {
+    assert_eq!(
+        eval("(progn (defun ch-f (_ a) (list 'old a)) (ch-f (progn (fset 'ch-f (lambda (_ a) (list 'new a))) 1) 2))"),
+        "(new 2)"
+    );
+    assert_eq!(
+        eval("(progn (defvar zz 0) (defun ch-body () (ch-undefined (progn (setq zz 1) 2))) (list (condition-case e (ch-body) (error e)) zz))"),
+        "((void-function ch-undefined) 1)"
+    );
+    assert_eq!(
+        eval("(let ((zz 0)) (list (condition-case e (ch-undefined (progn (setq zz 1) 2)) (error e)) zz))"),
+        "((void-function ch-undefined) 0)"
+    );
+    // The loader-order check is the primitives themselves: neither a redefined
+    // `fboundp' or `signal' nor an alias of `symbol-function' to a special form
+    // changes it.
+    assert_eq!(eval("(progn (fset 'fboundp (lambda (_) nil)) (fset 'ch-late (lambda (x) x)) (ch-late 42))"), "42");
+    assert_eq!(
+        eval("(progn (fset 'symbol-function 'quote) (let ((seen 0)) (list (condition-case e (ch-missing (setq seen 1)) (error e)) seen)))"),
+        "((void-function ch-missing) 0)"
+    );
+    assert_eq!(
+        eval("(progn (fset 'signal (lambda (&rest _) nil)) (let ((seen 0)) (list (condition-case e (ch-missing (setq seen 1)) (error e)) seen)))"),
+        "((void-function ch-missing) 0)"
+    );
+    assert_eq!(
+        eval("(progn (defun ch-g (x) x) (defun ch-run (x) (ch-g x)) (ch-run 1) (ch-run 2) \
+              (fset 'ch-g (lambda (x) (* x 10))) (list (ch-run 3) (progn (defun ch-g (x) (1+ x)) (ch-run 4))))"),
+        "(30 5)"
+    );
+    assert_eq!(
+        eval("(progn (defun ch-pg (l) (plist-get l 'a)) (ch-pg '(a 1)) (ch-pg '(a 2)) \
+              (fset 'plist-get (lambda (_l _k) 'mine)) (ch-pg '(a 3)))"),
+        "mine"
+    );
+}

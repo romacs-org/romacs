@@ -93,12 +93,8 @@ mod control_tests {
         Engine {
             vm,
             code: vec![],
-            rest: RestStack {
-                values: Vec::new(),
-                activations: vec![(0, None)],
-            },
+            rest: RestStack::default(),
             frames: vec![],
-            call_marks: vec![None],
             native_mark: None,
             apply_function: None,
             apply_mark: None,
@@ -204,10 +200,7 @@ mod control_tests {
         let mut e = Engine {
             vm: &mut vm,
             code: vec![],
-            rest: RestStack {
-                values: Vec::new(),
-                activations: vec![(0, None)],
-            },
+            rest: RestStack::default(),
             frames: vec![Frame {
                 pc: std::ptr::null(),
                 regs: std::ptr::null_mut(),
@@ -215,8 +208,8 @@ mod control_tests {
                 function: 0,
                 dynamic: 0,
                 controls_base: 0,
+                mark: NO_MARK,
             }],
-            call_marks: vec![None, None],
             native_mark: None,
             apply_function: None,
             apply_mark: None,
@@ -379,7 +372,7 @@ struct Inst {
     value: Value,
     op: Op,
     site: usize,
-    prepared_handler: Handler,
+    kernel: Handler,
 }
 type PrimitiveCall = fn(&mut Vm, Primitive, usize, usize) -> Result<Value>;
 #[derive(Clone, Copy)]
@@ -425,7 +418,6 @@ fn inline_body(vm: &Vm, function: usize) -> Option<InlineBody> {
     }
     let mut body = None;
     let mut result_reg = None;
-    let mut resolved = None;
     for (index, op) in f.code.iter().enumerate() {
         match *op {
             Op::Const(dst, value) => {
@@ -452,15 +444,8 @@ fn inline_body(vm: &Vm, function: usize) -> Option<InlineBody> {
                     }
                 }
             }
-            Op::ResolveHead(dst, slot) if resolved.is_none() && body.is_none() => {
-                resolved = Some((dst, slot));
-            }
             Op::Direct(dst, slot, _, start, argc)
-            | Op::Prepared(dst, _, slot, _, start, argc)
             | Op::Sealed(dst, slot, start, argc) if body.is_none() => {
-                if let Op::Prepared(_, snapshot, _, _, _, _) = *op {
-                    if resolved != Some((snapshot, slot)) { return None; }
-                }
                 let sealed = matches!(*op, Op::Sealed(..));
                 let target = if sealed { sealed::target(&vm.symbol_names[slot], argc)? } else { vm.slots[slot].function };
                 let primitive = prim::legacy(target)?;
@@ -686,16 +671,25 @@ fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {
         inst.op.visit_values(visit);
     }
 }
+/// One record per call: the suspended caller's resume state, and the
+/// backtrace entry the entered activation gives back when it leaves. Six
+/// words (`frame_is_48_bytes_without_drop`): register and function ids are
+/// narrow.
 #[derive(Clone, Copy)]
 struct Frame {
     pc: *const Inst,
     regs: *mut Value,
-    dest: usize,
-    function: usize,
+    dest: u32,
+    function: u32,
     dynamic: usize,
     // Suspended caller's floor; the callee's floor is the shared stack length at entry.
     controls_base: usize,
+    /// The activation's backtrace entry, or NO_MARK. A physical activation
+    /// can own several real calls (an apply chain); a continuation
+    /// activation (K_CODE) owns its primitive's.
+    mark: usize,
 }
+const NO_MARK: usize = usize::MAX;
 pub(super) enum Escape {
     Normal(Value),
     Throw(Value, Value),
@@ -1028,10 +1022,10 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
             continue;
         }
         if let Some(frame) = e.frames.pop() {
-            leave_call(e);
-            e.rest.leave();
+            leave_call(e, frame.mark);
+            e.rest.leave(e.frames.len() + 1);
             e.regs = frame.regs;
-            e.function = frame.function;
+            e.function = frame.function as usize;
             e.dynamic = frame.dynamic;
             e.controls_base = frame.controls_base;
         } else {
@@ -1071,7 +1065,16 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
 #[derive(Default)]
 struct RestStack {
     values: Vec<Value>,
-    activations: Vec<(usize, Option<OpaqueRest>)>,
+    /// The activations that own a window of `values`, innermost last: only
+    /// calls of a `&rest' function with extra arguments, keyed by their
+    /// frame depth (`Engine::frames.len()` while they run).
+    activations: Vec<RestActivation>,
+}
+#[derive(Clone, Copy)]
+struct RestActivation {
+    depth: usize,
+    base: usize,
+    pending: Option<OpaqueRest>,
 }
 #[derive(Clone, Copy)]
 struct OpaqueRest {
@@ -1085,9 +1088,29 @@ impl RestStack {
             visit(value);
         }
     }
-    fn leave(&mut self) {
-        let (base, _) = self.activations.pop().unwrap();
-        self.values.truncate(base);
+    // Out of line and by scalars, as `leave_call`: a push inlined into a
+    // dispatching handler, or a struct argument's stack temporary whose
+    // address escapes, keeps the handler from tail-calling the next
+    // instruction (`funcall_and_apply_tail_dispatch_has_bounded_native_stack`).
+    #[inline(never)]
+    fn enter(&mut self, depth: usize, reg: usize, start: usize, end: usize) {
+        self.activations.push(RestActivation { depth, base: start, pending: Some(OpaqueRest { reg, start, end }) });
+    }
+    /// The activation at DEPTH leaves: its window goes with it.
+    #[inline(never)]
+    fn leave(&mut self, depth: usize) {
+        if self.activations.last().is_some_and(|a| a.depth == depth) {
+            let base = self.activations.pop().unwrap().base;
+            self.values.truncate(base);
+        }
+    }
+    fn pending(&self, depth: usize) -> Option<OpaqueRest> {
+        self.activations.last().filter(|a| a.depth == depth).and_then(|a| a.pending)
+    }
+    fn materialized(&mut self, depth: usize) {
+        if let Some(a) = self.activations.last_mut().filter(|a| a.depth == depth) {
+            a.pending = None;
+        }
     }
     fn materialize(&self, vm: &mut Vm, rest: OpaqueRest) -> Value {
         let mut tail = Value::NIL;
@@ -1109,9 +1132,6 @@ pub(super) struct Engine<'a> {
     /// registers, cleared on exit with the used prefix.
     apply_scratch: Vec<(usize, usize)>,
     frames: Vec<Frame>,
-    // Physical continuations can own several real calls (an apply chain).
-    // K machinery itself has no public activation.
-    call_marks: Vec<Option<usize>>,
     native_mark: Option<usize>,
     apply_function: Option<Value>,
     // Until entry, a spreader's calls have no physical callee to unwind them.
@@ -1211,12 +1231,11 @@ pub(super) fn assert_opaque_rest_compaction() {
         code: vec![],
         rest: RestStack {
             values: vec![a, b],
-            activations: vec![(0, Some(desc))],
+            activations: vec![RestActivation { depth: 0, base: 0, pending: Some(desc) }],
         },
         stack_used: 0,
         apply_scratch: Vec::new(),
         frames: vec![],
-        call_marks: vec![None],
         native_mark: None,
         apply_function: None,
         apply_mark: None,
@@ -1388,7 +1407,6 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     let handler_mark = vm.signal_handlers.len();
     let backtrace_mark = vm.backtrace.frames.len();
     let vm_propagate = std::mem::take(&mut vm.propagate_next);
-    program.rest.activations.push((0, None));
     let mut engine = Engine {
         stack_used: vm.functions[function].regs.max(args.len()),
         apply_scratch: Vec::new(),
@@ -1397,7 +1415,6 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         code: program.code,
         rest: program.rest,
         frames: Vec::with_capacity(512),
-        call_marks: vec![None],
         native_mark: None,
         apply_function: None,
         apply_mark: None,
@@ -1508,7 +1525,7 @@ fn lower_function(
                         reg
                     });
                     match op {
-                        Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Prepared(_, _, _, _, start, count)
+                        Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count)
                         | Op::Sealed(_, _, start, count) => {
                             observes |= (start..start + count).contains(&rest_reg);
                         }
@@ -1559,7 +1576,7 @@ fn lower(vm: &Vm, op: Op) -> Inst {
         value: Value::NIL,
         op,
         site: 0,
-        prepared_handler: direct,
+        kernel: direct,
     };
     match op {
         Op::Const(a, v) => {
@@ -1571,23 +1588,6 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.handler = mov;
             i.a = a;
             i.b = b;
-        }
-        Op::ResolveHead(a, b) => {
-            i.handler = resolve_head;
-            i.a = a;
-            i.b = b;
-        }
-        Op::Prepared(a, _, b, c, d, e) => {
-            i = lower(vm, Op::Direct(a, b, c, d, e));
-            i.handler = prepared;
-            i.op = op;
-            // A kernel serves the primitive the cell holds now; `prepared`
-            // runs it only while the snapshot still names that primitive.
-            let target = vm.slots[b].function;
-            if let Some(k) = kernel(target, e) {
-                i.value = target;
-                i.prepared_handler = k;
-            }
         }
         Op::Sealed(a, b, d, e) => {
             i.a = a;
@@ -1639,6 +1639,14 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.c = c;
             i.d = d;
             i.e = e;
+            // A kernel serves the primitive the cell holds now; `direct_kernel`
+            // runs it only while the site cache still holds that primitive.
+            let target = vm.slots[b].function;
+            if let Some(k) = kernel(target, e) {
+                i.handler = direct_kernel;
+                i.value = target;
+                i.kernel = k;
+            }
         }
         _ => {}
     }
@@ -1698,14 +1706,14 @@ unsafe fn observe_rest(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
     // A pending binding cannot be copied into an ordinary Value. Materialize
     // before any instruction that can read it, including implicit captures and
     // contiguous call windows. Conservative destination matches are intentional.
-    if let Some(rest) = e.rest.activations.last().and_then(|(_, rest)| *rest) {
+    if let Some(rest) = e.rest.pending(e.frames.len()) {
         let mut op = unsafe { (*pc).op };
         // These writes cannot fail or transfer control before replacing the
         // binding. Its previous tail is genuinely dead, not observed.
         if matches!(op, Op::Const(dst, _) if dst == rest.reg)
             || matches!(op, Op::Move(dst, src) if dst == rest.reg && src != rest.reg)
         {
-            e.rest.activations.last_mut().unwrap().1 = None;
+            e.rest.materialized(e.frames.len());
             return;
         }
         let mut observed = false;
@@ -1714,7 +1722,7 @@ unsafe fn observe_rest(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
             reg
         });
         match op {
-            Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count) | Op::Prepared(_, _, _, _, start, count)
+            Op::Call(_, _, start, count) | Op::Direct(_, _, _, start, count)
             | Op::Sealed(_, _, start, count) => {
                 observed |= (start..start + count).contains(&rest.reg);
             }
@@ -1728,7 +1736,7 @@ unsafe fn observe_rest(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
             unsafe {
                 *r.add(rest.reg) = value;
             }
-            e.rest.activations.last_mut().unwrap().1 = None;
+            e.rest.materialized(e.frames.len());
         }
     }
 }
@@ -1968,10 +1976,10 @@ unsafe fn ret(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             return fail(e, "invalid image return through control region");
         }
         if let Some(frame) = e.frames.pop() {
-            leave_call(e);
-            e.rest.leave();
-            *frame.regs.add(frame.dest) = value;
-            e.function = frame.function;
+            leave_call(e, frame.mark);
+            e.rest.leave(e.frames.len() + 1);
+            *frame.regs.add(frame.dest as usize) = value;
+            e.function = frame.function as usize;
             e.dynamic = frame.dynamic;
             e.controls_base = frame.controls_base;
             e.regs = frame.regs;
@@ -1990,39 +1998,18 @@ unsafe fn return_unbind(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
     }
     unsafe { ret(e, r, pc) }
 }
-// Resolution is reach-time, not compile-time. Autoload loading can rebase the
-// register stack; never retain the pre-load pointer or target across that call.
-unsafe fn resolve_head(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+/// A named call whose cell held a primitive with a kernel when lowered: the
+/// kernel while the site cache still holds that primitive (the cache is
+/// filled by `direct_generic`, which also serves the first call and any
+/// redefinition), as GNU's Bcall reads the cell after the arguments.
+unsafe fn direct_kernel(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
-        let function = Value::reference((*pc).b + 1, 7);
-        let Some(target) = t2_resolve(e, function) else { return Value::UNBOUND; };
-        if target.tag() == 3 && e.vm.autoload_object(target) {
-            return match autoload_then(e, r, function, target) {
-                Some(r) => resolve_head(e, r, pc),
-                None => Value::UNBOUND,
-            };
-        }
-        if !matches!(target.tag(), 4 | 6) && !lambda_list(e, target) {
-            let condition = uncallable_condition(e, target);
-            return raise(e, condition, &[function]);
-        }
-        *r.add((*pc).a) = target;
-        advance(e, r, pc)
-    }
-}
-unsafe fn prepared(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
-    unsafe {
-        let Op::Prepared(_, snapshot, _, _, _, _) = (*pc).op else { unreachable!() };
-        let target = *r.add(snapshot);
-        // A kernel (`value` set) serves exactly the primitive it was lowered
-        // for; otherwise keep direct-call speculation while the snapshot still
-        // names the cell. A changed cell must NOT replace the function already
-        // resolved.
-        let primitive = (*pc).value;
-        if target == primitive || primitive == Value::NIL && target == e.vm.slots[(*pc).b].function {
-            ((*pc).prepared_handler)(e, r, pc)
+        let i = &*pc;
+        let cache = e.vm.caches.get_unchecked(i.c);
+        if cache.version == e.vm.slots.get_unchecked(i.b).version && cache.target == i.value {
+            (i.kernel)(e, r, pc)
         } else {
-            invoke(e, r, pc, target, (*pc).d, (*pc).e)
+            direct_generic(e, r, pc)
         }
     }
 }
@@ -2084,8 +2071,8 @@ fn leave_native(e: &mut Engine<'_>) {
     if let Some(mark) = e.native_mark.take() { e.vm.backtrace.leave(mark); }
 }
 #[inline(never)]
-fn leave_call(e: &mut Engine<'_>) {
-    if let Some(mark) = e.call_marks.pop().flatten() { e.vm.backtrace.leave(mark); }
+fn leave_call(e: &mut Engine<'_>, mark: usize) {
+    if mark != NO_MARK { e.vm.backtrace.leave(mark); }
 }
 #[inline(never)]
 unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
@@ -2093,7 +2080,7 @@ unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
     unsafe {
         let function = if std::ptr::eq(pc, &K_CODE[0]) { *r.add(K_F) } else {
             match (*pc).op {
-                Op::Direct(_, slot, ..) | Op::Prepared(_, _, slot, ..) | Op::Sealed(_, slot, ..) => Value::reference(slot + 1, 7),
+                Op::Direct(_, slot, ..) | Op::Sealed(_, slot, ..) => Value::reference(slot + 1, 7),
                 Op::Call(_, function, ..) => *r.add(function),
                 _ => target,
             }
@@ -2101,9 +2088,22 @@ unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
         // The spreader carries the final original function through nested
         // apply calls. Reading the outer call's first argument loses aliases
         // and can mislabel a real failing callee as apply itself.
-        let function = e.apply_function.take().unwrap_or(function);
+        let spread = e.apply_function.take();
+        let function = spread.unwrap_or(function);
         let resolved = if target == Value::UNBOUND { e.vm.backtrace_resolve(function).unwrap_or(target) } else { target };
-        e.vm.backtrace.enter(function, resolved, std::slice::from_raw_parts(r.add(start), argc), e.vm.dynamic.len())
+        // GNU records a pointer to the caller's pushed arguments; so does this,
+        // as an offset into the register stack. `apply`'s spread window is
+        // the exception: a nested apply reuses it, so those are copied.
+        let args = if spread.is_some() {
+            e.vm.backtrace.copied(std::slice::from_raw_parts(r.add(start), argc))
+        } else {
+            backtrace::Arguments::Registers {
+                stack: e.vm.suspended_stacks.len(),
+                offset: r.add(start).offset_from(e.vm.stack.as_ptr()) as usize,
+                count: argc,
+            }
+        };
+        e.vm.backtrace.enter(function, resolved, args, e.vm.dynamic.len())
     }
 }
 #[inline(never)]
@@ -2333,7 +2333,7 @@ unsafe fn resolve_entry(
                 }
             }
             let closure = &e.vm.closures[target.payload() as usize];
-            let world_version = if matches!((*pc).op, Op::Direct(..) | Op::Prepared(..))
+            let world_version = if matches!((*pc).op, Op::Direct(..))
                 && closure.captures.is_empty()
                 && e.vm.functions[function].required == e.vm.functions[function].arity
                 && !e.vm.functions[function].rest
@@ -2585,9 +2585,6 @@ unsafe fn enter_frame_marked(
     mark: usize,
 ) -> Value {
     unsafe {
-        e.call_marks.push(Some(e.apply_mark.take().unwrap_or(mark)));
-        let base = rest.map_or(e.rest.values.len(), |rest| rest.start);
-        e.rest.activations.push((base, rest));
         // Captures/arguments have already been copied, including on lower failure.
         let end = new.offset_from(e.vm.stack.as_ptr()) as usize + e.vm.functions[function].regs;
         e.stack_used = e.stack_used.max(end);
@@ -2595,11 +2592,18 @@ unsafe fn enter_frame_marked(
         e.frames.push(Frame {
             pc: pc.add(1),
             regs: r,
-            dest: (*pc).a,
-            function: e.function,
+            dest: (*pc).a as u32,
+            function: e.function as u32,
             dynamic: e.dynamic,
             controls_base: e.controls_base,
+            mark: e.apply_mark.take().unwrap_or(mark),
         });
+        // An empty window needs no record: the rest register already holds nil.
+        if let Some(rest) = rest
+            && rest.start != rest.end
+        {
+            e.rest.enter(e.frames.len(), rest.reg, rest.start, rest.end);
+        }
         e.controls_base = e.controls.len();
         e.regs = new;
         e.function = function;
@@ -2646,7 +2650,7 @@ const fn k_inst(handler: Handler) -> Inst {
         op: Op::Return(K_RES),
         // Never an entry-cache index: K_CODE calls do not use the site caches.
         site: usize::MAX,
-        prepared_handler: direct,
+        kernel: direct,
     }
 }
 static K_CODE: [Inst; 3] = [k_inst(t2_call), k_inst(t2_resume), k_inst(ret)];
@@ -2848,15 +2852,14 @@ unsafe fn take_step(
             return Continue::Stop;
         }
         if !resuming {
-            e.call_marks.push(e.native_mark.take());
-            e.rest.activations.push((e.rest.values.len(), None));
             e.frames.push(Frame {
                 pc: pc.add(1),
                 regs: r,
-                dest: (*pc).a,
-                function: e.function,
+                dest: (*pc).a as u32,
+                function: e.function as u32,
                 dynamic: e.dynamic,
                 controls_base: e.controls_base,
+                mark: e.native_mark.take().unwrap_or(NO_MARK),
             });
             e.controls_base = e.controls.len();
             e.regs = k;
@@ -4136,7 +4139,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 | Op::Unless(..)
                 | Op::Return(..)
                 | Op::Call(..)
-                | Op::Direct(..) | Op::ResolveHead(..) | Op::Prepared(..) | Op::Sealed(..) => unreachable!("lowering assigns hot handlers"),
+                | Op::Direct(..) | Op::Sealed(..) => unreachable!("lowering assigns hot handlers"),
             }
             Ok(())
         })();
@@ -4177,16 +4180,16 @@ mod register_tests {
             } else {
                 2
             };
-            let prepared = lower(&vm, Op::Prepared(0, 3, slot, 0, 1, argc));
+            let direct = lower(&vm, Op::Direct(0, slot, 0, 1, argc));
             assert!(
-                !std::ptr::fn_addr_eq(prepared.prepared_handler, direct as Handler),
+                std::ptr::fn_addr_eq(direct.handler, direct_kernel as Handler),
                 "{name} still uses generic dispatch"
             );
             if name == "plist-get" {
                 continue;
             }
             let sealed = lower(&vm, Op::Sealed(0, slot, 1, argc));
-            assert!(std::ptr::fn_addr_eq(prepared.prepared_handler, sealed.handler),
+            assert!(std::ptr::fn_addr_eq(direct.kernel, sealed.handler),
                 "HEAD_ORDER_SPECIALIZATION_LOST: {name}");
         }
     }

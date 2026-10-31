@@ -849,8 +849,6 @@ enum Op {
     DeclareSpecial(usize),
     Call(usize, usize, usize, usize),
     Direct(usize, usize, usize, usize, usize),
-    ResolveHead(usize, usize),
-    Prepared(usize, usize, usize, usize, usize, usize),
     /// A call GNU compiles to a byte code (sealed.rs): the primitive itself,
     /// never the function cell. (destination, symbol slot, first argument, count)
     Sealed(usize, usize, usize, usize),
@@ -880,8 +878,6 @@ romacs_snapshot::snapshot_enum!(Op {
     Op::DeclareSpecial(f0) => (f0),
     Op::Call(f0, f1, f2, f3) => (f0, f1, f2, f3),
     Op::Direct(f0, f1, f2, f3, f4) => (f0, f1, f2, f3, f4),
-    Op::ResolveHead(f0, f1) => (f0, f1),
-    Op::Prepared(f0, f1, f2, f3, f4, f5) => (f0, f1, f2, f3, f4, f5),
     Op::Sealed(f0, f1, f2, f3) => (f0, f1, f2, f3),
     Op::Return(f0) => (f0),
     Op::Catch(f0, f1, f2) => (f0, f1, f2),
@@ -899,7 +895,6 @@ impl Op {
         match self {
             Self::Const(d, _)
             | Self::Global(d, _)
-            | Self::ResolveHead(d, _)
             | Self::Closure(d, _, _)
             | Self::Condition(d, _, _)
             | Self::Protect(d, _, _) => *d = map(*d),
@@ -916,11 +911,6 @@ impl Op {
             | Self::LeaveProtect(r)
             | Self::Unless(r, _) => *r = map(*r),
             Self::Call(d, target, start, _) => {
-                *d = map(*d);
-                *target = map(*target);
-                *start = map(*start);
-            }
-            Self::Prepared(d, target, _, _, start, _) => {
                 *d = map(*d);
                 *target = map(*target);
                 *start = map(*start);
@@ -1024,6 +1014,10 @@ struct Builder {
     env: NameMap<Name, Binding>,
     sites: Vec<Vec<usize>>,
     local_specials: NameSet<String>,
+    /// GNU's loader order for an unbound head (its loader is its
+    /// interpreter): a top-level request (`compile`) or a form deferred to
+    /// its reach, never a lambda body nested in one.
+    loader_order: bool,
 }
 impl Builder {
     fn reg(&mut self) -> usize {
@@ -1270,6 +1264,8 @@ pub struct Vm {
     lazy_regime: bool,
     /// R215: compile a failing form as a deferred reach-time expansion.
     defer_expansion_errors: bool,
+    /// Set for the builder about to be created (`Builder::loader_order`).
+    loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
     keep_captures: bool,
     expanded_macros: Vec<(usize, u64)>,
@@ -1435,6 +1431,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     seed_file_specials,
     lazy_regime,
     defer_expansion_errors,
+    loader_order_request,
     keep_captures,
     expanded_macros,
     expanded_symbols,
@@ -1595,6 +1592,7 @@ impl Vm {
             seed_file_specials: false,
             lazy_regime: false,
             defer_expansion_errors: false,
+            loader_order_request: false,
             keep_captures: false,
             expanded_macros: vec![],
             expanded_symbols: NameSet::default(),
@@ -1888,6 +1886,7 @@ impl Vm {
         } else {
             NameSet::default()
         };
+        self.loader_order_request = true;
         let result = self
             .function(&[], std::slice::from_ref(form), &NameMap::default(), &seed)
             .map(|(id, _)| id);
@@ -1929,6 +1928,7 @@ impl Vm {
             env: NameMap::default(),
             sites: vec![],
             local_specials: local_specials.clone(),
+            loader_order: std::mem::take(&mut self.loader_order_request),
         };
         // Stable order is essential: HashMap iteration order is not a closure ABI.
         let mut names: Vec<_> = outer.keys().cloned().collect();
@@ -2203,6 +2203,9 @@ impl Vm {
         }
         self.compile_depth += 1;
         self.keep_captures = true;
+        // A deferred form is evaluated at its reach, as GNU's interpreter
+        // evaluates it: an unbound head is named before the arguments run.
+        self.loader_order_request = lazy.deferred;
         let result = self.compile_lazy_request(&lazy.args, &body, &outer, &lazy.local_specials);
         self.keep_captures = false;
         self.compile_depth -= 1;
@@ -2650,10 +2653,7 @@ impl Vm {
                         // GNU compiles these calls to a byte code that never reads
                         // the function cell; so does Romacs (sealed.rs, VM2-SEALED1).
                         let sealed = target.is_none() && sealed::target(head, args.len()).is_some();
-                        // eval_sub resolves the named function before evaluating arguments.
-                        // Keep its value in a traced register: argument evaluation may
-                        // redefine the cell or collect the closure it used to own.
-                        let prepared = if target.is_none() && !sealed {
+                        if target.is_none() && !sealed {
                             let slot = self.slot(head);
                             // Non-eager Lisp bodies may name a macro before its
                             // defining file is loaded. Keep that entire form
@@ -2661,10 +2661,39 @@ impl Vm {
                             if self.defer_expansion_errors && self.slots[slot].function == Value::UNBOUND {
                                 return Err(format!("defer unresolved function {head}"));
                             }
-                            let function = b.reg();
-                            b.emit(Op::ResolveHead(function, slot));
-                            Some((function, slot))
-                        } else { None };
+                        }
+                        // GNU's loader is its interpreter: a top-level or deferred
+                        // form whose head has no function when compiled (a macro
+                        // from a file not yet loaded) names that head, not an
+                        // argument, when it fails. A call compiled inside a
+                        // function keeps the byte code's order (VM2-BCALL1).
+                        // Emitted as ops, never as a form: the cell is read by the
+                        // sealed `symbol-function' primitive, and a void cell takes
+                        // the call itself at once, with no arguments, so that
+                        // `direct_generic' raises its (void-function HEAD) before
+                        // any argument runs. No name is read and no constant but
+                        // the head's symbol is needed (the source cache spells it).
+                        let loader_guard = if target.is_none() && !sealed && b.loader_order
+                            && self.names.get(head).is_none_or(|&slot| self.slots[slot].function == Value::UNBOUND)
+                        {
+                            let slot = self.slot(head);
+                            let symbol = b.reg();
+                            b.emit(Op::Const(symbol, Value::reference(slot + 1, 7)));
+                            let cell = b.reg();
+                            let reader = self.slot("symbol-function");
+                            b.emit(Op::Sealed(cell, reader, symbol, 1));
+                            let void = b.emit(Op::Unless(cell, 0));
+                            let bound = b.emit(Op::Jump(0));
+                            b.code[void] = Op::Unless(cell, b.code.len());
+                            let r = b.reg();
+                            let cache = self.install_cache();
+                            b.emit(Op::Direct(r, slot, cache, b.next, 0));
+                            let after = b.emit(Op::Jump(0));
+                            b.code[bound] = Op::Jump(b.code.len());
+                            Some(after)
+                        } else {
+                            None
+                        };
                         // Reserve consecutive argument registers before compiling nested calls.
                         let start = b.next;
                         b.next += args.len();
@@ -2680,9 +2709,14 @@ impl Vm {
                         } else if sealed {
                             b.emit(Op::Sealed(r, self.slot(head), start, args.len()));
                         } else {
-                            let (function, slot) = prepared.unwrap();
+                            // GNU's Bcall (bytecode.c): the arguments first, then the
+                            // function cell, read through this site's cache.
+                            let slot = self.slot(head);
                             let cache = self.install_cache();
-                            b.emit(Op::Prepared(r, function, slot, cache, start, args.len()));
+                            b.emit(Op::Direct(r, slot, cache, start, args.len()));
+                        }
+                        if let Some(after) = loader_guard {
+                            b.code[after] = Op::Jump(b.code.len());
                         }
                         Ok(r)
                     }
@@ -2816,8 +2850,6 @@ impl Vm {
                     Op::ReadCell(d, s) => format!("r{d} = cell-value r{s}"),
                     Op::WriteCell(d, s) => format!("cell-value r{d} = r{s}"),
                     Op::Global(d, s) => format!("r{d} = value s{s}"),
-                    Op::ResolveHead(d, s) => format!("r{d} = resolve-head s{s}"),
-                    Op::Prepared(d, f, s, c, a, n) => format!("r{d} = prepared r{f} s{s} cache c{c} r{a}..+{n}"),
                     Op::Sealed(d, s, a, n) => format!("r{d} = sealed s{s} r{a}..+{n}"),
                     Op::SetGlobal(s, r) => format!("value s{s} = r{r}"),
                     Op::Bind(s, r) => format!("bind-special s{s} r{r}"),
@@ -3290,7 +3322,7 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
         for &op in &code {
             let mut read = |r: usize| reads[r] += 1;
             match op {
-                Op::Const(d, _) | Op::Global(d, _) | Op::ResolveHead(d, _) => writes[d] += 1,
+                Op::Const(d, _) | Op::Global(d, _) => writes[d] += 1,
                 Op::Move(d, s) | Op::ReadCell(d, s) => {
                     read(s);
                     writes[d] += 1;
@@ -3321,7 +3353,7 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
                     }
                     writes[d] += 1;
                 }
-                Op::Call(d, t, start, n) | Op::Prepared(d, t, _, _, start, n) => {
+                Op::Call(d, t, start, n) => {
                     read(t);
                     for r in start..start + n {
                         read(r);
@@ -3378,9 +3410,6 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
                     Some(Op::Call(out, t, a, n)) if out == s => Some(Op::Call(d, t, a, n)),
                     Some(Op::Direct(out, slot, cache, a, n)) if out == s => {
                         Some(Op::Direct(d, slot, cache, a, n))
-                    }
-                    Some(Op::Prepared(out, f, slot, cache, a, n)) if out == s => {
-                        Some(Op::Prepared(d, f, slot, cache, a, n))
                     }
                     Some(Op::Sealed(out, slot, a, n)) if out == s => Some(Op::Sealed(d, slot, a, n)),
                     _ => None,

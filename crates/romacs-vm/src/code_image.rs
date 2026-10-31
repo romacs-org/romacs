@@ -5,7 +5,7 @@ use super::*;
 use serde_json::{Value as Json, json};
 use std::{collections::BTreeMap, path::Path};
 
-const ABI: &str = "VM2CODE8";
+const ABI: &str = "VM2CODE9";
 fn array(v: &Json) -> Result<&[Json]> {
     v.as_array()
         .map(Vec::as_slice)
@@ -557,8 +557,7 @@ impl Vm {
                 }
                 Op::Move(d, s) | Op::ReadCell(d, s) | Op::WriteCell(d, s) => reg(d) && reg(s),
                 Op::Cell(r) | Op::Return(r) => reg(r),
-                Op::Global(d, s) | Op::ResolveHead(d, s) => reg(d) && slot(s),
-                Op::Prepared(d, t, s, c, a, n) => reg(d) && reg(t) && slot(s) && c < self.caches.len() && args(a, n),
+                Op::Global(d, s) => reg(d) && slot(s),
                 Op::Sealed(d, s, a, n) => reg(d) && slot(s) && args(a, n),
                 Op::SetGlobal(s, r) | Op::Bind(s, r) | Op::Define(s, r) | Op::DefineMacro(s, r) => {
                     slot(s) && reg(r)
@@ -626,8 +625,6 @@ pub(crate) fn encode_op(op: Op) -> Json {
         Protect(a, b, c) => json!([21, a, b, c]),
         LeaveProtect(a) => json!([22, a]),
         ResumeExit => json!([23]),
-        ResolveHead(a, b) => json!([24, a, b]),
-        Prepared(a, b, c, d, e, f) => json!([25, a, b, c, d, e, f]),
         Sealed(a, b, c, d) => json!([26, a, b, c, d]),
     }
 }
@@ -659,8 +656,6 @@ pub(crate) fn decode_op(v: &Json) -> Result<Op> {
         [21, a, b, c] => Protect(*a, *b, *c),
         [22, a] => LeaveProtect(*a),
         [23] => ResumeExit,
-        [24, a, b] => ResolveHead(*a, *b),
-        [25, a, b, c, d, e, f] => Prepared(*a, *b, *c, *d, *e, *f),
         [26, a, b, c, d] => Sealed(*a, *b, *c, *d),
         _ => return Err("invalid image opcode".into()),
     })

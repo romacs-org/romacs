@@ -25,7 +25,9 @@ fn explicit_marker_exposes_ordered_shared_cells() {
 #[test]
 fn explicit_marker_preserves_resolution_and_effects() {
     check("(progn (fset 'ignore (lambda (&rest _) nil)) (fset 'oclosure--fix-type (lambda (_ f) f)) (eq (oclosure--fix-type (ignore) (function car)) 'car))", "t");
-    check("(progn (fset 'ignore (lambda (&rest _) nil)) (fset 'oclosure--fix-type (lambda (_ f) (list 'old f))) (let ((result (oclosure--fix-type (ignore) (lambda () (:documentation (progn (fset 'ignore (lambda (&rest _) nil)) (fset 'oclosure--fix-type (lambda (_ f) (list 'new f))) 'kind)) 7)))) (list (car result) (romacs--oclosure-type (car (cdr result))) (funcall (car (cdr result))))))", "(old kind 7)");
+    // Compiled GNU (bytecode.c Bcall) evaluates the arguments, then reads the
+    // function cell: a redefinition inside an argument is the function called.
+    check("(progn (fset 'ignore (lambda (&rest _) nil)) (fset 'oclosure--fix-type (lambda (_ f) (list 'old f))) (let ((result (oclosure--fix-type (ignore) (lambda () (:documentation (progn (fset 'ignore (lambda (&rest _) nil)) (fset 'oclosure--fix-type (lambda (_ f) (list 'new f))) 'kind)) 7)))) (list (car result) (romacs--oclosure-type (car (cdr result))) (funcall (car (cdr result))))))", "(new kind 7)");
     check("(progn (fset 'ignore (lambda (&rest _) nil)) (fset 'oclosure--fix-type (lambda (_ f) 'sentinel)) (oclosure--fix-type (ignore) (lambda () (:documentation 'kind) 7)))", "sentinel");
 }
 
