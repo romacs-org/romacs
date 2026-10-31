@@ -1702,6 +1702,10 @@ impl Vm {
         };
         let (_, displayed) = self.window_rows(text_height);
         let frame_cols = (self.window_state.width / self.window_state.column.max(1)).max(1) as usize;
+        // keyboard.el's Frecursive_edit keeps it.
+        let command_loop_level = self.names.get("romacs--command-loop-level")
+            .and_then(|&slot| self.slots[slot].value.integer_value())
+            .map_or(0, |level| level.max(0) as usize);
         let Object::Buffer(b) = self.object(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
@@ -1745,6 +1749,7 @@ impl Vm {
             column,
             modified: b.state.modified(),
             frame_cols,
+            command_loop_level,
         })
     }
     /// GNU's `CURRENT_MODE_LINE_ACTIVE_FACE_ID`: the selected window draws
