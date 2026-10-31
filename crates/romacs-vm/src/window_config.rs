@@ -35,21 +35,23 @@ pub(crate) struct SavedWindow {
 }
 romacs_snapshot::snapshot_struct!(SavedWindow { window, buffer, start, point, parent, children, horizontal, x, y, width, height, normal_lines, normal_cols, left_margin, right_margin, vscroll_px, hscroll, combination_limit, dedicated, parameters });
 
-/// GNU `struct save_window_data`, for the one frame VM2 has.
+/// GNU `struct save_window_data`: one frame's windows, and the frame
+/// selected when they were saved.
 #[derive(Clone)]
 pub(crate) struct WindowConfiguration {
     frame: Value,
+    selected_frame: Value,
     current_window: Value,
     current_buffer: Value,
     root: Value,
     /// The root's subtree in preorder, then the minibuffer window.
     windows: Vec<SavedWindow>,
 }
-romacs_snapshot::snapshot_struct!(WindowConfiguration { frame, current_window, current_buffer, root, windows });
+romacs_snapshot::snapshot_struct!(WindowConfiguration { frame, selected_frame, current_window, current_buffer, root, windows });
 
 impl WindowConfiguration {
     pub(crate) fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
-        for v in [&mut self.frame, &mut self.current_window, &mut self.current_buffer, &mut self.root] {
+        for v in [&mut self.frame, &mut self.selected_frame, &mut self.current_window, &mut self.current_buffer, &mut self.root] {
             f(v);
         }
         for w in &mut self.windows {
@@ -141,16 +143,19 @@ impl Vm {
     /// Fcurrent_window_configuration for FRAME (nil, the selected frame).
     pub(super) fn current_window_configuration(&mut self, frame: Value) -> Result<Value> {
         self.ensure_windows()?;
-        let selected_frame = self.frame_value_peek();
+        let frame = if frame == Value::NIL { self.frame_value_peek() } else { frame };
         let persistent = self.persistent_window_parameters()?;
         let mut windows = vec![];
-        let root = self.window_root(ROOT);
+        let (root, mini, current_window) = { let f = self.frame(frame)?; (f.root, f.minibuffer, f.selected) };
         self.save_window(root, &persistent, &mut windows)?;
-        let mini = self.window_root(MINI);
-        self.save_window(mini, &persistent, &mut windows)?;
+        // A child frame uses its parent's minibuffer window.
+        if self.window(mini)?.frame == frame {
+            self.save_window(mini, &persistent, &mut windows)?;
+        }
         let config = WindowConfiguration {
-            frame: selected_frame,
-            current_window: self.window_root(SELECTED),
+            frame,
+            selected_frame: self.frame_value_peek(),
+            current_window,
             current_buffer: self.slots[self.buffer_slot].value,
             root,
             windows,
@@ -201,8 +206,9 @@ impl Vm {
         Ok(())
     }
     /// Fset_window_configuration.
-    pub(super) fn set_window_configuration(&mut self, config: Value, dont_set_miniwindow: Value) -> Result<Value> {
+    pub(super) fn set_window_configuration(&mut self, config: Value, dont_set_frame: Value, dont_set_miniwindow: Value) -> Result<Value> {
         self.ensure_windows()?;
+        let entry_frame = self.frame_value_peek();
         let Some(Object::WindowConfiguration(data)) = self.object_if(config) else {
             return Err("window configuration required".into());
         };
@@ -230,7 +236,9 @@ impl Vm {
         }
         // delete_all_child_windows: every window of the current tree is
         // deleted; a leaf remembers its buffer in case it is restored.
-        let mut tree = vec![self.window_root(ROOT)];
+        let frame = data.frame;
+        if !self.frame(frame)?.live { return Ok(Value::NIL); }
+        let mut tree = vec![self.frame(frame)?.root];
         let mut kept = HashMap::default();
         let mut at = 0;
         while at < tree.len() {
@@ -309,7 +317,7 @@ impl Vm {
                 self.retire_window(v)?;
             }
         }
-        self.put_window_root(ROOT, data.root);
+        self.frame_mut(frame)?.root = data.root;
         if self.window(data.current_window)?.buffer == new_current {
             let (marker, buffer) = (self.window(data.current_window)?.point, new_current);
             self.set_marker_object(marker, old_point, buffer)?;
@@ -318,13 +326,22 @@ impl Vm {
         // of the old selected window, which was saved above.
         let window = data.current_window;
         if self.window(window)?.live() {
-            self.put_window_root(SELECTED, window);
+            self.frame_mut(frame)?.selected = window;
+            let slot = self.slot(crate::frame::SELECTED_FRAME);
+            self.slots[slot].value = frame;
             let point = self.marker_position_value(self.window(window)?.point)?;
             self.set_buffer_point_for_window(window, point)?;
             self.window_state.select_count += 1;
             let count = self.window_state.select_count;
             self.window_mut(window)?.use_time = count;
             self.slots[self.buffer_slot].value = self.window(window)?.buffer;
+        }
+        // select_window made FRAME the selected frame; the frame selected
+        // at saving, or with DONT-SET-FRAME at entry, is selected again
+        // (window.c:8075).
+        let reselect = if dont_set_frame == Value::NIL { data.selected_frame } else { entry_frame };
+        if reselect != self.frame_value_peek() && self.frame(reselect)?.live {
+            self.select_frame_value(reselect, false)?;
         }
         if new_current != Value::NIL {
             self.slots[self.buffer_slot].value = new_current;
@@ -373,9 +390,9 @@ impl Windows<'_> {
         self.live_frame(frame)?;
         self.vm.current_window_configuration(frame).map_err(internal)
     }
-    pub(crate) fn set_window_configuration(&mut self, config: Value, dont_set_miniwindow: Value) -> Out {
+    pub(crate) fn set_window_configuration(&mut self, config: Value, dont_set_frame: Value, dont_set_miniwindow: Value) -> Out {
         self.configuration(config)?;
-        self.vm.set_window_configuration(config, dont_set_miniwindow).map_err(internal)
+        self.vm.set_window_configuration(config, dont_set_frame, dont_set_miniwindow).map_err(internal)
     }
     pub(crate) fn window_configuration_records(&mut self, config: Value) -> std::result::Result<Vec<Value>, Fault> {
         self.configuration(config)?;

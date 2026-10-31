@@ -242,8 +242,8 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "kill-buffer" => "bKill buffer: ", "make-indirect-buffer" => "bMake indirect buffer (to buffer): \nBName of indirect buffer: ",
         "rename-buffer" => "(list (read-string \"Rename buffer (to new name): \" nil 'buffer-name-history (buffer-name (current-buffer))) current-prefix-arg)",
         "buffer-enable-undo" | "delete-other-windows-internal" | "iconify-frame" | "lower-frame" | "raise-frame"
-            | "make-frame-invisible" | "make-frame-visible" => "",
-        "select-frame" => "e",
+            | "make-frame-invisible" | "make-frame-visible" | "delete-frame" => "",
+        "select-frame" => "e", "set-frame-width" => "(set-frame-property--interactive \"Frame width: \" (frame-width))", "set-frame-height" => "(set-frame-property--interactive \"Frame height: \" (frame-height))",
         "copy-file" => "fCopy file: \nGCopy %s to file: \np\nP",
         "rename-file" => "fRename file: \nGRename %s to file: \np",
         "add-name-to-file" => "fAdd name to file: \nGName to add to %s: \np",

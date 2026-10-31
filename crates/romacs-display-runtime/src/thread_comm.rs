@@ -733,6 +733,22 @@ impl ClipboardCommand {
     }
 }
 
+/// One paint: the primary frame and the child frames shown over it,
+/// lowest first. A child absent from the next paint is removed.
+#[cfg(feature = "core-free")]
+#[derive(Debug)]
+pub struct PaintScene {
+    pub root: romacs_display_protocol::FrameGlyphBuffer,
+    pub children: Vec<romacs_display_protocol::FrameGlyphBuffer>,
+}
+
+#[cfg(feature = "core-free")]
+impl From<romacs_display_protocol::FrameGlyphBuffer> for PaintScene {
+    fn from(root: romacs_display_protocol::FrameGlyphBuffer) -> Self {
+        Self { root, children: Vec::new() }
+    }
+}
+
 /// Command from Emacs to render thread
 #[derive(Debug)]
 // This public transport enum preserves its established by-value command API.
@@ -740,7 +756,7 @@ impl ClipboardCommand {
 #[allow(clippy::large_enum_variant)]
 pub enum RenderCommand {
     #[cfg(feature = "core-free")]
-    Paint(Box<romacs_display_protocol::FrameGlyphBuffer>),
+    Paint(Box<PaintScene>),
     Lifecycle(LifecycleCommand),
     Window(WindowCommand),
     Asset(AssetCommand),

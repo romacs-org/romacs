@@ -61,6 +61,10 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; shows any 24-bit color.
         (setq initial-window-system (window-system)
               window-system initial-window-system)
+        ;; startup.el:1602: the display is initialized, so `make-frame'
+        ;; does not initialize it again.
+        (when initial-window-system
+          (put initial-window-system 'window-system-initialized t))
         (setq romacs-display
               `(:graphic t :mouse t :selections t :symbol-keys t
                 :screens 1 :pixel-width ,(frame-pixel-width) :pixel-height ,(frame-pixel-height)

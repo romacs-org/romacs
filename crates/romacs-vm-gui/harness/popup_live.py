@@ -16,6 +16,17 @@ painted text rows must be exactly its buffer's lines, each row one line
 high, with its mode line directly below the last, and each recorded posn's
 pixel position must be where the painter drew that glyph.  labwc,
 wlr-randr, wtype and grim come from PATH (the gate's headless tools).
+
+With --child-frame, keymap-popup shows its buffer in a child frame
+(`keymap-popup-backend-child-frame', fitted by `fit-frame-to-buffer'), a
+layer over the frame: the popup's painted rows must be exactly its buffer's
+lines, in the child frame's rect, and the root frame's windows and mode
+lines must not move while it shows or after it goes.
+
+With --which-key, which-key's `custom' popup type shows its keys in a
+layer (romacs-layer.el) after C-x: a strip directly above the minibuffer
+line, with the root frame's windows unmoved while it shows and after it
+goes.
 """
 import argparse
 import hashlib
@@ -86,6 +97,104 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
 '''
 
 
+CHILD_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
+      hermes-dashboard-transport-start-mode 'remote
+      hermes-dashboard-transport-command "/nonexistent/hermes")
+(setq keymap-popup-backend #'keymap-popup-backend-child-frame)
+(defun popup-live--root-windows ()
+  (mapcar (lambda (w) (list (buffer-name (window-buffer w)) (window-pixel-top w) (window-pixel-height w)))
+          (window-list (frame-parent (selected-frame)) 'nomini)))
+(defun popup-live--record (buffer)
+  (let* ((frame (keymap-popup--session-get buffer :frame))
+         (window (frame-root-window frame)))
+    (with-current-buffer buffer
+      (write-region
+       (prin1-to-string
+        (list :position (list (car (frame-position frame)) (cdr (frame-position frame)))
+              :native (list (frame-native-width frame) (frame-native-height frame))
+              :border (frame-parameter frame 'child-frame-border-width)
+              :visible (frame-visible-p frame)
+              :window-pixel-top (window-pixel-top window)
+              :window-pixel-left (window-pixel-left window)
+              :text-left (car (window-inside-pixel-edges window))
+              :frame-char-height (frame-char-height)
+              :mode-line (and (buffer-local-value 'mode-line-format buffer) t)
+              :lines (save-excursion
+                       (goto-char (point-min))
+                       (let (out)
+                         (while (not (eobp))
+                           (push (buffer-substring-no-properties (point) (line-end-position)) out)
+                           (forward-line 1))
+                         (nreverse out)))
+              :root-windows (popup-live--root-windows)
+              :frames (length (frame-list))))
+       nil {state}))))
+(with-eval-after-load 'keymap-popup
+  (advice-add 'keymap-popup--show-child-frame :after #'popup-live--record))
+'''
+
+
+WHICH_KEY_INIT = '''(require 'which-key)
+(setq which-key-popup-type 'custom
+      which-key-custom-show-popup-function #'romacs-layer-which-key-show
+      which-key-custom-hide-popup-function #'romacs-layer-which-key-hide
+      which-key-custom-popup-max-dimensions-function #'romacs-layer-which-key-max-dimensions
+      which-key-idle-delay 0.3)
+(which-key-mode 1)
+(defun popup-live--record (&rest _)
+  (let ((frame (cdr (assq which-key--buffer romacs-layer--frames))))
+    (write-region
+     (prin1-to-string
+      (list :position (list (car (frame-position frame)) (cdr (frame-position frame)))
+            :native (list (frame-native-width frame) (frame-native-height frame))
+            :minibuffer-top (window-pixel-top (minibuffer-window))
+            :root-windows (mapcar (lambda (w) (list (window-pixel-top w) (window-pixel-height w)))
+                                  (window-list (frame-parent frame) 'nomini))))
+     nil {state})))
+(advice-add 'romacs-layer-which-key-show :after #'popup-live--record)
+'''
+
+
+def check_which_key(args, output, report, env, process, state, keys, glyphs):
+    """C-x shows which-key's keys in a layer above the minibuffer line; the
+    root frame's windows do not move."""
+    def root_bands():
+        return [y for y, _, _ in rows([g for g in glyphs() if g.get('frame', 1) == 1], 'ModeLine')]
+
+    def layer_rows():
+        return rows([g for g in glyphs() if g.get('frame', 1) != 1], 'Text')
+
+    before = root_bands()
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+    fio.wait(state.exists, args.timeout, 'which-key layer', process)
+    fio.wait(lambda: layer_rows(), args.timeout, 'which-key painted', process)
+    time.sleep(1)
+    fio.shot(output / 'which-key.png', env, report)
+    probe = read_plist(state.read_text())
+    report['probe'] = probe
+    shown = [text for _, text, _ in layer_rows()]
+    report['captures'].append({'name': 'which-key', 'layer_rows': shown, 'root_bands': root_bands()})
+    if not any('b : switch-to-buffer' in row for row in shown):
+        raise AssertionError(f'which-key layer shows {shown}')
+    left, top = probe['position']
+    width, height = probe['native']
+    if (left, top + height) != (0, probe['minibuffer-top']):
+        raise AssertionError(f"layer at {left},{top} {width}x{height}, minibuffer line at {probe['minibuffer-top']}")
+    if root_bands() != before:
+        raise AssertionError(f'root mode lines at {root_bands()} with the layer, {before} without')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    fio.wait(lambda: not layer_rows(), args.timeout, 'which-key gone', process)
+    time.sleep(.5)
+    if root_bands() != before:
+        raise AssertionError(f'root mode lines at {root_bands()} after the layer, {before} before')
+    # The layer's frame is kept and shows again.
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+    fio.wait(lambda: any('b : switch-to-buffer' in text for _, text, _ in layer_rows()), args.timeout, 'which-key again', process)
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    fio.wait(lambda: not layer_rows(), args.timeout, 'which-key gone again', process)
+    report['checks'].append({'layer_rect': [left, top, width, height], 'rows': len(shown), 'root_bands': before, 'shown_twice': True})
+
+
 def scene_glyphs(text):
     scene = fio.last_scene(text)
     return (scene or {}).get('glyphs', [])
@@ -143,6 +252,68 @@ def read_plist(text):
     return {key.lstrip(':'): item for key, item in zip(value[::2], value[1::2])}
 
 
+def check_child_frame(args, output, report, env, process, state, keys, glyphs, log_path):
+    """The popup is a child frame: its rows are its buffer's lines in its
+    rect, painted over the root frame, whose windows never move."""
+    def root(role):
+        return rows([g for g in glyphs() if g.get('frame', 1) == 1], role)
+
+    fio.wait(state.exists, args.timeout, 'first popup', process)
+    state.unlink()
+    keys('h')
+    fio.wait(state.exists, args.timeout, 'popup shown', process)
+    probe = read_plist(state.read_text())
+    report['probe'] = probe
+
+    def popup_rows():
+        return rows([g for g in glyphs() if g.get('frame', 1) != 1], 'Text')
+
+    fio.wait(lambda: any(text.strip() for _, text, _ in popup_rows()), args.timeout, 'popup painted', process)
+    time.sleep(1.5)
+    fio.shot(output / 'popup.png', env, report)
+    shown = {'root_mode_lines': [(y, t) for y, t, _ in root('ModeLine')], 'popup_rows': [(y, t) for y, t, _ in popup_rows()]}
+    report['captures'].append({'name': 'popup', **shown})
+    lines = [line.rstrip() for line in probe['lines'] if line.strip()]
+    # A line as wide as the window continues on the next row, as GNU
+    # shows it without fringes (the last column holds the `\\').
+    painted, carry = [], ''
+    for _, text in shown['popup_rows']:
+        if text.endswith('\\'):
+            carry += text[:-1]
+            continue
+        painted.append((carry + text).rstrip())
+        carry = ''
+    painted = [text for text in painted if text.strip()]
+    if painted != lines:
+        raise AssertionError(f'popup painted {painted} for its lines {lines}')
+    # Its rows start at its window's top inside the frame's rect, a line apart.
+    left, top = probe['position']
+    first_y = shown['popup_rows'][0][0]
+    line = probe['frame-char-height']
+    if first_y != top + probe['window-pixel-top']:
+        raise AssertionError(f"first popup row at {first_y}, frame top {top} + window top {probe['window-pixel-top']}")
+    ys = [y for y, _ in shown['popup_rows']]
+    if any(not line <= b - a <= 2 * line + 1 for a, b in zip(ys, ys[1:])):
+        raise AssertionError(f'popup rows at {ys}, not a line ({line}px) apart')
+    width, height = probe['native']
+    xs = [x for _, _, row in popup_rows() for x, _ in row]
+    if min(xs) < left + probe['text-left'] or max(xs) >= left + width:
+        raise AssertionError(f'popup glyphs span {min(xs)}..{max(xs)}, frame at {left} width {width}')
+    if ys[-1] + line > top + height:
+        raise AssertionError(f'last popup row {ys[-1]} below the frame bottom {top + height}')
+    # The root frame's windows are as they were with the popup gone.
+    keys('q')
+    fio.wait(lambda: not popup_rows(), args.timeout, 'popup gone', process)
+    time.sleep(1)
+    fio.shot(output / 'gone.png', env, report)
+    gone = [(y, t) for y, t, _ in root('ModeLine')]
+    report['captures'].append({'name': 'gone', 'root_mode_lines': gone})
+    if [y for y, _ in gone] != [y for y, _ in shown['root_mode_lines']]:
+        raise AssertionError(f"root mode lines at {[y for y, _ in gone]} after, {[y for y, _ in shown['root_mode_lines']]} while the popup showed")
+    report['checks'].append({'popup_lines': len(lines), 'popup_rect': [left, top, width, height],
+                             'root_windows': probe['root-windows'], 'root_mode_line_y': [y for y, _ in gone]})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True)
@@ -150,6 +321,8 @@ def main():
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--font', default='Iosevka')
     parser.add_argument('--font-size', default='14')
+    parser.add_argument('--child-frame', action='store_true', help="keymap-popup's child-frame backend")
+    parser.add_argument('--which-key', action='store_true', help="which-key's popup in a layer")
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
@@ -166,7 +339,8 @@ def main():
                 directory.mkdir()
             state = work / 'popup-state.el'
             (home / 'config/romacs').mkdir(parents=True)
-            (home / 'config/romacs/init.el').write_text(INIT.format(state=json.dumps(str(state))))
+            init = WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame else INIT
+            (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state))))
             (config / 'rc.xml').write_text(live.RC_XML)
             env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
@@ -213,6 +387,11 @@ def main():
                     return [text for _, text, _ in rows(glyphs(), 'ModeLine')]
 
                 fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
+                if args.which_key:
+                    time.sleep(1)
+                    check_which_key(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
                 keys('-M', 'alt', 'x', '-m', 'alt')
                 fio.wait(lambda: ff.current_rows(log_path.read_text(errors='replace'))[:1] == ['M-x '], args.timeout, 'M-x prompt', process)
                 keys('hermes', '-k', 'Return')
@@ -220,6 +399,10 @@ def main():
                 time.sleep(1)
                 fio.shot(output / 'dashboard.png', env, report)
                 report['captures'].append({'name': 'dashboard', 'rows': text_rows(), 'mode_lines': mode_lines()})
+                if args.child_frame:
+                    check_child_frame(args, output, report, env, process, state, keys, glyphs, log_path)
+                    report['status'] = 'PASS'
+                    return
                 # The dashboard opens its popup itself; the popup key shows
                 # it again, refitting.
                 fio.wait(state.exists, args.timeout, 'first popup fit', process)

@@ -1,7 +1,14 @@
-//! Lisp identity and ownership for the single initial display device.
-//! No TTY is claimed: the initial terminal has no native TTY top frame.
+//! Lisp identity and ownership for the initial display device and its
+//! child frames. No TTY is claimed: the initial terminal has no native TTY
+//! top frame. The host frame is the one the display shows; every other
+//! frame is a child frame (`parent-frame'), painted over its parent and
+//! never resizing its windows (DIVERGENCES.md VM2-CHILD-FRAME).
 use crate::{data::Object, *};
 pub(super) const SELECTED_FRAME: &str = "#:vm2-frame";
+/// The frame the host displays: the initial frame.
+const HOST_FRAME: &str = "#:vm2-host-frame";
+/// Live frames, newest first: GNU's `Vframe_list' (frame.c:1438).
+const FRAME_LIST: &str = "#:vm2-frame-list";
 #[derive(Clone)]
 pub(super) struct Frame {
     pub root: Value,
@@ -10,17 +17,44 @@ pub(super) struct Frame {
     pub terminal: Value,
     pub parameters: Vec<(Value, Value)>,
     pub live: bool,
+    /// The display's identity for this frame: 1 for the host frame.
+    pub id: u64,
+    /// The parent frame, nil for the host frame.
+    pub parent: Value,
+    /// A child frame's outer position in its parent's native area and its
+    /// native size, in pixels. The host frame's size is the window state's.
+    pub left: i32,
+    pub top: i32,
+    pub width: u32,
+    pub height: u32,
+    /// The internal border a child frame draws (`child-frame-border-width').
+    pub border: u32,
+    pub visible: bool,
+    /// Stacking among siblings: a higher one is drawn above a lower one.
+    pub z: i64,
+    /// GNU `f->focus_frame' (`redirect-frame-focus'), nil when unredirected.
+    pub focus: Value,
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live });
+romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus });
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         for v in [&mut self.root, &mut self.selected, &mut self.minibuffer,
-                  &mut self.terminal] { f(v); }
+                  &mut self.terminal, &mut self.parent, &mut self.focus] { f(v); }
         for (k, v) in &mut self.parameters { f(k); f(v); }
     }
     pub fn storage_bytes(&self) -> usize {
         size_of::<Self>() + self.parameters.capacity() * size_of::<(Value, Value)>()
     }
+}
+/// A child frame's placement and size request, in pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChildGeometry {
+    pub left: i32,
+    pub top: i32,
+    /// The text area's size.
+    pub width: u32,
+    pub height: u32,
+    pub border: u32,
 }
 #[derive(Clone)]
 pub(super) struct Terminal {
@@ -44,6 +78,10 @@ impl Vm {
     pub(super) fn frame_value_peek(&self) -> Value {
         self.names.get(SELECTED_FRAME).map_or(Value::UNBOUND, |&i| self.slots[i].value)
     }
+    /// The frame the host displays, unbound before `ensure_windows'.
+    pub(super) fn host_frame_peek(&self) -> Value {
+        self.names.get(HOST_FRAME).map_or(Value::UNBOUND, |&i| self.slots[i].value)
+    }
     pub(super) fn selected_frame_value(&mut self) -> Result<Value> {
         self.ensure_windows()?;
         Ok(self.frame_value_peek())
@@ -60,6 +98,31 @@ impl Vm {
             _ => Err("frame required".into()),
         }
     }
+    /// Live frames, newest first.
+    pub(super) fn frames(&self) -> Vec<Value> {
+        let mut out = vec![];
+        let mut tail = self.names.get(FRAME_LIST).map_or(Value::NIL, |&i| self.slots[i].value);
+        while let Ok((frame, rest)) = self.cons_pair(tail) {
+            out.push(frame);
+            tail = rest;
+        }
+        out
+    }
+    fn set_frames(&mut self, frames: &[Value]) {
+        let list = self.list_value(frames);
+        let slot = self.slot(FRAME_LIST);
+        self.slots[slot].value = list;
+    }
+    /// FRAME's parent chain, nearest first.
+    pub(super) fn frame_ancestors(&self, mut frame: Value) -> Vec<Value> {
+        let mut out = vec![];
+        while let Ok(f) = self.frame(frame) {
+            if f.parent == Value::NIL { break; }
+            out.push(f.parent);
+            frame = f.parent;
+        }
+        out
+    }
     pub(super) fn allocate_initial_frame(&mut self, root: Value, minibuffer: Value) -> Result<()> {
         let (undecided, no_conversion) = (self.intern("undecided"), self.intern("no-conversion"));
         let terminal = self.allocate_object(Object::Terminal(Box::new(Terminal {
@@ -69,16 +132,246 @@ impl Vm {
         let name = (self.intern("name"), self.make_lisp_string(b"F1".to_vec(), false));
         let frame = self.allocate_object(Object::Frame(Box::new(Frame {
             root, selected: root, minibuffer, terminal,
-            parameters: vec![name], live: true,
+            parameters: vec![name], live: true, id: 1, parent: Value::NIL,
+            left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: 0, focus: Value::NIL,
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
-        let slot = self.slot(SELECTED_FRAME);
-        self.slots[slot].value = frame;
-        let last = self.slot("#:vm2-last-nonminibuffer-frame");
-        self.slots[last].value = frame;
+        for name in [SELECTED_FRAME, HOST_FRAME, "#:vm2-last-nonminibuffer-frame"] {
+            let slot = self.slot(name);
+            self.slots[slot].value = frame;
+        }
+        self.set_frames(&[frame]);
         self.window_mut(root)?.frame = frame;
         self.window_mut(minibuffer)?.frame = frame;
         Ok(())
+    }
+    /// A new invisible child frame of PARENT showing BUFFER in one window,
+    /// sharing PARENT's minibuffer window (pgtkfns.c x-create-frame with a
+    /// `parent-frame'); PARAMETERS are stored as given, newest first.
+    pub(super) fn allocate_child_frame(&mut self, parent: Value, buffer: Value, geometry: ChildGeometry,
+                                       parameters: Vec<(Value, Value)>) -> Result<Value> {
+        self.ensure_windows()?;
+        let parent_frame = self.frame(parent)?;
+        let (minibuffer, terminal) = (parent_frame.minibuffer, parent_frame.terminal);
+        let root = self.allocate_window(buffer)?;
+        self.window_state.next_frame += 1;
+        let id = self.window_state.next_frame;
+        let frame = self.allocate_object(Object::Frame(Box::new(Frame {
+            root, selected: root, minibuffer, terminal, parameters, live: true, id, parent,
+            left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL,
+        })));
+        self.window_mut(root)?.frame = frame;
+        let mut frames = self.frames();
+        frames.insert(0, frame);
+        self.set_frames(&frames);
+        self.set_child_geometry(frame, geometry)?;
+        Ok(frame)
+    }
+    /// Place and size child FRAME, then lay its windows out in the text
+    /// area inside its border. Its parent's windows do not change.
+    pub(super) fn set_child_geometry(&mut self, frame: Value, geometry: ChildGeometry) -> Result<()> {
+        let (line, column) = (self.window_state.line.max(1), self.window_state.column.max(1));
+        let ChildGeometry { left, top, width, height, border } = geometry;
+        // A child frame keeps at least one line of two columns.
+        let (width, height) = (width.max(2 * column), height.max(line));
+        let root = {
+            let f = self.frame_mut(frame)?;
+            (f.left, f.top, f.border) = (left, top, border);
+            (f.width, f.height) = (width + 2 * border, height + 2 * border);
+            f.root
+        };
+        let mut geometry = vec![];
+        self.plan_window_geometry(root, border, border, width, height, (0, 0), line, column, &mut geometry)?;
+        for (v, x, y, w, h) in geometry {
+            let window = self.window_mut(v)?;
+            if (window.x, window.y, window.width, window.height) != (x, y, w, h) {
+                window.end_valid = false;
+            }
+            (window.x, window.y, window.width, window.height) = (x, y, w, h);
+        }
+        self.display_state.version += 1;
+        Ok(())
+    }
+    /// A child frame's geometry request as it stands.
+    pub(super) fn child_geometry(&self, frame: Value) -> Result<ChildGeometry> {
+        let f = self.frame(frame)?;
+        Ok(ChildGeometry { left: f.left, top: f.top, width: f.width - 2 * f.border,
+                           height: f.height - 2 * f.border, border: f.border })
+    }
+    /// FRAME's native size in pixels.
+    pub(super) fn frame_native(&self, frame: Value) -> Result<(u32, u32)> {
+        let f = self.frame(frame)?;
+        Ok(if f.parent == Value::NIL { (self.window_state.width, self.window_state.height) } else { (f.width, f.height) })
+    }
+    /// Delete child FRAME and its descendants (frame.c delete_frame): their
+    /// windows die, and a deleted selected frame passes the selection to
+    /// its nearest live ancestor. The host frame is never deleted here.
+    pub(super) fn delete_child_frame(&mut self, frame: Value) -> Result<()> {
+        if !self.frame(frame)?.live { return Ok(()); }
+        if self.frame(frame)?.parent == Value::NIL {
+            return Err("Attempt to delete the sole visible or iconified frame".into());
+        }
+        let children: Vec<Value> = self.frames().into_iter().filter(|&f| self.frame(f).is_ok_and(|f| f.parent == frame)).collect();
+        for child in children {
+            self.delete_child_frame(child)?;
+        }
+        let selected = self.frame_value_peek();
+        if selected == frame {
+            let parent = self.frame(frame)?.parent;
+            self.select_frame_value(parent, false)?;
+        }
+        let root = self.frame(frame)?.root;
+        self.retire_window(root)?;
+        let f = self.frame_mut(frame)?;
+        f.live = false;
+        f.visible = false;
+        f.root = Value::NIL;
+        f.selected = Value::NIL;
+        let frames: Vec<Value> = self.frames().into_iter().filter(|&f| f != frame).collect();
+        self.set_frames(&frames);
+        self.display_state.version += 1;
+        Ok(())
+    }
+    /// Select FRAME and its selected window (frame.c do_switch_frame).
+    pub(super) fn select_frame_value(&mut self, frame: Value, record: bool) -> Result<()> {
+        let window = self.frame(frame)?.selected;
+        self.select_window_value(window, record)?;
+        Ok(())
+    }
+    /// Whether FRAME shows: it and its ancestors are live and visible.
+    pub(super) fn frame_shown(&self, frame: Value) -> bool {
+        std::iter::once(frame).chain(self.frame_ancestors(frame)).all(|f| self.frame(f).is_ok_and(|f| f.visible && f.live))
+    }
+    /// FRAME's outer position in the host frame.
+    pub(super) fn frame_origin(&self, frame: Value) -> Result<(i32, i32)> {
+        std::iter::once(frame).chain(self.frame_ancestors(frame))
+            .try_fold((0, 0), |(x, y), f| self.frame(f).map(|f| (x + f.left, y + f.top)))
+    }
+    /// Live child frames in stacking order, lowest first: a frame's
+    /// children above it, siblings by creation unless raised or lowered.
+    /// GNU leaves stacking to the window manager; `z-group' is not read.
+    pub(crate) fn child_frames_bottom_up(&self) -> Vec<Value> {
+        let host = self.host_frame_peek();
+        let mut out: Vec<Value> = self.frames().into_iter()
+            .filter(|&f| f != host && self.frame(f).is_ok_and(|f| f.live)).collect();
+        let key = |vm: &Self, f: Value| (vm.frame_ancestors(f).len(), vm.frame(f).map_or(0, |f| f.z));
+        out.sort_by_key(|&f| key(self, f));
+        out
+    }
+    /// Raise (or lower) child FRAME above (below) its siblings.
+    pub(super) fn restack_frame(&mut self, frame: Value, raise: bool) -> Result<()> {
+        self.window_state.next_frame += 1;
+        let z = self.window_state.next_frame as i64;
+        self.frame_mut(frame)?.z = if raise { z } else { -z };
+        self.display_state.version += 1;
+        Ok(())
+    }
+}
+type Out = std::result::Result<Value, crate::prim::Fault>;
+use crate::prim::Fault;
+fn internal(e: String) -> Fault { Fault::Error(e) }
+/// The frame surface `prims/frame.rs' declares beyond window.rs's: child
+/// frames (GNU frame.c and pgtkfns.c x-create-frame).
+impl crate::window::Windows<'_> {
+    /// A live child frame, or GNU's error for the host frame CALLER cannot
+    /// change.
+    fn child(&mut self, frame: Value) -> std::result::Result<Option<Value>, Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        Ok((self.vm.frame(frame).map_err(internal)?.parent != Value::NIL).then_some(frame))
+    }
+    pub(crate) fn create_child_frame(&mut self, parent: Value, geometry: ChildGeometry, parameters: Vec<(Value, Value)>) -> Out {
+        let parent = self.decode_live_frame(parent)?;
+        // make_frame: the current buffer, unless it is a minibuffer.
+        let current = self.vm.slots[self.vm.buffer_slot].value;
+        let buffer = if self.vm.minibuffer_window_buffer() == Some(current) {
+            self.vm.named_buffer("*scratch*").unwrap_or(current)
+        } else { current };
+        self.vm.allocate_child_frame(parent, buffer, geometry, parameters).map_err(internal)
+    }
+    pub(crate) fn frame_minibuffer_window(&mut self, frame: Value) -> Out {
+        let frame = self.decode_live_frame(frame)?;
+        Ok(self.vm.frame(frame).map_err(internal)?.minibuffer)
+    }
+    pub(crate) fn frame_parent(&mut self, frame: Value) -> Out {
+        let frame = self.decode_live_frame(frame)?;
+        Ok(self.vm.frame(frame).map_err(internal)?.parent)
+    }
+    pub(crate) fn frame_ancestor_p(&mut self, ancestor: Value, descendant: Value) -> Out {
+        let (a, d) = (self.decode_live_frame(ancestor)?, self.decode_live_frame(descendant)?);
+        Ok(if self.vm.frame_ancestors(d).contains(&a) { Value::TRUE } else { Value::NIL })
+    }
+    /// A child frame's geometry, nil for the host frame.
+    pub(crate) fn child_geometry(&mut self, frame: Value) -> std::result::Result<Option<ChildGeometry>, Fault> {
+        match self.child(frame)? {
+            Some(frame) => Ok(Some(self.vm.child_geometry(frame).map_err(internal)?)),
+            None => Ok(None),
+        }
+    }
+    /// Place or size child FRAME; the host frame's geometry is the host
+    /// window's, which Lisp does not change.
+    pub(crate) fn set_child_geometry(&mut self, frame: Value, geometry: ChildGeometry) -> std::result::Result<(), Fault> {
+        if let Some(frame) = self.child(frame)? {
+            self.vm.set_child_geometry(frame, geometry).map_err(internal)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn frame_visible(&mut self, frame: Value) -> std::result::Result<bool, Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        Ok(self.vm.frame(frame).map_err(internal)?.visible)
+    }
+    /// Show or hide child FRAME; the host frame stays visible (VM2-FRAME-VIS).
+    pub(crate) fn set_frame_visible(&mut self, frame: Value, visible: bool) -> std::result::Result<(), Fault> {
+        if let Some(frame) = self.child(frame)? {
+            let f = self.vm.frame_mut(frame).map_err(internal)?;
+            if f.visible != visible {
+                f.visible = visible;
+                self.vm.display_state.version += 1;
+            }
+        }
+        Ok(())
+    }
+    /// frame.c:3652: the visible frames, oldest first.
+    pub(crate) fn visible_frames(&mut self) -> Out {
+        self.decode_live_frame(Value::NIL)?;
+        let frames: Vec<Value> = self.vm.frames().into_iter().rev().filter(|&f| self.vm.frame(f).is_ok_and(|f| f.visible)).collect();
+        Ok(self.vm.list_value(&frames))
+    }
+    pub(crate) fn restack(&mut self, frame: Value, raise: bool) -> std::result::Result<(), Fault> {
+        if let Some(frame) = self.child(frame)? {
+            self.vm.restack_frame(frame, raise).map_err(internal)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn redirect_frame_focus(&mut self, frame: Value, focus: Value) -> Out {
+        let frame = self.decode_live_frame(frame)?;
+        if focus != Value::NIL && !self.is_frame_value(focus) { return Err(Fault::Wrong("framep", focus)); }
+        self.vm.frame_mut(frame).map_err(internal)?.focus = focus;
+        Ok(Value::NIL)
+    }
+    pub(crate) fn frame_focus(&mut self, frame: Value) -> Out {
+        let frame = self.decode_live_frame(frame)?;
+        Ok(self.vm.frame(frame).map_err(internal)?.focus)
+    }
+    fn is_frame_value(&self, v: Value) -> bool {
+        matches!(self.vm.object_if(v), Some(Object::Frame(_)))
+    }
+    /// Whether FRAME (nil, the selected one) is a live child frame.
+    pub(crate) fn is_child_frame(&mut self, frame: Value) -> std::result::Result<bool, Fault> {
+        Ok(self.child(frame)?.is_some())
+    }
+    /// frame.c delete_frame's deletion, once `delete-frame-functions' ran:
+    /// FRAME and its descendants die. A frame already dead is left alone;
+    /// the host frame is the sole frame GNU would refuse to delete.
+    pub(crate) fn delete_frame(&mut self, frame: Value, force: Value) -> Out {
+        let frame = if frame == Value::NIL { self.decode_live_frame(frame)? } else { frame };
+        if !self.is_frame_value(frame) { return Err(Fault::Wrong("framep", frame)); }
+        if !self.vm.frame(frame).map_err(internal)?.live { return Ok(Value::NIL); }
+        if self.vm.frame(frame).map_err(internal)?.parent == Value::NIL {
+            return Err(Fault::Error(if force == Value::NIL { "Attempt to delete the sole visible or iconified frame" }
+                                    else { "Attempt to delete the only frame" }.into()));
+        }
+        self.vm.delete_child_frame(frame).map_err(internal)?;
+        Ok(Value::NIL)
     }
 }
