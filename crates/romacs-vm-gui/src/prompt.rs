@@ -27,8 +27,8 @@ pub struct Shared {
     /// The outer loop's in-flight presentation; the prompt settles it before
     /// it submits its own (the renderer retains only the latest sample).
     pub in_flight: Option<u64>,
-    /// Set when the prompt settled `in_flight`.
-    pub settled: Option<u64>,
+    /// Set when the prompt settled `in_flight`: it and when it rendered.
+    pub settled: Option<(u64, std::time::Instant)>,
     /// Latest frame geometry seen by the prompt.
     pub size: Option<(u32, u32)>,
     pub closed: bool,
@@ -184,7 +184,7 @@ impl HostInput for GuiHost {
             let mut shared = self.shared.borrow_mut();
             if let Some(in_flight) = shared.in_flight.take() {
                 self.sender.wait_for_render(in_flight, wait)?;
-                shared.settled = Some(in_flight);
+                shared.settled = Some((in_flight, std::time::Instant::now()));
             }
             shared.presentation = shared.presentation.checked_add(1).ok_or("presentation exhausted")?;
             shared.presentation

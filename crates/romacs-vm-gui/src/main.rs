@@ -115,7 +115,7 @@ mod lent_tests {
             let mut shared = host.borrow_mut();
             let seen = (shared.presentation, shared.in_flight, shared.pending.len());
             // What a prompt's redisplay does: settle the loop's frame, submit its own.
-            shared.settled = shared.in_flight.take();
+            shared.settled = shared.in_flight.take().map(|p| (p, Instant::now()));
             shared.presentation += 1;
             shared.size = Some((30, 40));
             shared.closed = true;
@@ -126,6 +126,40 @@ mod lent_tests {
         assert_eq!((queue.len(), host.borrow().presentation, width, height), (1, 8, 30, 40));
         assert!(live.in_flight().is_none(), "the settled presentation is no longer in flight");
         assert_eq!(host.borrow().in_flight, None);
+    }
+
+    /// A presentation a prompt settled inside the loop's Lisp retires as one
+    /// the loop saw render, so the latency trace completes its keys and
+    /// takes the next paint; it used to stay in flight in the trace, whose
+    /// next submission asserted and ended the session.
+    #[test]
+    fn a_presentation_a_prompt_settled_completes_the_latency_trace() {
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        let now = Instant::now();
+        let (mut trace, mut live) = (latency::Trace::default(), presentation::Presentation::new());
+        let key = |sequence| latency::Key { sequence, received: Some(now), start: now, ready: now,
+            command_ns: 0, diagnostic_ns: 0, reply_ns: 0 };
+        let paint = || latency::Paint { submitted: now, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 };
+        let first = trace.sequence();
+        trace.push(key(first));
+        host.borrow_mut().presentation = 7;
+        live.submitted(7, now);
+        trace.submitted(7, paint(), now, 0);
+        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
+        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        lent.run(&host, |_| {
+            let mut shared = host.borrow_mut();
+            shared.settled = shared.in_flight.take().map(|p| (p, now));
+            shared.presentation += 1;
+        });
+        let (presentation, observed) = live.take_retired().expect("the settled presentation retired");
+        assert_eq!((presentation, observed), (7, now));
+        assert_eq!(trace.completed(presentation, observed).len(), 1);
+        let second = trace.sequence();
+        trace.push(key(second));
+        live.submitted(9, now);
+        trace.submitted(9, paint(), now, 0);
+        assert_eq!(trace.completed(9, now).len(), 1);
     }
 
     /// A prompt read inside any Lisp the loop runs (a timer, a background
@@ -1071,10 +1105,7 @@ fn evaluate(
             let mut retired = false;
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
                 if let Ok(diagnostic) = sender.wait_for_render(in_flight, std::time::Duration::ZERO) {
-                    let observed = Instant::now();
-                    if let Some(trace) = &mut key_trace {
-                        for sample in trace.completed(in_flight, observed) { eprintln!("{sample}"); }
-                    }
+                    live_presentation.completed(in_flight, Instant::now());
                     eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
                         "unresolved_face_text_total":diagnostic.unresolved_face_text_total}));
@@ -1083,11 +1114,15 @@ fn evaluate(
                             "units":"ns","submit_to_render_observed_ns":submitted.elapsed().as_nanos(),
                             "render_semantics":"renderer-successful-submit-not-compositor-present"}));
                     }
-                    live_presentation.completed(in_flight);
                     retired = true;
                 } else if submitted.elapsed() >= std::time::Duration::from_secs(30) {
                     return Err(format!("no rendered atlas diagnostic for presentation {in_flight}"));
                 }
+            }
+            // Here, or in a prompt that settled it first (`Lent').
+            if let Some((presentation, observed)) = live_presentation.take_retired()
+                && let Some(trace) = &mut key_trace {
+                for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
             }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 let snapshot_start = Instant::now();
@@ -1229,7 +1264,7 @@ impl Lent<'_> {
         let mut shared = host.borrow_mut();
         *self.queue = std::mem::take(&mut shared.pending);
         if shared.presentation != before { self.live.changed(); }
-        if let Some(settled) = shared.settled.take() { self.live.completed(settled); }
+        if let Some((settled, at)) = shared.settled.take() { self.live.completed(settled, at); }
         shared.in_flight = None;
         if let Some((w, h)) = shared.size.take() { (*self.width, *self.height) = (w, h); }
         (value, std::mem::take(&mut shared.closed))
