@@ -219,3 +219,18 @@ fn resubmitted_jobs_keep_their_snapshot_and_fit_the_pool() {
     assert_eq!(out, "((t t pending 4) (t t) provided cancelled (after))");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+#[test]
+fn a_retired_worker_ends_without_a_wait_or_a_death_report() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((reports nil) (isolate-error-functions (list (lambda (&rest e) (push e reports))))
+                                    (iso (isolate-create)) (pid (progn (isolate-await (isolate-spawn 'list :isolate iso)) (romacs--isolate-pid (romacs--isolate-id iso))))
+                                    (busy (isolate-create)) (job (isolate-spawn '(lambda () (while t)) :isolate busy))
+                                    (t0 (float-time)) (retired (isolate-retire iso)) (quick (< (- (float-time) t0) 0.1)))
+                               (let ((end (+ (float-time) 5))) (while (and (memq iso romacs--isolates) (< (float-time) end)) (romacs--isolate-pump 0.05)))
+                               (prog1 (list pid retired quick (isolate-live-p iso) (memq iso (isolate-list)) reports (isolate-retire busy))
+                                 (isolate-kill busy)))");
+    let pid: i64 = out.trim_start_matches('(').split_whitespace().next().unwrap().parse().unwrap();
+    assert!(out.ends_with(" t t nil nil nil nil)"), "{out}");
+    assert!(settles(|| !process_exists(pid)), "retired worker {pid} survived");
+}

@@ -1932,19 +1932,52 @@ pub fn parent_pid() -> i32 {
 }
 
 /// The worker's end of an isolate's signals: SIGUSR1 notes an interrupt for
-/// the engine's safepoints, SIGTERM a termination for its loop. Neither
-/// restarts a wait, so a blocked poll returns to look.
+/// the engine's safepoints, SIGTERM a termination for its loop. Either
+/// also writes a byte to the wake pipe, which the worker's isolate wait
+/// polls: the signal may land on any of the process's threads (the main
+/// one waits in a join), so only the pipe reliably ends a blocked wait.
 static INTERRUPT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static TERMINATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The wake pipe's read and write ends, or -1.
+static WAKE_READ: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+static WAKE_WRITE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
+fn wake_isolate_wait() {
+    let fd = WAKE_WRITE.load(std::sync::atomic::Ordering::SeqCst);
+    // Async-signal-safe; a full pipe already wakes the wait.
+    if fd >= 0 { let _ = unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) }; }
+}
 extern "C" fn note_interrupt(_: libc::c_int) {
     INTERRUPT.store(true, std::sync::atomic::Ordering::SeqCst);
+    wake_isolate_wait();
 }
 extern "C" fn note_terminate(_: libc::c_int) {
     TERMINATE.store(true, std::sync::atomic::Ordering::SeqCst);
+    wake_isolate_wait();
+}
+
+/// The read end of the wake pipe, once `catch_isolate_signals' made it.
+pub fn isolate_wake_fd() -> Option<std::os::fd::RawFd> {
+    let fd = WAKE_READ.load(std::sync::atomic::Ordering::SeqCst);
+    (fd >= 0).then_some(fd)
+}
+/// Empty the wake pipe: the flags, not the bytes, say what happened.
+pub fn drain_isolate_wake() {
+    if let Some(fd) = isolate_wake_fd() {
+        let mut bytes = [0u8; 64];
+        while unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), bytes.len()) } > 0 {}
+    }
 }
 
 pub fn catch_isolate_signals() -> io::Result<()> {
+    if WAKE_READ.load(std::sync::atomic::Ordering::SeqCst) < 0 {
+        effect(|| "isolate wake pipe".into())?;
+        let mut fds = [0; 2];
+        status(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) })?;
+        // For the process's life: a handler may write to it at any time.
+        WAKE_WRITE.store(fds[1], std::sync::atomic::Ordering::SeqCst);
+        WAKE_READ.store(fds[0], std::sync::atomic::Ordering::SeqCst);
+    }
     for (signal, handler) in [(libc::SIGUSR1, note_interrupt as extern "C" fn(libc::c_int)), (libc::SIGTERM, note_terminate)] {
         effect(|| format!("handle signal {signal}"))?;
         let mut action: libc::sigaction = unsafe { std::mem::zeroed() };

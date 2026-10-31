@@ -893,7 +893,9 @@ impl Vm {
                 bytes.extend_from_slice(&encoded[..n]);
                 continue;
             }
-            if Self::image_value(v) {
+            // Frozen strings are objects (`Vm::object`); only the executable
+            // image's are read through `string_value`.
+            if Self::image_string(v) {
                 bytes.extend_from_slice(self.string_value(v)?.as_bytes());
                 continue;
             }
