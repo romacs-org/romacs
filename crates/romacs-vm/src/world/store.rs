@@ -141,7 +141,7 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
 
 /// A directory DIR of the store's own, made 0700 if missing: private
 /// whatever the umask, as the store is.
-fn store_subdir(dir: &Path) -> std::io::Result<()> {
+pub(super) fn store_subdir(dir: &Path) -> std::io::Result<()> {
     match host::create_dir(dir, 0o700) {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         made => made,
@@ -334,8 +334,40 @@ impl World {
         Ok(World { store, key: sha256(text.as_bytes()), recipe })
     }
 
+    /// The world LINES add to this one's recipe: keyed by this world's key
+    /// and LINES, so it binds all this one does (an init layer,
+    /// `super::layer`).
+    pub fn layered(&self, lines: Vec<String>) -> World {
+        let text = format!("{FORMAT}\nbase {}\n{}\n", hex(&self.key), lines.join("\n"));
+        let mut recipe = self.recipe.clone();
+        recipe.extend(lines);
+        World { store: self.store.clone(), key: sha256(text.as_bytes()), recipe }
+    }
+
     fn file(&self, suffix: &str) -> PathBuf {
         self.store.join(format!("{}{suffix}", hex(&self.key)))
+    }
+
+    /// The refusals of a build on these very inputs, when one stands: its
+    /// records all hold, so building again would refuse the same.
+    pub fn standing_refusal(&self) -> Option<Vec<Json>> {
+        match self.valid_manifest() {
+            Err(reason) => reason.get("refused")?.as_array().cloned(),
+            Ok(_) => None,
+        }
+    }
+
+    /// Whether a launch would restore this world now: its manifest holds
+    /// and its image is the one bound.
+    pub fn ready(&self) -> bool {
+        self.usable().is_ok()
+    }
+
+    /// Hold this world in use for the process's life (`prune` keeps it),
+    /// as a restored launch holds the world it restored: for a world a
+    /// launch boots beside, its layer's base.
+    pub fn keep(&self) {
+        self.mark_use();
     }
 
     /// The manifest, when its records still hold: every keyed fact the build
@@ -838,8 +870,8 @@ fn world_file(name: &str) -> Option<(&str, &str)> {
 
 /// Forget STORE's failure records: every world's transient failures and
 /// refused manifests, so its next launch builds again. With EVERYTHING,
-/// every world and the digest cache and pinned table too, leaving the
-/// marker and the store lock. Only a marked store is touched
+/// every world, the plans, the digest cache and the pinned table too,
+/// leaving the marker and the store lock. Only a marked store is touched
 /// (`checked_store`), and in it only regular files and real directories
 /// with a store's names: no symlink is followed. How many it removed.
 pub fn reset(store: &Path, everything: bool) -> std::io::Result<usize> {
@@ -887,6 +919,16 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         if real_dir(&p) {
             for name in ["cwd", "tmp", "bin"] {
                 if real_dir(&p.join(name)) && host::remove_dir(p.join(name)).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        let plans = store.join("plans");
+        if real_dir(&plans) {
+            for entry in host::read_dir(&plans)? {
+                let name = entry?.file_name().to_string_lossy().into_owned();
+                if super::layer::plan_file(&name) && regular(&plans.join(&name)) {
+                    host::remove_file(plans.join(&name))?;
                     removed += 1;
                 }
             }

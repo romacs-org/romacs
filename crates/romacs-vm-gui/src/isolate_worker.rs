@@ -58,6 +58,8 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
                 let mut vm = *vm;
                 vm.world_reinit();
                 vm.eval_source("(romacs-world-restart)")?;
+                // A worker is batch, whatever its world (an init layer loads as a live session).
+                vm.eval_source("(setq noninteractive t)")?;
                 (vm, "world")
             }
         };

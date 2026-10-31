@@ -937,14 +937,19 @@ impl Vm {
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => Some(self.fenced_forwarding(slot).unwrap_or(fwd)),
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => match self.fenced_forwarding(slot) {
+                Some(kept) => Some(kept),
+                // A fenced buffer-local variable is no built-in.
+                None if matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => None,
+                None => Some(fwd),
+            },
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             _ => None,
         }
     }
     /// [`Vm::forwarding`] as the access paths dispatch on it: every fenced
     /// variable is `Fwd::Fence`.
-    fn access_forwarding(&mut self, slot: usize) -> Option<Fwd> {
+    pub(super) fn access_forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
@@ -978,7 +983,7 @@ impl Vm {
     /// forwarding): its default lives there, its buffer-local values in the
     /// local-binding table.
     pub(super) fn localized_forwarded(&self, slot: usize) -> Option<Fwd> {
-        match self.variable_redirects.get(slot).copied().flatten() {
+        match self.kept_redirect(slot) {
             Some(VariableRedirect::LocalizedForwarded(fwd @ (Fwd::Bool(_) | Fwd::Int(_) | Fwd::Obj(_)))) => Some(fwd),
             _ => None,
         }

@@ -241,7 +241,7 @@ impl Vm {
             }
             self.initialize_variable_redirect(&name, slot);
         }
-        if !matches!(self.variable_redirects[slot], Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) { return Ok(None); }
+        if !matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) { return Ok(None); }
         let table = self.slots[slot].local;
         Ok((table != Value::NIL).then_some(table))
     }
@@ -281,10 +281,13 @@ impl Vm {
         if slot == self.multibyte_slot {
             return Ok(if matches!(self.object(buffer)?, data::Object::ByteBuffer(_)) { Value::NIL } else { Value::TRUE });
         }
-        if let Some(fwd) = self.forwarding(slot) {
-            // A fenced variable's forwarding is the one the fence keeps, so
-            // its fence is checked here, for BUFFER.
+        // A fenced variable's fence is checked here, for BUFFER: its
+        // forwarding below is the one the fence keeps, none for a fenced
+        // buffer-local variable.
+        if matches!(self.access_forwarding(slot), Some(forwarded::Fwd::Fence(_))) {
             self.fence_access(slot, crate::world::Access::Read, buffer);
+        }
+        if let Some(fwd) = self.forwarding(slot) {
             return match fwd {
                 forwarded::Fwd::Buffer(i) => Ok(self.forwarded_buffer_value(buffer.index(0)? - 1, i)),
                 forwarded::Fwd::Fence(_) => Ok(self.slots[slot].value),
@@ -433,7 +436,9 @@ impl Vm {
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
         if self.protected_variable_slot(slot) || self.symbol_names[slot].starts_with(':') { return Err("setting constant".into()); }
-        if let Some(fwd) = self.forwarding(slot) { return self.make_forwarded_local(slot, fwd); }
+        // A fenced variable's forwarding is `Fwd::Fence`, whose arm acts
+        // through the fence: the kept forwarding would never localize it.
+        if let Some(fwd) = self.access_forwarding(slot) { return self.make_forwarded_local(slot, fwd); }
         let value = self.variable_value(slot)?;
         let table = if let Some(table) = self.local_table(slot)? { table } else {
             let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
@@ -497,8 +502,8 @@ impl Vm {
                 let property = self.intern("standard-value");
                 Ok(truth(self.symbol_property(symbol, property)? != Value::NIL))
             }
-            MakeVariableBufferLocal if self.forwarding(slot).is_some() => {
-                match self.forwarding(slot) {
+            MakeVariableBufferLocal if self.access_forwarding(slot).is_some() => {
+                match self.access_forwarding(slot) {
                     Some(forwarded::Fwd::Buffer(_)) => Ok(symbol),
                     Some(forwarded::Fwd::Fence(_)) => self.fenced(slot, crate::world::Access::Write, |vm| vm.variable_primitive(p, start, n)),
                     _ => { self.promote_forwarded_local(slot, false)?; Ok(symbol) }

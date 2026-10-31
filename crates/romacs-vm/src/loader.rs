@@ -11,9 +11,15 @@ pub(super) struct Loader {
     steps: Vec<Step>,
     completed_files: usize,
     completed_forms: usize,
+    /// The init's loads, while they are recorded (`world::layer`).
+    pub(super) recording: Option<crate::world::layer::Recording>,
 }
-romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms });
+romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms, recording });
 impl Loader {
+    /// How many source loads are in progress.
+    pub(super) fn active_depth(&self) -> usize {
+        self.active.len()
+    }
     /// PATH's index in `files`, added at the end when new.
     fn file_index(&mut self, path: &Path) -> usize {
         self.files.iter().rposition(|p| p == path).unwrap_or_else(|| {
@@ -172,7 +178,11 @@ impl Vm {
         if tail != Value::NIL { return Err(Fault::Wrong("listp", list)); }
         Ok(false)
     }
-    pub(super) fn source_path(&self, name: &str, nosuffix: bool) -> Result<Option<PathBuf>> {
+    pub(super) fn source_path(&mut self, name: &str, nosuffix: bool) -> Result<Option<PathBuf>> {
+        // lread.c openp: a name under `~' is absolute, expanded through
+        // the user's home, never looked up along `load-path'.
+        let expanded = self.expand_home_name(name)?;
+        let name = expanded.as_deref().unwrap_or(name);
         let path = Path::new(name);
         let roots = if path.is_absolute() {
             vec![PathBuf::new()]
@@ -263,6 +273,11 @@ impl Vm {
                     return Err("wrong primitive arity".into());
                 }
                 let feature = args[0];
+                if self.loader.recording.is_some() && let Some(name) = self.symbol_name_of(feature) {
+                    let file = args.get(1).filter(|v| **v != Value::NIL).and_then(|v| self.source_string_if(*v)).map(str::to_owned);
+                    let noerror = args.get(2).is_some_and(|v| *v != Value::NIL);
+                    self.note_init_load(crate::world::layer::Kind::Require, name, file, noerror);
+                }
                 if self.feature_present(feature)? {
                     return Ok(feature);
                 }
@@ -495,9 +510,21 @@ impl Vm {
                     file: path.to_string_lossy().into_owned(), line,
                     head: form_source.trim_start().lines().next().unwrap_or("").chars().take(80).collect(),
                 });
-                let evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
-                if evaluated.is_ok() && crate::host::mode() == crate::host::Mode::Build {
-                    self.world_form_done();
+                let mut evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
+                if crate::host::mode() == crate::host::Mode::Build {
+                    // A layer's definition cut short by a refused effect
+                    // defines nil here and is kept whole for restore.
+                    if let (Err(_), Some(name)) = (&evaluated, crate::host::layer_form_cut()) {
+                        self.propagated_escape = None;
+                        let slot = self.slot(&name);
+                        if self.slots[slot].value == Value::UNBOUND {
+                            self.declare_special_raw(&name, Value::NIL);
+                        }
+                        evaluated = Ok(Value::NIL);
+                    }
+                    if evaluated.is_ok() {
+                        self.world_form_done(&form);
+                    }
                 }
                 drop(site);
                 match evaluated {

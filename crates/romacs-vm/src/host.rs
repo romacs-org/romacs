@@ -42,6 +42,7 @@ pub enum Mode {
 thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
+    static LAYER: RefCell<Option<LayerState>> = const { RefCell::new(None) };
     static CONFINED: Cell<bool> = const { Cell::new(false) };
     static FLAGS_READER: RefCell<Option<std::sync::mpsc::Sender<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>>> =
         const { RefCell::new(None) };
@@ -138,7 +139,7 @@ const BAKED: (&str, &str) = ("/version.el", "(defconst emacs-build-time");
 /// restore re-seeds (`romacs--world-reseed`): (file suffix, form head, the P
 /// fact or fenced variable the form may read, the variable it sets, which is
 /// fenced once the form ends).
-const RESEED: [(&str, &str, &str, Option<&str>); 4] = [
+const RESEED: [(&str, &str, &str, Option<&str>); 7] = [
     ("/emacs-lisp/cl-extra.el", "(defvar cl--random-state", "clock", Some("cl--random-state")),
     ("/progmodes/project.el", "(defcustom project-list-file", "default-directory", Some("project-list-file")),
     ("/emacs-lisp/find-func.el", "(defvar find-function-C-source-directory", "default-directory",
@@ -146,7 +147,117 @@ const RESEED: [(&str, &str, &str, Option<&str>); 4] = [
     // It asks only whether exec-path is bound: its standard value is the
     // expression cus-start gives, so nothing it sets needs re-seeding.
     ("/cus-start.el", "(let* ((quoter", "exec-path", None),
+    // The user's persistent connection history, this process's state: the
+    // read is no keyed fact, and restore reads the file again.
+    ("/net/tramp-cache.el", "(when (and (stringp tramp-persistency-file-name)", "user-file", None),
+    // The lock-refresh timer org-persist starts when it loads: restore
+    // starts this process's own.
+    ("/org/org-persist.el", "(unless (and org-persist--disable-when-emacs-Q", "clock", Some("org-persist--refresh-gc-lock-timer")),
+    // tramp-set-completion-function keeps a completion entry whose file is
+    // the empty string when `(file-exists-p "")' is true: the working
+    // directory exists in every process, so nothing it sets needs re-seeding.
+    ("/net/tramp.el", "(run-hooks 'tramp--startup-hook)", "default-directory", None),
 ];
+
+/// A layer build's state while an init's libraries load (`world::layer`):
+/// the definition form being loaded, when the top-level form is one, and
+/// whether it read a per-process fact, which makes it a re-seed form
+/// (re-evaluated at restore); and whether the startup function may run
+/// again, after the libraries.
+#[derive(Default)]
+struct LayerState {
+    form: Option<(&'static str, String)>,
+    tainted: bool,
+    /// An effect refused inside the definition form: the form is cut short
+    /// and deferred whole to restore (`layer_form_cut`).
+    cut: bool,
+    /// A re-seed form that starts a timer ran (`reseed_reads`).
+    timers: bool,
+    rerun: bool,
+}
+
+/// The definition forms a layer re-seeds: the head's kind and the name it
+/// defines, for `(KIND NAME ...`.
+const DEFINITIONS: [&str; 4] = ["defcustom", "defvar", "defconst", "defvar-local"];
+
+fn definition(head: &str) -> Option<(&'static str, String)> {
+    let mut words = head.strip_prefix('(')?.split(|c: char| c.is_whitespace() || c == ')').filter(|w| !w.is_empty());
+    let first = words.next()?;
+    let kind = DEFINITIONS.iter().find(|k| **k == first)?;
+    Some((kind, words.next()?.to_owned()))
+}
+
+/// The libraries of a layer load from here (`world::layer`).
+pub(crate) fn layer_begin() {
+    LAYER.with(|l| *l.borrow_mut() = Some(LayerState::default()));
+}
+
+pub(crate) fn layer_end() {
+    LAYER.with(|l| *l.borrow_mut() = None);
+}
+
+pub(crate) fn layer_active() -> bool {
+    LAYER.with(|l| l.borrow().is_some())
+}
+
+/// The top-level form with HEAD begins, in a layer build.
+fn layer_form(head: &str) {
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = definition(head); layer.tainted = false; layer.cut = false; });
+}
+
+/// An effect inside a layer's definition form: not done, and the form
+/// is deferred whole to restore, where it is. True when so taken.
+fn layer_cut(what: &str) -> bool {
+    LAYER.with(|l| match l.borrow_mut().as_mut() {
+        Some(layer) if layer.form.is_some() => { layer.tainted = true; layer.cut = true; true }
+        _ => false,
+    }).then(|| record("layer-effect", json!({"what": what}))).is_some()
+}
+
+/// The definition form that signalled was cut short by a refused effect:
+/// its name, for the loader to define it as nil and go on; the form is
+/// kept for restore (`layer_form_done`).
+pub(crate) fn layer_form_cut() -> Option<String> {
+    LAYER.with(|l| l.borrow().as_ref().filter(|layer| layer.cut).and_then(|layer| layer.form.as_ref().map(|(_, name)| name.clone())))
+}
+
+/// A read of a per-process fact or a fenced value in a layer build: taken
+/// when the form being loaded is a definition, which the layer re-seeds
+/// at restore; false when it is not, and the read refuses as usual.
+pub(crate) fn layer_taint() -> bool {
+    LAYER.with(|l| match l.borrow_mut().as_mut() {
+        Some(layer) if layer.form.is_some() => { layer.tainted = true; true }
+        _ => false,
+    })
+}
+
+/// Whether the top-level form being loaded is a definition of NAME: a
+/// file loaded again (circular `require`s) defines its variables again.
+pub(crate) fn layer_defines(name: &str) -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.form.as_ref().is_some_and(|(_, defined)| defined == name)))
+}
+
+/// The top-level form ends: the definition it was, when it read a
+/// per-process fact (`layer_taint`), and whether an effect cut it short.
+pub(crate) fn layer_form_done() -> Option<(&'static str, String, bool)> {
+    LAYER.with(|l| {
+        let mut layer = l.borrow_mut();
+        let layer = layer.as_mut()?;
+        let tainted = std::mem::take(&mut layer.tainted);
+        let cut = std::mem::take(&mut layer.cut);
+        layer.form.take().filter(|_| tainted).map(|(kind, name)| (kind, name, cut))
+    })
+}
+
+/// Whether the startup function may run again now: after a layer's
+/// libraries, as a restored process runs it after them.
+pub(crate) fn layer_rerun(on: bool) {
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.rerun = on; });
+}
+
+fn layer_rerun_allowed() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.rerun))
+}
 
 /// The re-seed entry of the form being loaded, if it is one.
 fn reseed_entry() -> Option<(&'static str, Option<&'static str>)> {
@@ -160,8 +271,17 @@ pub(crate) fn reseed_reads(what: &str) -> bool {
     let allowed = reseed_entry().is_some_and(|(reads, _)| reads == what);
     if allowed {
         record("reseed", json!({"reads": what}));
+        if what == "clock" {
+            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.timers = true; });
+        }
     }
     allowed
+}
+
+/// Whether a re-seed form that reads the clock ran since the last call:
+/// a timer the form left is restarted at restore, so the layer may keep it.
+pub(crate) fn layer_timers_allowed() -> bool {
+    LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
@@ -250,7 +370,7 @@ pub(crate) fn switch_startup(on: bool) -> bool {
         let from = match on { true => Phase::Recipe, false => Phase::Startup };
         let run = if on { b.startups } else { b.startups.saturating_sub(1) };
         let allowed = b.phase == from
-            && b.site.as_ref().is_some_and(|s| STARTUP.get(run).is_some_and(|file| s.file.ends_with(file)));
+            && (layer_rerun_allowed() || b.site.as_ref().is_some_and(|s| STARTUP.get(run).is_some_and(|file| s.file.ends_with(file))));
         if allowed {
             b.phase = if on { Phase::Startup } else { Phase::Recipe };
             b.startups += usize::from(on);
@@ -285,7 +405,9 @@ pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
         return SiteGuard(None);
     }
-    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(Rc::new(site())))))
+    let site = Rc::new(site());
+    layer_form(&site.head);
+    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))))
 }
 
 /// This thread is confined (`world::sandbox`): a read it is refused fails
@@ -320,6 +442,11 @@ pub(crate) fn record(kind: &str, fields: Json) {
     });
 }
 
+/// How many refusals the build has listed so far; 0 outside a build.
+pub(crate) fn refusals() -> usize {
+    with_build(|b| b.refusals.len()).unwrap_or(0)
+}
+
 /// List a refusal: KIND with FIELDS and the current site.
 pub(crate) fn refuse(kind: &str, fields: Json) {
     with_build(|b| {
@@ -331,13 +458,16 @@ pub(crate) fn refuse(kind: &str, fields: Json) {
 
 /// A P fact WHAT is read: recorded where it is allowed, else refused.
 fn p_read(fact: Fact<'_>, what: String) {
+    // Asked before the build is borrowed: it records, and notes a timer's allowance.
+    let reseed = reseed_reads(&what);
     with_build(|b| {
         let site = b.site.as_deref();
         let allowed = match (b.phase, class(fact, site)) {
             (Phase::Init, _) => Some("init"),
             (Phase::Startup, _) => Some("startup"),
             (Phase::Recipe, Class::B) => Some("baked"),
-            (Phase::Recipe, _) if site.is_some_and(|s| RESEED.iter().any(|r| s.at((r.0, r.1)) && what == r.2)) => Some("reseed"),
+            (Phase::Recipe, _) if reseed => Some("reseed"),
+            (Phase::Recipe, _) if layer_taint() => Some("layer"),
             _ => None,
         };
         let item = json!({"kind": "p-read", "site": b.site(), "what": what, "allowed": allowed});
@@ -350,7 +480,10 @@ fn effect(what: impl FnOnce() -> String) -> io::Result<()> {
     if !building() {
         return Ok(());
     }
-    refuse("effect", json!({"what": what()}));
+    let what = what();
+    if !layer_cut(&what) {
+        refuse("effect", json!({"what": what}));
+    }
     Err(io::Error::from_raw_os_error(libc::EPERM))
 }
 
@@ -383,6 +516,14 @@ fn sha256(data: &[u8]) -> String {
 
 /// A file's content as a record: its length and digest, or the error.
 fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
+    if reseed_reads("user-file") {
+        return;
+    }
+    // This process's own entries (its umask, its maps): a per-process fact.
+    if path.starts_with("/proc/self") {
+        p_read(Fact::Pid, format!("{} read", bytes(path)));
+        return;
+    }
     let result = match result {
         Ok(data) => json!({"len": data.as_ref().len(), "sha256": sha256(data.as_ref())}),
         Err(e) => {
@@ -396,6 +537,9 @@ fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
 }
 
 fn probed(kind: &str, path: &Path, result: Json) {
+    if reseed_reads("user-file") {
+        return;
+    }
     if keyed_path(path, kind) {
         record("probe", json!({"probe": kind, "path": path_json(path), "result": result}));
     }
@@ -566,6 +710,9 @@ pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
             Ok(Input(file, Some(path.to_owned()), Some(Captured { content, at: 0 })))
         }
         Err(e) => {
+            if reseed_reads("user-file") {
+                return Err(e);
+            }
             confined(path, &e);
             if keyed_path(path, "read") {
                 record("file-read", json!({"path": path_json(path), "result": errno(&e)}));

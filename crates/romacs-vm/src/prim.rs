@@ -1945,6 +1945,27 @@ fn no_collection<R>(vm: &mut Vm, run: impl FnOnce(&mut Vm) -> R) -> R {
 }
 
 impl Vm {
+    /// NAME under the user's home, as fileio.c expands `~' and `~/REST'
+    /// (`get_homedir'): the home directory, joined to REST. None for any
+    /// other name, `~user' included. No file name handler is asked.
+    pub(crate) fn expand_home_name(&mut self, name: &str) -> crate::Result<Option<String>> {
+        let Some(rest) = name.strip_prefix('~').filter(|rest| rest.is_empty() || rest.starts_with('/')) else { return Ok(None) };
+        let home = no_collection(self, |vm| prims::expand_file_name::home_directory(&mut Leaf::new(vm)));
+        let home = match home {
+            Ok(home) => home,
+            Err(fault) => {
+                let (condition, data) = self.fault(fault);
+                self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                return Err("expand-file-name signalled".into());
+            }
+        };
+        let mut joined = String::from_utf8_lossy(&home).into_owned();
+        if joined.is_empty() { joined.push('/'); }
+        if joined.ends_with('/') && rest.starts_with('/') { joined.pop(); }
+        joined.push_str(rest);
+        Ok(Some(joined))
+    }
+
     /// The legacy `expand-file-name' row (kept for its ordinal) runs the
     /// defsubr's expansion, refusing where a file name handler would be called.
     pub(crate) fn expand_file_name_legacy(&mut self, name: Value, default: Value) -> crate::Result<Value> {

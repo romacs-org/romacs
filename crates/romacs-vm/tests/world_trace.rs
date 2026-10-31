@@ -125,7 +125,7 @@ fn a_reseed_form_reads_its_fact_and_fences_its_variable() {
     let after = write(&dir.join("after.el"), "(defvar seen (car cl--random-state))\n(defvar seen2 project-list-file)\n");
     let (_, trace) = build(&[extra, project, after]);
     let reseeds: Vec<_> = items(&trace, "records", "reseed").iter().map(|r| r["reads"].as_str().unwrap()).collect();
-    assert_eq!(reseeds, ["default-directory"], "{trace}");
+    assert_eq!(reseeds, ["clock", "default-directory"], "{trace}");
     let allowed: Vec<_> = items(&trace, "records", "p-read").iter().filter_map(|r| r["allowed"].as_str()).filter(|a| *a != "init").collect();
     assert_eq!(allowed, ["reseed"], "{trace}");
     let fenced: Vec<_> = items(&trace, "refusals", "fence").iter()
