@@ -166,9 +166,9 @@ impl Vm {
                 // them, and then the wait ends for Lisp to compute it again.
                 let before = self.host_wait_state()?;
                 let (width, height) = (self.window_state.width, self.window_state.height);
-                let started = std::time::Instant::now();
+                let started = crate::host::monotonic();
                 let frame = self.frame_snapshot(width, height)?;
-                let snapshot = started.elapsed();
+                let snapshot = crate::host::monotonic().saturating_duration_since(started);
                 let selected = self.selected_window_value()?;
                 let selected = self.window(selected)?.id;
                 let ends = host.redisplay(HostFrame { frame, selected, snapshot })?;
