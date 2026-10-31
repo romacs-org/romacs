@@ -4,11 +4,11 @@ use std::rc::Rc;
 
 #[derive(Clone)]
 struct Host(Rc<RefCell<State>>);
-struct State { snapshot: TerminalSnapshot, sent: Vec<Vec<u8>>, closed: Vec<u64>, snapshot_reads: usize, pending: bool }
+struct State { snapshot: TerminalSnapshot, sent: Vec<Vec<u8>>, closed: Vec<u64>, snapshot_reads: usize, pending: bool, resized: Vec<(u16, u16)> }
 impl TerminalHost for Host {
     fn create(&mut self, _: &str, _: &str, _: u16, _: u16) -> Result<u64, String> { Ok(1) }
     fn send(&mut self, _: u64, bytes: &[u8]) -> Result<(), String> { self.0.borrow_mut().sent.push(bytes.to_vec()); Ok(()) }
-    fn resize(&mut self, _: u64, _: u16, _: u16) -> Result<(), String> { Ok(()) }
+    fn resize(&mut self, _: u64, columns: u16, rows: u16) -> Result<(), String> { self.0.borrow_mut().resized.push((columns, rows)); Ok(()) }
     fn input_state(&mut self, _: u64) -> Result<romacs_vm::TerminalInputState, String> { Ok(self.0.borrow().snapshot.input_state()) }
     fn changed_sessions(&mut self) -> Vec<u64> { if std::mem::take(&mut self.0.borrow_mut().pending) { vec![1] } else { vec![] } }
     fn snapshot(&mut self, _: u64) -> Result<TerminalSnapshot, String> { let mut state = self.0.borrow_mut(); state.snapshot_reads += 1; Ok(state.snapshot.clone()) }
@@ -18,7 +18,7 @@ impl TerminalHost for Host {
 fn setup() -> (Vm, Rc<RefCell<State>>) {
     let state = Rc::new(RefCell::new(State {
         snapshot: TerminalSnapshot { revision: 1, text: "one\nλtwo".into(), styles: std::sync::Arc::from([]), default_colors: [None; 2], cursor_byte: 9, screen_start_byte: 0, columns: 80, rows: 24,
-            alternate_screen: false, running: true, application_cursor: false, bracketed_paste: false }, sent: vec![], closed: vec![], snapshot_reads: 0, pending: false,
+            alternate_screen: false, running: true, application_cursor: false, bracketed_paste: false }, sent: vec![], closed: vec![], snapshot_reads: 0, pending: false, resized: vec![],
     }));
     let mut vm = Vm::new();
     vm.set_collection_floor(1);
@@ -227,4 +227,192 @@ fn snapshots_are_validated_before_mutating_text() {
     { let mut s = state.borrow_mut(); s.snapshot.cursor_byte = 5; s.snapshot.revision += 1; s.pending = true; }
     assert!(vm.poll_terminal_output().is_err(), "CURSOR_CANNOT_SPLIT_UTF8");
     assert_eq!(vm.eval_source("(buffer-string)").unwrap().display().unwrap(), "\"one\\nλtwo\"");
+}
+
+/// Redisplay's geometry publication: the frame snapshot the host paints.
+fn publish(vm: &mut Vm) { vm.frame_snapshot(800, 600).unwrap(); }
+
+fn mini_text(vm: &mut Vm, text: &str) {
+    vm.eval_source(&format!("(setq resize-mini-windows t) (with-current-buffer (window-buffer (minibuffer-window)) (erase-buffer) (insert {text:?}))")).unwrap();
+}
+
+fn eval(vm: &mut Vm, source: &str) -> String { vm.eval_source(source).unwrap().display().unwrap() }
+
+/// window.el `split-window' with a SIZE: WINDOW keeps the rest, and both
+/// take their pixel share as normal size.
+const SPLIT: &str = "(fset 'test-split (lambda (window size horizontal)
+  (let* ((total (if horizontal (window-pixel-width window) (window-pixel-height window))) (rest (- total size)))
+    (set-window-new-pixel window rest) (set-window-new-normal window (/ rest (float total)))
+    (split-window-internal window size horizontal (/ size (float total))))))";
+
+#[test]
+fn a_grown_mini_window_never_resizes_the_pty() {
+    let (mut vm, state) = setup();
+    publish(&mut vm);
+    // 800x600 at 20 px lines: 29 lines above the one-line mini-window, one of them the mode line.
+    assert_eq!(state.borrow().resized, vec![(80, 28)], "THE_FIRST_PUBLICATION_SIZES_THE_PTY_TO_ITS_WINDOW");
+    mini_text(&mut vm, "1\n2\n3\n4\n5");
+    publish(&mut vm);
+    assert_eq!(eval(&mut vm, "(window-body-height)"), "24", "THE_ROOT_WINDOW_SHRINKS_FOR_THE_MINI_WINDOW");
+    mini_text(&mut vm, "");
+    publish(&mut vm);
+    assert_eq!(state.borrow().resized, vec![(80, 28)], "MINI_WINDOW_GROWTH_MUST_NOT_RESIZE_THE_PTY");
+}
+
+#[test]
+fn split_delete_and_host_resize_follow_the_controlling_window() {
+    let (mut vm, state) = setup();
+    publish(&mut vm);
+    vm.eval_source(SPLIT).unwrap();
+    vm.eval_source("(setq main (selected-window) other (test-split main 280 nil))").unwrap();
+    publish(&mut vm);
+    let split = *state.borrow().resized.last().unwrap();
+    assert_eq!(split.1, eval(&mut vm, "(window-body-height)").parse::<u16>().unwrap(), "SPLIT_RESIZES_TO_THE_NEW_BODY");
+    // The same buffer in both windows: the selected one controls.
+    vm.eval_source("(set-window-buffer other terminal-buffer) (select-window other)").unwrap();
+    publish(&mut vm);
+    assert_eq!(state.borrow().resized.last().unwrap().1, eval(&mut vm, "(window-body-height other)").parse::<u16>().unwrap());
+    // window.el `delete-window': MAIN takes the parent's whole extent.
+    vm.eval_source("(select-window main) (set-window-new-pixel main 580) (set-window-new-normal main 1.0) (set-window-new-pixel (window-parent main) 580) (delete-window-internal other)").unwrap();
+    publish(&mut vm);
+    assert_eq!(*state.borrow().resized.last().unwrap(), (80, 28), "DELETE_RESIZES_TO_THE_WHOLE_BODY");
+    // A host resize while a minibuffer shows five lines: one resize, to the stable body.
+    let before = state.borrow().resized.len();
+    mini_text(&mut vm, "1\n2\n3\n4\n5");
+    vm.set_frame_geometry(1000, 800, 20, 10).unwrap();
+    vm.frame_snapshot(1000, 800).unwrap();
+    vm.frame_snapshot(1000, 800).unwrap();
+    assert_eq!(state.borrow().resized[before..], [(100, 38)], "HOST_RESIZE_DURING_A_PROMPT_RESIZES_ONCE");
+}
+
+#[test]
+fn a_hidden_terminal_keeps_its_size() {
+    let (mut vm, state) = setup();
+    publish(&mut vm);
+    vm.eval_source(SPLIT).unwrap();
+    vm.eval_source("(set-window-buffer (selected-window) (get-buffer-create \"ordinary\")) (test-split (selected-window) 280 nil)").unwrap();
+    publish(&mut vm);
+    assert_eq!(state.borrow().resized, vec![(80, 28)], "HIDDEN_TERMINAL_MUST_KEEP_ITS_SIZE");
+}
+
+#[test]
+fn a_shorter_window_shows_the_cursor_row_last() {
+    let (mut vm, state) = setup();
+    let grid: String = (0..27).map(|n| format!("row{n}\n")).collect();
+    {
+        let mut s = state.borrow_mut();
+        s.snapshot.text = format!("history\n{grid}$ ").into();
+        s.snapshot.screen_start_byte = 8;
+        s.snapshot.cursor_byte = s.snapshot.text.len();
+        s.snapshot.rows = 28;
+    }
+    vm.poll_terminal_output().unwrap();
+    publish(&mut vm);
+    assert_eq!(eval(&mut vm, "(window-start)"), "9", "A_GRID_THAT_FITS_SHOWS_FROM_ITS_FIRST_ROW");
+    mini_text(&mut vm, "1\n2\n3\n4\n5");
+    publish(&mut vm);
+    // 24 body rows: the cursor's row (the 28th) last, so rows 4.. show.
+    assert_eq!(eval(&mut vm, "(save-excursion (goto-char (window-start)) (buffer-substring (point) (line-end-position)))"), "\"row4\"");
+    mini_text(&mut vm, "");
+    publish(&mut vm);
+    assert_eq!(eval(&mut vm, "(window-start)"), "9", "THE_RESTORED_WINDOW_SHOWS_THE_GRID_FROM_ITS_FIRST_ROW");
+}
+
+#[test]
+fn prompt_cycles_leave_an_uneven_split_unchanged() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 1430, 26, 10).unwrap();
+    vm.eval_source(SPLIT).unwrap();
+    // 1404 px of root: 728 over 676, the lower one split beside.
+    vm.eval_source("(test-split (test-split (selected-window) 676 nil) 400 t)").unwrap();
+    vm.frame_snapshot(800, 1430).unwrap();
+    let heights = "(mapcar (lambda (w) (list (window-pixel-height w) (window-pixel-width w) (window-pixel-top w))) (window-list))";
+    let before = eval(&mut vm, heights);
+    for _ in 0..10 {
+        mini_text(&mut vm, "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12");
+        vm.frame_snapshot(800, 1430).unwrap();
+        assert_ne!(eval(&mut vm, heights), before, "THE_MINI_WINDOW_GREW");
+        mini_text(&mut vm, "");
+        vm.frame_snapshot(800, 1430).unwrap();
+    }
+    assert_eq!(eval(&mut vm, heights), before, "PROMPT_CYCLES_MUST_NOT_DRIFT_WINDOW_EDGES");
+}
+
+#[test]
+fn output_scrolls_an_unselected_terminal_window_with_its_grid() {
+    let (mut vm, state) = setup();
+    let publish_text = |state: &Rc<RefCell<State>>, history: &str| {
+        let mut s = state.borrow_mut();
+        s.snapshot.text = format!("{history}g0\ng1\n$ ").into();
+        s.snapshot.screen_start_byte = history.len();
+        s.snapshot.cursor_byte = s.snapshot.text.len();
+        s.snapshot.revision += 1;
+        s.pending = true;
+    };
+    publish_text(&state, "h0\n");
+    vm.poll_terminal_output().unwrap();
+    publish(&mut vm);
+    vm.eval_source(SPLIT).unwrap();
+    // The terminal stays in the upper window; the selection moves away, as
+    // it does into a minibuffer.
+    vm.eval_source("(setq term-window (selected-window)) (select-window (test-split term-window 280 nil)) (set-window-buffer (selected-window) (get-buffer-create \"ordinary\"))").unwrap();
+    publish(&mut vm);
+    assert_eq!(eval(&mut vm, "(window-start term-window)"), "4");
+    publish_text(&state, "h0\nh1\nh2\n");
+    vm.poll_terminal_output().unwrap();
+    publish(&mut vm);
+    assert_eq!(eval(&mut vm, "(list (window-start term-window) (window-point term-window))"), "(10 18)",
+        "OUTPUT_MUST_MOVE_AN_UNSELECTED_FOLLOWING_WINDOW_WITH_THE_GRID");
+}
+
+#[test]
+fn history_rollover_keeps_an_unselected_terminal_window_following() {
+    let (mut vm, state) = setup();
+    let publish_text = |state: &Rc<RefCell<State>>, history: &str, grid: &str| {
+        let mut s = state.borrow_mut();
+        s.snapshot.text = format!("{history}{grid}0\n{grid}1\n$ ").into();
+        s.snapshot.screen_start_byte = history.len();
+        s.snapshot.cursor_byte = s.snapshot.text.len();
+        s.snapshot.revision += 1;
+        s.pending = true;
+    };
+    let history = |from: usize, to: usize| (from..to).map(|n| format!("h{n}\n")).collect::<String>();
+    publish_text(&state, &history(0, 50), "g");
+    vm.poll_terminal_output().unwrap();
+    vm.eval_source(SPLIT).unwrap();
+    vm.eval_source("(setq term-window (selected-window)) (select-window (test-split term-window 280 nil)) (set-window-buffer (selected-window) (get-buffer-create \"ordinary\"))").unwrap();
+    publish(&mut vm);
+    // The scrollback drops its oldest lines as new ones arrive: the whole
+    // text before the grid is replaced.
+    let rolled = history(40, 90);
+    publish_text(&state, &rolled, "k");
+    vm.poll_terminal_output().unwrap();
+    publish(&mut vm);
+    let screen = rolled.len() + 1;
+    assert_eq!(eval(&mut vm, "(list (window-start term-window) (window-point term-window))"),
+        format!("({screen} {})", screen + 8), "ROLLOVER_MUST_KEEP_AN_UNSELECTED_FOLLOWING_WINDOW_ON_THE_GRID");
+}
+
+#[test]
+fn a_deletion_that_promotes_children_rebases_their_normal_sizes() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 1430, 26, 10).unwrap();
+    vm.eval_source(SPLIT).unwrap();
+    // A over B; B beside C; B over D. Deleting C promotes B and D into the root.
+    // window.el `delete-window': every window but C spans the frame's width.
+    vm.eval_source("(setq a (selected-window) b (test-split a 702 nil) c (test-split b 400 t) d (test-split b 351 nil))
+      (dolist (w (list (frame-root-window) a (window-parent c) (window-parent b) b d))
+        (set-window-new-pixel w 800) (set-window-new-normal w nil))
+      (delete-window-internal c)").unwrap();
+    vm.frame_snapshot(800, 1430).unwrap();
+    let shape = "(mapcar (lambda (w) (list (window-pixel-height w) (window-normal-size w))) (window-list))";
+    assert_eq!(eval(&mut vm, shape), "((702 0.5) (351 0.25) (351 0.25))", "PROMOTED_CHILDREN_TAKE_THEIR_SHARE_OF_THE_NEW_PARENT");
+    mini_text(&mut vm, "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12");
+    vm.frame_snapshot(800, 1430).unwrap();
+    assert_eq!(eval(&mut vm, "(mapcar #'window-pixel-height (window-list))"), "(559 279 280)", "GROWTH_IS_SHARED_BY_NORMAL_SIZE");
+    mini_text(&mut vm, "");
+    vm.frame_snapshot(800, 1430).unwrap();
+    assert_eq!(eval(&mut vm, shape), "((702 0.5) (351 0.25) (351 0.25))");
 }

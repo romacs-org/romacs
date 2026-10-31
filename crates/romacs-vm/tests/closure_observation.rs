@@ -5,6 +5,7 @@ use romacs_vm::Vm;
 
 fn check(source: &str, expected: &str, contract: &str) {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
     vm.set_collection_floor(1);
     let result = vm.eval_source(source).unwrap().display().unwrap();
     assert_eq!(result, expected, "{contract}: {source}");

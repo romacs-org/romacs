@@ -100,6 +100,7 @@ mod tests {
         let mut count = 0;
         for row in rows.iter().filter(|r| r["primitive"] == name) {
             let mut vm = crate::Vm::new();
+            vm.install_lisp_prelude_raw().unwrap();
             vm.set_collection_floor(1);
             let value = vm.eval_source_raw(row["source"].as_str().unwrap()).unwrap_or_else(|e| panic!("{}: {e}", row["id"]));
             let actual = Leaf::new(&mut vm).string_text(value).unwrap_or_else(|_| panic!("expected string"));

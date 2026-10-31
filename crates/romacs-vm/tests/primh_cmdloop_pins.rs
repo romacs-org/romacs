@@ -52,6 +52,7 @@ fn reviewed_rows(eval: &dyn Fn(&str) -> String) -> Vec<(String, Value, String)> 
 // collecting at every safepoint.
 fn observe(src: &str) -> String {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
     vm.set_collection_floor(1);
     match vm.eval_source(src) {
         Ok(v) => v.display().map(|s| serde_json::from_str::<String>(&s).unwrap_or(s)).unwrap_or_else(|e| format!("VM-ERROR {e}")),

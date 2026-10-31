@@ -641,7 +641,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("nth", Primitive::Nth),
     ("stringp", Primitive::Stringp),
     ("null", Primitive::Null),
-    ("nconc", Primitive::Nconc),
+    ("#:vm2-nconc", Primitive::Nconc), // T1 defsubr now (prims/fns_seq.rs); the ordinal stays.
     // T2 defsubrs (prims/expand_file_name.rs, prims/filesave.rs) so they can
     // call file name handlers; the rows stay because legacy primitive
     // references are table ordinals.
@@ -2668,6 +2668,16 @@ impl Vm {
                         };
                         // GNU compiles these calls to a byte code that never reads
                         // the function cell; so does Romacs (sealed.rs, VM2-SEALED1).
+                        // byte-opt.el's `byte-optimize-plus' and its siblings:
+                        // (OP x y z) of arguments it cannot fold is (OP (OP x y) z),
+                        // two byte codes.
+                        if target.is_none() && args.len() == 3 && matches!(head, "+" | "-" | "*" | "min" | "max")
+                            && sealed::target(head, 2).is_some()
+                            && !args.iter().any(|a| matches!(a, Form::Int(_) | Form::Float(_)))
+                        {
+                            let inner = Form::List(vec![Form::Sym(head.into()), args[0].clone(), args[1].clone()]);
+                            return self.expr(b, &Form::List(vec![Form::Sym(head.into()), inner, args[2].clone()]));
+                        }
                         let sealed = target.is_none() && sealed::target(head, args.len()).is_some();
                         if target.is_none() && !sealed {
                             let slot = self.slot(head);

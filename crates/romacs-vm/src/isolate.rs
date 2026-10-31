@@ -340,42 +340,54 @@ impl Vm {
     /// Wait up to TIMEOUT (None: as long as it takes) for a frame or a
     /// worker's death, reading what is ready: whether anything was. In a
     /// worker, a pending interrupt or termination ends the wait at once.
+    /// A worker's socket closing with nothing in it is no news: the worker
+    /// is exiting, and exit closes its descriptors before its pidfd turns
+    /// readable, so the wait goes on for the death that follows.
     pub(crate) fn isolate_wait(&mut self, timeout: Option<std::time::Duration>) -> Result<bool> {
         // Interrupted or terminating: no wait, but what the sockets hold is
         // still read (the frame naming the interrupt's job is there).
         let interrupted = crate::host::interrupt_pending() || crate::host::terminate_pending();
         let timeout = if interrupted { Some(std::time::Duration::ZERO) } else { timeout };
-        let fds = self.isolate_fds();
-        if fds.is_empty() {
-            if let Some(timeout) = timeout { std::thread::sleep(timeout.min(std::time::Duration::from_millis(50))); }
-            return Ok(interrupted);
-        }
-        let ready = crate::subprocess::poll(&fds, timeout).map_err(|e| e.to_string())?;
-        let ready: Vec<RawFd> = fds.iter().zip(ready).filter(|(_, r)| *r != 0).map(|((fd, _), _)| *fd).collect();
-        if let Some(wake) = crate::host::isolate_wake_fd() && ready.contains(&wake) {
-            crate::host::drain_isolate_wake();
-        }
-        let interrupted = interrupted || crate::host::interrupt_pending();
-        if ready.is_empty() { return Ok(interrupted); }
-        if let Some(parent) = &mut self.isolates.parent && ready.contains(&parent.socket.as_raw_fd()) {
-            parent.drain(|_, _, _| {}).map_err(|e| e.to_string())?;
-        }
-        for worker in self.isolates.workers.values_mut() {
-            if ready.contains(&worker.peer.socket.as_raw_fd()) {
-                let children = &mut worker.children;
-                worker.peer.drain(|kind, pid, pidfd| match kind {
-                    Kind::Child => { children.insert(pid, pidfd); }
-                    _ => { children.remove(&pid); }
-                }).map_err(|e| e.to_string())?;
+        let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
+        loop {
+            let timeout = deadline.map(|deadline| deadline.saturating_duration_since(crate::host::monotonic()));
+            let fds = self.isolate_fds();
+            if fds.is_empty() {
+                if let Some(timeout) = timeout { std::thread::sleep(timeout.min(std::time::Duration::from_millis(50))); }
+                return Ok(interrupted);
             }
-            if worker.status.is_none() && worker.pidfd.as_ref().is_some_and(|fd| ready.contains(&fd.as_raw_fd())) {
-                if let Some(status) = crate::subprocess::wait_status(worker.pid, 0) {
-                    worker.status = Some(status);
-                    worker.peer.inbox.push_back(Frame { kind: Kind::Died, generation: 0, payload: Payload::Status(status) });
+            let ready = crate::subprocess::poll(&fds, timeout).map_err(|e| e.to_string())?;
+            let ready: Vec<RawFd> = fds.iter().zip(ready).filter(|(_, r)| *r != 0).map(|((fd, _), _)| *fd).collect();
+            let mut news = false;
+            if let Some(wake) = crate::host::isolate_wake_fd() && ready.contains(&wake) {
+                crate::host::drain_isolate_wake();
+                news = true;
+            }
+            let interrupted = interrupted || crate::host::interrupt_pending();
+            if ready.is_empty() { return Ok(interrupted); }
+            if let Some(parent) = &mut self.isolates.parent && ready.contains(&parent.socket.as_raw_fd()) {
+                parent.drain(|_, _, _| {}).map_err(|e| e.to_string())?;
+                news = true;
+            }
+            for worker in self.isolates.workers.values_mut() {
+                if ready.contains(&worker.peer.socket.as_raw_fd()) {
+                    let (children, before) = (&mut worker.children, worker.peer.inbox.len());
+                    worker.peer.drain(|kind, pid, pidfd| match kind {
+                        Kind::Child => { children.insert(pid, pidfd); }
+                        _ => { children.remove(&pid); }
+                    }).map_err(|e| e.to_string())?;
+                    news |= !worker.peer.closed || worker.peer.inbox.len() != before;
+                }
+                if worker.status.is_none() && worker.pidfd.as_ref().is_some_and(|fd| ready.contains(&fd.as_raw_fd())) {
+                    news = true;
+                    if let Some(status) = crate::subprocess::wait_status(worker.pid, 0) {
+                        worker.status = Some(status);
+                        worker.peer.inbox.push_back(Frame { kind: Kind::Died, generation: 0, payload: Payload::Status(status) });
+                    }
                 }
             }
+            if news || interrupted { return Ok(true); }
         }
-        Ok(true)
     }
 
     /// The next frame from peer ID as `(KIND GENERATION VALUE)`, its value

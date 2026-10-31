@@ -10,6 +10,7 @@ fn show(vm: &mut Vm, source: &str) -> String {
 #[test]
 fn mapc_returns_original_sequence_and_observes_callback_mutation() {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
     for (source, expected) in [
         ("(list (fboundp 'mapc) (functionp #'mapc) (funcall #'mapc #'identity nil))", "(t t nil)"),
         ("(let ((s (list 1 2 3)) calls) (list (eq s (mapc (lambda (x) (setq calls (cons x calls)) (cons x x)) s)) calls))", "(t (3 2 1))"),
@@ -21,7 +22,8 @@ fn mapc_returns_original_sequence_and_observes_callback_mutation() {
         ("(mapc 'absent-mapc-callback [])", "[]"),
         ("(condition-case e (mapc #'identity '(1 . 2)) (error e))", "(wrong-type-argument listp 2)"),
         ("(condition-case e (mapc #'identity 7) (error e))", "(wrong-type-argument sequencep 7)"),
-        ("(condition-case e (apply #'mapc '(identity)) (error e))", "(wrong-number-of-arguments #<subr mapc> 1)"),
+        // GNU's datum is `#<subr mapc>`; the prelude's is its arity (VM2-MAPCAR1).
+        ("(condition-case e (apply #'mapc '(identity)) (error e))", "(wrong-number-of-arguments (2 . 2) 1)"),
         ("(catch 'done (mapc (lambda (x) (if (eq x 2) (throw 'done x))) '(1 2 3)))", "2"),
         ("(condition-case e (mapc (lambda (x) (signal 'error (list x))) '(1 2)) (error e))", "(error 1)"),
     ] {
@@ -32,6 +34,7 @@ fn mapc_returns_original_sequence_and_observes_callback_mutation() {
 #[test]
 fn mapc_callback_collects_and_releases_objects_and_bytes() {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
     vm.set_collection_floor(1);
     // Identical source and symbol inventory on every iteration: compiler constants
     // and newly interned names cannot masquerade as a callback retention leak.

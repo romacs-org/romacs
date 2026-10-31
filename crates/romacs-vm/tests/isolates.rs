@@ -119,6 +119,21 @@ fn a_worker_is_spawned_without_running_atfork_handlers() {
     assert_eq!(FORKS.with(std::cell::Cell::get), 1);
 }
 
+/// A worker's socket closes before its death is visible (exit closes its
+/// descriptors first): one wait that sees the close goes on to the death.
+/// This worker closes its socket at once and exits 0.3 s later.
+#[test]
+fn a_wait_that_sees_a_workers_socket_close_reports_its_death() {
+    use std::os::unix::fs::PermissionsExt;
+    let script = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("closes-then-exits-{}", std::process::id()));
+    std::fs::write(&script, "#!/bin/sh\nexec 0<&-\nsleep 0.3\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut vm = vm();
+    let out = eval(&mut vm, &format!("(let ((id (romacs--isolate-start {script:?} nil))) (list (romacs--isolate-wait 5) (romacs--isolate-take id) (romacs--isolate-close id)))"));
+    assert_eq!(out, "(t (died 0 0) t)");
+    std::fs::remove_file(&script).unwrap();
+}
+
 #[test]
 fn a_worker_that_is_not_this_executable_is_refused_and_a_dead_one_reported() {
     let mut vm = vm();

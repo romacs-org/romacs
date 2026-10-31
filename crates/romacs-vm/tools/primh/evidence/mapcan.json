@@ -27,6 +27,8 @@
  "mapcan/0234": "PRINTER",
  "mapcan/0241": "CONDITION",
  "mapcan/0242": "PRINTER",
+ "mapcan/0243": "DATA",
+ "mapcan/0244": "DATA",
  "mapcan/0258": "PRINTER",
  "mapcan/0267": "PRINTER",
  "mapcan/0276": "PRINTER",
