@@ -135,6 +135,20 @@ fn unibyte_strings_keep_their_properties_across_freeze_and_thaw() {
 }
 
 #[test]
+fn frozen_strings_insert_as_private_ones() {
+    // A snapshot's text and a job's string literals reach `insert` frozen.
+    let mut vm = vm();
+    for text in ["(propertize \"aλb\" 'face 'bold)", "(unibyte-string 97 200)", "(make-string 100000 ?x)"] {
+        let src = format!("(let ((s {text}) (b (get-buffer-create \"frozen-insert\")))
+          (set-buffer b) (erase-buffer) (insert s) (setq trash (list (buffer-string) (get-text-property 1 'face)))
+          (erase-buffer) (insert (freeze s) ?z) (list (equal (buffer-substring 1 (1- (point-max))) (car trash))
+                                                       (equal (get-text-property 1 'face) (nth 1 trash)) (buffer-size)))");
+        let expected = eval(&mut vm, &format!("(let ((s {text})) (list t t (1+ (length (if (multibyte-string-p s) s (string-to-multibyte s))))))"));
+        assert_eq!(eval(&mut vm, &src), expected, "{text}");
+    }
+}
+
+#[test]
 fn inline_and_sealed_transports_behave_the_same() {
     let mut vm = vm();
     for size in [10usize, 100_000] {
