@@ -508,8 +508,10 @@ impl Vm {
     /// Commit scalar display mutations only after the frozen frame has painted.
     pub fn display_apply_journal(&mut self) -> bool {
         let mut changed = false;
-        for object in &mut self.objects {
-            if let Object::Window(w) = object
+        self.referrers();
+        let (referrers, objects) = (self.referrers.as_deref().unwrap_or_default(), &mut self.objects);
+        for &i in referrers {
+            if let Object::Window(w) = &mut objects[i]
                 && let Some(next) = w.pending_vscroll.take()
                 && next != w.vscroll_px
             {

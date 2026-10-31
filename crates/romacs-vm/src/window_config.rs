@@ -347,7 +347,7 @@ impl Vm {
         let mut out = vec![];
         for (window, buffer) in saved {
             let current = self.window(window)?.buffer;
-            let minibuffer = self.objects.iter().any(|o| matches!(o, Object::Window(w) if w.mini && w.buffer == buffer));
+            let minibuffer = self.minibuffer_window_buffer() == Some(buffer);
             if current != Value::NIL && current != buffer && self.config_buffer_live(buffer) && !minibuffer {
                 out.push(window);
             }

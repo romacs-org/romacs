@@ -812,12 +812,7 @@ impl Vm {
         if self.resize_mini_window(mini)? {
             self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column)?;
         }
-        let live = |vm: &Self, id| {
-            vm.objects.iter().enumerate().find_map(|(i, o)| match o {
-                Object::Window(w) if w.id == id && w.live() => Some(Value::reference(i + 1, 0)),
-                _ => None,
-            })
-        };
+        let live = |vm: &mut Self, id| vm.live_window_index(id).map(|i| Value::reference(i + 1, 0));
         let outcome = (|| {
             let mut snapshots = vec![];
             for id in ids {
@@ -844,6 +839,13 @@ impl Vm {
         self.display_state.width = width;
         self.display_state.height = height;
         outcome
+    }
+    /// The index in `objects` of the live window whose id is ID.
+    fn live_window_index(&mut self, id: u64) -> Option<usize> {
+        self.referrers();
+        let objects = &self.objects;
+        self.referrers.as_deref().unwrap_or_default().iter().copied()
+            .find(|&i| matches!(&objects[i], Object::Window(w) if w.id == id && w.live()))
     }
     fn window_leaf_ids(&self, v: Value, out: &mut Vec<u64>) -> Result<()> {
         let w = self.window(v)?;
@@ -950,15 +952,8 @@ impl Vm {
         // Validate the complete journal before publishing any per-window end.
         let mut changes = vec![];
         for &crate::WindowEnd { id, end, .. } in ends {
-            let (index, w) = self
-                .objects
-                .iter()
-                .enumerate()
-                .find_map(|(i, o)| match o {
-                    Object::Window(w) if w.id == id && w.live() => Some((i, w)),
-                    _ => None,
-                })
-                .ok_or("layout journal names an unknown live window")?;
+            let index = self.live_window_index(id).ok_or("layout journal names an unknown live window")?;
+            let Object::Window(w) = &self.objects[index] else { unreachable!("live window") };
             let Object::Buffer(b) = self.object(w.buffer)? else {
                 return Err("buffer required".into());
             };

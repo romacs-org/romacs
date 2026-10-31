@@ -391,6 +391,9 @@ impl Vm {
         self.allocate_object(string_object(LispString::from_bytes(bytes, multibyte)))
     }
     pub(super) fn allocate_object(&mut self, object: Object) -> Value {
+        if let (Some(referrers), Object::Marker(_) | Object::Overlay(_) | Object::Window(_)) = (&mut self.referrers, &object) {
+            referrers.push(self.objects.len());
+        }
         self.objects.push(object);
         Value::reference(self.objects.len(), 0)
     }
