@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c95df17eb9ade6e2c9c5f13bcec0d5fbae82d86a49d3d131ded7af63a568e077",
+  "source_fingerprint": "1fd1a9ec15b9deeff447b0bdff3d72b1114b2332d6bff271a731468111b723bf",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -1330,7 +1330,7 @@
   "directory-name-p": {
    "name": "directory-name-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:410"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:415"
   },
   "discard-input": {
    "name": "discard-input",
