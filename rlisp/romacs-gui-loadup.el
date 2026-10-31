@@ -175,11 +175,28 @@ The GUI shows *Romacs* there with `romacs-gui-loadup-startup-screen'.
                    (assoc (font-xlfd-name (face-attribute 'default :font))
                           face-font-rescale-alist #'string-match-p))
           (set-face-attribute 'default nil :font (font-spec)))
-        (when (fboundp 'frame-notice-user-settings)
-          (frame-notice-user-settings))
+        (romacs-gui-loadup-notice-frame-settings)
         (run-hooks 'window-setup-hook)
         (setq inhibit-startup-hooks t)
         (if (> displayable-buffers-len 0) 'concise 'full)))))
+
+(defun romacs-gui-loadup-notice-frame-settings ()
+  "`frame-notice-user-settings' for Romacs's one frame.
+On a window system GNU's `frame-initialize' (frame.el) makes the initial
+frame from `initial-frame-alist' and `default-frame-alist' before the
+init runs, and `frame-notice-user-settings' applies what the init
+changed.  The host made Romacs's frame with no `frame-initial-frame', so
+it first gets the alists as the init left them, the earlier alist
+winning, as `frame-notice-user-settings' gives a frame without a window
+system; then GNU's function runs."
+  (when (fboundp 'frame-notice-user-settings)
+    (when (and frame-notice-user-settings initial-window-system (null frame-initial-frame))
+      (modify-frame-parameters
+       nil (append initial-frame-alist
+                   (cdr (assq initial-window-system
+                              window-system-default-frame-alist))
+                   default-frame-alist nil)))
+    (frame-notice-user-settings)))
 
 (defun romacs-gui-loadup-startup-screen (buffer concise)
   "Show BUFFER, the filled *Romacs* startup screen, as startup.el
@@ -201,25 +218,20 @@ in the selected one."
 the startup hooks unless the startup screen ran them, the user's frame
 settings on a frame that already exists, and `window-setup-hook' unless
 an earlier hook inhibited it.  Romacs's one frame is the hosted window,
-not a window-system initial frame, so the frame settings apply here as
-on GNU's terminal frame."
+which always exists, so the frame settings always apply, where GNU
+skips them when it failed to make a window-system initial frame."
   (unless inhibit-startup-hooks
     (run-hooks 'emacs-startup-hook 'term-setup-hook))
-  (when (or frame-initial-frame
-            (not (and initial-window-system
-                      (not noninteractive)
-                      (not (eq initial-window-system 'pc)))))
-    (when (and (display-multi-font-p)
-               (not (eq face-font-rescale-alist
-                        romacs-gui-loadup--old-face-font-rescale-alist))
-               (assoc (face-attribute 'default :font)
-                      face-font-rescale-alist
-                      #'startup--rescale-elt-match-p))
-      (set-face-attribute 'default nil :font (font-spec)))
-    (if (fboundp 'frame-notice-user-settings)
-        (frame-notice-user-settings))
-    (if (fboundp 'frame-set-background-mode)
-        (frame-set-background-mode (selected-frame))))
+  (when (and (display-multi-font-p)
+             (not (eq face-font-rescale-alist
+                      romacs-gui-loadup--old-face-font-rescale-alist))
+             (assoc (face-attribute 'default :font)
+                    face-font-rescale-alist
+                    #'startup--rescale-elt-match-p))
+    (set-face-attribute 'default nil :font (font-spec)))
+  (romacs-gui-loadup-notice-frame-settings)
+  (if (fboundp 'frame-set-background-mode)
+      (frame-set-background-mode (selected-frame)))
   (if (fboundp 'font-menu-add-default)
       (font-menu-add-default))
   (unless inhibit-startup-hooks

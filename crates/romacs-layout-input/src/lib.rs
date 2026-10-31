@@ -85,6 +85,9 @@ pub struct FrameSnapshot {
     pub width: u32,
     pub height: u32,
     pub windows: Vec<PlacedWindowSnapshot>,
+    /// The opacity of every background the frame paints, as its
+    /// `alpha-background' setter last applied it (frame.c:6098).
+    pub background_alpha: f32,
 }
 
 impl FrameSnapshot {

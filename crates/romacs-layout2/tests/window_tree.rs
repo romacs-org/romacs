@@ -63,7 +63,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     // window and the later would silently win.
     let duplicate = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
-        width: 400, height: 300,
+        width: 400, height: 300, background_alpha: 1.0,
         windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snap(7, 400, 150, &face) },
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 150, snapshot: snap(7, 400, 150, &face) },
@@ -76,7 +76,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     // presented surface.
     let overflow = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
-        width: 400, height: 300,
+        width: 400, height: 300, background_alpha: 1.0,
         windows: vec![romacs_layout_input::PlacedWindowSnapshot {
             x: 0, y: 200, snapshot: snap(1, 400, 200, &face) }],
     };
@@ -86,7 +86,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     // The honest control: the same windows, placed legally, do lay out.
     let valid = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
-        width: 400, height: 300,
+        width: 400, height: 300, background_alpha: 1.0,
         windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snap(1, 400, 150, &face) },
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 150, snapshot: snap(2, 400, 150, &face) },
@@ -218,4 +218,20 @@ fn an_empty_body_positioned_outside_the_frame_still_renders() {
                        "an empty body displays nothing, so end == start");
         }
     }
+}
+
+/// The frame's `alpha-background' reaches the painted frame, including a
+/// repaint that reuses the last layout.
+#[test]
+fn background_opacity_reaches_every_paint() {
+    let mut vm = Vm::new();
+    let face = vm.display_default_face().unwrap();
+    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    vm.set_frame_geometry(400, 300, line, column).unwrap();
+    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut snapshot = vm.frame_snapshot(400, 300).unwrap();
+    assert_eq!(engine.layout_frame(&snapshot, 1, None).unwrap().0.background_alpha, 1.0);
+    snapshot.background_alpha = 0.8;
+    assert!(snapshot.lays_out_like(&snapshot.clone()), "opacity alone needs no new layout");
+    assert_eq!(engine.layout_frame(&snapshot, 2, None).unwrap().0.background_alpha, 0.8);
 }

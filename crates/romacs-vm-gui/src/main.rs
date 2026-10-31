@@ -391,7 +391,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
         // Preserve G1's explicitly full-height legacy selected-window fixture.
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
             font_alternatives: vm.font_alternative_state()?,
-            width: 400, height: 300,
+            width: 400, height: 300, background_alpha: 1.0,
             windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
             }],
@@ -409,7 +409,7 @@ fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), 
     use romacs_layout_input::{FaceHandle, FrameSnapshot, PlacedWindowSnapshot, TextSlice, WindowSnapshot};
     let face = Vm::new().display_default_face()?;
     let snapshot = FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width, height,
+        font_selection: Default::default(), font_alternatives: Default::default(), width, height, background_alpha: 1.0,
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { utf8: PREPARING.into(), face_runs: vec![], raw: vec![] }, mode_line: None,
@@ -861,7 +861,11 @@ fn evaluate(
     // its children, as shut_down_emacs does) and exits with the status.
     if live { vm.set_session_host(Some(Box::new(|code| std::panic::resume_unwind(Box::new(SessionEnd(code)))))); }
     // Its window system, which the session opens (fonts.rs).
-    vm.set_display_host(Some(Box::new(fonts::Display::new()?)));
+    let alpha_sender = sender.clone();
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_alpha_hook(move |alpha, limit| {
+        // Only a closed window refuses, and then nothing shows it.
+        let _ = alpha_sender.set_frame_alpha(alpha, limit);
+    }))));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     // A completed background command wakes the same wait as a terminal.

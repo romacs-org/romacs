@@ -139,7 +139,65 @@ fn frame_alist(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<Vec<(Valu
     store(&mut alist, cx.intern("tab-bar-lines"), Value::integer(0).unwrap());
     store(&mut alist, cx.intern("visibility"), Value::TRUE);
     store(&mut alist, cx.intern("no-accept-focus"), Value::NIL);
+    // A window-system frame stores every parameter it has a handler for,
+    // nil when unset (pgtkfns.c:1599 gui_default_parameter).
+    if cx.windows().window_system(frame)? != Value::NIL {
+        for key in ["alpha", "alpha-background", "borders-respect-alpha-background"] {
+            let key = cx.intern(key);
+            if !alist.iter().any(|(k, _)| *k == key) { alist.insert(0, (key, Value::NIL)); }
+        }
+    }
     Ok(alist)
+}
+
+/// One opacity as gui_set_alpha_background reads it (frame.c:6098): nil is
+/// None, else a float in [0, 1] or a percentage fixnum in [0, 100].
+fn opacity(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<Option<f32>, Fault> {
+    if value == Value::NIL { return Ok(None); }
+    if let Ok(alpha) = cx.float_value(value) {
+        if !(0.0..=1.0).contains(&alpha) { return Err(Fault::Range(cx.float(0.0), cx.float(1.0))); }
+        return Ok(Some(alpha as f32));
+    }
+    match value.as_integer() {
+        Ok(percent) if (0..=100).contains(&percent) => Ok(Some(percent as f32 / 100.0)),
+        Ok(_) => Err(Fault::Range(Value::integer(0).unwrap(), Value::integer(100).unwrap())),
+        Err(_) => Err(Fault::Wrong("numberp", value)),
+    }
+}
+
+/// The opacity `frame-alpha-lower-limit' lets `alpha' reach, as
+/// pgtk_set_frame_alpha reads it (pgtkterm.c:4677): above 1 none applies.
+fn alpha_lower_limit(cx: &mut Leaf<'_>) -> std::result::Result<f32, Fault> {
+    let symbol = cx.intern("frame-alpha-lower-limit");
+    let limit = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
+    Ok(match (cx.float_value(limit), limit.as_integer()) {
+        (Ok(limit), _) => limit as f32,
+        (_, Ok(percent)) => percent as f32 / 100.0,
+        _ => 1.0,
+    })
+}
+
+/// The window system's handler for KEY, run after FRAME stores VALUE
+/// (frame.c gui_set_frame_parameters_1): `alpha' (gui_set_alpha,
+/// frame.c:6047) is an opacity or a cons of the active and inactive ones,
+/// nil leaving the window's alone; `alpha-background' (frame.c:6098) the
+/// opacity of the backgrounds the frame paints. Other parameters, and
+/// every parameter of a frame without a window system, are only stored.
+fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
+    if cx.kind(key) != leaf::Kind::Symbol || cx.windows().window_system(frame)? == Value::NIL { return Ok(()); }
+    if key == cx.intern("alpha-background") {
+        let background = opacity(cx, value)?.unwrap_or(1.0);
+        cx.windows().set_frame_background_alpha(frame, background)
+    } else if key == cx.intern("alpha") {
+        let (mut rest, mut alpha) = (value, [-1.0; 2]);
+        for slot in &mut alpha {
+            let item = match cx.pair(rest) { Some((car, cdr)) => { rest = cdr; car } None => rest };
+            *slot = opacity(cx, item)?.unwrap_or(-1.0);
+        }
+        let limit = alpha_lower_limit(cx)?;
+        cx.windows().set_frame_alpha(alpha, limit);
+        Ok(())
+    } else { Ok(()) }
 }
 
 defsubr! { name = "frame-parameters", gnu = "frame.c:4083", effect = Reads,
@@ -156,8 +214,8 @@ fn frame_parameter(cx, frame: Value, parameter: Value) {
 }}
 defsubr! { name = "modify-frame-parameters", gnu = "frame.c:4243", effect = Global,
 fn modify_frame_parameters(cx, frame: Value, alist: Value) {
-    // A frame without a window system: list_length validates ALIST, Fcar and
-    // Fcdr split each element, then entries are stored in reverse order.
+    // list_length validates ALIST, Fcar and Fcdr split each element, then
+    // entries are stored in reverse order, each before its handler runs.
     cx.windows().check_live_frame(frame)?;
     let mut elements = Vec::new();
     let mut seen = HashSet::default();
@@ -178,6 +236,7 @@ fn modify_frame_parameters(cx, frame: Value, alist: Value) {
     }
     for (key, value) in pairs.into_iter().rev() {
         cx.windows().store_frame_parameter(frame, key, value)?;
+        handle_frame_parameter(cx, frame, key, value)?;
     }
     Ok(Value::NIL)
 }}

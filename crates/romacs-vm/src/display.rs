@@ -436,7 +436,8 @@ impl Vm {
             .into_iter()
             .map(|(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot })
             .collect();
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows })
+        let background_alpha = self.frame_background_alpha()?;
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha })
     }
     /// The exact list returned by the family setter, held in a lazy traced slot.
     pub fn font_alternative_family_root(&self) -> crate::handle::Local<'_> {
@@ -965,7 +966,7 @@ impl Vm {
     fn lay_out_alone(&mut self, snapshot: WindowSnapshot) -> Result<romacs_layout_input::WindowEnd> {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
-            font_alternatives: self.font_alternative_state()?, width, height,
+            font_alternatives: self.font_alternative_state()?, width, height, background_alpha: 1.0,
             windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }

@@ -15,12 +15,18 @@ pub struct Display {
     /// frame's font each time.
     opened: HashMap<(String, u32, i64), Option<OpenedFont>>,
     chars: HashMap<(String, u32, char), Option<(OpenedFont, u32)>>,
+    /// Where `alpha' setters go: the window's opacity state.
+    alpha_hook: Option<Box<dyn FnMut([f32; 2], f32)>>,
 }
 
 impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?, policy: FontsetPolicy::new(),
-                  opened: HashMap::new(), chars: HashMap::new() })
+                  opened: HashMap::new(), chars: HashMap::new(), alpha_hook: None })
+    }
+    /// This display, sending each `alpha' setter to HOOK.
+    pub fn with_alpha_hook(self, hook: impl FnMut([f32; 2], f32) + 'static) -> Self {
+        Self { alpha_hook: Some(Box::new(hook)), ..self }
     }
     fn open_uncached(entity: &FontEntity, pixel_size: i64) -> Option<OpenedFont> {
         let metrics = romacs_font::probe::probe_font_px_metrics(&entity.file, entity.index, u32::try_from(pixel_size).ok()?.max(1), None)?;
@@ -101,6 +107,9 @@ impl romacs_vm::DisplayHost for Display {
         self.chars.insert(key, found.clone());
         found
     }
+    fn set_frame_alpha(&mut self, alpha: [f32; 2], limit: f32) {
+        if let Some(hook) = &mut self.alpha_hook { hook(alpha, limit); }
+    }
 }
 
 #[cfg(test)]
@@ -139,6 +148,46 @@ mod tests {
                                           (terminal-live-p nil) (frame-initial-p) (frame-parameter nil 'window-system)
                                           (frame-parameter nil 'font-backend) (frame-parameter nil 'font))"),
                    format!(r#"(pgtk pgtk pgtk pgtk nil pgtk (ftcrhb) "{FONT}")"#));
+    }
+
+    /// `alpha' and `alpha-background' against pinned GNU's X11 frame, whose
+    /// setters are pgtk's (frame.c gui_set_alpha, gui_set_alpha_background):
+    /// each value is stored, then validated; painting gets the background
+    /// opacity the last valid setter applied, and every valid `alpha' setter
+    /// reaches the window, as GNU's set_frame_alpha_hook. Without a window
+    /// system they are only stored.
+    #[test]
+    fn opacity_parameters_validate_as_gnu_and_reach_the_window() {
+        let setters = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+        let seen = setters.clone();
+        let mut vm = displayed();
+        vm.set_display_host(Some(Box::new(Display::new().unwrap().with_alpha_hook(move |alpha, limit| seen.borrow_mut().push((alpha, limit))))));
+        let set = |vm: &mut Vm, alist: &str| printed(vm, &format!(
+            "(list (condition-case e (modify-frame-parameters nil '{alist}) (error e))
+                   (frame-parameter nil 'alpha-background) (frame-parameter nil 'alpha))"));
+        let background = |vm: &mut Vm| vm.frame_snapshot(1200, 800).unwrap().background_alpha;
+        assert_eq!(set(&mut vm, "((alpha-background . 101) (alpha . 300))"), "(nil 101 300)");
+        assert_eq!((background(&mut vm), setters.borrow().len()), (1.0, 0));
+        assert!(vm.open_display());
+        assert_eq!(printed(&mut vm, "(list frame-alpha-lower-limit (assq 'alpha (frame-parameters))
+                                          (assq 'borders-respect-alpha-background (frame-parameters)))"),
+                   "(20 (alpha . 300) (borders-respect-alpha-background))");
+        assert_eq!(set(&mut vm, "((alpha-background . 80))"), "(nil 80 300)");
+        assert_eq!(background(&mut vm), 0.8);
+        assert_eq!(set(&mut vm, "((alpha-background . 101))"), "((args-out-of-range 0 100) 101 300)");
+        assert_eq!(set(&mut vm, "((alpha-background . 1.5))"), "((args-out-of-range 0.0 1.0) 1.5 300)");
+        assert_eq!(set(&mut vm, "((alpha-background . \"80\"))"), r#"((wrong-type-argument numberp "80") "80" 300)"#);
+        assert_eq!(background(&mut vm), 0.8, "a refused value leaves the applied one");
+        // Both setters of one call reach the window, the later last.
+        assert_eq!(set(&mut vm, "((alpha) (alpha . (50 . 70)))"), "(nil \"80\" nil)");
+        assert_eq!(*setters.borrow(), [([0.5, 0.7], 0.2), ([-1.0, -1.0], 0.2)]);
+        // Stored in reverse order, each before its handler: `alpha' signals
+        // and `alpha-background' is never reached.
+        assert_eq!(set(&mut vm, "((alpha-background . 40) (alpha . (a . 50)))"),
+                   "((wrong-type-argument numberp a) \"80\" (a . 50))");
+        assert_eq!(setters.borrow().len(), 2);
+        assert_eq!(set(&mut vm, "((alpha-background))"), "(nil nil (a . 50))");
+        assert_eq!(background(&mut vm), 1.0);
     }
 
     #[test]
@@ -189,6 +238,39 @@ mod tests {
                     (progn (internal-make-lisp-face 'rt-empty) (equal (face-font 'rt-empty) (frame-parameter nil 'font)))
                     (condition-case e (face-font 'rt-big nil 'x) (error e)) (condition-case e (face-font 'rt-nosuch) (error e)))))"),
                    r#"("-TWR-PlemolJP Console NF-regular-normal-normal-*-37-*-*-*-d-0-iso10646-1" 37 20 t (bold) t (wrong-type-argument characterp x) (error "Invalid face" rt-nosuch))"#);
+    }
+
+    /// The init's `initial-frame-alist' and `default-frame-alist' reach the
+    /// display's frame once, before `window-setup-hook', on both of
+    /// startup's paths, so the hook's own setting stays: pinned GNU X11
+    /// with this init answers (80 90 50) with and without the screen.
+    #[test]
+    fn startup_applies_the_inits_frame_alists_once() {
+        for screen in ["nil", "t"] {
+            let answer = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+                let mut vm = displayed();
+                let home = std::env::temp_dir().join(format!("romacs-fonts-alists-{}-{screen}", std::process::id()));
+                std::fs::create_dir_all(&home).unwrap();
+                vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
+                                        home.display())).unwrap();
+                let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::Loadup, None).unwrap();
+                printed(&mut vm, &format!("(progn (setq inhibit-startup-screen {screen})
+                    (setf (alist-get 'alpha-background default-frame-alist) 80)
+                    (setq initial-frame-alist '((alpha . 90)))
+                    (defvar probe-seen nil)
+                    (add-hook 'window-setup-hook
+                      (lambda ()
+                        (setq probe-seen (list (frame-parameter nil 'alpha-background) (frame-parameter nil 'alpha)))
+                        (set-frame-parameter nil 'alpha-background 50)))
+                    t)"));
+                crate::startup::finish_loadup(&mut vm, &started).unwrap();
+                let answer = printed(&mut vm, "(append probe-seen (list (frame-parameter nil 'alpha-background)))");
+                let background = vm.frame_snapshot(1200, 800).unwrap().background_alpha;
+                let _ = std::fs::remove_dir_all(&home);
+                (answer, background)
+            }).unwrap().join().unwrap();
+            assert_eq!(answer, ("(80 90 50)".to_owned(), 0.5), "inhibit-startup-screen {screen}");
+        }
     }
 
     /// `--loadup` on the GUI's display: the session puts the frame on it, a

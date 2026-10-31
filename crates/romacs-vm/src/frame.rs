@@ -10,8 +10,10 @@ pub(super) struct Frame {
     pub terminal: Value,
     pub parameters: Vec<(Value, Value)>,
     pub live: bool,
+    /// What the `alpha-background' setter last applied (frame.c:6098).
+    pub alpha_background: f32,
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live });
+romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, alpha_background });
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         for v in [&mut self.root, &mut self.selected, &mut self.minibuffer,
@@ -54,6 +56,11 @@ impl Vm {
             _ => Err("frame required".into()),
         }
     }
+    /// The selected frame's background opacity, as painting presents it.
+    pub(crate) fn frame_background_alpha(&mut self) -> Result<f32> {
+        let frame = self.selected_frame_value()?;
+        Ok(self.frame(frame)?.alpha_background)
+    }
     pub(super) fn frame_mut(&mut self, value: Value) -> Result<&mut Frame> {
         match self.objects.get_mut(value.index(0)?.saturating_sub(1)) {
             Some(Object::Frame(f)) => Ok(f),
@@ -69,7 +76,7 @@ impl Vm {
         let name = (self.intern("name"), self.make_lisp_string(b"F1".to_vec(), false));
         let frame = self.allocate_object(Object::Frame(Box::new(Frame {
             root, selected: root, minibuffer, terminal,
-            parameters: vec![name], live: true,
+            parameters: vec![name], live: true, alpha_background: 1.0,
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;

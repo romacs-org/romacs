@@ -1847,6 +1847,18 @@ impl<'a> Windows<'a> {
         }
         Ok(())
     }
+    /// FRAME's background opacity becomes ALPHA.
+    pub(crate) fn set_frame_background_alpha(&mut self, frame: Value, alpha: f32) -> std::result::Result<(), Fault> {
+        self.live_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        self.vm.frame_mut(frame).map_err(internal)?.alpha_background = alpha;
+        Ok(())
+    }
+    /// The window system's frame alpha hook (frame.c:6088): ALPHA while
+    /// active and inactive, LIMIT the lower limit it reads.
+    pub(crate) fn set_frame_alpha(&mut self, alpha: [f32; 2], limit: f32) {
+        if let Some(host) = self.vm.window_system_host() { host.set_frame_alpha(alpha, limit); }
+    }
     /// frame.c:286: the frame's type, t on the initial terminal and the
     /// display's backend once the session opened one (display_host.rs).
     pub(crate) fn frame_p(&mut self, object: Value) -> Value {

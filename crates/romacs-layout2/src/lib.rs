@@ -55,6 +55,7 @@ impl LayoutEngine {
         let last = self.last.as_ref().expect("laid out above");
         let mut frame = last.frame.clone();
         stamp(&mut frame, presentation)?;
+        frame.background_alpha = snapshot.background_alpha;
         hide_cursors_off(&mut frame, snapshot);
         Ok((frame, last.ends.clone()))
     }

@@ -156,7 +156,12 @@ struct FrameIngestOutcome {
 
 impl RenderApp {
     #[cfg(feature = "core-free")]
-    pub(super) fn ingest_paint(&mut self, frame: romacs_display_protocol::FrameGlyphBuffer) {
+    pub(super) fn ingest_paint(&mut self, mut frame: romacs_display_protocol::FrameGlyphBuffer) {
+        if self.frame_windows.primary_window().and_then(|window| window.lifecycle.native())
+            .is_some_and(|native| !native.composites_alpha())
+        {
+            frame.background_alpha = 1.0;
+        }
         let current = self.frame_windows.primary_window().and_then(|window| {
             window.render.compositor.current_frame.as_ref()
         });

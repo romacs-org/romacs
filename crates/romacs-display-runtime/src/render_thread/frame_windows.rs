@@ -78,6 +78,12 @@ pub(crate) struct GuiFrameNativeWindowState {
 }
 
 impl GuiFrameNativeWindowState {
+    /// Whether the compositor blends this surface's alpha; on an opaque
+    /// surface frame transparency would only darken the frame.
+    pub(super) fn composites_alpha(&self) -> bool {
+        self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied
+    }
+
     pub(super) fn content_insets(&self) -> romacs_display_protocol::ContentInsets {
         self.content_insets
     }
@@ -640,8 +646,19 @@ impl GuiFrameRenderState {
         &mut self,
         controls: &crate::thread_comm::FrameOpacityState,
     ) -> bool {
+        self.apply_surface_frame_opacity(controls, true)
+    }
+
+    /// `apply_frame_opacity' on a surface the compositor blends only if
+    /// COMPOSITES: the frame's own opacity needs that, its child frames
+    /// blend inside the surface.
+    pub(super) fn apply_surface_frame_opacity(
+        &mut self,
+        controls: &crate::thread_comm::FrameOpacityState,
+        composites: bool,
+    ) -> bool {
         let mut changed = false;
-        if let Some(alpha) = controls.applied(self.emacs_frame_id)
+        if let Some(alpha) = controls.applied(self.emacs_frame_id).filter(|_| composites)
             && alpha != self.applied_frame_alpha
         {
             self.applied_frame_alpha = alpha;
@@ -2268,14 +2285,7 @@ impl GuiFrameWindowManager {
                         .copied()
                         .find(|f| f.is_srgb())
                         .unwrap_or(caps.formats[0]);
-                    let alpha_mode = if caps
-                        .alpha_modes
-                        .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
-                    {
-                        wgpu::CompositeAlphaMode::PreMultiplied
-                    } else {
-                        caps.alpha_modes[0]
-                    };
+                    let alpha_mode = super::bootstrap::composite_alpha_mode(&caps.alpha_modes);
                     let config = wgpu::SurfaceConfiguration {
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                         format,
@@ -2888,14 +2898,7 @@ impl GuiFrameWindowManager {
                 .copied()
                 .find(|f| f.is_srgb())
                 .unwrap_or(caps.formats[0]);
-            let alpha_mode = if caps
-                .alpha_modes
-                .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
-            {
-                wgpu::CompositeAlphaMode::PreMultiplied
-            } else {
-                caps.alpha_modes[0]
-            };
+            let alpha_mode = super::bootstrap::composite_alpha_mode(&caps.alpha_modes);
             let config = wgpu::SurfaceConfiguration {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 format,
