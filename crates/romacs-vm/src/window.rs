@@ -1464,19 +1464,15 @@ impl<'a> Windows<'a> {
     /// window.c:1215 `WINDOW_MODE_LINE_HEIGHT` over `window_wants_mode_line`
     /// (window.c:6037): a live non-minibuffer window whose `mode-line-format`
     /// parameter is not `none`, with that parameter or `mode-line-format`
-    /// non-nil, taller than one canonical line. VM2 draws a mode line one
-    /// canonical line tall; it reads `mode-line-format`'s current value cell,
-    /// as display.rs `build_mode_line` does, not the window buffer's local
-    /// value (DIVERGENCES.md VM2-WIN3).
+    /// non-nil, taller than one canonical line. `mode-line-format` is the
+    /// window's buffer's, as display.rs paints it. VM2 draws a mode line one
+    /// canonical line tall (DIVERGENCES.md VM2-WIN3).
     pub(crate) fn window_mode_line_height(&mut self, window: Value) -> Out {
         let w = self.live(window)?;
-        let format = {
-            let slot = self.vm.slot("mode-line-format");
-            self.vm.variable_value(slot).map_err(internal)?
-        };
         let line = self.vm.window_state.line;
-        let key = self.vm.intern("mode-line-format");
-        let none = self.vm.intern("none");
+        let (key, none, slot) = (self.vm.intern("mode-line-format"), self.vm.intern("none"), self.vm.slot("mode-line-format"));
+        let buffer = self.get(w)?.buffer;
+        let format = self.vm.value_in_buffer(slot, buffer).map_err(internal)?;
         let x = self.get(w)?;
         let parameter = x.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
         let wants = !x.mini

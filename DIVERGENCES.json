@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "65be1706f1b51e645ee77d39653e0d7557d2c3d33f0343f849bd10e8cde771d6",
+  "input_hash": "f25bbaf48ff9a282447bcddc339ad25ee08799b31fcb2e17e82f2ddac6b8af42",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -6647,7 +6647,7 @@
    "planned": false,
    "mechanism": "`window-mode-line-height`, `window-header-line-height`, decoration widths",
    "gnu": "GNU `window_wants_mode_line` (`src/window.c:6037`) reads WINDOW's buffer's `mode-line-format`, whose C default is `\"%-\"` (`src/buffer.c`), and `window_wants_header_line` likewise reads `header-line-format`; a header line is one line tall",
-   "romacs": "VM2 answers from what its display draws: a mode line one canonical line tall from `mode-line-format`'s current value cell (as `display.rs` `build_mode_line` reads it), honouring the window's `mode-line-format` parameter and `none`; a header line as GNU's `window_wants_header_line` decides it, from the window's `header-line-format` parameter or its buffer's value, one canonical line tall, or once a host lays the frame out the height the host paints it (`tests/header_line.rs` against pinned GNU, `romacs-vm-gui` `measure.rs` against the paint); no tab line, scroll bars or dividers (all 0). `mode-line-format` has buffer.c's default `\"%-\"`, so a bare VM2's windows want a mode line as GNU's do. Pin `window-header-line-height/0010` (VALUE: the backend line's pixels, VM2-WIN5)",
+   "romacs": "VM2 answers from what its display draws: a mode line one canonical line tall from WINDOW's buffer's `mode-line-format` (as `display.rs` paints it), honouring the window's `mode-line-format` parameter and `none`; a header line as GNU's `window_wants_header_line` decides it, from the window's `header-line-format` parameter or its buffer's value, one canonical line tall, or once a host lays the frame out the height the host paints it (`tests/header_line.rs` against pinned GNU, `romacs-vm-gui` `measure.rs` against the paint); no tab line, scroll bars or dividers (all 0). `mode-line-format` has buffer.c's default `\"%-\"`, so a bare VM2's windows want a mode line as GNU's do. Pin `window-header-line-height/0010` (VALUE: the backend line's pixels, VM2-WIN5)",
    "why": "**Package-observable**: body sizes computed from these heights match what VM2 draws, not what GNU would draw, in a bare VM",
    "symbols": [
     "window-mode-line-height",
