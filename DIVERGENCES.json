@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "1993f5226fc13bbb5ccacc260a386dfdbf5e1c842f53c948273f0de2b22c929d",
+  "input_hash": "3fa09fad6a7eb2a8a83fe3446f72c3f37cfdc076bdb9c761cd864be1fab8cf74",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -2944,7 +2944,7 @@
    "planned": false,
    "mechanism": "`execute-extended-command`, `dired`, `find-file`",
    "gnu": "GNU supplies the complete command/completion, Dired and file policy libraries.",
-   "romacs": "The default workspace uses separate Romacs-owned Lisp orchestration: interactive command-name completion/history and a read-only local directory browser with GNU-style long metadata columns, semantic filename faces and n/p/RET/^/g/q. The C-locale ordinary-file listing matches the GNU reference; locale collation, ACL/security indicators and special-device size columns are not implemented. Control-character filenames remain explicitly escaped on one row. Local UTF-8 files and directories share native visits; remote handlers, listing switches, Dired mutation commands and the full GNU coding/mode lifecycle remain unsupported (file coding: VM2-WORKSPACE-CODING). The pristine GNU Lisp tree is unchanged; GNU-only startup does not install these owned modules.",
+   "romacs": "The default workspace uses separate Romacs-owned Lisp orchestration: interactive command-name completion/history and a read-only local directory browser with GNU-style long metadata columns, semantic filename faces and n/p/RET/^/g/q. The C-locale ordinary-file listing matches the GNU reference; locale collation, ACL/security indicators and special-device size columns are not implemented. Control-character filenames remain explicitly escaped on one row. Local UTF-8 files and directories share native visits; remote handlers, listing switches, Dired mutation commands and the full GNU coding/mode lifecycle remain unsupported (file coding: VM2-WORKSPACE-CODING). The pristine GNU Lisp tree is unchanged; GNU-only startup does not install these owned modules, and a `--loadup` session keeps GNU's dired.el.",
    "why": "A useful slim editor path independent of GNU's full diagnostic/startup dependencies. Maintained GUI command tests and private native-keyboard journeys cover the supported slice, not full GNU API parity.",
    "symbols": [
     "execute-extended-command",
