@@ -331,17 +331,21 @@ OWNER_INIT = r'''
 '''.replace('@URL@', DASHBOARD_URL)
 
 
+def gnu_settings():
+    """The settings Romacs's --loadup makes before the user's init, for
+    GNU's init, as the parity harnesses' GNU takes them."""
+    return ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
+            '(setq scroll-conservatively 101)\n'
+            f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n')
+
+
 def init_source(engine, lisp, port_file, token, profile='owner'):
     """ENGINE's init: under PROFILE owner the owner's blocks from LISP, under
     stock nothing of anyone's, then the MCP endpoint on loopback, its port
     written to PORT_FILE, its peers sending TOKEN first.  Loopback, not a
     local socket: Romacs's GUI host refuses local network processes."""
     owner = profile == 'owner'
-    # GNU takes the settings Romacs's --loadup makes before the user's
-    # init, as the parity harnesses' GNU does.
-    gnu_setup = ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
-                 '(setq scroll-conservatively 101)\n'
-                 f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
+    gnu_setup = gnu_settings() if engine == 'gnu' else ''
     return f''';; -*- lexical-binding: t -*-
 (defvar bench-init-errors nil "Init blocks that signalled, as (NAME MESSAGE).")
 (defmacro bench-block (name &rest body)

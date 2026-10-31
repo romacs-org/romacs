@@ -552,6 +552,8 @@ def run_workflow(harness, name, args, base, report):
             record['differences'], record['geometry'] = compare(*snapshots)
             if args.keep_snapshots:
                 record['snapshots'] = snapshots
+            if step['name'] == args.until:
+                break
         entry['status'] = 'PASS' if not any(s['differences'] for s in entry['steps']) else 'DIFFER'
         if harness.check:
             entry['check'] = harness.check(engines)
@@ -597,6 +599,7 @@ def main(harness, description, add_arguments=lambda parser: None):
     parser.add_argument('--perf', action='store_true', help='count instructions with perf stat')
     parser.add_argument('--keep', action='store_true', help='keep the private trees')
     parser.add_argument('--keep-snapshots', action='store_true')
+    parser.add_argument('--until', metavar='STEP', help='end each workflow after its step STEP')
     args = parser.parse_args()
     # A terminated harness still stops its compositors and editors.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
