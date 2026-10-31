@@ -390,13 +390,18 @@ fn file_name_absolute_p(cx, filename: Value) {
     let bytes = cx.string_bytes(filename)?;
     // SSDATA is read as a C string.
     let name = bytes.split(|&b| b == 0).next().unwrap_or(&[]);
-    let absolute = match name {
+    Ok(if absolute(name) { Value::TRUE } else { Value::NIL })
+}}
+
+/// GNU file_name_absolute_p: NAME starts with `/', `~' alone or before a
+/// slash, or `~' and a login with an absolute home.
+pub(super) fn absolute(name: &[u8]) -> bool {
+    match name {
         [b'/', ..] | [b'~'] | [b'~', b'/', ..] => true,
         [b'~', rest @ ..] => user_homedir(rest),
         _ => false,
-    };
-    Ok(if absolute { Value::TRUE } else { Value::NIL })
-}}
+    }
+}
 
 /// GNU user_homedir: NAME, up to its first slash, is a login whose home
 /// directory is absolute.
