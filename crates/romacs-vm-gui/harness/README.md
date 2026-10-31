@@ -246,3 +246,66 @@ about 5 minutes.  It keeps observations out of the repository: only the
 calls and their verdicts are recorded, and a run's `results.jsonl` stays
 local.  Gnosis due cards and model replies depend on the day, so on
 replay those steps can diverge for reasons outside Romacs.
+
+# Standing benchmarks: fixed workloads against pinned GNU
+
+`perfbench/perfbench.py` runs one fixed set of workloads in pinned GNU and
+in a given Romacs build and prints one table: per workload, each engine's
+`instructions:u` (the reliable metric) and wall time (median of `--runs`,
+default 3), the Romacs/GNU ratio of each, and the change of Romacs's
+figures since the previous saved run.  Each run is saved as
+`results.json` and `table.md` under `OUT/<commit>/<UTC time>/` (default
+OUT `~/.cache/claude-scratch/perf-bench`), so a rerun after every master
+shows the trend.  The workloads, and how each is counted, are in the
+script's docstring:
+
+* batch, `-Q --batch` on `perfbench/perfbench.el` in both engines:
+  startup; font-lock-ensure on fileio.c, subr.el and ORG-NEWS; dired of
+  5,000 files; project-find-regexp over the Emacs repository; vc-log of
+  2,000 commits; occur and how-many over xdisp.c.  Instructions are a run's
+  less a run doing only the setup (perf/font-lock's method).  Each engine's
+  result (match counts, line counts) is compared, and a difference is noted.
+* micro: named call, closure call, mapcar of 1 and 10, dolist + funcall,
+  per iteration beyond an empty loop; GNU byte-compiled, Romacs from source.
+* ERT: 25 GNU ERT files with the same `-l ert ... -f
+  ert-run-tests-batch-and-exit` command in both engines.  These totals are
+  not comparable with `gnu-tests/run.py`'s, which run romacs-gnu-ert
+  through the romacs-batch adapter.
+* GUI, each engine on its own headless labwc as the parity harnesses run
+  them: first-start world build (Romacs only), warm launch to first paint
+  (Romacs only) and to idle, per-key self-insert, C-f and C-n, and C-x C-f
+  over 5,000 files in fido-vertical.  Per-key instructions count every
+  thread but llvmpipe's: the headless compositor has no GPU, so Mesa's
+  software GL does the GPU's work there.  The parity probe's polling is
+  paused while a phase is counted.  Wall per key runs from
+  `pre-command-hook` to the next idle moment, after redisplay
+  (`perfbench-gui.el`).
+* owner init body (bench/owner.py's profile), GNU against Romacs from
+  source and from its init layer; wall only.
+* gnosis dashboard open and back (`gnosis_parity_live.py` on a database
+  copy given with `--gnosis-db` and `--gnosis-db-repo`), and hermes
+  dashboard open (`hermes_parity_live.py`, read-only, only when the
+  dashboard answers), one run each.
+
+When the 1-minute load average exceeds `--max-load` (default 8) during a
+workload, its wall times are withheld and the load is printed beside them.
+Instructions are still reported.  The inputs are pinned.  The Emacs tree
+is a `--shared` clone of `$ROMACS_GNU_SOURCE` at the oracle's commit,
+checked clean, and its fixture files are checked against SHA-256s.  The
+5,000 files have fixed contents and mtimes.  Every engine runs in private
+HOME/XDG/TMPDIR trees, and no workload writes owner data.
+
+```sh
+source ~/.cache/claude-scratch/bin/romacs-env.sh
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py \
+  --romacs ~/.local/state/romacs/current/romacs-vm-gui \
+  --gnosis-db COPY/gnosis.db --gnosis-db-repo REPO   # about 15 minutes
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --quick  # about 4
+```
+
+A binary installed beside its runtime (`gnu-lisp/`, `rlisp/`, as under
+`~/.local/state/romacs/current`) runs that runtime; otherwise give
+`--runtime`.  The commit comes from the `build.json` beside the binary, or
+from `--commit`.  `--only` takes groups (`batch micro ert gui owner apps`)
+or workloads: a batch row's name, `micro`, `ERT 25 files`, `launch`,
+`keys`, `owner init` or `apps`.
