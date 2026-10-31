@@ -53,6 +53,8 @@ struct State {
     name: Value,
     tortoise: Value,
     steps: i64,
+    /// This walk's identity, for what it computes once (`walk_case_ranges').
+    walk: u64,
 }
 
 impl State {
@@ -73,6 +75,7 @@ impl State {
             self.name,
             self.tortoise,
             Value::integer(self.steps).unwrap(),
+            Value::integer(self.walk as i64).unwrap(),
         ]
     }
 
@@ -93,9 +96,10 @@ impl State {
             name,
             tortoise,
             steps,
+            walk,
         ] = values
         else {
-            unreachable!("completion saves fifteen registers")
+            unreachable!("completion saves sixteen registers")
         };
         Self {
             mode: match index(mode) {
@@ -118,6 +122,7 @@ impl State {
             name,
             tortoise,
             steps: steps.integer_value().unwrap(),
+            walk: walk.integer_value().unwrap() as u64,
         }
     }
 
@@ -219,6 +224,7 @@ fn prepare(
         name: Value::NIL,
         tortoise: collection,
         steps: 0,
+        walk: cx.next_completion_walk(),
     };
     if mode == Mode::Test {
         test_start(cx, state)
@@ -307,7 +313,7 @@ fn walk(cx: &mut Leaf<'_>, mut state: State) -> Next {
         if regexps {
             if matcher.is_none() {
                 let patterns = regexp_patterns(cx)?;
-                matcher = Some(cx.completion_matcher(&patterns, fold, false)?);
+                matcher = Some(cx.completion_matcher(&patterns, fold, false, Some(state.walk))?);
             }
             let compiled = matcher.as_mut().unwrap();
             let matched = match compiled {

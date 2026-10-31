@@ -4,7 +4,7 @@ use romacs_regex_engine::{CaseTable, CaseTranslation};
 
 #[derive(Debug)]
 struct CompletionCase {
-    ranges: Vec<(u32, u32, i64)>,
+    ranges: std::sync::Arc<Vec<(u32, u32, i64)>>,
     standard: CaseTranslation,
 }
 
@@ -63,18 +63,45 @@ impl Leaf<'_> {
     /// How completion folds case when FOLD: as dired.c, with the standard
     /// canonical table (FILE), or as minibuf.c, with the current buffer's
     /// case-canon table; as the pattern cache's key and the translation it
-    /// compiles with.
-    fn completion_translation(&mut self, fold: bool, file: bool)
+    /// compiles with. WALK names the `all-completions' walk asking, which
+    /// walks the canon table once (`walk_case_ranges').
+    fn completion_translation(&mut self, fold: bool, file: bool, walk: Option<u64>)
         -> std::result::Result<(Translation, Option<CaseTranslation>), Fault> {
         Ok(match (fold, file) {
             (false, _) => (Translation::None, None),
             (true, true) => (Translation::Standard, Some(CaseTranslation::standard())),
             (true, false) => {
                 let canon = self.completion_case_canon()?;
-                let case = CompletionCase { ranges: self.completion_case_ranges()?, standard: CaseTranslation::standard() };
+                let case = CompletionCase { ranges: self.walk_case_ranges(canon, walk)?, standard: CaseTranslation::standard() };
                 (Translation::Completion(canon), Some(CaseTranslation::from_case_table(std::rc::Rc::new(case))))
             }
         })
+    }
+
+    /// A new `all-completions' walk's identity.
+    pub(crate) fn next_completion_walk(&mut self) -> u64 {
+        self.vm.completion_walks += 1;
+        self.vm.completion_walks
+    }
+
+    /// The canon table CANON's case ranges, the walk of the whole table
+    /// `completion_translation' folds with, made once per `all-completions'
+    /// WALK: its predicate runs Lisp between candidates, and the walk
+    /// resumes after each call. A predicate that changes the table's
+    /// entries in place during the walk is not seen until the next walk.
+    fn walk_case_ranges(&mut self, canon: Value, walk: Option<u64>)
+        -> std::result::Result<std::sync::Arc<Vec<(u32, u32, i64)>>, Fault> {
+        let root = match self.vm.object_if(canon) {
+            Some(data::Object::CharTable(table)) => std::sync::Arc::as_ptr(&table.root) as usize,
+            _ => 0,
+        };
+        if let (Some(walk), Some((at, kept, ranges))) = (walk, &self.vm.completion_case_memo)
+            && *at == walk && *kept == root && root != 0 {
+            return Ok(ranges.clone());
+        }
+        let ranges = std::sync::Arc::new(self.completion_case_ranges()?);
+        if let Some(walk) = walk { self.vm.completion_case_memo = Some((walk, root, ranges.clone())); }
+        Ok(ranges)
     }
 
     pub(crate) fn completion_regexp_match(
@@ -83,7 +110,7 @@ impl Leaf<'_> {
         string: Value,
         fold: bool,
     ) -> std::result::Result<bool, Fault> {
-        let (key, translation) = self.completion_translation(fold, false)?;
+        let (key, translation) = self.completion_translation(fold, false, None)?;
         Ok(self.vm.string_match_no_data(pattern, string, key, translation)?.is_some())
     }
 
@@ -91,9 +118,9 @@ impl Leaf<'_> {
     /// candidates of one pass, folding case as `completion_regexp_match'
     /// (FILE: as `file_completion_regexp_match'); None when each candidate's
     /// own `syntax-table' properties matter, so each is tested alone.
-    pub(crate) fn completion_matcher(&mut self, patterns: &[Value], fold: bool, file: bool)
+    pub(crate) fn completion_matcher(&mut self, patterns: &[Value], fold: bool, file: bool, walk: Option<u64>)
         -> std::result::Result<Option<crate::regexp::StringMatcher>, Fault> {
-        let (key, translation) = self.completion_translation(fold, file)?;
+        let (key, translation) = self.completion_translation(fold, file, walk)?;
         self.vm.string_matcher(patterns, key, translation)
     }
 
@@ -111,7 +138,7 @@ impl Leaf<'_> {
         string: Value,
         fold: bool,
     ) -> std::result::Result<bool, Fault> {
-        let (key, translation) = self.completion_translation(fold, true)?;
+        let (key, translation) = self.completion_translation(fold, true, None)?;
         Ok(self.vm.string_match_no_data(pattern, string, key, translation)?.is_some())
     }
 }
@@ -254,7 +281,7 @@ impl Leaf<'_> {
     fn orderless_regexp(&mut self, pass: &mut OrderlessPass, i: usize, string: Value)
         -> std::result::Result<Option<Vec<(usize, usize)>>, Fault> {
         if pass.regexps.is_none() {
-            let (key, translation) = self.completion_translation(pass.fold.is_some(), false)?;
+            let (key, translation) = self.completion_translation(pass.fold.is_some(), false, None)?;
             let matcher = self.vm.string_matcher(&pass.sources, key, translation.clone())?;
             pass.regexps = Some(OrderlessRegexps { matcher, key, translation });
         }
