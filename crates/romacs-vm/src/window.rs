@@ -820,12 +820,7 @@ impl Vm {
             self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column)?;
         }
         self.reconcile_terminal_geometry()?;
-        let live = |vm: &Self, id| {
-            vm.objects.iter().enumerate().find_map(|(i, o)| match o {
-                Object::Window(w) if w.id == id && w.live() => Some(Value::reference(i + 1, 0)),
-                _ => None,
-            })
-        };
+        let live = |vm: &mut Self, id| vm.live_window_index(id).map(|i| Value::reference(i + 1, 0));
         let outcome = (|| {
             let mut snapshots = vec![];
             for id in ids {
@@ -852,6 +847,13 @@ impl Vm {
         self.display_state.width = width;
         self.display_state.height = height;
         outcome
+    }
+    /// The index in `objects` of the live window whose id is ID.
+    fn live_window_index(&mut self, id: u64) -> Option<usize> {
+        self.referrers();
+        let objects = &self.objects;
+        self.referrers.as_deref().unwrap_or_default().iter().copied()
+            .find(|&i| matches!(&objects[i], Object::Window(w) if w.id == id && w.live()))
     }
     /// The root frame's live windows in tree order, as `window-list' from
     /// its first window lists them.
@@ -1039,15 +1041,8 @@ impl Vm {
         // Validate the complete journal before publishing any per-window end.
         let mut changes = vec![];
         for &crate::WindowEnd { id, end, .. } in ends {
-            let (index, w) = self
-                .objects
-                .iter()
-                .enumerate()
-                .find_map(|(i, o)| match o {
-                    Object::Window(w) if w.id == id && w.live() => Some((i, w)),
-                    _ => None,
-                })
-                .ok_or("layout journal names an unknown live window")?;
+            let index = self.live_window_index(id).ok_or("layout journal names an unknown live window")?;
+            let Object::Window(w) = &self.objects[index] else { unreachable!("live window") };
             let Object::Buffer(b) = self.object(w.buffer)? else {
                 return Err("buffer required".into());
             };
@@ -1553,19 +1548,15 @@ impl<'a> Windows<'a> {
     /// window.c:1215 `WINDOW_MODE_LINE_HEIGHT` over `window_wants_mode_line`
     /// (window.c:6037): a live non-minibuffer window whose `mode-line-format`
     /// parameter is not `none`, with that parameter or `mode-line-format`
-    /// non-nil, taller than one canonical line. VM2 draws a mode line one
-    /// canonical line tall; it reads `mode-line-format`'s current value cell,
-    /// as display.rs `build_mode_line` does, not the window buffer's local
-    /// value (DIVERGENCES.md VM2-WIN3).
+    /// non-nil, taller than one canonical line. `mode-line-format` is the
+    /// window's buffer's, as display.rs paints it. VM2 draws a mode line one
+    /// canonical line tall (DIVERGENCES.md VM2-WIN3).
     pub(crate) fn window_mode_line_height(&mut self, window: Value) -> Out {
         let w = self.live(window)?;
-        let format = {
-            let slot = self.vm.slot("mode-line-format");
-            self.vm.variable_value(slot).map_err(internal)?
-        };
         let line = self.vm.window_state.line;
-        let key = self.vm.intern("mode-line-format");
-        let none = self.vm.intern("none");
+        let (key, none, slot) = (self.vm.intern("mode-line-format"), self.vm.intern("none"), self.vm.slot("mode-line-format"));
+        let buffer = self.get(w)?.buffer;
+        let format = self.vm.value_in_buffer(slot, buffer).map_err(internal)?;
         let x = self.get(w)?;
         let parameter = x.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
         let wants = !x.mini

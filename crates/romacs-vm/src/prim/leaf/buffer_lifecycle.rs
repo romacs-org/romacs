@@ -92,12 +92,7 @@ impl Leaf<'_> {
         }
     }
     pub fn lifecycle_killable(&self, buffer: Value) -> bool {
-        self.lifecycle_live_p(buffer)
-            && !self
-                .vm
-                .objects
-                .iter()
-                .any(|object| matches!(object, Object::Window(w) if w.mini && w.buffer == buffer))
+        self.lifecycle_live_p(buffer) && self.vm.minibuffer_window_buffer() != Some(buffer)
     }
     pub fn lifecycle_finish(&mut self, buffer: Value) -> Out {
         if !self.lifecycle_killable(buffer) {

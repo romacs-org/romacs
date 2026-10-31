@@ -280,8 +280,8 @@ impl Vm {
         }
         let mut overlays = Vec::new();
         let mut markers = Vec::new();
-        for (i, object) in self.objects.iter().enumerate() {
-            match object {
+        for i in self.referrers().to_vec() {
+            match &self.objects[i] {
                 Object::Marker(m) if m.buffer == value => markers.extend(m.anchor),
                 Object::Overlay(o) if o.buffer == value => overlays.push(Value::reference(i + 1, 0)),
                 _ => {}

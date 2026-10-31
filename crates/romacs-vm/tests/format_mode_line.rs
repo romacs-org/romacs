@@ -87,3 +87,14 @@ fn formats_as_pinned_gnu_on_a_terminal_frame() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// `%[' and `%]' show keyboard.c's command_loop_level, the recursive edits
+/// keyboard.el's `recursive-edit' counts, not minibuffers: a bracket per
+/// level, or GNU's ellipses past five (xdisp.c decode_mode_spec). This VM
+/// does not load keyboard.el, which declares the level in a session.
+#[test]
+fn recursion_brackets_follow_the_command_loop_level() {
+    let mut vm = romacs();
+    let actual = printed(&mut vm, r#"(progn (defvar romacs--command-loop-level) (mapcar (lambda (level) (let ((noninteractive nil) (romacs--command-loop-level level)) (substring-no-properties (format-mode-line "%[x%]")))) '(0 1 2 5 6)))"#);
+    assert_eq!(actual.as_deref(), Ok(r#"("x" "[x]" "[[x]]" "[[[[[x]]]]]" "[[[... x ...]]]")"#));
+}

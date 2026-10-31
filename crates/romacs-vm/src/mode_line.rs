@@ -44,6 +44,8 @@ pub(super) struct SpecState {
     pub column: usize,
     pub modified: bool,
     pub frame_cols: usize,
+    /// keyboard.c command_loop_level: recursive edits, not minibuffers.
+    pub command_loop_level: usize,
 }
 
 /// Field widths and precisions, after GNU's C `int` wrap, are clamped here:
@@ -603,8 +605,9 @@ impl Vm {
             '*' | '&' => if state.modified { "*" } else { "-" }.into(),
             '+' => if state.modified { "*" } else if read_only { "%" } else { "-" }.into(),
             '%' => "%".into(),
-            // command_loop_level: VM2 has no recursive edit.
-            '[' | ']' => String::new(),
+            '[' if state.command_loop_level > 5 => "[[[... ".into(),
+            ']' if state.command_loop_level > 5 => " ...]]]".into(),
+            '[' | ']' => c.to_string().repeat(state.command_loop_level),
             // A string's dashes are "infinitely long" as two.
             '-' if target != Target::Display => "--".into(),
             '-' => "-".repeat(if field <= 0 || field as usize > LOTS_OF_DASHES { 4 * state.frame_cols - 1 } else { LOTS_OF_DASHES }),

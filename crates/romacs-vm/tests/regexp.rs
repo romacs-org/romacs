@@ -88,3 +88,33 @@ fn match_string_after_actual_compaction() {
     };
     assert_eq!(actual, "(\"abc\" \"ab\" 1 4)", "moving-GC match-string");
 }
+
+/// Match positions over characters of every internal width (ASCII, two-
+/// to four-byte UTF-8, raw bytes), in strings and buffers, against pinned GNU.
+#[test]
+fn match_positions_over_mixed_widths_match_pinned_gnu() {
+    const CASES: &str = r###"
+(let ((s (concat "aé😀b" (string (unibyte-char-to-multibyte #xe9)) "λc😀d"))) (list (string-match "\\(😀\\)\\(.\\)" s) (match-data) (string-match "😀\\(.\\)" s 3) (match-data) (string-match "x" s) (string-match "d\\'" s)))
+(with-temp-buffer (insert "ab😀λ\n" (string (unibyte-char-to-multibyte #xff)) "😀c\nλd") (goto-char 2) (list (re-search-forward "\\(λ\\)\n\\(.\\)" nil t) (match-data t) (point) (re-search-backward "😀" nil t) (point) (looking-at "😀\\(.\\)") (match-data t) (progn (goto-char (point-max)) (re-search-backward "^\\(.\\)" nil t)) (match-data t) (re-search-forward "zz" nil t)))
+(with-temp-buffer (insert "aé😀λb😀\nλ😀c" (string (unibyte-char-to-multibyte #xe9)) "d😀") (goto-char (point-max)) (list (re-search-backward "😀" 8 t) (match-data t) (re-search-backward "😀\\(.\\)" 2 t) (match-data t) (progn (goto-char 12) (re-search-forward "d" (1- (point-max)) t)) (point) (progn (goto-char 13) (re-search-backward "λ" 9 t)) (point)))
+(let ((s "aé😀λb😀λc")) (list (string-match "λ" s -3) (match-data) (string-match "😀\\(.\\)" s -4) (match-data) (string-match "a" s -8) (condition-case e (string-match "a" s -9) (error e))))
+(with-temp-buffer (insert "é😀éé😀") (narrow-to-region 3 6) (goto-char (point-min)) (list (re-search-forward "é+" nil t) (match-data t) (re-search-forward "😀" nil t)))
+"###;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let mut failures = Vec::new();
+    for expression in CASES.lines().filter(|line| !line.is_empty()) {
+        let source = format!("(prin1-to-string (condition-case e {expression} (error (list 'signal e))))");
+        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = String::from_utf8(output.stdout).unwrap();
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let actual = vm.eval_source(&source).and_then(|v| v.display()).map(|printed| {
+            serde_json::from_str::<String>(&printed).unwrap_or(printed)
+        }).unwrap_or_else(|e| format!("ERR {e}"));
+        if actual != expected {
+            failures.push(format!("{expression}\n  GNU    {expected}\n  Romacs {actual}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
