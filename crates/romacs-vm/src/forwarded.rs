@@ -896,6 +896,12 @@ impl PerBuffer {
         }
         self.0[i] = Some(value);
     }
+    /// Forget every binding but those at KEPT, keeping the visit metadata.
+    pub(crate) fn retain_locals(&mut self, kept: &[u16]) {
+        for (i, value) in self.0.iter_mut().enumerate() {
+            if !kept.contains(&(i as u16)) { *value = None; }
+        }
+    }
     /// Forget one binding without disturbing the other values or visit metadata.
     /// Absence is the local flag: removing the value also removes that flag.
     pub(crate) fn clear_local(&mut self, i: u16) {
@@ -937,6 +943,11 @@ impl Vm {
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
     /// A fenced built-in variable is the forwarding the fence keeps; a
     /// fenced plain one is `Fwd::Fence`.
+    /// The interned slots of the per-buffer built-ins (DEFVAR_PER_BUFFER),
+    /// the only ones a `Fwd::Buffer' forwards.
+    pub(crate) fn per_buffer_slots(&self) -> Vec<usize> {
+        self.forwarded.buffer_vars.iter().filter_map(|&v| self.names.get(C_VARIABLES[v].name).copied()).collect()
+    }
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {

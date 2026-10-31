@@ -876,7 +876,7 @@ impl Vm {
     fn live_window_index(&mut self, id: u64) -> Option<usize> {
         self.referrers();
         let objects = &self.objects;
-        self.referrers.as_deref().unwrap_or_default().iter().copied()
+        self.referrers.as_ref().map_or(&[][..], |r| &r.windows).iter().copied()
             .find(|&i| matches!(&objects[i], Object::Window(w) if w.id == id && w.live()))
     }
     /// The root frame's live windows in tree order, as `window-list' from

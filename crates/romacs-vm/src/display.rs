@@ -545,8 +545,8 @@ impl Vm {
     pub fn display_apply_journal(&mut self) -> bool {
         let mut changed = false;
         self.referrers();
-        let (referrers, objects) = (self.referrers.as_deref().unwrap_or_default(), &mut self.objects);
-        for &i in referrers {
+        let (windows, objects) = (self.referrers.as_ref().map_or(&[][..], |r| &r.windows), &mut self.objects);
+        for &i in windows {
             if let Object::Window(w) = &mut objects[i]
                 && let Some(next) = w.pending_vscroll.take()
                 && next != w.vscroll_px

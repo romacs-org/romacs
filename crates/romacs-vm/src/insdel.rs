@@ -603,12 +603,15 @@ impl Vm {
             return Ok(Vec::new());
         }
         let family = self.text_family(index);
-        let buffers: Vec<Value> = if family.is_empty() { vec![index] } else { family }
-            .into_iter().map(|i| Value::reference(i + 1, 0)).collect();
+        let family = if family.is_empty() { vec![index] } else { family };
+        let buffers: Vec<Value> = family.iter().map(|&i| Value::reference(i + 1, 0)).collect();
+        // A marker that moved between the family's buffers is in both chains.
+        let mut members: Vec<usize> = family.into_iter().flat_map(|i| self.buffer_referrers(i)).collect();
+        members.sort_unstable();
+        members.dedup();
         let mut found = Vec::new();
-        self.referrers();
         let Object::Buffer(b) = &self.objects[index] else { unreachable!("buffer above") };
-        for &i in self.referrers.as_deref().unwrap_or_default() {
+        for i in members {
             let Object::Marker(m) = &self.objects[i] else { continue };
             if !buffers.contains(&m.buffer) { continue; }
             let Some(anchor) = m.anchor else { continue };
