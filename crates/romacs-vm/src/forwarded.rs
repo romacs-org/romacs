@@ -206,6 +206,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "fontification-functions", gnu: "xdisp.c:39011", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "force-load-messages", gnu: "lread.c:5746", kind: Kind::Bool(false) },
     CVariable { name: "forward-comment-function", gnu: "syntax.c:3822", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "frame-alpha-lower-limit", gnu: "frame.c:7421", kind: Kind::Lisp(Init::Fixnum(20)) },
     CVariable { name: "frame-inhibit-implied-resize", gnu: "frame.c:7638", kind: Kind::Lisp(Init::True) },
     CVariable { name: "frame-resize-pixelwise", gnu: "frame.c:7625", kind: Kind::Bool(false) },
     CVariable { name: "frame-size-history", gnu: "frame.c:7695", kind: Kind::Lisp(Init::Nil) },

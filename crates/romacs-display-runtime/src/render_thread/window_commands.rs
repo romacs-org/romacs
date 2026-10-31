@@ -34,7 +34,8 @@ impl RenderApp {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         for window in self.frame_windows.windows.values_mut() {
-            if window.render.apply_frame_opacity(&controls) {
+            let composites = window.lifecycle.native().is_some_and(|native| native.composites_alpha());
+            if window.render.apply_surface_frame_opacity(&controls, composites) {
                 window.request_redraw();
             }
         }

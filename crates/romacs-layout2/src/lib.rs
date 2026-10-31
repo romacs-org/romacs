@@ -55,6 +55,7 @@ impl LayoutEngine {
         let last = self.last.as_ref().expect("laid out above");
         let mut frame = last.frame.clone();
         stamp(&mut frame, presentation)?;
+        frame.background_alpha = snapshot.background_alpha;
         hide_cursors_off(&mut frame, snapshot);
         Ok((frame, last.ends.clone()))
     }
@@ -159,11 +160,12 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
     if child.id == 1 || child.windows.is_empty() { return Err("invalid child frame".into()); }
     let frame_snapshot = FrameSnapshot {
         font_selection: snapshot.font_selection, font_alternatives: snapshot.font_alternatives.clone(),
-        width: child.width, height: child.height, windows: child.windows.clone(), children: vec![],
+        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![],
     };
     let cursor = cursor.filter(|(id, _)| child.windows.iter().any(|w| w.snapshot.id == *id));
     let (mut frame, ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, resolver)?;
     frame.background = color(child.background);
+    frame.background_alpha = child.background_alpha;
     frame.border_width = child.border as f32;
     frame.border_color = color(child.border_color);
     frame.undecorated = true;

@@ -9,6 +9,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
     let mut snapshot = FrameSnapshot {
         font_selection: FontSelectionState::default(),
         font_alternatives: FontAlternativeState::default(),
+        background_alpha: 1.0,
         width: 400,
         height: 300,
         children: vec![], windows: vec![PlacedWindowSnapshot {
