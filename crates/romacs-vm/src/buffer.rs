@@ -135,6 +135,27 @@ mod model_tests {
         assert_eq!(entries, Value::integer(1).unwrap());
     }
 
+    /// `substring' finds a multibyte string's positions from its cursors:
+    /// slicing a string from start to end scans it about once, not once
+    /// per slice, and each slice holds the characters asked for.
+    #[test]
+    fn substring_walks_multibyte_strings_once() {
+        let mut vm = Vm::new();
+        let ok = vm.eval_source_raw(r#"
+          (setq s (apply #'string (let ((i 0) l) (while (< i 6000) (setq l (cons (aref [?é ?a ?字 4194303] (% i 4)) l) i (1+ i))) l))
+                i 0 ok t)
+          (while (< i 5990)
+            (let ((piece (substring s i (+ i 10))) (k 0))
+              (while (< k 10) (or (eq (aref piece k) (aref s (+ i k))) (setq ok nil)) (setq k (1+ k))))
+            (setq i (+ i 10)))
+          ok"#).unwrap();
+        assert_eq!(ok, Value::TRUE);
+        let slot = vm.slot("s");
+        let Some(Object::String(s) | Object::RawString(s)) = vm.object_if(vm.slots[slot].value) else { panic!("string") };
+        let scanned = s.scanned.get();
+        assert!(scanned > 0 && scanned < 4 * 6000, "{scanned}");
+    }
+
     #[test]
     fn killed_buffer_loses_symbol_local_bindings() {
         let mut vm = Vm::new();
