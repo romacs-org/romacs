@@ -107,8 +107,6 @@ C-x, M-x and C-g retain editor behavior.  C-c C-k sends Ctrl-C, and C-c C-c togg
 terminal input and Emacs navigation.  Terminal output is always protected."
   (interactive)
   (let* ((directory (or (and (boundp 'default-directory) default-directory) "/"))
-         (columns (max 2 (/ (window-pixel-width) (max 1 (frame-char-width)))))
-         (rows (max 1 (- (/ (window-pixel-height) (max 1 (frame-char-height))) 1)))
          (buffer (get-buffer-create (generate-new-buffer-name "*romacs-term*")))
          (completed nil))
     (unwind-protect
@@ -124,15 +122,18 @@ terminal input and Emacs navigation.  Terminal output is always protected."
                   major-mode 'romacs-term-mode mode-name "Term Input"
                   buffer-file-name nil buffer-read-only t
                   romacs-term-emacs-input nil)
-            (use-local-map romacs-term-mode-map)
-            (setq romacs-term-session (romacs--term-create (or shell romacs-term-shell "") directory columns rows))
+            (use-local-map romacs-term-mode-map))
+          ;; Shown first, so the session takes the size of the window that
+          ;; shows it (with a one-line mini-window), not the caller's.
+          (romacs-select-buffer buffer)
+          (with-current-buffer buffer
+            (setq romacs-term-session (romacs--term-create (or shell romacs-term-shell "") directory))
             (setq kill-buffer-hook '(romacs-term--close)
                   kill-buffer-query-functions '(romacs-term--kill-query)
                   mode-line-format '("  %b  |  " mode-name "  "
                                      (:eval (if (romacs-term-running-p) "running" "exited"))
                                      "  |  C-c C-c toggle · C-c C-k interrupt"))
             (run-hooks 'romacs-term-mode-hook))
-          (romacs-select-buffer buffer)
           (setq completed t)
           buffer)
       (unless completed

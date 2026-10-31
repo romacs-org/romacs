@@ -189,7 +189,9 @@ impl HostInput for GuiHost {
             shared.presentation = shared.presentation.checked_add(1).ok_or("presentation exhausted")?;
             shared.presentation
         };
+        let laying = std::time::Instant::now();
         let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, presentation, &frame)?;
+        let submitted = std::time::Instant::now();
         // Synchronous, like the oracle path: the prompt is on screen before
         // the evaluator blocks for its key.
         self.sender.wait_for_render(presentation, wait)?;
@@ -206,7 +208,11 @@ impl HostInput for GuiHost {
             let now = std::time::Instant::now();
             eprintln!("{}", serde_json::json!({"diagnostic":"prompt-key-latency","presentation":presentation,"units":"ns",
                 "command_ns":started.duration_since(read).as_nanos(),"redisplay_ns":now.duration_since(started).as_nanos(),
-                "key_to_render_ns":now.duration_since(read).as_nanos()}));
+                "key_to_render_ns":now.duration_since(read).as_nanos(),
+                // command_ns includes snapshot_ns; redisplay_ns is layout_ns, the
+                // wait for the previous frame, and render_ns.
+                "snapshot_ns":frame.snapshot.as_nanos(),"layout_ns":submitted.duration_since(laying).as_nanos(),
+                "render_ns":now.duration_since(submitted).as_nanos()}));
         }
         Ok(ends)
     }

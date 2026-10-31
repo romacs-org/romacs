@@ -138,18 +138,35 @@
   (let* ((leaves (romacs-gui-leaves (romacs-gui-root)))
          (tail (cdr (memq (selected-window) leaves))))
     (select-window (if tail (car tail) (car leaves)))))
+(defun romacs-gui--reset-new-normals (w)
+  "Clear the new normal sizes in W's subtree, as `window--resize-reset' does."
+  (set-window-new-normal w nil)
+  (let ((child (romacs-gui--window-child w)))
+    (while child
+      (romacs-gui--reset-new-normals child)
+      (setq child (window-next-sibling child)))))
 (defun romacs-gui-split (horizontal)
   (let* ((w (selected-window))
          (size (if horizontal (window-pixel-width w) (window-pixel-height w)))
-         (half (/ size 2)))
+         (half (/ size 2))
+         (parent (window-parent w))
+         ;; window.el `split-window': both halves share W's normal size, or
+         ;; a new parent's whole one.
+         (normal (if (and parent (not window-combination-limit)
+                          (if horizontal (window-left-child parent) (window-top-child parent)))
+                     (window-normal-size w horizontal)
+                   1.0)))
+    (romacs-gui--reset-new-normals (romacs-gui-root))
     (set-window-new-pixel w (- size half))
-    (split-window-internal w half horizontal 0.5)))
+    (set-window-new-normal w (* normal (/ (- size half) (float size))))
+    (split-window-internal w half horizontal (* normal (/ half (float size))))))
 (defun romacs-gui-split-below () (interactive) (romacs-gui-split nil))
 (defun romacs-gui-split-right () (interactive) (romacs-gui-split t))
 ;; Prepare every node along the deletion axis, redistributing the removed
 ;; pixels into the first surviving sibling. Internal nodes need preparation too.
 (defun romacs-gui-prepare-delete (w size horizontal omit)
   (set-window-new-pixel w size)
+  (set-window-new-normal w nil)
   (let ((child (romacs-gui--window-child w)))
     (when child
       (let ((same (eq horizontal (< (window-pixel-width child) (window-pixel-width w))))
@@ -162,9 +179,10 @@
         (let ((delta (- size sum)))
           (while children
             (setq child (car children))
-            (romacs-gui-prepare-delete child
-              (if same (+ (if horizontal (window-pixel-width child) (window-pixel-height child)) delta) size)
-              horizontal omit)
+            (let ((new (if same (+ (if horizontal (window-pixel-width child) (window-pixel-height child)) delta) size)))
+              (romacs-gui-prepare-delete child new horizontal omit)
+              ;; A child's normal size is its share of the combination.
+              (when same (set-window-new-normal child (/ new (float size)))))
             (setq delta 0 children (cdr children))))))))
 (defun romacs-gui-delete (w)
   (let ((parent (window-parent w)))
