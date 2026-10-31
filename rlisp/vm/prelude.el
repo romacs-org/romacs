@@ -13,24 +13,101 @@
 
 ;;; Code:
 
+;; GNU fns.c's mapping functions.  Each takes the length first, so an improper
+;; or circular list signals before FUNCTION runs, then walks as `mapcar1': a
+;; list until the length or a tail FUNCTION shortened, anything else by index.
+;; Each is its own loop, so a callback's frame sits directly on the mapping
+;; function's, as on GNU's subr.
+
+(defun romacs--map-indexed (sequence)
+  "Refuse, as fns.c does after `length', a non-list SEQUENCE no mapping
+function walks: a char-table is (wrong-type-argument listp SEQUENCE), and
+anything but a vector, string or bool-vector (a record) is mapcar1's
+(wrong-type-argument sequencep SEQUENCE)."
+  (cond ((or (vectorp sequence) (stringp sequence) (bool-vector-p sequence)))
+        ((char-table-p sequence) (signal 'wrong-type-argument (list 'listp sequence)))
+        (t (signal 'wrong-type-argument (list 'sequencep sequence)))))
+
 (defun mapcar (function sequence)
   "Apply FUNCTION to each element of SEQUENCE, and make a list of the results.
-GNU fns.c `Fmapcar'/`mapcar1': the length is taken first, so an improper or
-circular SEQUENCE signals before FUNCTION runs, and a list that FUNCTION
-shortens ends the walk early."
+GNU fns.c `Fmapcar'."
   (let ((n (length sequence))
         (i 0)
         (acc nil))
-    (if (or (consp sequence) (null sequence))
+    (if (listp sequence)
         (let ((tail sequence))
           (while (and (< i n) (consp tail))
             (setq acc (cons (funcall function (car tail)) acc))
             (setq tail (cdr tail))
             (setq i (1+ i))))
+      (romacs--map-indexed sequence)
       (while (< i n)
         (setq acc (cons (funcall function (aref sequence i)) acc))
         (setq i (1+ i))))
     (nreverse acc)))
+
+(defun mapc (function sequence)
+  "Apply FUNCTION to each element of SEQUENCE for side effects only.
+Return SEQUENCE.  GNU fns.c `Fmapc'."
+  (let ((n (length sequence))
+        (i 0))
+    (if (listp sequence)
+        (let ((tail sequence))
+          (while (and (< i n) (consp tail))
+            (funcall function (car tail))
+            (setq tail (cdr tail))
+            (setq i (1+ i))))
+      (romacs--map-indexed sequence)
+      (while (< i n)
+        (funcall function (aref sequence i))
+        (setq i (1+ i))))
+    sequence))
+
+(defun mapcan (function sequence)
+  "Apply FUNCTION to each element of SEQUENCE, and `nconc' the results.
+GNU fns.c `Fmapcan'."
+  (let ((n (length sequence))
+        (i 0)
+        (acc nil))
+    (if (listp sequence)
+        (let ((tail sequence))
+          (while (and (< i n) (consp tail))
+            (setq acc (cons (funcall function (car tail)) acc))
+            (setq tail (cdr tail))
+            (setq i (1+ i))))
+      (romacs--map-indexed sequence)
+      (while (< i n)
+        (setq acc (cons (funcall function (aref sequence i)) acc))
+        (setq i (1+ i))))
+    (romacs--nconc-list (nreverse acc))))
+
+(defun mapconcat (function sequence &optional separator)
+  "Apply FUNCTION to each element of SEQUENCE, and concat the results.
+SEPARATOR goes between each pair of results.  GNU fns.c `Fmapconcat':
+the symbol `identity' over a list or vector concatenates the elements
+without calling it, and a nil or empty SEPARATOR inserts nothing."
+  (let ((n (length sequence))
+        (i 0)
+        (parts nil))
+    (if (and (eq function 'identity) (or (consp sequence) (vectorp sequence)))
+        (setq parts (append sequence nil))
+      (if (listp sequence)
+          (let ((tail sequence))
+            (while (and (< i n) (consp tail))
+              (setq parts (cons (funcall function (car tail)) parts))
+              (setq tail (cdr tail))
+              (setq i (1+ i))))
+        (romacs--map-indexed sequence)
+        (while (< i n)
+          (setq parts (cons (funcall function (aref sequence i)) parts))
+          (setq i (1+ i))))
+      (setq parts (nreverse parts)))
+    (if (and separator (not (equal separator "")))
+        (let ((tail parts))
+          (while (cdr tail)
+            (setcdr tail (cons separator (cdr tail)))
+            (setq tail (cdr (cdr tail))))))
+    (romacs--concat-list parts)))
 
 
 ;;; Printing

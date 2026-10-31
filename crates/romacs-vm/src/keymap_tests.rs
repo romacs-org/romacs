@@ -92,6 +92,7 @@ fn keymap_inherited_prefixes_and_static_menu_bindings() {
 #[test]
 fn naming_global_map_before_first_keymap_use_still_installs_keymaps() {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude_raw().unwrap();
     check(&mut vm, "(progn (current-global-map) (mapc #'makunbound '(global-map esc-map ctl-x-map)) (list (keymapp (current-global-map)) (boundp 'global-map)))", "(t nil)");
     let mut vm = Vm::new();
     check(&mut vm, "(progn 'global-map (global-set-key [24 6] 'find) (key-binding [24 6]))", "find");

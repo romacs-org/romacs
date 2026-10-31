@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 
 fn setup() -> Vm {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
     vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el")).unwrap();
     vm
 }

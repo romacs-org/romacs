@@ -2064,12 +2064,22 @@ impl Vm {
             let n = Value::integer(argc as i64).unwrap();
             return Err(Some(self.condition("wrong-number-of-arguments", &[target, n])));
         }
-        let args: Vec<Value> = self.stack[start..start + argc].to_vec();
+        // Copied off the register stack, which the body may widen; on the
+        // native stack for the common argument counts.
+        let mut small = [Value::NIL; 8];
+        let heap;
+        let args: &[Value] = if argc <= small.len() {
+            small[..argc].copy_from_slice(&self.stack[start..start + argc]);
+            &small[..argc]
+        } else {
+            heap = self.stack[start..start + argc].to_vec();
+            &heap
+        };
         let run = |vm: &mut Vm| {
             let mut cx = Leaf::new(vm);
             match d.body {
-                Body::Leaf(f) => f(&mut cx, &args).map(Step::Done),
-                Body::Call(f) => f(&mut cx, &args),
+                Body::Leaf(f) => f(&mut cx, args).map(Step::Done),
+                Body::Call(f) => f(&mut cx, args),
             }
         };
         // The reader owns explicit roots and the engine publishes its suspended
