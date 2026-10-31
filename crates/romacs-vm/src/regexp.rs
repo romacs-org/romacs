@@ -42,41 +42,76 @@ pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
 struct Input {
     bytes: Vec<u8>,
     multibyte: bool,
+    /// Whether a character is a byte: unibyte or all-ASCII text.
+    bytewise: bool,
+    /// Known (byte, characters starting before it) pairs: the start, the
+    /// end, the caller's point and the last conversion. A conversion counts
+    /// characters only from the nearest, so one near point costs the
+    /// distance from it, not the length of the text.
+    anchors: std::cell::Cell<[(usize, usize); 4]>,
+}
+/// Internal multibyte text starts each character with one byte that is not
+/// a continuation byte (10xxxxxx), so counting those counts characters.
+fn starts_character(byte: u8) -> bool {
+    byte & 0xc0 != 0x80
+}
+fn characters_in(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|&&b| starts_character(b)).count()
 }
 impl Input {
+    /// BYTES, which hold CHARS characters.
+    fn new(bytes: Vec<u8>, chars: usize, multibyte: bool) -> Self {
+        let bytewise = !multibyte || bytes.is_ascii();
+        let end = (bytes.len(), chars);
+        Input { bytes, multibyte, bytewise, anchors: std::cell::Cell::new([(0, 0), end, end, end]) }
+    }
+    /// This input, knowing that CHARS characters start before BYTE.
+    fn anchored(self, byte: usize, chars: usize) -> Self {
+        let mut anchors = self.anchors.get();
+        anchors[2] = (byte, chars);
+        self.anchors.set(anchors);
+        self
+    }
     fn len(&self) -> usize {
-        if self.multibyte && !self.bytes.is_ascii() {
-            self.character(self.bytes.len())
-        } else {
-            self.bytes.len()
-        }
+        self.anchors.get()[1].1
     }
+    fn remember(&self, byte: usize, chars: usize) {
+        let mut anchors = self.anchors.get();
+        anchors[3] = (byte, chars);
+        self.anchors.set(anchors);
+    }
+    /// The byte where character CHARACTER starts, or the end.
     fn byte(&self, character: usize) -> usize {
-        if self.multibyte && !self.bytes.is_ascii() {
-            let mut byte = 0;
-            for _ in 0..character {
-                if byte == self.bytes.len() {
-                    break;
-                }
-                byte += crate::lstring::string_char(&self.bytes[byte..]).1;
-            }
-            byte
-        } else {
-            character
+        if self.bytewise {
+            return character;
         }
+        let (at, chars) = self.anchors.get().into_iter().min_by_key(|&(_, chars)| chars.abs_diff(character)).unwrap();
+        let byte = if character >= chars {
+            self.bytes[at..].iter().enumerate().filter(|&(_, &b)| starts_character(b))
+                .nth(character - chars).map_or(self.bytes.len(), |(i, _)| at + i)
+        } else {
+            self.bytes[..at].iter().enumerate().rev().filter(|&(_, &b)| starts_character(b))
+                .nth(chars - character - 1).map_or(0, |(i, _)| i)
+        };
+        if byte < self.bytes.len() {
+            self.remember(byte, character);
+        }
+        byte
     }
+    /// The characters that start before BYTE.
     fn character(&self, byte: usize) -> usize {
-        if self.multibyte && !self.bytes.is_ascii() {
-            let mut at = 0;
-            let mut count = 0;
-            while at < byte {
-                at += crate::lstring::string_char(&self.bytes[at..]).1;
-                count += 1;
-            }
-            count
-        } else {
-            byte
+        if self.bytewise {
+            return byte;
         }
+        let byte = byte.min(self.bytes.len());
+        let (at, chars) = self.anchors.get().into_iter().min_by_key(|&(at, _)| at.abs_diff(byte)).unwrap();
+        let counted = if byte >= at {
+            chars + characters_in(&self.bytes[at..byte])
+        } else {
+            chars - characters_in(&self.bytes[byte..at])
+        };
+        self.remember(byte, counted);
+        counted
     }
 }
 
@@ -383,10 +418,7 @@ impl Vm {
     }
     fn regexp_input(&self, v: Value) -> SearchResult<Input> {
         let view = self.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
-        Ok(Input {
-            bytes: view.bytes().to_vec(),
-            multibyte: view.is_multibyte(),
-        })
+        Ok(Input::new(view.bytes().to_vec(), view.chars, view.is_multibyte()))
     }
     fn regexp_int(&self, v: Value) -> SearchResult<i64> {
         v.as_integer().map_err(|_| Fault::Wrong("fixnump", v))
@@ -736,32 +768,30 @@ impl Vm {
         // search_command with RE false: the same search over STRING quoted,
         // which matches exactly where the literal does, with the same folding.
         if matches!(p, SearchForward | SearchBackward) {
-            pattern.bytes = pattern.bytes.iter().flat_map(|&b| {
+            let quoted: Vec<u8> = pattern.bytes.iter().flat_map(|&b| {
                 let special = b"[*.\\?+^$".contains(&b);
                 if special { vec![b'\\', b] } else { vec![b] }
             }).collect();
+            let chars = pattern.len() + quoted.len() - pattern.bytes.len();
+            pattern = Input::new(quoted, chars, pattern.multibyte);
         }
         let index = self.buffer_index()?;
         let (input, base_byte, base_char, original) = match &self.objects[index] {
             Object::Buffer(t) => {
                 let r = t.accessible();
+                let (first, last, point) = (t.char_of_byte(r.start)?.0, t.char_of_byte(r.end)?.0, t.char_of_byte(t.point)?.0);
                 (
-                    Input {
-                        bytes: t.bytes()[r.start.0..r.end.0].to_vec(),
-                        multibyte: true,
-                    },
+                    Input::new(t.bytes()[r.start.0..r.end.0].to_vec(), last - first, true)
+                        .anchored(t.point.0 - r.start.0, point - first),
                     r.start.0,
-                    t.char_of_byte(r.start)?.0 + 1,
+                    first + 1,
                     t.point.0 - r.start.0,
                 )
             }
             Object::ByteBuffer(t) => {
                 let r = &t.restriction;
                 (
-                    Input {
-                        bytes: t.bytes[r.start.0..r.end.0].to_vec(),
-                        multibyte: false,
-                    },
+                    Input::new(t.bytes[r.start.0..r.end.0].to_vec(), r.end.0 - r.start.0, false),
                     r.start.0,
                     r.start.0 + 1,
                     t.point.0 - r.start.0,
