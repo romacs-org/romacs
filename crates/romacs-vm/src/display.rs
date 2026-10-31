@@ -461,14 +461,19 @@ impl Vm {
             if !self.frame_shown(frame) { continue; }
             let (x, y) = self.frame_origin(frame)?;
             let f = self.frame(frame)?;
-            let (width, height, border, root) = (f.width, f.height, f.border, f.root);
+            let (width, height, border, root, hosts) = (f.width, f.height, f.border, f.root, f.hosts_minibuffer.is_some());
             let default = self.display_face("default")?;
             let edge = self.display_face("child-frame-border")?;
             // An unspecified border face draws in the default foreground.
             let border_color = if edge.background == default.background { default.foreground } else { edge.background };
             let background = self.frame_hex_parameter(frame, "background-color")?.unwrap_or(default.background);
-            let leaves = self.leaf_ids(root)?;
-            let windows = self.snapshot_leaves(leaves)?.into_iter().map(place).collect();
+            let mut windows: Vec<_> = self.snapshot_leaves(self.leaf_ids(root)?)?.into_iter().map(place).collect();
+            // The hosted mini-window is placed in the host frame; drawn in this one.
+            if hosts {
+                let mini = self.window(self.mini_window())?.id;
+                let local = |n: u32, origin: i32| u32::try_from(i64::from(n) - i64::from(origin)).unwrap_or(0);
+                windows.extend(self.snapshot_leaves(vec![mini])?.into_iter().map(|(wx, wy, snapshot)| place((local(wx, x), local(wy, y), snapshot))));
+            }
             children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
                                                                      background, windows });
         }
@@ -791,7 +796,7 @@ impl Vm {
         Ok(if !continued { LineWrap::Truncate } else if var("word-wrap")? == Value::NIL { LineWrap::Window } else { LineWrap::Word })
     }
     /// WINDOW's line wrap for BUFFER.
-    fn window_line_wrap(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::LineWrap> {
+    pub(super) fn window_line_wrap(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::LineWrap> {
         let w = self.window(window)?;
         let (x, width) = (w.x, w.width);
         let root = self.root_of(window)?;

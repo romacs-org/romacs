@@ -158,14 +158,17 @@ before- and after-strings appear.  Returns (TEXT . RUNS), each run
 
 (defun romacs-mcp-session--layers (faces limit)
   "The visible child frames shown over the frame, oldest first: each one's
-root window as `windows' reports it, with the frame's place in its parent
-and its text size in columns and lines."
+root window as `windows' reports it, with the frame's place in its parent,
+its text size in columns and lines, and whether it hosts the minibuffer
+window."
   (vconcat
    (cl-loop for frame in (visible-frame-list) for i from 0
             when (frame-parent frame)
             collect (let ((layer (romacs-mcp-session--window (frame-root-window frame) i faces limit)))
                       (puthash "position" (vector (car (frame-position frame)) (cdr (frame-position frame))) layer)
                       (puthash "size" (vector (frame-text-cols frame) (frame-text-lines frame)) layer)
+                      ;; It also shows the minibuffer window (romacs-complete.el).
+                      (puthash "minibuffer" (eq frame (romacs--minibuffer-host)) layer)
                       layer))))
 
 (defun romacs-mcp-session--tree (window windows)

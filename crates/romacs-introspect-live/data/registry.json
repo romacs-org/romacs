@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "29c147a85c75e5fa3a31bd2aa81df105b8072632bf043c879add4ffb4a24afc1",
+    "input_hash": "4c718207222c12113a99732d0055fd015b787eecb5ac47b272eb43a478cf88f1",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 5361
+    "vm2_universe": 5364
   },
   "schema": 2,
   "vm2": {
-    "count": 1162,
+    "count": 1164,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -779,6 +779,7 @@
       "romacs--decode-output",
       "romacs--frozen-regions",
       "romacs--get-process",
+      "romacs--host-minibuffer",
       "romacs--insert-file-contents-format",
       "romacs--insert-file-contents-undecide",
       "romacs--insert-printed",
@@ -805,6 +806,7 @@
       "romacs--keymap-generation",
       "romacs--kill-buffer-finish",
       "romacs--local-toplevel-cell",
+      "romacs--minibuffer-host",
       "romacs--nconc-list",
       "romacs--note-command-point",
       "romacs--oclosure-type",

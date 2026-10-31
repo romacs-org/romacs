@@ -50,7 +50,8 @@ PROBE = '''
                                            (completion--field-metadata (minibuffer-prompt-end)))
                                   :fido (bound-and-true-p fido-mode)
                                   :icomplete (bound-and-true-p icomplete-mode)
-                                  :vertical (bound-and-true-p icomplete-vertical-mode)))
+                                  :vertical (bound-and-true-p icomplete-vertical-mode)
+                                  :romacs-complete (bound-and-true-p romacs-complete-mode)))
                            nil %(path)s nil 'quiet)))
                       90 t)))
 '''

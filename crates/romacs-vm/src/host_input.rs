@@ -22,6 +22,9 @@ use crate::{CommandEvent, Result, Value, Vm, threaded};
 pub struct HostFrame {
     pub frame: romacs_layout_input::FrameSnapshot,
     pub selected: u64,
+    /// The minibuffer window's id: its snapshot is the frame's last
+    /// window, or a child frame's when one hosts it.
+    pub minibuffer: u64,
     pub snapshot: std::time::Duration,
 }
 
@@ -171,7 +174,8 @@ impl Vm {
                 let snapshot = crate::host::monotonic().saturating_duration_since(started);
                 let selected = self.selected_window_value()?;
                 let selected = self.window(selected)?.id;
-                let ends = host.redisplay(HostFrame { frame, selected, snapshot })?;
+                let minibuffer = self.window(self.mini_window())?.id;
+                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot })?;
                 self.display_apply_layout(&ends)?;
                 redraw = false;
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }

@@ -6,7 +6,7 @@
 ;; the root frame.  Showing, moving or hiding it changes no window of the
 ;; frame below and no terminal's size (DIVERGENCES.md VM2-CHILD-FRAME).
 ;; Where a layer goes is policy, here: a full-width strip directly above
-;; the minibuffer line by default, a centred box, or below point.  A
+;; the minibuffer line (or the minibuffer's own layer) by default, a centred box, or below point.  A
 ;; layer's frame is kept for its buffer's next show and deleted once the
 ;; buffer is killed.
 ;; `romacs-layers' lists what is shown, for agents and tests.  The
@@ -88,6 +88,15 @@
           (forward-line 1))
         (cons (max columns 1) (max lines 1))))))
 
+(defun romacs-layer--bottom (root)
+  "Where a `bottom' layer of ROOT ends: above the minibuffer line, or above
+the minibuffer's layer when a child frame hosts the minibuffer window
+\(`romacs--host-minibuffer'), else at ROOT's bottom edge."
+  (let ((host (romacs--minibuffer-host)))
+    (cond ((null host) (window-pixel-top (minibuffer-window root)))
+          ((frame-visible-p host) (cdr (frame-position host)))
+          (t (frame-text-height root)))))
+
 (defun romacs-layer--placement (position columns lines border)
   "Where POSITION puts a layer of COLUMNS by LINES with BORDER pixels:
 \(LEFT TOP WIDTH HEIGHT), its outer position in the root frame and its
@@ -100,7 +109,7 @@ text size, in pixels."
          (outer-height (+ height (* 2 border))))
     (pcase position
       ('bottom
-       (let ((top (- (window-pixel-top (minibuffer-window root)) outer-height)))
+       (let ((top (- (romacs-layer--bottom root) outer-height)))
          (list 0 (max 0 top) frame-width height)))
       ('center
        (let ((width (min width (- frame-width (* 4 cw)))))
@@ -150,7 +159,8 @@ columns and lines."
            collect (list :frame frame
                          :buffer (window-buffer (frame-root-window frame))
                          :position (frame-position frame)
-                         :size (cons (frame-text-cols frame) (frame-text-lines frame)))))
+                         :size (cons (frame-text-cols frame) (frame-text-lines frame))
+                         :minibuffer (eq frame (romacs--minibuffer-host)))))
 
 ;; which-key's `custom' popup type (which-key.el `which-key-custom-*').
 

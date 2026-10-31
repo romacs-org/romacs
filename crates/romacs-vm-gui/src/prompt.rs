@@ -200,7 +200,11 @@ impl HostInput for GuiHost {
             "{}",
             serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
                 "selected":frame.selected,
-                "minibuffer":frame.frame.windows.last().map(|w| w.snapshot.text.utf8.clone()),
+                "minibuffer":frame.frame.windows.iter().chain(frame.frame.children.iter().flat_map(|c| &c.windows))
+                    .find(|w| w.snapshot.id == frame.minibuffer).map(|w| w.snapshot.text.utf8.clone()),
+                // Each child frame's other windows' text: the layers shown.
+                "layers":frame.frame.children.iter().map(|c| c.windows.iter().filter(|w| w.snapshot.id != frame.minibuffer)
+                    .map(|w| w.snapshot.text.utf8.clone()).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "glyphs":glyphs})
         );
         // The key's command and hooks ran before this redisplay began.

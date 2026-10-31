@@ -87,6 +87,24 @@ pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings:
     merged
 }
 
+/// The rows LINE takes in rows of WIDTH columns: a glyph that does not
+/// fit in what is left of a row starts the next. A TAB goes to the next
+/// tab stop of the line, a control character takes two (^X), others
+/// their Unicode width.
+fn rows(line: &str, width: usize) -> usize {
+    let (mut rows, mut at, mut column) = (1, 0, 0);
+    for c in line.chars() {
+        let glyph = match c {
+            '\t' => 8 - column % 8,
+            '\u{0}'..='\u{1f}' | '\u{7f}' => 2,
+            _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(1),
+        };
+        if at > 0 && at + glyph > width { (rows, at) = (rows + 1, 0); }
+        (at, column) = (at + glyph, column + glyph);
+    }
+    rows
+}
+
 /// How a string character displays with `ctl-arrow' at COLUMN: a tab as
 /// spaces to the next tab stop, other controls as ^X, a raw byte as \OOO.
 fn displayed(c: u32, column: usize, out: &mut String) {
@@ -181,7 +199,8 @@ impl Vm {
     }
 
     /// xdisp.c resize_mini_window: give the mini-window the lines its
-    /// display needs, within `max-mini-window-height', as
+    /// display needs (each line's rows as its window wraps it), within
+    /// `max-mini-window-height', as
     /// `resize-mini-windows' allows: nil never resizes; `grow-only' grows
     /// the active minibuffer and otherwise fits the echo area exactly; t
     /// always fits exactly. Display starts at the beginning unless
@@ -193,7 +212,7 @@ impl Vm {
         let mode = value(self, "resize-mini-windows")?;
         if value(self, "inhibit-redisplay")? != Value::NIL { return Ok(false); }
         let adhoc = value(self, "redisplay-adhoc-scroll-in-resize-mini-windows")? != Value::NIL;
-        let (buffer, marker) = { let w = self.window(mini)?; (w.buffer, w.start) };
+        let (buffer, marker, width) = { let w = self.window(mini)?; (w.buffer, w.start, w.width) };
         let Object::Buffer(b) = self.object(buffer)? else { return Err("text buffer required".into()) };
         let (text, empty) = (b.as_str().to_owned(), b.accessible().is_empty());
         let begv = b.char_of_byte(b.accessible().start)?.0 as i64 + 1;
@@ -209,6 +228,11 @@ impl Vm {
         }.clamp(i64::from(unit), i64::from(total.max(unit)));
         let max_lines = (max / i64::from(unit)) as usize;
         let lines = spliced.text.split('\n').count();
+        // A continued row ends a column short, for the `\\' glyph (layout2).
+        let column = self.window_state.column.max(1);
+        let row = (width.saturating_sub(column) / column).max(1) as usize;
+        let wrapped = self.window_line_wrap(mini, buffer)? != romacs_layout_input::LineWrap::Truncate;
+        let rows: usize = if wrapped { spliced.text.split('\n').map(|line| rows(line, row)).sum() } else { lines };
         if lines > max_lines && adhoc {
             // Start at the display line that shows the last MAX_LINES.
             let line_start = spliced.text.match_indices('\n').nth(lines - max_lines - 1).map_or(0, |(i, _)| i + 1);
@@ -217,7 +241,7 @@ impl Vm {
             let start = b.char_of_byte(coordinates::ByteOffset(byte))?.0 as i64 + 1;
             self.set_window_start_if_moved(marker, buffer, start)?;
         }
-        let height = lines.min(max_lines).max(1) as u32;
+        let height = rows.min(max_lines).max(1) as u32;
         let old = self.window_state.mini_lines;
         // grow-only's shrink to one line, then the next cycle's growth
         // (window.c shrink_mini_window), in one step.
