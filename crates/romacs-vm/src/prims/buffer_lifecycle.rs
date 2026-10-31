@@ -56,6 +56,12 @@ fn kill_buffer(cx; optional arg: Value) -> Step {
     lifecycle_lisp(cx, "romacs--kill-buffer", vec![buffer, inhibit])
 }}
 
+defsubr! { name = "other-buffer", gnu = "buffer.c:1758", effect = Global,
+fn other_buffer(cx; optional buffer: Value, visible_ok: Value, frame: Value) -> Step {
+    let frame = cx.windows().decode_live_frame(frame)?;
+    lifecycle_lisp(cx, "romacs--other-buffer", vec![buffer, visible_ok, frame])
+}}
+
 defsubr! { name = "make-indirect-buffer", gnu = "buffer.c:807", effect = Global,
 fn make_indirect_buffer(cx, base_buffer: Value, name: Value; optional clone: Value, inhibit_buffer_hooks: Value) -> Step {
     let inhibit = inhibit_buffer_hooks != Value::NIL;

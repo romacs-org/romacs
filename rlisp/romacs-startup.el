@@ -106,8 +106,10 @@
           (romacs-gui-echo "Buffer killed")))
     (romacs-gui-live-visits)))
 (defun romacs-gui-quit ()
+  "Quit, asking first while a file buffer is modified (any visit, as
+`save-buffers-kill-emacs' asks) or a terminal runs."
   (interactive)
-  (let ((buffers (romacs-gui-live-visits)) (dirty nil))
+  (let ((buffers (buffer-list)) (dirty nil))
     (while buffers
       (with-current-buffer (car buffers)
         (when (and buffer-file-name (romacs-gui-dirty-p)) (setq dirty t)))

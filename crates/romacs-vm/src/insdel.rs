@@ -47,12 +47,11 @@ pub(crate) struct ChangeSlots {
     filename: usize,
     mark_active: usize,
     select_regions: usize,
-    combine: usize,
     deactivate: usize,
     undoable: usize,
     pub(crate) inhibit_record_point: usize,
 }
-romacs_snapshot::snapshot_struct!(ChangeSlots { read_only, inhibit_read_only, inhibit_hooks, before, after, first, truename, filename, mark_active, select_regions, combine, deactivate, undoable, inhibit_record_point });
+romacs_snapshot::snapshot_struct!(ChangeSlots { read_only, inhibit_read_only, inhibit_hooks, before, after, first, truename, filename, mark_active, select_regions, deactivate, undoable, inhibit_record_point });
 
 /// An insertion that may skip the bracket (`Vm::quiet_insertion'): whether
 /// modification hooks are inhibited, and buffer, point and modified state
@@ -133,7 +132,6 @@ impl Vm {
             filename: self.slot("buffer-file-name"),
             mark_active: self.slot("mark-active"),
             select_regions: self.slot("select-active-regions"),
-            combine: self.slot("combine-after-change-calls"),
             deactivate: self.slot("deactivate-mark"),
             undoable: self.slot("undo-auto--undoable-change"),
             inhibit_record_point: self.slot("undo-inhibit-record-point"),
@@ -212,12 +210,10 @@ impl Vm {
         }
         let unmodified = !self.buffer_state(buffer).map_err(Fault::Error)?.modified();
         let after = self.change_value(slots.after)?;
-        let before = self.change_value(slots.before)?;
-        self.refuse_combined_after_change(before, after, overlays)?;
         prepared.after = after != Value::NIL;
         prepared.before |= !prepared.modification_hooks.is_empty()
             || prepared.overlays
-            || before != Value::NIL
+            || self.change_value(slots.before)? != Value::NIL
             || (unmodified && self.change_value(slots.first)? != Value::NIL)
             // lock_file for a visited file's first change.
             || (unmodified && self.change_locks_file(buffer)?)
@@ -238,31 +234,6 @@ impl Vm {
             Ok(!matches!(value, Value::NIL | Value::UNBOUND))
         };
         Ok(names(slots.truename)? && names(slots.filename)?)
-    }
-
-    /// signal_after_change defers to combine-after-change-calls, which VM2
-    /// does not implement, unless the buffer has OVERLAYS: refuse before
-    /// anything changes (VM2-EDIT-HOOKS1).
-    pub(crate) fn refuse_combined_after_change(&mut self, before: Value, after: Value, overlays: bool) -> Faulty<()> {
-        let slots = self.change_slots();
-        if after == Value::NIL || overlays || self.change_value(slots.combine)? == Value::NIL {
-            return Ok(());
-        }
-        // GNU still defers with only syntax-ppss-flush-cache before a change.
-        let flush = self.intern("syntax-ppss-flush-cache");
-        let deferring = before == Value::NIL
-            || self.cons_pair(before).is_ok_and(|(head, tail)| {
-                head == Value::TRUE && self.cons_pair(tail).is_ok_and(|(f, rest)| f == flush && rest == Value::NIL)
-            }) && self.default_value_of(slots.before) == Value::NIL;
-        if deferring {
-            return Err(Fault::Error("VM2 combine-after-change-calls deferral is not implemented".into()));
-        }
-        Ok(())
-    }
-
-    fn default_value_of(&self, slot: usize) -> Value {
-        let value = self.slots[slot].value;
-        if value == Value::UNBOUND { Value::NIL } else { value }
     }
 
     /// verify_interval_modification for an insertion at POSITION (byte AT):

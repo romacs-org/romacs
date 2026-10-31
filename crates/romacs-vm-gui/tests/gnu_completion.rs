@@ -4,7 +4,8 @@
 //! with GNU's `execute-extended-command`, `read-file-name` and `read-buffer`;
 //! icomplete shows the candidates in the mini-window as an overlay string,
 //! the mini-window grows to hold them and shrinks back when the minibuffer
-//! exits. The GUI delivers Return as C-j (DIVERGENCES VM2-HOSTIN1).
+//! exits; GNU's `find-file-noselect' visits. The GUI delivers Return as C-j
+//! (DIVERGENCES VM2-HOSTIN1).
 #[path = "../src/command.rs"]
 mod command;
 #[path = "../src/echo.rs"]
@@ -92,6 +93,11 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
     std::fs::create_dir_all(root.join("work/sub")).unwrap();
     std::fs::create_dir_all(root.join("home/config")).unwrap();
     std::fs::write(root.join("work/sub/notes.txt"), "notes\n").unwrap();
+    for dir in ["a", "b"] {
+        std::fs::create_dir_all(root.join("work/uq").join(dir)).unwrap();
+        std::fs::write(root.join("work/uq").join(dir).join("notes.org"), "* note\n").unwrap();
+    }
+    std::fs::write(root.join("work/uq/raw.txt"), "raw\n").unwrap();
     let work = format!("{}/", root.join("work").display());
     let home = root.join("home");
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
@@ -130,6 +136,19 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         report.push(printed(&mut vm, &format!("(list (file-relative-name buffer-file-name {}) (buffer-string))", quoted(&work))));
         report.push(format!("{} {}", tallest > LINE, mini_height(&mut vm) == LINE));
         report.push(texts.iter().any(|t| t.contains(&format!("Find file: {work}s/n \nsub/notes.txt"))).to_string());
+        // GNU's files.el visits: uniquify names, a visited file is found
+        // again, and closing the window asks before losing an edit to it,
+        // a literal visit's too.
+        report.push(printed(&mut vm, &format!("(let* ((default-directory {}) (a (find-file-noselect \"uq/a/notes.org\")) (b (find-file-noselect \"uq/b/notes.org\")))
+            (list (buffer-name a) (buffer-name b) (eq a (find-file-noselect \"uq/b/../a/notes.org\"))
+                  (mapcar (lambda (buffer)
+                            (with-current-buffer buffer (insert \"edit\"))
+                            (setq romacs-gui-quit-requested nil)
+                            (with-current-buffer \"*scratch*\" (romacs-gui-quit))
+                            (prog1 (list romacs-gui-quit-requested (car romacs-gui-pending))
+                              (romacs-gui-answer-no)
+                              (with-current-buffer buffer (set-buffer-modified-p nil))))
+                          (list a (find-file-noselect \"uq/raw.txt\" nil t)))))", quoted(&work))));
 
         // C-x b: the default in the prompt, completion over the buffers.
         vm.eval_source("(get-buffer-create \"alpha-kt-buffer\")").unwrap();
@@ -146,6 +165,7 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         "((basic flex) t one-column historical ((file (styles partial-completion))) 0.15 t t t t t icomplete-force-complete grow-only)",
         "None", "(ran \"gc-probe-command\")", "true true", "true", "true",
         "None", r#"("sub/notes.txt" "notes\n")"#, "true true", "true",
+        r#"("notes.org<a>" "notes.org<b>" t ((nil quit) (nil quit)))"#,
         "None", "(\"alpha-kt-buffer\" \"alpha-kt-buffer\")", "true",
     ]);
 }
