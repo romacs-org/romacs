@@ -499,6 +499,10 @@ impl Properties {
         }
         runs
     }
+    /// Whether any text has the property KEY.
+    pub fn has_key(&self, key: &str) -> bool {
+        self.layers.contains_key(key)
+    }
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }

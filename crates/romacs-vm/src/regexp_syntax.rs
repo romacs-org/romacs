@@ -3,7 +3,6 @@
 use super::*;
 use crate::char_table::CharTable;
 use regex::{SyntaxClass, SyntaxLookup};
-use std::collections::BTreeMap;
 
 pub(crate) fn parse_syntax_descriptor(description: &crate::lstring::OwnedStr) -> std::result::Result<Option<(i64, Option<u32>)>, String> {
     let first = description.bytes.first().copied().unwrap_or(0);
@@ -144,12 +143,12 @@ mod tests {
     }
 }
 
-/// The syntax-table text properties of one search subject, by byte offset,
-/// and the table the search reads.
+/// The table a search reads and, under `parse-sexp-lookup-properties',
+/// the subject whose `syntax-table' properties override it.
 #[derive(Clone)]
 pub(crate) struct SyntaxSource {
     table: Value,
-    properties: BTreeMap<usize, SyntaxClass>,
+    subject: Option<PropertySubject>,
 }
 impl SyntaxSource {
     /// The syntax table the search reads.
@@ -158,12 +157,20 @@ impl SyntaxSource {
     }
 }
 
+/// A string or buffer whose `syntax-table' properties a search reads, and
+/// the offset in it of the engine's first byte.
+#[derive(Clone, Copy)]
+struct PropertySubject {
+    object: Value,
+    base: usize,
+}
+
 pub(crate) struct VmSyntax<'a> {
     vm: &'a Vm,
     table: Value,
     /// Memo of the ASCII classes this call has read.
     ascii: [std::cell::Cell<Option<SyntaxClass>>; 128],
-    properties: BTreeMap<usize, SyntaxClass>,
+    subject: Option<PropertySubject>,
     id: usize,
 }
 impl<'a> VmSyntax<'a> {
@@ -172,11 +179,13 @@ impl<'a> VmSyntax<'a> {
         // A fresh identity per call keeps the engine's TLS caches from
         // confusing separate VMs or table contents.
         static NEXT: AtomicUsize = AtomicUsize::new(1);
+        // A subject without `syntax-table' properties reads the table alone.
+        let subject = source.subject.filter(|s| vm.has_syntax_properties(s.object));
         Self {
             vm,
             table: source.table,
             ascii: std::array::from_fn(|_| std::cell::Cell::new(None)),
-            properties: source.properties,
+            subject,
             id: NEXT.fetch_add(1, Ordering::Relaxed),
         }
     }
@@ -187,11 +196,17 @@ impl<'a> VmSyntax<'a> {
             None => lookup(),
         }
     }
+    /// The class a `syntax-table' property gives CODE at POS, if any.
+    fn property_class(&self, code: u32, pos: usize) -> Option<SyntaxClass> {
+        let s = self.subject?;
+        let value = self.vm.syntax_property(s.object, s.base + pos)?;
+        self.vm.regexp_property_class(value, code)
+    }
 }
 impl VmSyntax<'_> {
     /// `char_syntax_at` for a character code, raw bytes included.
     pub(crate) fn code_syntax_at(&self, code: u32, pos: usize) -> SyntaxClass {
-        self.properties.get(&pos).copied().unwrap_or_else(|| self.class(code))
+        self.property_class(code, pos).unwrap_or_else(|| self.class(code))
     }
 }
 impl SyntaxLookup for VmSyntax<'_> {
@@ -199,13 +214,13 @@ impl SyntaxLookup for VmSyntax<'_> {
         self.class(c as u32)
     }
     fn char_syntax_at(&self, c: char, pos: usize) -> SyntaxClass {
-        self.properties.get(&pos).copied().unwrap_or_else(|| self.char_syntax(c))
+        self.code_syntax_at(c as u32, pos)
     }
     fn emacs_char_syntax(&self, c: regex::emacs_char::EmacsChar) -> SyntaxClass {
         self.class(c.code())
     }
     fn emacs_char_syntax_at(&self, c: regex::emacs_char::EmacsChar, pos: usize) -> SyntaxClass {
-        self.properties.get(&pos).copied().unwrap_or_else(|| self.emacs_char_syntax(c))
+        self.code_syntax_at(c.code(), pos)
     }
     fn char_has_category(&self, c: char, cat: u8) -> bool {
         regex::default_char_has_category(c, cat)
@@ -223,7 +238,11 @@ impl SyntaxLookup for VmSyntax<'_> {
         0
     }
     fn position_dependent(&self) -> bool {
-        !self.properties.is_empty()
+        self.subject.is_some()
+    }
+    fn plain_syntax_until(&self, pos: usize) -> usize {
+        let Some(s) = self.subject else { return usize::MAX };
+        self.vm.syntax_property_free_until(s.object, s.base + pos).map_or(usize::MAX, |end| end.saturating_sub(s.base).max(pos))
     }
 }
 impl Vm {
@@ -372,6 +391,40 @@ impl Vm {
             .unwrap_or(SyntaxClass::Whitespace);
         Some(class)
     }
+    /// Whether OBJECT, a search subject, has any `syntax-table' property.
+    fn has_syntax_properties(&self, object: Value) -> bool {
+        match self.object_if(object) {
+            Some(Object::Buffer(t)) => t.properties.has_key("syntax-table"),
+            Some(Object::String(s) | Object::RawString(s)) => s.properties.has_key("syntax-table"),
+            Some(Object::ByteBuffer(t)) => t.properties.values().any(|p| p.contains_key("syntax-table")),
+            _ => false,
+        }
+    }
+    /// OBJECT's `syntax-table' property at byte AT.
+    fn syntax_property(&self, object: Value, at: usize) -> Option<Value> {
+        match self.object_if(object)? {
+            Object::Buffer(t) => t.properties.get_property(ByteOffset(at), "syntax-table"),
+            Object::String(s) | Object::RawString(s) => s.properties.get_property(ByteOffset(at), "syntax-table"),
+            Object::ByteBuffer(t) => t.properties.get(&ByteOffset(at)).and_then(|p| p.get("syntax-table")).copied(),
+            _ => None,
+        }
+    }
+    /// The first byte at or after AT with a `syntax-table' property in
+    /// OBJECT, or None when none follows.
+    fn syntax_property_free_until(&self, object: Value, at: usize) -> Option<usize> {
+        let next = |p: &crate::properties::Properties, len: usize| {
+            if p.get_property(ByteOffset(at), "syntax-table").is_some() { return Some(at); }
+            let next = p.next_single_change(ByteOffset(at), "syntax-table", ByteOffset(len)).0;
+            (next < len).then_some(next)
+        };
+        match self.object_if(object)? {
+            Object::Buffer(t) => next(&t.properties, t.len_bytes()),
+            Object::String(s) | Object::RawString(s) => next(&s.properties, s.bytes().len()),
+            Object::ByteBuffer(t) => t.properties.range(ByteOffset(at)..)
+                .find(|(_, p)| p.contains_key("syntax-table")).map(|(b, _)| b.0),
+            _ => None,
+        }
+    }
     fn regexp_property_class(&self, value: Value, code: u32) -> Option<SyntaxClass> {
         if self.regexp_syntax_table(value).is_ok() {
             return self.regexp_table_class(value, code);
@@ -394,61 +447,18 @@ impl Vm {
             }
             table = t.parent;
         }
-        let mut properties = BTreeMap::new();
-        if self.slots[self.names["parse-sexp-lookup-properties"]].value != Value::NIL {
+        // parse-sexp-lookup-properties: the subject's `syntax-table'
+        // properties, read where the engine asks (GNU UPDATE_SYNTAX_TABLE).
+        let subject = (self.slots[self.names["parse-sexp-lookup-properties"]].value != Value::NIL).then(|| {
             let object = subject.unwrap_or(self.slots[self.buffer_slot].value);
-            let mut record = |offset, code, value: Option<Value>| {
-                if let Some(class) = value.and_then(|v| self.regexp_property_class(v, code)) {
-                    properties.insert(offset, class);
-                }
+            let base = match self.object_if(object) {
+                Some(Object::Buffer(t)) => t.accessible().start.0,
+                Some(Object::ByteBuffer(t)) => t.restriction.start.0,
+                _ => 0,
             };
-            match self.object_if(object) {
-                Some(Object::Buffer(t)) => {
-                    let r = t.accessible();
-                    for (offset, c) in t.as_str()[r.start.0..r.end.0].char_indices() {
-                        // A raw byte's code, not its placeholder's.
-                        let code = t.character_at(ByteOffset(r.start.0 + offset)).ok().flatten().map_or(u32::from(c), |code| code as u32);
-                        record(
-                            offset,
-                            code,
-                            t.properties
-                                .get_property(ByteOffset(r.start.0 + offset), "syntax-table"),
-                        );
-                    }
-                }
-                Some(Object::String(s) | Object::RawString(s)) => {
-                    let mut offset = 0;
-                    for c in s.view().chars() {
-                        record(
-                            offset,
-                            c,
-                            s.properties
-                                .get_property(ByteOffset(offset), "syntax-table"),
-                        );
-                        offset += if s.is_multibyte() {
-                            crate::lstring::string_char(&s.bytes()[offset..]).1
-                        } else {
-                            1
-                        };
-                    }
-                }
-                Some(Object::ByteBuffer(t)) => {
-                    let r = &t.restriction;
-                    for (offset, &c) in t.bytes[r.start.0..r.end.0].iter().enumerate() {
-                        record(
-                            offset,
-                            c as u32,
-                            t.properties
-                                .get(&ByteOffset(r.start.0 + offset))
-                                .and_then(|p| p.get("syntax-table"))
-                                .copied(),
-                        );
-                    }
-                }
-                _ => (),
-            }
-        }
-        Ok(SyntaxSource { table: current, properties })
+            PropertySubject { object, base }
+        });
+        Ok(SyntaxSource { table: current, subject })
     }
     pub(super) fn regexp_syntax_primitive(
         &mut self,
