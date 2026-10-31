@@ -620,8 +620,15 @@ impl Vm {
             .position(|c| *c == v)
             .ok_or("broken window parent")?;
         p.children.splice(at..at + 1, children.iter().copied());
+        let (horizontal, extent) = (p.horizontal, if p.horizontal { p.width } else { p.height });
         for c in children {
-            self.window_mut(c)?.parent = parent;
+            // window.c:2646-2653: a promoted child's normal size is its
+            // share of its new parent.
+            let size = { let w = self.window(c)?; if horizontal { w.width } else { w.height } };
+            let normal = self.allocate_object(Object::Float(f64::from(size) / f64::from(extent.max(1))));
+            let w = self.window_mut(c)?;
+            w.parent = parent;
+            if horizontal { w.normal_cols = normal; } else { w.normal_lines = normal; }
         }
         self.window_mut(v)?.children = vec![];
         self.retire_window(v)
@@ -812,6 +819,7 @@ impl Vm {
         if self.resize_mini_window(mini)? {
             self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column)?;
         }
+        self.reconcile_terminal_geometry()?;
         let live = |vm: &Self, id| {
             vm.objects.iter().enumerate().find_map(|(i, o)| match o {
                 Object::Window(w) if w.id == id && w.live() => Some(Value::reference(i + 1, 0)),
@@ -845,6 +853,54 @@ impl Vm {
         self.display_state.height = height;
         outcome
     }
+    /// The root frame's live windows in tree order, as `window-list' from
+    /// its first window lists them.
+    pub(crate) fn leaf_windows(&self) -> Result<Vec<Value>> {
+        fn walk(vm: &Vm, v: Value, out: &mut Vec<Value>) -> Result<()> {
+            let w = vm.window(v)?;
+            if w.live() { out.push(v); }
+            for &c in &w.children { walk(vm, c, out)?; }
+            Ok(())
+        }
+        let mut out = vec![];
+        walk(self, self.window_root_peek(ROOT), &mut out)?;
+        Ok(out)
+    }
+    /// WINDOW's text body in (columns, rows) with a one-line mini-window:
+    /// the size it has whenever the mini-window is not grown, planned
+    /// without changing any window. A mode line takes one row.
+    pub(crate) fn stable_window_body(&self, window: Value) -> Result<Option<(u16, u16)>> {
+        let state = &self.window_state;
+        let (line, column) = (state.line, state.column);
+        if line == 0 || column == 0 || state.height < 2 * line { return Ok(None); }
+        let mut geometry = vec![];
+        let root = self.window_root_peek(ROOT);
+        let now = self.mini_growth()?;
+        if self.plan_window_geometry(root, 0, 0, state.width, state.height - line, (now, 0), line, column, &mut geometry).is_err() {
+            return Ok(None);
+        }
+        let Some(&(_, _, _, width, height)) = geometry.iter().find(|g| g.0 == window) else { return Ok(None) };
+        let w = self.window(window)?;
+        let width = width.saturating_sub((w.left_margin + w.right_margin) * column);
+        let columns = (width / column).clamp(2, u32::from(u16::MAX)) as u16;
+        let rows = (height / line).saturating_sub(1).clamp(1, u32::from(u16::MAX)) as u16;
+        Ok(Some((columns, rows)))
+    }
+    /// The root window's growth now: minus the rows past one line that
+    /// the mini-window takes.
+    fn mini_growth(&self) -> Result<i64> {
+        let mini = self.window(self.window_root_peek(MINI))?;
+        Ok((i64::from(self.window_state.line) - i64::from(mini.height)).min(0))
+    }
+    /// GNU `window-normal-size' of V along an axis, when it is a number.
+    fn normal_size(&self, v: Value, horizontal: bool) -> Result<Option<f64>> {
+        let w = self.window(v)?;
+        let normal = if horizontal { w.normal_cols } else { w.normal_lines };
+        Ok(match self.object_if(normal) {
+            Some(Object::Float(f)) => Some(*f),
+            _ => normal.as_integer().ok().map(|n| n as f64),
+        })
+    }
     fn window_leaf_ids(&self, v: Value, out: &mut Vec<u64>) -> Result<()> {
         let w = self.window(v)?;
         if w.live() {
@@ -877,11 +933,13 @@ impl Vm {
         // line (window.c grow_mini_window, bug#69140).
         let mini_height = self.window_state.mini_lines.saturating_mul(line_height).min(height - line_height);
         let mut geometry = vec![];
-        let planned = self.plan_window_geometry(root, 0, 0, width, height - mini_height, line_height, column_width, &mut geometry);
+        let now = self.mini_growth()?;
+        let wanted = i64::from(line_height) - i64::from(mini_height);
+        let planned = self.plan_window_geometry(root, 0, 0, width, height - mini_height, (now, wanted), line_height, column_width, &mut geometry);
         let mini_height = if planned.is_err() && mini_height > line_height {
             self.window_state.mini_lines = 1;
             geometry.clear();
-            self.plan_window_geometry(root, 0, 0, width, height - line_height, line_height, column_width, &mut geometry)?;
+            self.plan_window_geometry(root, 0, 0, width, height - line_height, (now, 0), line_height, column_width, &mut geometry)?;
             line_height
         } else {
             planned?;
@@ -907,6 +965,16 @@ impl Vm {
         self.display_state.height = height;
         Ok(())
     }
+    /// Plan V's subtree in the rect. Along the vertical axis a window's
+    /// size is its stable size (with a one-line mini-window) plus a growth,
+    /// the negative share of the rows a grown mini-window takes: GROWTH.0
+    /// now, GROWTH.1 planned. A vertical combination recovers its
+    /// children's stable sizes, rescales them to its new stable extent,
+    /// and shares the planned growth among them by their normal sizes, as
+    /// GNU's `window--resize-root-window-vertically' shares a mini-window's
+    /// growth without changing normal sizes. A prompt's shrink and the
+    /// restore after it so land on the same edges, where rescaling the
+    /// shrunk pixel sizes would round a row away per prompt.
     #[allow(clippy::too_many_arguments)]
     fn plan_window_geometry(
         &self,
@@ -915,6 +983,7 @@ impl Vm {
         y: u32,
         width: u32,
         height: u32,
+        growth: (i64, i64),
         line: u32,
         column: u32,
         out: &mut Vec<(Value, u32, u32, u32, u32)>,
@@ -924,27 +993,47 @@ impl Vm {
             return Err("frame resize would violate safe window minimum".into());
         }
         out.push((v, x, y, width, height));
-        let total = if w.horizontal { width } else { height };
-        let old_total = if w.horizontal { w.width } else { w.height };
-        let mut old_edge = 0u64;
-        let mut edge = 0;
+        let (now, wanted) = growth;
+        let count = w.children.len();
+        let shares = if w.horizontal { vec![] } else { self.growth_shares(&w.children)? };
+        // The growth of children 0..=I: all of it from the last child.
+        let share = |i: usize, growth: i64| if i + 1 == count { growth } else { (shares[i] * growth as f64).round() as i64 };
+        let total = i64::from(if w.horizontal { width } else { height });
+        let old_total = i64::from(if w.horizontal { w.width } else { w.height });
+        let (stable_old, stable_new) = if w.horizontal { (old_total, total) } else { (old_total - now, total - wanted) };
+        let (mut old_edge, mut edge, mut shared) = (0i64, 0i64, (0i64, 0i64));
         for (i, &child) in w.children.iter().enumerate() {
             let c = self.window(child)?;
-            old_edge += u64::from(if w.horizontal { c.width } else { c.height });
-            let next = if i + 1 == w.children.len() {
-                total
+            old_edge += i64::from(if w.horizontal { c.width } else { c.height });
+            let (child_growth, next) = if w.horizontal {
+                (growth, if i + 1 == count { total } else { old_edge * total / old_total.max(1) })
             } else {
-                (old_edge * u64::from(total) / u64::from(old_total.max(1))) as u32
+                let upto = (share(i, now), share(i, wanted));
+                let stable_edge = old_edge - upto.0;
+                let next = if i + 1 == count { total } else { stable_edge * stable_new / stable_old.max(1) + upto.1 };
+                let child = (upto.0 - shared.0, upto.1 - shared.1);
+                shared = upto;
+                (child, next)
             };
-            let size = next.saturating_sub(edge);
+            let next = next.clamp(edge, total);
+            let size = (next - edge) as u32;
             if w.horizontal {
-                self.plan_window_geometry(child, x + edge, y, size, height, line, column, out)?;
+                self.plan_window_geometry(child, x + edge as u32, y, size, height, child_growth, line, column, out)?;
             } else {
-                self.plan_window_geometry(child, x, y + edge, width, size, line, column, out)?;
+                self.plan_window_geometry(child, x, y + edge as u32, width, size, child_growth, line, column, out)?;
             }
             edge = next;
         }
         Ok(())
+    }
+    /// The cumulative normal sizes of a vertical combination's CHILDREN,
+    /// or none (the last child takes all growth) when one is not a number.
+    fn growth_shares(&self, children: &[Value]) -> Result<Vec<f64>> {
+        let normals = children.iter().map(|&c| self.normal_size(c, false)).collect::<Result<Option<Vec<_>>>>()?;
+        Ok(match normals {
+            Some(normals) => normals.iter().scan(0.0, |sum, n| { *sum += n; Some(*sum) }).collect(),
+            None => vec![0.0; children.len()],
+        })
     }
     pub fn display_apply_layout(&mut self, ends: &[crate::WindowEnd]) -> Result<()> {
         // Validate the complete journal before publishing any per-window end.
@@ -2255,7 +2344,7 @@ impl<'a> Windows<'a> {
         let (line, column) = (self.vm.window_state.line, self.vm.window_state.column);
         let mut geometry = vec![];
         self.vm
-            .plan_window_geometry(w, x, y, width, height, line, column, &mut geometry)
+            .plan_window_geometry(w, x, y, width, height, (0, 0), line, column, &mut geometry)
             .map_err(internal)?;
         // Live-window start is intentionally unchanged: GNU's vmotion-based
         // scroll preservation is deferred (DIVERGENCES.md VM2-WIN4).

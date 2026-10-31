@@ -3,12 +3,27 @@ use crate::prim::Out;
 use crate::terminal_host::TerminalBinding;
 
 impl Leaf<'_> {
-    pub(crate) fn terminal_create(&mut self, shell: Value, directory: Value, columns: i64, rows: i64) -> Out {
+    /// A terminal of COLUMNS x ROWS, or, when nil, of the stable body of
+    /// the window that controls the current buffer (`controlling_window').
+    pub(crate) fn terminal_create(&mut self, shell: Value, directory: Value, columns: Value, rows: Value) -> Out {
         let shell = self.string_text(shell)?;
         let directory = self.string_text(directory)?;
-        let columns = u16::try_from(columns).ok().filter(|n| *n > 0).ok_or_else(|| Fault::Error("Invalid terminal columns".into()))?;
-        let rows = u16::try_from(rows).ok().filter(|n| *n > 0).ok_or_else(|| Fault::Error("Invalid terminal rows".into()))?;
         let buffer = self.current_buffer()?;
+        let (columns, rows) = if columns == Value::NIL && rows == Value::NIL {
+            self.vm.ensure_windows().map_err(Fault::Error)?;
+            let mut showing = vec![];
+            for w in self.vm.leaf_windows().map_err(Fault::Error)? {
+                if self.vm.window(w).map_err(Fault::Error)?.buffer == buffer { showing.push(w); }
+            }
+            let control = self.vm.controlling_window(buffer, &showing).map_err(Fault::Error)?
+                .ok_or_else(|| Fault::Error("Terminal buffer is not shown in a window".into()))?;
+            self.vm.stable_window_body(control).map_err(Fault::Error)?
+                .ok_or_else(|| Fault::Error("Window too small for a terminal".into()))?
+        } else {
+            let size = |v: Value, what: &str| v.as_integer().ok().and_then(|n| u16::try_from(n).ok()).filter(|n| *n > 0)
+                .ok_or_else(|| Fault::Error(format!("Invalid terminal {what}")));
+            (size(columns, "columns")?, size(rows, "rows")?)
+        };
         if self.vm.terminal_bindings.iter().any(|b| b.buffer == buffer) {
             return Err(Fault::Error("Buffer already owns a terminal".into()));
         }
@@ -19,7 +34,7 @@ impl Leaf<'_> {
             let _ = host.close(session);
             return Err(Fault::Error("Terminal session identity exhausted".into()));
         };
-        self.vm.terminal_bindings.push(TerminalBinding { buffer, session, revision: None, follow: true, columns, rows, styles: std::sync::Arc::from([]), default_colors: [None; 2] });
+        self.vm.terminal_bindings.push(TerminalBinding::new(buffer, session, columns, rows));
         Ok(value)
     }
 

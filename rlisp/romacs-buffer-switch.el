@@ -49,7 +49,8 @@ Return the displaying window."
              (if (< height (* 2 minimum)) anchor
                (let ((window-combination-limit t))
                  (set-window-new-pixel anchor top)
-                 (split-window-internal anchor (- height top) nil (- 1.0 fraction))))))))
+                 (set-window-new-normal anchor (/ top (float height)))
+                 (split-window-internal anchor (- height top) nil (/ (- height top) (float height)))))))))
     (set-window-buffer target buffer)
     target))
 

@@ -1,8 +1,8 @@
 use super::*;
 
 defsubr! { name = "romacs--term-create", gnu = "romacs:terminal", effect = Global,
-fn terminal_create(cx, shell: Value, directory: Value, columns: Integer, rows: Integer) {
-    cx.terminal_create(shell, directory, columns.0, rows.0)
+fn terminal_create(cx, shell: Value, directory: Value; optional columns: Value, rows: Value) {
+    cx.terminal_create(shell, directory, columns, rows)
 }}
 
 defsubr! { name = "romacs--term-send", gnu = "romacs:terminal", effect = Global,

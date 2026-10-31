@@ -1020,7 +1020,6 @@ fn evaluate(
                         width = w; height = h;
                         let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
                         vm.set_frame_geometry(width, height, lh, cw)?;
-                        if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
                         live_presentation.changed();
                     }
                     continue;
@@ -1080,7 +1079,6 @@ fn evaluate(
                 }
                 if live {
                     terminal_modal = vm.eval_source("(and (boundp 'romacs-gui-pending) romacs-gui-pending)")? != romacs_vm::Fixed::NIL;
-                    if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
                 }
                 let command_ns = command_start.elapsed().as_nanos();
                 let snapshot_ns = if !live {

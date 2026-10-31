@@ -131,6 +131,85 @@ def check_editor_prefix(process, keys, control, shell, visible, capture, trace, 
                           'C_X_PROMPT_CANCEL_UNKNOWN_AND_QUIT_NO_PTY_BYTES'])
 
 
+def term_windows(trace, marker):
+    """(clip, rows) of each window whose text shows MARKER, top first, and the line height."""
+    scene = fio.last_scene(trace) or {'glyphs': []}
+    clips = {json.dumps(g['clip'], sort_keys=True) for g in scene['glyphs'] if g['role'] == 'Text'}
+    found = [(json.loads(c), fio.scene_rows(scene, json.loads(c))) for c in clips]
+    found = sorted(((c, r) for c, r in found if any(marker in row for row in r)), key=lambda cr: cr[0]['y'])
+    lines = [g['clip']['height'] for g in scene['glyphs'] if g['role'] == 'ModeLine']
+    return found, (min(lines) if lines else None)
+
+
+def check_prompt_grow(process, keys, control, extended, shell, visible, capture, trace, work, report, timeout):
+    """A grown minibuffer covers the grid's bottom rows; the pty never changes size for it."""
+    sizes = work / 'pty-sizes'
+
+    def recorded():
+        return sizes.read_text().split('\n')[:-1] if sizes.exists() else []
+
+    shell(f"PS1='$ '; trap 'stty size >> {sizes}' WINCH; stty size >> {sizes}; seq 1 200; printf 'SIZE_READY\\n'")
+    visible('SIZE_READY')
+    fio.wait(lambda: recorded(), timeout, 'pty size recorded', process)
+    time.sleep(.5)
+    (clip, before), line = term_windows(trace(), 'SIZE_READY')[0][0], term_windows(trace(), 'SIZE_READY')[1]
+    created = recorded()[0]
+    body = int(clip['height'] // line)
+    assert int(created.split()[0]) == body, ('PTY_ROWS_ARE_THE_WINDOW_BODY', created, body)
+    capture('prompt-grow-before', cursor=False)
+    control('x')
+    control('f')
+    keys('ls-entry-')
+    fio.wait(lambda: (lambda w: w[0] and w[0][0][0]['height'] < clip['height'])(term_windows(trace(), '$ ')),
+             timeout, 'the minibuffer grows over the terminal window', process)
+    time.sleep(.5)
+    (shrunk, during), _ = term_windows(trace(), '$ ')[0][0], None
+    capture('prompt-grow-during', cursor=False)
+    assert len(during) == int(shrunk['height'] // line) and during == before[-len(during):], \
+        ('THE_SHORTER_WINDOW_SHOWS_THE_GRID_TAIL_WITH_THE_CURSOR_ROW', before[-3:], during[-3:])
+    control('g')
+    fio.wait(lambda: (lambda w: w[0] and w[0][0][0]['height'] == clip['height'])(term_windows(trace(), '$ ')),
+             timeout, 'the terminal window restored', process)
+    time.sleep(.5)
+    after = term_windows(trace(), '$ ')[0][0][1]
+    assert after == before, ('ROWS_AFTER_THE_PROMPT_ARE_THE_ROWS_BEFORE', before[-3:], after[-3:])
+    assert recorded() == [created], ('NO_WINCH_FOR_A_GROWN_MINIBUFFER', recorded())
+    control('g')  # an editor command in the terminal buffer
+    shell(f"stty size >> {sizes}; printf 'STTY_DONE\\n'")
+    visible('STTY_DONE')
+    assert recorded() == [created, created], ('PTY_SIZE_UNCHANGED_AFTER_PROMPT_AND_EDITOR_COMMAND', recorded())
+    capture('prompt-grow-after', cursor=False)
+    extended('romacs-gui-split-below')
+    fio.wait(lambda: len(recorded()) == 3, timeout, 'one WINCH for the split', process)
+    time.sleep(1)
+    windows, _ = term_windows(trace(), 'STTY_DONE')
+    split = recorded()
+    top = int(windows[0][0]['height'] // line)
+    assert len(split) == 3 and int(split[2].split()[0]) == top, ('SPLIT_RESIZES_ONCE_TO_THE_CONTROLLING_BODY', split, top)
+    capture('prompt-grow-split', cursor=False)
+    # A prompt over the split restores both panes exactly, without a WINCH.
+    panes = [w[0]['height'] for w in windows]
+    control('x')
+    control('f')
+    keys('ls-entry-')
+    fio.wait(lambda: [w[0]['height'] for w in term_windows(trace(), 'STTY_DONE')[0]] != panes,
+             timeout, 'the minibuffer grows over the split', process)
+    control('g')
+    fio.wait(lambda: [w[0]['height'] for w in term_windows(trace(), 'STTY_DONE')[0]] == panes,
+             timeout, 'the split panes restored', process)
+    time.sleep(.5)
+    assert recorded() == split, ('NO_WINCH_FOR_A_PROMPT_OVER_A_SPLIT', recorded())
+    report.update(status='PASS', exit=0, pty_sizes=split, body_rows=body, shrunk_rows=len(during), split_rows=top,
+                  checks=['PTY_ROWS_ARE_THE_WINDOW_BODY', 'THE_SHORTER_WINDOW_SHOWS_THE_GRID_TAIL_WITH_THE_CURSOR_ROW',
+                          'ROWS_AFTER_THE_PROMPT_ARE_THE_ROWS_BEFORE', 'NO_WINCH_FOR_A_GROWN_MINIBUFFER',
+                          'PTY_SIZE_UNCHANGED_AFTER_PROMPT_AND_EDITOR_COMMAND', 'SPLIT_RESIZES_ONCE_TO_THE_CONTROLLING_BODY',
+                          'SPLIT_PANES_RESTORED_AFTER_A_PROMPT', 'NO_WINCH_FOR_A_PROMPT_OVER_A_SPLIT'])
+    keys('-M', 'alt', '-k', 'F4', '-m', 'alt')
+    visible('Running terminals exist;')
+    keys('y')
+    process.wait(timeout=timeout)
+
+
 def check_colors(shell, visible, capture, trace, output, report):
     import struct
     shell("printf '\\033[31mANSI_RED\\033[0m \\033[91mBRIGHT_RED\\033[0m \\033[38;5;196mINDEXED\\033[0m \\033[38;2;12;34;56mTRUE\\033[48;2;65;43;21mBG_SAMPLE\\033[0m RESET\\nCOLOR_DONE\\n'")
@@ -166,6 +245,8 @@ def main():
     parser.add_argument('--exit-resize', action='store_true')
     parser.add_argument('--colors', action='store_true')
     parser.add_argument('--editor-prefix', action='store_true')
+    parser.add_argument('--prompt-grow', action='store_true',
+                        help='under --loadup (fido-vertical), a growing minibuffer must not resize the pty')
     parser.add_argument('--labwc', default=live.LABWC)
     parser.add_argument('--wlr-randr', default=live.RANDR)
     args = parser.parse_args()
@@ -233,7 +314,8 @@ def main():
                 keyboard = subprocess.Popen(['/usr/bin/wtype', '-s', '120000', '-k', 'Shift_L'], env=env,
                                             stdout=log, stderr=log)
                 time.sleep(.3)
-                process = subprocess.Popen([str(binary), '--trace-scene', str(original)], env=env, cwd=work,
+                flags = ['--loadup'] if args.prompt_grow else []
+                process = subprocess.Popen([str(binary), *flags, '--trace-scene', str(original)], env=env, cwd=work,
                                            stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
                 def trace():
@@ -250,11 +332,12 @@ def main():
                     fio.wait(lambda: any(text in row for row in ff.current_rows(trace())), args.timeout,
                              text, process)
 
-                def capture(name):
+                def capture(name, cursor=True):
                     fio.shot(output / (name + '.png'), env, report)
                     assert (output / (name + '.png')).exists(), 'TERMINAL_CAPTURE_REQUIRED'
+                    # A blinking cursor (--loadup) may have no active publication.
                     report['captures'].append({'name': name, 'rows': ff.current_rows(trace()),
-                                               'cursor': cursor_state(trace())})
+                                               'cursor': cursor_state(trace()) if cursor else None})
 
                 def extended(command):
                     keys('-M', 'alt', 'x', '-m', 'alt')
@@ -277,6 +360,9 @@ def main():
                 keys('1')
                 extended('romacs-term')
                 check('TERMINAL_OPEN_NATIVE', lambda: 'romacs-term' in trace() and process.poll() is None)
+                if args.prompt_grow:
+                    check_prompt_grow(process, keys, control, extended, shell, visible, capture, trace, work, report, args.timeout)
+                    return 0
                 if args.editor_prefix:
                     check_editor_prefix(process, keys, control, shell, visible, capture, trace, work, original, report, args.timeout)
                     return 0
