@@ -468,6 +468,38 @@ impl Tree {
                 .or_else(|| right.next_different(base + left.len(), at, value)),
         }
     }
+    /// The last position before `at` whose preceding value differs from
+    /// the value just before `at`, or `limit` when that is nearer.
+    fn change_before(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
+        if at.0 == 0 {
+            return limit;
+        }
+        let before = self.at(at.0 - 1).filter(|r| r.stamp != 0).map(|r| r.value);
+        ByteOffset(self.last_different(0, at.0, before).unwrap_or(0).max(limit.0))
+    }
+    /// The end of the last run starting before `at` whose value is not
+    /// `value`.
+    fn last_different(&self, base: usize, at: usize, value: Option<Value>) -> Option<usize> {
+        if base >= at {
+            return None;
+        }
+        match self {
+            Self::Leaf(runs, ..) => {
+                let mut end = base + self.len();
+                for r in runs.iter().rev() {
+                    let start = end - r.len as usize;
+                    if start < at && (r.stamp != 0).then_some(r.value) != value {
+                        return Some(end.min(at));
+                    }
+                    end = start;
+                }
+                None
+            }
+            Self::Branch { left, right, .. } => right
+                .last_different(base + left.len(), at, value)
+                .or_else(|| left.last_different(base, at, value)),
+        }
+    }
     fn storage(&self) -> usize {
         size_of::<Self>()
             + match self {
@@ -633,6 +665,11 @@ impl Properties {
     /// Observable boundaries compare presence and eq-values, never stamps.
     pub fn next_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
         self.layers.values().flatten().fold(limit, |next, root| next.min(root.change_after(at, limit)))
+    }
+    /// The last boundary before `at` where any property changes, or
+    /// `limit` when that is nearer: [`Self::next_change`] backwards.
+    pub fn previous_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
+        self.layers.values().flatten().fold(limit, |previous, root| previous.max(root.change_before(at, limit)))
     }
     /// [`Self::next_change`] of `key` alone.
     pub fn next_single_change(&self, at: ByteOffset, key: &str, limit: ByteOffset) -> ByteOffset {
