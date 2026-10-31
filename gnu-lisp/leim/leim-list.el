@@ -58,7 +58,7 @@
  "quail/Punct-b5")
 (register-input-method
  "chinese-punct" "Chinese-GB" 'quail-use-package
- "\346\240\207G" "\346\261\211\345\255\227\350\276\223\345\205\245\342\210\267\346\240\207\347\202\271\347\254\246\345\217\267\342\210\267\243\240"
+ "标G" "汉字输入∷标点符号∷\243\240"
  "quail/Punct")
 (register-input-method
  "chinese-qj-b5" "Chinese-BIG5" 'quail-use-package
@@ -1084,28 +1084,16 @@
  "welsh" "Welsh" 'quail-use-package
  "Ŵ" "Welsh postfix input method"
  "quail/welsh")
-
-
-
-
-
-
-
-
-
 (eval-after-load "quail/PY-b5"
   '(progn
      (quail-defrule "ling2" ?〇 nil t)
      (quail-defrule "wan2" ?○ nil t)))
-
 (eval-after-load "quail/Punct"
   '(quail-defrule " " ?　 nil t))
 (eval-after-load "quail/Punct-b5"
   '(quail-defrule " " ?　 nil t))
-
 (register-input-method "ucs" "UTF-8" #'ucs-input-activate "U+"
 		       "Unicode input as hex in the form Uxxxx.")
-
 (register-input-method
  "korean-hangul"
  "UTF-8"
@@ -1114,7 +1102,6 @@
  "Hangul 2-Bulsik Input"
  'hangul2-input-method
  "Input method: korean-hangul2 (mode line indicator:한2)\n\nHangul 2-Bulsik input method.")
-
 (register-input-method
  "korean-hangul3f"
  "UTF-8"
@@ -1123,7 +1110,6 @@
  "Hangul 3-Bulsik final Input"
  'hangul3-input-method
  "Input method: korean-hangul3 (mode line indicator:한3f)\n\nHangul 3-Bulsik final input method.")
-
 (register-input-method
  "korean-hangul390"
  "UTF-8"
@@ -1132,7 +1118,6 @@
  "Hangul 3-Bulsik 390 Input"
  'hangul390-input-method
  "Input method: korean-hangul390 (mode line indicator:한390)\n\nHangul 3-Bulsik 390 input method.")
-
 (register-input-method
  "korean-hangul3"
  "UTF-8"
@@ -1141,13 +1126,9 @@
  "Hangul 3-Bulsik 390 Input"
  'hangul390-input-method
  "Input method: korean-hangul390 (mode line indicator:한390)\n\nHangul 3-Bulsik 390 input method.")
-
-
 ;; Local Variables:
 ;; no-byte-compile: t
 ;; version-control: never
 ;; no-update-autoloads: t
 ;; End:
-
 ;;; leim-list.el ends here
-

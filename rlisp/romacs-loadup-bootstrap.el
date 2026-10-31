@@ -178,6 +178,9 @@
 (load "international/iso-transl.el" nil t t)
 (load "emacs-lisp/rmc.el" nil t t)
 (load "leim/leim-list.el" nil t t)
+;; loadup.el:569: with the preloaded files in, `debug-early' gives way to
+;; the full debugger.
+(setq debugger #'debug)
 
 ;; startup.el command-line (startup.el:1479): variables whose standard value
 ;; depends on the runtime (user-mail-address and friends) get it once the
