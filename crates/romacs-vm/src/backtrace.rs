@@ -1,11 +1,28 @@
 //! Live call metadata. No lexical environment or Lisp source representation is retained.
 use super::*;
 
+/// Where a call's arguments are read from, as GNU's `record_in_backtrace`
+/// keeps a pointer to the caller's pushed values (bytecode.c `Bcall`).
+pub(super) enum Arguments {
+    /// The caller's argument registers: OFFSET..OFFSET+COUNT of the register
+    /// stack at suspension depth STACK (`Vm::suspended_stacks` index; the live
+    /// stack is at `suspended_stacks.len()`). Nothing writes them while the
+    /// callee runs; widening keeps offsets; collection forwards them as
+    /// registers; a nested run sets the whole stack aside unmoved.
+    Registers { stack: usize, offset: usize, count: usize },
+    /// Copied into `Backtrace::arguments`: a call through `apply`, whose
+    /// spread window a nested `apply` reuses while the callee runs.
+    Copied(std::ops::Range<usize>),
+}
+romacs_snapshot::snapshot_enum!(Arguments {
+    Arguments::Registers { stack, offset, count } => (stack, offset, count),
+    Arguments::Copied(f0) => (f0),
+});
 pub(super) struct Activation {
     pub token: usize,
     pub function: Value,
     resolved: Value,
-    args: std::ops::Range<usize>,
+    args: Arguments,
     pub dynamic: usize,
 }
 romacs_snapshot::snapshot_struct!(Activation { token, function, resolved, args, dynamic });
@@ -27,12 +44,10 @@ impl Backtrace {
         &mut self,
         function: Value,
         resolved: Value,
-        args: &[Value],
+        args: Arguments,
         dynamic: usize,
     ) -> usize {
         let mark = self.frames.len();
-        let start = self.arguments.len();
-        self.arguments.extend_from_slice(args);
         let token = match self.next_token.checked_add(1) {
             Some(token) => {
                 self.next_token = token;
@@ -44,10 +59,16 @@ impl Backtrace {
             token,
             function,
             resolved,
-            args: start..self.arguments.len(),
+            args,
             dynamic,
         });
         mark
+    }
+    /// ARGS copied, for a call whose registers do not outlive its entry.
+    pub fn copied(&mut self, args: &[Value]) -> Arguments {
+        let start = self.arguments.len();
+        self.arguments.extend_from_slice(args);
+        Arguments::Copied(start..self.arguments.len())
     }
     /// A call while startup is observed: its token, from the parked counter.
     #[cold]
@@ -76,13 +97,14 @@ impl Backtrace {
             .resolved = resolved;
     }
     pub fn leave(&mut self, mark: usize) {
-        if let Some(frame) = self.frames.get(mark) {
-            self.arguments.truncate(frame.args.start);
+        let copied = self.frames.get(mark..).into_iter().flatten().find_map(|frame| match &frame.args {
+            Arguments::Copied(range) => Some(range.start),
+            Arguments::Registers { .. } => None,
+        });
+        if let Some(start) = copied {
+            self.arguments.truncate(start);
         }
         self.frames.truncate(mark);
-    }
-    pub fn arguments(&self, index: usize) -> &[Value] {
-        &self.arguments[self.frames[index].args.clone()]
     }
     pub fn bind(&mut self, at: usize, symbol: Value) {
         self.bindings.push((at, symbol));
@@ -106,6 +128,16 @@ impl Backtrace {
     }
 }
 impl Vm {
+    /// The arguments of activation INDEX, where they were pushed.
+    pub(super) fn backtrace_arguments(&self, index: usize) -> &[Value] {
+        match &self.backtrace.frames[index].args {
+            Arguments::Copied(range) => &self.backtrace.arguments[range.clone()],
+            &Arguments::Registers { stack, offset, count } => {
+                let stack = self.suspended_stacks.get(stack).unwrap_or(&self.stack);
+                &stack[offset..offset + count]
+            }
+        }
+    }
     pub(super) fn backtrace_resolve(
         &self,
         original: Value,

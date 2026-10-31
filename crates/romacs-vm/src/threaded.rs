@@ -93,12 +93,8 @@ mod control_tests {
         Engine {
             vm,
             code: vec![],
-            rest: RestStack {
-                values: Vec::new(),
-                activations: vec![(0, None)],
-            },
+            rest: RestStack::default(),
             frames: vec![],
-            call_marks: vec![None],
             native_mark: None,
             apply_function: None,
             apply_mark: None,
@@ -204,10 +200,7 @@ mod control_tests {
         let mut e = Engine {
             vm: &mut vm,
             code: vec![],
-            rest: RestStack {
-                values: Vec::new(),
-                activations: vec![(0, None)],
-            },
+            rest: RestStack::default(),
             frames: vec![Frame {
                 pc: std::ptr::null(),
                 regs: std::ptr::null_mut(),
@@ -215,8 +208,8 @@ mod control_tests {
                 function: 0,
                 dynamic: 0,
                 controls_base: 0,
+                mark: NO_MARK,
             }],
-            call_marks: vec![None, None],
             native_mark: None,
             apply_function: None,
             apply_mark: None,
@@ -678,16 +671,25 @@ fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {
         inst.op.visit_values(visit);
     }
 }
+/// One record per call: the suspended caller's resume state, and the
+/// backtrace entry the entered activation gives back when it leaves. Six
+/// words (`frame_is_48_bytes_without_drop`): register and function ids are
+/// narrow.
 #[derive(Clone, Copy)]
 struct Frame {
     pc: *const Inst,
     regs: *mut Value,
-    dest: usize,
-    function: usize,
+    dest: u32,
+    function: u32,
     dynamic: usize,
     // Suspended caller's floor; the callee's floor is the shared stack length at entry.
     controls_base: usize,
+    /// The activation's backtrace entry, or NO_MARK. A physical activation
+    /// can own several real calls (an apply chain); a continuation
+    /// activation (K_CODE) owns its primitive's.
+    mark: usize,
 }
+const NO_MARK: usize = usize::MAX;
 pub(super) enum Escape {
     Normal(Value),
     Throw(Value, Value),
@@ -1020,10 +1022,10 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
             continue;
         }
         if let Some(frame) = e.frames.pop() {
-            leave_call(e);
-            e.rest.leave();
+            leave_call(e, frame.mark);
+            e.rest.leave(e.frames.len() + 1);
             e.regs = frame.regs;
-            e.function = frame.function;
+            e.function = frame.function as usize;
             e.dynamic = frame.dynamic;
             e.controls_base = frame.controls_base;
         } else {
@@ -1063,7 +1065,16 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
 #[derive(Default)]
 struct RestStack {
     values: Vec<Value>,
-    activations: Vec<(usize, Option<OpaqueRest>)>,
+    /// The activations that own a window of `values`, innermost last: only
+    /// calls of a `&rest' function with extra arguments, keyed by their
+    /// frame depth (`Engine::frames.len()` while they run).
+    activations: Vec<RestActivation>,
+}
+#[derive(Clone, Copy)]
+struct RestActivation {
+    depth: usize,
+    base: usize,
+    pending: Option<OpaqueRest>,
 }
 #[derive(Clone, Copy)]
 struct OpaqueRest {
@@ -1077,9 +1088,23 @@ impl RestStack {
             visit(value);
         }
     }
-    fn leave(&mut self) {
-        let (base, _) = self.activations.pop().unwrap();
-        self.values.truncate(base);
+    fn enter(&mut self, depth: usize, rest: OpaqueRest) {
+        self.activations.push(RestActivation { depth, base: rest.start, pending: Some(rest) });
+    }
+    /// The activation at DEPTH leaves: its window goes with it.
+    fn leave(&mut self, depth: usize) {
+        if self.activations.last().is_some_and(|a| a.depth == depth) {
+            let base = self.activations.pop().unwrap().base;
+            self.values.truncate(base);
+        }
+    }
+    fn pending(&self, depth: usize) -> Option<OpaqueRest> {
+        self.activations.last().filter(|a| a.depth == depth).and_then(|a| a.pending)
+    }
+    fn materialized(&mut self, depth: usize) {
+        if let Some(a) = self.activations.last_mut().filter(|a| a.depth == depth) {
+            a.pending = None;
+        }
     }
     fn materialize(&self, vm: &mut Vm, rest: OpaqueRest) -> Value {
         let mut tail = Value::NIL;
@@ -1101,9 +1126,6 @@ pub(super) struct Engine<'a> {
     /// registers, cleared on exit with the used prefix.
     apply_scratch: Vec<(usize, usize)>,
     frames: Vec<Frame>,
-    // Physical continuations can own several real calls (an apply chain).
-    // K machinery itself has no public activation.
-    call_marks: Vec<Option<usize>>,
     native_mark: Option<usize>,
     apply_function: Option<Value>,
     // Until entry, a spreader's calls have no physical callee to unwind them.
@@ -1203,12 +1225,11 @@ pub(super) fn assert_opaque_rest_compaction() {
         code: vec![],
         rest: RestStack {
             values: vec![a, b],
-            activations: vec![(0, Some(desc))],
+            activations: vec![RestActivation { depth: 0, base: 0, pending: Some(desc) }],
         },
         stack_used: 0,
         apply_scratch: Vec::new(),
         frames: vec![],
-        call_marks: vec![None],
         native_mark: None,
         apply_function: None,
         apply_mark: None,
@@ -1380,7 +1401,6 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     let handler_mark = vm.signal_handlers.len();
     let backtrace_mark = vm.backtrace.frames.len();
     let vm_propagate = std::mem::take(&mut vm.propagate_next);
-    program.rest.activations.push((0, None));
     let mut engine = Engine {
         stack_used: vm.functions[function].regs.max(args.len()),
         apply_scratch: Vec::new(),
@@ -1389,7 +1409,6 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         code: program.code,
         rest: program.rest,
         frames: Vec::with_capacity(512),
-        call_marks: vec![None],
         native_mark: None,
         apply_function: None,
         apply_mark: None,
@@ -1681,14 +1700,14 @@ unsafe fn observe_rest(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
     // A pending binding cannot be copied into an ordinary Value. Materialize
     // before any instruction that can read it, including implicit captures and
     // contiguous call windows. Conservative destination matches are intentional.
-    if let Some(rest) = e.rest.activations.last().and_then(|(_, rest)| *rest) {
+    if let Some(rest) = e.rest.pending(e.frames.len()) {
         let mut op = unsafe { (*pc).op };
         // These writes cannot fail or transfer control before replacing the
         // binding. Its previous tail is genuinely dead, not observed.
         if matches!(op, Op::Const(dst, _) if dst == rest.reg)
             || matches!(op, Op::Move(dst, src) if dst == rest.reg && src != rest.reg)
         {
-            e.rest.activations.last_mut().unwrap().1 = None;
+            e.rest.materialized(e.frames.len());
             return;
         }
         let mut observed = false;
@@ -1711,7 +1730,7 @@ unsafe fn observe_rest(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
             unsafe {
                 *r.add(rest.reg) = value;
             }
-            e.rest.activations.last_mut().unwrap().1 = None;
+            e.rest.materialized(e.frames.len());
         }
     }
 }
@@ -1951,10 +1970,10 @@ unsafe fn ret(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             return fail(e, "invalid image return through control region");
         }
         if let Some(frame) = e.frames.pop() {
-            leave_call(e);
-            e.rest.leave();
-            *frame.regs.add(frame.dest) = value;
-            e.function = frame.function;
+            leave_call(e, frame.mark);
+            e.rest.leave(e.frames.len() + 1);
+            *frame.regs.add(frame.dest as usize) = value;
+            e.function = frame.function as usize;
             e.dynamic = frame.dynamic;
             e.controls_base = frame.controls_base;
             e.regs = frame.regs;
@@ -2046,8 +2065,8 @@ fn leave_native(e: &mut Engine<'_>) {
     if let Some(mark) = e.native_mark.take() { e.vm.backtrace.leave(mark); }
 }
 #[inline(never)]
-fn leave_call(e: &mut Engine<'_>) {
-    if let Some(mark) = e.call_marks.pop().flatten() { e.vm.backtrace.leave(mark); }
+fn leave_call(e: &mut Engine<'_>, mark: usize) {
+    if mark != NO_MARK { e.vm.backtrace.leave(mark); }
 }
 #[inline(never)]
 unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
@@ -2063,9 +2082,22 @@ unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
         // The spreader carries the final original function through nested
         // apply calls. Reading the outer call's first argument loses aliases
         // and can mislabel a real failing callee as apply itself.
-        let function = e.apply_function.take().unwrap_or(function);
+        let spread = e.apply_function.take();
+        let function = spread.unwrap_or(function);
         let resolved = if target == Value::UNBOUND { e.vm.backtrace_resolve(function).unwrap_or(target) } else { target };
-        e.vm.backtrace.enter(function, resolved, std::slice::from_raw_parts(r.add(start), argc), e.vm.dynamic.len())
+        // GNU records a pointer to the caller's pushed arguments; so does this,
+        // as an offset into the register stack. `apply`'s spread window is
+        // the exception: a nested apply reuses it, so those are copied.
+        let args = if spread.is_some() {
+            e.vm.backtrace.copied(std::slice::from_raw_parts(r.add(start), argc))
+        } else {
+            backtrace::Arguments::Registers {
+                stack: e.vm.suspended_stacks.len(),
+                offset: r.add(start).offset_from(e.vm.stack.as_ptr()) as usize,
+                count: argc,
+            }
+        };
+        e.vm.backtrace.enter(function, resolved, args, e.vm.dynamic.len())
     }
 }
 #[inline(never)]
@@ -2547,9 +2579,6 @@ unsafe fn enter_frame_marked(
     mark: usize,
 ) -> Value {
     unsafe {
-        e.call_marks.push(Some(e.apply_mark.take().unwrap_or(mark)));
-        let base = rest.map_or(e.rest.values.len(), |rest| rest.start);
-        e.rest.activations.push((base, rest));
         // Captures/arguments have already been copied, including on lower failure.
         let end = new.offset_from(e.vm.stack.as_ptr()) as usize + e.vm.functions[function].regs;
         e.stack_used = e.stack_used.max(end);
@@ -2557,11 +2586,16 @@ unsafe fn enter_frame_marked(
         e.frames.push(Frame {
             pc: pc.add(1),
             regs: r,
-            dest: (*pc).a,
-            function: e.function,
+            dest: (*pc).a as u32,
+            function: e.function as u32,
             dynamic: e.dynamic,
             controls_base: e.controls_base,
+            mark: e.apply_mark.take().unwrap_or(mark),
         });
+        // An empty window needs no record: the rest register already holds nil.
+        if let Some(rest) = rest.filter(|rest| rest.start != rest.end) {
+            e.rest.enter(e.frames.len(), rest);
+        }
         e.controls_base = e.controls.len();
         e.regs = new;
         e.function = function;
@@ -2810,15 +2844,14 @@ unsafe fn take_step(
             return Continue::Stop;
         }
         if !resuming {
-            e.call_marks.push(e.native_mark.take());
-            e.rest.activations.push((e.rest.values.len(), None));
             e.frames.push(Frame {
                 pc: pc.add(1),
                 regs: r,
-                dest: (*pc).a,
-                function: e.function,
+                dest: (*pc).a as u32,
+                function: e.function as u32,
                 dynamic: e.dynamic,
                 controls_base: e.controls_base,
+                mark: e.native_mark.take().unwrap_or(NO_MARK),
             });
             e.controls_base = e.controls.len();
             e.regs = k;

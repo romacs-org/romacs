@@ -483,3 +483,27 @@ fn autoload_error_preserves_one_original_escape_and_cleanup() {
         compare_autoload_attempt(case, true);
     }
 }
+
+// The backtrace shows a call's arguments as the caller passed them (GNU's
+// `record_in_backtrace' keeps a pointer to the caller's pushed values): not
+// a parameter the callee assigns or boxes for a capturing closure; the same
+// across a nested `eval' (the caller's registers set aside), a recursion
+// deep enough to widen the registers, `apply' (whose spread window a nested
+// `apply' reuses) and `&rest' with extra arguments.
+#[test]
+fn arguments_are_shown_as_passed_from_the_callers_registers() {
+    compare(
+        "args-as-passed",
+        r#"(progn
+  (defun bt-args (name) (let (out) (mapbacktrace (lambda (_e f a _flags) (if (eq f name) (setq out (cons a out)))) name) out))
+  (fset 'bt-setq (bt-compile (lambda (x) (setq x 9) (bt-args 'bt-setq))))
+  (fset 'bt-cell (bt-compile (lambda (x) (let ((c (lambda () (setq x 9)))) (funcall c) (bt-args 'bt-cell)))))
+  (fset 'bt-inner (bt-compile (lambda () (bt-args 'bt-outer))))
+  (fset 'bt-outer (bt-compile (lambda (x) (eval '(bt-inner) t))))
+  (fset 'bt-deep (bt-compile (lambda (n) (if (= n 0) (length (bt-args 'bt-deep)) (bt-deep (1- n))))))
+  (fset 'bt-b (bt-compile (lambda (&rest r) (bt-args 'bt-a))))
+  (fset 'bt-a (bt-compile (lambda (x y) (apply 'bt-b (list x 7 8 9)))))
+  (fset 'bt-rest (bt-compile (lambda (x &rest r) (setq r nil) (bt-args 'bt-rest))))
+  (list (bt-setq 1) (bt-cell 1) (bt-outer 5) (bt-deep 300) (apply 'bt-a '(1 2)) (bt-rest 1 2 3) (funcall 'bt-rest 1)))"#,
+    );
+}
