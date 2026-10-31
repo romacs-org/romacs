@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "5e4f81e0d70b8ad3d4653277ee0184cd6f4d5254b29a8a065498d69c5bf0ae0a",
+  "source_fingerprint": "982a00c9acd3c7658218d60a93522c91f5662f0694a2c6261b2fbd75986bd2ec",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1150,
-  "parsed_vm2_only": 1150
+  "parsed_total": 1154,
+  "parsed_vm2_only": 1154
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4120,6 +4120,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/oclosure.rs:3"
   },
+  "romacs--orderless-filter": {
+   "name": "romacs--orderless-filter",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/orderless.rs:13"
+  },
+  "romacs--orderless-highlight": {
+   "name": "romacs--orderless-highlight",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/orderless.rs:31"
+  },
   "romacs--overlay-change-hooks": {
    "name": "romacs--overlay-change-hooks",
    "implementation": "vm2",
@@ -4365,6 +4375,16 @@
    "name": "romacs--signal-description",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process.rs:492"
+  },
+  "romacs--sort-by-history": {
+   "name": "romacs--sort-by-history",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/orderless.rs:72"
+  },
+  "romacs--sort-by-length-alpha": {
+   "name": "romacs--sort-by-length-alpha",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/orderless.rs:54"
   },
   "romacs--startup-phase": {
    "name": "romacs--startup-phase",
