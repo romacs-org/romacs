@@ -11,17 +11,20 @@
 //! that file by the kernel, so capture never reads heap bytes (`write_image`).
 //!
 //! The range's address is random, chosen by each process that starts a
-//! fresh arena, so each world has its own; and the window every range is
-//! chosen from is reserved whole, inaccessible, at the process's first
-//! allocation, before anything the process maps later could land in it
-//! (`reserve_window`). A builder's range and an image's are in the lower
-//! part of the window, a process's first arena in the upper part, so an
-//! image's range overlaps nothing of its restorer's: restore maps it over
-//! the reservation, which cannot find the range taken. Where the window
-//! cannot be reserved (an address-space limit, or something mapped there
-//! before the process's first allocation), each range is mapped only where
-//! nothing is, and a taken range refuses the image (`Restore::Map`), with
-//! the step and error that found it so (`map_failure`). Everything else a
+//! fresh arena, so each world has its own; and the part of the window every
+//! range is chosen from is reserved, inaccessible, a TiB at a time, at the
+//! process's first allocation, before anything the process maps later could
+//! land in it (`reserve_window`). A builder's range and an image's are in
+//! BUILD, a process's first arena in FIRST above it, so an image's range
+//! overlaps nothing of its restorer's: restore maps it over the
+//! reservation, which cannot find the range taken. Both parts lie above
+//! where a process with an unlimited stack, whose kernel maps bottom-up
+//! from a sixth of the address space, has its libraries and later
+//! mappings. A TiB something of the process holds before its first
+//! allocation stays unreserved, and under an address-space limit nothing
+//! is reserved: a range there is mapped only where nothing is, and a taken
+//! range refuses the image (`Restore::Map`), with the step and error that
+//! found it so (`map_failure`). Everything else a
 //! world process maps stays randomized, the executable too. What an image holds of the
 //! executable is read-only data: string literals, constant tables and the
 //! empty hash table group in its first segment, vtables and `&'static`
@@ -41,14 +44,20 @@
 //! its range cannot be reserved it hands every request to the system
 //! allocator.
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 /// Where an arena may start: a GiB-aligned address in this window, far from
 /// the executable, its heap, the libraries and the stack. Builders' arenas,
-/// so images, start below FIRST; a process's first arena starts in FIRST,
-/// the window's top eighth.
+/// so images, start in BUILD; a process's first arena starts in FIRST, the
+/// window's top eighth. Both are above the window's lower part, where a
+/// process with an unlimited stack maps its libraries (bottom-up from
+/// 0x1554_0000_0000 or so, a sixth of the address space, plus up to a TiB
+/// of randomization; see the module documentation). The window is
+/// reserved a CHUNK at a time.
 const WINDOW: (usize, usize) = (0x1000_0000_0000, 0x5000_0000_0000);
+const BUILD: (usize, usize) = (0x2800_0000_0000, 0x4800_0000_0000);
 const FIRST: (usize, usize) = (0x4800_0000_0000, WINDOW.1);
+const CHUNK: usize = 1 << 40;
 const ALIGN: usize = 1 << 30;
 /// The most an arena reserves. Pages are committed only as they are
 /// touched; under an address-space limit an arena reserves a quarter of it,
@@ -111,12 +120,14 @@ static LOCK: AtomicBool = AtomicBool::new(false);
 static SCRUB: AtomicBool = AtomicBool::new(false);
 /// How the image this process asked for fared (`Restore`).
 static RESTORE: AtomicU8 = AtomicU8::new(Restore::None as u8);
-/// Whether the window is this process's, reserved at its first allocation.
-static WINDOW_RESERVED: AtomicBool = AtomicBool::new(false);
+/// The chunks of the window this process reserved at its first allocation
+/// (`reserve_window`): bit N for the Nth CHUNK from the window's start.
+static RESERVED: AtomicU64 = AtomicU64::new(0);
 /// What refused the image's range (`Restore::Map`): the step (an index in
-/// STEPS) and the error.
+/// STEPS) and the error; and whether the range was within the reservation.
 static MAP_STEP: AtomicU8 = AtomicU8::new(0);
 static MAP_ERRNO: AtomicI32 = AtomicI32::new(0);
+static MAP_RESERVED: AtomicBool = AtomicBool::new(false);
 const STEPS: [&str; 6] = ["", "no arena", "adopted already", "address-space limit", "image", "rest of the range"];
 /// Where the arena allocations come from starts, once it has.
 static BASE: AtomicUsize = AtomicUsize::new(0);
@@ -324,35 +335,70 @@ fn state() -> u8 {
     }
 }
 
-/// Reserve the window whole, inaccessible: nothing the process maps after
-/// its first allocation lands in it, and the ranges this module maps there
-/// replace the reservation (`place`). Not under an address-space limit, nor
-/// where something of the process is already mapped in the window.
+/// Reserve the window from BUILD up, inaccessible, a chunk at a time:
+/// nothing the process maps after its first allocation lands in a reserved
+/// chunk, and the ranges this module maps there replace the reservation
+/// (`place`). A chunk something is mapped in already stays unreserved.
+/// A reservation counts against an address-space limit, inaccessible as
+/// it is: under one that holds less than the arenas themselves nothing is
+/// tried, and the chunks stop where the limit is reached.
 unsafe fn reserve_window() {
     if unsafe { reserve() } != Some(RESERVE) {
         return;
     }
     let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
-    let at = unsafe { libc::mmap(WINDOW.0 as *mut libc::c_void, WINDOW.1 - WINDOW.0, libc::PROT_NONE, flags, -1, 0) };
-    if at == WINDOW.0 as *mut libc::c_void {
-        WINDOW_RESERVED.store(true, Ordering::Relaxed);
-    } else if at != libc::MAP_FAILED {
-        unsafe { libc::munmap(at, WINDOW.1 - WINDOW.0) };
+    let mut bits = 0u64;
+    let mut at = BUILD.0;
+    while at < WINDOW.1 {
+        let mapped = unsafe { libc::mmap(at as *mut libc::c_void, CHUNK, libc::PROT_NONE, flags, -1, 0) };
+        if mapped == at as *mut libc::c_void {
+            bits |= 1 << ((at - WINDOW.0) / CHUNK);
+        } else if mapped != libc::MAP_FAILED {
+            unsafe { libc::munmap(mapped, CHUNK) };
+        } else if errno() == libc::ENOMEM {
+            break;
+        }
+        at += CHUNK;
     }
+    RESERVED.store(bits, Ordering::Relaxed);
 }
 
-/// Whether the window is this process's reservation (`reserve_window`).
-pub fn window_reserved() -> bool {
+/// The chunks of the window the range at AT, LEN bytes, spans, as bits of
+/// RESERVED; None for a range not within the window.
+fn chunks(at: usize, len: usize) -> Option<u64> {
+    if !(WINDOW.0..WINDOW.1).contains(&at) || len == 0 || len > WINDOW.1 - at {
+        return None;
+    }
+    let (first, last) = ((at - WINDOW.0) / CHUNK, (at + len - 1 - WINDOW.0) / CHUNK);
+    Some(((1u128 << (last + 1)) - (1u128 << first)) as u64)
+}
+
+/// Whether the range at AT, LEN bytes, is within this process's
+/// reservation of the window (`reserve_window`).
+pub fn reserved(at: usize, len: usize) -> bool {
     state();
-    WINDOW_RESERVED.load(Ordering::Relaxed)
+    chunks(at, len).is_some_and(|mask| RESERVED.load(Ordering::Relaxed) & mask == mask)
 }
 
-/// The flags that map a range of this process at AT, LEN bytes, which
-/// `place` requires in the window: over the reservation where the window
-/// is this process's, else only where nothing is mapped.
+/// The flags that map a range of this process at AT, LEN bytes: over the
+/// reservation where the range is within it, else only where nothing is
+/// mapped.
 fn place(at: usize, len: usize) -> i32 {
-    let reserved = WINDOW_RESERVED.load(Ordering::Relaxed) && at >= WINDOW.0 && len <= WINDOW.1 - at;
-    if reserved { libc::MAP_FIXED } else { libc::MAP_FIXED_NOREPLACE }
+    let within = chunks(at, len).is_some_and(|mask| RESERVED.load(Ordering::Relaxed) & mask == mask);
+    if within { libc::MAP_FIXED } else { libc::MAP_FIXED_NOREPLACE }
+}
+
+/// A GiB-aligned base for a range of RESERVE bytes in the part LOW..HIGH
+/// of the window, from RANDOM: in one of the part's reserved chunks when
+/// it has any, anywhere in the part otherwise.
+fn base_in(low: usize, high: usize, reserve: usize, random: usize) -> usize {
+    let mask = chunks(low, high - low).unwrap_or(0) & RESERVED.load(Ordering::Relaxed);
+    if mask == 0 {
+        return low + random % ((high - low - reserve) / ALIGN) * ALIGN;
+    }
+    let nth = random % mask.count_ones() as usize;
+    let chunk = (0..64).filter(|bit| mask & (1 << bit) != 0).nth(nth).unwrap();
+    WINDOW.0 + chunk * CHUNK + (random >> 8) % ((CHUNK - reserve) / ALIGN) * ALIGN
 }
 
 /// Give up the range at AT, LEN bytes, this module's mapping placed with
@@ -368,7 +414,7 @@ unsafe fn unplace(at: usize, len: usize, placed: i32) {
 }
 
 /// Reserve a fresh range at a random address in the window: a builder's
-/// below FIRST, where images are made, any other process's first arena in
+/// in BUILD, where images are made, any other process's first arena in
 /// FIRST.
 unsafe fn start() -> u8 {
     unsafe { take_inventory() };
@@ -378,14 +424,14 @@ unsafe fn start() -> u8 {
     let Some(reserve) = (unsafe { reserve() }) else { return SYSTEM };
     let backing = if building { unsafe { backing_file(reserve) } } else { -1 };
     let flags = libc::MAP_NORESERVE | if backing >= 0 { libc::MAP_SHARED } else { libc::MAP_PRIVATE | libc::MAP_ANONYMOUS };
-    let (low, high) = if building { (WINDOW.0, FIRST.0) } else { FIRST };
+    let (low, high) = if building { BUILD } else { FIRST };
     for _ in 0..8 {
         let mut random = 0usize;
         let read = unsafe { libc::getrandom((&raw mut random).cast(), size_of::<usize>(), 0) };
         if read != size_of::<usize>() as isize {
             break;
         }
-        let base = low + random % ((high - low - reserve) / ALIGN) * ALIGN;
+        let base = base_in(low, high, reserve, random);
         let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags | place(base, reserve), backing, 0) };
         if at == base as *mut libc::c_void {
             BACKING.store(backing, Ordering::Relaxed);
@@ -460,20 +506,22 @@ unsafe fn reserve() -> Option<usize> {
 pub fn adopt(file: &std::fs::File) -> Restore {
     use std::os::fd::AsRawFd;
     if state() != ARENA {
-        return refuse(1, 0);
+        return refuse(1, 0, false);
     }
     // The first image stays this process's: what became of it stays said.
     if FORMER.load(Ordering::Acquire) != 0 {
-        return refuse(2, 0);
+        return refuse(2, 0, false);
     }
     let outcome = unsafe { map_image_fd(file.as_raw_fd()) };
     RESTORE.store(outcome as u8, Ordering::Release);
     outcome
 }
 
-/// The image's range is refused at STEP (an index in STEPS) with ERRNO.
-fn refuse(step: u8, errno: i32) -> Restore {
+/// The image's range is refused at STEP (an index in STEPS) with ERRNO;
+/// RESERVED says whether the range was within the reservation.
+fn refuse(step: u8, errno: i32, reserved: bool) -> Restore {
     MAP_ERRNO.store(errno, Ordering::Relaxed);
+    MAP_RESERVED.store(reserved, Ordering::Relaxed);
     MAP_STEP.store(step, Ordering::Release);
     Restore::Map
 }
@@ -483,10 +531,11 @@ fn errno() -> i32 {
 }
 
 /// What refused the image's range, once `adopt` has (`Restore::Map`): the
-/// step, and the error number of the moment, 0 for none.
-pub fn map_failure() -> Option<(&'static str, i32)> {
+/// step, the error number of the moment, 0 for none, and whether the range
+/// was within this process's reservation of the window.
+pub fn map_failure() -> Option<(&'static str, i32, bool)> {
     let step = MAP_STEP.load(Ordering::Acquire);
-    (step != 0).then(|| (STEPS[step as usize], MAP_ERRNO.load(Ordering::Relaxed)))
+    (step != 0).then(|| (STEPS[step as usize], MAP_ERRNO.load(Ordering::Relaxed), MAP_RESERVED.load(Ordering::Relaxed)))
 }
 
 /// Whether the ranges AT, LEN bytes, and OTHER, OTHER_LEN bytes, share an address.
@@ -511,7 +560,7 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     }
     let reserve = match unsafe { reserve() } {
         Some(reserve) if len < reserve && base + reserve <= WINDOW.1 => reserve,
-        _ => return refuse(3, 0),
+        _ => return refuse(3, 0, false),
     };
     // Over the reservation, unless the range reaches this process's first
     // arena (an image made under another address-space limit could): then
@@ -524,7 +573,7 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     // module mapped, never what refused it, which the launch's source boot
     // may be using.
     if at != base as *mut libc::c_void {
-        let refused = refuse(4, errno());
+        let refused = refuse(4, errno(), placed == libc::MAP_FIXED);
         if at != libc::MAP_FAILED {
             unsafe { libc::munmap(at, len) };
         } else if placed == libc::MAP_FIXED {
@@ -535,7 +584,7 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     let anon = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | placed;
     let rest = unsafe { libc::mmap((base + len) as *mut libc::c_void, reserve - len, libc::PROT_READ | libc::PROT_WRITE, anon, -1, 0) };
     if rest != (base + len) as *mut libc::c_void {
-        let refused = refuse(5, errno());
+        let refused = refuse(5, errno(), placed == libc::MAP_FIXED);
         if rest != libc::MAP_FAILED {
             unsafe { libc::munmap(rest, reserve - len) };
         }
@@ -1110,6 +1159,21 @@ mod tests {
         for (offset, bytes) in segments {
             assert_eq!(&file[offset as usize..offset as usize + bytes.len()], bytes);
         }
+    }
+
+    #[test]
+    fn a_range_spans_the_chunks_of_the_window_it_lies_in() {
+        assert_eq!(chunks(WINDOW.0, CHUNK), Some(1));
+        assert_eq!(chunks(WINDOW.0 + CHUNK - PAGE, 2 * PAGE), Some(0b11));
+        assert_eq!(chunks(WINDOW.1 - CHUNK, CHUNK), Some(1 << 63));
+        assert_eq!(chunks(WINDOW.0, WINDOW.1 - WINDOW.0), Some(u64::MAX));
+        assert_eq!(chunks(BUILD.0, RESERVE), Some(1 << ((BUILD.0 - WINDOW.0) / CHUNK)));
+        assert_eq!((chunks(WINDOW.0 - PAGE, PAGE), chunks(WINDOW.1 - PAGE, 2 * PAGE), chunks(WINDOW.0, 0)), (None, None, None));
+        // At and above the window's end: no chunk, so never reserved.
+        assert_eq!((chunks(WINDOW.1, PAGE), chunks(WINDOW.1 + CHUNK, PAGE), chunks(usize::MAX, 1)), (None, None, None));
+        assert!(!reserved(WINDOW.1 + CHUNK, PAGE) && !reserved(WINDOW.0 - PAGE, PAGE));
+        // The parts a range is chosen from fit whole chunks, and FIRST is above BUILD.
+        assert!(BUILD.0 % CHUNK == 0 && BUILD.1 == FIRST.0 && FIRST.0 % CHUNK == 0 && FIRST.1 == WINDOW.1 && RESERVE < CHUNK);
     }
 
     #[test]

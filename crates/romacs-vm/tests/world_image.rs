@@ -49,6 +49,33 @@ unsafe extern "C" fn premap() {
     unsafe { libc::mmap(at as *mut libc::c_void, 4096, libc::PROT_NONE, flags, -1, 0) };
 }
 
+/// COMMAND run under a stack limit of STACK bytes and an address-space
+/// limit of ADDRESS_SPACE bytes. An unlimited stack makes the kernel lay
+/// the child's mappings out bottom-up, from inside the window; an
+/// address-space limit leaves the arena nothing to reserve the window with.
+fn with_limits(mut command: Command, stack: u64, address_space: u64) -> Command {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        command.pre_exec(move || {
+            for (resource, limit) in [(libc::RLIMIT_STACK, stack), (libc::RLIMIT_AS, address_space)] {
+                let limit = libc::rlimit { rlim_cur: limit, rlim_max: limit };
+                if libc::setrlimit(resource, &limit) != 0 { return Err(std::io::Error::last_os_error()); }
+            }
+            Ok(())
+        })
+    };
+    command
+}
+
+/// Whether a child of this process may run without an address-space
+/// limit: the hard limit is none. Nextest's wrapper sets one (8 GiB) on
+/// every test process, and a child cannot raise it.
+fn address_space_unlimited() -> bool {
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    let asked = unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) };
+    asked == 0 && limit.rlim_max == libc::RLIM_INFINITY
+}
+
 /// Test NAME in a process of its own, in ROLE, with STORE.
 fn child_of(name: &str, role: &str, store: &Path) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
@@ -204,15 +231,15 @@ fn mapping_at(at: usize) -> Option<i32> {
 }
 
 /// Launch as `launch` does, after showing what the arena made of the
-/// address space: the window reserved, the image's range disjoint from
-/// the first arena's and taken by nothing, as the mapping something of the
-/// process would make there finds it; and after, whether the image's base
-/// is still taken: by the image, or by what refused it.
+/// address space: the image's range reserved, disjoint from the first
+/// arena's and taken by nothing, as the mapping something of the process
+/// would make there finds it; and after, whether the image's base is still
+/// taken: by the image, or by what refused it.
 fn launch_reserved(store: &Path) {
     let base = image_base(store);
     let (first, reserve) = arena::current_range().unwrap();
     let disjoint = base + reserve <= first || first + reserve <= base;
-    println!("WORLD-IMAGE {}", json!({"reserved": arena::window_reserved(), "disjoint": disjoint,
+    println!("WORLD-IMAGE {}", json!({"reserved": arena::reserved(base, reserve), "disjoint": disjoint,
                                        "taken": mapping_at(base) == Some(libc::EEXIST)}));
     launch(store);
     println!("WORLD-IMAGE {}", json!({"taken_after": mapping_at(base) == Some(libc::EEXIST)}));
@@ -274,7 +301,7 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     assert_eq!(probe_file(&store, &other), r#"{"again":"Format","failure":null,"kept":false,"restore":"Format"}"#);
     // Adopted once per process: a second adoption is refused, says so, and
     // the first image stays the process's.
-    assert_eq!(probe_file(&store, &whole), r#"{"again":"Map","failure":["adopted already",0],"kept":true,"restore":"Mapped"}"#);
+    assert_eq!(probe_file(&store, &whole), r#"{"again":"Map","failure":["adopted already",0,false],"kept":true,"restore":"Mapped"}"#);
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
@@ -297,10 +324,22 @@ fn an_images_range_is_reserved_before_anything_else_maps_and_the_restore_succeed
     // In a process started afterwards, with the image's range in its
     // reservation: nothing of the process can map there, and the image
     // maps over the reservation, which no mapping made since can refuse.
-    for _ in 0..3 {
-        let printed = outcomes(&mut child_of(RESERVED, "launch-reserved", &store));
+    // So in a process with an unlimited stack, whose kernel maps its
+    // libraries bottom-up from a sixth of the address space, inside the
+    // window: the image's range lies above them. Under an address-space
+    // limit nothing is reserved: the image maps where nothing is, and
+    // finds its range free.
+    for stack in [8 << 20, libc::RLIM_INFINITY] {
+        let limited = outcomes(&mut with_limits(child_of(RESERVED, "launch-reserved", &store), stack, 8 << 30));
+        assert_eq!(limited, [json!({"reserved": false, "disjoint": true, "taken": false}).to_string(), restored(),
+                             json!({"taken_after": true}).to_string()], "stack limit {stack}, address space limited");
+        if !address_space_unlimited() {
+            println!("under an address-space limit: the reservation is not exercised");
+            continue;
+        }
+        let printed = outcomes(&mut with_limits(child_of(RESERVED, "launch-reserved", &store), stack, libc::RLIM_INFINITY));
         assert_eq!(printed, [json!({"reserved": true, "disjoint": true, "taken": true}).to_string(), restored(),
-                             json!({"taken_after": true}).to_string()]);
+                             json!({"taken_after": true}).to_string()], "stack limit {stack}");
     }
     let _ = std::fs::remove_dir_all(&scratch);
 }
@@ -323,7 +362,7 @@ fn an_image_whose_range_was_taken_before_the_process_started_is_refused_and_says
     let base = image_base(&store);
     let printed = outcomes(child_of(TAKEN, "launch-reserved", &store).env("ROMACS_WORLD_IMAGE_TEST_PREMAP", format!("{base:x}")));
     assert_eq!(printed, [json!({"reserved": false, "disjoint": true, "taken": true}).to_string(),
-                         json!({"mode": "source", "reason": {"image": "Map", "step": "image", "error": "File exists (os error 17)"}}).to_string(),
+                         json!({"mode": "source", "reason": {"image": "Map", "step": "image", "error": "File exists (os error 17)", "reserved": false}}).to_string(),
                          json!({"taken_after": true}).to_string()]);
     assert_eq!(std::fs::metadata(image(&store)).unwrap().ino(), inode, "the image was kept");
     assert_eq!(outcome(&mut child_of(TAKEN, "launch", &store)), restored());
