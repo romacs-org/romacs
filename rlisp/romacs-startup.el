@@ -236,14 +236,17 @@
   "The buffers --loadup's file arguments visited, the last one first:
 startup.el `command-line-1's `displayable-buffers', which
 `romacs-gui-loadup-command-line-1' displays.")
-(defun romacs-gui-visit-file-noselect (file name)
-  "Visit FILE, named NAME, as startup.el's `process-file-arg' does: the
+(defun romacs-gui-visit-file-noselect (file)
+  "Visit FILE as startup.el's `process-file-arg' does: GNU's
+`find-file-noselect' visits it, it joins `file-name-history', the
 buffer goes onto `romacs-gui-displayable-buffers' and becomes current,
 and no window shows it yet.  A file the visitor refuses gives the
 *romacs visit errors* buffer in its place."
-  (let ((buffer (condition-case err
-                    (romacs-find-file-noselect file name)
-                  (error (romacs-gui--visit-error file err)))))
+  (let* ((file (expand-file-name (command-line-normalize-file-name file)))
+         (buffer (condition-case err
+                     (find-file-noselect file)
+                   (error (romacs-gui--visit-error file err)))))
+    (file-name-history--add file)
     (setq romacs-gui-displayable-buffers (cons buffer romacs-gui-displayable-buffers))
     (set-buffer buffer)))
 (defun romacs-gui--visit-file (file name)
