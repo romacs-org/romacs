@@ -468,12 +468,122 @@ impl Tree {
                 .or_else(|| right.next_different(base + left.len(), at, value)),
         }
     }
+    /// The last position before `at` whose preceding value differs from
+    /// the value just before `at`, or `limit` when that is nearer.
+    fn change_before(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
+        if at.0 == 0 {
+            return limit;
+        }
+        let before = self.at(at.0 - 1).filter(|r| r.stamp != 0).map(|r| r.value);
+        ByteOffset(self.last_different(0, at.0, before).unwrap_or(0).max(limit.0))
+    }
+    /// The end of the last run starting before `at` whose value is not
+    /// `value`.
+    fn last_different(&self, base: usize, at: usize, value: Option<Value>) -> Option<usize> {
+        if base >= at {
+            return None;
+        }
+        match self {
+            Self::Leaf(runs, ..) => {
+                let mut end = base + self.len();
+                for r in runs.iter().rev() {
+                    let start = end - r.len as usize;
+                    if start < at && (r.stamp != 0).then_some(r.value) != value {
+                        return Some(end.min(at));
+                    }
+                    end = start;
+                }
+                None
+            }
+            Self::Branch { left, right, .. } => right
+                .last_different(base + left.len(), at, value)
+                .or_else(|| left.last_different(base, at, value)),
+        }
+    }
+    /// A copy of START..END of the runs, visiting only the subtrees
+    /// inside it.
+    fn copy_range(&self, start: usize, end: usize, work: &mut usize) -> Link {
+        let end = end.min(self.len());
+        if start >= end {
+            return None;
+        }
+        *work += 1;
+        if start == 0 && end == self.len() {
+            return Some(Box::new(self.clone()));
+        }
+        match self {
+            Self::Leaf(runs, ..) => {
+                let mut p = 0;
+                let mut out = Vec::new();
+                for r in runs {
+                    let (a, b) = (p.max(start), (p + r.len as usize).min(end));
+                    if a < b {
+                        out.push(Run { len: (b - a) as u32, ..*r });
+                    }
+                    p += r.len as usize;
+                }
+                Some(Box::new(Self::leaf(out)))
+            }
+            Self::Branch { left, right, .. } => {
+                let n = left.len();
+                let a = left.copy_range(start, end.min(n), work);
+                let b = right.copy_range(start.saturating_sub(n), end.saturating_sub(n), work);
+                Self::join(a, b, work)
+            }
+        }
+    }
+    /// The run holding `at` and its start.
+    fn run_at(&self, at: usize) -> Option<(usize, Run)> {
+        let mut base = 0;
+        let mut node = self;
+        loop {
+            match node {
+                Self::Leaf(v, ..) => {
+                    for r in v {
+                        if at < base + r.len as usize {
+                            return Some((base, *r));
+                        }
+                        base += r.len as usize;
+                    }
+                    return None;
+                }
+                Self::Branch { left, right, .. } => {
+                    if at < base + left.len() {
+                        node = left;
+                    } else {
+                        base += left.len();
+                        node = right;
+                    }
+                }
+            }
+        }
+    }
     fn storage(&self) -> usize {
         size_of::<Self>()
             + match self {
                 Self::Leaf(v, ..) => v.capacity() * size_of::<Run>(),
                 Self::Branch { left, right, .. } => left.storage() + right.storage(),
             }
+    }
+}
+
+/// One key's values for many reads: [`Properties::get_property`] without
+/// the key's lookup, remembering the run it read last.
+pub(crate) struct KeyReader<'a> {
+    root: Option<&'a Tree>,
+    /// The last run read: its start, end and value.
+    run: std::cell::Cell<(usize, usize, Option<Value>)>,
+}
+impl KeyReader<'_> {
+    pub fn get(&self, at: ByteOffset) -> Option<Value> {
+        let (start, end, value) = self.run.get();
+        if start <= at.0 && at.0 < end {
+            return value;
+        }
+        let (start, run) = self.root?.run_at(at.0)?;
+        let value = (run.stamp != 0).then_some(run.value);
+        self.run.set((start, start + run.len as usize, value));
+        value
     }
 }
 
@@ -499,6 +609,10 @@ impl Properties {
         }
         runs
     }
+    /// Whether any text has the property KEY.
+    pub fn has_key(&self, key: &str) -> bool {
+        self.layers.contains_key(key)
+    }
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
@@ -523,6 +637,10 @@ impl Properties {
             };
             state(a.0) == state(b.0)
         })
+    }
+    /// A reader of KEY's values.
+    pub fn reader(&self, key: &str) -> KeyReader<'_> {
+        KeyReader { root: self.layers.get(key).and_then(|root| root.as_deref()), run: std::cell::Cell::new((0, 0, None)) }
     }
     pub fn get_property(&self, at: ByteOffset, key: &str) -> Option<Value> {
         self.layers
@@ -629,6 +747,11 @@ impl Properties {
     /// Observable boundaries compare presence and eq-values, never stamps.
     pub fn next_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
         self.layers.values().flatten().fold(limit, |next, root| next.min(root.change_after(at, limit)))
+    }
+    /// The last boundary before `at` where any property changes, or
+    /// `limit` when that is nearer: [`Self::next_change`] backwards.
+    pub fn previous_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
+        self.layers.values().flatten().fold(limit, |previous, root| previous.max(root.change_before(at, limit)))
     }
     /// [`Self::next_change`] of `key` alone.
     pub fn next_single_change(&self, at: ByteOffset, key: &str, limit: ByteOffset) -> ByteOffset {
@@ -765,8 +888,7 @@ impl Properties {
                 continue;
             }
             let mut work = 0;
-            let (_, suffix) = Tree::split(root.clone(), range.start.0, &mut work);
-            let (part, _) = Tree::split(suffix, range.end.0.min(len) - range.start.0, &mut work);
+            let part = root.as_ref().and_then(|n| n.copy_range(range.start.0, range.end.0, &mut work));
             if part.as_ref().is_some_and(|n| n.present() != 0) {
                 out.layers.insert(key.clone(), part);
             }
