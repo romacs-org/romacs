@@ -80,6 +80,14 @@ impl Input {
     }
 }
 
+/// REGISTERS' groups in INPUT's character positions; None for a group
+/// that took no part in the match.
+fn character_groups(input: &Input, registers: &MatchRegisters) -> Vec<Option<(usize, usize)>> {
+    registers.start.iter().zip(&registers.end)
+        .map(|(&a, &b)| (a >= 0 && b >= 0).then(|| (input.character(a as usize), input.character(b as usize))))
+        .collect()
+}
+
 enum Fault {
     Signal(&'static str, Vec<Value>),
     Text(&'static str, String),
@@ -147,38 +155,63 @@ impl Vm {
     /// [`Self::string_match_no_data`].
     pub(crate) fn string_matcher(&mut self, patterns: &[Value], key: Translation, translation: Option<regex::CaseTranslation>)
         -> std::result::Result<Option<StringMatcher>, prim::Fault> {
-        if self.slots[self.names["parse-sexp-lookup-properties"]].value != Value::NIL { return Ok(None); }
+        if self.string_syntax_properties() { return Ok(None); }
         let syntax = self.regexp_syntax(None).map_err(|fault| self.regexp_fault(fault))?;
         Ok(Some(StringMatcher { sources: patterns.to_vec(), patterns: vec![None; patterns.len()], key, translation, syntax }))
+    }
+
+    /// Whether `parse-sexp-lookup-properties' makes a string's own
+    /// `syntax-table' properties part of what a regexp matches in it.
+    pub(crate) fn string_syntax_properties(&self) -> bool {
+        self.slots[self.names["parse-sexp-lookup-properties"]].value != Value::NIL
+    }
+
+    /// Whether each ASCII character is a word constituent in the current
+    /// syntax table, as `\<' and `\b' read a string.
+    pub(crate) fn ascii_word_syntax(&mut self) -> std::result::Result<[bool; 128], prim::Fault> {
+        let source = self.regexp_syntax(None).map_err(|fault| self.regexp_fault(fault))?;
+        Ok(std::array::from_fn(|c| self.regexp_table_class(source.table(), c as u32) == Some(regex::SyntaxClass::Word)))
     }
 
     /// Whether STRING matches every pattern of MATCHER, in order.
     pub(crate) fn string_matcher_matches(&mut self, matcher: &mut StringMatcher, string: Value) -> std::result::Result<bool, prim::Fault> {
         for i in 0..matcher.sources.len() {
-            if matcher.patterns[i].is_none() {
-                let compiled = self.regexp_input(matcher.sources[i])
-                    .and_then(|source| self.regexp_pattern(&source, false, matcher.key, matcher.translation.clone(), &matcher.syntax))
-                    .map_err(|fault| self.regexp_fault(fault))?;
-                matcher.patterns[i] = Some(compiled);
-            }
-            let pattern = matcher.patterns[i].clone().unwrap();
-            let mut pattern = pattern.borrow_mut();
-            // Some(found), or None when the matcher overflowed.
-            let found = {
-                let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
-                let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
-                let syntax = syntax::VmSyntax::new(self, matcher.syntax.clone());
-                pattern.set_target_multibyte(multibyte);
-                let found = regex::re_search(&pattern, bytes, 0, bytes.len() as isize, &syntax, usize::MAX);
-                (!regex::take_matcher_overflow()).then_some(found.is_some())
-            };
-            match found {
-                None => return Err(self.regexp_fault(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()))),
-                Some(false) => return Ok(false),
-                Some(true) => {}
-            }
+            if self.string_matcher_search(matcher, i, string)?.is_none() { return Ok(false); }
         }
         Ok(true)
+    }
+
+    /// The groups, in character positions, of the first match of
+    /// MATCHER's pattern I in STRING; None when it does not match.
+    pub(crate) fn string_matcher_groups(&mut self, matcher: &mut StringMatcher, i: usize, string: Value)
+        -> std::result::Result<Option<Vec<Option<(usize, usize)>>>, prim::Fault> {
+        let Some(registers) = self.string_matcher_search(matcher, i, string)? else { return Ok(None) };
+        let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
+        let input = Input { bytes: view.bytes().to_vec(), multibyte: view.is_multibyte() };
+        Ok(Some(character_groups(&input, &registers)))
+    }
+
+    fn string_matcher_search(&mut self, matcher: &mut StringMatcher, i: usize, string: Value)
+        -> std::result::Result<Option<MatchRegisters>, prim::Fault> {
+        if matcher.patterns[i].is_none() {
+            let compiled = self.regexp_input(matcher.sources[i])
+                .and_then(|source| self.regexp_pattern(&source, false, matcher.key, matcher.translation.clone(), &matcher.syntax))
+                .map_err(|fault| self.regexp_fault(fault))?;
+            matcher.patterns[i] = Some(compiled);
+        }
+        let pattern = matcher.patterns[i].clone().unwrap();
+        let mut pattern = pattern.borrow_mut();
+        let found = {
+            let view = self.str_view(string).ok_or(prim::Fault::Wrong("stringp", string))?;
+            let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
+            let syntax = syntax::VmSyntax::new(self, matcher.syntax.clone());
+            pattern.set_target_multibyte(multibyte);
+            regex::re_search(&pattern, bytes, 0, bytes.len() as isize, &syntax, usize::MAX)
+        };
+        if regex::take_matcher_overflow() {
+            return Err(self.regexp_fault(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into())));
+        }
+        Ok(found.map(|(_, registers)| registers))
     }
 
     /// PATTERN compiled, for the longest match when POSIX, with the
@@ -259,7 +292,19 @@ impl Vm {
     /// TRANSLATION), without touching the match data.
     pub(crate) fn string_match_no_data(&mut self, pattern: Value, string: Value, key: Translation,
                                        translation: Option<regex::CaseTranslation>) -> std::result::Result<Option<usize>, prim::Fault> {
-        let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
+        Ok(self.string_search(pattern, string, key, translation)?.map(|(_, at, _)| at))
+    }
+
+    /// [`Self::string_match_no_data`]'s match, as its groups in character positions.
+    pub(crate) fn string_match_groups(&mut self, pattern: Value, string: Value, key: Translation,
+                                      translation: Option<regex::CaseTranslation>)
+        -> std::result::Result<Option<Vec<Option<(usize, usize)>>>, prim::Fault> {
+        Ok(self.string_search(pattern, string, key, translation)?.map(|(input, _, registers)| character_groups(&input, &registers)))
+    }
+
+    fn string_search(&mut self, pattern: Value, string: Value, key: Translation, translation: Option<regex::CaseTranslation>)
+        -> std::result::Result<Option<(Input, usize, MatchRegisters)>, prim::Fault> {
+        let run = |vm: &mut Self| -> SearchResult<Option<(Input, usize, MatchRegisters)>> {
             let pattern = vm.regexp_input(pattern)?;
             let input = vm.regexp_input(string)?;
             let source = vm.regexp_syntax(Some(string))?;
@@ -271,7 +316,7 @@ impl Vm {
             if regex::take_matcher_overflow() {
                 return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
             }
-            Ok(found.map(|(at, _)| at))
+            Ok(found.map(|(at, registers)| (input, at, registers)))
         };
         run(self).map_err(|fault| self.regexp_fault(fault))
     }
