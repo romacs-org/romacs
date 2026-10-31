@@ -280,6 +280,7 @@ impl Vm {
                 rest: m[4].as_bool().ok_or("invalid rest flag")?,
                 lazy: None,
                 dynamic: None,
+                params: None,
             };
             if f.regs == 0
                 || f.required > f.arity
@@ -497,6 +498,7 @@ impl Vm {
             rest: f.rest,
             lazy: None,
             dynamic: f.dynamic,
+            params: f.params.clone(),
         };
         self.validate_image_function(&f)?;
         let roots = field(&body, "roots")?.as_object().ok_or("invalid image literal roots")?;

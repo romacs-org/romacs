@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "57d0da8ff64a1170b8d0ad264bbdbb9f860ca8f89390780b6d9a10ee691f9985",
+  "input_hash": "c955b850fd2a5f0c3646e145ce013201cf2ae3a758598f73d28373a7c88763ae",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4937,8 +4937,8 @@
    "planned": false,
    "mechanism": "a closure is not a sequence in VM2",
    "gnu": "A closure is a vector-like object in GNU 32.0.50, so `length`, `append` and `mapcar` accept it as a sequence: `(length (lambda (x) x))` is 5 for the byte-compiled closure and 3 for the interpreted one (both regimes recorded; `src/fns.c:154` at pin `45b0f7699df`, `Flength` counts a `CLOSUREP` object's slots).",
-   "romacs": "Ordinary VM2 closures remain opaque objects: all three signal `wrong-type-argument`. Explicit `make-interpreted-closure` values and marked OClosures expose their supported metadata slots; this does not make ordinary closures sequences. `aref` of slot 2, the environment, answers for a closure made where no lexical binding is visible (a top-level `defun` or `lambda`): GNU's is then the dialect's alone, `(t)` or nil, which nadvice reads to run an advised command's computed interactive form (`tests/closure_environment.rs`); under a `let` it still signals, as do slots 0 and 1. Pinned in the bulk `core` corpus as `length/0071`, `append/1041`, `mapcar/0257` (class `VALUE`; the probes catch the type error as -99 so the closure is never printed).",
-   "why": "**Package-observable, rarely:** only code that measures or walks a function object's slots (OClosure internals, some debuggers/`cl-print`) sees the difference. General closure sequence operations remain out of scope. OClosure uses the explicit metadata boundary described in VM2-OCLOSURE1.",
+   "romacs": "Ordinary VM2 closures remain opaque objects: all three signal `wrong-type-argument`. Explicit `make-interpreted-closure` values and marked OClosures expose their supported metadata slots; this does not make ordinary closures sequences. `aref` of slot 2, the environment, answers for a closure made where no lexical binding is visible (a top-level `defun` or `lambda`): GNU's is then the dialect's alone, `(t)` or nil, which nadvice reads to run an advised command's computed interactive form (`tests/closure_environment.rs`); under a `let` it still signals, as does slot 1, the body. Slot 0 answers the lambda list as written, which `help-function-arglist` (eldoc, `describe-function`) reads; code images do not record it, and there it still signals. Pinned in the bulk `core` corpus as `length/0071`, `append/1041`, `mapcar/0257` (class `VALUE`; the probes catch the type error as -99 so the closure is never printed).",
+   "why": "**Package-observable, rarely:** only code that measures or walks a function object's slots (OClosure internals, some debuggers) sees the difference; `cl-print` prints an ordinary closure as `prin1` does (`rlisp/romacs-cl-print.el`). General closure sequence operations remain out of scope. OClosure uses the explicit metadata boundary described in VM2-OCLOSURE1.",
    "symbols": [
     "length",
     "append",

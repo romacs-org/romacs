@@ -531,6 +531,10 @@ unbound upper-case or shifted key is looked up without its shift, and
 (defun romacs--read-key-sequence-vs (prompt continue-echo dont-downcase-last _cmd-loop)
   (and prompt (not (stringp prompt))
        (signal 'wrong-type-argument (list 'stringp prompt)))
+  ;; read_key_sequence (keyboard.c:10993): an interactive read installs
+  ;; PROMPT as the start of the echo and shows it now, unlogged (echo_now).
+  (when (and prompt (not executing-kbd-macro) (not noninteractive))
+    (let ((message-log-max nil)) (message "%s" prompt)))
   (unless continue-echo
     (setq romacs--command-keys [] romacs--single-command-key-start 0))
   (or (romacs--read-key-sequence dont-downcase-last) []))
@@ -584,13 +588,19 @@ a command signalled out of it: `post-command-hook' runs for that command."
   (unless (consp last-command-event)
     (setq last-repeatable-command real-this-command)))
 
+(defun romacs--command-loop-top ()
+  "The top of keyboard.c command_loop_1's loop, before it waits for keys:
+the selected window's buffer is current and no command is running, so
+idle timers and redisplay see `this-command' nil."
+  (set-buffer (window-buffer (selected-window)))
+  (setq deactivate-mark nil this-command nil real-this-command nil
+        this-original-command nil this-command-keys-shift-translated nil))
+
 (defun romacs--command-loop-step ()
   "One pass of keyboard.c command_loop_1's loop: read a key sequence and
 run its command between `pre-command-hook' and `post-command-hook'.
 Return the keys read, nil at the end of an executing keyboard macro."
-  (set-buffer (window-buffer (selected-window)))
-  (setq deactivate-mark nil this-command nil real-this-command nil
-        this-original-command nil this-command-keys-shift-translated nil)
+  (romacs--command-loop-top)
   (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil)))
         cmd previous-buffer previous-tick)
     (set-buffer (window-buffer (selected-window)))
@@ -657,7 +667,8 @@ from the unread queues, a keyboard macro, then the host, and run its
 command as command_loop_1 does.  A signal goes to cmd_error, a throw to
 `top-level' ends the command, and the loop then resumes, so
 `post-command-hook' runs for that command too.  Value: (COMMAND . ERROR),
-COMMAND `this-command' and ERROR nil or the (CONDITION . DATA) signalled."
+COMMAND `this-command' and ERROR nil or the (CONDITION . DATA) signalled.
+The host waits for the next input at the top of the loop."
   (let ((error nil) (thrown t))
     (catch 'top-level
       (condition-case data
@@ -667,7 +678,8 @@ COMMAND `this-command' and ERROR nil or the (CONDITION . DATA) signalled."
     (when (or error thrown)
       (when thrown (catch 'top-level (romacs--top-level-1)))
       (romacs--command-loop-resume))
-    (cons this-command error)))
+    (prog1 (cons this-command error)
+      (romacs--command-loop-top))))
 
 (defun romacs--top-level-1 ()
   "keyboard.c top_level_1, which the command loop runs on reaching its outer

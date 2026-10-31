@@ -90,6 +90,9 @@
 (load "indent.el" nil t t)
 ;; GNU cl-generic, loaded through Romacs's type-query bridge.
 (require 'romacs-cl-generic)
+;; cl-print's closure method walks body slots VM2 closures do not expose
+;; (VM2-CLOSEQ1).
+(with-eval-after-load 'cl-print (require 'romacs-cl-print))
 (load "simple.el" nil t t)
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)
@@ -161,8 +164,11 @@
 (load "emacs-lisp/shorthands.el" nil t t)
 (load "emacs-lisp/eldoc.el" nil t t)
 (load "emacs-lisp/cconv.el" nil t t)
-;; loadup.el preloads cus-start with this flag bound.
+;; loadup.el preloads cus-start with this flag bound, under `dump-mode',
+;; where it does not provide itself: Custom's `(require 'cus-start)'
+;; then loads the types and groups the preload skips.
 (dlet ((cus-start--preload t)) (load "cus-start.el" nil t t))
+(setq features (delq 'cus-start features))
 (load "tooltip.el" nil t t)
 (load "international/iso-transl.el" nil t t)
 (load "emacs-lisp/rmc.el" nil t t)

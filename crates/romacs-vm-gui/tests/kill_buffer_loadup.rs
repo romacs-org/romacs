@@ -41,6 +41,9 @@ fn kill_buffer_replaces_windows_and_keeps_a_sole_scratch_as_gnu() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         let started = startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        // GNU's batch shows no startup screen (command-line-1 under
+        // `noninteractive'); a shown one is recorded first in `buffer-list'.
+        vm.eval_source("(setq inhibit-startup-screen t)").unwrap();
         startup::finish_loadup(&mut vm, &started).unwrap();
         vm.eval_source(&format!("(prin1-to-string {FORM})")).unwrap().display().unwrap()
     }).unwrap().join().unwrap();

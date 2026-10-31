@@ -19,6 +19,9 @@ Shared by interactive and programmatic file visits and buffer switches."
   (let ((old (window-buffer (selected-window))))
     (unless (or norecord (eq old buffer)) (setq romacs-buffer--previous old))
     (set-window-buffer (selected-window) buffer)
+    ;; window.el `switch-to-buffer': selecting the selected window records
+    ;; BUFFER first in `buffer-list' (record_buffer).
+    (unless norecord (select-window (selected-window)))
     (set-buffer buffer)
     (set-window-point (selected-window) (point))
     buffer))

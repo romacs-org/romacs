@@ -695,12 +695,17 @@ impl Vm {
                             if let Some(&slot) = self.generated_symbols.get(id) { pending.push(Value::reference(slot + 1, 7)); }
                         }
                     }
-                    let mut forms: Vec<_> = lazy.args.iter().collect();
-                    while let Some(form) = forms.pop() {
+                }
+                // The lambda list, which slot 0 answers, outlives the lazy body.
+                let function = &self.functions[id];
+                let mut nested = Vec::new();
+                for form in function.lazy.iter().flat_map(|lazy| &lazy.args).chain(function.params.iter().flatten()) {
+                    let mut next = Some(form);
+                    while let Some(form) = next.take().or_else(|| nested.pop()) {
                         match form {
                             Form::Generated(id) => if let Some(&slot) = self.generated_symbols.get(id) { pending.push(Value::reference(slot + 1, 7)); },
-                            Form::List(items) | Form::Vector(items) => forms.extend(items),
-                            Form::Dotted(items, tail) => { forms.extend(items); forms.push(tail); }
+                            Form::List(items) | Form::Vector(items) => nested.extend(items),
+                            Form::Dotted(items, tail) => { nested.extend(items); nested.push(tail); }
                             _ => {}
                         }
                     }
