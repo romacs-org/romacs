@@ -12,7 +12,7 @@
 ;; # .cit version 1
 ;; ENCODE:	GB
 ;; MULTICHOICE:	YES
-;; PROMPT:	汉字输入∷标点符号∷��
+;; PROMPT:	汉字输入∷标点符号∷\243\240
 ;; #
 ;; COMMENT	Copyright 1991 by Yongguang Zhang.
 ;; COMMENT Permission to use/modify/copy for any purpose is hereby granted.

@@ -236,14 +236,33 @@ one with the `xr' package." t)
 "Save all documents associated with the current document.
 The function is useful after a global action like replacing or renumbering
 labels." t)
+(defvar reftex-isearch-minor-mode nil
+"Non-nil if Reftex-Isearch minor mode is enabled.
+See the `reftex-isearch-minor-mode' command
+for a description of this minor mode.
+Setting this variable directly does not take effect;
+either customize it (see the info node `Easy Customization')
+or call the function `reftex-isearch-minor-mode'.")
+(custom-autoload 'reftex-isearch-minor-mode "reftex-global" nil)
 (autoload 'reftex-isearch-minor-mode "reftex-global"
 "When on, isearch searches the whole document, not only the current file.
+
 This minor mode allows isearch to search through all the files of
 the current TeX document.
 
-With no argument, this command toggles
-`reftex-isearch-minor-mode'.  With a prefix argument ARG, turn
-`reftex-isearch-minor-mode' on if ARG is positive, otherwise turn it off.
+This is a global minor mode.  If called interactively, toggle the
+`Reftex-Isearch minor mode' mode.  If the prefix argument is positive,
+enable the mode, and if it is zero or negative, disable the mode.
+
+If called from Lisp, toggle the mode if ARG is `toggle'.  Enable the
+mode if ARG is nil, omitted, or is a positive number.  Disable the mode
+if ARG is a negative number.
+
+To check whether the minor mode is enabled in the current buffer,
+evaluate `(default-value \\='reftex-isearch-minor-mode)'.
+
+The mode's hook is called both when the mode is enabled and when it is
+disabled.
 
 (fn &optional ARG)" t)
 

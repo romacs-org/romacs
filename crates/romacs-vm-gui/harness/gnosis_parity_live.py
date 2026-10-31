@@ -101,8 +101,9 @@ def init_source(engine, root, lisp):
     """The init both engines load: identical except where each finds gnosis."""
     # GNU gets the packages Romacs bundles, installed as package.el would:
     # their directories on `load-path' and the same generated autoloads
-    # Romacs's --loadup loads.  gnosis and keymap-popup come byte-compiled.
-    bundled = [lisp] + [ROOT / 'rlisp' / d for d in ('hermes', 'jabber', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket')]
+    # Romacs's --loadup loads, whose rlisp/ libraries (romacs-video's
+    # find-file-hook) need rlisp/ too.  gnosis and keymap-popup come byte-compiled.
+    bundled = [lisp] + [ROOT / 'rlisp' / d for d in ('', 'hermes', 'jabber', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket')]
     load = '' if lisp is None else (
         f'(setq load-path (append (list {" ".join(lisp_string(str(d)) for d in bundled[:1])}) load-path'
         f' (list {" ".join(lisp_string(str(d)) for d in bundled[1:])})))\n'

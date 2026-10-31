@@ -5847,6 +5847,7 @@ If FIX is non-nil, run `copyright-fix-years' instead.
 
 ;;; Generated autoloads from progmodes/cperl-mode.el
 
+(push '(cperl-mode 33 0 0) package--builtin-versions)
 (put 'cperl-file-style 'safe-local-variable 'stringp)
 (put 'cperl-indent-level 'safe-local-variable 'integerp)
 (put 'cperl-brace-offset 'safe-local-variable 'integerp)
@@ -6385,6 +6386,15 @@ even if it doesn't match the type.)
 "
 
 (fn VARIABLE VALUE)")
+(defvar setopt-local-type-mismatch nil
+"Behavior of `setopt-local’ if value's type doesn't match its definition.
+If nil, emit a warning, but accept the mismatched value.
+If the symbol `accept', ignore type mismatch warning and assign the value.
+If the symbol `discard', ignore warning and discard the mismatched value.
+If any other non-nil value, prompt whether to accept or discard the value.
+Note: Accepting mismatched values may result in unexpected behavior.")
+(custom-autoload 'setopt-local-type-mismatch "cus-edit" t)
+(put 'setopt-local-type-mismatch 'safe-local-variable #'symbolp)
 (autoload 'setopt-local "cus-edit"
 "Set buffer local VARIABLE/VALUE pairs, and return the final VALUE.
 This is like `setq-local', but is meant for user options instead of
@@ -6402,7 +6412,8 @@ Signal an error if a `custom-set' form does not support the
 
 (fn [VARIABLE VALUE]...)" nil t)
 (autoload 'setopt--set-local "cus-edit"
-"
+"Set a buffer local VARIABLE to VALUE.
+Consult `setopt-local-type-mismatch'.
 
 (fn VARIABLE VALUE)")
 (autoload 'customize-save-variable "cus-edit"
@@ -7043,7 +7054,6 @@ There is some minimal font-lock support (see vars
 
 ;;; Generated autoloads from emacs-lisp/debug.el
 
-(setq debugger 'debug)
 (autoload 'debug "debug"
 "Enter debugger.  \\<debugger-mode-map>`\\[debugger-continue]' returns from the debugger.
 
@@ -7204,7 +7214,7 @@ START and END delimit the corners of the text rectangle.
 
 ;;; Generated autoloads from delsel.el
 
-(defalias 'pending-delete-mode 'delete-selection-mode)
+(defalias 'pending-delete-mode #'delete-selection-mode)
 (defvar delete-selection-mode nil
 "Non-nil if Delete-Selection mode is enabled.
 See the `delete-selection-mode' command
@@ -7870,7 +7880,7 @@ active it will overwrite that mode for the current buffer.
 Internally it provides a default for the `dictionary-tooltip-mode'.
 It can be overwritten for each buffer using `dictionary-tooltip-mode'.
 
-Note: (global-dictionary-tooltip-mode 0) will not disable the mode
+Note: (global-dictionary-tooltip-mode -1) will not disable the mode
 any buffer where (dictionary-tooltip-mode 1) has been called.
 
 (fn &optional ARG)" t)
@@ -7896,7 +7906,7 @@ the word at mouse click.
 
 ;;; Generated autoloads from vc/diff.el
 
-(defvar diff-switches "-u"
+(defvar diff-switches '("-u" "-r")
 "A string or list of strings specifying switches to be passed to diff.
 
 This variable is also used in the `vc-diff' command (and related
@@ -9995,7 +10005,7 @@ Argument BOTTOM is the bottom margin in number of lines or percent of window.
 
 ;;; Generated autoloads from progmodes/eglot.el
 
-(push '(eglot 1 24 31) package--builtin-versions)
+(push '(eglot 1 24) package--builtin-versions)
 (define-obsolete-function-alias 'eglot-update #'eglot-upgrade-eglot "29.1")
 (autoload 'eglot "eglot"
 "Start LSP server for PROJECT's buffers under MANAGED-MAJOR-MODES.
@@ -10296,7 +10306,7 @@ The mode's hook is called both when the mode is enabled and when it is
 disabled.
 
 (fn &optional ARG)" t)
-(register-definition-prefixes "elec-pair" '("electric-pair-"))
+(register-definition-prefixes "elec-pair" '("electric-"))
 
 
 ;;; Generated autoloads from elide-head.el
@@ -11176,7 +11186,7 @@ a single minimum version string.
 
 ;;; Generated autoloads from erc/erc.el
 
-(push '(erc 5 6 2 31 1) package--builtin-versions)
+(push '(erc 5 7 -4) package--builtin-versions)
 (dolist (symbol '( erc-sasl erc-spelling ; 29
                   erc-imenu erc-nicks)) ; 30
  (custom-add-load symbol symbol))
@@ -11298,7 +11308,7 @@ Customize `erc-url-connect-function' to override this.
 
 ;;; Generated autoloads from erc/erc-desktop-notifications.el
 
-(register-definition-prefixes "erc-desktop-notifications" '("erc-notifications-"))
+(register-definition-prefixes "erc-desktop-notifications" '("erc-"))
 
 
 ;;; Generated autoloads from erc/erc-ezbounce.el
@@ -11414,6 +11424,11 @@ server name and search for a match in `erc-networks-alist'.")
 ;;; Generated autoloads from erc/erc-services.el
 
 (register-definition-prefixes "erc-services" '("erc-"))
+
+
+;;; Generated autoloads from erc/erc-settings.el
+
+(register-definition-prefixes "erc-settings" '("erc-settings"))
 
 
 ;;; Generated autoloads from erc/erc-sound.el
@@ -11637,6 +11652,11 @@ penultimate step during initialization.
 ;;; Generated autoloads from eshell/esh-var.el
 
 (register-definition-prefixes "esh-var" '("eshell" "pcomplete/eshell-mode/"))
+
+
+;;; Generated autoloads from eshell/esh-worker.el
+
+(register-definition-prefixes "esh-worker" '("eshell"))
 
 
 ;;; Generated autoloads from eshell/eshell.el
@@ -13181,7 +13201,8 @@ then this function adds it at the end of the file, with the first
 line containing the string `Local Variables:' and the last line
 containing the string `End:'.
 
-For adding local variables on the first line of a file,
+For adding local variables on the first line of a file, for example
+for settings like `lexical-binding, which must be specified there,
 use the `add-file-local-variable-prop-line' command instead.
 
 If optional variable INTERACTIVE is non-nil, display a message telling
@@ -13829,7 +13850,7 @@ lines.
 
 ;;; Generated autoloads from progmodes/flymake.el
 
-(push '(flymake 1 4 6) package--builtin-versions)
+(push '(flymake 1 4 7) package--builtin-versions)
 (autoload 'flymake-log "flymake"
 "Log, at level LEVEL, the message MSG formatted with ARGS.
 LEVEL is passed to `display-warning', which is used to display
@@ -15112,11 +15133,6 @@ supported.
 ;;; Generated autoloads from gnus/gnus-cus.el
 
 (register-definition-prefixes "gnus-cus" '("category-fields" "gnus-"))
-
-
-;;; Generated autoloads from gnus/gnus-dbus.el
-
-(register-definition-prefixes "gnus-dbus" '("gnus-dbus-"))
 
 
 ;;; Generated autoloads from gnus/gnus-delay.el
@@ -20524,7 +20540,7 @@ For instance, the following code
 
 essentially expands to
 
-  (let ((.title.0 (nth 0 (cdr (assq \\='title alist))))
+  (let ((.title.0 (elt (cdr (assq \\='title alist)) 0))
         (.body  (cdr (assq \\='body alist)))
         (.site  (cdr (assq \\='site alist)))
         (.site.contents (cdr (assq \\='contents (cdr (assq \\='site alist))))))
@@ -21512,12 +21528,269 @@ for the current invocation.
 ;;; Generated autoloads from textmodes/markdown-ts-mode.el
 
 (push '(markdown-ts-mode 1 0) package--builtin-versions)
+(autoload 'markdown-ts-mode "markdown-ts-mode"
+"Major mode for editing Markdown using tree-sitter grammar.
+NOTE: See `markdown-ts--set-up-inline'.
+
+In addition to any hooks its parent mode `text-mode' might have run,
+this mode runs the hook `markdown-ts-mode-hook', as the final or
+penultimate step during initialization.
+
+\\{markdown-ts-mode-map}" t)
+(autoload 'markdown-ts-view-mode "markdown-ts-mode"
+"Major mode for read-only viewing Markdown using tree-sitter grammar.
+
+This mode runs the hook `markdown-ts-view-mode-hook', as the final or
+penultimate step during initialization.
+
+\\{markdown-ts-view-mode-map}" t)
+(autoload 'markdown-ts-buffer-string "markdown-ts-mode"
+"Like `buffer-string', and convert overlay properties to text properties.")
+(autoload 'markdown-ts-mode-maybe "markdown-ts-mode"
+"Enable `markdown-ts-mode' when its grammars are available.
+Also propose to install the grammars when `treesit-enabled-modes'
+is t or contains the mode name.")
+(when (boundp 'treesit-major-mode-remap-alist) (add-to-list 'auto-mode-alist '("\\.md\\'" . markdown-ts-mode-maybe)) (add-to-list 'auto-mode-alist '("\\.markdown\\'" . markdown-ts-mode-maybe)) (add-to-list 'auto-mode-alist '("\\.mdx\\'" . markdown-ts-mode-maybe)) (add-to-list 'treesit-major-mode-remap-alist '(markdown-mode . markdown-ts-mode)))
 (register-definition-prefixes "markdown-ts-mode" '("markdown-ts-"))
 
 
 ;;; Generated autoloads from textmodes/markdown-ts-mode-x.el
 
 (push '(markdown-ts-mode-x 1 0) package--builtin-versions)
+(autoload 'markdown-ts-convert-file "markdown-ts-mode-x"
+"Convert Markdown INPUT-FILE to FORMAT.
+If optional DISPLAY is non-nil, show the output file in a buffer, if
+possible, using the function `markdown-ts-convert-display-function'.
+
+With a prefix argument, DISPLAY will be non-nil.
+
+Optional FORMAT is a format/converter pair specified as a cons
+\\='(format . converter) for example \\='(html . pandoc).  See
+`markdown-ts-converters'.  If nil, prompt for the format and converter.
+
+If optional OVERWRITE is non-nil, silently overwrite OUTPUT-FILE if it
+exists.
+
+If QUIET is non-nil, inhibit showing conversion warnings or errors.
+
+The external executable specified by a converter must be installed and
+found; see the variable `exec-path'.
+
+(fn INPUT-FILE &optional FORMAT OUTPUT-FILE DISPLAY OVERWRITE QUIET)" t)
+(autoload 'markdown-ts-convert "markdown-ts-mode-x"
+"Convert a `markdown-ts-mode' buffer or file to FORMAT.
+Convert INPUT-FILE to OUTPUT-FILE.
+
+If INPUT-FILE is nil, use the current buffer.
+
+If OUTPUT-FILE is nil, prompt for an output file.
+
+Optional FORMAT is a format/converter pair specified as a cons
+\\='(format . converter) for example \\='(html . pandoc).  See
+`markdown-ts-converters'.  If nil, prompt for the format and converter.
+
+If optional DISPLAY is non-nil, show the output file in a buffer, if
+possible, using the function `markdown-ts-convert-display-function'.
+
+With a prefix argument, DISPLAY will be non-nil.
+
+If optional OVERWRITE is non-nil, silently overwrite OUTPUT-FILE if it
+exists.
+
+If QUIET is non-nil, inhibit showing conversion warnings or errors.
+
+The external executable specified by a converter must be installed and
+found; see the variable `exec-path'.
+
+(fn &optional INPUT-FILE OUTPUT-FILE FORMAT DISPLAY OVERWRITE QUIET)" t)
+(autoload 'markdown-ts-toc-update-before-save-mode "markdown-ts-mode-x"
+"If enabled, update `markdown-ts-mode' tables of contents before saving.
+
+This is a minor mode.  If called interactively, toggle the
+`Markdown-Ts-Toc-Update-Before-Save mode' mode.  If the prefix argument
+is positive, enable the mode, and if it is zero or negative, disable the
+mode.
+
+If called from Lisp, toggle the mode if ARG is `toggle'.  Enable the
+mode if ARG is nil, omitted, or is a positive number.  Disable the mode
+if ARG is a negative number.
+
+To check whether the minor mode is enabled in the current buffer,
+evaluate the variable `markdown-ts-toc-update-before-save-mode'.
+
+The mode's hook is called both when the mode is enabled and when it is
+disabled.
+
+(fn &optional ARG)" t)
+(autoload 'markdown-ts-toc-clear-and-remove "markdown-ts-mode-x"
+"Remove `markdown-ts-mode' table of contents bodies and templates.
+Operate on the active region BEG to END, otherwise operate on the
+buffer, which may be narrowed.
+
+(fn &optional BEG END)" t)
+(autoload 'markdown-ts-toc-clear "markdown-ts-mode-x"
+"Clear `markdown-ts-mode' table of contents bodies.
+Operate on the active region BEG to END, otherwise operate on the
+buffer, which may be narrowed.
+If optional REMOVE is non-nil, remove tables including their templates.
+
+(fn &optional BEG END REMOVE)" t)
+(autoload 'markdown-ts-toc-insert-template "markdown-ts-mode-x"
+"Insert a `markdown-ts-mode` table of contents template at point.
+
+CHAR is the template type \"b\" for basic, \"c\" for complete.  If CHAR
+is nil and the command is run interactively, prompt for a template.
+
+The basic template uses all defaults and is likely the best choice for
+most uses.  The complete template illustrates all parameters set to
+their defaults and is useful as a starting point to customize a table.
+
+(fn &optional CHAR)" t)
+(autoload 'markdown-ts-toc-generate "markdown-ts-mode-x"
+"Generate tables of contents in the current buffer.
+`markdown-ts-mode' uses Markdown HTML comment elements to identify table
+of contents (aka toc) insertion boundaries and the parameters for each
+table.  Derive table content from the Markdown elements in the current
+buffer which are usually headings but can also be list items, setext
+headers, named code blocks.
+
+Operate on the active region BEG to END, otherwise operate on the
+buffer, which may be narrowed.
+
+Each time you run this command, existing tables of contents are cleared
+and refreshed with new content.  So don't place toc elements around
+important text.
+
+The buffer can have one or more tocs.  By default, populate each toc
+with elements that appear in the buffer below the toc.  Therefore, the
+easiest way to insert a complete table of contents, is to put the toc
+template near the top of your buffer.
+
+A basic empty toc template looks like this:
+
+Header text you want here.
+
+<!-- markdown-ts-toc: -->
+Contents inserted between these elements.
+<!-- markdown-ts-toc-end: -->
+
+Footer text you want here.
+
+Use the command `markdown-ts-toc-insert-template' to insert a table of
+contents template.
+
+Use the command `markdown-ts-toc-clear' to clear table content, and the
+command `markdown-ts-toc-clear-and-remove' to both clear and remove
+table content and templates.
+
+By default, a toc includes headers at all levels below the toc which are
+presented as list items with links.
+
+To ignore a Markdown element that would otherwise be included in the
+toc, add a toc ignore element:
+
+## Ignore Me <!-- markdown-ts-toc-ignore: -->
+
+The starting toc element accepts parameters in the syntax of Emacs file
+variables.
+
+For example, if you want to generate a table of contents limited to
+headings two levels deep:
+
+<!-- markdown-ts-toc: -*- max-depth: 2; -*- -->
+<!-- markdown-ts-toc-end: -->
+
+Or use only headings two and three levels deep.
+
+<!-- markdown-ts-toc: -*- min-depth: 2; max-depth: 3; -*- -->
+<!-- markdown-ts-toc-end: -->
+
+These are the supported parameters which are optional.  They each list
+their defaults.
+
+  min-depth: 1          ; an integer
+  max-depth: nil        ; an integer
+  candidates: (heading) ; a list
+  from: below           ; a symbol
+  style: item           ; a symbol
+  indent: 1             ; a number
+  no-link: nil          ; a boolean
+  relative-depth: nil   ; a boolean
+  ignore: nil           ; a boolean
+
+`min-depth' and `max-depth' both default to using all candidates at
+every level.  Use `min-depth' to ignore level 1 headings like \"#
+Heading\", by using 2.  Use `max-depth' to control how deep into the
+heading hierarchy you need your toc to go.  Use 3 to stop at level three
+headings.
+
+Headings dictate the level of their children even if headings are
+excluded from candidates.  Other element types inherit the level of
+their preceding heading.
+
+`candidates' is a list and can contain any of the following Markdown
+element shortcut names.  You can mix higher-level grouping symbols and
+lower level symbols.
+
+  all (includes everything)
+  heading (includes the below)
+    h1 h2 h3 h4 h5 h6
+  setext (includes the below)
+    sh1 sh2
+  item (includes the below)
+    minus plus star
+  numbered-item (includes the below)
+    dot paren
+  code (named code blocks)
+
+`from' controls the direction and scope from which candidates are
+selected.  Typically, a toc is placed at the beginning of a buffer and
+`from' is `below' to capture entry candidates after the toc.  If you set
+`from' to `above', candidates are selected from above the toc.  Use
+`all' to capture every entry candidate.  This is useful to create a
+complete toc at the end of your buffer.
+
+The `style' parameter can be nil, `item', `number' or `number.'.  Under
+nil, entries have no decorations.  If `item', entries are prefixed with
+\"-\".  If `bullet', prefix with \"*\".  If `number', numeric prefixes
+are generated, for example 1, 1.1, 2, 2.1, 2.1.1, 2.1.2.  Use `number.'
+to add a period to each entry's number.
+
+`indent' is an integer between 0 and 10.  0 means nothing should be
+indented.  Otherwise, each entry is indented by the number of spaces of
+its Markdown level multiplied by this value.  Candidates that have no
+native level such as list items inherit the base indentation level of
+its preceding header.  List item hierarchies and code blocks indent
+under that base.
+
+Set `no-link' to t if you do not want your entries to have header links.
+By default, each entry derived from a heading is presented as a link to
+its source heading.  NOTE: The elements represented by `setext', `item',
+`numbered-item', `code' do not support links.
+
+Use `relative-depth' to create a toc underneath a heading, limiting the
+toc to heading depths underneath the preceding header and specify the
+levels relative to that header.  More concretely, if the preceding
+header is a level 1 \"#\" header, `min-depth' 1 and `max-depth' 2 will
+be interpreted to be 2 and 3.  If you demote the header to level 2
+\"##\" they will be interpreted as 3 and 4.  This is useful to avoid
+fussing with toc configurations under headers when you change their
+levels.
+
+For example:
+
+<!-- markdown-ts-toc: -*- relative-depth: t; min-depth: 1; max-depth: 2; -*- -->
+<!-- markdown-ts-toc-end: -->
+
+Finally, if `ignore' is t, you can keep a toc element in place and skip
+it.
+
+INTERACTIVE will be non-nil if this command was invoked interactively.
+
+See `markdown-ts-toc-generate-warn-if-none' to configure warnings about
+tables not being processed when this function is called.
+
+(fn &optional INTERACTIVE BEG END)" t)
 (register-definition-prefixes "markdown-ts-mode-x" '("markdown-ts-"))
 
 
@@ -23822,11 +24095,6 @@ step during initialization." t)
 (register-definition-prefixes "ob-tangle" '("org-babel-"))
 
 
-;;; Generated autoloads from ob-wgsl.el
-
-(register-definition-prefixes "ob-wgsl" '("ob-wgsl-" "org-babel-"))
-
-
 ;;; Generated autoloads from org/oc.el
 
 (autoload 'org-cite-insert "oc"
@@ -24777,6 +25045,25 @@ except the hard-coded property name `outline-level'.
 This function is intended to be used in `outline-search-function'.
 
 (fn &optional BOUND MOVE BACKWARD LOOKING-AT)")
+(autoload 'outline-search-from-regexp "outline"
+"Search for the next heading matching `outline-regexp'.
+The arguments BOUND, MOVE, BACKWARD, and LOOKING-AT are described
+in `outline-search-function'.  This function is intended to be
+used in `outline-search-function' by modes and minor modes that
+customize `outline-regexp' but do not need a custom search strategy.
+Install it with
+
+  (setq-local outline-search-function #\\='outline-search-from-regexp)
+
+(fn &optional BOUND MOVE BACKWARD LOOKING-AT)")
+(put 'outline-comment-regexp 'safe-local-variable 'stringp)
+(autoload 'outline-find-headings "outline"
+"Find all outline headings in the current buffer.
+Display an Xref buffer with the outline headings found in the current
+buffer.  You can use that Xref buffer to navigate and edit the outline.
+
+If `outline-search-function' is non-nil, it is used to find the outline
+headings.  Otherwise, `outline-regexp' is used." t)
 (register-definition-prefixes "outline" '("outline-"))
 
 
@@ -25348,6 +25635,8 @@ affect the returned value of date and time, they only affect the
 last two members of the returned value.  This function simply
 parses the textual representation of date and time into separate
 numerical values, and doesn't care whether the time is local or UTC.
+Also, obsolete alphabetic time zone abbreviations like \"PST\" have
+their circa 1970 meanings, even if current usage differs.
 
 See `decode-time' for the meaning of FORM.
 
@@ -29245,229 +29534,6 @@ OUTPUT is either a character or a string to be generated.
 (register-definition-prefixes "robin" '("robin-"))
 
 
-;;; Generated autoloads from romacs-companion.el
-
-(register-definition-prefixes "romacs-companion" '("romacs-companion-"))
-
-
-;;; Generated autoloads from romacs-companion-receipts.el
-
-(register-definition-prefixes "romacs-companion-receipts" '("romacs-companion-"))
-
-
-;;; Generated autoloads from romacs-effects.el
-
-(register-definition-prefixes "romacs-effects" '("romacs-"))
-
-
-;;; Generated autoloads from romacs-gradients.el
-
-(register-definition-prefixes "romacs-gradients" '("romacs-"))
-
-
-;;; Generated autoloads from romacs-image.el
-
-(register-definition-prefixes "romacs-image" '("romacs-"))
-
-
-;;; Generated autoloads from romacs-mcp.el
-
-(autoload 'romacs-mcp-start "romacs-mcp"
-"Start an owner-controlled MCP listener at explicit absolute SOCKET.
-Require a private owner directory and do not change GNU server parsing.
-Refuse any existing node except an owned socket that no listener accepts on,
-which a dead editor left behind; like GNU `server-start', delete that one.
-Loading the library alone never starts a listener.
-
-(fn SOCKET)" t)
-(autoload 'romacs-mcp-stop "romacs-mcp"
-"Retire admission and close only this endpoint's connections and socket.
-Keep boot identity and companion receipts until the editor process exits." t)
-(register-definition-prefixes "romacs-mcp" '("romacs-mcp-"))
-
-
-;;; Generated autoloads from romacs-mcp-companion.el
-
-(autoload 'romacs-mcp-enable-companion-tools "romacs-mcp-companion"
-"Register optional cooperative companion tools without creating any buffers.
-Receipt capacity is finite and process-local.  Never imply restart durability." t)
-(register-definition-prefixes "romacs-mcp-companion" '("romacs-mcp--"))
-
-
-;;; Generated autoloads from romacs-mcp-editor.el
-
-(autoload 'romacs-mcp-enable-editor-tools "romacs-mcp-editor"
-"Register two optional native observation tools without editor side effects.
-Preserve trusted owner eval and the separate companion claim/receipt authority." t)
-(register-definition-prefixes "romacs-mcp-editor" '("romacs-mcp-"))
-
-
-;;; Generated autoloads from romacs-model.el
-
-(autoload 'romacs-model-available-p "romacs-model"
-"Return non-nil if a renderer that can draw native models is live now.")
-(autoload 'romacs-model-create "romacs-model"
-"Create a native model from PLIST and return it.
-Keys:
-  :meshes ((ID PATH [SHA256]) ...)  required, 1..255 meshes with
-            unique string IDs and absolute .obj PATHs; SHA256 is the
-            lowercase hex digest the loader checks.
-  :width, :height  logical pixels, 32..2048 (default 512).
-  :view (YAW PITCH ZOOM)  initial camera, a list or vector
-            (default (0 0 1)).
-  :background  colour name or (R G B) in 0..1 (default: the
-            `default' face background).
-  :callback FUNCTION  called with (MODEL EVENT PLIST), see Commentary.
-Loading is asynchronous: file, digest, parse and GPU failures arrive
-as a `failed' event.  Signals a `user-error' without a graphical
-renderer.
-
-(fn &rest PLIST)")
-(autoload 'romacs-model-capabilities "romacs-model"
-"Return a list of the optional native model features available.
-Members:
-  `highlight-layers'  `romacs-model-set-highlight' accepts :layers.")
-(autoload 'romacs-model-open "romacs-model"
-"Show MESHES in a buffer *Model: NAME* in `romacs-model-view-mode'.
-MESHES and PLIST are as for `romacs-model-create', plus :name
-(default: the first mesh ID).  Return the buffer.
-
-(fn MESHES &rest PLIST)")
-(register-definition-prefixes "romacs-model" '("romacs-model-"))
-
-
-;;; Generated autoloads from romacs-shader-playground.el
-
-(autoload 'romacs-shader-playground "romacs-shader-playground"
-"Open the shader playground: WGSL buffer plus a live GPU preview." t)
-(register-definition-prefixes "romacs-shader-playground" '("romacs-shader-playground-"))
-
-
-;;; Generated autoloads from romacs-shaders.el
-
-(autoload 'romacs-shaders-gallery "romacs-shaders"
-"Pop a buffer showing the shader showcase; killing it frees the surfaces." t)
-(autoload 'romacs-shaders-crt "romacs-shaders"
-"Apply the CRT frame shader to the whole editor." t)
-(autoload 'romacs-shaders-crt-curvature "romacs-shaders"
-"Set the CRT frame shader's barrel-distortion AMOUNT live.
-0.0 is flat, 0.10 is the default, 0.3 is heavy.  Updates the
-`curvature' uniform on the installed frame shader without
-recompiling; signals an error if no frame shader is installed
-(run `romacs-shaders-crt' first).
-
-(fn AMOUNT)" t)
-(autoload 'romacs-shaders-glow "romacs-shaders"
-"Apply the bloom frame shader to the whole editor." t)
-(autoload 'romacs-shaders-matrix "romacs-shaders"
-"Apply the digital-rain frame shader to the whole editor." t)
-(autoload 'romacs-shaders-off "romacs-shaders"
-"Remove the frame shader." t)
-(autoload 'romacs-shaders-ghostty-starfield "romacs-shaders"
-"Apply the Ghostty starfield shader over the whole editor." t)
-(autoload 'romacs-shaders-ghostty-gradient "romacs-shaders"
-"Apply the Ghostty animated-gradient shader over the whole editor." t)
-(autoload 'romacs-shaders-ghostty-crt "romacs-shaders"
-"Apply the Ghostty (Lottes) CRT shader over the whole editor." t)
-(register-definition-prefixes "romacs-shaders" '("romacs-shaders--"))
-
-
-;;; Generated autoloads from romacs-surface.el
-
-(register-definition-prefixes "romacs-surface" '("romacs-"))
-
-
-;;; Generated autoloads from romacs-term.el
-
-(autoload 'romacs-term "romacs-term"
-"Open a new GPU-accelerated terminal in the current window." t)
-(autoload 'romacs-term-floating "romacs-term"
-"Open a floating GPU terminal overlay.
-Optional X, Y set the floating position.
-Optional COLS, ROWS set the terminal size.
-
-(fn &optional X Y COLS ROWS)" t)
-(register-definition-prefixes "romacs-term" '("romacs-term-"))
-
-
-;;; Generated autoloads from romacs-term-colors.el
-
-(register-definition-prefixes "romacs-term-colors" '("romacs-term--"))
-
-
-;;; Generated autoloads from romacs-term-eshell.el
-
-(autoload 'romacs-term-eshell-mode "romacs-term-eshell"
-"Buffer-local opt-in for detached Eshell visual commands using romacs-term.
-
-Do not enable globally.  Non-eligible invocations keep the canonical route.
-Native child status is shown only in its terminal buffer, never used for
-Eshell foreground continuation, &&, $? or the parent working directory.
-
-This is a minor mode.  If called interactively, toggle the
-`Romacs-Term-Eshell mode' mode.  If the prefix argument is positive,
-enable the mode, and if it is zero or negative, disable the mode.
-
-If called from Lisp, toggle the mode if ARG is `toggle'.  Enable the
-mode if ARG is nil, omitted, or is a positive number.  Disable the mode
-if ARG is a negative number.
-
-To check whether the minor mode is enabled in the current buffer,
-evaluate the variable `romacs-term-eshell-mode'.
-
-The mode's hook is called both when the mode is enabled and when it is
-disabled.
-
-(fn &optional ARG)" t)
-(register-definition-prefixes "romacs-term-eshell" '("romacs-term-eshell--"))
-
-
-;;; Generated autoloads from romacs-video.el
-
-(autoload 'romacs-video-play-file "romacs-video"
-"Play video FILE in a new player.
-Return the opaque video-session handle.
-
-(fn FILE)" t)
-(autoload 'romacs-video-mode "romacs-video"
-"Major mode for visiting video files with native playback.
-`romacs-video--select-visited-video' enters this mode for the extensions in
-`romacs-video-file-name-regexp', from `find-file-hook'.  The original file
-bytes remain in the buffer underneath a single video display property,
-following the lifecycle used by `image-mode'.
-
-In addition to any hooks its parent mode `special-mode' might have
-run, this mode runs the hook `romacs-video-mode-hook', as the final or
-penultimate step during initialization.
-
-\\{romacs-video-mode-map}" t)
-(autoload 'romacs-video--select-visited-video "romacs-video"
-"Select `romacs-video-mode' for a video file no other rule claimed.
-
-Installed on `find-file-hook', so it runs once the mode for a visited file has
-been chosen.  It claims only a buffer that GNU's own rules left in
-`fundamental-mode', which keeps every explicit rule ahead of it: a
-`-*- mode: ... -*-' tag, a `.dir-locals.el' entry, an `auto-mode-alist' match,
-`magic-mode-alist', and `major-mode-remap-alist' all win.
-
-The hook, rather than `set-auto-mode' advice, is deliberate: `loaddefs.el' is
-read at loadup.el:175, long before `nadvice' is loaded at loadup.el:253, so an
-autoloaded `advice-add' would be `void-function' during the dump.  `add-hook'
-is available that early and never adds a duplicate, so this stays idempotent
-however many times `romacs-video' is loaded.")
-(add-hook 'find-file-hook #'romacs-video--select-visited-video)
-(register-definition-prefixes "romacs-video" '("romacs-video-"))
-
-
-;;; Generated autoloads from romacs-webkit.el
-
-(autoload 'romacs-webkit-open-url "romacs-webkit"
-"Open URL in a new WebKit browser buffer.
-
-(fn URL)" t)
-(register-definition-prefixes "romacs-webkit" '("romacs-webkit-"))
-
-
 ;;; Generated autoloads from rot13.el
 
 (autoload 'rot13 "rot13"
@@ -30209,6 +30275,8 @@ ITEMS list is also populated by the resolved handler, but can be
 explicitly overridden.
 
 (fn &optional ITEMS)" t)
+(autoload 'send-to--resolve-handler "send-to"
+"Return first supported handler from `send-to-handlers'.")
 (register-definition-prefixes "send-to" '("send-to-"))
 
 
@@ -31837,7 +31905,6 @@ Positive ARG means turn on, negative turn off.
 A nil ARG means toggle.  Once the speedbar window is activated, a buffer in
 `speedbar-mode' will be displayed.  Currently, only one speedbar is
 supported at a time.
-`speedbar-before-popup-hook' is called before popping up the speedbar frame.
 `speedbar-before-delete-hook' is called before the frame is deleted.
 
 (fn &optional ARG)" t)
@@ -34667,7 +34734,7 @@ If DATE is malformed, return a time value of zero.
 
 (fn DATE)")
 (autoload 'format-seconds "time-date"
-"Use format control STRING to format the number SECONDS.
+"Use format control STRING to format the time value SECONDS.
 The valid format specifiers are:
 %y is the number of (365-day) years.
 %d is the number of days.
@@ -35146,6 +35213,120 @@ holds a keymap.
 (register-definition-prefixes "tool-bar" '("modifier-bar-" "secondary-tool-bar-map" "toggle-tool-bar-mode-from-frame" "tool-bar-"))
 
 
+;;; Generated autoloads from touch-screen.el
+
+(autoload 'touch-screen-hold "touch-screen"
+"Handle a long press EVENT.
+Ding and select the window at EVENT, then activate the mark.  If
+`touch-screen-word-select' is enabled, try to select the whole
+word around EVENT; otherwise, set point to the location of EVENT.
+
+(fn EVENT)" t)
+(autoload 'touch-screen-translate-touch "touch-screen"
+"Translate touch screen events into a sequence of mouse events.
+PROMPT is the prompt string given to `read-key-sequence', or nil
+if this function is being called from the keyboard command loop.
+Value is a new key sequence.
+
+Read the touch screen event within `current-key-remap-sequence'
+and give it to `touch-screen-handle-touch'.  Return any key
+sequence signaled.
+
+If `touch-screen-handle-touch' does not signal for an event to be
+returned after the last element of the key sequence is read,
+continue reading touch screen events until
+`touch-screen-handle-touch' signals.  Return a sequence
+consisting of the first event encountered that is not a touch
+screen event.
+
+In addition to non-touchscreen events read, key sequences
+returned may contain any one of the following events:
+
+  (touchscreen-scroll WINDOW DX DY)
+
+where WINDOW specifies a window to scroll, and DX and DY are
+integers describing how many pixels to be scrolled horizontally
+and vertically,
+
+  (touchscreen-hold POSN)
+  (touchscreen-drag POSN)
+
+where POSN is the position of the long-press or touchpoint
+motion,
+
+  (touchscreen-restart-drag POSN)
+
+where POSN is the position of the tap,
+
+  (down-mouse-1 POSN)
+  (drag-mouse-1 POSN)
+
+where POSN is the position of the mouse button press or click,
+
+  (mouse-1 POSN)
+  (mouse-2 POSN)
+
+where POSN is the position of the mouse click, either `mouse-2'
+if POSN is on a link or a button, or `mouse-1' otherwise.
+
+(fn PROMPT)")
+(autoload 'touch-screen-track-tap "touch-screen"
+"Track a single tap starting from EVENT.
+EVENT should be a `touchscreen-begin' event.
+
+Read touch screen events until a `touchscreen-end' event is
+received with the same ID as in EVENT.  If UPDATE is non-nil and
+a `touchscreen-update' event is received in the mean time and
+contains a touch point with the same ID as in EVENT, call UPDATE
+with that event and DATA.
+
+If THRESHOLD is non-nil, enforce a threshold of movement that is
+either itself or 10 pixels when it is not a number.  If the
+aforementioned touch point moves beyond that threshold on any
+axis, return nil immediately, and further resume mouse event
+translation for the touch point at hand.
+
+Return nil immediately if any other kind of event is received;
+otherwise, return t once the `touchscreen-end' event arrives.
+
+(fn EVENT &optional UPDATE DATA THRESHOLD)")
+(autoload 'touch-screen-track-drag "touch-screen"
+"Track a single drag starting from EVENT.
+EVENT should be a `touchscreen-begin' event.
+
+Read touch screen events until a `touchscreen-end' event is
+received with the same ID as in EVENT.  For each
+`touchscreen-update' event received in the mean time containing a
+touch point with the same ID as in EVENT, call UPDATE with the
+touch point in event and DATA, once the touch point has moved
+significantly by at least 5 pixels from where it was in EVENT.
+
+Return nil immediately if any other kind of event is received;
+otherwise, return either t or `no-drag' once the
+`touchscreen-end' event arrives; return `no-drag' returned if the
+touch point in EVENT did not move significantly, and t otherwise.
+
+(fn EVENT UPDATE &optional DATA)")
+(autoload 'touch-screen-inhibit-drag "touch-screen"
+"Inhibit subsequent `touchscreen-drag' events from being sent.
+Prevent `touchscreen-drag' and translated mouse events from being
+sent until the touch sequence currently being translated ends.
+Must be called from a command bound to a `touchscreen-hold' or
+`touchscreen-drag' event.")
+(autoload 'touch-screen-last-drag-position "touch-screen"
+"Return the last attested position of the current touch screen tool.
+Value is a pair of integers (X . Y) representing the pixel
+position of the said tool relative to the frame where it was
+placed (not the selected frame), or nil if this function was
+not invoked after the generation of a `mouse-movement' or
+`down-mouse-1' event by touch screen event translation.
+
+This function must be consulted in preference to
+`mouse-absolute-pixel-position' if the latter is required in any
+command that handles `mouse-movement' or `down-mouse-1' events.")
+(register-definition-prefixes "touch-screen" '("touch-screen-"))
+
+
 ;;; Generated autoloads from emacs-lisp/tq.el
 
 (autoload 'tq-create "tq"
@@ -35317,7 +35498,7 @@ Interactively, with a prefix argument, prompt for a different method." t)
 
 ;;; Generated autoloads from net/tramp-compat.el
 
-(register-definition-prefixes "tramp-compat" '("tramp-"))
+(register-definition-prefixes "tramp-compat" '("tramp-compat-"))
 
 
 ;;; Generated autoloads from net/tramp-container.el
@@ -35387,13 +35568,13 @@ Interactively, with a prefix argument, prompt for a different method." t)
 
 ;;; Generated autoloads from net/trampver.el
 
-(push '(tramp 2 8 2 31 1) package--builtin-versions)
+(push '(tramp 2 9 0 -1) package--builtin-versions)
 (register-definition-prefixes "trampver" '("tramp-"))
 
 
 ;;; Generated autoloads from transient.el
 
-(push '(transient 0 13 3) package--builtin-versions)
+(push '(transient 0 13 8) package--builtin-versions)
 (autoload 'transient-insert-suffix "transient"
 "Insert a SUFFIX into PREFIX before LOC.
 PREFIX is a prefix command, a symbol.
@@ -36716,6 +36897,10 @@ Usage:
 "
 
 (fn NAME KEYWORD ARGS)")
+(autoload 'use-package-ensure-installed "use-package-ensure"
+"
+
+(fn PACKAGE)")
 (autoload 'use-package-handler/:ensure "use-package-ensure"
 "
 
@@ -36856,6 +37041,11 @@ If FILE-NAME is non-nil, save the result to FILE-NAME.
 
 (fn START END &optional FILE-NAME)")
 (register-definition-prefixes "uudecode" '("uudecode-"))
+
+
+;;; Generated autoloads from emacs-lisp/uuid.el
+
+(register-definition-prefixes "uuid" '("uuid-"))
 
 
 ;;; Generated autoloads from vc/vc.el
@@ -38094,7 +38284,7 @@ step during initialization." t)
 
 ;;; Generated autoloads from progmodes/verilog-mode.el
 
-(push '(verilog-mode 2026 1 18 88738971) package--builtin-versions)
+(push '(verilog-mode 2026 4 14 10117132) package--builtin-versions)
 (autoload 'verilog-mode "verilog-mode"
 "Major mode for editing Verilog code.
 \\<verilog-mode-map>
@@ -40775,6 +40965,21 @@ when it decides whether to split the window horizontally or vertically.
 "Like `xref-find-definitions' but switch to the other frame.
 
 (fn IDENTIFIER)" t)
+(autoload 'xref-find-by-kind "xref"
+"Find some certain kind of definitions of the identifier at point.
+
+Prompt for KIND to search for.  With prefix argument or when there's no
+identifier at point, prompt for the identifier too.
+
+If only one location is found, display it in the selected window.
+Otherwise, display the list of the possible definitions in a
+buffer where the user can select from the list.
+
+Use \\[xref-go-back] to return back to where you invoked this command.
+
+When called programmatically, KIND should be one of supported symbols.
+
+(fn IDENTIFIER KIND)" t)
 (autoload 'xref-find-references "xref"
 "Find references to the identifier at point.
 This command might prompt for the identifier as needed, perhaps
@@ -40851,6 +41056,8 @@ output of this command when the backend is etags.
  (define-key esc-map [?\C-,] #'xref-go-forward)
  (define-key esc-map "?" #'xref-find-references)
  (define-key esc-map [?\C-.] #'xref-find-apropos)
+ (define-key goto-map    "." 'xref-find-by-kind)
+ (define-key goto-map "\M-." 'xref-find-by-kind)
  (define-key ctl-x-4-map "." #'xref-find-definitions-other-window)
  (define-key ctl-x-5-map "." #'xref-find-definitions-other-frame)
 (autoload 'xref-references-in-directory "xref"

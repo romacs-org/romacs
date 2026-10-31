@@ -309,6 +309,24 @@ current nick.
 (put 'services-regain 'erc--feature 'erc-services)
 
 
+;;; Generated autoloads from erc-settings.el
+
+(autoload 'erc-settings-mode "erc-settings" nil t)
+(autoload 'erc-settings--set-modules "erc-settings"
+"Set `erc-modules' locally if an entry exists for the current buffer.
+In server buffers, bind all matching entries, not just `erc-modules'.
+Expect TARGET to be a string or nil and ID to be a symbol.  When TARGET
+is non-nil, borrow local values from TARGET-SERVER-BUFFER to temporarily
+bind identifying variables sought by match conditions.
+
+(fn ID TARGET TARGET-SERVER-BUFFER)")
+(autoload 'erc-settings-connect-by-id "erc-settings"
+"Connect via some preconfigured network ID specified in `erc-settings'.
+See Info node `(erc) ID-based Settings Example'.
+
+(fn NETWORK-ID)" t)
+
+
 ;;; Generated autoloads from erc-sound.el
 
 (put 'ctcp-sound 'erc--module 'sound)
