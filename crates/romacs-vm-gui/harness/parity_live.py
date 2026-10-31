@@ -491,7 +491,7 @@ def run_step(engines, step, perf_enabled, seed):
         # Both engines run GNU's generator (lisp random), but other Lisp, the
         # probe's included, draws from it at different rates; reseed per step
         # so ids drawn during it match.
-        engine.ask(f'(progn (random {lisp_string(seed + step["name"])}) t)')
+        engine.ask(f'(progn (random {lisp_string(seed + step["name"])}) (parity-probe-step))')
         if step.get('keys'):
             engine.keys(*step['keys'])
             wait(lambda: plist(engine.ask(f'(parity-probe-ready (lambda () {step.get("keys_ready", "t")}))')).get('ready'),

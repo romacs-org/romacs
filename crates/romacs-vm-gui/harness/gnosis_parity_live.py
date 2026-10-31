@@ -69,8 +69,9 @@ import parity_live
 #     the process id (gnosis-scheduler-event-id), so the probe names each by
 #     the order it was made, <event-id-N>.
 #   * Settling: a step is observed once input is drained, its predicate
-#     holds and no one-shot timer is due within 3s (parity-probe-quiet), so
-#     work a step deferred to a timer has run on both sides.
+#     holds and no one-shot timer the step started is due within 3s
+#     (parity-probe-quiet), so work a step deferred to a timer has run on
+#     both sides.
 # Nothing else is ignored; an unexplained difference is a Romacs bug.
 # ---------------------------------------------------------------------------
 
