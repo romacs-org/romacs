@@ -55,7 +55,37 @@ impl Leaf<'_> {
         Ok(style)
     }
 
-    pub(crate) fn print_text(&mut self, object: Value, quoted: bool, mut overrides: Value, stream: Value) -> std::result::Result<Value, Fault> {
+    /// OBJECT printed to STREAM's text, each unreadable object it meets
+    /// taking the next of ANSWERS (see `Vm::print_render_answered').
+    pub(crate) fn print_text(&mut self, object: Value, quoted: bool, overrides: Value, stream: Value, answers: Value) -> std::result::Result<Value, Fault> {
+        let answers = self.vm.list_values(answers).map_err(Fault::Error)?;
+        let text = self.printing(overrides, stream, |vm, overrides, buffer| vm.print_render_answered(object, quoted, overrides, buffer, answers))?;
+        Ok(self.vm.printed_value(&text))
+    }
+
+    /// The unreadable objects OBJECT's print to STREAM meets, in order.
+    pub(crate) fn print_unreadables(&mut self, object: Value, quoted: bool, overrides: Value, stream: Value) -> std::result::Result<Vec<Value>, Fault> {
+        self.printing(overrides, stream, |vm, overrides, buffer| vm.print_unreadables(object, quoted, overrides, buffer))
+    }
+
+    /// `prin1-to-string''s text: printed into a multibyte buffer, as GNU's
+    /// ` prin1' buffer is, each unreadable object taking the next of ANSWERS.
+    pub(crate) fn print_string(&mut self, object: Value, quoted: bool, overrides: Value, answers: Value) -> std::result::Result<Value, Fault> {
+        let answers = self.vm.list_values(answers).map_err(Fault::Error)?;
+        let text = self.vm.print_render_answered(object, quoted, overrides, true, answers).map_err(Fault::Error)?;
+        Ok(self.vm.printed_value(&text))
+    }
+
+    /// `print-unreadable-function', nil when unbound.
+    pub(crate) fn print_unreadable_function(&mut self) -> std::result::Result<Value, Fault> {
+        self.vm.print_unreadable_function().map_err(Fault::Error)
+    }
+
+    /// PRINT run with the print's settings for STREAM: its overrides (a
+    /// unibyte buffer escapes multibyte text) and whether it is a multibyte
+    /// buffer, the buffer current meanwhile.
+    fn printing<T>(&mut self, mut overrides: Value, stream: Value,
+                   print: impl FnOnce(&mut Vm, Value, bool) -> crate::Result<T>) -> std::result::Result<T, Fault> {
         let buffer = self.print_buffer(stream)?;
         if let Some(buffer) = buffer {
             if self.kind(buffer) == Kind::ByteBuffer {
@@ -68,11 +98,10 @@ impl Leaf<'_> {
         }
         let current = if buffer.is_some() { Some(self.current_buffer()?) } else { None };
         if let Some(buffer) = buffer { self.vm.slots[self.vm.buffer_slot].value = buffer; }
-        let text = self.vm.print_render(object, quoted, overrides,
-            buffer.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer));
+        let multibyte = buffer.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer);
+        let result = print(self.vm, overrides, multibyte);
         if let Some(current) = current { self.vm.slots[self.vm.buffer_slot].value = current; }
-        let text = text.map_err(Fault::Error)?;
-        Ok(self.vm.printed_value(&text))
+        result.map_err(Fault::Error)
     }
 
     fn print_buffer(&self, stream: Value) -> std::result::Result<Option<Value>, Fault> {
@@ -92,11 +121,11 @@ impl Leaf<'_> {
 
     /// A string prints as itself, unless an earlier print numbered it or
     /// its raw bytes take octal escapes in a multibyte buffer.
-    pub(crate) fn princ_text(&mut self, object: Value, stream: Value) -> std::result::Result<Value, Fault> {
+    pub(crate) fn princ_text(&mut self, object: Value, stream: Value, answers: Value) -> std::result::Result<Value, Fault> {
         let continuous = self.intern("print-continuous-numbering");
         let continuous = self.variable_value(continuous)?.is_some_and(|v| v != Value::NIL);
         if continuous || !matches!(self.kind(object), Kind::String | Kind::Bytes) {
-            return self.print_text(object, false, Value::NIL, stream);
+            return self.print_text(object, false, Value::NIL, stream, answers);
         }
         if !self.string_view(object)?.is_multibyte() && self.print_buffer(stream)?.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer) {
             let text = self.vm.print_plain_string(object).map_err(Fault::Error)?;

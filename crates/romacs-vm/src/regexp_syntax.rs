@@ -507,7 +507,7 @@ impl Vm {
                 let entry = parsed.map_or(Value::NIL, |(code, matching)| {
                     self.regexp_syntax_entry(code, matching.map_or(Value::NIL, |c| Value::integer(i64::from(c)).unwrap()))
                 });
-                let Object::CharTable(table) = &mut self.objects[table.index(0)? - 1] else {
+                let Object::CharTable(table) = self.object_mut(table)? else {
                     unreachable!()
                 };
                 table.set_range(from as usize, to as usize, entry)?;

@@ -5,8 +5,9 @@
 //! (`after-insert-file-set-coding', `format-decode',
 //! `after-insert-file-functions'). Here are the checks, the read and the
 //! write; prims/insert_coding.rs decides, decodes and inserts, and
-//! prims/write_coding.rs chooses the coding system written. Both refuse file
-//! name handlers; `write-region' refuses the annotation functions.
+//! prims/write_coding.rs chooses the coding system written. Both dispatch
+//! file name handlers as GNU does; `write-region' refuses the annotation
+//! functions.
 //!
 //! Supported subset (DIVERGENCES.md VM2-FILEIO1 lists the rest):
 //!
@@ -61,18 +62,18 @@ fn visited_file_modtime(cx) {
 }}
 
 defsubr! { name = "verify-visited-file-modtime", gnu = "fileio.c:6121", effect = Global,
-fn verify_visited_file_modtime(cx; optional buffer: Value) {
+fn verify_visited_file_modtime(cx; optional buffer: Value) -> Step {
     let (state, name) = cx.fileio_modtime(buffer)?;
-    let Some(name) = name else { return Ok(Value::TRUE) };
-    if state == VisitedModtime::Unknown { return Ok(Value::TRUE) }
-    refuse_handler(cx, name, "verify-visited-file-modtime")?;
+    let Some(name) = name else { return Ok(Step::Done(Value::TRUE)) };
+    if state == VisitedModtime::Unknown { return Ok(Step::Done(Value::TRUE)) }
+    if let Some(call) = handler(cx, name, "verify-visited-file-modtime", vec![buffer])? { return call; }
     let actual = stat_modtime(&file_name_path(cx, name)?);
     let equal = match (state, actual) {
         (VisitedModtime::Known { seconds: s, nanos: n, size }, VisitedModtime::Known { seconds, nanos, size: actual_size }) =>
             s == seconds && n == nanos && (size.is_none() || size == actual_size),
         _ => state == actual,
     };
-    Ok(if equal { Value::TRUE } else { Value::NIL })
+    Ok(Step::Done(if equal { Value::TRUE } else { Value::NIL }))
 }}
 
 fn float_modtime_nanos(f: f64) -> std::result::Result<i128, Fault> {
@@ -126,22 +127,27 @@ fn explicit_modtime(cx: &Leaf<'_>, time: Value) -> std::result::Result<VisitedMo
 }
 
 defsubr! { name = "set-visited-file-modtime", gnu = "fileio.c:6177", effect = Global,
-fn set_visited_file_modtime(cx; optional time: Value) {
-    let state = if time != Value::NIL { explicit_modtime(cx, time)? } else {
-        let (_, filename) = cx.fileio_modtime(Value::NIL)?;
-        let Some(name) = filename else { return Err(Fault::Wrong("stringp", Value::NIL)) };
-        let (path, name) = expanded_path(cx, name)?;
-        refuse_handler(cx, name, "set-visited-file-modtime")?;
-        let meta = match crate::host::metadata(path) {
-            Ok(meta) => meta,
-            Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => return Ok(Value::NIL),
-            Err(e) => return Err(file_errno(cx, "Getting attributes", name, &e)),
-        };
-        metadata_modtime(&meta)
-    };
-    cx.fileio_set_modtime(state)?;
-    Ok(Value::NIL)
+fn set_visited_file_modtime(cx; optional time: Value) -> Step {
+    if time != Value::NIL {
+        let state = explicit_modtime(cx, time)?;
+        cx.fileio_set_modtime(state)?;
+        return Ok(Step::Done(Value::NIL));
+    }
+    let (_, filename) = cx.fileio_modtime(Value::NIL)?;
+    let Some(name) = filename else { return Err(Fault::Wrong("stringp", Value::NIL)) };
+    expanding(cx, name, visited_modtime_expanded, vec![])
 }}
+fn visited_modtime_expanded(cx: &mut Leaf<'_>, name: Value, _: &[Value]) -> Next {
+    if let Some(call) = handler(cx, name, "set-visited-file-modtime", vec![Value::NIL])? { return call; }
+    let path = file_name_path(cx, name)?;
+    let meta = match crate::host::metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => return Ok(Step::Done(Value::NIL)),
+        Err(e) => return Err(file_errno(cx, "Getting attributes", name, &e)),
+    };
+    cx.fileio_set_modtime(metadata_modtime(&meta))?;
+    Ok(Step::Done(Value::NIL))
+}
 
 /// GNU `report_file_errno' (fileio.c:286) via `get_file_errno_data'
 /// (fileio.c:265): EEXIST drops STRING; ENOENT, EACCES and the rest choose
@@ -190,29 +196,11 @@ fn symbol_is(cx: &mut Leaf<'_>, v: Value, names: &[&str]) -> bool {
     cx.kind(v) == Kind::Symbol && cx.symbol_name(v).is_ok_and(|n| names.contains(&n.as_str()))
 }
 
-/// GNU `Fexpand_file_name (NAME, Qnil)' (prims/expand_file_name.rs) as
-/// text, refusing where GNU would call a file name handler: callers that
-/// cannot continue through Lisp use this.
-pub(super) fn expand_file_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<String, Fault> {
-    Ok(expanded_name(cx, name)?.0)
-}
-
-/// `Fexpand_file_name (NAME, Qnil)' as text and as the Lisp string GNU
-/// returns: NAME itself when the expansion leaves it unchanged.
-fn expanded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<(String, Value), Fault> {
-    let (_, value) = expanded_path(cx, name)?;
-    Ok((cx.string_text(value)?, value))
-}
-
-/// `expanded_name` as the host path (ENCODE_FILE): a name with raw-byte
-/// characters names the file whose name has those bytes.
-pub(super) fn expanded_path(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
-    if !stringp(cx, name) {
-        return Err(Fault::Wrong("stringp", name));
-    }
-    let value = super::expand_file_name::expand(cx, name, Value::NIL)?
-        .ok_or_else(|| refuse("expand-file-name matching file name handler"))?;
-    Ok((file_name_path(cx, value)?, value))
+/// GNU `Fexpand_file_name (NAME, Qnil)', then THEN with the expansion:
+/// native where no handler applies, through Lisp `expand-file-name' where
+/// GNU would call one.
+pub(super) fn expanding(cx: &mut Leaf<'_>, name: Value, then: crate::prim::Then, saved: Vec<Value>) -> Next {
+    super::expand_file_name::expanding(cx, name, Value::NIL, then, saved)
 }
 
 /// ENCODE_FILE under a UTF-8 `file-name-coding-system': the host bytes of
@@ -221,6 +209,8 @@ pub(super) fn file_name_bytes(cx: &Leaf<'_>, value: Value) -> std::result::Resul
     cx.file_name_bytes(value)
 }
 
+/// VALUE as the host path: a name with raw-byte characters names the file
+/// whose name has those bytes.
 pub(super) fn file_name_path(cx: &Leaf<'_>, value: Value) -> std::result::Result<std::path::PathBuf, Fault> {
     use std::os::unix::ffi::OsStringExt;
     Ok(std::ffi::OsString::from_vec(file_name_bytes(cx, value)?).into())
@@ -234,6 +224,35 @@ pub(super) fn file_name_value(cx: &mut Leaf<'_>, bytes: &[u8]) -> Value {
         return cx.make_string(bytes.to_vec(), false);
     }
     cx.make_string(crate::text::octets_as_multibyte(bytes).0, true)
+}
+
+/// GNU `auto_saving': the mode bits an auto-save file is created with while
+/// `do-auto-save' writes (prims/autosave.rs), else None.
+pub(super) fn auto_saving(cx: &mut Leaf<'_>) -> std::result::Result<Option<u32>, Fault> {
+    Ok(var(cx, super::autosave::AUTO_SAVING)?.integer_value().map(|bits| bits as u32))
+}
+
+/// Whether the current buffer auto-saves into its visited file:
+/// Fstring_equal of its file name and its auto-save file name.
+pub(super) fn auto_saving_into_visited(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
+    let (file, auto) = (var(cx, "buffer-file-name")?, var(cx, "buffer-auto-save-file-name")?);
+    Ok(stringp(cx, file) && stringp(cx, auto) && cx.string_bytes(file)? == cx.string_bytes(auto)?)
+}
+
+pub(super) fn returned(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(value))
+}
+
+/// GNU's `handler = Ffind_file_name_handler (NAME, OPERATION); if
+/// (!NILP (handler)) return calln (handler, OPERATION, ARGS...)': the
+/// call when a handler is selected, whose value the primitive returns.
+pub(super) fn handler(cx: &mut Leaf<'_>, name: Value, operation: &str, args: Vec<Value>)
+    -> std::result::Result<Option<Next>, Fault> {
+    let operation = cx.intern(operation);
+    let f = find_file_name_handler(cx, name, operation)?;
+    if f == Value::NIL { return Ok(None); }
+    let args = std::iter::once(operation).chain(args).collect();
+    Ok(Some(Ok(Step::Call { f, args, then: returned, saved: vec![] })))
 }
 
 /// GNU `file_offset' (fileio.c:3949): a non-negative integer, or a float
@@ -252,18 +271,8 @@ fn file_offset(cx: &Leaf<'_>, v: Value) -> std::result::Result<u64, Fault> {
     Err(Fault::Wrong("file-offset", v))
 }
 
-/// Select with GNU's regexp, operations and inhibition rules. A leaf may
-/// proceed locally only when no callback is selected for this name/operation.
-pub(super) fn refuse_handler(cx: &mut Leaf<'_>, filename: Value, operation: &str) -> std::result::Result<(), Fault> {
-    let symbol = cx.intern(operation);
-    if find_file_name_handler(cx, filename, symbol)? != Value::NIL {
-        return Err(refuse(&format!("{operation} matching file name handler")));
-    }
-    Ok(())
-}
-
 /// GNU Finsert_file_contents (fileio.c:4057) up to the coding decision:
-/// the read-only and visit checks, the handler refusal, the open (a
+/// the read-only and visit checks, the handler dispatch, the open (a
 /// visited missing file goes on to notfound with no bytes), the
 /// regular-file refusal, the read of BEG..END and the lock
 /// checks. Every refusal precedes the first change to the buffer. GNU
@@ -280,9 +289,25 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
     let shape = cx.buffer_shape()?;
     // fileio.c:4126 empty_undo_list_p.
     let empty_undo = visit != Value::NIL && var(cx, "buffer-undo-list")? == Value::NIL && shape.empty;
+    let empty_undo = if empty_undo { Value::TRUE } else { Value::NIL };
     // fileio.c:4153-4155: CHECK_STRING inside Fexpand_file_name.
-    let (path, orig) = expanded_path(cx, filename)?;
-    refuse_handler(cx, orig, "insert-file-contents")?;
+    if !stringp(cx, filename) { return Err(Fault::Wrong("stringp", filename)); }
+    expanding(cx, filename, insert_expanded, vec![visit, beg, end, replace, empty_undo])
+}}
+
+/// fileio.c:4160-4167: a handler for the expanded ORIG inserts, and GNU's
+/// tail from `handled:' follows (insert_coding.rs `handled').
+fn insert_expanded(cx: &mut Leaf<'_>, orig: Value, saved: &[Value]) -> Next {
+    let [visit, beg, end, replace, empty_undo] = saved[..5] else { unreachable!() };
+    let operation = cx.intern("insert-file-contents");
+    let f = find_file_name_handler(cx, orig, operation)?;
+    if f != Value::NIL {
+        let args = vec![operation, orig, visit, beg, end, replace];
+        return Ok(Step::Call { f, args, then: insert_coding::handled, saved: vec![orig, visit, beg, end, replace, empty_undo, f] });
+    }
+    let path = file_name_path(cx, orig)?;
+    let shape = cx.buffer_shape()?;
+    let empty_undo = empty_undo != Value::NIL;
     let visiting = visit != Value::NIL;
     if visiting {
         if beg != Value::NIL || end != Value::NIL {
@@ -308,9 +333,6 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
                 return Err(refuse("insert-file-contents REPLACE"));
             }
             // notfound (fileio.c:5016): visiting completes, then the error.
-            let truename = var(cx, "buffer-file-truename")?;
-            if truename != Value::NIL { refuse_handler(cx, truename, "unlock-file")?; }
-            refuse_handler(cx, orig, "unlock-file")?;
             let modtime = if matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) {
                 VisitedModtime::Missing
             } else { VisitedModtime::Unknown };
@@ -333,18 +355,6 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
         file.read_range(beg_offset, end_offset - beg_offset)
             .map_err(|e| file_errno(cx, "Read error", orig, &e))?
     };
-    // Every refusal below precedes the first change to the buffer.
-    let truename = var(cx, "buffer-file-truename")?;
-    if !bytes.is_empty() && truename != Value::NIL
-        && var(cx, "buffer-file-name")? != Value::NIL
-        && { let state = cx.buffer_modification(Value::NIL)?; state.save_modiff >= state.modiff }
-        && var(cx, "inhibit-modification-hooks")? == Value::NIL {
-        refuse_handler(cx, truename, "lock-file")?;
-    }
-    if visiting {
-        if truename != Value::NIL { refuse_handler(cx, truename, "unlock-file")?; }
-        refuse_handler(cx, orig, "unlock-file")?;
-    }
     // fileio.c:4344-4373: when the first 4 KiB read stops short of END,
     // set-auto-coding-function sees 1 KiB of head and the tail from 3 KiB
     // before the end of the file (or of END), never overlapping that read;
@@ -355,7 +365,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
         else { size.saturating_sub(3 * 1024).min(end_offset.saturating_sub(3 * 1024)).saturating_sub(beg_offset) }
     });
     insert_coding::start(cx, read(Some(bytes), metadata_modtime(&meta), 0, tail.map(|t| t as usize)))
-}}
+}
 
 /// Open PATH for `insert-file-contents' with O_NONBLOCK, so a FIFO without a
 /// writer (or a device) opens at once and reaches the non-regular refusal
@@ -366,11 +376,9 @@ fn open_for_reading(path: &std::path::Path) -> std::io::Result<crate::host::Inpu
     crate::host::open_input(path, flags)
 }
 
-// File name handler selection, shared by every primitive here: VM2 calls
-// no handler, so each operation first asks whether GNU would dispatch to
-// one and refuses if so (`refuse_handler'). The selection itself is GNU's,
+// File name handler selection, shared by every file primitive: GNU's,
 // including `inhibit-file-name-operation' and each handler's `operations'
-// property.
+// property. A selected handler is called (`handler').
 
 // GNU Fmemq validates a dotted tail only when search reaches it.
 fn handler_member(cx: &Leaf<'_>, value: Value, list: Value) -> std::result::Result<bool, Fault> {
@@ -447,19 +455,27 @@ fn position(cx: &Leaf<'_>, v: Value) -> std::result::Result<i64, Fault> {
 defsubr! { name = "write-region", gnu = "fileio.c:5461", effect = Global,
 fn write_region(cx, start: Value, end: Value, filename: Value; optional append: Value,
                 visit: Value, lockname: Value, mustbenew: Value) -> Step {
-    // fileio.c:5539-5540 validate_region (editfns.c:2504).
+    // fileio.c:5539-5540 validate_region (editfns.c:2504): START and END
+    // become ordered positions, once in range, before the name is expanded
+    // or a handler sees them.
     let shape = cx.buffer_shape()?;
-    let mut region = None;
-    if start != Value::NIL && !stringp(cx, start) {
+    let (start, end) = if start != Value::NIL && !stringp(cx, start) {
         let (b, e) = (position(cx, start)?, position(cx, end)?);
-        let (b, e) = (b.min(e), b.max(e));
-        if !(shape.begv <= b && e <= shape.zv) {
+        let (b, e) = (Value::integer(b.min(e)).map_err(Fault::Error)?, Value::integer(b.max(e)).map_err(Fault::Error)?);
+        if !(shape.begv <= b.integer_value().unwrap() && e.integer_value().unwrap() <= shape.zv) {
             let buffer = cx.current_buffer()?;
             return Err(Fault::Range3(buffer, start, end));
         }
-        region = Some((b, e));
-    }
-    let (path, name) = expanded_path(cx, filename)?;
+        (b, e)
+    } else { (start, end) };
+    expanding(cx, filename, write_expanded, vec![start, end, append, visit, lockname, mustbenew])
+}}
+
+// write-region's SAVED: START END APPEND VISIT LOCKNAME MUSTBENEW, then the
+// expanded FILENAME.
+fn write_expanded(cx: &mut Leaf<'_>, name: Value, saved: &[Value]) -> Next {
+    let [_, _, _, visit, _, mustbenew] = saved[..6] else { unreachable!() };
+    let path = file_name_path(cx, name)?;
     let excl = symbol_is(cx, mustbenew, &["excl"]);
     if mustbenew != Value::NIL && !excl && crate::host::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_dir()) {
         // barf_or_query_if_file_exists checks directory before confirmation.
@@ -472,18 +488,37 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
         // barf_or_query_if_file_exists (fileio.c:5547) asks the user.
         return Err(refuse("write-region MUSTBENEW confirmation"));
     }
-    let visit_file = if stringp(cx, visit) { expanded_name(cx, visit)?.1 } else { name };
-    refuse_handler(cx, name, "write-region")?;
-    // GNU fileio.c:5564 tests the original VISIT, not its expanded name.
-    if stringp(cx, visit) { refuse_handler(cx, visit, "write-region")?; }
-    // GNU invokes lock/unlock handlers even when create-lockfiles is nil.
+    let mut saved = saved.to_vec();
+    saved.push(name);
+    if stringp(cx, visit) { return expanding(cx, visit, write_visit_expanded, saved); }
+    write_visit_expanded(cx, name, &saved)
+}
+
+/// fileio.c:5550-5577 with VISIT-FILE expanded: the handler for FILENAME,
+/// else for the original VISIT, writes; a visit is then recorded.
+fn write_visit_expanded(cx: &mut Leaf<'_>, visit_file: Value, saved: &[Value]) -> Next {
+    let [start, end, append, visit, lockname, mustbenew, name] = saved[..7] else { unreachable!() };
     let lock = if lockname != Value::NIL { lockname } else { visit_file };
-    refuse_handler(cx, lock, "lock-file")?;
-    if !(visit == Value::TRUE || stringp(cx, visit)) { refuse_handler(cx, lock, "unlock-file")?; }
-    // build_annotations (fileio.c:5604) and the post-annotation call (5811).
+    let operation = cx.intern("write-region");
+    let mut f = find_file_name_handler(cx, name, operation)?;
+    if f == Value::NIL && stringp(cx, visit) { f = find_file_name_handler(cx, visit, operation)?; }
+    if f != Value::NIL {
+        let args = vec![operation, start, end, name, append, visit, lock, mustbenew];
+        return Ok(Step::Call { f, args, then: write_handled, saved: vec![visit, visit_file] });
+    }
+    // A nil START widens and means BEGV..ZV; else the validated region.
+    let shape = cx.buffer_shape()?;
+    let region = if start != Value::NIL && !stringp(cx, start) {
+        let (b, e) = (position(cx, start)?, position(cx, end)?);
+        Some((b.min(e), b.max(e)))
+    } else { None };
+    // build_annotations (fileio.c:5604) and the post-annotation call (5811);
+    // an auto-save uses `buffer-auto-save-file-format' unless it is t.
+    let auto_format = var(cx, "buffer-auto-save-file-format")?;
+    let format = if auto_saving(cx)?.is_some() && auto_format != Value::TRUE { auto_format } else { var(cx, "buffer-file-format")? };
     if var(cx, "write-region-annotate-functions")? != Value::NIL
         || var(cx, "write-region-post-annotation-function")? != Value::NIL
-        || (!stringp(cx, start) && var(cx, "buffer-file-format")? != Value::NIL) {
+        || (!stringp(cx, start) && format != Value::NIL) {
         return Err(refuse("write-region annotations"));
     }
     // choose_write_coding_system's CODING_MODE_SELECTIVE_DISPLAY (fileio.c:5455).
@@ -505,7 +540,18 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
                          if widen { "(widen)" } else { "" });
     let args = vec![start, end, name, append, visit, lock, mustbenew, visit_file];
     insert_coding::closure_then(cx, &source, write_closure, args)
-}}
+}
+
+/// fileio.c:5567-5574: a handler wrote; a visit (SAVED: VISIT VISIT-FILE)
+/// is recorded, and the handler's value returned.
+fn write_handled(cx: &mut Leaf<'_>, val: Value, saved: &[Value]) -> Next {
+    let [visit, visit_file] = saved[..2] else { unreachable!() };
+    if visit == Value::TRUE || stringp(cx, visit) {
+        cx.set_buffer_modified(Value::NIL, true)?;
+        cx.bset("buffer-file-name", visit_file)?;
+    }
+    Ok(Step::Done(val))
+}
 fn write_closure(_: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
     Ok(Step::Call { f: closure, args: saved.to_vec(), then: written, saved: vec![] })
 }
@@ -546,15 +592,9 @@ fn refuse_write_conversion(cx: &mut Leaf<'_>, coding: Value) -> std::result::Res
 /// (fileio.c:5623 onwards): encode, open, write, sync and visit.
 pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     use super::write_coding as w;
-    let (start, end, name, append, visit) = (r[w::START], r[w::END], r[w::FILENAME], r[w::APPEND], r[w::VISIT]);
-    let (lockname, mustbenew, visit_file, coding) = (r[w::LOCKNAME], r[w::MUSTBENEW], r[w::VISIT_FILE], r[w::VAL]);
-    let visiting = visit == Value::TRUE || stringp(cx, visit);
+    let (start, end, append, coding) = (r[w::START], r[w::END], r[w::APPEND], r[w::VAL]);
     let lcsu = cx.intern("last-coding-system-used");
     cx.variable_set(lcsu, coding)?;
-    // fileio.c:5629 Flock_file: VM2 creates no lock files (VM2-FILEIO1),
-    // but the name is still checked as Flock_file's expand-file-name does.
-    expanded_path(cx, lockname)?;
-    let (path, _) = expanded_path(cx, name)?;
     let text = if stringp(cx, start) { start } else {
         // A Lisp call during the choice may have edited the buffer.
         let (b, e) = (start.integer_value().unwrap(), end.integer_value().unwrap());
@@ -565,12 +605,84 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     };
     refuse_write_conversion(cx, coding)?;
     let encoded = cx.coding_convert_string(text, coding, Value::TRUE, Value::NIL, true)?;
-    let bytes = cx.string_view(encoded)?.bytes().to_vec();
     cx.variable_set(lcsu, coding)?;
+    // NUMBERP (append): an offset to seek to (fileio.c:5638).
+    if append.integer_value().is_some() || cx.kind(append) == Kind::Float { file_offset(cx, append)?; }
+    // fileio.c:5629: Flock_file (LOCKNAME) before the file is opened, but
+    // for an auto-save.
+    let mut saved = r.to_vec();
+    saved.push(encoded);
+    if auto_saving(cx)?.is_some() { return write_locked(cx, Value::NIL, &saved); }
+    Ok(Step::Call { f: cx.intern("lock-file"), args: vec![r[w::LOCKNAME]], then: write_locked, saved })
+}
+
+/// The open, write, sync and close, then Funlock_file (LOCKNAME), which
+/// GNU calls after the write and before reporting its error (fileio.c:5652,
+/// 5667, 5821). SAVED: the registers, then the encoded text.
+fn write_locked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    use super::write_coding as w;
+    let (r, encoded) = (&saved[..w::REGISTERS], saved[w::REGISTERS]);
+    let mut saved = saved.to_vec();
+    match write_file(cx, r, encoded) {
+        Ok(modtime) => saved.extend([Value::NIL, modtime]),
+        Err(Fault::Signal(condition, data)) => saved.extend([condition, data]),
+        Err(fault) => return Err(fault),
+    }
+    if auto_saving(cx)?.is_some() { return write_unlocked(cx, Value::NIL, &saved); }
+    Ok(Step::Call { f: cx.intern("unlock-file"), args: vec![r[w::LOCKNAME]], then: write_unlocked, saved })
+}
+
+/// After the unlock: the write's error, else the visit's bookkeeping.
+/// SAVED: the registers, the encoded text, then the error's condition (nil
+/// when none) and its data, or the visited file's modtime.
+fn write_unlocked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    use super::write_coding as w;
+    let (condition, data) = (saved[w::REGISTERS + 1], saved[w::REGISTERS + 2]);
+    if condition != Value::NIL { return Err(Fault::Signal(condition, data)); }
+    let (visit, visit_file) = (saved[w::VISIT], saved[w::VISIT_FILE]);
+    // fileio.c:5835-5857: an auto-save into the visited file unlocks it.
+    let into_visited = auto_saving(cx)?.is_some() && auto_saving_into_visited(cx)?;
+    if visit == Value::TRUE || stringp(cx, visit) {
+        let modtime = insert_coding::modtime_of(cx, data);
+        cx.fileio_set_modtime(modtime)?;
+        cx.set_buffer_modified(Value::NIL, true)?;
+        cx.bset("buffer-file-name", visit_file)?;
+    } else if visit != Value::NIL && into_visited {
+        cx.set_buffer_modified(Value::NIL, true)?;
+    }
+    if visit != Value::NIL && into_visited {
+        return Ok(Step::Call { f: cx.intern("unlock-file"), args: vec![saved[w::LOCKNAME]], then: written_nil, saved: vec![] });
+    }
+    report_written(cx, saved[w::APPEND], visit, visit_file)
+}
+
+/// fileio.c:5859: an interactive write that is neither quiet (a VISIT
+/// other than nil, t or a string) nor an auto-save names the file it
+/// wrote, as `message' does.
+fn report_written(cx: &mut Leaf<'_>, append: Value, visit: Value, visit_file: Value) -> Next {
+    let quietly = visit != Value::NIL && visit != Value::TRUE && !stringp(cx, visit);
+    if quietly || auto_saving(cx)?.is_some() || var(cx, "noninteractive")? != Value::NIL {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let format = if append.integer_value().is_some() || cx.kind(append) == Kind::Float { "Updated %s" }
+        else if append != Value::NIL { "Added to %s" } else { "Wrote %s" };
+    let format = cx.string(format);
+    Ok(Step::Call { f: cx.intern("message"), args: vec![format, visit_file], then: written_nil, saved: vec![] })
+}
+
+fn written_nil(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
+
+/// Write the ENCODED text to the registers' file: its modtime as register
+/// data when visiting, else nil.
+fn write_file(cx: &mut Leaf<'_>, r: &[Value], encoded: Value) -> Out {
+    use super::write_coding as w;
+    let (name, append, visit, mustbenew) = (r[w::FILENAME], r[w::APPEND], r[w::VISIT], r[w::MUSTBENEW]);
+    let visiting = visit == Value::TRUE || stringp(cx, visit);
+    let path = file_name_path(cx, name)?;
+    let bytes = cx.string_view(encoded)?.bytes().to_vec();
     let excl = symbol_is(cx, mustbenew, &["excl"]);
     let mut options = crate::host::OpenOptions::new();
     options.write(true);
-    // NUMBERP (append): an offset to seek to (fileio.c:5638).
     let offset = if append.integer_value().is_some() || cx.kind(append) == Kind::Float {
         Some(file_offset(cx, append)?)
     } else {
@@ -585,9 +697,12 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
     if append != Value::NIL && offset.is_none() {
         options.append(true);
     }
+    let auto_save_bits = auto_saving(cx)?;
     {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.custom_flags(libc::O_NONBLOCK);
+        // fileio.c:5645: an auto-save file is created with its mode bits.
+        if let Some(bits) = auto_save_bits { options.mode(bits); }
     }
     let mut file = crate::host::open_output(&path, &options).map_err(|e| file_errno(cx, "Opening output file", name, &e))?;
     {
@@ -598,7 +713,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
         cx.fileio_write_output(&mut file, &bytes).map_err(|e| file_errno(cx, "Write error", name, &e))?;
         // fileio.c:5699: inhibit defaults to t. Retry EINTR; EINVAL means
         // this descriptor does not support fsync (e.g. devices and pipes).
-        if var(cx, "write-region-inhibit-fsync")? == Value::NIL {
+        if auto_save_bits.is_none() && var(cx, "write-region-inhibit-fsync")? == Value::NIL {
             loop {
                 match cx.fileio_sync_output(&file) {
                     Ok(()) => break,
@@ -613,12 +728,10 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
         Some(metadata_modtime(&crate::host::file_metadata(&file).map_err(|e| file_errno(cx, "Output file status", name, &e))?))
     } else { None };
     cx.fileio_close_output(file).map_err(|e| file_errno(cx, "Write error", name, &e))?;
-    if visiting {
-        cx.bset("buffer-file-name", visit_file)?;
-        cx.fileio_set_modtime(written_modtime.unwrap())?;
-        cx.set_buffer_modified(Value::NIL, true)?;
+    match written_modtime {
+        Some(modtime) => insert_coding::modtime_value(cx, modtime),
+        None => Ok(Value::NIL),
     }
-    Ok(Step::Done(Value::NIL))
 }
 
 // GNU defines `locate-file' in Lisp (lisp/files.el:1113) and only
@@ -711,10 +824,14 @@ fn locate_suffix(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
         return Ok(Step::Call { f: predicate, args: vec![candidate_value], then: locate_predicate_result, saved });
     }
     // lread.c openp selects after suffix concatenation, even for an
-    // absolute filename. A selected handler can run Lisp: still refuse.
-    // A natural-number predicate tests access(2) without handlers.
+    // absolute filename; with a handler, `file-readable-p' decides. A
+    // natural-number predicate tests access(2) without handlers.
     if access_mode.is_none() {
-        refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
+        let exists = cx.intern("file-exists-p");
+        if find_file_name_handler(cx, candidate_value, exists)? != Value::NIL {
+            saved.push(candidate_value);
+            return Ok(Step::Call { f: cx.intern("file-readable-p"), args: vec![candidate_value], then: locate_verdict, saved });
+        }
     }
     let found = match access_mode {
         None => crate::host::probe(crate::host::Probe::IsFile, &candidate) && open_for_reading(std::path::Path::new(&candidate)).is_ok(),
@@ -726,24 +843,23 @@ fn locate_suffix(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
 }
 
 /// openp's verdict on a function PREDICATE's RESULT for the candidate last
-/// in SAVED: nil rejects it, and a directory needs `dir-ok'.
+/// in SAVED: nil rejects it, and a directory (`file-directory-p') needs
+/// `dir-ok'.
 fn locate_predicate_result(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
-    let candidate = saved[7];
-    if result != Value::NIL
-        && (result == cx.intern("dir-ok") || !crate::host::probe(crate::host::Probe::IsDir, &cx.string_text(candidate)?))
-    {
-        return Ok(Step::Done(candidate));
-    }
-    locate_suffix(cx, &saved[..7])
+    if result == Value::NIL { return locate_suffix(cx, &saved[..7]); }
+    if result == cx.intern("dir-ok") { return Ok(Step::Done(saved[7])); }
+    let directoryp = cx.intern("file-directory-p");
+    Ok(Step::Call { f: directoryp, args: vec![saved[7]], then: locate_not_directory, saved: saved.to_vec() })
 }
 
-/// Native file lookup still refuses dispatch when a handler is selected.
-fn refuse_locate_handler(cx: &mut Leaf<'_>, filename: Value, operation: &str) -> std::result::Result<(), Fault> {
-    let operation = cx.intern(operation);
-    if find_file_name_handler(cx, filename, operation)? != Value::NIL {
-        return Err(refuse("locate-file-internal matching file name handler"));
-    }
-    Ok(())
+fn locate_not_directory(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]) -> Next {
+    locate_verdict(cx, if directory == Value::NIL { Value::TRUE } else { Value::NIL }, saved)
+}
+
+/// The candidate last in SAVED is found when VERDICT is non-nil.
+fn locate_verdict(cx: &mut Leaf<'_>, verdict: Value, saved: &[Value]) -> Next {
+    if verdict != Value::NIL { return Ok(Step::Done(saved[7])); }
+    locate_suffix(cx, &saved[..7])
 }
 
 // Romacs has no toolkit file dialog, so it answers as a GNU built without

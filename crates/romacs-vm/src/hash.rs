@@ -369,7 +369,7 @@ impl Vm {
                 None => Shape::Opaque,
             },
             0 if v == Value::NIL => Shape::Atom,
-            0 if Self::image_value(v) => match self.string_value(v) {
+            0 if Self::image_string(v) => match self.string_value(v) {
                 Ok(s) => Shape::Text {
                     bytes: s.as_bytes(),
                     chars: s.chars().count(),
@@ -672,20 +672,33 @@ impl Vm {
         Ok((a, b, None))
     }
 
+    /// The private index of the table V, for writing: a frozen table
+    /// refuses with GNU's read-only error (`frozen.rs`).
     fn table_index(&self, v: Value) -> Hashed<usize> {
         match self.object_if(v) {
             Some(data::Object::HashTable(_)) if !Self::image_value(v) => {
                 Ok(v.payload() as usize - 1)
             }
+            Some(data::Object::HashTable(_)) => Err(HashFault::Error(crate::frozen::READ_ONLY, Some(v))),
             _ => Err(HashFault::Wrong("hash-table-p", v)),
         }
     }
+    /// The table V, private or frozen, for reading.
     fn table(&self, v: Value) -> Hashed<&HashTable> {
-        let i = self.table_index(v)?;
-        match &self.objects[i] {
-            data::Object::HashTable(t) => Ok(t),
-            _ => unreachable!("checked hash table"),
+        match self.object_if(v) {
+            Some(data::Object::HashTable(t)) => Ok(t),
+            _ => Err(HashFault::Wrong("hash-table-p", v)),
         }
+    }
+    /// A table of TEST over ENTRIES, hashed by this VM: how a frozen table
+    /// is built at attachment and a thawed one on its copy (`frozen.rs`).
+    pub(crate) fn table_from_entries(&self, test: Test, entries: &[(Value, Value)]) -> HashTable {
+        let mut table = HashTable::new(test, Weakness::None, entries.len().max(1));
+        for &(key, value) in entries {
+            let (hash, moving) = self.hash_key(test, key);
+            table.insert(key, value, hash, moving);
+        }
+        table
     }
     fn table_mut(&mut self, i: usize) -> &mut HashTable {
         match &mut self.objects[i] {
@@ -694,7 +707,12 @@ impl Vm {
         }
     }
     /// Re-hash keys whose hash read a heap index, then rebuild the chains.
-    fn fresh_table(&mut self, v: Value) -> Hashed<usize> {
+    /// A frozen table's keys never move, so it is never stale.
+    fn fresh_table(&mut self, v: Value) -> Hashed<()> {
+        if Self::image_value(v) {
+            self.table(v)?;
+            return Ok(());
+        }
         let i = self.table_index(v)?;
         let table = self.table(v)?;
         if table.stale {
@@ -712,15 +730,15 @@ impl Vm {
             table.rebuild();
             table.stale = false;
         }
-        Ok(i)
+        Ok(())
     }
     /// GNU `hash_find`: `eq` first, then the stored hash and the test.
     fn table_lookup(
         &mut self,
         table: Value,
         key: Value,
-    ) -> Hashed<(usize, Option<usize>, u64, bool)> {
-        let i = self.fresh_table(table)?;
+    ) -> Hashed<(Option<usize>, u64, bool)> {
+        self.fresh_table(table)?;
         let t = self.table(table)?;
         let (hash, moving) = self.hash_key(t.test, key);
         let mut at = t.chain(hash);
@@ -728,11 +746,11 @@ impl Vm {
             let slot = at as usize;
             let stored = t.keys[slot];
             if key == stored || t.hashes[slot] == hash && self.keys_match(t.test, key, stored)? {
-                return Ok((i, Some(slot), hash, moving));
+                return Ok((Some(slot), hash, moving));
             }
             at = t.next[slot];
         }
-        Ok((i, None, hash, moving))
+        Ok((None, hash, moving))
     }
     pub(super) fn hash_call(
         &mut self,
@@ -786,14 +804,14 @@ impl Vm {
         table: Value,
         key: Value,
     ) -> Result<Option<Value>> {
-        let (i, found, _, _) = self
+        let (found, _, _) = self
             .table_lookup(table, key)
             .map_err(|_| "hash table required")?;
-        Ok(found.map(|slot| self.table_mut(i).values[slot]))
+        Ok(found.and_then(|slot| self.table(table).ok().map(|t| t.values[slot])))
     }
 
     pub(crate) fn completion_hash_find(&mut self, table: Value, key: Value) -> std::result::Result<Option<(Value, Value)>, prim::Fault> {
-        let (index, found, _, _) = self.table_lookup(table, key).map_err(|fault| match fault {
+        let (found, _, _) = self.table_lookup(table, key).map_err(|fault| match fault {
             HashFault::Wrong(predicate, value) => prim::Fault::Wrong(predicate, value),
             HashFault::Error(message, value) => match value {
                 Some(value) if message == "circular-list" => prim::Fault::Circular(value),
@@ -802,12 +820,13 @@ impl Vm {
             HashFault::Internal(message) => prim::Fault::Error(message),
             HashFault::Arity(_, _) => unreachable!(),
         })?;
-        Ok(found.and_then(|slot| self.table_mut(index).entry(slot)))
+        Ok(found.and_then(|slot| self.table(table).ok()?.entry(slot)))
     }
     pub(super) fn declaration_hash_remove(&mut self, table: Value, key: Value) -> Result<()> {
         // Local-binding tables are declaration tables (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
-        let (i, found, _, _) = self.table_lookup(table, key).map_err(|_| "hash table required")?;
+        let (found, _, _) = self.table_lookup(table, key).map_err(|_| "hash table required")?;
+        let i = self.table_index(table).map_err(|_| "hash table required")?;
         if let Some(slot) = found {
             let value = self.table_mut(i).values[slot];
             self.table_mut(i).remove(slot);
@@ -826,9 +845,10 @@ impl Vm {
         value: Value,
     ) -> Result<()> {
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
-        let (i, found, hash, moving) = self
+        let (found, hash, moving) = self
             .table_lookup(table, key)
             .map_err(|_| "hash table required")?;
+        let i = self.table_index(table).map_err(|_| "hash table required")?;
         let table = self.table_mut(i);
         match found {
             Some(slot) => table.values[slot] = value,
@@ -852,18 +872,19 @@ impl Vm {
         let truth = |b: bool| if b { Value::TRUE } else { Value::NIL };
         match p {
             MakeHashTable => self.make_hash_table(&args),
-            HashTableP => Ok(truth(self.table_index(args[0]).is_ok())),
+            HashTableP => Ok(truth(self.table(args[0]).is_ok())),
             Gethash => {
-                let (i, found, _, _) = self.table_lookup(args[1], args[0])?;
+                let (found, _, _) = self.table_lookup(args[1], args[0])?;
                 Ok(match found {
-                    Some(slot) => self.table_mut(i).values[slot],
+                    Some(slot) => self.table(args[1])?.values[slot],
                     None => args.get(2).copied().unwrap_or(Value::NIL),
                 })
             }
-            HashTableContainsP => Ok(truth(self.table_lookup(args[1], args[0])?.1.is_some())),
+            HashTableContainsP => Ok(truth(self.table_lookup(args[1], args[0])?.0.is_some())),
             Puthash => {
                 let (key, value) = (args[0], args[1]);
-                let (i, found, hash, moving) = self.table_lookup(args[2], key)?;
+                let (found, hash, moving) = self.table_lookup(args[2], key)?;
+                let i = self.table_index(args[2])?;
                 let table = self.table_mut(i);
                 match found {
                     Some(slot) => table.values[slot] = value,
@@ -872,7 +893,8 @@ impl Vm {
                 Ok(value)
             }
             Remhash => {
-                let (i, found, _, _) = self.table_lookup(args[1], args[0])?;
+                let (found, _, _) = self.table_lookup(args[1], args[0])?;
+                let i = self.table_index(args[1])?;
                 if let Some(slot) = found {
                     self.table_mut(i).remove(slot);
                 }
@@ -991,12 +1013,19 @@ impl Vm {
             return Err(HashFault::Error("Hash table data is not a list", None));
         }
         // list_length: FOR_EACH_TAIL, then CHECK_LIST_END on the final tail.
+        // FOR_EACH_TAIL signals a list that reaches itself (circular_list).
         let mut items = vec![];
-        let mut tail = data;
+        let (mut tail, mut slow) = (data, data);
         while tail.tag() == 3 {
             let (car, cdr) = self.cons_pair(tail).map_err(HashFault::Internal)?;
             items.push(car);
             tail = cdr;
+            if items.len() % 2 == 0 {
+                slow = self.cons_pair(slow).map_err(HashFault::Internal)?.1;
+                if slow == tail && tail.tag() == 3 {
+                    return Err(HashFault::Error("circular-list", Some(data)));
+                }
+            }
         }
         if tail != Value::NIL {
             return Err(HashFault::Wrong("listp", tail));
@@ -1008,7 +1037,8 @@ impl Vm {
         params.push(Value::integer(items.len() as i64 / 2).map_err(HashFault::Internal)?);
         let table = self.make_hash_table(&params)?;
         for pair in items.chunks_exact(2) {
-            let (i, found, hash, moving) = self.table_lookup(table, pair[0])?;
+            let (found, hash, moving) = self.table_lookup(table, pair[0])?;
+            let i = self.table_index(table)?;
             let t = self.table_mut(i);
             match found {
                 Some(slot) => t.values[slot] = pair[1],
@@ -1034,6 +1064,7 @@ impl Vm {
                     Value::integer(n as i64).unwrap(),
                 ],
             ),
+            HashFault::Error("circular-list", Some(list)) => ("circular-list", vec![list]),
             HashFault::Error(message, datum) => {
                 let text = self.allocate_object(data::Object::String(Box::new(
                     data::LispString::new(message),

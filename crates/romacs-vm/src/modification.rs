@@ -9,8 +9,11 @@ pub(crate) struct Modification {
     pub chars_modiff: u64,
     pub save_modiff: u64,
     pub autosave_modiff: u64,
+    /// GNU `auto_save_failure_time': when an auto-save last took over a
+    /// minute (seconds since the epoch), else 0.
+    pub auto_save_failure: i64,
 }
-romacs_snapshot::snapshot_struct!(Modification { modiff, chars_modiff, save_modiff, autosave_modiff });
+romacs_snapshot::snapshot_struct!(Modification { modiff, chars_modiff, save_modiff, autosave_modiff, auto_save_failure });
 
 impl Default for Modification {
     fn default() -> Self {
@@ -19,6 +22,7 @@ impl Default for Modification {
             chars_modiff: 1,
             save_modiff: 1,
             autosave_modiff: 0,
+            auto_save_failure: 0,
         }
     }
 }

@@ -70,3 +70,61 @@ fn quoted_and_nested_unibyte_format_uses_gnu_octal_escapes() {
         assert_eq!(text, expected, "{source}");
     }
 }
+
+/// styled_format prints a %S argument with prin1 and a non-string %s one
+/// with princ (editfns.c:3693), so the printer and its variables decide:
+/// a newline, TAB or other control character prints raw unless
+/// `print-escape-newlines', and `print-length' holds. The expected list
+/// is what pinned GNU's `equal' accepted for the same forms.
+#[test]
+fn percent_s_prints_as_prin1_and_princ_do() {
+    let mut vm = Vm::new();
+    let value = vm.eval_source(r#"(equal (list (format "%S" "a\nb")
+             (format "%S" "t\te\eu\177")
+             (format "%S" "é\"\\")
+             (format "%S" '("a\nb" sym 1.5 [v "w\n"]))
+             (format "%s" '("a\nb" "c"))
+             (let ((print-escape-newlines t)) (format "%S" "a\nb\fc"))
+             (let ((print-length 2)) (format "%S" '(1 2 3 4)))
+             (format "%-8S|" "a")
+             (format "%S" (unibyte-string 97 200))
+             (let ((print-gensym t)) (format "%s %S" (make-symbol "g") (make-symbol "g"))))
+        '("\"a\nb\"" "\"t\te\eu\177\"" "\"é\\\"\\\\\"" "(\"a\nb\" sym 1.5 [v \"w\n\"])" "(a\nb c)"
+          "\"a\\nb\\fc\"" "(1 2 ...)" "\"a\"     |" "\"a\\310\"" "g #:g"))"#).unwrap();
+    assert_eq!(value.display().unwrap(), "t");
+}
+
+/// print.c prints windows, frames, the terminal, overlays, markers and
+/// buffers as `#<...>' forms, princ giving a buffer its bare name; format,
+/// prin1-to-string and message print each as pinned GNU does. A frame's
+/// pointer is its own, so only its presence is compared.
+#[test]
+fn display_objects_print_as_gnu_prints_them() {
+    let source = r#"(let* ((b (get-buffer-create "pk"))
+       (o (with-current-buffer b (insert "hello") (make-overlay 1 3)))
+       (gone (with-current-buffer b (let ((o (make-overlay 1 2))) (delete-overlay o) o)))
+       (killed (let ((k (get-buffer-create "pk-killed"))) (kill-buffer k) k)))
+  (mapcar (lambda (x) (list (format "%s|%S" x x) (prin1-to-string x) (prin1-to-string x t) (message "%s" x)))
+          (list (selected-frame) (selected-window) (minibuffer-window) (frame-terminal)
+                (current-window-configuration) b killed (with-current-buffer b (copy-marker 2))
+                (make-marker) o gone (list (selected-window) o))))"#;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let pointers = |text: &str| {
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(at) = rest.find(" 0x") {
+            out.push_str(&rest[..at + 3]);
+            rest = rest[at + 3..].trim_start_matches(|c: char| c.is_ascii_hexdigit());
+        }
+        out + rest
+    };
+    let expected = pointers(&String::from_utf8(output.stdout).unwrap());
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let printed = vm.eval_source(&format!("(prin1-to-string {source})")).unwrap().display().unwrap();
+    let actual: String = serde_json::from_str(&printed).unwrap();
+    assert!(actual.contains("#<frame F1 0x") && !actual.contains("#<frame F1 0x>"), "{actual}");
+    assert_eq!(pointers(&actual), expected);
+}

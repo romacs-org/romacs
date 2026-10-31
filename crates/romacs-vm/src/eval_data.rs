@@ -61,16 +61,6 @@ impl Vm {
                 }
                 Ok(tail)
             }
-            Prin1ToString => {
-                if !(1..=3).contains(&n) {
-                    return Err("wrong primitive arity".into());
-                }
-                let quoted = n == 1 || self.stack[start + 1] == Value::NIL;
-                let overrides = if n == 3 { self.stack[start + 2] } else { Value::NIL };
-                let text = self.print_render(self.stack[start], quoted, overrides, true)?;
-                if text.contains(crate::symkey::ESC) { return Ok(self.printed_value(&text)); }
-                self.literal(&Form::String(text))
-            }
             _ => unreachable!("eval data dispatch"),
         }
     }
@@ -121,15 +111,47 @@ impl Vm {
         Ok(true)
     }
 
+    /// VALUE printed for a caller that cannot call Lisp: an unreadable
+    /// object met while `print-unreadable-function' is set is an error.
     pub(super) fn print_render(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool) -> Result<String> {
-        for name in ["float-output-format", "print-integers-as-characters", "print-unreadable-function", "print-charset-text-property", "print-symbols-bare"] {
+        let unreadable = if self.print_unreadable_function()? == Value::NIL { Unreadable::Ignored } else { Unreadable::Refused };
+        self.print_render_as(value, quoted, overrides, buffer_output, unreadable).map(|(text, _)| text)
+    }
+
+    /// `print-unreadable-function', nil when unbound.
+    pub(crate) fn print_unreadable_function(&mut self) -> Result<Value> {
+        let slot = self.slot("print-unreadable-function");
+        Ok(Some(self.variable_value(slot)?).filter(|&v| v != Value::UNBOUND).unwrap_or(Value::NIL))
+    }
+
+    /// The unreadable objects VALUE's print meets, in order: the calls of
+    /// `print-unreadable-function' print.c's print_vectorlike_unreadable
+    /// would make. The print's number-table state is left as it was.
+    pub(crate) fn print_unreadables(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool) -> Result<Vec<Value>> {
+        let index = self.print_number_index;
+        let met = self.print_render_as(value, quoted, overrides, buffer_output, Unreadable::Met(Default::default()));
+        self.print_number_index = index;
+        match met?.1 { Unreadable::Met(objects) => Ok(objects.into_inner()), _ => unreachable!("the print keeps its mode") }
+    }
+
+    /// VALUE printed, each unreadable object it meets taking the next of
+    /// ANSWERS, the values of `print-unreadable-function' for the objects
+    /// [`Self::print_unreadables'] listed: nil prints the object as usual,
+    /// a string prints as `princ' would, and anything else prints nothing.
+    pub(crate) fn print_render_answered(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, answers: Vec<Value>) -> Result<String> {
+        let unreadable = Unreadable::Answered(answers, Default::default());
+        self.print_render_as(value, quoted, overrides, buffer_output, unreadable).map(|(text, _)| text)
+    }
+
+    fn print_render_as(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, unreadable: Unreadable) -> Result<(String, Unreadable)> {
+        for name in ["float-output-format", "print-integers-as-characters", "print-charset-text-property", "print-symbols-bare"] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;
             // Text properties print unpruned, which is GNU's `t'.
             let supported = v == Value::UNBOUND || v == Value::NIL || (name == "print-charset-text-property" && v == Value::TRUE);
             if !supported { return Err(format!("printing {name} is not supported")); }
         }
-        let mut options = PrintOptions::default();
+        let mut options = PrintOptions { unreadable, ..PrintOptions::default() };
         for (key, name) in [("length", "print-length"), ("level", "print-level"), ("quoted", "print-quoted"),
             ("escape-newlines", "print-escape-newlines"), ("escape-nonascii", "print-escape-nonascii"),
             ("escape-multibyte", "print-escape-multibyte"), ("escape-control-characters", "print-escape-control-characters"),
@@ -146,7 +168,8 @@ impl Vm {
         let settings = if overrides == Value::TRUE { vec![overrides] } else { self.list_values(overrides)? };
         for setting in settings {
             if setting == Value::TRUE {
-                (options, continuous, bound_table) = (PrintOptions::default(), false, Some(Value::NIL));
+                let unreadable = std::mem::replace(&mut options.unreadable, Unreadable::Ignored);
+                (options, continuous, bound_table) = (PrintOptions { unreadable, ..PrintOptions::default() }, false, Some(Value::NIL));
                 continue;
             }
             let (key, v) = self.cons_pair(setting)?;
@@ -154,6 +177,8 @@ impl Vm {
             match key.as_str() {
                 "continuous-numbering" => continuous = v != Value::NIL,
                 "number-table" => bound_table = Some(v),
+                // Its calls are made before the print (prims/printing.rs).
+                "unreadable-function" | "unreadeable-function" => {}
                 _ if options.set(&key, v) => {}
                 _ => return Err("unsupported printing override".into()),
             }
@@ -168,12 +193,15 @@ impl Vm {
             table = Value::NIL;
             if bound_table.is_none() { self.set_print_number_table(table_slot, table)?; }
         }
-        if !options.circle { return self.print_object(value, quoted, &options, 0); }
+        if !options.circle { return Ok((self.print_object(value, quoted, &options, 0)?, options.unreadable)); }
         self.print_preprocess(value, quoted, &mut options, continuous, table)?;
         let printed = self.print_object(value, quoted, &options, 0);
-        let slot = if bound_table.is_none() { Some(table_slot) } else { None };
-        self.publish_print_number_table(slot, table, options.graph.get_mut())?;
-        printed
+        // Listing the unreadable objects is not the print itself.
+        if !matches!(options.unreadable, Unreadable::Met(_)) {
+            let slot = if bound_table.is_none() { Some(table_slot) } else { None };
+            self.publish_print_number_table(slot, table, options.graph.get_mut())?;
+        }
+        Ok((printed?, options.unreadable))
     }
 
     /// print_string for princ of a plain string into a multibyte buffer:
@@ -529,6 +557,19 @@ impl Vm {
                 return Ok(format!("{}{}.0e+NaN", if n.is_sign_negative() { "-" } else { "" }, n.to_bits() & 0x0007_ffff_ffff_ffff));
             }
         }
+        if self.print_unreadable(value) {
+            match &options.unreadable {
+                Unreadable::Ignored => {}
+                Unreadable::Met(objects) => objects.borrow_mut().push(value),
+                Unreadable::Answered(answers, next) => {
+                    let answer = answers.get(next.get()).copied().unwrap_or(Value::NIL);
+                    next.set(next.get() + 1);
+                    if self.str_view(answer).is_some() { return self.print_body(answer, false, options, depth); }
+                    if answer != Value::NIL { return Ok(String::new()); }
+                }
+                Unreadable::Refused => return Err("VM2 print-unreadable-function from this printer is unsupported".into()),
+            }
+        }
         // Text from Lisp data joins output decoded as symbol keys (symkey.rs).
         if let Ok(state) = self.buffer_state(value) {
             return Ok(match &state.name {
@@ -566,10 +607,55 @@ impl Vm {
         if let Some(data::Object::SubCharTable(node)) = self.object_if(value) {
             return self.print_sub_char_table_body(node, quoted, options, depth);
         }
-        if matches!(self.object_if(value), Some(data::Object::SyntaxTable(_) | data::Object::Overlay(_) | data::Object::Frame(_) | data::Object::Terminal(_))) {
+        if let Some(text) = self.print_display_object(value, options, depth)? { return Ok(text); }
+        if matches!(self.object_if(value), Some(data::Object::SyntaxTable(_))) {
             return Err("printing this object representation is not supported".into());
         }
         self.display(value).map(|text| crate::symkey::escape_text(&text).into_owned())
+    }
+
+    /// print.c's PVEC_WINDOW, PVEC_FRAME, PVEC_TERMINAL and PVEC_OVERLAY,
+    /// whose names print as `princ' prints them; None for another object.
+    /// A frame's pointer is its record's address, as GNU's is.
+    fn print_display_object(&self, value: Value, options: &PrintOptions, depth: usize) -> Result<Option<String>> {
+        let buffer_name = |buffer: Value| self.buffer_state(buffer).ok()
+            .and_then(|state| state.name.as_deref()).map(|name| crate::symkey::escape_text(name).into_owned());
+        Ok(Some(match self.object_if(value) {
+            Some(data::Object::Window(window)) => match buffer_name(window.buffer).filter(|_| !window.dead) {
+                Some(name) => format!("#<window {} on {name}>", window.id),
+                None => format!("#<window {}>", window.id),
+            },
+            Some(data::Object::Frame(frame)) => {
+                let key = self.names.get("name").map(|&slot| Value::reference(slot + 1, 7));
+                let name = frame.parameters.iter().find(|(k, _)| Some(*k) == key).map_or(Value::NIL, |&(_, v)| v);
+                // A string, or a young frame's symbol, prints its name.
+                let name = if self.str_view(name).is_some() || name.tag() == 7 || name == Value::NIL {
+                    self.print_body(name, false, options, depth)?
+                } else { "*INVALID*FRAME*NAME*".into() };
+                let address = &**frame as *const crate::frame::Frame as usize;
+                format!("#<{}frame {name} {address:#x}>", if frame.live { "" } else { "dead " })
+            }
+            // The VM's one terminal is GNU's initial terminal; a deleted
+            // terminal has no name.
+            Some(data::Object::Terminal(terminal)) => {
+                if terminal.live { "#<terminal 0 on initial_terminal>".into() } else { "#<terminal 0>".into() }
+            }
+            Some(data::Object::Overlay(overlay)) => match (self.overlay_positions(value)?, buffer_name(overlay.buffer)) {
+                (Some((start, end)), Some(name)) => format!("#<overlay from {start} to {end} in {name}>"),
+                _ => "#<overlay in no buffer>".into(),
+            },
+            _ => return Ok(None),
+        }))
+    }
+
+    /// Whether print.c prints VALUE through print_vectorlike_unreadable:
+    /// a pseudovector other than a vector, record, closure, char-table,
+    /// hash table, bignum or bool-vector, so a buffer, marker, window,
+    /// frame, process, overlay, obarray or primitive.
+    fn print_unreadable(&self, value: Value) -> bool {
+        use data::Object::*;
+        prim::name(value).is_some() || matches!(self.object_if(value), Some(Buffer(_) | ByteBuffer(_) | Marker(_) | Window(_) | Frame(_)
+            | Terminal(_) | WindowConfiguration(_) | Process(_) | Overlay(_) | Obarray(_) | Sqlite(_)))
     }
 
     /// print.c PVEC_MARKER: `#<marker [(moves after insertion) ]at N in
@@ -620,15 +706,28 @@ impl PrintGraph {
         matches!(self.marks.get(&key), Some(CircleMark::Pending(_) | CircleMark::Printed(_) | CircleMark::Other(_)))
     }
 }
+/// What a print does with an unreadable object (print.c
+/// print_vectorlike_unreadable) for `print-unreadable-function'.
+enum Unreadable {
+    /// The variable is nil: print it as usual.
+    Ignored,
+    /// List it, to call the function on later.
+    Met(std::cell::RefCell<Vec<Value>>),
+    /// Print the next of the function's answers, counted by the cell.
+    Answered(Vec<Value>, std::cell::Cell<usize>),
+    /// This print cannot call Lisp.
+    Refused,
+}
 struct PrintOptions {
     graph: std::cell::RefCell<PrintGraph>,
+    unreadable: Unreadable,
     length: Option<usize>, level: Option<i64>, quoted: bool, newlines: bool,
     nonascii: bool, multibyte: bool, controls: bool, circle: bool, gensym: bool,
     /// Output goes to a multibyte buffer, as print_string's does.
     buffer: bool,
 }
 impl Default for PrintOptions {
-    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false } }
+    fn default() -> Self { Self { graph: std::cell::RefCell::default(), unreadable: Unreadable::Ignored, length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false } }
 }
 impl PrintOptions {
     fn set(&mut self, key: &str, value: Value) -> bool {

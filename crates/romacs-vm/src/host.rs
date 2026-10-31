@@ -20,7 +20,7 @@ use std::ffi::{CStr, OsStr, OsString};
 use std::fs::{File, FileType, Metadata};
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,7 +42,10 @@ pub enum Mode {
 thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
+    static LAYER: RefCell<Option<LayerState>> = const { RefCell::new(None) };
     static CONFINED: Cell<bool> = const { Cell::new(false) };
+    static FLAGS_READER: RefCell<Option<std::sync::mpsc::Sender<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>>> =
+        const { RefCell::new(None) };
 }
 
 pub fn mode() -> Mode {
@@ -136,7 +139,7 @@ const BAKED: (&str, &str) = ("/version.el", "(defconst emacs-build-time");
 /// restore re-seeds (`romacs--world-reseed`): (file suffix, form head, the P
 /// fact or fenced variable the form may read, the variable it sets, which is
 /// fenced once the form ends).
-const RESEED: [(&str, &str, &str, Option<&str>); 4] = [
+const RESEED: [(&str, &str, &str, Option<&str>); 7] = [
     ("/emacs-lisp/cl-extra.el", "(defvar cl--random-state", "clock", Some("cl--random-state")),
     ("/progmodes/project.el", "(defcustom project-list-file", "default-directory", Some("project-list-file")),
     ("/emacs-lisp/find-func.el", "(defvar find-function-C-source-directory", "default-directory",
@@ -144,7 +147,117 @@ const RESEED: [(&str, &str, &str, Option<&str>); 4] = [
     // It asks only whether exec-path is bound: its standard value is the
     // expression cus-start gives, so nothing it sets needs re-seeding.
     ("/cus-start.el", "(let* ((quoter", "exec-path", None),
+    // The user's persistent connection history, this process's state: the
+    // read is no keyed fact, and restore reads the file again.
+    ("/net/tramp-cache.el", "(when (and (stringp tramp-persistency-file-name)", "user-file", None),
+    // The lock-refresh timer org-persist starts when it loads: restore
+    // starts this process's own.
+    ("/org/org-persist.el", "(unless (and org-persist--disable-when-emacs-Q", "clock", Some("org-persist--refresh-gc-lock-timer")),
+    // tramp-set-completion-function keeps a completion entry whose file is
+    // the empty string when `(file-exists-p "")' is true: the working
+    // directory exists in every process, so nothing it sets needs re-seeding.
+    ("/net/tramp.el", "(run-hooks 'tramp--startup-hook)", "default-directory", None),
 ];
+
+/// A layer build's state while an init's libraries load (`world::layer`):
+/// the definition form being loaded, when the top-level form is one, and
+/// whether it read a per-process fact, which makes it a re-seed form
+/// (re-evaluated at restore); and whether the startup function may run
+/// again, after the libraries.
+#[derive(Default)]
+struct LayerState {
+    form: Option<(&'static str, String)>,
+    tainted: bool,
+    /// An effect refused inside the definition form: the form is cut short
+    /// and deferred whole to restore (`layer_form_cut`).
+    cut: bool,
+    /// A re-seed form that starts a timer ran (`reseed_reads`).
+    timers: bool,
+    rerun: bool,
+}
+
+/// The definition forms a layer re-seeds: the head's kind and the name it
+/// defines, for `(KIND NAME ...`.
+const DEFINITIONS: [&str; 4] = ["defcustom", "defvar", "defconst", "defvar-local"];
+
+fn definition(head: &str) -> Option<(&'static str, String)> {
+    let mut words = head.strip_prefix('(')?.split(|c: char| c.is_whitespace() || c == ')').filter(|w| !w.is_empty());
+    let first = words.next()?;
+    let kind = DEFINITIONS.iter().find(|k| **k == first)?;
+    Some((kind, words.next()?.to_owned()))
+}
+
+/// The libraries of a layer load from here (`world::layer`).
+pub(crate) fn layer_begin() {
+    LAYER.with(|l| *l.borrow_mut() = Some(LayerState::default()));
+}
+
+pub(crate) fn layer_end() {
+    LAYER.with(|l| *l.borrow_mut() = None);
+}
+
+pub(crate) fn layer_active() -> bool {
+    LAYER.with(|l| l.borrow().is_some())
+}
+
+/// The top-level form with HEAD begins, in a layer build.
+fn layer_form(head: &str) {
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = definition(head); layer.tainted = false; layer.cut = false; });
+}
+
+/// An effect inside a layer's definition form: not done, and the form
+/// is deferred whole to restore, where it is. True when so taken.
+fn layer_cut(what: &str) -> bool {
+    LAYER.with(|l| match l.borrow_mut().as_mut() {
+        Some(layer) if layer.form.is_some() => { layer.tainted = true; layer.cut = true; true }
+        _ => false,
+    }).then(|| record("layer-effect", json!({"what": what}))).is_some()
+}
+
+/// The definition form that signalled was cut short by a refused effect:
+/// its name, for the loader to define it as nil and go on; the form is
+/// kept for restore (`layer_form_done`).
+pub(crate) fn layer_form_cut() -> Option<String> {
+    LAYER.with(|l| l.borrow().as_ref().filter(|layer| layer.cut).and_then(|layer| layer.form.as_ref().map(|(_, name)| name.clone())))
+}
+
+/// A read of a per-process fact or a fenced value in a layer build: taken
+/// when the form being loaded is a definition, which the layer re-seeds
+/// at restore; false when it is not, and the read refuses as usual.
+pub(crate) fn layer_taint() -> bool {
+    LAYER.with(|l| match l.borrow_mut().as_mut() {
+        Some(layer) if layer.form.is_some() => { layer.tainted = true; true }
+        _ => false,
+    })
+}
+
+/// Whether the top-level form being loaded is a definition of NAME: a
+/// file loaded again (circular `require`s) defines its variables again.
+pub(crate) fn layer_defines(name: &str) -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.form.as_ref().is_some_and(|(_, defined)| defined == name)))
+}
+
+/// The top-level form ends: the definition it was, when it read a
+/// per-process fact (`layer_taint`), and whether an effect cut it short.
+pub(crate) fn layer_form_done() -> Option<(&'static str, String, bool)> {
+    LAYER.with(|l| {
+        let mut layer = l.borrow_mut();
+        let layer = layer.as_mut()?;
+        let tainted = std::mem::take(&mut layer.tainted);
+        let cut = std::mem::take(&mut layer.cut);
+        layer.form.take().filter(|_| tainted).map(|(kind, name)| (kind, name, cut))
+    })
+}
+
+/// Whether the startup function may run again now: after a layer's
+/// libraries, as a restored process runs it after them.
+pub(crate) fn layer_rerun(on: bool) {
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.rerun = on; });
+}
+
+fn layer_rerun_allowed() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.rerun))
+}
 
 /// The re-seed entry of the form being loaded, if it is one.
 fn reseed_entry() -> Option<(&'static str, Option<&'static str>)> {
@@ -158,8 +271,17 @@ pub(crate) fn reseed_reads(what: &str) -> bool {
     let allowed = reseed_entry().is_some_and(|(reads, _)| reads == what);
     if allowed {
         record("reseed", json!({"reads": what}));
+        if what == "clock" {
+            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.timers = true; });
+        }
     }
     allowed
+}
+
+/// Whether a re-seed form that reads the clock ran since the last call:
+/// a timer the form left is restarted at restore, so the layer may keep it.
+pub(crate) fn layer_timers_allowed() -> bool {
+    LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
@@ -248,7 +370,7 @@ pub(crate) fn switch_startup(on: bool) -> bool {
         let from = match on { true => Phase::Recipe, false => Phase::Startup };
         let run = if on { b.startups } else { b.startups.saturating_sub(1) };
         let allowed = b.phase == from
-            && b.site.as_ref().is_some_and(|s| STARTUP.get(run).is_some_and(|file| s.file.ends_with(file)));
+            && (layer_rerun_allowed() || b.site.as_ref().is_some_and(|s| STARTUP.get(run).is_some_and(|file| s.file.ends_with(file))));
         if allowed {
             b.phase = if on { Phase::Startup } else { Phase::Recipe };
             b.startups += usize::from(on);
@@ -283,7 +405,9 @@ pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
         return SiteGuard(None);
     }
-    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(Rc::new(site())))))
+    let site = Rc::new(site());
+    layer_form(&site.head);
+    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))))
 }
 
 /// This thread is confined (`world::sandbox`): a read it is refused fails
@@ -318,6 +442,11 @@ pub(crate) fn record(kind: &str, fields: Json) {
     });
 }
 
+/// How many refusals the build has listed so far; 0 outside a build.
+pub(crate) fn refusals() -> usize {
+    with_build(|b| b.refusals.len()).unwrap_or(0)
+}
+
 /// List a refusal: KIND with FIELDS and the current site.
 pub(crate) fn refuse(kind: &str, fields: Json) {
     with_build(|b| {
@@ -329,13 +458,16 @@ pub(crate) fn refuse(kind: &str, fields: Json) {
 
 /// A P fact WHAT is read: recorded where it is allowed, else refused.
 fn p_read(fact: Fact<'_>, what: String) {
+    // Asked before the build is borrowed: it records, and notes a timer's allowance.
+    let reseed = reseed_reads(&what);
     with_build(|b| {
         let site = b.site.as_deref();
         let allowed = match (b.phase, class(fact, site)) {
             (Phase::Init, _) => Some("init"),
             (Phase::Startup, _) => Some("startup"),
             (Phase::Recipe, Class::B) => Some("baked"),
-            (Phase::Recipe, _) if site.is_some_and(|s| RESEED.iter().any(|r| s.at((r.0, r.1)) && what == r.2)) => Some("reseed"),
+            (Phase::Recipe, _) if reseed => Some("reseed"),
+            (Phase::Recipe, _) if layer_taint() => Some("layer"),
             _ => None,
         };
         let item = json!({"kind": "p-read", "site": b.site(), "what": what, "allowed": allowed});
@@ -348,7 +480,10 @@ fn effect(what: impl FnOnce() -> String) -> io::Result<()> {
     if !building() {
         return Ok(());
     }
-    refuse("effect", json!({"what": what()}));
+    let what = what();
+    if !layer_cut(&what) {
+        refuse("effect", json!({"what": what}));
+    }
     Err(io::Error::from_raw_os_error(libc::EPERM))
 }
 
@@ -381,6 +516,14 @@ fn sha256(data: &[u8]) -> String {
 
 /// A file's content as a record: its length and digest, or the error.
 fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
+    if reseed_reads("user-file") {
+        return;
+    }
+    // This process's own entries (its umask, its maps): a per-process fact.
+    if path.starts_with("/proc/self") {
+        p_read(Fact::Pid, format!("{} read", bytes(path)));
+        return;
+    }
     let result = match result {
         Ok(data) => json!({"len": data.as_ref().len(), "sha256": sha256(data.as_ref())}),
         Err(e) => {
@@ -394,6 +537,9 @@ fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
 }
 
 fn probed(kind: &str, path: &Path, result: Json) {
+    if reseed_reads("user-file") {
+        return;
+    }
     if keyed_path(path, kind) {
         record("probe", json!({"probe": kind, "path": path_json(path), "result": result}));
     }
@@ -564,6 +710,9 @@ pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
             Ok(Input(file, Some(path.to_owned()), Some(Captured { content, at: 0 })))
         }
         Err(e) => {
+            if reseed_reads("user-file") {
+                return Err(e);
+            }
             confined(path, &e);
             if keyed_path(path, "read") {
                 record("file-read", json!({"path": path_json(path), "result": errno(&e)}));
@@ -729,13 +878,27 @@ impl DirEntry {
     pub fn file_type(&self) -> io::Result<FileType> {
         let result = self.0.file_type();
         if self.1 {
-            let observed = match &result {
-                Ok(t) => json!(if t.is_dir() { "dir" } else if t.is_file() { "file" } else if t.is_symlink() { "symlink" } else { "other" }),
-                Err(e) => errno(e),
-            };
-            probed("entry-type", &self.0.path(), observed);
+            probed("entry-type", &self.0.path(), entry_type_json(&result));
         }
         result
+    }
+}
+
+/// The type of the entry PATH names, not following a symlink: an lstat
+/// whose record is only the type, so the entry's times and size are not
+/// keyed facts.
+pub fn entry_type(path: &Path) -> io::Result<FileType> {
+    let result = std::fs::symlink_metadata(path).map(|m| m.file_type());
+    if building() {
+        probed("entry-type", path, entry_type_json(&result));
+    }
+    result
+}
+
+fn entry_type_json(result: &io::Result<FileType>) -> Json {
+    match result {
+        Ok(t) => json!(if t.is_dir() { "dir" } else if t.is_file() { "file" } else if t.is_symlink() { "symlink" } else { "other" }),
+        Err(e) => errno(e),
     }
 }
 
@@ -798,27 +961,126 @@ pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
     result
 }
 
-/// Whether the filesystem holding PATH folds case, as CLASSIFY observes it:
-/// one keyed fact. The listings and stats that answer it are not recorded,
-/// since the build consumed only the answer, and restore asks again.
-pub fn case_insensitive(path: &Path, classify: fn(&Path) -> Result<bool, &'static str>) -> Result<bool, &'static str> {
-    if !building() {
-        return classify(path);
-    }
-    MODE.with(|m| m.set(Mode::Off));
-    let result = classify(path);
-    MODE.with(|m| m.set(Mode::Build));
-    // Confinement may hide what answers the probe: a build cannot know its
-    // answer is the host's.
-    if result.is_err() && CONFINED.with(Cell::get) {
-        refuse("confined", json!({"case probe": path_json(path), "error": result.err()}));
-        return result;
-    }
-    let observed = match result { Ok(answer) => json!(answer), Err(reason) => json!({"error": reason}) };
-    if keyed_path(path, "case probe") {
-        record("case", json!({"path": path_json(path), "result": observed}));
+/// The type of the filesystem holding PATH: statfs's `f_type`, a magic
+/// number of linux/magic.h. A keyed probe.
+pub fn filesystem_type(path: &Path) -> io::Result<u32> {
+    let result = path_c_string(path).and_then(|name| {
+        let mut buf = std::mem::MaybeUninit::<libc::statfs>::uninit();
+        match unsafe { libc::statfs(name.as_ptr(), buf.as_mut_ptr()) } {
+            // f_type is a signed word; the magic numbers are 32 bits.
+            0 => Ok(unsafe { buf.assume_init() }.f_type as u32),
+            _ => Err(io::Error::last_os_error()),
+        }
+    });
+    if building() {
+        if let Err(e) = &result { confined(path, e); }
+        probed("fs-type", path, result.as_ref().map_or_else(errno, |t| json!(t)));
     }
     result
+}
+
+/// The inode flags of DIRECTORY, opened without following a symlink
+/// (FS_IOC_GETFLAGS, linux/fs.h). A keyed probe. Landlock refuses a confined
+/// build a directory open outside its read roots, though the flags read
+/// nothing beneath it, so that thread asks the one `keep_flags_reader`
+/// started before it confined itself.
+pub fn directory_flags(directory: &Path) -> io::Result<u32> {
+    let reader = FLAGS_READER.with(|r| r.borrow().clone());
+    let result = match reader {
+        Some(reader) => {
+            let (reply, answer) = std::sync::mpsc::channel();
+            reader.send((directory.to_owned(), reply)).map_err(|_| io::Error::other("flags reader gone"))
+                .and_then(|()| answer.recv().map_err(|_| io::Error::other("flags reader gone"))?)
+        }
+        None => read_directory_flags(directory),
+    };
+    if building() {
+        probed("dir-flags", directory, result.as_ref().map_or_else(errno, |f| json!(f)));
+    }
+    result
+}
+
+/// The POSIX access ACL of the file PATH names, following a symlink: its
+/// `system.posix_acl_access' attribute, or None when it has none (its
+/// mode bits are then its ACL). A keyed probe.
+pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
+    const NAME: &CStr = c"system.posix_acl_access";
+    let result = (|| {
+        let name = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+        loop {
+            let size = unsafe { libc::getxattr(name.as_ptr(), NAME.as_ptr(), std::ptr::null_mut(), 0) };
+            if size < 0 {
+                let error = io::Error::last_os_error();
+                return if error.raw_os_error() == Some(libc::ENODATA) { Ok(None) } else { Err(error) };
+            }
+            let mut value = vec![0u8; size as usize];
+            let read = unsafe { libc::getxattr(name.as_ptr(), NAME.as_ptr(), value.as_mut_ptr().cast(), value.len()) };
+            if read >= 0 { value.truncate(read as usize); return Ok(Some(value)); }
+            // The attribute grew between the two calls: ask its size again.
+            if io::Error::last_os_error().raw_os_error() != Some(libc::ERANGE) { return Err(io::Error::last_os_error()); }
+        }
+    })();
+    if building() {
+        if let Err(e) = &result { confined(path, e); }
+        let observed = match &result { Ok(Some(value)) => encoded(value), Ok(None) => json!(null), Err(e) => errno(e) };
+        probed("acl", path, observed);
+    }
+    result
+}
+
+fn read_directory_flags(directory: &Path) -> io::Result<u32> {
+    let name = path_c_string(directory)?;
+    let fd = unsafe { libc::open(name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    // The kernel reads and writes an int, whatever the request's size says.
+    let mut flags: libc::c_int = 0;
+    use std::os::fd::AsRawFd;
+    match unsafe { libc::ioctl(fd.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut flags) } {
+        0 => Ok(flags as u32),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+fn path_c_string(path: &Path) -> io::Result<std::ffi::CString> {
+    std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))
+}
+
+/// Start the thread that reads directory flags for this one
+/// (`directory_flags`), before this thread confines itself: it answers that
+/// one query and makes no other.
+pub(crate) fn keep_flags_reader() -> io::Result<()> {
+    let (reader, queries) = std::sync::mpsc::channel::<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>();
+    std::thread::Builder::new().name("romacs-flags-reader".into()).spawn(move || {
+        for (directory, reply) in queries {
+            let _ = reply.send(read_directory_flags(&directory));
+        }
+    })?;
+    FLAGS_READER.with(|r| *r.borrow_mut() = Some(reader));
+    Ok(())
+}
+
+/// Set the POSIX access ACL of the file PATH names to VALUE, in its
+/// `system.posix_acl_access' form.
+pub fn set_posix_acl(path: &Path, value: &[u8]) -> io::Result<()> {
+    effect(|| format!("set ACL of {}", bytes(path)))?;
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    status(unsafe { libc::setxattr(name.as_ptr(), c"system.posix_acl_access".as_ptr(), value.as_ptr().cast(), value.len(), 0) })
+}
+
+/// sync(2): every pending disk update, the whole system's.
+pub fn sync_all() -> io::Result<()> {
+    effect(|| "sync".into())?;
+    unsafe { libc::sync() };
+    Ok(())
+}
+
+/// Close this process's standard stream FD (0, 1 or 2).
+pub fn close_standard_stream(fd: i32) -> io::Result<()> {
+    effect(|| format!("close standard stream {fd}"))?;
+    status(unsafe { libc::close(fd) })
 }
 
 // Replay.
@@ -834,8 +1096,8 @@ fn decoded(field: &Json) -> Option<Vec<u8>> {
 
 /// The record a keyed RECORD's query makes now, its site aside: the host's
 /// present answer to the same question, asked the same way (§6.4). None for
-/// a record that asks the host nothing. CASE answers a case probe.
-pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> Option<Json> {
+/// a record that asks the host nothing.
+pub fn replay(record: &Json) -> Option<Json> {
     let kind = record["kind"].as_str()?;
     let path = || decoded(&record["path"]).map(|bytes| PathBuf::from(OsString::from_vec(bytes)));
     use std::os::unix::ffi::OsStringExt;
@@ -853,15 +1115,11 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
                 "lstat" => { let _ = symlink_metadata(path()?); }
                 "fstat" | "open" => { if let Ok(input) = open_input(path()?, 0) { let _ = input.stat(); } }
                 "readlink" => { let _ = read_link(path()?); }
-                "entry-type" => {
-                    let path = path()?;
-                    let observed = match std::fs::symlink_metadata(&path) {
-                        Ok(m) => json!(if m.is_symlink() { "symlink" } else if m.is_dir() { "dir" } else if m.is_file() { "file" } else { "other" }),
-                        Err(e) => errno(&e),
-                    };
-                    probed("entry-type", &path, observed);
-                }
+                "entry-type" => { let _ = entry_type(&path()?); }
                 "statvfs" => { let _ = statvfs(&std::ffi::CString::new(path()?.into_os_string().into_vec()).ok()?); }
+                "fs-type" => { let _ = filesystem_type(&path()?); }
+                "dir-flags" => { let _ = directory_flags(&path()?); }
+                "acl" => { let _ = posix_acl(&path()?); }
                 access => {
                     let mut words = access.strip_prefix("access ")?.split(' ');
                     let mode = words.next()?.parse().ok()?;
@@ -890,6 +1148,8 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
                 "exe" => { let _ = current_exe(); }
                 "uid" => { uid(); }
                 "euid" => { euid(); }
+                "gid" => { gid(); }
+                "egid" => { egid(); }
                 "system-name" => { let _ = system_name(); }
                 "processors Current" => { processors(Processors::Current); }
                 "processors Online" => { processors(Processors::Online); }
@@ -898,15 +1158,18 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
             },
             "user-db" => {
                 let key = &record["key"];
-                if let Some(uid) = key["uid"].as_u64() {
+                if let Some(list) = key.as_str() {
+                    match list { "users" => { account_names(false); } "groups" => { account_names(true); } _ => return None }
+                } else if let Some(uid) = key["uid"].as_u64() {
                     let _ = user_by_uid(uid as u32, 1 << 16);
                 } else if let Some(gid) = key["gid"].as_u64() {
                     let _ = group_by_gid(gid as u32, 1 << 16);
+                } else if key.get("group").is_some() {
+                    let _ = group_by_name(&std::ffi::CString::new(decoded(&key["group"])?).ok()?, 1 << 16);
                 } else {
                     let _ = user_by_name(&std::ffi::CString::new(decoded(&key["name"])?).ok()?, 1 << 16);
                 }
             }
-            "case" => { let _ = case_insensitive(&path()?, case); }
             _ => return None,
         }
         Some(())
@@ -924,7 +1187,7 @@ pub fn replay(record: &Json, case: fn(&Path) -> Result<bool, &'static str>) -> O
 /// Whether RECORD is a keyed query restore must ask again: the other kinds
 /// say what the build did, not what the host answered.
 pub fn keyed(record: &Json) -> bool {
-    matches!(record["kind"].as_str(), Some("file-read" | "probe" | "dir-list" | "canon" | "env" | "host" | "user-db" | "case"))
+    matches!(record["kind"].as_str(), Some("file-read" | "probe" | "dir-list" | "canon" | "env" | "host" | "user-db"))
 }
 
 // Process facts.
@@ -957,22 +1220,6 @@ pub fn pid() -> u32 {
     std::process::id()
 }
 
-pub fn gid() -> u32 {
-    let gid = unsafe { libc::getgid() };
-    if building() {
-        host_fact("gid", json!(gid));
-    }
-    gid
-}
-
-pub fn egid() -> u32 {
-    let egid = unsafe { libc::getegid() };
-    if building() {
-        host_fact("egid", json!(egid));
-    }
-    egid
-}
-
 pub fn uid() -> u32 {
     let uid = unsafe { libc::getuid() };
     if building() {
@@ -989,10 +1236,27 @@ pub fn euid() -> u32 {
     euid
 }
 
+pub fn gid() -> u32 {
+    let gid = unsafe { libc::getgid() };
+    if building() {
+        host_fact("gid", json!(gid));
+    }
+    gid
+}
+
+pub fn egid() -> u32 {
+    let egid = unsafe { libc::getegid() };
+    if building() {
+        host_fact("egid", json!(egid));
+    }
+    egid
+}
+
 // User database.
 
 /// A passwd entry's fields, as the C library's bytes.
 pub struct Passwd {
+    pub uid: u32,
     /// pw_name, absent when the entry has none.
     pub name: Option<Vec<u8>>,
     pub gecos: Vec<u8>,
@@ -1012,7 +1276,7 @@ fn passwd(buffer: usize, lookup: impl Fn(*mut libc::passwd, *mut libc::c_char, u
     }
     let bytes = |p: *const libc::c_char| if p.is_null() { Vec::new() } else { unsafe { CStr::from_ptr(p) }.to_bytes().to_vec() };
     let field = |p: *const libc::c_char| (!p.is_null()).then(|| bytes(p));
-    Ok(Passwd { name: field(entry.pw_name), gecos: bytes(entry.pw_gecos), dir: field(entry.pw_dir) })
+    Ok(Passwd { uid: entry.pw_uid, name: field(entry.pw_name), gecos: bytes(entry.pw_gecos), dir: field(entry.pw_dir) })
 }
 
 pub fn user_by_uid(uid: u32, buffer: usize) -> Result<Passwd, i32> {
@@ -1031,7 +1295,7 @@ pub fn user_by_name(name: &CStr, buffer: usize) -> Result<Passwd, i32> {
 fn user_db(key: Json, result: &Result<Passwd, i32>) {
     if building() {
         let result = match result {
-            Ok(p) => json!(sha256(&[p.name.as_deref(), Some(&p.gecos), p.dir.as_deref()].map(|f| f.map(<[u8]>::to_vec)).iter()
+            Ok(p) => json!(sha256(&[Some(p.uid.to_string().as_bytes()), p.name.as_deref(), Some(&p.gecos), p.dir.as_deref()].map(|f| f.map(<[u8]>::to_vec)).iter()
                 .flat_map(|f| f.as_ref().map_or(vec![0xff], |f| [f.as_slice(), &[0]].concat())).collect::<Vec<u8>>())),
             Err(status) => json!({"status": status}),
         };
@@ -1056,6 +1320,41 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
         record("user-db", json!({"key": {"gid": gid}, "result": observed}));
     }
     result
+}
+
+/// The group NAME names: its gid.
+pub fn group_by_name(name: &CStr, buffer: usize) -> Result<u32, i32> {
+    let mut buffer = vec![0 as libc::c_char; buffer];
+    let mut entry = std::mem::MaybeUninit::<libc::group>::uninit();
+    let mut found = std::ptr::null_mut();
+    let status = unsafe { libc::getgrnam_r(name.as_ptr(), entry.as_mut_ptr(), buffer.as_mut_ptr(), buffer.len(), &mut found) };
+    let result = if status != 0 || found.is_null() { Err(status) } else { Ok(unsafe { (*found).gr_gid }) };
+    if building() {
+        let observed = match &result { Ok(gid) => json!(gid), Err(status) => json!({"status": status}) };
+        record("user-db", json!({"key": {"group": encoded(name.to_bytes())}, "result": observed}));
+    }
+    result
+}
+
+/// The names getpwent (users) or getgrent (groups) walks the whole database
+/// for, in its order, then endpwent or endgrent, as dired.c Fsystem_users and
+/// Fsystem_groups do (so NSS sources count). The walk's cursor is the C
+/// library's, shared by the process, so one walk runs at a time.
+pub fn account_names(groups: bool) -> Vec<Vec<u8>> {
+    static WALK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _walk = WALK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let next = || unsafe {
+        let name = if groups { libc::getgrent().as_ref().map(|g| g.gr_name) } else { libc::getpwent().as_ref().map(|p| p.pw_name) };
+        name.map(|name| (!name.is_null()).then(|| CStr::from_ptr(name).to_bytes().to_vec()))
+    };
+    let mut names = Vec::new();
+    unsafe { if groups { libc::setgrent() } else { libc::setpwent() } }
+    while let Some(name) = next() { names.extend(name); }
+    unsafe { if groups { libc::endgrent() } else { libc::endpwent() } }
+    if building() {
+        record("user-db", json!({"key": if groups { "groups" } else { "users" }, "result": sha256(&names.join(&0))}));
+    }
+    names
 }
 
 // Machine.
@@ -1106,6 +1405,12 @@ fn count_processors(set: Processors) -> u64 {
 }
 
 // Time.
+
+/// The kernel's clock ticks per second (`_SC_CLK_TCK`), the unit of
+/// /proc's process times.
+pub fn clock_ticks_per_second() -> u64 {
+    u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok().filter(|&n| n > 0).unwrap_or(100)
+}
 
 /// A time-zone file's bytes: `/etc/localtime`, a TZ file or a zoneinfo entry.
 pub fn zone_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
@@ -1468,12 +1773,283 @@ pub fn pidfd_open(pid: i32) -> Option<OwnedFd> {
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd as libc::c_int) })
 }
 
+/// A memfd holding BYTES, sealed against writing, shrinking and growing
+/// once written: the backing of a large frozen region (`frozen.rs`), which
+/// another process may map or read knowing the bytes cannot change.
+pub fn sealed_memfd(bytes: &[u8]) -> io::Result<File> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    effect(|| "memfd".into())?;
+    let fd = unsafe { libc::memfd_create(c"romacs-frozen".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    file.write_all(bytes)?;
+    status(unsafe { libc::fcntl(file.as_raw_fd(), libc::F_ADD_SEALS, SEALS) })?;
+    Ok(file)
+}
+
+const SEALS: libc::c_int = libc::F_SEAL_WRITE | libc::F_SEAL_SHRINK | libc::F_SEAL_GROW;
+
+/// FILE's bytes, when `sealed_memfd`'s seals are on it; a descriptor another
+/// process sent is refused otherwise, since its bytes could change under
+/// the reader.
+pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileExt;
+    let seals = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GET_SEALS) };
+    if seals < 0 || seals & SEALS != SEALS {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "frozen region descriptor is not sealed"));
+    }
+    let len = usize::try_from(file.metadata()?.len()).map_err(|_| io::Error::other("frozen region too large"))?;
+    let mut bytes = vec![0; len];
+    file.read_exact_at(&mut bytes, 0)?;
+    Ok(bytes)
+}
+
+// Isolates (`isolate.rs`): worker processes, their control sockets, the
+// descriptors they pass, and the signals between them.
+
+/// FD nonblocking: a worker's inherited control socket.
+pub fn set_nonblocking(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0 { return Err(io::Error::last_os_error()); }
+    status(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }.min(0))
+}
+
+/// A connected pair of close-on-exec, nonblocking `SOCK_SEQPACKET` sockets:
+/// one packet per `send_packet`, received whole or not at all; a full
+/// buffer makes a send fail with `WouldBlock` rather than wait.
+pub fn socketpair() -> io::Result<(OwnedFd, OwnedFd)> {
+    effect(|| "socketpair".into())?;
+    let mut fds = [0; 2];
+    status(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK, 0, fds.as_mut_ptr()) })?;
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+}
+
+/// BYTES as one packet on SOCKET, with FD passed beside it (`SCM_RIGHTS`);
+/// `WouldBlock` when the peer's buffer is full (a bounded queue).
+pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option<std::os::fd::BorrowedFd<'_>>) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    effect(|| "sendmsg".into())?;
+    let mut iov = libc::iovec { iov_base: bytes.as_ptr() as *mut libc::c_void, iov_len: bytes.len() };
+    let space = unsafe { libc::CMSG_SPACE(4) } as usize;
+    let mut control = vec![0u8; space];
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    if let Some(fd) = fd {
+        msg.msg_control = control.as_mut_ptr().cast();
+        msg.msg_controllen = space as _;
+        // SAFETY: the control buffer holds exactly one descriptor header.
+        unsafe {
+            let cmsg = libc::CMSG_FIRSTHDR(&msg);
+            (*cmsg).cmsg_level = libc::SOL_SOCKET;
+            (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+            (*cmsg).cmsg_len = libc::CMSG_LEN(4) as _;
+            std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), fd.as_raw_fd());
+        }
+    }
+    loop {
+        let n = unsafe { libc::sendmsg(socket.as_raw_fd(), &msg, libc::MSG_NOSIGNAL) };
+        if n >= 0 { return Ok(()); }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted { return Err(error); }
+    }
+}
+
+/// One packet from SOCKET, up to CAPACITY bytes, with the descriptors passed
+/// beside it (close-on-exec); None once the peer has closed. A packet the
+/// buffer cannot hold whole is an error, never a prefix.
+pub fn recv_packet(socket: std::os::fd::BorrowedFd<'_>, capacity: usize) -> io::Result<Option<(Vec<u8>, Vec<OwnedFd>)>> {
+    use std::os::fd::AsRawFd;
+    let mut bytes = vec![0u8; capacity];
+    let mut iov = libc::iovec { iov_base: bytes.as_mut_ptr().cast(), iov_len: capacity };
+    let space = unsafe { libc::CMSG_SPACE(4 * 8) } as usize;
+    let mut control = vec![0u8; space];
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control.as_mut_ptr().cast();
+    msg.msg_controllen = space as _;
+    let n = loop {
+        let n = unsafe { libc::recvmsg(socket.as_raw_fd(), &mut msg, libc::MSG_CMSG_CLOEXEC) };
+        if n >= 0 { break n as usize; }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted { return Err(error); }
+    };
+    let mut fds = Vec::new();
+    // SAFETY: the kernel filled the control buffer it was given.
+    unsafe {
+        let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
+        while !cmsg.is_null() {
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
+                let count = ((*cmsg).cmsg_len as usize - libc::CMSG_LEN(0) as usize) / 4;
+                let data = libc::CMSG_DATA(cmsg).cast::<libc::c_int>();
+                for i in 0..count { fds.push(OwnedFd::from_raw_fd(std::ptr::read_unaligned(data.add(i)))); }
+            }
+            cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
+        }
+    }
+    if n == 0 && fds.is_empty() { return Ok(None); }
+    if msg.msg_flags & libc::MSG_TRUNC != 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "isolate packet larger than its buffer"));
+    }
+    bytes.truncate(n);
+    Ok(Some((bytes, fds)))
+}
+
+/// `PIDFD_SIGNAL_PROCESS_GROUP` (linux/pidfd.h, Linux 6.9): SIGNAL goes to
+/// the process group of the process PIDFD names.
+const PIDFD_SIGNAL_PROCESS_GROUP: libc::c_uint = 1 << 2;
+
+/// SIGNAL through PIDFD, to the process or, with GROUP, to its whole
+/// process group (Linux 6.9 and later; `EINVAL` before). A pidfd names one
+/// process for good, so this never reaches a reused pid: a reaped process
+/// gives `ESRCH`, while its group, still alive without it, is signalled.
+pub fn pidfd_send_signal(pidfd: std::os::fd::BorrowedFd<'_>, signal: i32, group: bool) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    effect(|| format!("pidfd signal {signal}"))?;
+    let flags = if group { PIDFD_SIGNAL_PROCESS_GROUP } else { 0 };
+    status(unsafe { libc::syscall(libc::SYS_pidfd_send_signal, pidfd.as_raw_fd(), signal, std::ptr::null::<libc::siginfo_t>(), flags) } as libc::c_int)
+}
+
+/// prctl(PR_SET_PDEATHSIG): SIGNAL once the thread that made this process
+/// exits. The caller checks `parent_pid` after, for a parent gone before.
+pub fn set_parent_death_signal(signal: i32) -> io::Result<()> {
+    effect(|| "pdeathsig".into())?;
+    status(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) })
+}
+
+pub fn parent_pid() -> i32 {
+    if building() {
+        p_read(Fact::Pid, "ppid".into());
+        return 0;
+    }
+    unsafe { libc::getppid() }
+}
+
+/// The worker's end of an isolate's signals: SIGUSR1 notes an interrupt for
+/// the engine's safepoints, SIGTERM a termination for its loop. Neither
+/// restarts a wait, so a blocked poll returns to look.
+static INTERRUPT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static TERMINATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn note_interrupt(_: libc::c_int) {
+    INTERRUPT.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+extern "C" fn note_terminate(_: libc::c_int) {
+    TERMINATE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn catch_isolate_signals() -> io::Result<()> {
+    for (signal, handler) in [(libc::SIGUSR1, note_interrupt as extern "C" fn(libc::c_int)), (libc::SIGTERM, note_terminate)] {
+        effect(|| format!("handle signal {signal}"))?;
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = handler as *const () as usize;
+        action.sa_flags = 0;
+        unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+    }
+    Ok(())
+}
+
+/// An interrupt or a termination was signalled and not yet taken: two
+/// relaxed loads, for the engine's safepoints.
+#[inline(always)]
+pub fn interrupt_pending() -> bool {
+    INTERRUPT.load(std::sync::atomic::Ordering::Relaxed) || TERMINATE.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// Take the pending interrupt, if any.
+pub fn take_interrupt() -> bool {
+    INTERRUPT.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+pub fn terminate_pending() -> bool {
+    TERMINATE.load(std::sync::atomic::Ordering::SeqCst)
+}
+/// A termination's one `quit`: true the first time after SIGTERM, so the
+/// engine leaves the Lisp it runs once and the worker's loop can end.
+static TERMINATE_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn take_terminate_quit() -> bool {
+    TERMINATE.load(std::sync::atomic::Ordering::SeqCst) && !TERMINATE_QUIT.swap(true, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A worker process: PROGRAM with ARGS after `--isolate 3`, SOCKET as its
+/// descriptor 3, no stdin, this process's stderr. Its pid; the caller reaps.
+pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    let mut command = command(program)?;
+    command.arg("--isolate").arg("3").args(args).stdin(std::process::Stdio::null());
+    let fd = socket.as_raw_fd();
+    // SAFETY: dup2 and fcntl are async-signal-safe.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::dup2(fd, 3) < 0 || libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = command.spawn()?;
+    drop(socket);
+    Ok(child.id() as i32)
+}
+
 /// emacs_pipe: a close-on-exec pipe (read end, write end).
 pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     effect(|| "pipe".into())?;
     let mut fds = [0; 2];
     status(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) })?;
     Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+}
+
+/// The SIGTERM or SIGHUP noted and not yet taken, else 0.
+static TERMINATION: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// The write end of the pipe the handler wakes `catch_termination_signals''s thread with.
+static TERMINATION_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+extern "C" fn note_termination(signal: libc::c_int) {
+    use std::sync::atomic::Ordering;
+    TERMINATION.store(signal, Ordering::SeqCst);
+    let fd = TERMINATION_PIPE.load(Ordering::SeqCst);
+    // Only async-signal-safe calls here: the store and write(2).
+    if fd >= 0 { let _ = unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) }; }
+}
+
+/// sysdep.c init_signals's SIGTERM and SIGHUP, for an embedder that ends
+/// its session as emacs.c terminate_due_to_signal does, with `kill-emacs':
+/// the handler notes the signal and a thread of its own calls WAKE, which
+/// a handler may not. `termination_signal' takes it.
+pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -> io::Result<()> {
+    use std::os::fd::IntoRawFd;
+    let (reader, writer) = pipe()?;
+    TERMINATION_PIPE.store(writer.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
+    std::thread::Builder::new().name("romacs-signals".into()).spawn(move || {
+        let mut byte = 0u8;
+        while unsafe { libc::read(std::os::fd::AsRawFd::as_raw_fd(&reader), (&raw mut byte).cast(), 1) } == 1 {
+            wake();
+        }
+    })?;
+    for signal in [libc::SIGTERM, libc::SIGHUP] {
+        effect(|| format!("handle signal {signal}"))?;
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = note_termination as *const () as usize;
+        action.sa_flags = libc::SA_RESTART;
+        unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+    }
+    Ok(())
+}
+
+/// The termination signal `catch_termination_signals' noted since the
+/// last call, taken; `pending' only looks.
+pub fn termination_signal(pending: bool) -> Option<i32> {
+    use std::sync::atomic::Ordering;
+    let signal = if pending { TERMINATION.load(Ordering::SeqCst) } else { TERMINATION.swap(0, Ordering::SeqCst) };
+    (signal != 0).then_some(signal)
 }
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
@@ -1535,6 +2111,59 @@ pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
     TcpStream::connect(addr)
 }
 
+/// A listening local (Unix domain) stream socket bound to PATH.
+pub fn listen_local(path: &Path) -> io::Result<std::os::unix::net::UnixListener> {
+    effect(|| format!("listen {}", bytes(path)))?;
+    std::os::unix::net::UnixListener::bind(path)
+}
+
+pub fn connect_local(path: &Path) -> io::Result<std::os::unix::net::UnixStream> {
+    effect(|| format!("connect {}", bytes(path)))?;
+    std::os::unix::net::UnixStream::connect(path)
+}
+
+/// connect_network_socket's nonblocking connect to the local socket PATH:
+/// a close-on-exec stream socket, connected or (EINPROGRESS) connecting.
+pub fn connect_local_nonblocking(path: &Path) -> io::Result<OwnedFd> {
+    effect(|| format!("connect {}", bytes(path)))?;
+    let mut sun: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    sun.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    let name = path.as_os_str().as_bytes();
+    if name.len() >= sun.sun_path.len() {
+        return Err(io::Error::from_raw_os_error(libc::ENAMETOOLONG));
+    }
+    for (slot, &byte) in sun.sun_path.iter_mut().zip(name) {
+        *slot = byte as libc::c_char;
+    }
+    let s = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
+    if s < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let socket = unsafe { OwnedFd::from_raw_fd(s) };
+    let len = size_of::<libc::sockaddr_un>() as libc::socklen_t;
+    if unsafe { libc::connect(s, (&sun as *const libc::sockaddr_un).cast(), len) } != 0 {
+        let error = io::Error::last_os_error();
+        if !matches!(error.raw_os_error(), Some(libc::EINPROGRESS | libc::EINTR)) {
+            return Err(error);
+        }
+    }
+    Ok(socket)
+}
+
+/// accept4 on the listening socket LISTENER: the connection, close-on-exec,
+/// and the peer's raw address with its length.
+pub fn accept(listener: RawFd) -> io::Result<(OwnedFd, libc::sockaddr_storage, libc::socklen_t)> {
+    effect(|| format!("accept on {listener}"))?;
+    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut len = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+    let sa = (&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr>();
+    let fd = unsafe { libc::accept4(listener, sa, &mut len, libc::SOCK_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((unsafe { OwnedFd::from_raw_fd(fd) }, storage, len))
+}
+
 /// connect_network_socket's nonblocking connect: a close-on-exec stream
 /// socket to ADDR, connected or (EINPROGRESS) connecting.
 pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
@@ -1575,6 +2204,23 @@ pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
 
 #[cfg(test)]
 mod tests {
+    /// A build's walk of the account database replays as the same walk.
+    #[test]
+    fn account_name_walks_replay() {
+        for (groups, key) in [(false, "users"), (true, "groups")] {
+            enter_build(Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] });
+            begin_recipe();
+            account_names(groups);
+            let trace = leave_build().expect("a build trace");
+            let record = trace["records"].as_array().unwrap().iter()
+                .find(|r| r["kind"] == "user-db" && r["key"] == key).expect("the walk is recorded").clone();
+            let mut answer = replay(&record).expect("the walk replays");
+            let mut recorded = record;
+            recorded.as_object_mut().unwrap().remove("site");
+            answer.as_object_mut().unwrap().remove("site");
+            assert_eq!(answer["result"], recorded["result"], "{key}");
+        }
+    }
     use super::*;
 
     #[test]

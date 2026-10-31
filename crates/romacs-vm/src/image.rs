@@ -414,6 +414,9 @@ impl Vm {
     pub(crate) fn cons_pair(&self, v: Value) -> Result<(Value, Value)> {
         let index = v.index(3)?;
         if index & IMAGE != 0 {
+            if crate::frozen::region_of(index) != 0 {
+                return self.frozen_cons(index);
+            }
             self.image
                 .as_ref()
                 .ok_or("no image attached")?
@@ -427,7 +430,7 @@ impl Vm {
     }
     pub(crate) fn string_value(&self, v: Value) -> Result<&str> {
         let index = v.index(0)?;
-        if index & IMAGE == 0 {
+        if index & IMAGE == 0 || crate::frozen::region_of(index) != 0 {
             return Err("string required".into());
         }
         self.image
@@ -435,13 +438,22 @@ impl Vm {
             .ok_or("no image attached")?
             .string(index & !IMAGE)
     }
+    /// V is not a private heap object: a reference into the executable
+    /// image (region 0) or a frozen region (`frozen.rs`). Such a value is
+    /// never traced, moved or written.
     #[inline(always)]
     pub(super) fn image_value(v: Value) -> bool {
         matches!(v.tag(), 0 | 3) && v.payload() as usize & IMAGE != 0
     }
+    /// V is a string of the executable image, which `string_value` reads;
+    /// frozen strings are objects (`Vm::object`).
+    #[inline(always)]
+    pub(super) fn image_string(v: Value) -> bool {
+        v.tag() == 0 && v.payload() as usize & IMAGE != 0 && crate::frozen::region_of(v.payload() as usize) == 0
+    }
     #[inline(always)]
     pub(super) fn list_limit(&self) -> usize {
-        self.conses.len() + self.image.as_ref().map_or(0, |i| i.len)
+        self.conses.len() + self.image.as_ref().map_or(0, |i| i.len) + self.region_conses()
     }
 }
 

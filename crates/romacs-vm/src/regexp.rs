@@ -25,6 +25,10 @@ pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
             | Primitive::MatchData
             | Primitive::ReSearchForward
             | Primitive::ReSearchBackward
+            | Primitive::PosixLookingAt
+            | Primitive::PosixStringMatch
+            | Primitive::PosixSearchForward
+            | Primitive::PosixSearchBackward
             | Primitive::SearchForward
             | Primitive::SearchBackward
             | Primitive::SyntaxTable
@@ -113,6 +117,8 @@ impl PatternCache {
 struct CachedPattern {
     source: Vec<u8>,
     multibyte: bool,
+    /// Compiled for the longest match (search.c `posix').
+    posix: bool,
     translation: Translation,
     /// The syntax table the compiled fastmap read (GNU `used_syntax').
     syntax: Option<Value>,
@@ -151,7 +157,7 @@ impl Vm {
         for i in 0..matcher.sources.len() {
             if matcher.patterns[i].is_none() {
                 let compiled = self.regexp_input(matcher.sources[i])
-                    .and_then(|source| self.regexp_pattern(&source, matcher.key, matcher.translation.clone(), &matcher.syntax))
+                    .and_then(|source| self.regexp_pattern(&source, false, matcher.key, matcher.translation.clone(), &matcher.syntax))
                     .map_err(|fault| self.regexp_fault(fault))?;
                 matcher.patterns[i] = Some(compiled);
             }
@@ -175,28 +181,29 @@ impl Vm {
         Ok(true)
     }
 
-    /// PATTERN compiled with the TRANSLATION KEY names (built as
-    /// TRANSLATION) for the syntax table SOURCE reads: the cached one, or
-    /// a new one cached in place of the least recently used.
-    fn regexp_pattern(&mut self, pattern: &Input, key: Translation, translation: Option<regex::CaseTranslation>,
+    /// PATTERN compiled, for the longest match when POSIX, with the
+    /// TRANSLATION KEY names (built as TRANSLATION) for the syntax table
+    /// SOURCE reads: the cached one, or a new one cached in place of the
+    /// least recently used.
+    fn regexp_pattern(&mut self, pattern: &Input, posix: bool, key: Translation, translation: Option<regex::CaseTranslation>,
                       source: &syntax::SyntaxSource) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
         let table = source.table();
         let cache = &mut self.regexp_cache.0;
         if let Some(i) = cache.iter().position(|e| e.source == pattern.bytes && e.multibyte == pattern.multibyte
-            && e.translation == key && e.syntax.is_none_or(|t| t == table)) {
+            && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table)) {
             let entry = cache.remove(i);
             let compiled = entry.compiled.clone();
             cache.insert(0, entry);
             return Ok(compiled);
         }
         let mut compiled = regex::regex_compile_lisp_with_translation(
-            &EmacsStr::new(&pattern.bytes, pattern.multibyte), false, translation,
+            &EmacsStr::new(&pattern.bytes, pattern.multibyte), posix, translation,
         ).map_err(|e| Fault::Text("invalid-regexp", e.to_string()))?;
         compiled.rebind_syntax_table(&syntax::VmSyntax::new(self, source.clone()));
         let syntax = compiled.used_syntax().then_some(table);
         let compiled = std::rc::Rc::new(std::cell::RefCell::new(compiled));
         let cache = &mut self.regexp_cache.0;
-        cache.insert(0, CachedPattern { source: pattern.bytes.clone(), multibyte: pattern.multibyte,
+        cache.insert(0, CachedPattern { source: pattern.bytes.clone(), multibyte: pattern.multibyte, posix,
                                         translation: key, syntax, compiled: compiled.clone() });
         cache.truncate(PATTERN_CACHE_SIZE);
         Ok(compiled)
@@ -231,7 +238,7 @@ impl Vm {
             let point = b.point.0.clamp(accessible.start.0, accessible.end.0) - accessible.start.0;
             let patterns = patterns.iter().map(|&p| vm.regexp_input(p)).collect::<SearchResult<Vec<_>>>()?;
             let source = vm.regexp_syntax(None)?;
-            let compiled = patterns.iter().map(|p| vm.regexp_compiled(p, true, false, &source)).collect::<SearchResult<Vec<_>>>()?;
+            let compiled = patterns.iter().map(|p| vm.regexp_compiled(p, true, false, false, &source)).collect::<SearchResult<Vec<_>>>()?;
             let syntax = syntax::VmSyntax::new(vm, source);
             let mut looks = |pattern: usize, at: usize| {
                 let found = regex::re_match(&compiled[pattern].borrow(), &internal, at, internal.len(), &syntax, point);
@@ -256,7 +263,7 @@ impl Vm {
             let pattern = vm.regexp_input(pattern)?;
             let input = vm.regexp_input(string)?;
             let source = vm.regexp_syntax(Some(string))?;
-            let compiled = vm.regexp_pattern(&pattern, key, translation, &source)?;
+            let compiled = vm.regexp_pattern(&pattern, false, key, translation, &source)?;
             let mut compiled = compiled.borrow_mut();
             let syntax = syntax::VmSyntax::new(vm, source);
             compiled.set_target_multibyte(input.multibyte);
@@ -391,12 +398,14 @@ impl Vm {
     fn regexp_case_fold(&mut self) -> SearchResult<bool> {
         Ok(self.variable_value(self.names["case-fold-search"])? != Value::NIL)
     }
-    /// PATTERN for a search of MULTIBYTE text, case-folded with the
-    /// standard table when FOLDED, from the pattern cache.
+    /// PATTERN for a search of MULTIBYTE text, for the longest match when
+    /// POSIX, case-folded with the standard table when FOLDED, from the
+    /// pattern cache.
     fn regexp_compiled(
         &mut self,
         pattern: &Input,
         multibyte: bool,
+        posix: bool,
         folded: bool,
         source: &syntax::SyntaxSource,
     ) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
@@ -405,7 +414,7 @@ impl Vm {
         } else {
             (Translation::None, None)
         };
-        let compiled = self.regexp_pattern(pattern, key, translation, source)?;
+        let compiled = self.regexp_pattern(pattern, posix, key, translation, source)?;
         compiled.borrow_mut().set_target_multibyte(multibyte);
         Ok(compiled)
     }
@@ -617,8 +626,17 @@ impl Vm {
         }
         Ok(reuse)
     }
-    fn regexp_primitive(&mut self, p: Primitive, start: usize, n: usize) -> SearchResult<Value> {
+    fn regexp_primitive(&mut self, primitive: Primitive, start: usize, n: usize) -> SearchResult<Value> {
         use Primitive::*;
+        // search.c: each posix- primitive is its plain search compiled for
+        // the longest match.
+        let (p, posix) = match primitive {
+            PosixLookingAt => (LookingAt, true),
+            PosixStringMatch => (StringMatch, true),
+            PosixSearchForward => (ReSearchForward, true),
+            PosixSearchBackward => (ReSearchBackward, true),
+            p => (p, false),
+        };
         let valid = match p {
             SyntaxTable | StandardSyntaxTable => n == 0,
             CopySyntaxTable => n <= 1,
@@ -632,7 +650,7 @@ impl Vm {
         if !valid {
             return Err(Fault::Signal(
                 "wrong-number-of-arguments",
-                vec![Value::reference(p as usize, 6), Value::integer(n as i64)?],
+                vec![crate::prim::legacy_value(primitive).unwrap_or(Value::NIL), Value::integer(n as i64)?],
             ));
         }
         let arg = |i| {
@@ -683,7 +701,7 @@ impl Vm {
             }
             let folded = self.regexp_case_fold()?;
             let source = self.regexp_syntax(Some(args[1]))?;
-            let compiled = self.regexp_compiled(&pattern, input.multibyte, folded, &source)?;
+            let compiled = self.regexp_compiled(&pattern, input.multibyte, posix, folded, &source)?;
             let compiled = compiled.borrow();
             let syntax = syntax::VmSyntax::new(self, source);
             let byte = input.byte(pos as usize);
@@ -790,7 +808,7 @@ impl Vm {
         }
         let folded = self.regexp_case_fold()?;
         let source = self.regexp_syntax(None)?;
-        let compiled = self.regexp_compiled(&pattern, input.multibyte, folded, &source)?;
+        let compiled = self.regexp_compiled(&pattern, input.multibyte, posix, folded, &source)?;
         let compiled = compiled.borrow();
         let syntax = syntax::VmSyntax::new(self, source);
         // Match data is saved once, from the last success, after the engine.

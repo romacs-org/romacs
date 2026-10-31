@@ -196,10 +196,7 @@ impl Vm {
                 let old = self.annotation_variable("kill-ring");
                 let values = self.list_values(old)?;
                 let ring = if n == 2 && self.stack[start + 1] != Value::NIL && old != Value::NIL {
-                    if Self::image_value(old) {
-                        return Err("cannot mutate immutable image".into());
-                    }
-                    self.conses[old.index(3)?].0 = string;
+                    self.cons_mut(old)?.0 = string;
                     old
                 } else {
                     let max =
@@ -215,10 +212,7 @@ impl Vm {
                         for _ in 1..max {
                             tail = self.cons_pair(tail)?.1;
                         }
-                        if Self::image_value(tail) {
-                            return Err("cannot mutate immutable image".into());
-                        }
-                        self.conses[tail.index(3)?].1 = Value::NIL;
+                        self.cons_mut(tail)?.1 = Value::NIL;
                     }
                     ring
                 };
@@ -853,7 +847,7 @@ impl Vm {
         out
     }
     pub(super) fn annotation_raw(&self, object: Value, at: usize) -> Result<Vec<(String, Value)>> {
-        if Self::image_value(object) {
+        if Self::image_string(object) {
             if at > self.string_value(object)?.chars().count() {
                 return Err("index out of range".into());
             }

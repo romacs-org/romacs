@@ -130,6 +130,9 @@ impl Vm {
                 return Err(self.signal_error("wrong-type-argument", &[listp, fundef], e));
             }
         };
+        if self.loader.recording.is_some() && let Some(name) = self.source_string_if(file).map(str::to_owned) {
+            self.note_init_load(crate::world::layer::Kind::Autoload, name, None, ignore_errors != Value::NIL);
+        }
         // Root FUNDEF for the duration of the load; it is compared afterwards.
         let pending = self.slot(PENDING);
         let mark = self.dynamic.len();

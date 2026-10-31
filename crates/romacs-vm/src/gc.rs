@@ -309,6 +309,10 @@ impl Vm {
     /// traverses, retained objects and compiled code units. Both variables
     /// are read live, so binding them takes effect at once.
     pub(crate) fn collection_due(&self) -> bool {
+        // Frozen region ids are scarce: at 75% in use, collect now.
+        if self.region_collect {
+            return true;
+        }
         // An embedder's floor overrides, as GNU's memory-full state does.
         if let Some(floor) = self.gc_floor {
             return self.heap_objects() >= self.gc_retained.saturating_mul(2).max(floor);
@@ -377,10 +381,12 @@ impl Vm {
     }
 
     /// Whether a Value is retained by the current mark: immediates, symbols,
-    /// primitives and mapped image objects always survive.
-    fn survives(&self, marks: &[Vec<bool>; 4], symbols: &HashSet<usize>, v: Value) -> bool {
+    /// primitives and executable-image objects always survive; a frozen
+    /// value survives iff its region is marked (REGIONS).
+    fn survives(&self, marks: &[Vec<bool>; 4], symbols: &HashSet<usize>, regions: &[bool], v: Value) -> bool {
         if Self::image_value(v) {
-            return true;
+            let id = crate::frozen::region_of(v.payload() as usize);
+            return id == 0 || regions.get(id).copied().unwrap_or(false);
         }
         let i = v.payload() as usize;
         match v.tag() {
@@ -422,6 +428,7 @@ impl Vm {
         marks: &[Vec<bool>; 4],
         weak: &[usize],
         symbols: &HashSet<usize>,
+        regions: &[bool],
         pending: &mut Vec<Value>,
         local_live: &mut HashSet<usize>,
     ) -> bool {
@@ -430,7 +437,7 @@ impl Vm {
                 unreachable!("weak table index");
             };
             for (_, key, value) in table.entries() {
-                let (k, v) = (self.survives(marks, symbols, key), self.survives(marks, symbols, value));
+                let (k, v) = (self.survives(marks, symbols, regions, key), self.survives(marks, symbols, regions, value));
                 // The buffer-keyed ephemeron owns a local value indirectly
                 // through a stable symbol-slot ID. The slot is NOT a global
                 // root: trace its moving Value only once its owner is live.
@@ -572,7 +579,12 @@ impl Vm {
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);
         let before = self.heap_objects();
+        let private_before = self.private_objects();
         self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
+        // Frozen regions reached by marking (`frozen.rs`); region 0 is the
+        // executable image, always live.
+        let mut region_marks = vec![false; self.regions.len()];
+        region_marks[0] = true;
         let mut marks = [
             vec![false; self.conses.len()],
             vec![false; self.closures.len()],
@@ -667,7 +679,7 @@ impl Vm {
         while !pending.is_empty()
             || !code_pending.is_empty()
             || (!std::mem::replace(&mut finalizers_doomed, true) && self.doom_finalizers(&marks, &mut pending))
-            || self.weak_round(&marks, &weak_tables, &obarray_symbols_live, &mut pending, &mut local_live)
+            || self.weak_round(&marks, &weak_tables, &obarray_symbols_live, &region_marks, &mut pending, &mut local_live)
         {
             while let Some(id) = code_pending.pop() {
                 // Some low-level arena tests construct capture-only closures.
@@ -700,7 +712,8 @@ impl Vm {
                     let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
                     match op {
                         Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _) | Op::DeclareSpecial(slot)
-                        | Op::Define(slot, _) | Op::DefineMacro(slot, _) | Op::ResolveHead(_, slot) => pending.extend(symbol(slot)),
+                        | Op::Define(slot, _) | Op::DefineMacro(slot, _) | Op::ResolveHead(_, slot)
+                        | Op::Sealed(_, slot, _, _) => pending.extend(symbol(slot)),
                         Op::Closure(_, child, _) => code_pending.push(child),
                         Op::Direct(_, slot, cache, _, _) | Op::Prepared(_, _, slot, cache, _, _) => {
                             pending.extend(symbol(slot));
@@ -742,6 +755,15 @@ impl Vm {
                             pending.push(Value::reference(target + 1, 7));
                         }
                     }
+                }
+                continue;
+            }
+            // A frozen value marks its region, whose symbols are then roots;
+            // the region's own values are never traced (`frozen.rs`).
+            if Self::image_value(v) {
+                let id = crate::frozen::region_of(v.payload() as usize);
+                if id != 0 && !std::mem::replace(&mut region_marks[id], true) {
+                    pending.extend_from_slice(self.region_symbols(id));
                 }
                 continue;
             }
@@ -814,7 +836,8 @@ impl Vm {
                 data::Object::HashTable(table) => table
                     .entries()
                     .filter(|&(_, key, value)| {
-                        !(self.survives(&marks, &obarray_symbols_live, key) && self.survives(&marks, &obarray_symbols_live, value))
+                        !(self.survives(&marks, &obarray_symbols_live, &region_marks, key)
+                          && self.survives(&marks, &obarray_symbols_live, &region_marks, value))
                     })
                     .map(|(slot, _, _)| slot)
                     .collect(),
@@ -866,9 +889,12 @@ impl Vm {
         if !active {
             self.request_code.since_collection = 0;
         }
+        // Unmarked regions go now: no surviving value names one, and no weak
+        // entry into one is left (swept above), so their ids can be reused.
+        self.sweep_regions(&region_marks);
         // A completely live arena needs no forwarding table or rewrite pass.
-        if pads == 0 && marked == before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
-            self.gc_retained = before;
+        if pads == 0 && marked == private_before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
+            self.gc_retained = self.heap_objects();
             self.gc_stats.collections += 1;
             return;
         }

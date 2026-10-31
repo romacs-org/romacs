@@ -122,7 +122,7 @@ impl Vm {
                     json!({"type":"cons","car":self.typed_depth(a,depth+1)?,"cdr":self.typed_depth(b,depth+1)?}),
                 )
             }
-            0 if Self::image_value(v) => Ok(json!({"type":"string","value":self.string_value(v)?})),
+            0 if Self::image_string(v) => Ok(json!({"type":"string","value":self.string_value(v)?})),
             0 => match self.object(v)? {
                 data::Object::Float(n) => {
                     Ok(json!({"type":"float","value":n,"bits":format!("{:016x}",n.to_bits())}))

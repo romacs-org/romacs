@@ -264,6 +264,25 @@ impl Vm {
         order.push(buffer);
         self.set_buffer_order(&order);
     }
+    /// buffer.c other_buffer_safely, the last defence of Fkill_buffer once
+    /// `replace-buffer-in-windows' and `other-buffer' (the Lisp half,
+    /// rlisp/vm/buffer_lifecycle.el) have had their say: the first buffer in
+    /// ORDER other than BUFFER that is live, not hidden and not the
+    /// minibuffer's, a text buffer when a window will SHOW it, else a new
+    /// *scratch*.
+    fn other_buffer_safely(&mut self, order: &[Value], buffer: Value, show: bool) -> Result<Value> {
+        let found = order.iter().copied().find(|&candidate| {
+            candidate != buffer
+                && (!show || matches!(self.object_if(candidate), Some(Object::Buffer(_))))
+                && self.buffer_state(candidate).is_ok_and(|state| {
+                    state.live && state.name.as_deref().is_some_and(|n| !n.starts_with(' '))
+                })
+                && !self.objects.iter().any(|object| {
+                    matches!(object, Object::Window(w) if w.mini && w.buffer == candidate)
+                })
+        });
+        found.map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))
+    }
     pub(crate) fn kill_buffer_model(&mut self, value: Value) -> Result<()> {
         if !self.buffer_state(value)?.live || self.objects.iter().any(|object| {
             matches!(object, Object::Window(w) if w.mini && w.buffer == value)
@@ -284,17 +303,7 @@ impl Vm {
             }
         }).collect();
         if self.slots[self.buffer_slot].value == value || !windows.is_empty() {
-            // The first other live buffer in the buffer list, as other-buffer.
-            let replacement = order.iter().copied().find(|&candidate| {
-                candidate != value
-                    && (windows.is_empty() || matches!(self.object_if(candidate), Some(Object::Buffer(_))))
-                    && self.buffer_state(candidate).is_ok_and(|state| {
-                        state.live && state.name.as_deref().is_some_and(|n| !n.starts_with(' '))
-                    })
-                    && !self.objects.iter().any(|object| {
-                        matches!(object, Object::Window(w) if w.mini && w.buffer == candidate)
-                    })
-            }).map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))?;
+            let replacement = self.other_buffer_safely(&order, value, !windows.is_empty())?;
             let point = match self.object(replacement)? {
                 Object::Buffer(b) => b.char_of_byte(b.point)?.0,
                 Object::ByteBuffer(b) => b.point.0,
@@ -332,7 +341,7 @@ impl Vm {
         }
         // GNU kill-buffer resets ordinary locals but retains the visited filename.
         // Reuse the native per-buffer storage without retaining other Lisp locals.
-        let fields = match &self.objects[value.index(0)? - 1] {
+        let fields = match self.object(value)? {
             Object::Buffer(b) => &b.per_buffer,
             Object::ByteBuffer(b) => &b.per_buffer,
             _ => unreachable!(),
@@ -388,14 +397,14 @@ impl Vm {
             .clone();
         let at =
             usize::try_from(self.stack[start].as_integer()?).map_err(|_| "index out of range")?;
-        if Self::image_value(object) {
+        if Self::image_string(object) {
             let text = self.string_value(object)?;
             if at <= text.chars().count() {
                 return Ok(Value::NIL);
             }
             return Err("immutable image string or index out of range".into());
         }
-        let (Object::String(s) | Object::RawString(s)) = &self.objects[object.index(0)? - 1] else {
+        let (Object::String(s) | Object::RawString(s)) = self.object(object)? else {
             return Err("string required".into());
         };
         let b = s.byte_offset(CharOffset(at)).ok_or("index out of range")?;
@@ -407,7 +416,7 @@ impl Vm {
             .unwrap_or(Value::NIL))
     }
     pub(super) fn string_bytes(&self, v: Value) -> Result<Vec<u8>> {
-        if Self::image_value(v) {
+        if Self::image_string(v) {
             return Ok(self.string_value(v)?.as_bytes().to_vec());
         }
         match self.object(v)? {
@@ -472,13 +481,22 @@ impl Vm {
         if (p as usize) >= SetMultibyte as usize {
             return self.edge_primitive(p, start, n);
         }
+        // editfns.c Fbuffer_size: a given BUFFER's whole text.
+        if p == BufferSize && n == 1 && self.stack[start] != Value::NIL {
+            return match self.object_if(self.stack[start]) {
+                Some(Object::Buffer(t)) => Value::integer(t.len_chars() as i64),
+                Some(Object::ByteBuffer(b)) => Value::integer(b.bytes.len() as i64),
+                _ => Err("buffer required".into()),
+            };
+        }
         let args = self.buffer_primitive_args(p, start, n)?;
         let valid = match p {
             Remainder | DeleteRegion | Substring | Narrow => n == 2,
             SetBuffer | GotoChar | CharToByte | ByteToChar => n == 1,
-            CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen => {
+            CurrentBuffer | Point | PointMin | PointMax | Widen => {
                 n == 0
             }
+            BufferSize => n <= 1,
             CharAfter => n <= 1,
             Insert => true,
             GetProperty => (2..=3).contains(&n),
@@ -511,7 +529,7 @@ impl Vm {
             Value::NIL
         };
         if object != Value::NIL
-            && (Self::image_value(object) || matches!(self.object(object), Ok(Object::String(_) | Object::RawString(_))))
+            && (Self::image_string(object) || matches!(self.object(object), Ok(Object::String(_) | Object::RawString(_))))
         {
             return self.string_property_primitive(start, object);
         }
@@ -828,6 +846,7 @@ impl Vm {
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
+                a.local_keymap = b.local_keymap;
                 Some(Object::Buffer(Box::new(a)))
             }
             _ => None,
@@ -851,6 +870,7 @@ impl Vm {
         b.state = t.state.clone();
         b.per_buffer = t.per_buffer.clone();
         b.case_tables = t.case_tables;
+        b.local_keymap = t.local_keymap;
         b.anchors = (*t.anchors).clone();
         // Each raw-byte character shrinks to its byte: the markers move
         // as for the deletion of its second byte.
@@ -1134,6 +1154,7 @@ mod tests {
             syntax_table: Value::NIL,
             category_table: Value::NIL,
             case_tables: [Value::NIL; 4],
+            local_keymap: Value::NIL,
             bytes: vec![0xce, 0xbb],
             point: ByteOffset(1),
             restriction: ByteOffset(0)..ByteOffset(2),
@@ -1658,7 +1679,8 @@ impl Vm {
     pub(crate) fn property_install(&mut self, plan: PropertyPlan) -> std::result::Result<(), crate::prim::Fault> {
         use crate::prim::Fault;
         if Self::image_value(plan.object) {
-            return Err(Fault::Error("immutable image string".into()));
+            let (condition, data) = self.read_only_signal(plan.object);
+            return Err(Fault::Signal(condition, data));
         }
         let index = plan.object.index(0).map_err(Fault::Error)? - 1;
         if buffer_object(self, plan.object) && !plan.undo.is_empty() {

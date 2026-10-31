@@ -79,30 +79,39 @@ impl Leaf<'_> {
         if self.is_category_table(table) { Ok(table) } else { Err(Fault::Wrong("category-table-p", table)) }
     }
 
-    pub(crate) fn category_table(&mut self, table: Value) -> &mut crate::char_table::CharTable {
-        match self.vm.objects.get_mut(table.index(0).expect("checked table") - 1) {
-            Some(data::Object::CharTable(t)) => t,
+    /// TABLE, checked, for reading: private or frozen.
+    pub(crate) fn category_table_ref(&self, table: Value) -> std::result::Result<&crate::char_table::CharTable, Fault> {
+        match self.vm.object(table).map_err(Fault::Error)? {
+            data::Object::CharTable(t) => Ok(t),
+            _ => unreachable!("checked category table"),
+        }
+    }
+
+    /// TABLE, checked, for writing; a frozen table refuses (`frozen.rs`).
+    pub(crate) fn category_table(&mut self, table: Value) -> std::result::Result<&mut crate::char_table::CharTable, Fault> {
+        match self.object_mut(table)? {
+            data::Object::CharTable(t) => Ok(t),
             _ => unreachable!("checked category table"),
         }
     }
 
     pub(crate) fn category_docstring(&mut self, table: Value, category: usize) -> super::super::Out {
-        let docs = self.category_table(table).extras[0];
+        let docs = self.category_table_ref(table)?.extras[0];
         self.vector_get(docs, Value::integer(category as i64 - 32).unwrap())
     }
 
     pub(crate) fn set_category_docstring(&mut self, table: Value, category: usize, doc: Value) -> std::result::Result<(), Fault> {
-        let docs = self.category_table(table).extras[0];
+        let docs = self.category_table_ref(table)?.extras[0];
         self.vector_set(docs, Value::integer(category as i64 - 32).unwrap(), doc).map(|_| ())
     }
 
     /// hash_get_category_set: one shared set per distinct contents.
     fn intern_category_set(&mut self, table: Value, set: Value) -> super::super::Out {
-        let mut hash = self.category_table(table).extras[1];
+        let mut hash = self.category_table(table)?.extras[1];
         if hash == Value::NIL {
             hash = self.vm.allocate_object(data::Object::HashTable(Box::new(
                 crate::hash::HashTable::new(crate::hash::Test::Equal, crate::hash::Weakness::None, 65))));
-            self.category_table(table).extras[1] = hash;
+            self.category_table(table)?.extras[1] = hash;
         }
         if let Some((key, _)) = self.vm.completion_hash_find(hash, set)? { return Ok(key); }
         self.vm.declaration_hash_put(hash, set, Value::NIL).map_err(Fault::Error)?;
@@ -113,14 +122,14 @@ impl Leaf<'_> {
     pub(crate) fn modify_category_entry(&mut self, table: Value, start: usize, end: usize, category: usize, add: bool) -> std::result::Result<(), Fault> {
         let mut start = start;
         while start <= end {
-            let (set, _, to) = self.category_table(table).span(start).map_err(Fault::Error)?;
+            let (set, _, to) = self.category_table(table)?.span(start).map_err(Fault::Error)?;
             let to = to.min(end);
             let mut bits = self.bool_vector(set)?;
             if bits.get(category) != Some(add) {
                 bits.set(category, add);
                 let copy = self.bool_vector_from(bits);
                 let set = self.intern_category_set(table, copy)?;
-                self.category_table(table).set_range(start, to, set).map_err(Fault::Error)?;
+                self.category_table(table)?.set_range(start, to, set).map_err(Fault::Error)?;
             }
             start = to + 1;
         }
@@ -129,7 +138,7 @@ impl Leaf<'_> {
 
     /// copy_category_table: fresh sets everywhere, a fresh docstring vector.
     pub(crate) fn copy_category_table(&mut self, table: Value) -> super::super::Out {
-        let mut copy = self.category_table(table).clone();
+        let mut copy = self.category_table_ref(table)?.clone();
         let mut entries = Vec::new();
         copy.map_entries(&mut |value| entries.push(*value));
         let mut copies = Vec::with_capacity(entries.len());

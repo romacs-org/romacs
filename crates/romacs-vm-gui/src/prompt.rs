@@ -27,8 +27,8 @@ pub struct Shared {
     /// The outer loop's in-flight presentation; the prompt settles it before
     /// it submits its own (the renderer retains only the latest sample).
     pub in_flight: Option<u64>,
-    /// Set when the prompt settled `in_flight`.
-    pub settled: Option<u64>,
+    /// Set when the prompt settled `in_flight`: it and when it rendered.
+    pub settled: Option<(u64, std::time::Instant)>,
     /// Latest frame geometry seen by the prompt.
     pub size: Option<(u32, u32)>,
     pub closed: bool,
@@ -88,10 +88,21 @@ fn next_event(shared: &std::cell::RefCell<Shared>, input: &crossbeam_channel::Re
         let event = match queued {
             Next::Closed => return Ok(HostEvent::Closed),
             Next::Event(event) => event,
+            // A termination signal whose wake other work took still ends the prompt.
+            Next::Wait if romacs_vm::host::termination_signal(true).is_some() => {
+                shared.borrow_mut().closed = true;
+                return Ok(HostEvent::Closed);
+            }
             Next::Wait => {
                 let left = deadline.map(|end| end.saturating_duration_since(std::time::Instant::now()));
                 match crate::terminal_wait::wait(input, terminal, left, processes) {
                     crate::terminal_wait::Wake::Input(event) => event,
+                    // A termination signal ends the prompt as a closed frame
+                    // does; the loop then runs `kill-emacs' (main.rs terminate).
+                    crate::terminal_wait::Wake::Terminal if romacs_vm::host::termination_signal(true).is_some() => {
+                        shared.borrow_mut().closed = true;
+                        return Ok(HostEvent::Closed);
+                    }
                     crate::terminal_wait::Wake::Terminal => return Ok(HostEvent::Background),
                     crate::terminal_wait::Wake::Process => return Ok(HostEvent::Process),
                     crate::terminal_wait::Wake::Closed => return Err("input closed while reading".into()),
@@ -173,7 +184,7 @@ impl HostInput for GuiHost {
             let mut shared = self.shared.borrow_mut();
             if let Some(in_flight) = shared.in_flight.take() {
                 self.sender.wait_for_render(in_flight, wait)?;
-                shared.settled = Some(in_flight);
+                shared.settled = Some((in_flight, std::time::Instant::now()));
             }
             shared.presentation = shared.presentation.checked_add(1).ok_or("presentation exhausted")?;
             shared.presentation

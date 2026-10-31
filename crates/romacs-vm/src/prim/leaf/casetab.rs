@@ -218,7 +218,7 @@ impl Leaf<'_> {
         to: usize,
         value: Value,
     ) -> std::result::Result<(), Fault> {
-        let Object::CharTable(t) = &mut self.vm.objects[table.index(0).map_err(Fault::Error)? - 1]
+        let Object::CharTable(t) = self.object_mut(table)?
         else {
             unreachable!()
         };

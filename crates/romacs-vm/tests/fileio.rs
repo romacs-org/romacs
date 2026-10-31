@@ -451,9 +451,11 @@ fn unsupported_reads_refuse_and_leave_the_buffer_alone() {
         let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e {form} (error e)) (buffer-string) (point) last-coding-system-used))");
         assert_eq!(eval(&mut vm, &source), "((coding-system-error raw-text) \"keep\" 3 nil)", "{form}");
     }
+    // An expansion handler that returns no name is invalid (pinned GNU),
+    // before the buffer or the file is touched.
+    let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e (let ((file-name-handler-alist '((\"/crlf\\\\'\" . list)))) (insert-file-contents {crlf})) (error e)) (buffer-string) (point) last-coding-system-used))");
+    assert_eq!(eval(&mut vm, &source), "((error \"Invalid handler in ‘file-name-handler-alist’\") \"keep\" 3 nil)");
     for (form, message) in [
-        // The matching control must still refuse before touching the buffer or file.
-        (format!("(let ((file-name-handler-alist '((\"/crlf\\\\'\" . ignore)))) (insert-file-contents {crlf}))"), "expand-file-name matching file name handler"),
         (format!("(let ((selective-display t)) (write-region nil nil {crlf}))"), "write-region with selective-display t"),
         (format!("(let ((write-region-annotate-functions '(ignore))) (write-region \"x\" nil {crlf}))"), "write-region annotations"),
         (format!("(write-region \"x\" nil {crlf} nil nil nil t)"), "write-region MUSTBENEW confirmation"),
@@ -652,4 +654,36 @@ fn visited_modtime_flags_and_timestamp_forms() {
     assert_eq!(eval(&mut vm, "(condition-case e (set-visited-file-modtime 1) (error (car e)))"), "args-out-of-range", "MTIME_FLAG_RANGE");
     let d = dir("mtime-missing"); let path = d.join("absent");
     assert_eq!(eval(&mut vm, &format!("(with-temp-buffer (condition-case nil (insert-file-contents {} t) (file-missing nil)) (list (visited-file-modtime) (verify-visited-file-modtime)))", lisp(&path))), "(-1 t)", "MTIME_MISSING_VISIT");
+}
+
+/// fileio.c:5859: an interactive write names what it wrote in the echo
+/// area and *Messages*: "Wrote" (a VISIT string's file), "Added to" for
+/// an append, "Updated" at an offset, nothing for a quiet VISIT. Pinned
+/// GNU under `emacs -nw -Q' answered these; in batch it says nothing.
+#[test]
+fn write_region_reports_the_file_it_wrote_as_gnu_does() {
+    let d = dir("wrote");
+    let (a, b) = (lisp(&d.join("a.txt")), lisp(&d.join("b.txt")));
+    let mut vm = Vm::new();
+    let report = eval(&mut vm, &format!("(progn (setq noninteractive nil)
+        (let (out)
+          (with-temp-buffer
+            (insert \"x\")
+            (write-region nil nil {a} nil t) (push (current-message) out) (message nil)
+            (write-region nil nil {a} t) (push (current-message) out) (message nil)
+            (write-region nil nil {a} 0) (push (current-message) out) (message nil)
+            (write-region \"y\" nil {a} nil 'quiet) (push (current-message) out) (message nil)
+            (write-region \"y\" nil {a} nil {b}) (push (current-message) out) (message nil)
+            (write-region \"y\" nil {a}) (push (current-message) out))
+          (push (with-current-buffer \"*Messages*\" (buffer-string)) out)
+          (equal (nreverse out)
+                 (list (concat \"Wrote \" {a}) (concat \"Added to \" {a}) (concat \"Updated \" {a}) nil
+                       (concat \"Wrote \" {b}) (concat \"Wrote \" {a})
+                       (concat \"Wrote \" {a} \"\\nAdded to \" {a} \"\\nUpdated \" {a} \"\\nWrote \" {b} \"\\nWrote \" {a} \"\\n\")))))"));
+    assert_eq!(report, "t");
+    let mut batch = Vm::new();
+    let quiet = eval(&mut batch, &format!("(progn (setq noninteractive t)
+        (with-temp-buffer (insert \"x\") (write-region nil nil {a} nil t))
+        (list (current-message) (get-buffer \"*Messages*\")))"));
+    assert_eq!(quiet, "(nil nil)");
 }

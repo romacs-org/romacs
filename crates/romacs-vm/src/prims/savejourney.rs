@@ -51,11 +51,38 @@ fn file_mode_string(mode: u32) -> Vec<u8> {
 
 defsubr! { name = "file-attributes", gnu = "dired.c:953", effect = Global,
 fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
-    // GNU catches all expansion conditions and returns nil.
-    let (path, expanded) = match super::fileio::expanded_path(cx, filename) {
-        Ok(path) => path,
-        Err(_) => return Ok(Step::Done(Value::NIL)),
-    };
+    // dired.c:974: internal_condition_case_2 (Fexpand_file_name, FILENAME,
+    // Qnil, Qt, Fidentity): any condition, a handler's among them, is the
+    // value, and a value that is not a string answers nil.
+    match super::expand_file_name::expand(cx, filename, Value::NIL) {
+        Ok(Some(expanded)) => attributes_expanded(cx, expanded, &[id_format]),
+        Ok(None) => {
+            let form = catching_expansion(cx, filename);
+            Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: attributes_expanded, saved: vec![id_format] })
+        }
+        Err(_) => Ok(Step::Done(Value::NIL)),
+    }
+}}
+
+/// (condition-case err (expand-file-name 'NAME nil) (t err))
+fn catching_expansion(cx: &mut Leaf<'_>, name: Value) -> Value {
+    let list = |cx: &mut Leaf<'_>, items: &[Value]| items.iter().rev().fold(Value::NIL, |tail, &head| cx.cons(head, tail));
+    let quote = cx.intern("quote");
+    let quoted = list(cx, &[quote, name]);
+    let expand = cx.intern("expand-file-name");
+    let call = list(cx, &[expand, quoted, Value::NIL]);
+    let err = cx.intern("err");
+    let catch_all = list(cx, &[Value::TRUE, err]);
+    let condition_case = cx.intern("condition-case");
+    list(cx, &[condition_case, err, call, catch_all])
+}
+
+fn attributes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    if !matches!(cx.kind(expanded), crate::prim::leaf::Kind::String | crate::prim::leaf::Kind::Bytes) {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let id_format = saved[0];
+    let path = super::fileio::file_name_path(cx, expanded)?;
     let operation = cx.intern("file-attributes");
     let handler = super::fileio::find_file_name_handler(cx, expanded, operation)?;
     if handler != Value::NIL {
@@ -63,12 +90,12 @@ fn file_attributes(cx, filename: Value; optional id_format: Value) -> Step {
         if id_format != Value::NIL { args.push(id_format); }
         return Ok(Step::Call { f: handler, args, then: returned, saved: vec![] });
     }
-    Ok(Step::Done(local_file_attributes(cx, &path, id_format)?))
-}}
+    Ok(Step::Done(native_attributes(cx, &path, id_format)?))
+}
 
-/// dired.c file_attributes of the local file PATH, already expanded: nil
-/// when it cannot be read.
-pub(super) fn local_file_attributes(cx: &mut Leaf<'_>, path: &std::path::Path, id_format: Value) -> std::result::Result<Value, Fault> {
+/// The attributes of the file PATH names, not following a symlink, in
+/// ID-FORMAT; nil when it cannot be examined.
+pub(super) fn native_attributes(cx: &mut Leaf<'_>, path: &std::path::Path, id_format: Value) -> Out {
     use std::os::unix::fs::MetadataExt;
     let integer = cx.intern("integer");
     let named = id_format != Value::NIL && id_format != integer;
@@ -118,8 +145,7 @@ fn file_symlink_p(cx, filename: Value) -> Step {
     if cx.string_bytes(filename)?.contains(&0) {
         return Err(Fault::Wrong("filenamep", filename));
     }
-    let (_, expanded) = super::fileio::expanded_path(cx, filename)?;
-    symlink_expanded(cx, expanded, &[])
+    super::fileio::expanding(cx, filename, symlink_expanded, vec![])
 }}
 
 defsubr! { name = "file-name-nondirectory", gnu = "fileio.c:534", effect = Global,
@@ -231,13 +257,14 @@ fn returned(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
 }
 
 /// A unibyte non-ASCII NAME is an encoded file name (ENCODE_FILE's output,
-/// which `set-auto-coding-function' receives): DECODE_FILE under the UTF-8
-/// file-name coding, bytes that are not UTF-8 as raw-byte characters.
+/// which `set-auto-coding-function' receives). VM2 file names are UTF-8, so
+/// its bytes name the same file as the multibyte string they spell.
 fn decoded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fault> {
     let view = cx.string_view(name)?;
     if view.is_multibyte() || view.bytes().is_ascii() { return Ok(name); }
     let bytes = view.bytes().to_vec();
     super::filename::utf8_file_names(cx, "file-name-case-insensitive-p")?;
+    // DECODE_FILE: bytes that are not UTF-8 are raw-byte characters.
     Ok(super::fileio::file_name_value(cx, &bytes))
 }
 
@@ -245,162 +272,108 @@ defsubr! { name = "file-name-case-insensitive-p", gnu = "fileio.c:2688", effect 
 fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
     cx.string_bytes(filename)?;
     let filename = decoded_name(cx, filename)?;
-    let expansion = cx.intern("expand-file-name");
-    if super::fileio::find_file_name_handler(cx, filename, expansion)? != Value::NIL {
-        return Err(Fault::Error("VM2 file-name-case-insensitive-p expand-file-name handler is unsupported".into()));
-    }
-    let (path, expanded) = super::fileio::expanded_path(cx, filename)?;
+    super::fileio::expanding(cx, filename, case_expanded, vec![])
+}}
+
+fn case_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Next {
     let operation = cx.intern("file-name-case-insensitive-p");
     let handler = super::fileio::find_file_name_handler(cx, expanded, operation)?;
     if handler != Value::NIL {
         return Ok(Step::Call { f: handler, args: vec![operation, expanded], then: returned, saved: vec![] });
     }
-    let insensitive = crate::host::case_insensitive(&path, filesystem_case_insensitive)
-        .map_err(|reason| Fault::Error(format!("VM2 filesystem case sensitivity unknown: {reason}")))?;
-    Ok(Step::Done(if insensitive { Value::TRUE } else { Value::NIL }))
-}}
+    let path = super::fileio::file_name_path(cx, expanded)?;
+    Ok(Step::Done(if folds_case(&path) { Value::TRUE } else { Value::NIL }))
+}
 
-// Deliberately differs from pinned GNU's Linux constant: observe existing
-// directory entries only. Never create a probe or infer from the OS name.
-// Like GNU, a directory that cannot tell defers to its ancestors.
-#[cfg(unix)]
-pub(crate) fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    let mut directory = path;
+// Deliberately differs from pinned GNU, whose GNU/Linux answer is nil by
+// platform assumption (fileio.c `file_name_case_insensitive_err'): the
+// filesystem is measured, by its type and its directory's casefold flag. No
+// directory is listed, so its size cannot matter, and every failure answers
+// GNU's nil.
+#[cfg(target_os = "linux")]
+fn folds_case(path: &std::path::Path) -> bool {
+    let Some(directory) = containing_directory(path) else { return false };
+    classify_case(crate::host::filesystem_type(&directory), || crate::host::directory_flags(&directory))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn folds_case(_: &std::path::Path) -> bool {
+    cfg!(windows)
+}
+
+/// PATH when it is a directory, else the directory its name is in: the
+/// nearest that exists, as GNU's walk up the tree finds on trouble.
+#[cfg(target_os = "linux")]
+fn containing_directory(mut path: &std::path::Path) -> Option<std::path::PathBuf> {
     loop {
-        match crate::host::metadata(directory) {
-            Ok(m) if m.file_type().is_dir() => break,
-            Ok(m) if m.file_type().is_file() => {
-                directory = directory.parent().ok_or("no containing directory")?;
-                break;
-            }
-            Ok(_) => return Err("unsupported file class"),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                directory = directory.parent().ok_or("no existing ancestor")?;
-            }
-            Err(_) => return Err("cannot stat path"),
-        }
-    }
-    // fileio.c Ffile_name_case_insensitive_p: a directory that cannot say
-    // defers to its parent; the answer is still the nearest measurement.
-    loop {
-        match stable_case_witness(directory) {
-            Err(NO_WITNESS) => directory = directory.parent().ok_or(NO_WITNESS)?,
-            result => return result,
+        match crate::host::entry_type(path) {
+            Ok(t) if std::fs::FileType::is_dir(&t) => return Some(path.to_owned()),
+            Ok(_) => return path.parent().map(std::path::Path::to_owned),
+            Err(_) => path = path.parent()?,
         }
     }
 }
 
-const NO_WITNESS: &str = "no unambiguous ASCII case witness";
-const ENTRY_CHANGED: &str = "entry changed during probe";
-const DIRECTORY_CHANGED: &str = "directory changed during probe";
+// Filesystem magic numbers (statfs(2); linux/magic.h, else the driver).
+const MSDOS_SUPER_MAGIC: u32 = 0x4d44; // vfat and msdos
+const EXFAT_SUPER_MAGIC: u32 = 0x2011_bab0;
+const NTFS_SB_MAGIC: u32 = 0x5346_544e; // fs/ntfs, case-insensitive unless case_sensitive=yes
+const HFS_SUPER_MAGIC: u32 = 0x4244;
+const HFSPLUS_SUPER_MAGIC: u32 = 0x482b;
+const EXT4_SUPER_MAGIC: u32 = 0xef53; // ext2, ext3 and ext4
+const F2FS_SUPER_MAGIC: u32 = 0xf2f5_2010;
+const TMPFS_MAGIC: u32 = 0x0102_1994; // casefold since Linux 6.13
+/// linux/fs.h: "case-insensitive name lookup" on this directory.
+const FS_CASEFOLD_FL: u32 = 0x4000_0000;
 
-/// `case_witness', observed again (at most 8 times) while DIRECTORY or the
-/// witnessing entry changes under the probe: visits and saves ask about
-/// directories other processes write to, and only a stable observation
-/// answers.
-#[cfg(unix)]
-fn stable_case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    let mut observation = case_witness(directory);
-    for _ in 1..8 {
-        if !matches!(observation, Err(ENTRY_CHANGED | DIRECTORY_CHANGED)) { break; }
-        observation = case_witness(directory);
+/// Whether a filesystem of type FS_TYPE folds case: by its type, or, where
+/// folding is a per-directory attribute, by the directory's FLAGS, asked
+/// only there. Any error answers nil, as GNU does when it cannot tell.
+fn classify_case(fs_type: std::io::Result<u32>, flags: impl FnOnce() -> std::io::Result<u32>) -> bool {
+    match fs_type {
+        Ok(MSDOS_SUPER_MAGIC | EXFAT_SUPER_MAGIC | NTFS_SB_MAGIC | HFS_SUPER_MAGIC | HFSPLUS_SUPER_MAGIC) => true,
+        Ok(EXT4_SUPER_MAGIC | F2FS_SUPER_MAGIC | TMPFS_MAGIC) => flags().is_ok_and(|f| f & FS_CASEFOLD_FL != 0),
+        _ => false,
     }
-    observation
-}
-
-/// Classify DIRECTORY's filesystem from one of its own entries.
-#[cfg(unix)]
-fn case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    use std::os::unix::fs::MetadataExt;
-    let identity = |m: &std::fs::Metadata| (m.dev(), m.ino());
-    let directory_before = crate::host::metadata(directory).map_err(|_| "cannot stat directory")?;
-    let entries = crate::host::read_dir(directory).map_err(|_| "cannot read directory")?;
-    let mut names = std::collections::HashSet::new();
-    for entry in entries {
-        if names.len() >= 4096 {
-            return Err("directory exceeds read-only probe bound");
-        }
-        names.insert(
-            entry
-                .map_err(|_| "cannot read directory entry")?
-                .file_name(),
-        );
-    }
-    for name in &names {
-        let original = directory.join(name);
-        let before =
-            crate::host::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
-        // Special files and symlinks are not reliable filesystem witnesses.
-        if !(before.file_type().is_file() || before.file_type().is_dir()) {
-            continue;
-        }
-        for (index, byte) in name.as_bytes().iter().enumerate() {
-            if !byte.is_ascii_alphabetic() {
-                continue;
-            }
-            let mut bytes = name.as_bytes().to_vec();
-            bytes[index] ^= 0x20;
-            let alternate = std::ffi::OsString::from_vec(bytes);
-            let observed = match crate::host::symlink_metadata(directory.join(&alternate)) {
-                Ok(m) => Some(identity(&m)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(_) => return Err("cannot stat alternate spelling"),
-            };
-            let Some(result) =
-                classify_case_observation(identity(&before), observed, names.contains(&alternate))
-            else {
-                continue;
-            };
-            let after =
-                crate::host::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
-            let directory_after =
-                crate::host::metadata(directory).map_err(|_| DIRECTORY_CHANGED)?;
-            if identity(&before) != identity(&after)
-                || identity(&directory_before) != identity(&directory_after)
-                || directory_before.mtime() != directory_after.mtime()
-                || directory_before.mtime_nsec() != directory_after.mtime_nsec()
-                || directory_before.ctime() != directory_after.ctime()
-                || directory_before.ctime_nsec() != directory_after.ctime_nsec()
-            {
-                return Err(DIRECTORY_CHANGED);
-            }
-            return Ok(result);
-        }
-    }
-    Err(NO_WITNESS)
-}
-
-// An explicitly listed alternate spelling with the same inode is a hardlink,
-// not evidence of case folding. A distinct inode establishes sensitivity.
-fn classify_case_observation(
-    original: (u64, u64),
-    alternate: Option<(u64, u64)>,
-    listed: bool,
-) -> Option<bool> {
-    match alternate {
-        None if !listed => Some(false),
-        Some(other) if other != original => Some(false),
-        Some(_) if !listed => Some(true),
-        _ => None,
-    }
-}
-
-#[cfg(not(unix))]
-fn filesystem_case_insensitive(_: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    Err("native file identity is unsupported on this platform")
 }
 
 #[cfg(test)]
 mod case_tests {
-    use super::classify_case_observation as classify;
+    use super::*;
+    fn error(errno: i32) -> std::io::Result<u32> { Err(std::io::Error::from_raw_os_error(errno)) }
+    fn unasked() -> std::io::Result<u32> { panic!("flags asked of a filesystem without casefold") }
+
     #[test]
-    fn case_identity_requires_an_unlisted_alias() {
-        assert_eq!(classify((1, 2), Some((1, 2)), false), Some(true));
-        assert_eq!(classify((1, 2), Some((1, 2)), true), None);
-        assert_eq!(classify((1, 2), Some((1, 3)), true), Some(false));
-        assert_eq!(classify((1, 2), Some((2, 2)), false), Some(false));
-        assert_eq!(classify((1, 2), None, false), Some(false));
-        assert_eq!(classify((1, 2), None, true), None);
+    fn a_folding_filesystem_type_answers_t_without_flags() {
+        for magic in [MSDOS_SUPER_MAGIC, EXFAT_SUPER_MAGIC, NTFS_SB_MAGIC, HFS_SUPER_MAGIC, HFSPLUS_SUPER_MAGIC] {
+            assert!(classify_case(Ok(magic), unasked), "{magic:#x}");
+        }
+    }
+
+    #[test]
+    fn other_filesystem_types_answer_nil_without_flags() {
+        // btrfs, xfs, ntfs3 (case-sensitive unless mounted nocase), CIFS,
+        // SMB2 (the server and mount options decide), FUSE.
+        for magic in [0x9123_683e, 0x5846_5342, 0x7366_746e, 0xff53_4d42, 0xfe53_4d42, 0x6573_5546] {
+            assert!(!classify_case(Ok(magic), unasked), "{magic:#x}");
+        }
+    }
+
+    #[test]
+    fn a_casefold_capable_filesystem_answers_from_the_directory_flag() {
+        for magic in [EXT4_SUPER_MAGIC, F2FS_SUPER_MAGIC, TMPFS_MAGIC] {
+            assert!(classify_case(Ok(magic), || Ok(FS_CASEFOLD_FL | 0x80000)), "{magic:#x}");
+            assert!(!classify_case(Ok(magic), || Ok(0x80000)), "{magic:#x}");
+            for errno in [libc::ENOTTY, libc::EPERM, libc::EACCES, libc::ELOOP] {
+                assert!(!classify_case(Ok(magic), || error(errno)), "{magic:#x} {errno}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_statfs_error_answers_nil() {
+        for errno in [libc::EACCES, libc::ENOENT, libc::ENOSYS] {
+            assert!(!classify_case(error(errno), unasked), "{errno}");
+        }
     }
 }

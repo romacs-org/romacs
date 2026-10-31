@@ -15,6 +15,27 @@ const INT_MAX: i64 = i32::MAX as i64;
 
 fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixel-size {what} is unsupported")) }
 
+/// How a window labels its lines (maybe_produce_line_number): numbers of
+/// at least WIDTH digits, relative to POINT_LINE (an index) or absolute,
+/// point's absolute when CURRENT_ABSOLUTE, each glyph X wide.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LineLabels { pub width: i64, pub x: i64, pub relative: bool, pub current_absolute: bool, pub point_line: i64 }
+
+impl LineLabels {
+    /// The label of the line at index LINE: its number padded to WIDTH
+    /// plus a blank either side, longer when the number is.
+    pub(crate) fn label(&self, line: i64) -> String {
+        let mut shown = if self.relative { (line - self.point_line).abs() } else { line + 1 };
+        if self.relative && shown == 0 && self.current_absolute { shown = self.point_line + 1; }
+        format!("{shown:>width$} ", width = self.width as usize + 1)
+    }
+    /// The glyphs and the x the label of line LINE takes.
+    pub(crate) fn prefix(&self, line: i64) -> (i64, i64) {
+        let glyphs = self.label(line).len() as i64;
+        (glyphs, glyphs * self.x)
+    }
+}
+
 /// The arguments window_text_pixel_size takes after WINDOW.
 pub(crate) struct TextSizeArgs { pub from: Value, pub to: Value, pub x_limit: Value, pub y_limit: Value, pub mode_lines: Value, pub ignore_line_at_end: Value }
 
@@ -73,8 +94,8 @@ impl Leaf<'_> {
             else if args.x_limit != Value::NIL { Some(INT_MAX) } else { None };
         let max_y = if args.y_limit == Value::NIL { INT_MAX }
             else { args.y_limit.integer_value().filter(|n| (0..=INT_MAX).contains(n)).unwrap_or(0) };
-        let cx = self.iterator_context(area, zv)?;
-        let view = Self::view(area, buffer, begv, zv);
+        let cx = self.iterator_context(area, zv, start)?;
+        let view = Self::view(area, buffer, begv, zv, cx.lnum);
         let (column, line) = if area.hosted { (1, 1) } else { (area.column, area.line) };
         let mut source = Source::new(self, view, begv)?;
         let measure = |start, start_on_newline| Measure { start, end, begv, start_on_newline, x_limit: max_x.map(|x| x / column),
@@ -109,9 +130,33 @@ impl Leaf<'_> {
         Ok(self.cons(x, tail))
     }
 
-    fn view(area: &TextArea, buffer: Value, begv: i64, zv: i64) -> View {
-        View { window: area.window, buffer, begv, zv, column: area.column,
-            box_width: area.columns - area.left_margin - area.right_margin, left_margin: area.left_margin, right_margin: area.right_margin }
+    /// What AREA's window shows of BUFFER: in columns on the terminal
+    /// frame, in the host's pixels once it lays the window out.
+    fn view(area: &TextArea, buffer: Value, begv: i64, zv: i64, lnum: Option<LineLabels>) -> View {
+        let column = area.column;
+        // A display specification counts the label of the estimated width.
+        let lnum = lnum.map_or(0, |l| (l.width + 2) * l.x);
+        if area.hosted {
+            return View { window: area.window, buffer, begv, zv, column, box_width: area.body_width,
+                left_margin: area.left_margin * column, right_margin: area.right_margin * column, pixels: true, lnum };
+        }
+        View { window: area.window, buffer, begv, zv, column,
+            box_width: area.columns - area.left_margin - area.right_margin, left_margin: area.left_margin, right_margin: area.right_margin, pixels: false, lnum }
+    }
+
+    /// The elements WINDOW shows of its buffer from FROM, a line start,
+    /// through TO, in the pixels of a window-system frame (VM2-WTPS1).
+    pub(crate) fn window_shown_elements(&mut self, window: Value, from: i64, to: i64) -> std::result::Result<Vec<super::display_hosted::Shown>, Fault> {
+        let mut area = self.windows().text_area(window, "redisplay")?;
+        area.hosted = true;
+        let buffer = area.buffer;
+        self.with_buffer(buffer, |leaf| {
+            let (begv, zv) = leaf.accessible_positions(buffer)?;
+            let top = leaf.windows().window_end(window)?.2;
+            let point = leaf.vm.window_point_value(window).map_err(Fault::Error)?.as_integer().map_err(Fault::Error)?;
+            let lnum = leaf.line_numbers(&area, top, point)?;
+            leaf.shown_elements(Self::view(&area, buffer, begv, zv, lnum), from, to)
+        })
     }
 
     /// Fvertical_motion (indent.c:2207): move point LINES screen lines (or,
@@ -160,8 +205,8 @@ impl Leaf<'_> {
             }
             None => None,
         };
-        let cx = self.iterator_context(&area, zv)?;
-        let view = Self::view(&area, buffer, begv, zv);
+        let cx = self.iterator_context(&area, zv, pt)?;
+        let view = Self::view(&area, buffer, begv, zv, cx.lnum);
         let source = Source::new(self, view, begv)?;
         let (at, vpos) = if area.hosted {
             let mut hosted = Hosted::new(source);
@@ -191,8 +236,8 @@ impl Leaf<'_> {
                 }
                 _ => return Err(unsupported("in a unibyte buffer")),
             };
-            let cx = leaf.iterator_context(&area, zv)?;
-            let view = Self::view(&area, buffer, begv, zv);
+            let cx = leaf.iterator_context(&area, zv, pt)?;
+            let view = Self::view(&area, buffer, begv, zv, cx.lnum);
             let source = Source::new(leaf, view, begv)?;
             if area.hosted {
                 let mut hosted = Hosted::new(source);
@@ -250,12 +295,16 @@ impl Leaf<'_> {
         // posn-at-x-y's Y counts from the window's top, above its header line.
         let p = self.with_buffer(buffer, |leaf| leaf.hosted_posn(&area, top, v.x, v.y - area.header_line))?;
         let int = |n: i64| Value::integer(n).map_err(Fault::Error);
-        let (x, y, zero, pos) = (int(v.x)?, int(v.y)?, int(0)?, int(p.pos)?);
+        // The position's (X . Y) counts from the text area's top, below
+        // the header line (make_lispy_position).
+        let (x, y, zero, pos) = (int(v.x)?, int(v.y - area.header_line)?, int(0)?, int(p.pos)?);
         let xy = self.cons(x, y);
         let col_row = { let (c, r) = (int(p.col)?, int(p.row)?); self.cons(c, r) };
         let offset = { let (dx, dy) = (int(p.dx)?, int(p.dy)?); self.cons(dx, dy) };
         let size = { let (wd, ht) = (int(p.width)?, int(p.height)?); self.cons(wd, ht) };
-        Ok(self.vm.list_value(&[w, pos, xy, zero, Value::NIL, pos, col_row, Value::NIL, offset, size]))
+        // A string's glyph names the string and its position there.
+        let object = match p.string { Some((string, at)) => { let at = int(at as i64)?; self.cons(string, at) } None => Value::NIL };
+        Ok(self.vm.list_value(&[w, pos, xy, zero, object, pos, col_row, Value::NIL, offset, size]))
     }
 
     /// pos_visible_p (xdisp.c:1693) for CHARPOS in window W from its start
@@ -270,6 +319,7 @@ impl Leaf<'_> {
         self.with_buffer(buffer, |leaf| {
             let (mut hosted, cx, mut it) = leaf.hosted_from(&area, top)?;
             let src = &mut hosted;
+            let top_it = it;
             let last_y = area.body_height;
             motion::move_to(src, &cx, &mut it, charpos, -1, last_y - 1, -1, Op { pos: true, y: true, ..Op::default() })?;
             if motion::charpos(src, &it)? < charpos {
@@ -284,9 +334,33 @@ impl Leaf<'_> {
             motion::move_in_line(src, &cx, &mut rest, -1, -1, Op::default())?;
             let height = if rest.max_h > 0 { rest.max_h } else { src.default_height };
             let bottom = it.current_y + height;
+            let (mut x, mut y) = (it.current_x, it.current_y);
+            // Stopped at CHARPOS before its row produced its line number.
+            // pos_visible_p: the last width produced, else the first row's.
+            if let Some(lnum) = cx.lnum && it.lnum_x == 0 && motion::charpos(src, &it)? == charpos {
+                x += if it.lnum_last > 0 { it.lnum_last } else { lnum.prefix(src.line_at(top_it.index)?).1 };
+            }
+            if motion::loaded(src, &it)?.is_some_and(|e| matches!(e.method, motion::Method::Vector { .. })) {
+                // Stopped on a display vector's last glyph (an ellipsis):
+                // where the character before CHARPOS ends, past any vector
+                // showing it.
+                (x, y) = (0, it.current_y);
+                if charpos >= 2 && top < charpos {
+                    let mut before = top_it;
+                    motion::move_to(src, &cx, &mut before, charpos - 1, -1, -1, -1, Op { pos: true, ..Op::default() })?;
+                    let (end, eol) = if motion::charpos(src, &before)? != charpos - 1 { (before, false) }
+                        else { motion::past_vector(src, &cx, &mut before, charpos)? };
+                    if !eol && end.current_x <= cx.last_visible_x { (x, y) = (end.current_x, end.current_y); }
+                }
+            } else if motion::charpos(src, &it)? != charpos {
+                // Past CHARPOS: it is hidden, or a display replaces it.
+                if let Some((start, string)) = src.source().replacing_display(charpos)? {
+                    (x, y) = display_start(src, &cx, top_it, top, charpos, start, string, it.lnum_x)?;
+                }
+            }
             // Y counts from the window's top: the text starts below the
             // header line (window_top_y).
-            Ok(Some(Visible { x: it.current_x, y: area.header_line + it.current_y, rtop: 0, rbot: (bottom - last_y).max(0),
+            Ok(Some(Visible { x, y: area.header_line + y, rtop: 0, rbot: (bottom - last_y).max(0),
                 rowh: bottom.min(last_y) - it.current_y, vpos: it.vpos }))
         })
     }
@@ -345,12 +419,17 @@ impl Leaf<'_> {
         // The glyph under X, else the space glyph GNU appends after a
         // line's end and at ZV, in the default face.
         let glyph = if it.loaded { hosted.slot(it.index)?.elem } else { None };
-        let (width, height) = match glyph.map(|e| e.shape) {
-            Some(motion::Shape::Pixel { c, .. }) if c != 0x0a => hosted.glyph(pos)?,
-            Some(motion::Shape::PixelTab { space, .. }) => (motion::pixel_tab(&cx, &it, space), hosted.glyph(pos)?.1),
+        let (width, height) = match glyph.map(|e| (e, e.shape)) {
+            Some((_, motion::Shape::Pixel { c, .. })) if c != 0x0a => hosted.glyph(it.index)?,
+            Some((_, motion::Shape::PixelTab { space, .. })) => (motion::pixel_tab(&cx, &it, space), hosted.glyph(it.index)?.1),
+            Some((e, motion::Shape::PixelStretch { width, unnumbered, .. })) => {
+                let width = if it.lnum_x > 0 { width } else { unnumbered.unwrap_or(width) };
+                (motion::pixel_stretch(&cx, &it, &e, width), hosted.glyph(it.index)?.1)
+            }
             _ => hosted.default_advance(' ')?,
         };
-        Ok(Posn { pos, col: it.hpos, row: it.vpos, dx: x - it.current_x, dy: y - it.current_y, width, height })
+        let string = glyph.filter(|e| e.object != Value::NIL).and_then(|e| Some((e.object, e.strpos?)));
+        Ok(Posn { pos, col: it.hpos, row: it.vpos, dx: x - it.current_x, dy: y - it.current_y, width, height, string })
     }
 
     /// FROM: nil, t (the first non-blank line), a position, or
@@ -406,26 +485,167 @@ impl Leaf<'_> {
         Ok(b.char_of_byte(crate::coordinates::ByteOffset(r.start.0 + at)).map_err(Fault::Error)?.0 as i64 + 1)
     }
 
-    /// init_iterator's line wrap and last visible x on a terminal frame.
-    fn iterator_context(&mut self, area: &TextArea, zv: i64) -> std::result::Result<Ctx, Fault> {
+    /// The line numbers `display-line-numbers' shows in AREA's window, its
+    /// buffer current, for an iterator whose first row shows FIRST
+    /// (maybe_produce_line_number): the label's digits, the glyphs a row's
+    /// number takes and their x, in pixels once a host lays the window out
+    /// (the `line-number' face's), else columns.
+    pub(crate) fn line_numbers(&mut self, area: &TextArea, first: i64, point: i64) -> std::result::Result<Option<LineLabels>, Fault> {
+        let var = |leaf: &mut Self, name: &str| -> std::result::Result<Value, Fault> {
+            let symbol = leaf.intern(name);
+            Ok(leaf.variable_value(symbol)?.unwrap_or(Value::NIL))
+        };
+        let mode = var(self, "display-line-numbers")?;
+        if mode == Value::NIL || self.vm.window(area.window).map_err(Fault::Error)?.mini { return Ok(None); }
+        let (relative, visual) = (self.intern("relative"), self.intern("visual"));
+        if mode == visual { return Err(unsupported("with visual line numbers")); }
+        if var(self, "display-line-numbers-offset")?.integer_value().is_some_and(|n| n != 0)
+            || var(self, "display-line-numbers-widen")? != Value::NIL {
+            return Err(unsupported("with widened or offset line numbers"));
+        }
+        // The first row's line, past text its start hides (handle_stop).
+        let this_line = self.shown_line(area, first)?;
+        // The desired matrix's rows (required_matrix_height): the text
+        // area's lines, from the frame's line height where GNU takes its
+        // smallest font's, a partial one at either edge, and three bands.
+        let line = i64::from(self.vm.window_state.line.max(1));
+        let nrows = (area.body_height + area.vscroll + line - 1) / line + 2 + 3;
+        let current_absolute = var(self, "display-line-numbers-current-absolute")? != Value::NIL;
+        let max_lnum = if mode == relative && !current_absolute { nrows - 2 } else { this_line + nrows - 1 }.max(1);
+        let mut width = max_lnum.ilog10() as i64 + 1;
+        if let Some(least) = var(self, "display-line-numbers-width")?.integer_value().filter(|&n| n >= 0) {
+            let limit = area.columns - area.left_margin - area.right_margin - 5 - 2;
+            width = width.max(least.clamp(1, limit.max(1)));
+        }
+        let glyphs = width + 2;
+        let labels = |x| LineLabels { width, x, relative: mode == relative, current_absolute, point_line: 0 };
+        let point_line = self.line_index(point)?;
+        // The text area less the truncation or continuation glyph and
+        // three columns more must hold the number, else there is none.
+        let room = |x: i64, column: i64, special: i64| x < area.body_width.min(area.columns * column) - special - 3 * column;
+        if !area.hosted { return Ok(room(glyphs, 1, 1).then_some(LineLabels { point_line, ..labels(1) })); }
+        if !self.vm.has_layout_host() {
+            return Ok(room(glyphs * area.column, area.column, area.column).then_some(LineLabels { point_line, ..labels(area.column) }));
+        }
+        // Both faces' digits and spaces advance alike, in rows no taller
+        // than the default's; an undefined face merges to the default.
+        let (special, line_height) = self.vm.host_default_advance('\\').map_err(Fault::Error)?;
+        let mut digit = None;
+        for (face, c) in [("line-number", '0'), ("line-number", ' '), ("line-number-current-line", '0'), ("line-number-current-line", ' ')] {
+            let (advance, height) = self.vm.host_face_advance(face, c).or_else(|_| self.vm.host_default_advance(c)).map_err(Fault::Error)?;
+            if *digit.get_or_insert(advance) != advance || height > line_height {
+                return Err(unsupported("with a line-number face of its own widths or height"));
+            }
+        }
+        let digit = i64::from(digit.unwrap_or(0));
+        Ok(room(glyphs * digit, area.column, i64::from(special)).then_some(LineLabels { point_line, ..labels(digit) }))
+    }
+    /// The line of the first element AREA's window shows of the current
+    /// buffer from POS: past text there it hides or replaces with nothing.
+    /// Where the iterator refuses what it finds first (composed text), the
+    /// row starts at POS.
+    fn shown_line(&mut self, area: &TextArea, pos: i64) -> std::result::Result<i64, Fault> {
+        let buffer = self.vm.slots[self.vm.buffer_slot].value;
+        let (begv, zv) = self.accessible_positions(buffer)?;
+        let pos = pos.clamp(begv, zv);
+        match Source::new(self, Self::view(area, buffer, begv, zv, None), pos).and_then(|mut source| source.line_at(0)) {
+            Err(Fault::Error(_)) => self.line_index(pos),
+            line => line,
+        }
+    }
+    /// BUFFER's accessible text's first and last positions.
+    fn accessible_positions(&self, buffer: Value) -> std::result::Result<(i64, i64), Fault> {
+        let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { return Err(unsupported("in a unibyte buffer")) };
+        let r = b.accessible();
+        let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
+        Ok((pos(r.start)?, pos(r.end)?))
+    }
+    /// The current buffer's point.
+    fn point_position(&mut self) -> std::result::Result<i64, Fault> {
+        match self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) {
+            Some(Object::Buffer(b)) => Ok(b.char_of_byte(b.point).map_err(Fault::Error)?.0 as i64 + 1),
+            _ => Err(unsupported("in a unibyte buffer")),
+        }
+    }
+    /// The number of lines before POS's in the accessible text.
+    pub(super) fn line_index(&mut self, pos: i64) -> std::result::Result<i64, Fault> {
+        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else {
+            return Err(unsupported("in a unibyte buffer"));
+        };
+        let r = b.accessible();
+        let at = b.byte_of_char(crate::coordinates::CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.0.clamp(r.start.0, r.end.0);
+        Ok(b.as_str().as_bytes()[r.start.0..at].iter().filter(|&&c| c == b'\n').count() as i64)
+    }
+
+    /// How WINDOW labels its lines from its start, its buffer current.
+    pub(crate) fn window_line_numbers(&mut self, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
+        // Most windows show none: say so before measuring the window.
+        let buffer = self.vm.window(window).map_err(Fault::Error)?.buffer;
+        let mode = self.intern("display-line-numbers");
+        if self.with_buffer(buffer, |leaf| leaf.variable_value(mode))?.is_none_or(|v| v == Value::NIL) { return Ok(None); }
+        let area = self.windows().text_area(window, "redisplay")?;
+        let top = self.windows().window_end(window)?.2;
+        self.with_buffer(area.buffer, |leaf| {
+            // Redisplay makes the window's point the buffer's.
+            let point = leaf.vm.window_point_value(window).map_err(Fault::Error)?.as_integer().map_err(Fault::Error)?;
+            leaf.line_numbers(&area, top, point)
+        })
+    }
+
+    /// line-number-display-width (indent.c:2150) for the selected window:
+    /// the label's digits, or with PIXELWISE `columns' the row prefix in
+    /// frame columns, else in pixels.
+    pub(crate) fn line_number_display_width(&mut self, pixelwise: Value) -> super::super::Out {
+        let window = self.vm.selected_window_value().map_err(Fault::Error)?;
+        let area = self.windows().text_area(window, "line-number-display-width")?;
+        let buffer = area.buffer;
+        let top = self.windows().window_end(window)?.2;
+        let numbers = self.with_buffer(buffer, |leaf| {
+            let point = leaf.point_position()?;
+            leaf.line_numbers(&area, top, point)
+        })?;
+        // The window start's line's, as move_it_by_lines produces it.
+        let (width, pixels) = match numbers {
+            Some(labels) => (labels.width, labels.prefix(self.with_buffer(buffer, |leaf| leaf.line_index(top))?).1),
+            None => (0, 0),
+        };
+        // A terminal's column is a pixel.
+        let column = if area.hosted { area.column.max(1) } else { 1 };
+        let columns = self.intern("columns");
+        if pixelwise == columns { return Ok(self.float(pixels as f64 / column as f64)); }
+        Value::integer(if pixelwise != Value::NIL { pixels } else { width }).map_err(Fault::Error)
+    }
+
+    /// init_iterator's line wrap and last visible x on a terminal frame,
+    /// with line numbers for an iterator whose first row shows FIRST.
+    fn iterator_context(&mut self, area: &TextArea, zv: i64, first: i64) -> std::result::Result<Ctx, Fault> {
         let var = |leaf: &mut Self, name: &str| -> std::result::Result<Value, Fault> {
             let symbol = leaf.intern(name);
             Ok(leaf.variable_value(symbol)?.unwrap_or(Value::NIL))
         };
         if var(self, "selective-display")? != Value::NIL { return Err(unsupported("with `selective-display'")); }
-        if var(self, "display-line-numbers")? != Value::NIL { return Err(unsupported("with line numbers")); }
+        let point = self.point_position()?;
+        let lnum = self.line_numbers(area, first, point)?;
+        // GNU's initial terminal frame counts line numbers in their width
+        // but not in the iterator's x (no glyph row to copy them from).
+        if lnum.is_some() && !area.hosted { return Err(unsupported("with line numbers")); }
         if area.hscroll != 0 { return Err(unsupported("in a horizontally scrolled window")); }
         let wrap = self.vm.line_wrap(area.full_width, area.columns).map_err(Fault::Error)?;
         if wrap == Wrap::Word && var(self, "word-wrap-by-category")? != Value::NIL {
             return Err(unsupported("with `word-wrap-by-category'"));
         }
-        let glyph = self.special_glyph_width(if wrap == Wrap::Truncate { 0 } else { 1 })?;
+        let slot = if wrap == Wrap::Truncate { 0 } else { 1 };
+        let glyph = self.special_glyph_width(slot)?;
         let border = i64::from(!area.rightmost);
         let zv_after_newline = match self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) {
             Some(Object::Buffer(b)) => b.as_str()[..b.accessible().end.0].ends_with('\n'),
             _ => false,
         };
-        if area.hosted && self.display_table()?.is_some() { return Err(unsupported("with a display table in a displayed window")); }
+        // The host draws an ellipsis from a display table, not its glyphs
+        // for characters or its truncation, continuation or escape glyphs.
+        if area.hosted && let Some(table) = self.display_table()? && !self.only_ellipsis(table) {
+            return Err(unsupported("with a display table in a displayed window"));
+        }
         Ok(Ctx {
             last_visible_x: area.columns - area.left_margin - area.right_margin - glyph - border,
             wrap,
@@ -433,19 +653,22 @@ impl Leaf<'_> {
             zv,
             zv_after_newline,
             breaks: !area.hosted,
+            lnum,
         })
+    }
+
+    /// Whether the display table TABLE sets nothing but its ellipsis and
+    /// window border: no character's glyphs, nor truncation, continuation,
+    /// escape or control glyphs.
+    fn only_ellipsis(&self, table: Value) -> bool {
+        let Some(Object::CharTable(t)) = self.vm.object_if(table) else { return false };
+        t.parent == Value::NIL && t.extras.iter().take(4).all(|&v| v == Value::NIL) && t.all_nil()
     }
 
     /// The truncation (SLOT 0) or continuation (SLOT 1) glyph's columns:
     /// the display table's glyph, else `$' or `\'.
     fn special_glyph_width(&mut self, slot: usize) -> std::result::Result<i64, Fault> {
-        let glyph = match self.display_table()? {
-            Some(table) => match self.vm.object_if(table) {
-                Some(Object::CharTable(t)) => t.extras.get(slot).copied().unwrap_or(Value::NIL),
-                _ => Value::NIL,
-            },
-            None => Value::NIL,
-        };
+        let glyph = self.special_glyph(slot)?;
         let c = match self.pair(glyph) {
             Some((c, _)) => c.integer_value(),
             None => glyph.integer_value().filter(|&g| g >= 0).map(|g| g & 0x3fffff),
@@ -455,6 +678,17 @@ impl Leaf<'_> {
             Some(c) => self.character_width(c as u32),
             None => Ok(1),
         }
+    }
+
+    /// The display table's glyph in SLOT, nil without one.
+    fn special_glyph(&mut self, slot: usize) -> std::result::Result<Value, Fault> {
+        Ok(match self.display_table()? {
+            Some(table) => match self.vm.object_if(table) {
+                Some(Object::CharTable(t)) => t.extras.get(slot).copied().unwrap_or(Value::NIL),
+                _ => Value::NIL,
+            },
+            None => Value::NIL,
+        })
     }
 
     /// The tab, header and mode lines MODE-LINES asks for. VM2 draws no
@@ -481,8 +715,8 @@ impl<'a> Leaf<'a> {
             }
             _ => return Err(unsupported("in a unibyte buffer")),
         };
-        let cx = self.iterator_context(area, zv)?;
-        let view = Self::view(area, buffer, begv, zv);
+        let cx = self.iterator_context(area, zv, top)?;
+        let view = Self::view(area, buffer, begv, zv, cx.lnum);
         let mut hosted = Hosted::new(Source::new(self, view, begv)?);
         let cx = hosted_context(&mut hosted, cx, area)?;
         let mut it = It::default();
@@ -507,7 +741,7 @@ impl<'a> Leaf<'a> {
 struct Visible { x: i64, y: i64, rtop: i64, rbot: i64, rowh: i64, vpos: i64 }
 
 /// buffer_posn_from_coords's answer.
-struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height: i64 }
+struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height: i64, string: Option<(Value, usize)> }
 
 /// init_iterator's last visible x on a window-system frame without
 /// fringes, in the host's pixels: the text area less the truncation or
@@ -518,6 +752,33 @@ fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> 
     cx.last_visible_x = area.body_width - advance;
     cx.breaks = cx.wrap != Wrap::Word;
     Ok(cx)
+}
+
+/// pos_visible_p's place for CHARPOS, which a display replacing the text
+/// from START covers, STRING (or nil) showing there, from the window
+/// start TOP at TOP_IT: as the cursor shows there, on the display line
+/// where the display begins, at the first element at or after CHARPOS;
+/// ROW_LNUM the line number CHARPOS's row produced.
+#[allow(clippy::too_many_arguments)]
+fn display_start(src: &mut Hosted<'_, '_>, cx: &Ctx, top_it: It, top: i64, charpos: i64, start: i64, string: Value, row_lnum: i64) -> std::result::Result<(i64, i64), Fault> {
+    let mut it = top_it;
+    if start > top { motion::move_to(src, cx, &mut it, start - 1, -1, -1, -1, Op { pos: true, ..Op::default() })?; }
+    let (buffer, at) = motion::position(src, &it)?;
+    let newline = buffer && (motion::loaded(src, &it)?.is_some_and(|e| matches!(e.shape, motion::Shape::Pixel { c: 10, .. }))
+        || src.source().char_after(at)? == Some(0x0a));
+    let next_line = newline || {
+        let to_x = it.current_x + it.pixel_width;
+        motion::move_in_line(src, cx, &mut it, -1, to_x, Op { x: true, ..Op::default() })? == motion::Move::LineContinued
+    };
+    if next_line { let vpos = it.vpos + 1; motion::move_to(src, cx, &mut it, -1, -1, -1, vpos, Op { vpos: true, ..Op::default() })?; }
+    let top_y = it.current_y;
+    let mut it = top_it;
+    motion::move_to(src, cx, &mut it, -1, 0, top_y, -1, Op { x: true, y: true, ..Op::default() })?;
+    let (mut x, stopped_in_string, mut before) = motion::x_at_or_after(src, cx, &mut it, charpos, string)?;
+    // The walk produced no line number: add the row's own, as produced.
+    if cx.lnum.is_some() && it.lnum_x == 0 { (x, before) = (x + row_lnum, before + row_lnum); }
+    let newline_in_string = src.source().leaf().vm.str_view(string).is_some_and(|v| v.bytes().contains(&b'\n'));
+    Ok((if newline_in_string && stopped_in_string { before } else { x }, top_y))
 }
 
 /// line_bottom_y from the start of the screen line showing POS: its

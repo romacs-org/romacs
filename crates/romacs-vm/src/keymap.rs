@@ -87,6 +87,14 @@ impl Vm {
             other => other.map(Ok),
         }
     }
+    /// The local keymap of the buffer at INDEX, text or unibyte.
+    pub(crate) fn local_keymap(&mut self, index: usize) -> &mut Value {
+        match &mut self.objects[index] {
+            Object::Buffer(buffer) => &mut buffer.local_keymap,
+            Object::ByteBuffer(buffer) => &mut buffer.local_keymap,
+            _ => unreachable!("buffer_index names a buffer"),
+        }
+    }
     pub(super) fn resolve_keymap(&self, mut value: Value) -> Option<Value> {
         for _ in 0..=self.slots.len() {
             if let Ok((head, _)) = self.cons_pair(value) {
@@ -269,7 +277,7 @@ impl Vm {
     }
     fn set_keymap_table_range(&mut self, table: Value, from: usize, to: usize, value: Value) -> Result<()> {
         let slot = self.literal_table_slot(value);
-        let Object::CharTable(table) = &mut self.objects[table.index(0)? - 1] else { unreachable!() };
+        let Object::CharTable(table) = self.object_mut(table)? else { unreachable!() };
         table.set_range_slot(from, to, slot)
     }
     fn key_event_modifier(name: &str) -> Option<i64> {
@@ -312,17 +320,9 @@ impl Vm {
         // Only abbreviated keyboard modifiers (not `control-`, etc.) are
         // prefixes; solitary list modifiers accept both spellings.
         let name = self.key_event_name(event).ok_or("symbol event required")?.to_owned();
-        let mut base = name.as_str();
-        let mut modifiers = 0;
-        while let Some((prefix, rest)) = base.split_once('-') {
-            if !matches!(prefix, "A" | "C" | "H" | "M" | "S" | "s" | "up" | "down" | "drag" | "double" | "triple") {
-                break;
-            }
-            modifiers |= Self::key_event_modifier(prefix).unwrap();
-            base = rest;
-        }
-        if base == name { return Ok(event); }
-        Ok(self.modified_key_event_symbol(base, modifiers))
+        let (modifiers, base) = parse_event_modifiers(name.as_bytes());
+        if base == 0 { return Ok(event); }
+        Ok(self.modified_key_event_symbol(&name[base..], modifiers))
     }
     fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
         // GNU keyboard.c:7832-7888: collect modifier bits before converting
@@ -541,8 +541,7 @@ impl Vm {
             UseLocalMap => {
                 if args[0] != Value::NIL && self.resolve_keymap(args[0]).is_none() { return Err("keymap required".into()); }
                 let index = self.buffer_index()?;
-                let Object::Buffer(buffer) = &mut self.objects[index] else { return Err("Unicode buffer required".into()); };
-                buffer.local_keymap = args[0];
+                *self.local_keymap(index) = args[0];
                 Ok(Value::NIL)
             }
             KeyBinding => {
@@ -550,8 +549,7 @@ impl Vm {
                 if n > 3 && args[3] != Value::NIL { return Err("key-binding POSITION not supported".into()); }
                 let events = self.key_events(args[0])?;
                 let index = self.buffer_index()?;
-                let Object::Buffer(buffer) = &self.objects[index] else { return Err("Unicode buffer required".into()); };
-                let local = buffer.local_keymap;
+                let local = *self.local_keymap(index);
                 let defaults = n > 1 && args[1] != Value::NIL;
                 if local != Value::NIL {
                     let binding = self.lookup_keymap_key(local, &events, defaults)?;
@@ -564,4 +562,27 @@ impl Vm {
             _ => unreachable!(),
         }
     }
+}
+
+/// keyboard.c parse_modifiers_uncached: the modifier bits NAME's prefixes
+/// spell (each an abbreviation followed by `-'), with `click' for a bare
+/// mouse button or wheel event, and the byte NAME's base starts at.
+pub(crate) fn parse_event_modifiers(name: &[u8]) -> (i64, usize) {
+    const PREFIXES: [&str; 11] = ["A", "C", "H", "M", "S", "s", "drag", "down", "double", "triple", "up"];
+    let bit = |prefix| Vm::key_event_modifier(prefix).expect("a modifier prefix");
+    let (mut modifiers, mut i) = (0, 0);
+    while i + 1 < name.len() {
+        let Some(prefix) = PREFIXES.iter().find(|p| name[i..].starts_with(p.as_bytes()) && name.get(i + p.len()) == Some(&b'-'))
+        else { break };
+        modifiers |= bit(prefix);
+        i += prefix.len() + 1;
+    }
+    let base = &name[i..];
+    let clicks = bit("double") | bit("triple");
+    if modifiers & (clicks | bit("down") | bit("drag")) == 0
+        && base.len() == 7 && base.starts_with(b"mouse-") && base[6].is_ascii_digit()
+        || modifiers & clicks == 0 && base.len() > 6 && base.starts_with(b"wheel-") {
+        modifiers |= bit("click");
+    }
+    (modifiers, i)
 }

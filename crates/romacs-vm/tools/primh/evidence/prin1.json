@@ -1,7 +1,7 @@
 {
  "protocol": "primh-v1",
  "primitive": "prin1",
- "spec_sha256": "20d89d36b6d030df951bc8f39a96bf8f317579aa42e726d3d12dd724420d2e70",
+ "spec_sha256": "d16836132eccc5034d8f7518b16b93dd8b0222851332d03f698809186613d48d",
  "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
  "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
  "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
@@ -996,14 +996,9 @@
   "prin1/0037": "SIGNAL-VS-VALUE",
   "prin1/0113": "VALUE",
   "prin1/0114": "SIGNAL-VS-VALUE",
-  "prin1/0136": "SIGNAL-VS-VALUE",
-  "prin1/0137": "SIGNAL-VS-VALUE",
+  "prin1/0136": "VALUE",
   "prin1/0149": "SIGNAL-VS-VALUE",
   "prin1/0153": "SIGNAL-VS-VALUE",
-  "prin1/0154": "SIGNAL-VS-VALUE",
-  "prin1/0156": "SIGNAL-VS-VALUE",
-  "prin1/0157": "DATA",
-  "prin1/0158": "DATA",
-  "prin1/0159": "CONDITION"
+  "prin1/0156": "SIGNAL-VS-VALUE"
  }
 }

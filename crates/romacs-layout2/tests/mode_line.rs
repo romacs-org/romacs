@@ -23,7 +23,7 @@ fn scene() -> WindowSnapshot {
             }],
         }),
         mode_line_face: FaceHandle(1), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false,
+        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None,
         faces: vec![
             Face {
                 foreground: [255; 3],

@@ -76,7 +76,7 @@ fn world_reset_refuses_a_directory_romacs_did_not_mark() {
 fn help_names_the_world_options() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui")).arg("--help").output().unwrap();
     let text = String::from_utf8(output.stdout).unwrap();
-    for option in ["--world-store", "--world-reset", "--world-reset=all", "ROMACS_WORLD=off"] {
+    for option in ["--world-store", "--world-build", "--world-reset", "--world-reset=all", "ROMACS_WORLD=off"] {
         assert!(text.contains(option), "{option} in {text}");
     }
 }

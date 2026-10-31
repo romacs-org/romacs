@@ -95,17 +95,17 @@ fn user_real_login_name(cx) {
     Ok(cx.variable_value(symbol)?.unwrap_or(Value::NIL))
 }}
 
-defsubr! { name = "group-gid", gnu = "editfns.c:1046", effect = Reads,
-fn group_gid(cx) { Ok(cx.bigint(user_db::effective_gid().into())) }}
-
-defsubr! { name = "group-real-gid", gnu = "editfns.c:1056", effect = Reads,
-fn group_real_gid(cx) { Ok(cx.bigint(user_db::real_gid().into())) }}
-
 defsubr! { name = "user-uid", gnu = "editfns.c:1159", effect = Reads,
 fn user_uid(cx) { Ok(cx.bigint(user_db::effective_uid().into())) }}
 
 defsubr! { name = "user-real-uid", gnu = "editfns.c:1167", effect = Reads,
 fn user_real_uid(cx) { Ok(cx.bigint(user_db::real_uid().into())) }}
+
+defsubr! { name = "group-gid", gnu = "editfns.c:1193", effect = Reads,
+fn group_gid(cx) { Ok(cx.bigint(user_db::effective_gid().into())) }}
+
+defsubr! { name = "group-real-gid", gnu = "editfns.c:1201", effect = Reads,
+fn group_real_gid(cx) { Ok(cx.bigint(user_db::real_gid().into())) }}
 
 defsubr! { name = "user-full-name", gnu = "editfns.c:1209", effect = Reads,
 fn user_full_name(cx; optional uid: Value) {
@@ -124,3 +124,26 @@ fn user_full_name(cx; optional uid: Value) {
     };
     Ok(account.map_or(Value::NIL, |a| { let full = full_name(&a); cx.string(&full) }))
 }}
+
+/// dired.c Fsystem_users and Fsystem_groups: the database's names, consed
+/// as they are read, so last first.
+fn account_names(cx: &mut Leaf<'_>, groups: bool) -> Value {
+    crate::host::account_names(groups).into_iter().fold(Value::NIL, |list, name| {
+        let multibyte = crate::environment::multibyte(&name);
+        let name = cx.make_string(name, multibyte);
+        cx.cons(name, list)
+    })
+}
+
+defsubr! { name = "system-users", gnu = "dired.c:1147", effect = Reads,
+fn system_users(cx) {
+    let users = account_names(cx, false);
+    if users != Value::NIL { return Ok(users); }
+    // At least the current user is always known.
+    let symbol = cx.intern("user-real-login-name");
+    let name = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
+    Ok(cx.cons(name, Value::NIL))
+}}
+
+defsubr! { name = "system-groups", gnu = "dired.c:1168", effect = Reads,
+fn system_groups(cx) { Ok(account_names(cx, true)) }}

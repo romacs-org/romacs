@@ -33,25 +33,23 @@ shortens ends the walk early."
     (nreverse acc)))
 
 
+;;; Printing
+
+(defun romacs--print-unreadable (function objects escape)
+  "print.c print_vectorlike_unreadable: FUNCTION's value for each of the
+unreadable OBJECTS a print meets, called with ESCAPE while
+`print-unreadable-function' is nil, so a print it makes uses none."
+  (let ((print-unreadable-function nil) (answers nil))
+    (while objects
+      (setq answers (cons (funcall function (car objects) escape) answers))
+      (setq objects (cdr objects)))
+    (nreverse answers)))
+
 ;;; Reverse keymap lookup
 
 (defvar where-is-preferred-modifier nil)
 (defvar minor-mode-overriding-map-alist nil)
 (defvar emulation-mode-map-alists nil)
-
-(defun romacs--where-definition (binding)
-  (let ((seen nil))
-    (while (and (consp binding)
-                (or (eq (car binding) 'menu-item) (stringp (car binding))))
-      (if (memq binding seen) (error "Circular menu item"))
-      (setq seen (cons binding seen))
-      (if (stringp (car binding))
-          (setq binding (cdr binding))
-        (if (not (consp (cdr binding)))
-            (error "Malformed menu item")
-          (setq binding (cdr (cdr binding)))
-          (if (consp binding) (setq binding (car binding))))))
-    binding))
 
 (defun romacs--where-append (prefix event)
   ;; Chartab walkers reuse the range cons between callbacks.
@@ -64,48 +62,128 @@ shortens ends the walk early."
           sequence)
       (vconcat prefix (vector event)))))
 
-(defun romacs--where-cycle-p (map prefix queue)
-  (let ((cycle nil))
-    (while (and queue (not cycle))
-      (let* ((node (car queue)) (previous (car node)) (i 0))
-        (if (and (eq map (car (cdr node)))
-                 (<= (length previous) (length prefix)))
+(defun keymap--get-keyelt (object autoload)
+  "Given OBJECT which was found in a slot in a keymap,
+trace indirect definitions to get the actual definition of that slot.
+Also if OBJECT has a menu string as the first element,
+remove that.  Also remove a menu help string as second element.
+If AUTOLOAD, apply a `menu-item''s `:filter' to its definition.
+keymap.c get_keyelt; a circular wrapper, which GNU follows forever,
+signals."
+  (let ((done nil) (seen nil))
+    (while (and (consp object) (not done))
+      (if (memq object seen) (error "Circular menu item"))
+      (setq seen (cons object seen))
+      (cond ((eq (car object) 'menu-item)
+             (if (not (consp (cdr object)))
+                 (setq done t)
+               (setq object (cdr (cdr object)))
+               (let ((tail object))
+                 (if (consp object) (setq object (car object)))
+                 (if autoload
+                     (while (and (consp tail) (consp (cdr tail)))
+                       (if (not (eq (car tail) :filter))
+                           (setq tail (cdr tail))
+                         ;; keyboard.c menu_item_eval_property: an error is nil.
+                         (let ((filter (car (cdr tail))) (inhibit-redisplay t))
+                           (setq object (condition-case nil (eval (list filter (list 'quote object)) nil)
+                                          (error nil))))
+                         (setq tail nil)))))))
+            ((stringp (car object)) (setq object (cdr object)))
+            (t (setq done t))))
+    object))
+
+(defun romacs--keymap-noload (object)
+  "keymap.c get_keymap without autoloading or signalling: the keymap
+OBJECT is or names, OBJECT itself when it names an autoloaded keymap,
+else nil."
+  (if (eq (car-safe object) 'keymap) object
+    (let ((function (and object (indirect-function object))))
+      (cond ((eq (car-safe function) 'keymap) function)
+            ((and (symbolp object) (eq (car-safe function) 'autoload)
+                  (eq (nth 4 function) 'keymap))
+             object)))))
+
+(defun romacs--accessible-cycle-p (map sequence maps)
+  "Whether MAP is already in MAPS under a prefix of SEQUENCE."
+  (let ((cycle nil) entry)
+    (while (and (not cycle) (setq entry (rassq map maps)))
+      (let* ((prefix (car entry)) (n (length prefix)) (i 0))
+        (if (<= n (length sequence))
             (progn
-              (while (and (< i (length previous))
-                          (eq (aref previous i) (aref prefix i)))
+              (while (and (< i n) (eq (aref prefix i) (aref sequence i)))
                 (setq i (1+ i)))
-              (setq cycle (= i (length previous))))))
-      (setq queue (cdr queue)))
+              (setq cycle (>= i n)))))
+      (setq maps (cdr (memq entry maps))))
     cycle))
 
+(defun accessible-keymaps (keymap &optional prefix)
+  "Find all keymaps accessible via prefix characters from KEYMAP.
+Returns a list of elements of the form (KEYS . MAP), where the sequence
+KEYS starting from KEYMAP gets you to MAP.  These elements are ordered
+so that the KEYS increase in length.  The first element is ([] . KEYMAP).
+An optional argument PREFIX, if non-nil, should be a key sequence;
+then the value includes only maps for prefixes that start with PREFIX.
+keymap.c Faccessible_keymaps: a breadth-first walk that queues each
+keymap bound to a prefix not already reached by a prefix of it."
+  (let ((prefix-length (length prefix)) (maps nil))
+    (if (not prefix)
+        (let ((map (romacs--keymap-noload keymap)))
+          (if (not (consp map)) (signal 'wrong-type-argument (list 'keymapp keymap)))
+          (setq maps (list (cons [] map))))
+      (let ((map (romacs--keymap-noload (lookup-key keymap prefix t))))
+        (if map
+            (progn
+              ;; A string's 8-bit characters are meta characters.
+              (if (stringp prefix)
+                  (setq prefix (vconcat (mapcar (lambda (c)
+                                                  (if (and (< c 256) (/= 0 (logand c 128)))
+                                                      (logior (logxor c 128) 134217728)
+                                                    c))
+                                                prefix))))
+              (setq maps (list (cons prefix map)))))))
+    (let ((tail maps) (last maps))
+      (while tail
+        (let* ((sequence (car (car tail))) (map (cdr (car tail)))
+               (end (1- (length sequence)))
+               ;; Not the last event of PREFIX itself.
+               (metized (and (>= end 0) (>= end prefix-length)
+                             (eq (aref sequence end) meta-prefix-char))))
+          ;; An autoloaded keymap cannot be walked without loading it.
+          (if (consp map)
+              (map-keymap
+               (lambda (key binding)
+                 (let ((child (romacs--keymap-noload (keymap--get-keyelt binding nil))))
+                   (if (and child (not (romacs--accessible-cycle-p child sequence maps)))
+                       (if (and metized (integerp key))
+                           ;; The meta character's sequence is as long as
+                           ;; SEQUENCE, so it goes right after it.
+                           (let ((meta (copy-sequence sequence)))
+                             (aset meta end (logior key 134217728))
+                             (setcdr tail (cons (cons meta child) (cdr tail)))
+                             (if (eq last tail) (setq last (cdr tail))))
+                         ;; Chartab walkers reuse the range cons between callbacks.
+                         (if (consp key) (setq key (cons (car key) (cdr key))))
+                         (setcdr last (list (cons (vconcat sequence (vector key)) child)))
+                         (setq last (cdr last))))))
+               map)))
+        (setq tail (cdr tail))))
+    maps))
+
 (defun romacs--where-bindings (maps)
+  "Each key sequence MAPS bind, with its binding, in the order of
+`accessible-keymaps' (keymap.c where_is_internal)."
   (let ((rows nil))
     (while (consp maps)
-      (let* ((root (lookup-key (car maps) []))
-             (queue (list (list [] root)))
-             (last queue)
-             (tail queue))
-        (while tail
-          (let* ((node (car tail)) (prefix (car node))
-                 (map (car (cdr node))))
-            (map-keymap
-             (lambda (event raw)
-               (let* ((sequence (romacs--where-append prefix event))
-                      (binding (romacs--where-definition raw)))
-                 (setq rows (cons (cons sequence raw) rows))
-                 (if (keymapp binding)
-                     (let ((child (lookup-key binding [])))
-                       (if (not (romacs--where-cycle-p child prefix queue))
-                           (let ((entry (list sequence child)))
-                             ;; Meta prefixes do not increase sequence length.
-                             (if (= (length sequence) (length prefix))
-                                 (progn
-                                   (setcdr tail (cons entry (cdr tail)))
-                                   (if (eq last tail) (setq last (cdr tail))))
-                               (setcdr last (list entry))
-                               (setq last (cdr last)))))))))
-             map))
-          (setq tail (cdr tail))))
+      (let ((prefixes (accessible-keymaps (car maps))))
+        (while prefixes
+          (let ((prefix (car (car prefixes))) (map (cdr (car prefixes))))
+            (if (consp map)
+                (map-keymap
+                 (lambda (event raw)
+                   (setq rows (cons (cons (romacs--where-append prefix event) raw) rows)))
+                 map)))
+          (setq prefixes (cdr prefixes))))
       (setq maps (cdr maps)))
     (nreverse rows)))
 
@@ -190,7 +268,7 @@ shortens ends the walk early."
   (let ((found nil))
     (while rows
       (let* ((row (car rows)) (binding (cdr row)))
-        (if (not noindirect) (setq binding (romacs--where-definition binding)))
+        (if (not noindirect) (setq binding (keymap--get-keyelt binding nil)))
         (if (and (or (eq binding definition)
                      (and (consp definition) (equal binding definition)))
                  (not (and nomenus (romacs--where-mouse-prefix-p (car row)))))
@@ -247,7 +325,7 @@ shortens ends the walk early."
         (while rows
           (let ((row (car rows)))
             (if (not (romacs--where-mouse-prefix-p (car row)))
-                (let ((binding (romacs--where-definition (cdr row))))
+                (let ((binding (keymap--get-keyelt (cdr row) nil)))
                   (puthash binding (cons (car row) (gethash binding table)) table))))
           (setq rows (cdr rows)))
         (maphash (lambda (binding sequences) (puthash binding (nreverse sequences) table)) table)
@@ -551,11 +629,13 @@ a string, a buffer receives the text at its point."
 coding.c Fdecode_coding_region: DESTINATION nil replaces the text and
 returns its length, t returns the decoded string, a buffer receives it at
 point.  Sets `last-coding-system-used'."
+  (interactive "r\nzCoding system: ")
   (romacs--code-convert-region start end coding-system destination nil))
 
 (defun encode-coding-region (start end coding-system &optional destination)
   "Encode the text between START and END by CODING-SYSTEM.
 coding.c Fencode_coding_region, as `decode-coding-region' for DESTINATION."
+  (interactive "r\nzCoding system: ")
   (romacs--code-convert-region start end coding-system destination t))
 
 (defun detect-coding-region (start end &optional highest)
@@ -718,6 +798,45 @@ Redisplay calls this in the buffer of a window showing START to END."
               (setq globals (cdr globals)))))
         (setq functions (cdr functions))))))
 
+
+;;; The debugger on the signal path
+
+;; GNU eval.c maybe_call_debugger.  The signal path (threaded_signal.rs
+;; debugger_wanted) has already found the debugger considered for the error,
+;; `inhibit-debugger' nil and `debug-on-quit' or `debug-on-error' non-nil;
+;; when this says yes, it calls `debugger' itself under call_debugger's
+;; bindings (threaded.rs call_debugger), so no frame of this file's sits
+;; between the debugger and the error.
+(defun romacs--call-debugger-p (conditions error)
+  "Whether to call `debugger' for ERROR, whose CONDITIONS are its
+`error-conditions': unless `debug-on-error' lists none of them,
+`debug-ignored-errors' matches it, or the debugger already ran for the
+current input event.  Yes notes the event, as call_debugger does."
+  (when (and (or (memq 'quit conditions)
+                 (not (consp debug-on-error))
+                 (let ((tail conditions) (found nil))
+                   (while (and (consp tail) (not found))
+                     (setq found (memq (car tail) debug-on-error)
+                           tail (cdr tail)))
+                   found))
+             (not (romacs--skip-debugger conditions error))
+             (< internal-when-entered-debugger num-nonmacro-input-events))
+    (setq debug-on-next-call nil
+          internal-when-entered-debugger num-nonmacro-input-events)
+    t))
+
+(defun romacs--skip-debugger (conditions error)
+  "eval.c skip_debugger: whether `debug-ignored-errors' names one of
+CONDITIONS or has a regexp matching ERROR's message."
+  (let ((tail debug-ignored-errors) (message nil) (skip nil))
+    (while (and (consp tail) (not skip))
+      (if (stringp (car tail))
+          (setq message (or message (error-message-string error))
+                skip (string-match (car tail) message nil t))
+        (setq skip (memq (car tail) conditions)))
+      (setq tail (cdr tail)))
+    skip))
+
 ;;; Finalizers
 
 (defun romacs--run-finalizers (&optional value)
@@ -732,5 +851,177 @@ Return VALUE, the statistics of the collection that ran it."
         (t (let ((inhibit-message t))
              (message "finalizer failed: %S" err))))))
   value)
+
+;;; Evaluating buffer text: lread.c readevalloop
+
+(defun romacs--lexical-cookie ()
+  "lread.c lisp_file_lexical_cookie: `lex', `dyn' or nil, from the
+`lexical-binding' file variable on the line at point (the next one after
+a #! line).  Point is unchanged."
+  (save-excursion
+    (if (looking-at "#!") (forward-line 1))
+    (let ((data (match-data)) (cookie nil))
+      (unwind-protect
+          (if (eq (char-after) ?\;)
+              (let* ((line (buffer-substring-no-properties (point) (line-end-position)))
+                     (vars (and (string-match "-\\*-\\(.*?\\)\\(?:-\\*-\\|\\'\\)" line)
+                                (split-string (match-string 1 line) ";"))))
+                (while vars
+                  (if (string-match "\\`[ \t]*lexical-binding[ \t]*:[ \t]*\\(.*?\\)[ \t]*\\'" (car vars))
+                      (setq cookie (if (equal (match-string 1 (car vars)) "nil") 'dyn 'lex)))
+                  (setq vars (cdr vars)))))
+        (set-match-data data))
+      cookie)))
+
+(defun romacs--skip-to-form ()
+  "Skip the whitespace and `;' comments readevalloop skips before a
+form; nil at the end of the accessible text."
+  (let ((done nil))
+    (while (not done)
+      (skip-chars-forward " \t\n\f\r ")
+      (if (eq (char-after) ?\;) (skip-chars-forward "^\n") (setq done t))))
+  (not (eobp)))
+
+(defun romacs--eager-eval (form expander environment)
+  "lread.c readevalloop_eager_expand_eval: FORM expanded one level, each
+form of a resulting `progn' as a top-level form, else fully, then
+evaluated in ENVIRONMENT.  Return (VALUE . ENVIRONMENT): a top-level
+`(defvar NAME)' adds NAME to a lexical environment, as Fdefvar does."
+  (if expander (setq form (funcall expander form nil)))
+  (if (and expander (eq (car-safe form) 'progn))
+      (let ((result (cons nil environment)) (forms (cdr form)))
+        (while (consp forms)
+          (setq result (romacs--eager-eval (car forms) expander (cdr result)))
+          (setq forms (cdr forms)))
+        result)
+    (if expander (setq form (funcall expander form t)))
+    (let ((value (eval form environment)))
+      (if (and environment (eq (car-safe form) 'defvar) (consp (cdr form)) (null (cdr (cdr form)))
+               (symbolp (car (cdr form))) (not (special-variable-p (car (cdr form)))))
+          (setq environment (cons (car (cdr form)) environment)))
+      (cons value environment))))
+
+(defun romacs--build-load-history (filename entire)
+  "lread.c build_load_history: FILENAME's entry in `load-history' from
+`current-load-list', replacing an old one when ENTIRE, else merged in."
+  (let ((tail load-history) (previous nil) (found nil))
+    (while (consp tail)
+      (if (not (equal filename (car-safe (car tail))))
+          (setq previous tail)
+        (setq found t)
+        (if entire
+            (if previous (setcdr previous (cdr tail)) (setq load-history (cdr tail)))
+          (let ((new current-load-list))
+            (while (consp new)
+              (if (not (member (car new) (car tail)))
+                  (setcar tail (cons (car (car tail)) (cons (car new) (cdr (car tail))))))
+              (setq new (cdr new))))))
+      (setq tail (cdr tail)))
+    (if (or entire (not found))
+        (setq load-history (cons (reverse current-load-list) load-history)))))
+
+(defun romacs--readevalloop-read (buffer readfun)
+  "The next form of BUFFER at point for `romacs--readevalloop', as
+(FORM . MORE), MORE nil when READFUN left point at the end; nil at the
+end of the accessible text."
+  (if (romacs--skip-to-form)
+      (let ((form (cond (readfun (funcall readfun buffer))
+                        (load-read-function (funcall load-read-function buffer))
+                        (t (read buffer)))))
+        (cons form (not (and readfun (= (point) (point-max))))))))
+
+(defun romacs--readevalloop (buffer sourcename printflag readfun start end)
+  "lread.c readevalloop over BUFFER: read each form with READFUN,
+`load-read-function' or `read', and evaluate it as top-level code.  With
+START, read from there up to END in BUFFER, as `eval-region' does; else
+from BUFFER's point.  Print each value when PRINTFLAG; record what the
+forms define in `load-history' under SOURCENAME."
+  (let* ((standard-input buffer)
+         (expander (and (fboundp 'internal-macroexpand-for-load) #'internal-macroexpand-for-load))
+         (environment (if lexical-binding (list t)))
+         (macroexp--dynvars macroexp--dynvars)
+         (sourcename (if (and sourcename (file-name-absolute-p sourcename)) (expand-file-name sourcename) sourcename))
+         (current-load-list (list sourcename))
+         (whole 'unknown) (read t))
+    (while read
+      (if (not (buffer-live-p buffer)) (error "Reading from killed buffer"))
+      (setq read
+            (save-current-buffer
+              (set-buffer buffer)
+              (let ((at-start (lambda ()
+                                (if (eq whole 'unknown)
+                                    (setq whole (and (= (point) 1) (= (point-max) (1+ (buffer-size))))))
+                                (romacs--readevalloop-read buffer readfun))))
+                (if (not start)
+                    ;; Reading BUFFER itself leaves its point after the form.
+                    (funcall at-start)
+                  ;; eval-region reads each form at START, narrowed to END,
+                  ;; and keeps BUFFER's point and restriction.
+                  (save-excursion
+                    (save-restriction
+                      (goto-char start)
+                      (if end (narrow-to-region (point-min) end))
+                      ;; An integer END becomes a marker, which follows
+                      ;; the text the forms change.
+                      (if (integerp end) (setq end (point-max-marker)))
+                      (let ((read (funcall at-start)))
+                        (if (cdr read) (setq start (point-marker)))
+                        read)))))))
+      (if read
+          (let ((result (romacs--eager-eval (car read) expander environment)))
+            (setq environment (cdr result))
+            (if printflag
+                (progn
+                  (setq values (cons (car result) values))
+                  (if (eq standard-output t) (prin1 (car result)) (print (car result)))))
+            (if (not (cdr read)) (setq read nil)))))
+    (romacs--build-load-history sourcename (eq whole t))))
+
+(defun eval-buffer (&optional buffer printflag filename _unibyte do-allow-print)
+  "Execute the accessible portion of current buffer as Lisp code.
+When called from a Lisp program, BUFFER is the buffer to evaluate (nil
+means the current buffer) or its name; PRINTFLAG nil discards the output
+of output functions in the evaluated code, anything else is the stream to
+print to; FILENAME names the code in `load-history'; DO-ALLOW-PRINT
+non-nil lets output functions print normally even with PRINTFLAG nil.
+lread.c Feval_buffer over `romacs--readevalloop'."
+  (interactive "")
+  (let ((buf (if buffer (get-buffer buffer) (current-buffer))))
+    (if (null buf) (error "No such buffer"))
+    (let ((standard-output (if (or printflag do-allow-print) printflag 'symbolp))
+          (filename (or filename (buffer-local-value 'buffer-file-name buf)))
+          (eval-buffer-list (cons buf eval-buffer-list)))
+      (save-excursion
+        (save-current-buffer
+          (set-buffer buf)
+          (goto-char (point-min)))
+        ;; A buffer-local `lexical-binding' is kept: it, not the
+        ;; cookie, names the dialect then.
+        (if (local-variable-p 'lexical-binding buf)
+            (romacs--readevalloop buf filename printflag nil nil nil)
+          (let ((lexical-binding
+                 (let ((cookie (save-current-buffer (set-buffer buf) (romacs--lexical-cookie))))
+                   (cond ((eq cookie 'lex) t)
+                         ((eq cookie 'dyn) nil)
+                         ((and (boundp 'internal--get-default-lexical-binding-function)
+                               internal--get-default-lexical-binding-function)
+                          (funcall internal--get-default-lexical-binding-function buf))
+                         (t (default-toplevel-value 'lexical-binding))))))
+            (romacs--readevalloop buf filename printflag nil nil nil))))
+      nil)))
+
+(defun eval-region (start end &optional printflag read-function)
+  "Execute the region as Lisp code.
+When called from programs, expects two arguments, giving starting and
+ending indices in the current buffer of the text to be executed.
+PRINTFLAG nil discards the output of output functions in the code,
+anything else is the stream to print to.  READ-FUNCTION, if non-nil,
+reads each expression in place of `read'.  lread.c Feval_region over
+`romacs--readevalloop'."
+  (interactive "r")
+  (let ((standard-output (or printflag 'symbolp))
+        (eval-buffer-list (cons (current-buffer) eval-buffer-list)))
+    (romacs--readevalloop (current-buffer) buffer-file-name printflag read-function start end)
+    nil))
 
 ;;; prelude.el ends here

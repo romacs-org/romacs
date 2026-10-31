@@ -27,15 +27,7 @@ fn native_encoding(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
     Ok(())
 }
 
-/// Fexpand_file_name (VALUE, Qnil) for a primitive that cannot continue
-/// through Lisp: refused where GNU would call an expansion handler.
-fn name(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
-    let expanded = super::expand_file_name::expand(cx, value, Value::NIL)?
-        .ok_or_else(|| refusal("filesave expand-file-name handler"))?;
-    as_file(cx, expanded)
-}
-
-/// An expanded name as the host path and value.
+/// An expanded name as text and value.
 fn as_file(cx: &mut Leaf<'_>, expanded: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
     Ok((super::fileio::file_name_path(cx, expanded)?, expanded))
 }
@@ -74,11 +66,7 @@ fn dir_to_file(
     }
 }
 
-/// Fexpand_file_name (FILENAME, Qnil), then THEN with the expansion; through
-/// Lisp `expand-file-name' only where GNU would call a handler.
-fn expanding(cx: &mut Leaf<'_>, filename: Value, then: crate::prim::Then, saved: Vec<Value>) -> Next {
-    super::expand_file_name::expanding(cx, filename, Value::NIL, then, saved)
-}
+use super::fileio::{expanding, handler};
 
 /// Fexpand_file_name (FILENAME, BVAR (current_buffer, directory)), as
 /// set-file-modes and set-file-times expand.
@@ -87,29 +75,6 @@ fn expanding_in_buffer(cx: &mut Leaf<'_>, filename: Value, then: crate::prim::Th
     super::expand_file_name::expanding(cx, filename, directory, then, saved)
 }
 
-fn handler(
-    cx: &mut Leaf<'_>,
-    name: Value,
-    operation: &str,
-    args: Vec<Value>,
-) -> std::result::Result<Option<Next>, Fault> {
-    let operation = cx.intern(operation);
-    let function = super::fileio::find_file_name_handler(cx, name, operation)?;
-    if function == Value::NIL {
-        return Ok(None);
-    }
-    let mut all = vec![operation];
-    all.extend(args);
-    Ok(Some(Ok(Step::Call {
-        f: function,
-        args: all,
-        then: returned,
-        saved: vec![],
-    })))
-}
-fn returned(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
-    Ok(Step::Done(value))
-}
 
 /// fileio.c report_file_errno: an EEXIST carries no OPERATION.
 fn errno(cx: &mut Leaf<'_>, operation: &str, paths: &[Value], error: std::io::Error) -> Fault {
@@ -203,36 +168,6 @@ fn file_writable_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Ne
     Ok(Step::Done(if writable { Value::TRUE } else { Value::NIL }))
 }
 
-// As a GNU built without ACL support: no file has an ACL and none can be
-// set (fileio.c:3471-3518 with HAVE_ACL undefined).
-defsubr! { name = "file-acl", gnu = "fileio.c:3471", effect = Global,
-fn file_acl(cx, filename: Value) {
-    cx.string_bytes(filename)?;
-    Ok(Value::NIL)
-}}
-
-defsubr! { name = "set-file-acl", gnu = "fileio.c:3497", effect = Global,
-fn set_file_acl(cx, filename: Value, acl: Value) {
-    cx.string_bytes(filename)?;
-    let _ = acl;
-    Ok(Value::NIL)
-}}
-
-// As a GNU built without SELinux: every file's context is unknown and
-// none can be set (fileio.c:3408-3466 with HAVE_LIBSELINUX undefined).
-defsubr! { name = "file-selinux-context", gnu = "fileio.c:3408", effect = Global,
-fn file_selinux_context(cx, filename: Value) {
-    cx.string_bytes(filename)?;
-    Ok((0..4).fold(Value::NIL, |tail, _| cx.cons(Value::NIL, tail)))
-}}
-
-defsubr! { name = "set-file-selinux-context", gnu = "fileio.c:3443", effect = Global,
-fn set_file_selinux_context(cx, filename: Value, context: Value) {
-    cx.string_bytes(filename)?;
-    let _ = context;
-    Ok(Value::NIL)
-}}
-
 defsubr! { name = "file-modes", gnu = "fileio.c:3644", effect = Global,
 fn file_modes(cx, filename: Value; optional flag: Value) -> Step {
     expanding(cx, filename, file_modes_expanded, vec![flag])
@@ -284,13 +219,18 @@ fn set_default_file_modes(cx, mode: Value) {
 
 defsubr! { name = "rename-file", gnu = "fileio.c:2724", effect = Global,
 fn rename_file(cx, file: Value, newname: Value; optional overwrite: Value) -> Step {
-    let (source, source_value) = name(cx, file)?;
-    // expand_cp_target (Fdirectory_file_name (FILE), NEWNAME).
-    let directory_file = match super::savejourney::directory_file_name(cx, source_value)? {
-        Step::Done(file) => file,
-        _ => return Err(refusal("filesave directory-file-name handler")),
+    expanding(cx, file, rename_staged, vec![file, newname, overwrite])
+}}
+
+/// FILE expanded, then expand_cp_target (Fdirectory_file_name (FILE),
+/// NEWNAME), then the rename.
+fn rename_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
+    let (source_value, target_value) = match cp_stages(cx, value, saved, 3, true, rename_staged)? {
+        Ok(names) => names,
+        Err(next) => return next,
     };
-    let (target, target_value) = cp_target(cx, directory_file, newname)?;
+    let overwrite = saved[2];
+    let (source, target) = (super::fileio::file_name_path(cx, source_value)?, super::fileio::file_name_path(cx, target_value)?);
     let args = vec![source_value, target_value, overwrite];
     if let Some(call) = handler(cx, source_value, "rename-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, target_value, "rename-file", args)? { return call; }
@@ -312,7 +252,7 @@ fn rename_file(cx, file: Value, newname: Value; optional overwrite: Value) -> St
         Err(e) if e.raw_os_error() == Some(libc::EEXIST) => Err(already_exists(cx, target_value)),
         Err(e) => Err(errno(cx, "Renaming", &[source_value, target_value], e)),
     }
-}}
+}
 
 defsubr! { name = "make-temp-name", gnu = "fileio.c:830", effect = Global,
 fn make_temp_name(cx, prefix: Value) {
@@ -478,20 +418,41 @@ fn delete_directory_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]
     Ok(Step::Done(Value::NIL))
 }
 
-/// fileio.c expand_cp_target: NEWNAME expanded, or FILE's last component
-/// expanded against NEWNAME when NEWNAME is a directory name.
-fn cp_target(cx: &mut Leaf<'_>, file: Value, newname: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
-    if cx.string_bytes(newname)?.last() != Some(&b'/') {
-        return name(cx, newname);
+/// fileio.c expand_cp_target (FILE, NEWNAME) for a primitive whose N
+/// arguments lead SAVED, FILE first and NEWNAME second, VALUE being the
+/// last step's result: FILE expanded, the name whose last component is
+/// taken (FILE's directory file name under DIRECTORY_FILE, as
+/// `rename-file' takes it, else FILE), that component when NEWNAME is a
+/// directory name, else nil, and the target expanded. ME continues each
+/// step that calls Lisp; the expanded FILE and target, once both are known.
+fn cp_stages(cx: &mut Leaf<'_>, value: Value, saved: &[Value], n: usize, directory_file: bool, me: crate::prim::Then)
+    -> std::result::Result<std::result::Result<(Value, Value), Next>, Fault> {
+    let mut s = saved.to_vec();
+    s.push(value);
+    let newname = s[1];
+    let lisp = |step: Step, s: Vec<Value>| match step {
+        Step::Done(value) => Ok(Some(value)),
+        Step::Call { f, args, .. } => Err(Ok(Step::Call { f, args, then: me, saved: s })),
+        _ => unreachable!("a file name primitive returns or calls its handler"),
+    };
+    loop {
+        match s.len() - n {
+            1 => {
+                let step = if directory_file { super::savejourney::directory_file_name(cx, s[n])? } else { Step::Done(s[n]) };
+                match lisp(step, s.clone()) { Ok(v) => s.extend(v), Err(next) => return Ok(Err(next)) }
+            }
+            2 => {
+                if cx.string_bytes(newname)?.last() != Some(&b'/') {
+                    s.push(Value::NIL);
+                    return Ok(Err(expanding(cx, newname, me, s)));
+                }
+                let step = super::savejourney::file_name_nondirectory(cx, s[n + 1])?;
+                match lisp(step, s.clone()) { Ok(v) => s.extend(v), Err(next) => return Ok(Err(next)) }
+            }
+            3 => return Ok(Err(super::expand_file_name::expanding(cx, s[n + 2], newname, me, s))),
+            _ => return Ok(Ok((s[n], s[n + 3]))),
+        }
     }
-    super::fileio::refuse_handler(cx, file, "file-name-nondirectory")?;
-    let bytes = cx.string_bytes(file)?;
-    let base = bytes.rsplit(|&b| b == b'/').next().unwrap_or(&[]).to_vec();
-    let multibyte = cx.string_view(file)?.is_multibyte();
-    let base = cx.make_string(base, multibyte);
-    let expanded = super::expand_file_name::expand(cx, base, newname)?
-        .ok_or_else(|| refusal("filesave expand-file-name handler"))?;
-    as_file(cx, expanded)
 }
 
 /// barf_or_query_if_file_exists for a NAME known to exist: nil signals,
@@ -541,10 +502,18 @@ fn umask() -> std::result::Result<u32, Fault> {
 defsubr! { name = "copy-file", gnu = "fileio.c:2252", effect = Global,
 fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Value, keep_time: Value,
              preserve_uid_gid: Value, preserve_permissions: Value) -> Step {
+    expanding(cx, file, copy_staged, vec![file, newname, ok_if_already_exists, keep_time, preserve_uid_gid, preserve_permissions])
+}}
+
+fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let (source, file) = name(cx, file)?;
-    let (target, newname) = cp_target(cx, file, newname)?;
+    let (file, newname) = match cp_stages(cx, value, saved, 6, false, copy_staged)? {
+        Ok(names) => names,
+        Err(next) => return next,
+    };
+    let [_, _, ok_if_already_exists, keep_time, preserve_uid_gid, preserve_permissions] = saved[..6] else { unreachable!() };
+    let (source, target) = (super::fileio::file_name_path(cx, file)?, super::fileio::file_name_path(cx, newname)?);
     let args = vec![file, newname, ok_if_already_exists, keep_time, preserve_uid_gid, preserve_permissions];
     if let Some(call) = handler(cx, file, "copy-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, newname, "copy-file", args)? { return call; }
@@ -629,12 +598,20 @@ fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Val
     }
     cx.fileio_close_output(output).map_err(|e| errno(cx, "Write error", &[newname], e))?;
     Ok(Step::Done(Value::NIL))
-}}
+}
 
 defsubr! { name = "add-name-to-file", gnu = "fileio.c:2851", effect = Global,
 fn add_name_to_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Value) -> Step {
-    let (source, file) = name(cx, file)?;
-    let (target, newname) = cp_target(cx, file, newname)?;
+    expanding(cx, file, add_name_staged, vec![file, newname, ok_if_already_exists])
+}}
+
+fn add_name_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
+    let (file, newname) = match cp_stages(cx, value, saved, 3, false, add_name_staged)? {
+        Ok(names) => names,
+        Err(next) => return next,
+    };
+    let ok_if_already_exists = saved[2];
+    let (source, target) = (super::fileio::file_name_path(cx, file)?, super::fileio::file_name_path(cx, newname)?);
     let args = vec![file, newname, ok_if_already_exists];
     if let Some(call) = handler(cx, file, "add-name-to-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, newname, "add-name-to-file", args)? { return call; }
@@ -642,24 +619,35 @@ fn add_name_to_file(cx, file: Value, newname: Value; optional ok_if_already_exis
     create_name(cx, || host::hard_link(&source, &target), &target, newname, ok_if_already_exists, "add-name-to-file")?
         .map_err(|e| errno(cx, "Adding new name", &[file, newname], e))?;
     Ok(Step::Done(Value::NIL))
-}}
+}
 
 // Fmake_symbolic_link: TARGET is stored literally; only an integer
 // OK-IF-ALREADY-EXISTS expands its leading `~' or strips its leading `/:'.
 defsubr! { name = "make-symbolic-link", gnu = "fileio.c:2907", effect = Global,
 fn make_symbolic_link(cx, target: Value, linkname: Value; optional ok_if_already_exists: Value) -> Step {
     let bytes = cx.string_bytes(target)?;
-    let target = if ok_if_already_exists.integer_value().is_none() {
-        target
+    let args = vec![target, linkname, ok_if_already_exists];
+    if ok_if_already_exists.integer_value().is_none() {
+        link_staged(cx, target, &args)
     } else if bytes.first() == Some(&b'~') {
-        name(cx, target)?.1
+        expanding(cx, target, link_staged, args)
     } else if bytes.starts_with(b"/:") {
         let multibyte = cx.string_view(target)?.is_multibyte();
-        cx.make_string(bytes[2..].to_vec(), multibyte)
+        let target = cx.make_string(bytes[2..].to_vec(), multibyte);
+        link_staged(cx, target, &args)
     } else {
-        target
+        link_staged(cx, target, &args)
+    }
+}}
+
+/// TARGET as stored, then expand_cp_target (TARGET, LINKNAME).
+fn link_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
+    let (target, linkname) = match cp_stages(cx, value, saved, 3, false, link_staged)? {
+        Ok(names) => names,
+        Err(next) => return next,
     };
-    let (link, linkname) = cp_target(cx, target, linkname)?;
+    let ok_if_already_exists = saved[2];
+    let link = super::fileio::file_name_path(cx, linkname)?;
     if let Some(call) = handler(cx, linkname, "make-symbolic-link", vec![target, linkname, ok_if_already_exists])? {
         return call;
     }
@@ -667,11 +655,11 @@ fn make_symbolic_link(cx, target: Value, linkname: Value; optional ok_if_already
     if cx.string_bytes(target)?.contains(&0) {
         return Err(Fault::Wrong("filenamep", target));
     }
-    let literal = cx.string_text(target)?;
+    let literal = super::fileio::file_name_path(cx, target)?;
     create_name(cx, || host::symlink(&literal, &link), &link, linkname, ok_if_already_exists, "make-symbolic-link")?
         .map_err(|e| errno(cx, "Making symbolic link", &[target, linkname], e))?;
     Ok(Step::Done(Value::NIL))
-}}
+}
 
 // Fset_file_times: both times to TIMESTAMP, or now when it is nil; any
 // non-nil FLAG sets a symbolic link's own times. Returns t.
@@ -689,4 +677,246 @@ fn set_file_times_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) 
     cx.filesave_utimens(&path, time, flag != Value::NIL)
         .map_err(|e| errno(cx, "Setting file times", &[expanded], e))?;
     Ok(Step::Done(Value::TRUE))
+}
+
+// Faccess_file: the expanded FILENAME must be readable; else the error,
+// STRING its operation, names FILENAME as given.
+defsubr! { name = "access-file", gnu = "fileio.c:3078", effect = Global,
+fn access_file(cx, filename: Value, string: Value) -> Step {
+    cx.string_view(filename)?;
+    expanding(cx, filename, access_expanded, vec![filename, string])
+}}
+fn access_expanded(cx: &mut Leaf<'_>, absname: Value, saved: &[Value]) -> Next {
+    let [filename, string] = saved[..2] else { unreachable!() };
+    let operation = cx.string_text(string)?;
+    if let Some(call) = handler(cx, absname, "access-file", vec![absname, string])? { return call; }
+    native_encoding(cx)?;
+    let path = super::fileio::file_name_path(cx, absname)?;
+    cx.filesave_access(path.as_os_str(), libc::R_OK).map_err(|e| errno(cx, &operation, &[filename], e))?;
+    Ok(Step::Done(Value::NIL))
+}
+
+// Ffile_newer_than_file_p: both names through expand_and_dir_to_file, then
+// either's handler; nil when FILE1 is missing, t when FILE2 is, else
+// whether FILE1's modification time is later.
+defsubr! { name = "file-newer-than-file-p", gnu = "fileio.c:3793", effect = Global,
+fn file_newer_than_file_p(cx, file1: Value, file2: Value) -> Step {
+    cx.string_view(file1)?;
+    cx.string_view(file2)?;
+    expanding(cx, file1, newer_staged, vec![file1, file2])
+}}
+
+/// SAVED: FILE1 FILE2, then each step's value: FILE1 expanded, as a file
+/// name, FILE2 expanded, as a file name.
+fn newer_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
+    let mut s = saved.to_vec();
+    s.push(value);
+    loop {
+        match s.len() {
+            3 | 5 => {
+                // expand_and_dir_to_file: a name ending in a slash, but for
+                // the root, loses it through Fdirectory_file_name.
+                let name = s[s.len() - 1];
+                let bytes = cx.string_bytes(name)?;
+                if bytes.len() < 2 || bytes.last() != Some(&b'/') { s.push(name); continue; }
+                match super::savejourney::directory_file_name(cx, name)? {
+                    Step::Done(file) => s.push(file),
+                    Step::Call { f, args, .. } => return Ok(Step::Call { f, args, then: newer_staged, saved: s }),
+                    _ => unreachable!("directory-file-name returns or calls its handler"),
+                }
+            }
+            4 => return expanding(cx, s[1], newer_staged, s),
+            _ => break,
+        }
+    }
+    let (absname1, absname2) = (s[3], s[5]);
+    let args = vec![absname1, absname2];
+    if let Some(call) = handler(cx, absname1, "file-newer-than-file-p", args.clone())? { return call; }
+    if let Some(call) = handler(cx, absname2, "file-newer-than-file-p", args)? { return call; }
+    native_encoding(cx)?;
+    // file_attribute_errno: a missing file is no error.
+    let missing = |e: &std::io::Error| matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR));
+    let modified = |m: &std::fs::Metadata| { use std::os::unix::fs::MetadataExt; (m.mtime(), m.mtime_nsec()) };
+    let first = match host::metadata(super::fileio::file_name_path(cx, absname1)?) {
+        Ok(m) => modified(&m),
+        Err(e) if missing(&e) => return Ok(Step::Done(Value::NIL)),
+        Err(e) => return Err(errno(cx, "Getting attributes", &[absname1], e)),
+    };
+    let second = match host::metadata(super::fileio::file_name_path(cx, absname2)?) {
+        Ok(m) => modified(&m),
+        Err(e) if missing(&e) => return Ok(Step::Done(Value::TRUE)),
+        Err(e) => return Err(errno(cx, "Getting attributes", &[absname2], e)),
+    };
+    Ok(Step::Done(if second < first { Value::TRUE } else { Value::NIL }))
+}
+
+// ACLs and SELinux contexts, as pinned GNU answers them: built with libacl
+// (USE_ACL, HAVE_ACL_SET_FILE) and without libselinux. An access ACL is the
+// file's `system.posix_acl_access' attribute, else its mode bits, in
+// libacl's text forms (acl_to_text, acl_from_text).
+const ACL_USER_OBJ: u16 = 0x01;
+const ACL_USER: u16 = 0x02;
+const ACL_GROUP_OBJ: u16 = 0x04;
+const ACL_GROUP: u16 = 0x08;
+const ACL_MASK: u16 = 0x10;
+const ACL_OTHER: u16 = 0x20;
+const ACL_UNDEFINED_ID: u32 = u32::MAX;
+
+/// An ACL entry: its tag, permission bits (r 4, w 2, x 1) and qualifier.
+type AclEntry = (u16, u16, u32);
+
+/// The entries of an attribute value: version 2, then 8-byte entries.
+fn acl_entries(value: &[u8]) -> Option<Vec<AclEntry>> {
+    let (header, body) = (value.get(..4)?, &value[4..]);
+    if u32::from_le_bytes(header.try_into().ok()?) != 2 || body.len() % 8 != 0 { return None; }
+    Some(body.chunks(8).map(|e| (u16::from_le_bytes([e[0], e[1]]), u16::from_le_bytes([e[2], e[3]]), u32::from_le_bytes([e[4], e[5], e[6], e[7]]))).collect())
+}
+
+/// acl_from_mode: the ACL a file without an attribute has.
+fn acl_from_mode(mode: u32) -> Vec<AclEntry> {
+    let bits = |shift: u32| ((mode >> shift) & 7) as u16;
+    vec![(ACL_USER_OBJ, bits(6), ACL_UNDEFINED_ID), (ACL_GROUP_OBJ, bits(3), ACL_UNDEFINED_ID), (ACL_OTHER, bits(0), ACL_UNDEFINED_ID)]
+}
+
+fn acl_perms(perm: u16) -> String {
+    [(4, 'r'), (2, 'w'), (1, 'x')].iter().map(|&(bit, c)| if perm & bit != 0 { c } else { '-' }).collect()
+}
+
+/// acl_to_text: one line per entry, a named user or group by its name when
+/// it has one, and the rights a mask withholds noted as `#effective'.
+fn acl_text(entries: &[AclEntry]) -> String {
+    let mask = entries.iter().find(|e| e.0 == ACL_MASK).map(|e| e.1);
+    let mut text = String::new();
+    for &(tag, perm, id) in entries {
+        let user = || host::user_by_uid(id, 1 << 16).ok().and_then(|p| p.name).map_or(id.to_string(), |n| String::from_utf8_lossy(&n).into_owned());
+        let group = || host::group_by_gid(id, 1 << 16).ok().map_or(id.to_string(), |n| String::from_utf8_lossy(&n).into_owned());
+        let qualified = match tag {
+            ACL_USER_OBJ => "user:".to_owned(),
+            ACL_USER => format!("user:{}", user()),
+            ACL_GROUP_OBJ => "group:".to_owned(),
+            ACL_GROUP => format!("group:{}", group()),
+            ACL_MASK => "mask:".to_owned(),
+            _ => "other:".to_owned(),
+        };
+        text.push_str(&format!("{qualified}:{}", acl_perms(perm)));
+        if let Some(mask) = mask.filter(|_| matches!(tag, ACL_USER | ACL_GROUP_OBJ | ACL_GROUP)) {
+            if perm & !mask != 0 { text.push_str(&format!("\t#effective:{}", acl_perms(perm & mask))); }
+        }
+        text.push('\n');
+    }
+    text
+}
+
+/// acl_from_text: entries separated by commas or newlines, `#' comments,
+/// long or one-letter tags, a user or group by name or number. None is
+/// EINVAL. The entries come back in the order the kernel requires.
+fn acl_parse(text: &str) -> Option<Vec<AclEntry>> {
+    let mut entries = vec![];
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or("");
+        for entry in line.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+            let fields: Vec<&str> = entry.split(':').collect();
+            let tag = match fields[0] { "user" | "u" => ACL_USER_OBJ, "group" | "g" => ACL_GROUP_OBJ, "mask" | "m" => ACL_MASK, "other" | "o" => ACL_OTHER, _ => return None };
+            let (qualifier, perms) = match (tag, fields.len()) {
+                (ACL_MASK | ACL_OTHER, 2) => ("", fields[1]),
+                (_, 3) => (fields[1], fields[2]),
+                _ => return None,
+            };
+            let mut perm = 0;
+            for c in perms.trim().chars() {
+                let bit = match c { 'r' => 4, 'w' => 2, 'x' => 1, '-' => 0, _ => return None };
+                if perm & bit != 0 { return None; }
+                perm |= bit;
+            }
+            let qualifier = qualifier.trim();
+            let (tag, id) = match (tag, qualifier.is_empty()) {
+                (_, true) => (tag, ACL_UNDEFINED_ID),
+                (ACL_USER_OBJ, false) => (ACL_USER, qualifier.parse().ok().or_else(|| {
+                    host::user_by_name(&std::ffi::CString::new(qualifier).ok()?, 1 << 16).ok().map(|p| p.uid)
+                })?),
+                (ACL_GROUP_OBJ, false) => (ACL_GROUP, qualifier.parse().ok().or_else(|| {
+                    host::group_by_name(&std::ffi::CString::new(qualifier).ok()?, 1 << 16).ok()
+                })?),
+                _ => return None,
+            };
+            entries.push((tag, perm, id));
+        }
+    }
+    entries.sort_by_key(|&(tag, _, id)| (tag, id));
+    Some(entries)
+}
+
+defsubr! { name = "file-acl", gnu = "fileio.c:3534", effect = Global,
+fn file_acl(cx, filename: Value) -> Step {
+    expanding(cx, filename, acl_expanded, vec![])
+}}
+fn acl_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    let (path, absname) = match dir_to_file(cx, expanded, acl_expanded, saved, 0, false)? { Ok(file) => file, Err(call) => return call };
+    if let Some(call) = handler(cx, absname, "file-acl", vec![absname])? { return call; }
+    native_encoding(cx)?;
+    // acl_get_file (ACL_TYPE_ACCESS): the attribute, else the mode bits.
+    // A missing file, and an error acl_errno_valid rejects, answer nil.
+    let entries = match host::posix_acl(std::path::Path::new(&path)) {
+        Ok(Some(value)) => acl_entries(&value),
+        Ok(None) => match host::metadata(&path) {
+            Ok(meta) => { use std::os::unix::fs::MetadataExt; Some(acl_from_mode(meta.mode())) }
+            Err(e) => return acl_errno(cx, "Getting ACLs", absname, e),
+        },
+        Err(e) => return acl_errno(cx, "Getting ACLs", absname, e),
+    };
+    let Some(entries) = entries else { return Ok(Step::Done(Value::NIL)) };
+    Ok(Step::Done(cx.string(&acl_text(&entries))))
+}
+
+/// An ACL call's error: nil when the file is missing or acl_errno_valid
+/// rejects it (gnulib: EBUSY, EINVAL, ENOSYS, ENOTSUP), else signalled.
+fn acl_errno(cx: &mut Leaf<'_>, operation: &str, absname: Value, e: std::io::Error) -> Next {
+    match e.raw_os_error() {
+        Some(libc::ENOENT | libc::ENOTDIR | libc::EBUSY | libc::EINVAL | libc::ENOSYS | libc::ENOTSUP) => Ok(Step::Done(Value::NIL)),
+        _ => Err(errno(cx, operation, &[absname], e)),
+    }
+}
+
+defsubr! { name = "set-file-acl", gnu = "fileio.c:3580", effect = Global,
+fn set_file_acl(cx, filename: Value, acl_string: Value) -> Step {
+    expanding_in_buffer(cx, filename, set_acl_expanded, vec![acl_string])
+}}
+fn set_acl_expanded(cx: &mut Leaf<'_>, absname: Value, saved: &[Value]) -> Next {
+    let acl_string = saved[0];
+    if let Some(call) = handler(cx, absname, "set-file-acl", vec![absname, acl_string])? { return call; }
+    if !matches!(cx.kind(acl_string), crate::prim::leaf::Kind::String | crate::prim::leaf::Kind::Bytes) { return Ok(Step::Done(Value::NIL)); }
+    native_encoding(cx)?;
+    // acl_from_text's EINVAL is not a valid ACL errno: nil.
+    let Some(entries) = acl_parse(&cx.string_text(acl_string)?) else { return Ok(Step::Done(Value::NIL)) };
+    let mut value = 2u32.to_le_bytes().to_vec();
+    for (tag, perm, id) in entries { value.extend(tag.to_le_bytes().into_iter().chain(perm.to_le_bytes()).chain(id.to_le_bytes())); }
+    let path = super::fileio::file_name_path(cx, absname)?;
+    match host::set_posix_acl(&path, &value) {
+        Ok(()) => Ok(Step::Done(Value::TRUE)),
+        Err(e) if matches!(e.raw_os_error(), Some(libc::EBUSY | libc::EINVAL | libc::ENOSYS | libc::ENOTSUP)) => Ok(Step::Done(Value::NIL)),
+        Err(e) => Err(errno(cx, "Setting ACL", &[absname], e)),
+    }
+}
+
+// Pinned GNU has no libselinux: a context is (nil nil nil nil) and setting
+// one does nothing, once a handler had its chance.
+defsubr! { name = "file-selinux-context", gnu = "fileio.c:3392", effect = Global,
+fn file_selinux_context(cx, filename: Value) -> Step {
+    expanding(cx, filename, context_expanded, vec![])
+}}
+fn context_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    let (_, absname) = match dir_to_file(cx, expanded, context_expanded, saved, 0, false)? { Ok(file) => file, Err(call) => return call };
+    if let Some(call) = handler(cx, absname, "file-selinux-context", vec![absname])? { return call; }
+    let mut context = Value::NIL;
+    for _ in 0..4 { context = cx.cons(Value::NIL, context); }
+    Ok(Step::Done(context))
+}
+
+defsubr! { name = "set-file-selinux-context", gnu = "fileio.c:3446", effect = Global,
+fn set_file_selinux_context(cx, filename: Value, context: Value) -> Step {
+    expanding_in_buffer(cx, filename, set_context_expanded, vec![context])
+}}
+fn set_context_expanded(cx: &mut Leaf<'_>, absname: Value, saved: &[Value]) -> Next {
+    if let Some(call) = handler(cx, absname, "set-file-selinux-context", vec![absname, saved[0]])? { return call; }
+    Ok(Step::Done(Value::NIL))
 }

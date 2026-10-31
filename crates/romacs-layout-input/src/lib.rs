@@ -166,8 +166,47 @@ pub struct WindowSnapshot {
     /// GNU's `w->cursor_off_p': `internal-show-cursor' hid this window's
     /// cursor, as blink-cursor-mode's timer does every other blink.
     pub cursor_off: bool,
+    /// The characters of TEXT shown as stretches, in byte order.
+    pub stretches: Vec<Stretch>,
+    /// `display-line-numbers': what starts each row.
+    pub line_numbers: Option<LineNumbers>,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off, stretches, line_numbers });
+
+/// GNU's line numbers (xdisp.c maybe_produce_line_number): every row
+/// starts with the label of the line starting at its byte, in FACE
+/// (CURRENT for point's line), else as many blanks as its line's label
+/// has glyphs (COLUMNS before any label); a TAB stop and `:align-to'
+/// count from after them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LineNumbers {
+    pub columns: u32,
+    pub face: FaceHandle,
+    pub current: FaceHandle,
+    /// (byte of a line start in the text, its label, whether point's line).
+    pub labels: Vec<(usize, String, bool)>,
+}
+romacs_snapshot::snapshot_struct!(LineNumbers { columns, face, current, labels });
+
+/// A `(space ...)' display specification the host lays out in place of
+/// the character of a window's text at BYTE (a placeholder space in the
+/// stretch's face, which gives its height and background).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stretch {
+    pub byte: usize,
+    pub width: StretchWidth,
+}
+romacs_snapshot::snapshot_struct!(Stretch { byte, width });
+
+/// A stretch's width before it depends on where it is laid out, in pixels
+/// (GNU's produce_stretch_glyph): `:width', which may be zero when ZERO_OK,
+/// or `:align-to' TARGET pixels from the text area's left edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StretchWidth { Width { width: i64, zero_ok: bool }, AlignTo(i64) }
+romacs_snapshot::snapshot_enum!(StretchWidth {
+    StretchWidth::Width { width, zero_ok } => (width, zero_ok),
+    StretchWidth::AlignTo(target) => (target),
+});
 
 /// What laying a window out established about the text it published, in
 /// byte offsets into that text: where its last displayed row ends (GNU's
@@ -214,10 +253,10 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _ } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _, stretches, line_numbers } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.tab_width)
-            && *wrap == other.wrap && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces
+            && *wrap == other.wrap && *stretches == other.stretches && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces
     }
 }
 
@@ -231,6 +270,25 @@ pub fn tab_advance(x: f64, space: f64, tab_width: u32) -> f64 {
     let mut next = ((x + tab) / tab).floor() * tab;
     if next - x < space { next += tab; }
     next - x
+}
+
+/// The pixels a stretch of WIDTH at X on its row takes (GNU xdisp.c
+/// `produce_stretch_glyph` on a window-system frame), LINE_X being X
+/// counted from the start of the line, as `:align-to' measures. A width
+/// that is not positive is one pixel unless ZERO_OK; on a row that
+/// continues (LAST_VISIBLE_X given), a stretch that would pass its last
+/// visible x ends a pixel before it, so it never continues the row. The
+/// answer is a single glyph's when positive, and none otherwise.
+pub fn stretch_advance(width: StretchWidth, x: f64, line_x: f64, last_visible_x: Option<f64>) -> f64 {
+    let (mut width, zero_ok) = match width {
+        StretchWidth::Width { width, zero_ok } => (width as f64, zero_ok),
+        StretchWidth::AlignTo(target) => ((target as f64 - line_x).max(0.0), true),
+    };
+    if width <= 0.0 && (width < 0.0 || !zero_ok) { width = 1.0; }
+    if let Some(last) = last_visible_x && width > 0.0 && x + width > last {
+        width = last - x - 1.0;
+    }
+    width
 }
 
 /// One window's display input for a measurement: what the host would lay
@@ -257,7 +315,7 @@ pub struct Measured {
 
 #[cfg(test)]
 mod tests {
-    use super::tab_advance;
+    use super::{stretch_advance, tab_advance, StretchWidth};
 
     /// GNU's stops: the next multiple of TAB_WIDTH spaces, or the one
     /// after when that is less than a space away.
@@ -269,5 +327,23 @@ mod tests {
         assert_eq!(tab_advance(70.0, 10.0, 8), 10.0);
         assert_eq!(tab_advance(80.0, 10.0, 8), 80.0);
         assert_eq!(tab_advance(3.0, 7.0, 1), 11.0);
+    }
+
+    /// GNU's stretch widths: `:width' as given, at least a pixel unless
+    /// zero is allowed; `:align-to' to its target from the line's start,
+    /// never negative; on a continued row, a pixel short of the last
+    /// visible x.
+    #[test]
+    fn stretch_advance_is_produce_stretch_glyphs() {
+        let width = |width, zero_ok| StretchWidth::Width { width, zero_ok };
+        assert_eq!(stretch_advance(width(20, true), 10.0, 10.0, None), 20.0);
+        assert_eq!(stretch_advance(width(0, true), 10.0, 10.0, None), 0.0);
+        assert_eq!(stretch_advance(width(0, false), 10.0, 10.0, None), 1.0);
+        assert_eq!(stretch_advance(width(-3, true), 10.0, 10.0, None), 1.0);
+        assert_eq!(stretch_advance(StretchWidth::AlignTo(50), 10.0, 30.0, None), 20.0);
+        assert_eq!(stretch_advance(StretchWidth::AlignTo(20), 10.0, 30.0, None), 0.0);
+        assert_eq!(stretch_advance(width(500, true), 10.0, 10.0, Some(100.0)), 89.0);
+        assert_eq!(stretch_advance(width(500, true), 10.0, 10.0, None), 500.0);
+        assert_eq!(stretch_advance(StretchWidth::AlignTo(500), 0.0, 0.0, Some(100.0)), 99.0);
     }
 }

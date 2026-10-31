@@ -53,6 +53,83 @@ struct ShownText {
     table: std::rc::Rc<FaceTable>,
     /// The merged face rows FACES gained, by `face' value.
     merged: std::collections::HashMap<u64, FaceHandle>,
+    /// Where TEXT is the display elements of the buffer (`display'
+    /// strings and spaces, overlay strings, invisible text left out), not
+    /// its characters: which buffer bytes its bytes show, and its stretches.
+    /// BASE is then 0 and the segments hold buffer bytes.
+    segments: Option<Vec<mini_window::Segment>>,
+    stretches: Vec<romacs_layout_input::Stretch>,
+    line_numbers: Option<romacs_layout_input::LineNumbers>,
+}
+
+/// The labels LABELS gives the lines starting at STARTS, (display byte,
+/// buffer byte) in TEXT, whose accessible part starts at BEGV; none for
+/// the empty line at the end of a text of LEN bytes reaching ZV.
+fn line_numbers(table: &FaceTable, text: &str, begv: usize, labels: &crate::prim::LineLabels, starts: Vec<(usize, usize)>, len: usize, at_zv: bool)
+    -> romacs_layout_input::LineNumbers {
+    let face = table.handle("line-number").unwrap_or(FaceHandle(0));
+    let current = table.handle("line-number-current-line").unwrap_or(face);
+    let (mut from, mut line) = (begv, 0i64);
+    let mut out = vec![];
+    for (display, buffer) in starts {
+        if display == len && at_zv { break; }
+        line += text.as_bytes()[from.min(buffer)..buffer].iter().filter(|&&c| c == b'\n').count() as i64;
+        from = from.max(buffer);
+        out.push((display, labels.label(line), line == labels.point_line));
+    }
+    romacs_layout_input::LineNumbers { columns: (labels.width + 2) as u32, face, current, labels: out }
+}
+
+/// What a window's display elements read for their faces: its buffer,
+/// the overlays there with a `face' that apply to it, in increasing
+/// priority, and the buffer face's layers and realized face from byte
+/// RUN.0 to RUN.1; with the faces realized for them.
+struct ElementFaces {
+    buffer: Value,
+    face: Value,
+    overlays: Vec<(std::ops::Range<usize>, Value)>,
+    /// The text whose property runs bound RUN.
+    end: usize,
+    run: (usize, usize, FaceHandle, Vec<Value>),
+    /// No `char-property-alias-alist' entry or `default-text-properties'
+    /// can give text a face.
+    plain: bool,
+    /// The last element's position and byte.
+    cursor: (i64, usize),
+    merged: std::collections::HashMap<u64, FaceHandle>,
+    layered: std::collections::HashMap<Vec<u64>, FaceHandle>,
+}
+
+impl ElementFaces {
+    /// For WINDOW's BUFFER over the bytes SPAN.
+    fn new(vm: &mut Vm, window: Value, buffer: Value, span: std::ops::Range<usize>) -> Result<Self> {
+        let face = vm.display_symbol("face");
+        let end = span.end;
+        let mut covering = vec![];
+        if span.start < span.end {
+            vm.visit_overlays_in(buffer, ByteOffset(span.start)..ByteOffset(span.end), |overlay, range| covering.push((overlay, range)))?;
+        }
+        let mut overlays = vec![];
+        for (overlay, range) in covering {
+            let value = vm.overlay_get(overlay, face)?;
+            if value != Value::NIL && range.start < range.end && vm.overlay_applies_to(overlay, window) {
+                overlays.push((vm.overlay_order_key(overlay), range.start.0..range.end.0, value));
+            }
+        }
+        overlays.sort_by_key(|o| o.0);
+        let aliases = vm.list_values(vm.annotation_variable("char-property-alias-alist"))?;
+        let plain = vm.annotation_variable("default-text-properties") == Value::NIL
+            && !aliases.into_iter().any(|entry| vm.cons_pair(entry).is_ok_and(|(key, _)| key == face));
+        Ok(ElementFaces { buffer, face, overlays: overlays.into_iter().map(|(_, range, value)| (range, value)).collect(), end,
+            run: (0, 0, FaceHandle(0), vec![]), plain, cursor: (0, 0), merged: Default::default(), layered: Default::default() })
+    }
+}
+
+impl ShownText {
+    /// The buffer byte TEXT's byte DISPLAY shows.
+    fn buffer_byte(&self, display: usize) -> usize {
+        self.segments.as_deref().map_or(self.base + display, |s| shown_byte(s, display))
+    }
 }
 
 pub(super) struct DisplayState {
@@ -174,8 +251,9 @@ impl DisplayState {
     /// Window END.id's last publication was painted as END reports.
     pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd) {
         let base = self.base(end.id);
+        let segments = self.segments.get(&end.id).cloned();
         if let Some(shown) = self.shown.get_mut(&end.id) && !shown.mini {
-            shown.laid = Some((shown.key.clone(), laid(end, base, shown.len, shown.at_zv)));
+            shown.laid = Some((shown.key.clone(), laid(end, base, shown.len, shown.at_zv, segments.as_deref())));
         }
     }
     pub fn new() -> Self {
@@ -237,11 +315,12 @@ impl DisplayState {
 }
 /// The buffer-local variables a window's text, faces, start or mode line
 /// read, besides its buffer's text and the window itself.
-const DISPLAY_VARIABLES: [&str; 17] = [
+const DISPLAY_VARIABLES: [&str; 20] = [
     "mode-line-format", "header-line-format", "truncate-lines", "word-wrap", "tab-width",
     "truncate-partial-width-windows", "mark-active", "transient-mark-mode", "line-spacing",
     "buffer-invisibility-spec", "selective-display", "scroll-margin", "face-remapping-alist",
     "cursor-type", "show-trailing-whitespace", "buffer-display-table", "fontification-functions",
+    "display-line-numbers", "display-line-numbers-width", "display-line-numbers-current-absolute",
 ];
 const MARK_ACTIVE: usize = 6;
 const TRANSIENT_MARK_MODE: usize = 7;
@@ -419,6 +498,12 @@ impl Vm {
     pub fn display_default_face(&self) -> Result<Face> {
         self.snapshot_face("default")
     }
+    /// The face NAME as painting realizes it: one the theme does not hold
+    /// paints in the default face (`painted_face').
+    pub(crate) fn display_face(&self, name: &str) -> Result<Face> {
+        let known = self.display_state.theme().realize(name).is_some();
+        self.snapshot_face(if known { name } else { "default" })
+    }
 
     /// Commit scalar display mutations only after the frozen frame has painted.
     pub fn display_apply_journal(&mut self) -> bool {
@@ -495,7 +580,7 @@ impl Vm {
             DisplayDefineFace => n == 2,
             SelectedFrame => n == 0,
             WindowVscroll => n <= 2,
-            SetWindowVscroll => n == 3,
+            SetWindowVscroll => (2..=4).contains(&n),
             DisplayError => n >= 1,
             _ => n <= 1,
         };
@@ -538,19 +623,28 @@ impl Vm {
         }
         match p {
             SelectedFrame => Ok(identity),
+            // window.c Fwindow_vscroll: pixels, else canonical lines,
+            // a float when not whole.
             WindowVscroll => {
-                if n != 2 || self.stack[start + 1] == Value::NIL {
-                    return Err("VM2 window-vscroll currently requires pixelwise t".into());
-                }
-                let window = self.decode_window(self.stack[start], true, false)?;
-                Value::integer(self.window(window)?.vscroll_px as i64)
+                let window = self.decode_window(if n > 0 { self.stack[start] } else { Value::NIL }, true, false)?;
+                let pixels = n > 1 && self.stack[start + 1] != Value::NIL;
+                self.window_vscroll(window, pixels)
             }
+            // Fset_window_vscroll: VSCROLL lines of the frame's height, or
+            // pixels, truncated, never negative; the value is the vscroll.
             SetWindowVscroll => {
-                if self.stack[start + 2] == Value::NIL {
-                    return Err("VM2 set-window-vscroll currently requires pixelwise t".into());
-                }
-                let next = u32::try_from(self.stack[start + 1].as_integer()?)
-                    .map_err(|_| "nonnegative pixel vscroll required")?;
+                let value = self.stack[start + 1];
+                let amount = match (value.integer_value(), self.object_if(value)) {
+                    (Some(i), _) => i as f64,
+                    (None, Some(Object::Float(f))) => *f,
+                    _ => {
+                        let predicate = self.intern("numberp");
+                        return Err(self.signal_error("wrong-type-argument", &[predicate, value], "Wrong type argument: numberp".into()));
+                    }
+                };
+                let pixels = n > 2 && self.stack[start + 2] != Value::NIL;
+                let line = f64::from(self.window_state.line.max(1));
+                let next = (if pixels { amount } else { line * amount }).trunc().clamp(0.0, f64::from(u32::MAX)) as u32;
                 let window = self.decode_window(self.stack[start], true, false)?;
                 let building_band = self.display_state.building_band;
                 let (deferred, changed) = {
@@ -576,12 +670,25 @@ impl Vm {
                 if changed {
                     self.display_state.version += 1;
                 }
-                Value::integer(next as i64)
+                self.window_vscroll_of(next, pixels)
             }
             FramePixelWidth => Value::integer(self.display_state.width as i64),
             FramePixelHeight => Value::integer(self.display_state.height as i64),
             _ => Err("unknown display primitive".into()),
         }
+    }
+    /// WINDOW's vertical scroll, as `window-vscroll' answers it.
+    fn window_vscroll(&mut self, window: Value, pixels: bool) -> Result<Value> {
+        // The committed scroll: one set while a band is built applies after.
+        let px = self.window(window)?.vscroll_px;
+        self.window_vscroll_of(px, pixels)
+    }
+    /// PX pixels of vertical scroll, or with PIXELS nil in canonical lines
+    /// (FRAME_CANON_Y_FROM_PIXEL_Y: a float unless whole).
+    fn window_vscroll_of(&mut self, px: u32, pixels: bool) -> Result<Value> {
+        let line = self.window_state.line.max(1);
+        if pixels || px % line == 0 { return Value::integer(i64::from(if pixels { px } else { px / line })); }
+        Ok(self.allocate_object(crate::data::Object::Float(f64::from(px) / f64::from(line))))
     }
     /// Copy the selected window into Seam L. No heap handle or borrowed storage escapes.
     /// `buffer_version` is a conservative VM display revision (also changes on face,
@@ -596,6 +703,11 @@ impl Vm {
     /// the snapshot's byte offsets count from it.
     pub fn published_base(&self, id: u64) -> usize {
         self.display_state.base(id)
+    }
+    /// Read-only: the buffer byte window ID's last published text shows at
+    /// its byte DISPLAY.
+    pub fn published_buffer_byte(&self, id: u64, display: usize) -> usize {
+        self.display_state.segments(id).map_or(self.display_state.base(id) + display, |s| shown_byte(s, display))
     }
     /// Read-only: the display version a renderer uses to decide whether to repaint.
     pub fn display_version(&self) -> u64 {
@@ -695,9 +807,14 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged }
+        let ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, line_numbers }
             = self.window_text(window, height, None)?;
         self.display_state.bases.insert(id, base);
+        match segments {
+            Some(segments) => { self.display_state.segments.insert(id, segments); }
+            None if !mini => { self.display_state.segments.remove(&id); }
+            None => {}
+        }
         // No version bump here: this runs once per WINDOW, and
         // `display_state.width/height` is frame-wide, so each window's own
         // dimensions looked like a frame resize and every `frame_snapshot`
@@ -748,6 +865,8 @@ impl Vm {
             tab_width: self.buffer_tab_width(buffer)?,
             wrap: self.window_line_wrap(window, buffer)?,
             cursor_off: self.window(window)?.cursor_off,
+            stretches,
+            line_numbers,
         };
         let len = snapshot.text.utf8.len();
         let snapshot = self.publish_window(snapshot);
@@ -809,12 +928,12 @@ impl Vm {
         let (mode_line, mode_line_face) = self.painted_band(window, false)?;
         let (header_line, header_line_face) = self.painted_band(window, true)?;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
-        let ShownText { text, start_byte, point_byte, faces, base, at_zv, .. } = self.window_text(window, height, None)?;
+        let ShownText { text, start_byte, point_byte, faces, base, at_zv, segments, stretches, line_numbers, .. } = self.window_text(window, height, None)?;
         let len = text.utf8.len();
         let snapshot = WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: 0, text, mode_line,
-            mode_line_face, header_line, header_line_face, vscroll_px: vscroll, faces, tab_width, wrap, cursor_off: false };
+            mode_line_face, header_line, header_line_face, vscroll_px: vscroll, faces, tab_width, wrap, cursor_off: false, stretches, line_numbers };
         let end = self.lay_out_alone(snapshot)?;
-        let laid = laid(&end, base, len, at_zv);
+        let laid = laid(&end, base, len, at_zv, segments.as_deref());
         if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.laid = Some((key, laid)); }
         Ok(Some(laid))
     }
@@ -832,13 +951,15 @@ impl Vm {
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let zv = b.accessible().end.0;
         let to = b.as_str().as_bytes()[to.min(zv)..zv].iter().position(|&c| c == b'\n').map_or(zv, |i| to + i + 1);
-        let ShownText { text, start_byte, point_byte, faces, base, .. } = self.window_text(window, 0, Some(from..to))?;
+        let shown = self.window_text(window, 0, Some(from..to))?;
         // Taller than all of them: rows of the default face's line or more.
         let height = 1 << 24;
-        let snapshot = WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: 0, text, mode_line: None,
-            mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, faces, tab_width, wrap, cursor_off: false };
+        let snapshot = WindowSnapshot { id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
+            text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
+            vscroll_px: 0, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(),
+            line_numbers: shown.line_numbers.clone() };
         let end = self.lay_out_alone(snapshot)?;
-        Ok(Some(end.rows.iter().map(|row| (base + row.start, row.height)).collect()))
+        Ok(Some(end.rows.iter().map(|row| (shown.buffer_byte(row.start), row.height)).collect()))
     }
     /// What painting SNAPSHOT alone in a frame of its size would report.
     fn lay_out_alone(&mut self, snapshot: WindowSnapshot) -> Result<romacs_layout_input::WindowEnd> {
@@ -884,31 +1005,52 @@ impl Vm {
         let region = self.snapshot_region(window, buffer, point)?;
         let table = self.display_faces()?;
         let floor = self.min_row_height();
-        let Object::Buffer(b) = self.object(buffer)? else {
-            return Err("Unicode display buffer required".into());
+        let (shown, start_byte, start, point_byte, at_zv, rows) = {
+            let Object::Buffer(b) = self.object(buffer)? else {
+                return Err("Unicode display buffer required".into());
+            };
+            let point_byte = b
+                .byte_of_char(crate::coordinates::CharOffset((point - 1) as usize))?
+                .0;
+            let start_byte = match &span { Some(span) => span.start, None => b
+                .byte_of_char(crate::coordinates::CharOffset((start - 1) as usize))?
+                .0 };
+            // The mini-window splices overlay strings into its whole buffer.
+            // Any other window publishes only the bytes its rows can show, so a
+            // frame costs what the window shows, not what its buffer holds.
+            let accessible = b.accessible();
+            let rows = (span.is_none() && !mini).then(|| height.saturating_add(vscroll).div_ceil(floor) as usize);
+            let shown = if let Some(span) = span { span.start.max(accessible.start.0)..span.end.min(accessible.end.0) } else if mini { 0..b.as_str().len() } else {
+                crate::window::shown_bytes(b.as_str(), accessible.start.0..accessible.end.0, start_byte, rows.unwrap_or(0))
+            };
+            let at_zv = shown.end >= accessible.end.0;
+            // The display starts at START_BYTE, SPAN's start when given.
+            let start = b.char_of_byte(ByteOffset(start_byte.clamp(accessible.start.0, accessible.end.0)))?.0 as i64 + 1;
+            (shown, start_byte, start, point_byte, at_zv, rows)
         };
-        let point_byte = b
-            .byte_of_char(crate::coordinates::CharOffset((point - 1) as usize))?
-            .0;
-        let start_byte = match &span { Some(span) => span.start, None => b
-            .byte_of_char(crate::coordinates::CharOffset((start - 1) as usize))?
-            .0 };
-        // The mini-window splices overlay strings into its whole buffer.
-        // Any other window publishes only the bytes its rows can show, so a
-        // frame costs what the window shows, not what its buffer holds.
-        let accessible = b.accessible();
-        let shown = if let Some(span) = span { span.start.max(accessible.start.0)..span.end.min(accessible.end.0) } else if mini { 0..b.as_str().len() } else {
-            let rows = height.saturating_add(vscroll).div_ceil(floor) as usize;
-            crate::window::shown_bytes(b.as_str(), accessible.start.0..accessible.end.0, start_byte, rows)
+        // Where the window shows more than its buffer's characters, it
+        // publishes the elements GNU's iterator delivers; where the iterator
+        // refuses them, the characters.
+        let (mut shown, mut at_zv) = (shown, at_zv);
+        let elements = if mini || !self.shows_elements(window, buffer, shown.clone())? { None } else {
+            let mut lines = rows.unwrap_or(0);
+            loop {
+                let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+                let pos = |byte: usize| b.char_of_byte(ByteOffset(byte)).map(|c| c.0 as i64 + 1);
+                let (from, to) = (pos(shown.start)?, pos(shown.end)?);
+                let Ok(elements) = crate::prim::window_shown_elements(self, window, from, to) else { break None };
+                // Hidden and replaced newlines end no row: publish lines
+                // until as many show as the window has rows.
+                let Some(rows) = rows.filter(|&rows| !at_zv && elements.iter().filter(|e| e.c == '\n').count() < rows) else { break Some(elements) };
+                lines *= 2;
+                let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+                let accessible = b.accessible();
+                shown = crate::window::shown_bytes(b.as_str(), accessible.start.0..accessible.end.0, start_byte, rows + lines);
+                at_zv = shown.end >= accessible.end.0;
+            }
         };
-        let base = shown.start;
-        let at_zv = shown.end >= accessible.end.0;
-        let utf8 = b.as_str()[shown.clone()].to_owned();
-        // The raw bytes shown, as offsets into the published text.
-        let raw: Vec<u32> = b.raw_in(shown.clone()).iter().map(|&p| p - base as u32).collect();
-        let start_byte = start_byte.clamp(shown.start, shown.end) - base;
-        // Point outside the published bytes is not shown: no glyph is at it.
-        let point_byte = point_byte.checked_sub(base).filter(|&p| p <= utf8.len()).unwrap_or(utf8.len());
+        let labels = if mini { None } else { crate::prim::window_line_numbers(self, window).ok().flatten() };
+        let mut sources = ElementFaces::new(self, window, buffer, shown.clone())?;
         let mut faces = table.faces.clone();
         let terminal = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer);
         if let Some(binding) = terminal {
@@ -916,30 +1058,20 @@ impl Vm {
             if let Some(color) = binding.default_colors[1] { faces[0].background = color; }
         }
         let default = faces[0].clone();
-        let mut merged = std::collections::HashMap::new();
         let styles = terminal.map_or(&[][..], |binding| binding.styles.as_ref());
         let mut terminal_faces = std::collections::HashMap::new();
         let mut region_faces = std::collections::HashMap::new();
         let region_background = table.handle("region").map(|i| faces[i.0 as usize].background);
         // A control character other than TAB and newline shows as an escape.
         let escape = table.handle("escape-glyph");
-        let mut face_runs: Vec<FaceRun> = vec![];
-        // Resolve `face` once per run of one value, not per character.
-        let mut named = (0, FaceHandle(0));
-        let mut style_index = styles.partition_point(|run| run.bytes.end <= base);
-        for (offset, ch) in utf8.char_indices() {
-            // AT is the buffer byte; face runs are over the published bytes.
-            let at = base + offset;
-            if at >= named.0 {
-                let value = b
-                    .properties
-                    .get_property(ByteOffset(at), "face")
-                    .unwrap_or(Value::NIL);
-                let end = b.properties.next_single_change(ByteOffset(at), "face", ByteOffset(shown.end)).0;
-                named = (end, self.face_handle(&table, &mut faces, &mut merged, value));
-            }
-            let mut face = named.1;
-            if ((ch.is_control() && ch != '\n' && ch != '\t') || raw.binary_search(&(offset as u32)).is_ok()) && let Some(escape) = escape { face = escape; }
+        let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+        let mut style_index = styles.partition_point(|run| run.bytes.end <= shown.start);
+        // The face the buffer's character CH at byte AT shows in.
+        let mut buffer_face = |vm: &Self, faces: &mut Vec<Face>, sources: &mut ElementFaces, at: usize, ch: char| -> Result<FaceHandle> {
+            // Within the last run of one face, that face.
+            let mut face = if (sources.run.0..sources.run.1).contains(&at) { sources.run.2 }
+                else { vm.element_face(&table, faces, sources, crate::prim::FaceKey::Buffer(0), Some(at))? };
+            if ((ch.is_control() && ch != '\n' && ch != '\t') || b.is_raw_at(at)) && let Some(escape) = escape { face = escape; }
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
@@ -950,29 +1082,157 @@ impl Vm {
                     handle
                 });
             }
-            if region.as_ref().is_some_and(|range| range.contains(&at)) {
-                if let Some(background) = region_background {
-                    face = *region_faces.entry(face.0).or_insert_with(|| {
-                        let mut selected = faces[face.0 as usize].clone();
-                        selected.background = background;
-                        let handle = FaceHandle(faces.len() as u32);
-                        faces.push(selected);
-                        handle
-                    });
+            if region.as_ref().is_some_and(|range| range.contains(&at)) && let Some(background) = region_background {
+                face = *region_faces.entry(face.0).or_insert_with(|| {
+                    let mut selected = faces[face.0 as usize].clone();
+                    selected.background = background;
+                    let handle = FaceHandle(faces.len() as u32);
+                    faces.push(selected);
+                    handle
+                });
+            }
+            Ok(face)
+        };
+        let mut utf8 = String::new();
+        let mut face_runs: Vec<FaceRun> = vec![];
+        let push = |utf8: &mut String, face_runs: &mut Vec<FaceRun>, ch: char, face: FaceHandle| {
+            let offset = utf8.len();
+            utf8.push(ch);
+            match face_runs.last_mut() {
+                Some(last) if last.face == face => last.bytes.end = utf8.len(),
+                _ => face_runs.push(FaceRun { bytes: offset..utf8.len(), face }),
+            }
+        };
+        let Some(elements) = elements else {
+            let base = shown.start;
+            utf8.push_str(&b.as_str()[shown.clone()]);
+            // The raw bytes shown, as offsets into the published text; an
+            // element path publishes a raw byte as its escape's characters.
+            let raw: Vec<u32> = b.raw_in(shown.clone()).iter().map(|&p| p - base as u32).collect();
+            // Without a region or terminal styles, a face holds through its
+            // property run but on an escaped control character.
+            let plain = region.is_none() && styles.is_empty();
+            let mut run = (base, FaceHandle(0));
+            for (offset, ch) in utf8.char_indices() {
+                let at = base + offset;
+                let escaped = (ch.is_control() && ch != '\n' && ch != '\t') || b.is_raw_at(at);
+                let face = if plain && at < run.0 && !escaped { run.1 } else {
+                    let face = buffer_face(self, &mut faces, &mut sources, at, ch)?;
+                    if plain && !escaped { run = (sources.run.1, face); }
+                    face
+                };
+                let end = offset + ch.len_utf8();
+                match face_runs.last_mut() {
+                    Some(last) if last.face == face => last.bytes.end = end,
+                    _ => face_runs.push(FaceRun { bytes: offset..end, face }),
                 }
             }
-            if let Some(last) = face_runs.last_mut()
-                && last.face == face
-            {
-                last.bytes.end = offset + ch.len_utf8()
+            let start_byte = start_byte.clamp(shown.start, shown.end) - base;
+            // Point outside the published bytes is not shown: no glyph is at it.
+            let point_byte = point_byte.checked_sub(base).filter(|&p| p <= utf8.len()).unwrap_or(utf8.len());
+            let merged = sources.merged;
+            let line_numbers = labels.map(|labels| {
+                let starts = std::iter::once(0).chain(utf8.match_indices('\n').map(|(at, _)| at + 1)).map(|at| (at, base + at)).collect();
+                line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
+            });
+            return Ok(ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
+                segments: None, stretches: vec![], line_numbers });
+        };
+        // Each element's character, its face, and the buffer byte it shows:
+        // its own for the buffer's character, its position's for the rest.
+        let mut segments: Vec<mini_window::Segment> = vec![];
+        let mut stretches = vec![];
+        let mut relative = vec![];
+        let (mut start_at, mut point_at, mut cursor_at) = (None, None, None);
+        // The display bytes rows of a new buffer line start at, and the
+        // buffer bytes their first elements show, past any text hidden.
+        let (mut starts, mut pending) = (vec![], Some(0));
+        for e in &elements {
+            let at = b.byte_of_char(crate::coordinates::CharOffset((e.charpos - 1).max(0) as usize))?.0;
+            if let Some(display) = pending.take() { starts.push((display, at)); }
+            let display = utf8.len();
+            let own = e.kind == crate::prim::ShownKind::Buffer;
+            let face = if own { buffer_face(self, &mut faces, &mut sources, at, e.c)? } else {
+                let face = self.element_face(&table, &mut faces, &mut sources, e.face, None)?;
+                if e.c.is_control() && e.c != '\n' && e.c != '\t' && let Some(escape) = escape { escape } else { face }
+            };
+            if let crate::prim::ShownKind::Stretch(width) = e.kind { stretches.push(romacs_layout_input::Stretch { byte: display, width }); }
+            // A relative space's width waits for the host's glyph of C.
+            if let crate::prim::ShownKind::Relative { factor, c } = e.kind {
+                relative.push((display, face, c, factor));
+                push(&mut utf8, &mut face_runs, ' ', face);
             } else {
-                face_runs.push(FaceRun {
-                    bytes: offset..offset + ch.len_utf8(),
-                    face,
-                })
+                push(&mut utf8, &mut face_runs, e.c, face);
             }
+            let len = utf8.len() - display;
+            match segments.last_mut() {
+                Some(s) if !s.string && own && s.buffer + s.len == at && s.display + s.len == display => s.len += len,
+                Some(s) if s.string && !own && s.buffer == at && s.display + s.len == display => s.len += len,
+                _ => segments.push(mini_window::Segment { display, buffer: at, len, string: !own }),
+            }
+            // The display starts with the first element at its start; point
+            // shows on a string asking for it there, else on the first buffer
+            // character or replacing element at or after it.
+            if start_at.is_none() && e.charpos >= start { start_at = Some(display); }
+            if point_at.is_none() && e.charpos >= point && e.replaces { point_at = Some(display); }
+            if cursor_at.is_none() && e.charpos == point && matches!(e.kind, crate::prim::ShownKind::Other { cursor: true, .. }) { cursor_at = Some(display); }
+            if own && e.c == '\n' { pending = Some(utf8.len()); }
         }
-        Ok(ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table, merged })
+        if let Some(display) = pending { starts.push((display, shown.end)); }
+        // Past the last element: the end of the text published.
+        segments.push(mini_window::Segment { display: utf8.len(), buffer: shown.end, len: 1, string: false });
+        let len = utf8.len();
+        let merged = sources.merged;
+        let line_numbers = labels.map(|labels| line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, len, at_zv));
+        // produce_stretch_glyph: FACTOR times the glyph's pixel width.
+        for (byte, face, c, factor) in relative {
+            let input = romacs_layout_input::MeasureInput {
+                font_selection: self.display_state.font_selection_order,
+                font_alternatives: self.font_alternative_state()?,
+                faces: faces.clone(),
+                text: TextSlice { utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }], raw: vec![] },
+            };
+            let advance = if self.has_layout_host() { self.host_layout(&input)?.glyphs[0].0 } else { self.window_state.column };
+            let width = romacs_layout_input::StretchWidth::Width { width: (factor * f64::from(advance)) as i64, zero_ok: false };
+            let at = stretches.partition_point(|s: &romacs_layout_input::Stretch| s.byte < byte);
+            stretches.insert(at, romacs_layout_input::Stretch { byte, width });
+        }
+        Ok(ShownText { text: TextSlice { utf8, face_runs, raw: vec![] }, start_byte: start_at.unwrap_or(len), point_byte: cursor_at.or(point_at).unwrap_or(len),
+            faces, base: 0, at_zv, table: table.clone(), merged, segments: Some(segments), stretches, line_numbers })
+    }
+    /// Whether WINDOW shows BUFFER's bytes SHOWN as more than its
+    /// characters: text there has a `display' or `invisible' property, maybe
+    /// through a category or an alias, or an overlay there has one, or a
+    /// string to show.
+    fn shows_elements(&mut self, window: Value, buffer: Value, shown: std::ops::Range<usize>) -> Result<bool> {
+        let display = [self.display_symbol("display"), self.display_symbol("invisible")];
+        let keys = ["display", "invisible", "before-string", "after-string"].map(|n| self.display_symbol(n));
+        let Object::Buffer(b) = self.object(buffer)? else { return Ok(false) };
+        let (at, end) = (ByteOffset(shown.start), ByteOffset(shown.end));
+        // An overlay ending at the start shows its after-string there, one
+        // starting at the end its before-string: the characters around.
+        let text = b.as_str();
+        let mut low = shown.start.saturating_sub(1);
+        while !text.is_char_boundary(low) { low -= 1; }
+        let high = text[shown.end..].chars().next().map_or(shown.end, |c| shown.end + c.len_utf8());
+        let around = ByteOffset(low)..ByteOffset(high);
+        for name in ["display", "invisible", "category"] {
+            if b.properties.is_empty() { break; }
+            if b.properties.get_property(at, name).is_some() || b.properties.next_single_change(at, name, end) < end { return Ok(true); }
+        }
+        let aliases = self.list_values(self.annotation_variable("char-property-alias-alist"))?;
+        for entry in aliases {
+            if self.cons_pair(entry).is_ok_and(|(key, _)| display.contains(&key)) { return Ok(true); }
+        }
+        if self.annotation_variable("default-text-properties") != Value::NIL { return Ok(true); }
+        let mut found = false;
+        let mut overlays = vec![];
+        self.visit_overlays_in(buffer, around, |overlay, _| overlays.push(overlay))?;
+        for overlay in overlays {
+            if !self.overlay_applies_to(overlay, window) { continue; }
+            for key in keys { found |= self.overlay_get(overlay, key)? != Value::NIL; }
+        }
+        Ok(found)
     }
     /// Record SNAPSHOT as its window's last publication.
     fn publish_window(&mut self, mut snapshot: WindowSnapshot) -> WindowSnapshot {
@@ -1073,7 +1333,9 @@ impl Vm {
         if point != shown_point {
             let region = key.variables[MARK_ACTIVE] != Value::NIL && key.variables[TRANSIENT_MARK_MODE] != Value::NIL;
             let margin = key.variables[SCROLL_MARGIN].integer_value().is_some_and(|m| m > 0);
-            if region || margin {
+            // Display elements place the cursor, and line numbers count, by
+            // what they show there.
+            if region || margin || self.display_state.segments(id).is_some() || snapshot.line_numbers.is_some() {
                 return Ok(None);
             }
             // Point's row must be one the last paint showed whole.
@@ -1221,7 +1483,7 @@ impl Vm {
         // by character position if Lisp changed its text. As in GNU's restore,
         // a saved point beyond the new ZV falls back to the buffer's true end.
         let buffer = self.slots[buffer_slot].value;
-        let Object::Buffer(b) = &mut self.objects[buffer.index(0)? - 1] else {
+        let Object::Buffer(b) = self.object_mut(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
         let accessible = b.accessible();
@@ -1424,7 +1686,7 @@ impl Vm {
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
         let buffer = self.slots[buffer_slot].value;
         // `buffer-name', not a search of every symbol for its registry slot.
-        let buffer_name = crate::buffer::buffer_name_shown(self.buffer_state(buffer)?.name.as_deref().unwrap_or_default()).into_owned();
+        let buffer_name = self.buffer_state(buffer)?.name.clone().unwrap_or_default();
         let window = self.slots[root].value;
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1) as usize;
         let point = self.window_point_value(window)?.as_integer()? as usize;
@@ -1462,12 +1724,11 @@ impl Vm {
         let line_start = text[begv_byte..point_byte].rfind('\n').map_or(begv_byte, |n| begv_byte + n + 1);
         // GNU current_column: tab stops, ^X control characters, wide characters.
         let mut column = 0;
-        for (offset, c) in text[line_start..point_byte].char_indices() {
+        for c in text[line_start..point_byte].chars() {
             column += match c {
                 '\t' => tab_width - column % tab_width,
                 '\u{0}'..='\u{1f}' | '\u{7f}' => if ctl_arrow { 2 } else { 4 },
                 '\u{80}'..='\u{9f}' => 4,
-                _ if b.is_raw_at(line_start + offset) => 4,
                 _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(0),
             };
         }
@@ -1522,58 +1783,32 @@ impl Vm {
         self.display_state.face_table = Some(table.clone());
         Ok(table)
     }
-    /// The face a snapshot paints a character whose `face' property is
-    /// VALUE with: a symbol, or a list's first element, by name in NAMES,
-    /// else the default. The second value says whether that is the whole
-    /// of VALUE: nil, a symbol or a one-element list of one.
-    fn painted_face(&self, table: &FaceTable, value: Value) -> Result<(FaceHandle, bool)> {
-        let (resolved, whole) = if value.tag() == 3 {
-            let (head, tail) = self.cons_pair(value)?;
-            (head, tail == Value::NIL)
-        } else {
-            (value, true)
-        };
-        let graph = Graph(self);
-        let (name, symbol) = match graph.view(resolved.0) {
-            _ if resolved == Value::NIL => ("default", true),
-            NodeView::Symbol(s) => (s, true),
-            _ => ("default", false),
-        };
-        Ok((table.handle(name).unwrap_or(FaceHandle(0)), whole && symbol))
-    }
-    /// The host geometry of the characters at BYTES of the current
-    /// buffer, each in the face a snapshot paints it with (VM2-WTPS1),
-    /// with whether the host paints it so: not for a control character
-    /// other than newline, nor when its `face' is other than nil, a symbol
-    /// or a one-element list of one, it has `font-lock-face', or an
-    /// overlay's `face' covers it.
-    pub(crate) fn host_measure_buffer(&mut self, bytes: std::ops::Range<usize>) -> Result<(romacs_layout_input::Measured, Vec<bool>)> {
+    /// The host geometry of display elements of WINDOW's buffer, current:
+    /// each element's character in the face a snapshot paints it with
+    /// (VM2-WTPS1).
+    pub(crate) fn host_measure_elements(&mut self, window: Value, shown: &[(char, crate::prim::FaceKey)]) -> Result<romacs_layout_input::Measured> {
         let table = self.display_faces()?;
         let buffer = self.slots[self.buffer_slot].value;
-        let mut covered = vec![];
-        self.visit_overlays_in(buffer, ByteOffset(bytes.start)..ByteOffset(bytes.end), |overlay, range| covered.push((overlay, range)))?;
-        let face = self.intern("face");
-        let mut faced = vec![];
-        for (overlay, range) in covered {
-            if self.overlay_get(overlay, face)? != Value::NIL { faced.push(range); }
-        }
-        let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
-        let original = b.as_str().get(bytes.clone()).ok_or("measured range is not text")?;
-        let mut text = String::with_capacity(original.len());
+        let span = match self.object(buffer)? {
+            Object::Buffer(b) => {
+                let byte = |pos: i64| b.byte_of_char(crate::coordinates::CharOffset((pos - 1).max(0) as usize)).map(|b| b.0);
+                let charpos = |key: &crate::prim::FaceKey| match *key { crate::prim::FaceKey::Buffer(p) | crate::prim::FaceKey::String { charpos: p, .. } | crate::prim::FaceKey::Glyph { charpos: p, .. } => p };
+                let (low, high) = shown.iter().map(|(_, key)| charpos(key)).fold((i64::MAX, 0), |(l, h), p| (l.min(p), h.max(p)));
+                byte(low.min(high))?..byte(high + 1).unwrap_or(b.accessible().end.0).min(b.accessible().end.0)
+            }
+            _ => return Err("Unicode display buffer required".into()),
+        };
+        let mut sources = ElementFaces::new(self, window, buffer, span)?;
+        let mut faces = table.faces.clone();
+        let escape = table.handle("escape-glyph");
+        let mut text = String::with_capacity(shown.len());
         let mut face_runs: Vec<FaceRun> = vec![];
-        let mut exact = vec![];
-        for (at, ch) in original.char_indices() {
-            let byte = ByteOffset(bytes.start + at);
-            let value = b.properties.get_property(byte, "face").unwrap_or(Value::NIL);
-            let (face, whole) = self.painted_face(&table, value)?;
-            // The host paints a control character other than newline and
-            // TAB as an escape; a space stands in for one, inexact, and the
-            // iterator refuses it anyway.
-            let control = ch.is_control() && ch != '\n' && ch != '\t';
-            exact.push(!control && whole && b.properties.get_property(byte, "font-lock-face").is_none_or(|v| v == Value::NIL)
-                && !faced.iter().any(|range| range.contains(&byte)));
+        for &(c, key) in shown {
+            let mut face = self.element_face(&table, &mut faces, &mut sources, key, None)?;
+            // As painting does, a control character shows as its escape.
+            if c.is_control() && c != '\n' && c != '\t' && let Some(escape) = escape { face = escape; }
             let start = text.len();
-            text.push(if control { ' ' } else { ch });
+            text.push(c);
             match face_runs.last_mut() {
                 Some(last) if last.face == face => last.bytes.end = text.len(),
                 _ => face_runs.push(FaceRun { bytes: start..text.len(), face }),
@@ -1582,14 +1817,104 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
-            faces: table.faces.clone(),
+            faces,
             text: TextSlice { utf8: text, face_runs, raw: vec![] },
         };
-        Ok((self.host_layout(&input)?, exact))
+        self.host_layout(&input)
+    }
+    /// The face a display element shows in: KEY's, or at buffer byte AT
+    /// when given (GNU face_at_buffer_position: the text's `face' under
+    /// the faces of the overlays there, the higher priority first; and
+    /// face_at_string_position: a string's `face' over that, or for an
+    /// overlay's string over the text's alone, face_for_overlay_string).
+    fn element_face(&self, table: &FaceTable, faces: &mut Vec<Face>, sources: &mut ElementFaces,
+                    key: crate::prim::FaceKey, at: Option<usize>) -> Result<FaceHandle> {
+        let (string, charpos, glyph) = match key {
+            crate::prim::FaceKey::Buffer(charpos) => (None, charpos, Value::NIL),
+            crate::prim::FaceKey::String { string, strpos, charpos, overlay } => (Some((string, strpos, overlay)), charpos, Value::NIL),
+            crate::prim::FaceKey::Glyph { face, charpos } => (None, charpos, face),
+        };
+        let at = match at {
+            Some(at) => at,
+            None => match self.object(sources.buffer)? {
+                Object::Buffer(b) => {
+                    // Elements come in order: step from the last one's byte.
+                    let (pos, byte) = sources.cursor;
+                    let at = if pos > 0 && (pos..pos + 64).contains(&charpos) {
+                        b.as_str()[byte..].char_indices().nth((charpos - pos) as usize).map_or(b.as_str().len(), |(i, _)| byte + i)
+                    } else {
+                        b.byte_of_char(crate::coordinates::CharOffset((charpos - 1).max(0) as usize))?.0
+                    };
+                    sources.cursor = (charpos, at);
+                    at
+                }
+                _ => return Err("Unicode display buffer required".into()),
+            },
+        };
+        if !(sources.run.0..sources.run.1).contains(&at) {
+            let mut layers: Vec<Value> = sources.overlays.iter().rev().filter(|(range, _)| range.contains(&at)).map(|&(_, face)| face).collect();
+            // The text's own face last, nil past the text; the mini-window
+            // shows text outside a narrowing too.
+            let text_face = match self.object(sources.buffer)? {
+                Object::Buffer(_) if at >= sources.end => Value::NIL,
+                // The property itself, where nothing could stand in for it.
+                Object::Buffer(b) if sources.plain && b.properties.get_property(ByteOffset(at), "category").is_none() =>
+                    b.properties.get_property(ByteOffset(at), "face").unwrap_or(Value::NIL),
+                Object::Buffer(b) => {
+                    let raw: Vec<(String, Value)> = b.properties.properties_at(ByteOffset(at)).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+                    self.annotation_resolve(&raw, sources.face)?
+                }
+                _ => return Err("Unicode display buffer required".into()),
+            };
+            let end = sources.end.max(at + 1);
+            layers.push(text_face);
+            let next = self.next_property_boundary(sources.buffer, ByteOffset(at), ByteOffset(end))?.0.max(at + 1);
+            let handle = self.layered_face(table, faces, sources, &layers);
+            sources.run = (at, next, handle, layers);
+        }
+        if glyph != Value::NIL {
+            let layers: Vec<Value> = std::iter::once(glyph).chain(sources.run.3.iter().copied()).collect();
+            return Ok(self.layered_face(table, faces, sources, &layers));
+        }
+        let Some((string, strpos, overlay)) = string else { return Ok(sources.run.2) };
+        let own = self.property_textget(string, strpos as i64, sources.face).map_err(crate::forwarded::fault_text)?;
+        let base = if overlay { &sources.run.3[sources.run.3.len() - 1..] } else { &sources.run.3[..] };
+        if own == Value::NIL && !overlay { return Ok(sources.run.2); }
+        let layers: Vec<Value> = std::iter::once(own).chain(base.iter().copied()).collect();
+        Ok(self.layered_face(table, faces, sources, &layers))
+    }
+    /// The face of the face references LAYERS, the first taking precedence.
+    fn layered_face(&self, table: &FaceTable, faces: &mut Vec<Face>, sources: &mut ElementFaces, layers: &[Value]) -> FaceHandle {
+        let layers: Vec<Value> = layers.iter().copied().filter(|&v| v != Value::NIL).collect();
+        match layers.as_slice() {
+            [] => return FaceHandle(0),
+            [one] => return self.face_handle(table, faces, &mut sources.merged, *one),
+            _ => {}
+        }
+        let key: Vec<u64> = layers.iter().map(|v| v.0).collect();
+        if let Some(&handle) = sources.layered.get(&key) { return handle; }
+        let graph = Graph(self);
+        let face = layers.iter().map(|v| BoundedDatum::from_graph(&graph, v.0).ok().map(|d| (*d).clone())).collect::<Option<Vec<_>>>()
+            .and_then(|items| BoundedDatum::new(&romacs_face::Datum::List(items)).ok())
+            .and_then(|datum| romacs_face::remap::parse_face_ref(&datum).ok())
+            .and_then(|face_ref| {
+                let view = romacs_face::View::bind(&self.display_state.theme(), &romacs_face::Remap::empty()).ok()?;
+                face_of_attrs(&view.realize_ref(&face_ref), "merged face").ok()
+            });
+        let handle = match face {
+            Some(face) => { faces.push(face); FaceHandle(faces.len() as u32 - 1) }
+            None => FaceHandle(0),
+        };
+        sources.layered.insert(key, handle);
+        handle
     }
     /// The host advance of C in the default face, and that face's row height.
     pub(crate) fn host_default_advance(&mut self, c: char) -> Result<(u32, u32)> {
-        let face = self.snapshot_face("default")?;
+        self.host_face_advance("default", c)
+    }
+    /// The host advance of C in the face NAME, and that face's row height.
+    pub(crate) fn host_face_advance(&mut self, name: &str, c: char) -> Result<(u32, u32)> {
+        let face = self.snapshot_face(name)?;
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
@@ -1673,7 +1998,15 @@ fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
 /// byte BASE, LEN bytes long, through ZV when AT_ZV. Text that ran out
 /// short of ZV leaves its end position unknown: its last fully visible
 /// row ends there, never past.
-fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize, at_zv: bool) -> Laid {
-    let visible_end = match end.visible_end > len { true if at_zv => usize::MAX, true => base + len, false => base + end.visible_end };
-    Laid { end: base + end.end, visible_end, body_height: end.body_height }
+/// The buffer byte a display's byte DISPLAY shows (SEGMENTS'), past them
+/// the end of their text.
+fn shown_byte(segments: &[mini_window::Segment], display: usize) -> usize {
+    let end = segments.last().map_or(0, |s| if s.string { s.buffer } else { s.buffer + s.len });
+    buffer_of(segments, display, end)
+}
+
+fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
+    let byte = |display: usize| segments.map_or(base + display, |s| shown_byte(s, display));
+    let visible_end = match end.visible_end > len { true if at_zv => usize::MAX, true => byte(len), false => byte(end.visible_end) };
+    Laid { end: byte(end.end), visible_end, body_height: end.body_height }
 }

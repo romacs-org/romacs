@@ -137,6 +137,13 @@ fn run_host_command(cx) -> Step { enter(cx, "romacs--host-command", vec![], DONE
 defsubr! { name = "romacs--run-special-event", gnu = "keyboard.c:3113", effect = Global,
 fn run_special_event(cx, event: Value) -> Step { enter(cx, "romacs--special-event", vec![event], DONE) }}
 
+// cmd_error's default report: `romacs--command-error-default-function' of
+// the Lisp half.
+defsubr! { name = "command-error-default-function", gnu = "keyboard.c:1049", effect = Global,
+fn command_error_default_function(cx, data: Value, context: Value, signal: Value) -> Step {
+    enter(cx, "romacs--command-error-default-function", vec![data, context, signal], DONE)
+}}
+
 defsubr! { name = "top-level", gnu = "keyboard.c:1199", effect = Global,
 fn top_level(cx) -> Step { enter(cx, "romacs--top-level", vec![], DONE) }}
 
@@ -276,7 +283,8 @@ fn record_input(cx, event: Value; optional command: Value) {
 defsubr! { name = "ding", gnu = "dispnew.c:6854", effect = Global,
 fn ding(cx; optional arg: Value) -> Step {
     // dispnew.c Fding and bitch_at_user: batch writes BEL to stdout. A
-    // display with a keyboard macro running ends the macro, unless ARG.
+    // display with a keyboard macro running ends the macro with a
+    // `user-error', unless ARG.
     let noninteractive = cx.intern("noninteractive");
     if cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) != Value::NIL {
         use std::io::Write;
@@ -285,7 +293,9 @@ fn ding(cx; optional arg: Value) -> Step {
     }
     let macro_ = cx.intern("executing-kbd-macro");
     if arg == Value::NIL && cx.variable_value(macro_)?.unwrap_or(Value::NIL) != Value::NIL {
-        return Err(Fault::Error("Keyboard macro terminated by a command ringing the bell".into()));
+        let message = cx.string("Keyboard macro terminated by a command ringing the bell");
+        let data = cx.cons(message, Value::NIL);
+        return Err(Fault::Signal(cx.intern("user-error"), data));
     }
     // ring_bell: `ring-bell-function' when set; VM2's displays have no
     // audible or visible bell of their own.
@@ -301,13 +311,35 @@ fn done_nil(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
     Ok(Step::Done(Value::NIL))
 }
 
+// VM2 queues no host input of its own: the Lisp half ends a macro being
+// defined and drops `unread-command-events'.
 defsubr! { name = "discard-input", gnu = "keyboard.c:12400", effect = Global,
-fn discard_input(cx) {
-    // VM2 defines no keyboard macros and queues no host input of its own.
-    let unread = cx.intern("unread-command-events");
-    cx.variable_set(unread, Value::NIL)?;
-    Ok(Value::NIL)
+fn discard_input(cx) -> Step { enter(cx, "romacs--discard-input", vec![], DONE) }}
+
+// macros.c: defining a keyboard macro, whose events read_char stores
+// (rlisp/vm/keyboard.el `romacs--store-kbd-macro-char').
+defsubr! { name = "start-kbd-macro", gnu = "macros.c:43", effect = Global,
+fn start_kbd_macro(cx, append: Value; optional no_exec: Value) -> Step {
+    enter(cx, "romacs--start-kbd-macro", vec![append, no_exec], DONE)
 }}
+
+defsubr! { name = "end-kbd-macro", gnu = "macros.c:137", effect = Global,
+fn end_kbd_macro(cx; optional repeat: Value, loopfunc: Value) -> Step {
+    enter(cx, "romacs--end-kbd-macro-command", vec![repeat, loopfunc], DONE)
+}}
+
+defsubr! { name = "call-last-kbd-macro", gnu = "macros.c:228", effect = Global,
+fn call_last_kbd_macro(cx; optional prefix: Value, loopfunc: Value) -> Step {
+    enter(cx, "romacs--call-last-kbd-macro", vec![prefix, loopfunc], DONE)
+}}
+
+defsubr! { name = "store-kbd-macro-event", gnu = "macros.c:219", effect = Global,
+fn store_kbd_macro_event(cx, event: Value) -> Step {
+    enter(cx, "romacs--store-kbd-macro-char", vec![event], DONE)
+}}
+
+defsubr! { name = "cancel-kbd-macro-events", gnu = "macros.c:210", effect = Global,
+fn cancel_kbd_macro_events(cx) -> Step { enter(cx, "romacs--cancel-kbd-macro-events", vec![], DONE) }}
 
 defsubr! { name = "current-idle-time", gnu = "keyboard.c:4949", effect = Reads,
 fn current_idle_time(cx) {
@@ -404,10 +436,11 @@ fn set_idle(cx, idle: Value) {
 
 defsubr! { name = "input-pending-p", gnu = "keyboard.c:12076", effect = Reads,
 fn input_pending_p(cx; optional check_timers: Value) {
-    // requeued_events_pending_p; the host keyboard is not polled here.
+    // requeued_events_pending_p, then the host keyboard's readable events.
     let _ = check_timers;
     let unread = cx.intern("unread-command-events");
-    Ok(if cx.variable_value(unread)?.unwrap_or(Value::NIL) != Value::NIL { Value::TRUE } else { Value::NIL })
+    let pending = cx.variable_value(unread)?.unwrap_or(Value::NIL) != Value::NIL || cx.host_input_pending();
+    Ok(if pending { Value::TRUE } else { Value::NIL })
 }}
 
 defsubr! { name = "current-input-mode", gnu = "keyboard.c:12967", effect = Reads,
@@ -459,3 +492,31 @@ mod tests {
         assert_eq!(printed(&mut vm, "(romacs--timer-time [t 0 1 0 nil x nil nil 0 nil])"), "nil");
     }
 }
+
+/// keyboard.c modifier_names: the symbol for each modifier bit.
+const MODIFIER_NAMES: [(u32, &str); 12] = [(0, "up"), (1, "down"), (2, "drag"), (3, "click"), (4, "double"), (5, "triple"),
+    (22, "alt"), (23, "super"), (24, "hyper"), (25, "shift"), (26, "control"), (27, "meta")];
+
+// keyboard.c parse_modifiers: parse SYMBOL's name once, caching
+// (BASE MASK) on its `event-symbol-element-mask' and (BASE MODIFIERS...)
+// on its `event-symbol-elements', and return the latter.
+defsubr! { name = "internal-event-symbol-parse-modifiers", gnu = "keyboard.c:7609", effect = Global,
+fn internal_event_symbol_parse_modifiers(cx, symbol: Value) {
+    let (mask_key, elements_key) = (cx.intern("event-symbol-element-mask"), cx.intern("event-symbol-elements"));
+    let cached = cx.symbol_property(symbol, mask_key)?;
+    if cx.pair(cached).is_none() {
+        let name = cx.symbol_name(symbol)?;
+        let (modifiers, start) = crate::keymap::parse_event_modifiers(name.as_bytes());
+        let base = cx.intern(&name[start..]);
+        let mask = Value::integer(modifiers).expect("modifier bits are a fixnum");
+        let mask = cx.cons(mask, Value::NIL);
+        let mask = cx.cons(base, mask);
+        cx.put_symbol_property(symbol, mask_key, mask)?;
+        // lispy_modifier_list: consed from the lowest bit, so highest first.
+        let elements = MODIFIER_NAMES.iter().filter(|(bit, _)| modifiers & 1 << bit != 0)
+            .fold(Value::NIL, |list, (_, name)| { let name = cx.intern(name); cx.cons(name, list) });
+        let elements = cx.cons(base, elements);
+        cx.put_symbol_property(symbol, elements_key, elements)?;
+    }
+    cx.symbol_property(symbol, elements_key)
+}}

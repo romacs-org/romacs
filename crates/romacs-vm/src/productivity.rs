@@ -131,12 +131,14 @@ impl Vm {
                 let (piece, padding) = spec.text_field(text.bytes().to_vec(), !raw, 8);
                 leading = padding;
                 piece
-            } else if spec.conversion == 'S' && self.string_properties(value).is_some_and(|p| !p.is_empty()) {
-                // format_print has no #("..." ...) syntax; prin1's printer does.
-                let printed = self.print_render(value, true, Value::NIL, true)?;
-                spec.text(printed.into_bytes(), true, 8)
             } else if matches!(spec.conversion, 's' | 'S') {
-                let printed = self.format_print(value, spec.conversion == 'S', 0)?;
+                // styled_format prints the argument with prin1 or princ
+                // (editfns.c:3693): the printer and its variables decide,
+                // but %s of a symbol is its name, `print-gensym' or not.
+                let name = (spec.conversion == 's').then(|| value.index_if(7)).flatten()
+                    .and_then(|i| self.symbol_names.get(i.checked_sub(1)?)).cloned();
+                let printed = match name { Some(name) => name, None => self.print_render(value, spec.conversion == 'S', Value::NIL, true)? };
+                let printed = crate::symkey::to_internal(&printed).unwrap_or_else(|| printed.into_bytes());
                 spec.text(printed, true, 8)
             } else {
                 let numeric = if matches!(spec.conversion, 'e' | 'f' | 'g') {
@@ -276,112 +278,5 @@ impl Vm {
         let object = if string.is_utf8() { crate::data::Object::String(Box::new(string)) }
             else { crate::data::Object::RawString(Box::new(string)) };
         self.allocate_object(object)
-    }
-
-    // Lisp formatting is distinct from the host's typed #u8 diagnostic printer.
-    fn format_print(&self, value: Value, quoted: bool, depth: usize) -> Result<Vec<u8>> {
-        if depth > 100 {
-            return Err("display depth exceeded".into());
-        }
-        if let Some(view) = self.str_view(value)
-            && !view.is_multibyte()
-        {
-            let bytes = view.bytes();
-            use std::fmt::Write;
-            let mut out = String::new();
-            if quoted {
-                out.push('"');
-            }
-            for &byte in bytes {
-                match byte {
-                    128..=255 => {
-                        write!(out, "\\{byte:03o}").unwrap();
-                    }
-                    b'"' | b'\\' if quoted => {
-                        out.push('\\');
-                        out.push(char::from(byte));
-                    }
-                    _ => out.push(char::from(byte)),
-                }
-            }
-            if quoted {
-                out.push('"');
-            }
-            return Ok(out.into_bytes());
-        }
-        if let Some(view) = self.str_view(value) {
-            if !quoted {
-                return Ok(view.bytes().to_vec());
-            }
-            if let Some(text) = view.as_str() {
-                return Ok(serde_json::to_string(text).unwrap().into_bytes());
-            }
-            let mut out = vec![b'"'];
-            for code in view.chars() {
-                if code > crate::lstring::MAX_5_BYTE_CHAR {
-                    out.extend_from_slice(format!("\\{:03o}",code-crate::lstring::BYTE8_OFFSET).as_bytes());
-                } else if let Some(c) = char::from_u32(code) {
-                    let escaped = serde_json::to_string(&c.to_string()).unwrap();
-                    out.extend_from_slice(&escaped.as_bytes()[1..escaped.len() - 1]);
-                } else {
-                    let mut encoded = [0; 5];
-                    let width = crate::lstring::char_string(code, &mut encoded);
-                    out.extend_from_slice(&encoded[..width]);
-                }
-            }
-            out.push(b'"');
-            return Ok(out);
-        }
-        if value.tag() == 3 {
-            let mut tail = value;
-            let mut parts = Vec::new();
-            while tail.tag() == 3 {
-                let (car, cdr) = self.cons_pair(tail)?;
-                parts.push(self.format_print(car, quoted, depth + 1)?);
-                tail = cdr;
-                if parts.len() > self.list_limit() {
-                    return Err("circular list".into());
-                }
-            }
-            if tail != Value::NIL {
-                let mut dotted = b". ".to_vec();
-                dotted.extend(self.format_print(tail, quoted, depth + 1)?);
-                parts.push(dotted);
-            }
-            let mut out = vec![b'('];
-            out.extend(parts.join(&b' '));
-            out.push(b')');
-            return Ok(out);
-        }
-        if let Some(crate::data::Object::Vector(values)) = self.object_if(value) {
-            let parts = values
-                .iter()
-                .map(|&v| self.format_print(v, quoted, depth + 1))
-                .collect::<Result<Vec<_>>>()?;
-            let mut out = vec![b'['];
-            out.extend(parts.join(&b' '));
-            out.push(b']');
-            return Ok(out);
-        }
-        if let Some(crate::data::Object::HashTable(t)) = self.object_if(value) {
-            return self.print_table(t, None, |vm, v| vm.format_print(v, quoted, depth + 1));
-        }
-        // print.c PVEC_BUFFER: princ prints the bare name.
-        if let Ok(state) = self.buffer_state(value) {
-            return Ok(match &state.name {
-                Some(name) if quoted => format!("#<buffer {}>", crate::buffer::buffer_name_shown(name)),
-                Some(name) => crate::buffer::buffer_name_shown(name).into_owned(),
-                None => "#<killed buffer>".into(),
-            }.into_bytes());
-        }
-        if let Some(crate::data::Object::Process(process)) = self.object_if(value) {
-            // print.c PVEC_PROCESS: princ prints the bare name.
-            let name = self.process_name_text(process);
-            return Ok(if quoted { format!("#<process {name}>") } else { name }.into_bytes());
-        }
-        let text = self.display(value)?;
-        // A symbol's printed name is its key (symkey.rs): give its characters.
-        if value.tag() == 7 && let Some(internal) = crate::symkey::to_internal(&text) { return Ok(internal); }
-        Ok(text.into_bytes())
     }
 }

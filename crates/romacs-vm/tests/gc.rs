@@ -128,7 +128,7 @@ fn read_only_graph_is_shared_while_worker_heaps_collect() {
             vm.collect_garbage();
             assert_eq!(vm.heap_objects(), 0);
             let f = vm.compile(&form(r#"["nreverse","world"]"#)).unwrap();
-            assert!(vm.execute(f).unwrap_err().contains("immutable image"));
+            assert!(vm.execute(f).unwrap_err().contains("Attempt to modify read-only object"));
         })
     }).collect();
     for thread in threads {

@@ -120,16 +120,16 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | OverlayPut
         | Puthash
         | DefineHashTableTest
-        | SetWindowVscroll
         | SetWindowParameter
         | MakeObsolete
         | SetAdvertisedCallingConvention => (3, Some(3)),
-        CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen
+        CurrentBuffer | Point | PointMin | PointMax | Widen
         | BufferString | EncodeBufferUtf8 | DecodeBufferUtf8 | CacheStats | CacheClear
         | CacheEntries | MakeMarker | SyntaxTable | StandardSyntaxTable | SelectedWindow
         | SelectedFrame | CurrentGlobalMap | EmacsLispMode | Daemonp
         | DaemonInitialized => (0, Some(0)),
         ReadHostEvent | CopyMarker => (0, Some(2)),
+        BufferSize => (0, Some(1)),
         FormatModeLine => (1, Some(4)),
         CharAfter | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine | CopySyntaxTable
         | WindowBuffer | WindowStart | WindowPoint | FramePixelWidth | FramePixelHeight
@@ -140,9 +140,9 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
             (0, Some(1))
         }
         Eval | Provide | Featurep
-        | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | LookingAt
+        | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | LookingAt | PosixLookingAt
         | MatchString | Macroexpand | Signal => (1, Some(2)),
-        Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
+        Require | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
         SplitWindowInternal => (4, Some(5)),
         GetProperty | Defalias | GetCharProperty | SetMarker | DefineError | Gethash
         | ModifySyntaxEntry | SetWindowMargins | SetWindowStart
@@ -151,10 +151,11 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         YankFinalize => (4, Some(4)),
         MakeOverlay => (2, Some(5)),
         MoveOverlay | DefineKey | MakeObsoleteVariable => (3, Some(4)),
+        SetWindowVscroll => (2, Some(4)),
         RemoveOverlays => (0, Some(4)),
-        StringMatch => (2, Some(4)),
+        StringMatch | PosixStringMatch => (2, Some(4)),
         MatchData => (0, Some(3)),
-        ReSearchForward | ReSearchBackward | SearchForward | SearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
+        ReSearchForward | ReSearchBackward | PosixSearchForward | PosixSearchBackward | SearchForward | SearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
         WindowVscroll | WindowTotalHeight | WindowResizeApply | WindowTotalWidth => {
             (0, Some(2))
         }

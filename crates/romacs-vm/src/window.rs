@@ -314,7 +314,7 @@ impl Vm {
         let marker = self.window(v)?.point;
         self.set_marker_object(marker, pos, buffer)?;
         let pos = self.marker_position_value(marker)?.as_integer()?;
-        let Object::Buffer(b) = &mut self.objects[buffer.index(0)? - 1] else {
+        let Object::Buffer(b) = self.object_mut(buffer)? else {
             return Err("buffer required".into());
         };
         b.point = b.byte_of_char(coordinates::CharOffset((pos - 1) as usize))?;
@@ -341,10 +341,7 @@ impl Vm {
                 match previous {
                     None => head = rest,
                     Some(cell) => {
-                        if Self::image_value(cell) {
-                            return Err("cannot mutate immutable image".into());
-                        }
-                        self.conses[cell.index(3)?].1 = rest;
+                        self.cons_mut(cell)?.1 = rest;
                     }
                 }
             } else {
@@ -1671,12 +1668,9 @@ impl<'a> Windows<'a> {
             };
             let root = self.vm.window_root_peek(ROOT);
             let rightmost = self.vm.window(root).map_or(true, |r| right >= i64::from(r.x) + i64::from(r.width));
-            let window_system = {
-                let slot = self.vm.slot("window-system");
-                let value = self.vm.slots[slot].value;
-                value != Value::NIL && value != Value::UNBOUND
-            };
-            let bar = if !window_system && !rightmost { column } else { 0 };
+            // Romacs's frame draws a one-column divider right of a window
+            // that is not rightmost, on every display.
+            let bar = if !rightmost { column } else { 0 };
             let px = pixels - bar - margins;
             if chars { px / column } else { px }
         } else {
@@ -1725,8 +1719,9 @@ impl<'a> Windows<'a> {
         }
         Ok(frame)
     }
+    /// frame.c:326: a live frame's type (framep), else nil.
     pub(crate) fn frame_live_p(&mut self, object: Value) -> Value {
-        if matches!(self.vm.object_if(object), Some(Object::Frame(f)) if f.live) { Value::TRUE } else { Value::NIL }
+        if matches!(self.vm.object_if(object), Some(Object::Frame(f)) if f.live) { self.vm.frame_type() } else { Value::NIL }
     }
     /// The frame's parameter alist entries, most recently added first
     /// (frame.c f->param_alist). FRAME nil is the selected frame.
@@ -1763,8 +1758,17 @@ impl<'a> Windows<'a> {
         }
         Ok(())
     }
-    pub(crate) fn frame_p(&self, object: Value) -> Value {
-        if matches!(self.vm.object_if(object), Some(Object::Frame(_))) { Value::TRUE } else { Value::NIL }
+    /// frame.c:286: the frame's type, t on the initial terminal and the
+    /// display's backend once the session opened one (display_host.rs).
+    pub(crate) fn frame_p(&mut self, object: Value) -> Value {
+        if matches!(self.vm.object_if(object), Some(Object::Frame(_))) { self.vm.frame_type() } else { Value::NIL }
+    }
+    /// frame.c:415 Fwindow_system: the live frame's window system, nil on
+    /// the initial terminal.
+    pub(crate) fn window_system(&mut self, frame: Value) -> Out {
+        self.live_frame(frame)?;
+        let kind = self.vm.frame_type();
+        Ok(if kind == Value::TRUE { Value::NIL } else { kind })
     }
     pub(crate) fn frame_list(&mut self) -> Out {
         let frame = self.frame();
@@ -1835,17 +1839,25 @@ impl<'a> Windows<'a> {
         Ok(self.get(window)?.cursor_off)
     }
     /// terminal.c Fframe_initial_p. VM2's one terminal is GNU's
-    /// output_initial kind, so every live frame is an initial frame.
+    /// output_initial kind, whose frame writes messages and printing to the
+    /// standard streams, until the session opens a display or an embedder
+    /// renders its echo area (`Vm::set_echo_area_host`): either makes it the
+    /// session's display, as a window system's frame is, and not initial.
+    /// debug.el decides by this whether to show *Backtrace* or print it.
     pub(crate) fn frame_initial_p(&mut self, frame: Value) -> Out {
         let frame = if frame == Value::NIL { self.frame() } else { frame };
+        let host = self.vm.slot(crate::prim::ECHO_AREA_HOST);
+        let initial = self.vm.frame_type() == Value::TRUE
+            && matches!(self.vm.slots[host].value, Value::NIL | Value::UNBOUND);
         if let Some(Object::Frame(f)) = self.vm.object_if(frame) {
-            return Ok(if f.live { Value::TRUE } else { Value::NIL });
+            return Ok(if f.live && initial { Value::TRUE } else { Value::NIL });
         }
         // decode_terminal yields NULL for anything else: nil, not an error.
-        Ok(if self.terminal(frame).is_some() { Value::TRUE } else { Value::NIL })
+        Ok(if self.terminal(frame).is_some() && initial { Value::TRUE } else { Value::NIL })
     }
+    /// terminal.c:443: a live terminal's type, as framep's.
     pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {
-        if self.terminal(object).is_some() { Value::TRUE } else { Value::NIL }
+        if self.terminal(object).is_some() { self.vm.frame_type() } else { Value::NIL }
     }
     pub(crate) fn terminal_list(&mut self) -> Out {
         let terminal = self.frame_terminal(Value::NIL)?;

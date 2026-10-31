@@ -68,3 +68,28 @@ fn byte_compile_of_a_lambda_list_expands_its_macros_once() {
         assert_eq!(query(&mut vm, form), expected, "{form}");
     }
 }
+
+/// cc-fonts.el's matchers: a lambda list's `eval-when-compile' runs once,
+/// at compilation, and its value is the constant (bytecomp's handler, GNU
+/// byte code there, evaluated here: VM2-BYTECODE1), with no compile log;
+/// bytecomp's own `inline', an alias of `progn', is that special form.
+/// Pinned GNU 32.0.50 answers.
+#[test]
+fn byte_compile_of_a_lambda_list_evaluates_eval_when_compile_once() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    for (form, expected) in [
+        ("(progn (defvar bfv-n 0) (let ((lexical-binding t)) (let ((f (byte-compile '(lambda () (list (eval-when-compile (setq bfv-n (1+ bfv-n)) (list 'n bfv-n)) (inline (+ 1 2))))))) (list (funcall f) (funcall f) bfv-n (and (get-buffer \"*Compile-Log*\") t)))))", "(((n 1) 3) ((n 1) 3) 1 nil)"),
+        ("(let ((lexical-binding t)) (funcall (byte-compile '(lambda () (eval-when-compile (defmacro bfv-wm () 73) (bfv-wm))))))", "73"),
+    ] {
+        assert_eq!(query(&mut vm, form), expected, "{form}");
+    }
+    // An alias made before the form that calls it, as byte-run.el makes
+    // `inline' (VM2-SPECIAL-ALIAS1).
+    query(&mut vm, "(defalias 'bfv-progn (symbol-function 'progn))");
+    for (form, expected) in [
+        ("(list (bfv-progn 1 2) (let ((x 1)) (inline (setq x 5) x)) (special-form-p 'inline))", "(2 5 t)"),
+    ] {
+        assert_eq!(query(&mut vm, form), expected, "{form}");
+    }
+}

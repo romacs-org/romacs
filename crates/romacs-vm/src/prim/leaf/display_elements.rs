@@ -19,10 +19,16 @@ pub(super) struct View {
     pub zv: i64,
     /// The column width in pixels, for `(N)' pixel display specs.
     pub column: i64,
-    /// window_box_width (TEXT_AREA) and the margins, in columns.
+    /// window_box_width (TEXT_AREA) and the margins, in columns, or in
+    /// pixels when PIXELS.
     pub box_width: i64,
     pub left_margin: i64,
     pub right_margin: i64,
+    /// Display widths are a window-system frame's pixels, as a host lays
+    /// the window out, not a terminal's columns.
+    pub pixels: bool,
+    /// The x a row's line number takes (lnum_pixel_width), in those units.
+    pub lnum: i64,
 }
 
 /// Buffer variables the iterator reads (init_iterator).
@@ -52,6 +58,12 @@ pub(super) struct Source<'l, 'a> {
     pre: Option<i64>,
     ended: bool,
     prefixes: Vec<Vec<Elem>>,
+    /// An `:align-to' being computed has counted the line number
+    /// (calc_pixel_width_or_height's LNUM_ONCE).
+    lnum_added: bool,
+    /// A byte and the lines of the accessible text before it, from which
+    /// `line_at' counts on.
+    lines: (usize, i64),
 }
 
 #[derive(Clone, Copy)]
@@ -83,11 +95,11 @@ impl<'l, 'a> Source<'l, 'a> {
         let look = Look::new(leaf)?;
         let byte = leaf.buffer_byte(view.buffer, start)?;
         Ok(Source { leaf, view, look, syms, slots: vec![], next: start, byte, run_end: start, stop_due: true,
-            pre: None, ended: false, prefixes: vec![] })
+            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1) })
     }
 
     pub(super) fn begv(&self) -> i64 { self.view.begv }
-    pub(super) fn zv(&self) -> i64 { self.view.zv }
+    pub(super) fn window(&self) -> Value { self.view.window }
     /// The leaf the elements come from, for a host layout to measure them.
     pub(super) fn leaf(&mut self) -> &mut Leaf<'a> { self.leaf }
 
@@ -138,6 +150,28 @@ impl<'l, 'a> Source<'l, 'a> {
             break;
         }
         Ok(p)
+    }
+    /// The display POS shows, if it replaces the text there: where the
+    /// text it replaces starts, and its string (nil for a space or an
+    /// empty replacement), as pos_visible_p finds them.
+    pub(super) fn replacing_display(&mut self, pos: i64) -> R<Option<(i64, Value)>> {
+        if pos >= self.view.zv { return Ok(None); }
+        let (spec, overlay) = self.property(pos, self.syms.display)?;
+        if spec == Value::NIL { return Ok(None); }
+        let string = match self.display_spec(spec, false, false)? {
+            None => return Ok(None),
+            Some(Replacement::String(string, _)) => string,
+            Some(_) => Value::NIL,
+        };
+        let start = match self.overlay_span(overlay)? {
+            Some((start, _)) => start,
+            None => {
+                let (at, display) = (Value::integer(pos + 1).map_err(Fault::Error)?, self.syms.display);
+                self.leaf.vm.previous_property_change_values(at, Some(display), self.view.buffer, Value::NIL)?
+                    .integer_value().unwrap_or(self.view.begv)
+            }
+        };
+        Ok(Some((start.max(self.view.begv), string)))
     }
     /// Whether a row starts at POS for a host that breaks rows only at
     /// newlines: the character before it is a newline that is visible and
@@ -420,11 +454,19 @@ impl<'l, 'a> Source<'l, 'a> {
 
     /// setup_for_ellipsis: the display table's ellipsis vector, else `...'.
     fn ellipsis(&mut self, origin: Origin, buffer: bool) -> R<()> {
-        let glyphs = match self.look.display_table.map(|t| self.extra(t, 4)).filter(|v| self.leaf.vector_values(*v).is_ok()) {
-            Some(vector) => self.leaf.vector_values(vector).unwrap_or_default().into_iter().map(|g| self.glyph_char(g)).collect(),
-            None => vec![0x2e; 3],
+        let codes = match self.look.display_table.map(|t| self.extra(t, 4)).filter(|v| self.leaf.vector_values(*v).is_ok()) {
+            Some(vector) => self.leaf.vector_values(vector).unwrap_or_default(),
+            None => vec![Value::integer(0x2e).map_err(Fault::Error)?; 3],
         };
-        self.vector(&glyphs, origin, buffer)
+        let glyphs: Vec<u32> = codes.iter().map(|&g| self.glyph_char(g)).collect();
+        let first = self.slots.len();
+        self.vector(&glyphs, origin, buffer, true)?;
+        // Each glyph in its code's face (GLYPH_CODE_FACE), by `face-id'.
+        for (slot, code) in self.slots[first..].iter_mut().zip(codes) {
+            let id = match self.leaf.pair(code) { Some((_, face)) => face.integer_value(), None => code.integer_value().map(|g| g >> 22) };
+            if let Some(e) = slot.elem.as_mut() && let Some(id) = id.filter(|&id| id > 0) { e.ellipsis = Some(self.leaf.face_named_by_id(id)); }
+        }
+        Ok(())
     }
 
     fn extra(&self, table: Value, slot: usize) -> Value {
@@ -453,13 +495,14 @@ impl<'l, 'a> Source<'l, 'a> {
         valid.then(|| self.glyph_char(glyph))
     }
 
-    /// Glyphs from a display vector, each its own element.
-    fn vector(&mut self, glyphs: &[u32], origin: Origin, buffer: bool) -> R<()> {
+    /// Glyphs from a display vector, each its own element: an ELLIPSIS, or
+    /// the glyphs the character at ORIGIN shows as.
+    fn vector(&mut self, glyphs: &[u32], origin: Origin, buffer: bool, ellipsis: bool) -> R<()> {
         for (k, &g) in glyphs.iter().enumerate() {
             let shape = self.glyph_shape(g)?;
             let method = Method::Vector { last: k + 1 == glyphs.len(), buffer };
             self.emit(Elem { shape, method, charpos: origin.charpos, whitespace: matches!(g, 0x20 | 0x09) || origin.whitespace_under,
-                text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string });
+                text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: ellipsis.then_some(Value::NIL), unnumbered: None });
         }
         Ok(())
     }
@@ -484,13 +527,13 @@ impl<'l, 'a> Source<'l, 'a> {
             let entry = self.leaf.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
             if let Ok(items) = self.leaf.vector_values(entry) {
                 let glyphs: Vec<u32> = items.into_iter().map(|g| self.glyph_char(g)).collect();
-                return self.vector(&glyphs, origin, buffer);
+                return self.vector(&glyphs, origin, buffer, false);
             }
         }
         if let Some(width) = self.glyphless(c)? {
             if width > 0 {
                 self.emit(Elem { shape: Shape::Glyphless { width }, method: plain, charpos: origin.charpos,
-                    whitespace: origin.whitespace_under, text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string });
+                    whitespace: origin.whitespace_under, text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, unnumbered: None });
             }
             return Ok(());
         }
@@ -514,14 +557,14 @@ impl<'l, 'a> Source<'l, 'a> {
         } else {
             None
         };
-        if let Some(glyphs) = glyphs { return self.vector(&glyphs, origin, buffer); }
+        if let Some(glyphs) = glyphs { return self.vector(&glyphs, origin, buffer, false); }
         let shape = match c {
             0x09 => Shape::Tab,
             0x0a => Shape::Glyph { c, width: 0 },
             _ => self.glyph_shape(c)?,
         };
         self.emit(Elem { shape, method: plain, charpos: origin.charpos, whitespace: matches!(c, 0x20 | 0x09) || origin.whitespace_under,
-            text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string });
+            text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, unnumbered: None });
         Ok(())
     }
 
@@ -626,17 +669,30 @@ impl<'l, 'a> Source<'l, 'a> {
             Replacement::Space(spec, text_area) => {
                 let origin = Origin { text_area, ..origin };
                 let shape = self.stretch_shape(spec, origin)?;
+                // As computed before the row's line number is produced.
+                let lnum = std::mem::replace(&mut self.view.lnum, 0);
+                let unnumbered = if lnum == 0 { Ok(shape) } else { self.stretch_shape(spec, origin) };
+                self.view.lnum = lnum;
+                let unnumbered = Some(unnumbered?).filter(|&s| s != shape);
                 self.emit(Elem { shape, method: Method::Stretch, charpos: origin.charpos, whitespace: origin.whitespace_under,
-                    text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string });
+                    text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, unnumbered });
                 Ok(())
             }
         }
     }
 
     /// produce_stretch_glyph's width, before it depends on the x position.
+    /// In pixels, a height other than the face's is refused: the host
+    /// makes a stretch as tall as its face.
     fn stretch_shape(&mut self, spec: Value, origin: Origin) -> R<Shape> {
         let s = self.syms;
         let plist = self.leaf.pair(spec).map_or(Value::NIL, |(_, p)| p);
+        if self.view.pixels {
+            for key in [":height", ":relative-height", ":ascent"] {
+                let key = self.leaf.intern(key);
+                if self.plist_get(plist, key) != Value::NIL { return Err(unsupported("of a space with its own height in a displayed window")); }
+            }
+        }
         let width = self.plist_get(plist, s.width);
         if width != Value::NIL && let Some(tem) = self.pixels(width, None)? {
             return Ok(Shape::Stretch { width: tem as i64, zero_ok: true });
@@ -645,6 +701,12 @@ impl<'l, 'a> Source<'l, 'a> {
         if let Some(factor) = self.leaf.number_value(relative).filter(|&f| f > 0.0) {
             let c = if origin.string == Value::NIL { self.char_at(self.leaf.buffer_byte(self.view.buffer, origin.charpos)?) }
                 else { self.leaf.vm.str_view(origin.string).and_then(|v| v.chars().nth(origin.strpos.unwrap_or(0))).unwrap_or(0x20) };
+            // In pixels, FACTOR times the host's glyph of C (Org's table
+            // separators); a TAB's would depend on x.
+            if self.view.pixels {
+                if c == 0x09 || c == 0x0a { return Err(unsupported("of a space of relative width in a displayed window")); }
+                return Ok(Shape::RelativeStretch { factor, c });
+            }
             return Ok(match self.glyph_shape(c)? {
                 Shape::Tab => Shape::TabStretch { factor },
                 Shape::Glyph { width, .. } => Shape::Stretch { width: (factor * width as f64) as i64, zero_ok: false },
@@ -654,12 +716,14 @@ impl<'l, 'a> Source<'l, 'a> {
         let align = self.plist_get(plist, s.align_to);
         if align != Value::NIL {
             let mut anchor = -1;
+            self.lnum_added = false;
             if let Some(tem) = self.pixels(align, Some(&mut anchor))? {
                 let base = if anchor < 0 { 0 } else { anchor - self.view.left_margin };
                 return Ok(Shape::Align { target: tem as i64 + base });
             }
         }
-        Ok(Shape::Stretch { width: 1, zero_ok: false })
+        // FRAME_COLUMN_WIDTH: a column, a terminal's one.
+        Ok(Shape::Stretch { width: if self.view.pixels { self.view.column } else { 1 }, zero_ok: false })
     }
 
     fn plist_get(&self, mut plist: Value, key: Value) -> Value {
@@ -673,22 +737,30 @@ impl<'l, 'a> Source<'l, 'a> {
     }
 
     /// calc_pixel_width_or_height for a width on a terminal frame, in
-    /// columns. ANCHOR receives an `:align-to' window element's offset.
+    /// columns, or with the view's PIXELS on a window-system frame, in
+    /// pixels. ANCHOR receives an `:align-to' window element's offset.
     fn pixels(&mut self, prop: Value, mut anchor: Option<&mut i64>) -> R<Option<f64>> {
         let s = self.syms;
         let v = &self.view;
+        // A number counts columns; `(N)', pixels.
+        let (column, pixel) = if v.pixels { (v.column as f64, 1.0) } else { (1.0, v.column as f64) };
         if prop == Value::NIL { return Ok(Some(0.0)); }
         let mut prop = prop;
         if self.leaf.kind(prop) == super::Kind::Symbol {
             let name = self.leaf.symbol_name(prop)?;
             if ["in", "mm", "cm"].contains(&name.as_str()) { return Err(unsupported("of a display width in physical units")); }
+            // On a window-system frame, the face's font's measures.
+            if (prop == s.height || prop == s.width) && v.pixels { return Err(unsupported("of a font-relative display width in a displayed window")); }
             if prop == s.height || prop == s.width { return Ok(Some(1.0)); }
-            if prop == s.text { return Ok(Some(v.box_width as f64)); }
-            let elements = [(s.left, v.left_margin), (s.right, v.left_margin + v.box_width), (s.center, v.left_margin + v.box_width / 2),
+            if prop == s.text { return Ok(Some((v.box_width - v.lnum) as f64)); }
+            // An alignment counts the line number once, from the left.
+            let once = if anchor.is_some() && !self.lnum_added && (prop == s.left || prop == s.center) { v.lnum } else { 0 };
+            let elements = [(s.left, v.left_margin + once), (s.right, v.left_margin + v.box_width), (s.center, v.left_margin + (once + v.box_width) / 2),
                 (s.left_fringe, v.left_margin), (s.right_fringe, v.left_margin + v.box_width), (s.left_margin, 0),
                 (s.right_margin, v.left_margin + v.box_width), (s.scroll_bar, v.left_margin + v.box_width + v.right_margin)];
             if let Some(a) = anchor.as_deref_mut() && *a < 0 && let Some(&(_, at)) = elements.iter().find(|(k, _)| *k == prop) {
                 *a = at;
+                self.lnum_added |= once != 0;
                 return Ok(Some(0.0));
             }
             let widths = [(s.left_fringe, 0), (s.right_fringe, 0), (s.left_margin, v.left_margin), (s.right_margin, v.right_margin), (s.scroll_bar, 0)];
@@ -697,7 +769,12 @@ impl<'l, 'a> Source<'l, 'a> {
             }
             prop = self.leaf.variable_value(prop)?.unwrap_or(Value::NIL);
         }
-        if let Some(n) = self.leaf.number_value(prop) { return Ok(Some(n)); }
+        // While no window element anchors an alignment, a number counts
+        // from the text area's edge, the line number included once.
+        let once = |source: &mut Self, anchor: &Option<&mut i64>| -> f64 {
+            if anchor.as_deref().is_some_and(|a| *a < 0) && !source.lnum_added { source.lnum_added = true; source.view.lnum as f64 } else { 0.0 }
+        };
+        if let Some(n) = self.leaf.number_value(prop) { return Ok(Some(n * column + once(self, &anchor))); }
         let Some((mut car, cdr)) = self.leaf.pair(prop) else { return Ok(None) };
         if self.leaf.kind(car) == super::Kind::Symbol {
             if car == s.plus || car == s.minus {
@@ -712,9 +789,11 @@ impl<'l, 'a> Source<'l, 'a> {
             car = self.leaf.variable_value(car)?.unwrap_or(Value::NIL);
         }
         let Some(pixels) = self.leaf.number_value(car) else { return Ok(None) };
-        let columns = pixels / self.view.column as f64;
-        if cdr == Value::NIL { return Ok(Some(columns)); }
-        Ok(self.pixels(cdr, anchor)?.map(|factor| columns * factor))
+        let units = pixels / pixel;
+        // (NUM . UNIT): the line number counted before UNIT's measure.
+        let offset = once(self, &anchor);
+        if cdr == Value::NIL { return Ok(Some(units + offset)); }
+        Ok(self.pixels(cdr, anchor)?.map(|factor| units * factor + offset))
     }
 
     /// handle_line_prefix's property: the element's string, else the
@@ -755,7 +834,25 @@ fn printable(category: Option<i64>) -> bool {
     category.is_some_and(|k| ![Category::Control, Category::Surrogate, Category::Unassigned].into_iter().any(|c| cat_eq(k, c)))
 }
 
+impl Source<'_, '_> {
+    /// The index of the accessible text's line holding POS.
+    pub(super) fn line_of(&mut self, pos: i64) -> R<i64> {
+        let begv = self.leaf.buffer_byte(self.view.buffer, self.view.begv)?;
+        let at = self.leaf.buffer_byte(self.view.buffer, pos.clamp(self.view.begv, self.view.zv))?;
+        let (from, line) = if self.lines.1 >= 0 && self.lines.0 <= at { self.lines } else { (begv, 0) };
+        let line = line + self.text().as_str().as_bytes()[from..at].iter().filter(|&&c| c == b'\n').count() as i64;
+        self.lines = (at, line);
+        Ok(line)
+    }
+}
+
 impl Elements for Source<'_, '_> {
+    fn line_at(&mut self, index: usize) -> R<i64> {
+        let slot = self.slot(index)?;
+        // Where the element shows, past text the row start skips.
+        let pos = slot.elem.map(|e| e.charpos).or(slot.pre).unwrap_or(self.view.zv);
+        self.line_of(pos)
+    }
     fn slot(&mut self, index: usize) -> R<Slot> {
         while self.slots.len() <= index && !self.ended { self.generate()?; }
         Ok(self.slots.get(index).copied().unwrap_or(Slot { pre: Some(self.next), elem: None }))

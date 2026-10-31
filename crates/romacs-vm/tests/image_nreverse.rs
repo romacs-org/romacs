@@ -23,7 +23,7 @@ fn image_nreverse_refusal_is_not_a_type_error() {
         .eval_source("(condition-case e (nreverse world) (wrong-type-argument (list 'wrong-type e)))")
         .map(|v| v.display().unwrap());
     let error = outcome.expect_err("an image cons was reversed or the refusal was caught as a type error");
-    assert!(error.contains("immutable image"), "{error}");
+    assert!(error.contains("Attempt to modify read-only object"), "{error}");
     let after = vm.eval_source("world").unwrap();
     assert_eq!(after.display().unwrap(), "(7 42)");
 }
