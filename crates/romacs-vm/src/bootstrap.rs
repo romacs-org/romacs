@@ -148,7 +148,7 @@ impl Vm {
                 }
                 let slot = value.index(7)?.checked_sub(1).ok_or("symbol required")?;
                 Ok(
-                    if self.variable_value(slot)? != Value::UNBOUND {
+                    if self.fenced_and_bound(slot) || self.variable_value(slot)? != Value::UNBOUND {
                         Value::TRUE
                     } else {
                         Value::NIL

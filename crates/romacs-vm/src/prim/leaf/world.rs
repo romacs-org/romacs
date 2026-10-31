@@ -10,7 +10,7 @@ impl Leaf<'_> {
     /// makes an input.
     pub(crate) fn observed_symbol_plist(&mut self, symbol: Value) -> crate::prim::Out {
         if self.vm.fence.is_some() {
-            self.vm.fence_property(symbol, None, crate::world::Access::Read);
+            self.vm.fence_property(symbol, None, crate::world::Access::Read, None);
         }
         self.symbol_plist(symbol)
     }

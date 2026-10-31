@@ -42,8 +42,13 @@ impl Home {
 
     /// The plan a launch would have recorded for this init.
     fn plan(&self) {
-        let entries = vec![Entry { kind: Kind::Require, name: "layer-lib".into(), file: None, noerror: false, load_path: 0 }];
-        let plan = Plan::new(&self.init, entries, vec![vec![self.home.join("lisp").display().to_string()]]).unwrap();
+        self.plan_requiring("layer-lib", &self.home.join("lisp"));
+    }
+
+    /// A plan whose one entry requires FEATURE from DIR.
+    fn plan_requiring(&self, feature: &str, dir: &Path) {
+        let entries = vec![Entry { kind: Kind::Require, name: feature.into(), file: None, noerror: false, load_path: 0 }];
+        let plan = Plan::new(&self.init, entries, vec![vec![dir.display().to_string()]]).unwrap();
         plan.write(&self.store).unwrap();
     }
 
@@ -101,6 +106,21 @@ fn world_build_prepares_the_init_layer_and_rebuilds_it_only_for_its_inputs() {
     assert!(ok);
     assert!(!home.store.join("plans").exists() || std::fs::read_dir(home.store.join("plans")).unwrap().next().is_none());
     assert!(home.images().is_empty());
+    let _ = std::fs::remove_dir_all(&home.home);
+}
+
+/// cus-start, loaded again in full as Custom's `require' loads it after
+/// loadup's preload, asks whether the variables startup computes are bound
+/// and puts the `custom-set' startup reads: the layer holds it.
+#[test]
+fn an_init_layer_loads_cus_start_in_full() {
+    let home = Home::new("cus-start");
+    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp").canonicalize().unwrap();
+    home.build();
+    home.plan_requiring("cus-start", &gnu_lisp);
+    let said = home.build();
+    assert!(said.contains(r#""event":"layer-built""#) && said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
+    assert!(!said.contains("refused"), "{said}");
     let _ = std::fs::remove_dir_all(&home.home);
 }
 
