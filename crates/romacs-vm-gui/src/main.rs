@@ -551,6 +551,10 @@ fn run() -> Result<(), String> {
     if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
         world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor, init_layer.as_ref())?;
     }
+    // Fontconfig's configuration loads on a helper while the window and the
+    // world open: the evaluator's first font question finds it loaded, or
+    // waits for it.
+    if live { std::thread::spawn(romacs_font::load_catalog); }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (host, sender) =
         PaintHost::wayland(std::path::Path::new(&socket), width, height, if live { "romacs — VM" } else { "VM G1a" }.into())?;

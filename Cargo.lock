@@ -4255,6 +4255,7 @@ dependencies = [
  "fontconfig",
  "fontdb",
  "freetype-rs",
+ "memmap2",
  "once_cell",
  "romacs-display-protocol",
  "romacs-layout-input",

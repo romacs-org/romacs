@@ -18,6 +18,7 @@ freetype-bundled = ["freetype-rs/bundled"]
 [dependencies]
 cosmic-text.workspace = true
 fontdb.workspace = true
+memmap2.workspace = true
 once_cell.workspace = true
 romacs-display-protocol.workspace = true
 romacs-layout-input = { path = "../romacs-layout-input" }

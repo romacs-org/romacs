@@ -40,6 +40,13 @@ pub use style::{FontRequest, StyleScore, style_score};
 ///
 /// Registration is additive. Resolvers created afterwards observe it; an
 /// existing resolver keeps the answers it already cached.
+/// Load the platform font catalog (Fontconfig's configuration and cache),
+/// which every resolver shares, so a later caller finds it loaded.
+pub fn load_catalog() {
+    #[cfg(target_os = "linux")]
+    let _ = fontconfig_catalog::handle();
+}
+
 pub fn register_font_file(path: &std::path::Path) -> bool {
     #[cfg(target_os = "linux")]
     {
