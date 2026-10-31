@@ -1932,19 +1932,52 @@ pub fn parent_pid() -> i32 {
 }
 
 /// The worker's end of an isolate's signals: SIGUSR1 notes an interrupt for
-/// the engine's safepoints, SIGTERM a termination for its loop. Neither
-/// restarts a wait, so a blocked poll returns to look.
+/// the engine's safepoints, SIGTERM a termination for its loop. Either
+/// also writes a byte to the wake pipe, which the worker's isolate wait
+/// polls: the signal may land on any of the process's threads (the main
+/// one waits in a join), so only the pipe reliably ends a blocked wait.
 static INTERRUPT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static TERMINATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The wake pipe's read and write ends, or -1.
+static WAKE_READ: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+static WAKE_WRITE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
+fn wake_isolate_wait() {
+    let fd = WAKE_WRITE.load(std::sync::atomic::Ordering::SeqCst);
+    // Async-signal-safe; a full pipe already wakes the wait.
+    if fd >= 0 { let _ = unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) }; }
+}
 extern "C" fn note_interrupt(_: libc::c_int) {
     INTERRUPT.store(true, std::sync::atomic::Ordering::SeqCst);
+    wake_isolate_wait();
 }
 extern "C" fn note_terminate(_: libc::c_int) {
     TERMINATE.store(true, std::sync::atomic::Ordering::SeqCst);
+    wake_isolate_wait();
+}
+
+/// The read end of the wake pipe, once `catch_isolate_signals' made it.
+pub fn isolate_wake_fd() -> Option<std::os::fd::RawFd> {
+    let fd = WAKE_READ.load(std::sync::atomic::Ordering::SeqCst);
+    (fd >= 0).then_some(fd)
+}
+/// Empty the wake pipe: the flags, not the bytes, say what happened.
+pub fn drain_isolate_wake() {
+    if let Some(fd) = isolate_wake_fd() {
+        let mut bytes = [0u8; 64];
+        while unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), bytes.len()) } > 0 {}
+    }
 }
 
 pub fn catch_isolate_signals() -> io::Result<()> {
+    if WAKE_READ.load(std::sync::atomic::Ordering::SeqCst) < 0 {
+        effect(|| "isolate wake pipe".into())?;
+        let mut fds = [0; 2];
+        status(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) })?;
+        // For the process's life: a handler may write to it at any time.
+        WAKE_WRITE.store(fds[1], std::sync::atomic::Ordering::SeqCst);
+        WAKE_READ.store(fds[0], std::sync::atomic::Ordering::SeqCst);
+    }
     for (signal, handler) in [(libc::SIGUSR1, note_interrupt as extern "C" fn(libc::c_int)), (libc::SIGTERM, note_terminate)] {
         effect(|| format!("handle signal {signal}"))?;
         let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
@@ -1976,26 +2009,14 @@ pub fn take_terminate_quit() -> bool {
     TERMINATE.load(std::sync::atomic::Ordering::SeqCst) && !TERMINATE_QUIT.swap(true, std::sync::atomic::Ordering::SeqCst)
 }
 
-/// A worker process: PROGRAM with ARGS after `--isolate 3`, SOCKET as its
-/// descriptor 3, no stdin, this process's stderr. Its pid; the caller reaps.
+/// A worker process: PROGRAM with ARGS after `--isolate 0`, SOCKET as its
+/// standard input, this process's stderr. Its pid; the caller reaps.
+/// Spawned, never forked, as a world builder is (`World::start_builder`):
+/// no pre_exec, so no driver's atfork handler runs.
 pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
-    use std::os::fd::AsRawFd;
-    use std::os::unix::process::CommandExt;
     let mut command = command(program)?;
-    command.arg("--isolate").arg("3").args(args).stdin(std::process::Stdio::null());
-    let fd = socket.as_raw_fd();
-    // SAFETY: dup2 and fcntl are async-signal-safe.
-    unsafe {
-        command.pre_exec(move || {
-            if libc::dup2(fd, 3) < 0 || libc::fcntl(3, libc::F_SETFD, 0) < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let child = command.spawn()?;
-    drop(socket);
-    Ok(child.id() as i32)
+    command.arg("--isolate").arg("0").args(args).stdin(socket);
+    Ok(command.spawn()?.id() as i32)
 }
 
 /// emacs_pipe: a close-on-exec pipe (read end, write end).

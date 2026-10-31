@@ -48,7 +48,7 @@ pub const FORMAT: &str = "romacs-world 2";
 /// Set in a builder: the store it publishes to.
 const BUILD_ENV: &str = "ROMACS_WORLD_BUILD";
 /// Set in a builder: the descriptor of the world's lock, which its
-/// launcher took and handed on.
+/// launcher took and handed on as the builder's standard input.
 const LOCK_ENV: &str = "ROMACS_WORLD_LOCK_FD";
 /// How long a launch waits for a builder before it boots from source and
 /// counts the build as failed.
@@ -593,26 +593,28 @@ impl World {
         }
     }
 
-    /// Start a builder with ARGS, handing it LOCK: in the pinned environment
-    /// under the store, its output in `KEY.log`.
+    /// Start a builder with ARGS, handing it LOCK as its standard input: in
+    /// the pinned environment under the store, its output in `KEY.log`.
+    ///
+    /// The builder is spawned, never forked: a launch forks while its GPU
+    /// thread may be unloading a Vulkan driver, and fork runs the driver's
+    /// atfork handlers, which glibc unregisters only after the driver's
+    /// destructors ran (NVIDIA's then lock a mutex that is gone, at NULL).
+    /// With no pre_exec the standard library uses posix_spawn, which runs
+    /// no handlers (`host::spawn_isolate` does the same).
     fn start_builder(&self, args: Vec<OsString>, lock: std::fs::File) -> std::io::Result<std::process::Child> {
-        use std::os::fd::AsRawFd;
         use std::os::unix::process::CommandExt;
         let pinned = self.pinned_dir()?;
         let log = host::open_store_file(self.file(".log"), host::StoreOpen::Write { create: true, truncate: true })?;
         let mut env = pinned_env(&host::env_snapshot(), &pinned);
         env.push((BUILD_ENV.into(), self.store.clone().into_os_string()));
-        let fd = lock.as_raw_fd();
-        env.push((LOCK_ENV.into(), fd.to_string().into()));
+        env.push((LOCK_ENV.into(), "0".into()));
         let mut command = host::command(host::current_exe()?)?;
+        // The builder holds the lock this process took, on its descriptor 0;
+        // this one's copy closes once the builder runs.
         command.args(args).env_clear().envs(env).current_dir(pinned.join("cwd"))
-            .stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0);
-        // The lock's descriptor stays open across the exec: the builder holds
-        // the lock this process took, and this one's copy closes after.
-        unsafe { command.pre_exec(move || if libc::fcntl(fd, libc::F_SETFD, 0) == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }) };
-        let child = command.spawn();
-        drop(lock);
-        child
+            .stdin(lock).stdout(log.try_clone()?).stderr(log).process_group(0);
+        command.spawn()
     }
 
     /// The transient failures recorded since the last success: how many,

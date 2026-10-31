@@ -1,7 +1,7 @@
 //! A bare worker isolate: a `Vm::new` with the Lisp prelude, serving the
-//! spawner on descriptor 3 (`romacs_vm::isolate`). The GUI binary is the
-//! worker for its own launches; this one is for tests and embedders whose
-//! VM is bare.
+//! spawner on the descriptor `--isolate` names, its standard input
+//! (`romacs_vm::isolate`). The GUI binary is the worker for its own
+//! launches; this one is for tests and embedders whose VM is bare.
 use romacs_vm::Vm;
 
 fn main() {

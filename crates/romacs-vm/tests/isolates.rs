@@ -93,6 +93,32 @@ fn kill_leaves_no_zombie_and_settles_futures() {
     assert!(settles(|| !process_exists(worker)), "worker {worker} still exists: {out}");
 }
 
+thread_local! {
+    /// The forks this thread made since the handler was registered.
+    static FORKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+extern "C" fn count_fork() {
+    FORKS.with(|forks| forks.set(forks.get() + 1));
+}
+
+/// A worker is spawned, never forked: fork runs every library's atfork
+/// handlers, and a GPU driver unloading on another thread meanwhile
+/// crashes in its own (World::start_builder). Only a fork runs them.
+#[test]
+fn a_worker_is_spawned_without_running_atfork_handlers() {
+    use std::os::unix::process::CommandExt;
+    assert_eq!(unsafe { libc::pthread_atfork(Some(count_fork), None, None) }, 0);
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(isolate-await (isolate-spawn '+ 1 2))"), "3");
+    eval(&mut vm, "(isolate-kill-all)");
+    assert_eq!(FORKS.with(std::cell::Cell::get), 0, "spawning the worker forked");
+    // The handler sees a fork: a pre_exec makes the standard library fork.
+    let mut forked = std::process::Command::new("/bin/true");
+    unsafe { forked.pre_exec(|| Ok(())) };
+    assert!(forked.status().unwrap().success());
+    assert_eq!(FORKS.with(std::cell::Cell::get), 1);
+}
+
 #[test]
 fn a_worker_that_is_not_this_executable_is_refused_and_a_dead_one_reported() {
     let mut vm = vm();
@@ -218,4 +244,19 @@ fn resubmitted_jobs_keep_their_snapshot_and_fit_the_pool() {
     let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-4) 'provided))) (b (isolate-spawn '(lambda () (while t)))) (first (isolate-future-isolate b)) (generation (aref b 2))) (let ((end (+ (float-time) 10))) (while (and (< (romacs--isolate-frames (romacs--isolate-id first)) 4) (< (float-time) end)) (romacs--isolate-wait 0.2))) (list (list (eq (isolate-future-isolate b) first) (= (aref b 2) generation) (aref b 3) (romacs--isolate-frames (romacs--isolate-id first))) (progn (isolate-future-cancel b) (list (not (eq (isolate-future-isolate b) first)) (> (aref b 2) generation))) (isolate-await a) (condition-case e (isolate-await b 10) (quit 'cancelled)) (isolate-await (isolate-spawn 'list 'after) 10))))");
     assert_eq!(out, "((t t pending 4) (t t) provided cancelled (after))");
     eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_retired_worker_ends_without_a_wait_or_a_death_report() {
+    let mut vm = vm();
+    let out = eval(&mut vm, "(let* ((reports nil) (isolate-error-functions (list (lambda (&rest e) (push e reports))))
+                                    (iso (isolate-create)) (pid (progn (isolate-await (isolate-spawn 'list :isolate iso)) (romacs--isolate-pid (romacs--isolate-id iso))))
+                                    (busy (isolate-create)) (job (isolate-spawn '(lambda () (while t)) :isolate busy))
+                                    (t0 (float-time)) (retired (isolate-retire iso)) (quick (< (- (float-time) t0) 0.1)))
+                               (let ((end (+ (float-time) 5))) (while (and (memq iso romacs--isolates) (< (float-time) end)) (romacs--isolate-pump 0.05)))
+                               (prog1 (list pid retired quick (isolate-live-p iso) (memq iso (isolate-list)) reports (isolate-retire busy))
+                                 (isolate-kill busy)))");
+    let pid: i64 = out.trim_start_matches('(').split_whitespace().next().unwrap().parse().unwrap();
+    assert!(out.ends_with(" t t nil nil nil nil)"), "{out}");
+    assert!(settles(|| !process_exists(pid)), "retired worker {pid} survived");
 }

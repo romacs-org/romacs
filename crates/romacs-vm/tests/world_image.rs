@@ -116,7 +116,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn restored() -> String {
-    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "moved": true}).to_string()
+    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "moved": true, "forked": false}).to_string()
 }
 
 /// What a child printed of its outcome.
@@ -148,7 +148,19 @@ fn world(store: &Path) -> World {
     World::new(store.to_owned(), vec!["consumer world-image-test".into()]).unwrap()
 }
 
+thread_local! {
+    /// The forks this thread made since `launch` registered the handler.
+    static FORKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+extern "C" fn count_fork() {
+    FORKS.with(|forks| forks.set(forks.get() + 1));
+}
+
+/// A launch says whether it forked: it spawns its builder, never forks it,
+/// as fork runs every library's atfork handlers while the launch's GPU
+/// thread may be unloading a driver (`World::start_builder`).
 fn launch(store: &Path) {
+    unsafe { libc::pthread_atfork(Some(count_fork), None, None) };
     let world = match World::new(store.to_owned(), vec!["consumer world-image-test".into()]) {
         Ok(world) => world,
         Err(error) => {
@@ -162,7 +174,8 @@ fn launch(store: &Path) {
             let value = vm.eval_source("(world-image-probe)").and_then(|v| v.display()).unwrap();
             let builder = arena::mapped_image().unwrap().executable;
             println!("WORLD-IMAGE {}", json!({"mode": "restored", "carry": carry, "value": value,
-                                               "moved": builder != arena::executable_base()}));
+                                               "moved": builder != arena::executable_base(),
+                                               "forked": FORKS.with(std::cell::Cell::get) > 0}));
         }
         Launch::Build => {
             // An input beside the store: the word "fail" in it fails the build.
