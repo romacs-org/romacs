@@ -587,8 +587,8 @@ impl Leaf<'_> {
         Ok(eol == self.intern("dos"))
     }
     /// decode_coding_c_string of BYTES with CODING (nil: no-conversion),
-    /// setting `last-coding-system-used'. `undecided' detects ASCII and
-    /// UTF-8 only (VM2-PROC2); other bytes are refused, not guessed.
+    /// setting `last-coding-system-used'. `undecided' runs the coding
+    /// owner's detection (detect_coding), as insert-file-contents does.
     pub(crate) fn decode_output(&mut self, bytes: Vec<u8>, coding: Value) -> Out {
         let coding = if coding == Value::NIL { self.sym("no-conversion") } else { coding };
         let spec = self.coding_spec_checked(coding)?;
@@ -597,17 +597,19 @@ impl Leaf<'_> {
         let eol = self.vector_get(spec, fixnum(2))?;
         let last_used = self.intern("last-coding-system-used");
         let name = if kind == self.intern("undecided") {
-            if std::str::from_utf8(&bytes).is_err() {
-                return Err(Fault::Error("VM2 cannot detect the coding system of non-UTF-8 process output".into()));
-            }
             if bytes.is_ascii() && !bytes.contains(&b'\r') {
                 // Nothing to detect: the text, and the coding system stays.
                 let text = self.make_string(bytes, true);
                 self.variable_set(last_used, coding)?;
                 return Ok(text);
             }
-            let suffix = if eol == self.intern("unix") { "-unix" } else if eol == self.intern("dos") { "-dos" } else if eol == self.intern("mac") { "-mac" } else { "" };
-            self.sym(&format!("utf-8{suffix}"))
+            match self.coding_detected_system(spec, attrs, &bytes)? {
+                Some(found) => found,
+                None => {
+                    let suffix = if eol == self.intern("unix") { "-unix" } else if eol == self.intern("dos") { "-dos" } else if eol == self.intern("mac") { "-mac" } else { "" };
+                    self.sym(&format!("utf-8{suffix}"))
+                }
+            }
         } else {
             coding
         };

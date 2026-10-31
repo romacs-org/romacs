@@ -586,11 +586,7 @@ impl Vm {
     pub(crate) fn buffer_text(&mut self, buffer: Value, from: i64, to: i64) -> Faulty<Value> {
         let (a, b) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
         let object = match self.object_if(buffer) {
-            Some(Object::Buffer(t)) => {
-                let mut s = data::LispString::new(t.slice(a..b).map_err(Fault::Error)?);
-                s.properties = t.properties.slice(a..b);
-                Object::String(Box::new(s))
-            }
+            Some(Object::Buffer(t)) => data::string_object(t.lisp_string(a..b).map_err(Fault::Error)?),
             Some(Object::ByteBuffer(t)) => Object::Bytes(t.bytes[a.0..b.0].to_vec()),
             _ => return Err(Fault::Error("buffer required".into())),
         };

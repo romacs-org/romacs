@@ -108,7 +108,7 @@ impl Leaf<'_> {
         let mut chars: Vec<u32> = {
             let data::Object::Buffer(b) = &self.vm.objects[index] else { unreachable!() };
             ((lo - 1) as usize..(hi - 1) as usize)
-                .map(|at| b.character_of_char(CharOffset(at)).map(|c| c.map_or(0, |c| c as u32)))
+                .map(|at| b.character_of_char(CharOffset(at)).map(|c| c.unwrap_or(0)))
                 .collect::<crate::Result<_>>().map_err(Fault::Error)?
         };
         let (base, mut at, mut changed) = ((lo - 1) as usize, 0, 0);
@@ -128,10 +128,6 @@ impl Leaf<'_> {
                     }
                 },
             };
-            // A VM2 multibyte buffer holds Unicode text, so no raw byte.
-            if replacement.iter().any(|&c| c > 0x10ffff) {
-                return Err(Fault::Error("VM2 translate-region-internal cannot put a raw byte in a multibyte buffer".into()));
-            }
             let mut bytes = Vec::new();
             for &c in &replacement {
                 let mut encoded = [0; 5];
@@ -144,8 +140,7 @@ impl Leaf<'_> {
             if scalar && to.0 - from.0 == bytes.len() {
                 // One character for one of the same bytes: rewritten in
                 // place, properties, point and markers kept.
-                let text = std::str::from_utf8(&bytes).map_err(|e| Fault::Error(e.to_string()))?.to_owned();
-                b.overwrite(from..ByteOffset(from.0 + bytes.len()), &text).map_err(Fault::Error)?;
+                b.overwrite(from..ByteOffset(from.0 + bytes.len()), &bytes).map_err(Fault::Error)?;
             } else {
                 // replace_range: markers at or after the old end follow the
                 // new text, markers inside collapse to its start, and point

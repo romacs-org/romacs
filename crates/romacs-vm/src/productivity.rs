@@ -167,7 +167,7 @@ impl Vm {
             };
             if raw {
                 raw_high |= !piece.is_ascii();
-                if quoting_style.is_some() && !piece.is_ascii() {
+                if !piece.is_ascii() {
                     raw_ranges.push(out.len()..out.len() + piece.len());
                 }
             } else {
@@ -185,7 +185,7 @@ impl Vm {
             }
         }
         landing[codes.len()] = out.len();
-        if quoting_style.is_some() && unicode_high && raw_high {
+        if unicode_high && raw_high {
             // GNU promotes each unibyte octet separately, never as UTF-8.
             // Preserve source spans so literal Unicode and byte8 characters
             // already in a multibyte argument are not encoded twice.
@@ -209,9 +209,6 @@ impl Vm {
             return Ok(self.make_lisp_string(promoted, true));
         }
         if raw_high {
-            if unicode_high {
-                return Err("format cannot mix raw high octets with Unicode text".into());
-            }
             let properties = self.format_properties(format_value, &landing, &fields, &out, false);
             return Ok(self.propertied_string(out, false, properties));
         }

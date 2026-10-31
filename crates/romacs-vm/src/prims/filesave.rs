@@ -28,8 +28,8 @@ fn native_encoding(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
 }
 
 /// An expanded name as text and value.
-fn as_file(cx: &mut Leaf<'_>, expanded: Value) -> std::result::Result<(String, Value), Fault> {
-    Ok((cx.string_text(expanded)?, expanded))
+fn as_file(cx: &mut Leaf<'_>, expanded: Value) -> std::result::Result<(std::path::PathBuf, Value), Fault> {
+    Ok((super::fileio::file_name_path(cx, expanded)?, expanded))
 }
 
 /// Fdirectory_file_name of EXPANDED for BODY whose own arguments are the
@@ -44,7 +44,7 @@ fn dir_to_file(
     saved: &[Value],
     args: usize,
     always: bool,
-) -> std::result::Result<std::result::Result<(String, Value), Next>, Fault> {
+) -> std::result::Result<std::result::Result<(std::path::PathBuf, Value), Next>, Fault> {
     if saved.len() > args {
         if cx.string_bytes(expanded).is_err() {
             return Err(Fault::Error("Invalid handler in ‘file-name-handler-alist’".into()));
@@ -56,7 +56,7 @@ fn dir_to_file(
         return Ok(Ok(as_file(cx, expanded)?));
     }
     match super::savejourney::directory_file_name(cx, expanded)? {
-        Step::Done(file) => Ok(Ok((cx.string_text(file)?, file))),
+        Step::Done(file) => Ok(Ok(as_file(cx, file)?)),
         Step::Call { f, args, .. } => {
             let mut saved = saved.to_vec();
             saved.push(Value::TRUE);
@@ -154,11 +154,13 @@ fn file_writable_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Ne
     let (path, expanded) = as_file(cx, expanded)?;
     if let Some(call) = handler(cx, expanded, "file-writable-p", vec![expanded])? { return call; }
     native_encoding(cx)?;
-    let writable = match cx.filesave_access(&path, libc::W_OK) {
+    let writable = match cx.filesave_access(path.as_os_str(), libc::W_OK) {
         Ok(()) => true,
         Err(e) if e.raw_os_error() == Some(libc::ENOENT) => {
-            let slash = path.rfind('/').unwrap_or(0);
-            let dir = &path[..=slash];
+            use std::os::unix::ffi::OsStrExt;
+            let bytes = path.as_os_str().as_bytes();
+            let slash = bytes.iter().rposition(|&b| b == b'/').unwrap_or(0);
+            let dir = std::ffi::OsStr::from_bytes(&bytes[..=slash]);
             cx.filesave_access(dir, libc::W_OK | libc::X_OK).is_ok()
         }
         Err(_) => false,
@@ -228,7 +230,7 @@ fn rename_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         Err(next) => return next,
     };
     let overwrite = saved[2];
-    let (source, target) = (cx.string_text(source_value)?, cx.string_text(target_value)?);
+    let (source, target) = (super::fileio::file_name_path(cx, source_value)?, super::fileio::file_name_path(cx, target_value)?);
     let args = vec![source_value, target_value, overwrite];
     if let Some(call) = handler(cx, source_value, "rename-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, target_value, "rename-file", args)? { return call; }
@@ -294,7 +296,7 @@ fn check_file_access(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Nex
     let (path, expanded) = as_file(cx, expanded)?;
     if let Some(call) = handler(cx, expanded, operation, vec![expanded])? { return call; }
     native_encoding(cx)?;
-    Ok(Step::Done(if cx.filesave_access(&path, mode).is_ok() { Value::TRUE } else { Value::NIL }))
+    Ok(Step::Done(if cx.filesave_access(path.as_os_str(), mode).is_ok() { Value::TRUE } else { Value::NIL }))
 }
 
 fn access(cx: &mut Leaf<'_>, filename: Value, mode: i32) -> Next {
@@ -470,7 +472,7 @@ fn may_replace(cx: &mut Leaf<'_>, ok: Value, name: Value, operation: &str) -> st
 fn create_name(
     cx: &mut Leaf<'_>,
     create: impl Fn() -> std::io::Result<()>,
-    path: &str,
+    path: &std::path::Path,
     name: Value,
     ok: Value,
     operation: &str,
@@ -511,7 +513,7 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         Err(next) => return next,
     };
     let [_, _, ok_if_already_exists, keep_time, preserve_uid_gid, preserve_permissions] = saved[..6] else { unreachable!() };
-    let (source, target) = (cx.string_text(file)?, cx.string_text(newname)?);
+    let (source, target) = (super::fileio::file_name_path(cx, file)?, super::fileio::file_name_path(cx, newname)?);
     let args = vec![file, newname, ok_if_already_exists, keep_time, preserve_uid_gid, preserve_permissions];
     if let Some(call) = handler(cx, file, "copy-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, newname, "copy-file", args)? { return call; }
@@ -609,7 +611,7 @@ fn add_name_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         Err(next) => return next,
     };
     let ok_if_already_exists = saved[2];
-    let (source, target) = (cx.string_text(file)?, cx.string_text(newname)?);
+    let (source, target) = (super::fileio::file_name_path(cx, file)?, super::fileio::file_name_path(cx, newname)?);
     let args = vec![file, newname, ok_if_already_exists];
     if let Some(call) = handler(cx, file, "add-name-to-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, newname, "add-name-to-file", args)? { return call; }
@@ -645,7 +647,7 @@ fn link_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         Err(next) => return next,
     };
     let ok_if_already_exists = saved[2];
-    let link = cx.string_text(linkname)?;
+    let link = super::fileio::file_name_path(cx, linkname)?;
     if let Some(call) = handler(cx, linkname, "make-symbolic-link", vec![target, linkname, ok_if_already_exists])? {
         return call;
     }
@@ -653,7 +655,7 @@ fn link_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     if cx.string_bytes(target)?.contains(&0) {
         return Err(Fault::Wrong("filenamep", target));
     }
-    let literal = cx.string_text(target)?;
+    let literal = super::fileio::file_name_path(cx, target)?;
     create_name(cx, || host::symlink(&literal, &link), &link, linkname, ok_if_already_exists, "make-symbolic-link")?
         .map_err(|e| errno(cx, "Making symbolic link", &[target, linkname], e))?;
     Ok(Step::Done(Value::NIL))
@@ -689,8 +691,8 @@ fn access_expanded(cx: &mut Leaf<'_>, absname: Value, saved: &[Value]) -> Next {
     let operation = cx.string_text(string)?;
     if let Some(call) = handler(cx, absname, "access-file", vec![absname, string])? { return call; }
     native_encoding(cx)?;
-    let path = cx.string_text(absname)?;
-    cx.filesave_access(&path, libc::R_OK).map_err(|e| errno(cx, &operation, &[filename], e))?;
+    let path = super::fileio::file_name_path(cx, absname)?;
+    cx.filesave_access(path.as_os_str(), libc::R_OK).map_err(|e| errno(cx, &operation, &[filename], e))?;
     Ok(Step::Done(Value::NIL))
 }
 
@@ -735,12 +737,12 @@ fn newer_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     // file_attribute_errno: a missing file is no error.
     let missing = |e: &std::io::Error| matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR));
     let modified = |m: &std::fs::Metadata| { use std::os::unix::fs::MetadataExt; (m.mtime(), m.mtime_nsec()) };
-    let first = match host::metadata(cx.string_text(absname1)?) {
+    let first = match host::metadata(super::fileio::file_name_path(cx, absname1)?) {
         Ok(m) => modified(&m),
         Err(e) if missing(&e) => return Ok(Step::Done(Value::NIL)),
         Err(e) => return Err(errno(cx, "Getting attributes", &[absname1], e)),
     };
-    let second = match host::metadata(cx.string_text(absname2)?) {
+    let second = match host::metadata(super::fileio::file_name_path(cx, absname2)?) {
         Ok(m) => modified(&m),
         Err(e) if missing(&e) => return Ok(Step::Done(Value::TRUE)),
         Err(e) => return Err(errno(cx, "Getting attributes", &[absname2], e)),
@@ -888,8 +890,8 @@ fn set_acl_expanded(cx: &mut Leaf<'_>, absname: Value, saved: &[Value]) -> Next 
     let Some(entries) = acl_parse(&cx.string_text(acl_string)?) else { return Ok(Step::Done(Value::NIL)) };
     let mut value = 2u32.to_le_bytes().to_vec();
     for (tag, perm, id) in entries { value.extend(tag.to_le_bytes().into_iter().chain(perm.to_le_bytes()).chain(id.to_le_bytes())); }
-    let path = cx.string_text(absname)?;
-    match host::set_posix_acl(std::path::Path::new(&path), &value) {
+    let path = super::fileio::file_name_path(cx, absname)?;
+    match host::set_posix_acl(&path, &value) {
         Ok(()) => Ok(Step::Done(Value::TRUE)),
         Err(e) if matches!(e.raw_os_error(), Some(libc::EBUSY | libc::EINVAL | libc::ENOSYS | libc::ENOTSUP)) => Ok(Step::Done(Value::NIL)),
         Err(e) => Err(errno(cx, "Setting ACL", &[absname], e)),

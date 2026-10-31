@@ -2,12 +2,12 @@ use romacs_vm::Vm;
 
 #[test]
 fn mixed_raw_octets_and_unicode_follow_d002_without_silent_decoding() {
+    // Pinned GNU: "λ\200\303\251\377", multibyte: a unibyte argument's
+    // bytes above 127 become raw-byte characters (VM2-STR2), never UTF-8.
     let mut vm = Vm::new();
-    assert_eq!(
-        vm.eval_source(r#"(format "λ%s" (unibyte-string 128 195 169 255))"#)
-            .unwrap_err(),
-        "format cannot mix raw high octets with Unicode text"
-    );
+    let value = vm.eval_source(r#"(prin1-to-string (list (format "λ%s" (unibyte-string 128 195 169 255)) (multibyte-string-p (format "λ%s" (unibyte-string 128 195 169 255)))))"#).unwrap();
+    let printed: String = serde_json::from_str(&value.display().unwrap()).unwrap();
+    assert_eq!(printed, r#"("λ\200\303\251\377" t)"#);
     let value = vm
         .eval_source(r#"(format "λ%s" (string-as-multibyte (unibyte-string 195 169)))"#)
         .unwrap();

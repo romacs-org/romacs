@@ -194,7 +194,10 @@ impl<'l, 'a> Source<'l, 'a> {
         match self.leaf.vm.object_if(self.view.buffer) { Some(Object::Buffer(b)) => b, _ => unreachable!("checked text buffer") }
     }
     fn char_at(&self, byte: usize) -> u32 {
-        self.text().as_str()[byte..].chars().next().map_or(0, u32::from)
+        // The flat text's scalar, then the raw-byte listing (empty for
+        // pure Unicode text) decides its code.
+        let text = self.text();
+        text.as_str()[byte..].chars().next().map_or(0, |c| text.code_at(byte, c))
     }
     fn buffer_whitespace(&self, pos: i64) -> R<bool> {
         if pos >= self.view.zv { return Ok(false); }
@@ -228,7 +231,7 @@ impl<'l, 'a> Source<'l, 'a> {
         let (pos, byte) = (self.next, self.byte);
         let c = self.char_at(byte);
         self.next += 1;
-        self.byte += char::from_u32(c).map_or(1, char::len_utf8);
+        self.byte += crate::lstring::char_string(c, &mut [0; 5]);
         if self.pre.is_none() { self.pre = Some(pos); }
         let origin = Origin { charpos: pos, string: Value::NIL, strpos: None, from_display: false, text_area: true,
             whitespace_under: matches!(c, 0x20 | 0x09) };

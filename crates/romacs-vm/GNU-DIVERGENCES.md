@@ -327,8 +327,9 @@ Live isolated GNU 32.0.50 (`--batch -Q`, throwaway HOME), interpreted path:
 The integer-character reader now preserves raw high octets as BYTE8 codes in
 mixed multibyte literals, through the canonical 22-bit string codec. Pure raw
 literals remain unibyte. The banked reader corpus covers raw, mixed, surrogate
-and extended character inputs. Text buffers and file-source decoding retain
-separate strict-Unicode boundaries; this does not claim those are now fixed.
+and extended character inputs. Text buffers hold raw bytes too, as placeholder
+characters listed per text body (DIVERGENCES.md VM2-RAWTEXT1); file-source
+decoding retains its separate boundary.
 
 The host Rust-str compiler adapter retains its pre-existing multibyte-ASCII
 literal policy during migration. Lisp `read`/`read-from-string` use GNU's

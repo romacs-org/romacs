@@ -573,8 +573,8 @@ impl Vm {
         // Text from Lisp data joins output decoded as symbol keys (symkey.rs).
         if let Ok(state) = self.buffer_state(value) {
             return Ok(match &state.name {
-                Some(name) if quoted => format!("#<buffer {}>", crate::symkey::escape_text(name)),
-                Some(name) => crate::symkey::escape_text(name).into_owned(),
+                Some(name) if quoted => format!("#<buffer {}>", crate::symkey::escape_text(&crate::buffer::buffer_name_shown(name))),
+                Some(name) => crate::symkey::escape_text(&crate::buffer::buffer_name_shown(name)).into_owned(),
                 None => "#<killed buffer>".into(),
             });
         }

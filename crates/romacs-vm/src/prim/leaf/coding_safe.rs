@@ -85,7 +85,8 @@ impl Leaf<'_> {
             let (from, to) = (byte(s)?, byte(e)?);
             if (e - s) as usize == to.0 - from.0 { return Ok(Value::TRUE); }
             let text: &crate::text::Text = b;
-            text.as_str()[from.0..to.0].chars().map(u32::from).collect()
+            let internal = text.internal(from..to).map_err(Fault::Error)?;
+            crate::lstring::StrView { bytes: &internal, chars: (e - s) as usize, multibyte: true }.chars().collect()
         };
         let list = self.intern("coding-system-list");
         let names = self.variable_value(list)?.unwrap_or(Value::NIL);

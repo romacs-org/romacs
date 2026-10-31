@@ -30,7 +30,7 @@ fn metadata_modtime(meta: &std::fs::Metadata) -> VisitedModtime {
     VisitedModtime::Known { seconds: meta.mtime(), nanos: meta.mtime_nsec(), size: Some(meta.len()) }
 }
 
-fn stat_modtime(path: &str) -> VisitedModtime {
+fn stat_modtime(path: &std::path::Path) -> VisitedModtime {
     match crate::host::metadata(path) {
         Ok(meta) => metadata_modtime(&meta),
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => VisitedModtime::Missing,
@@ -63,12 +63,11 @@ fn visited_file_modtime(cx) {
 
 defsubr! { name = "verify-visited-file-modtime", gnu = "fileio.c:6121", effect = Global,
 fn verify_visited_file_modtime(cx; optional buffer: Value) -> Step {
-    let (state, path) = cx.fileio_modtime(buffer)?;
-    let Some(path) = path else { return Ok(Step::Done(Value::TRUE)) };
+    let (state, name) = cx.fileio_modtime(buffer)?;
+    let Some(name) = name else { return Ok(Step::Done(Value::TRUE)) };
     if state == VisitedModtime::Unknown { return Ok(Step::Done(Value::TRUE)) }
-    let name = cx.string(&path);
     if let Some(call) = handler(cx, name, "verify-visited-file-modtime", vec![buffer])? { return call; }
-    let actual = stat_modtime(&path);
+    let actual = stat_modtime(&file_name_path(cx, name)?);
     let equal = match (state, actual) {
         (VisitedModtime::Known { seconds: s, nanos: n, size }, VisitedModtime::Known { seconds, nanos, size: actual_size }) =>
             s == seconds && n == nanos && (size.is_none() || size == actual_size),
@@ -135,13 +134,12 @@ fn set_visited_file_modtime(cx; optional time: Value) -> Step {
         return Ok(Step::Done(Value::NIL));
     }
     let (_, filename) = cx.fileio_modtime(Value::NIL)?;
-    let Some(filename) = filename else { return Err(Fault::Wrong("stringp", Value::NIL)) };
-    let name = cx.string(&filename);
+    let Some(name) = filename else { return Err(Fault::Wrong("stringp", Value::NIL)) };
     expanding(cx, name, visited_modtime_expanded, vec![])
 }}
 fn visited_modtime_expanded(cx: &mut Leaf<'_>, name: Value, _: &[Value]) -> Next {
     if let Some(call) = handler(cx, name, "set-visited-file-modtime", vec![Value::NIL])? { return call; }
-    let path = cx.string_text(name)?;
+    let path = file_name_path(cx, name)?;
     let meta = match crate::host::metadata(path) {
         Ok(meta) => meta,
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => return Ok(Step::Done(Value::NIL)),
@@ -203,6 +201,29 @@ fn symbol_is(cx: &mut Leaf<'_>, v: Value, names: &[&str]) -> bool {
 /// GNU would call one.
 pub(super) fn expanding(cx: &mut Leaf<'_>, name: Value, then: crate::prim::Then, saved: Vec<Value>) -> Next {
     super::expand_file_name::expanding(cx, name, Value::NIL, then, saved)
+}
+
+/// ENCODE_FILE under a UTF-8 `file-name-coding-system': the host bytes of
+/// the file name VALUE, a raw-byte character as its byte.
+pub(super) fn file_name_bytes(cx: &Leaf<'_>, value: Value) -> std::result::Result<Vec<u8>, Fault> {
+    cx.file_name_bytes(value)
+}
+
+/// VALUE as the host path: a name with raw-byte characters names the file
+/// whose name has those bytes.
+pub(super) fn file_name_path(cx: &Leaf<'_>, value: Value) -> std::result::Result<std::path::PathBuf, Fault> {
+    use std::os::unix::ffi::OsStringExt;
+    Ok(std::ffi::OsString::from_vec(file_name_bytes(cx, value)?).into())
+}
+
+/// DECODE_FILE under a UTF-8 `file-name-coding-system': the Lisp string
+/// of the host name BYTES, invalid sequences as raw-byte characters;
+/// unibyte when ASCII, as decode_coding leaves ASCII.
+pub(super) fn file_name_value(cx: &mut Leaf<'_>, bytes: &[u8]) -> Value {
+    if bytes.is_ascii() {
+        return cx.make_string(bytes.to_vec(), false);
+    }
+    cx.make_string(crate::text::octets_as_multibyte(bytes).0, true)
 }
 
 /// GNU `auto_saving': the mode bits an auto-save file is created with while
@@ -284,7 +305,7 @@ fn insert_expanded(cx: &mut Leaf<'_>, orig: Value, saved: &[Value]) -> Next {
         let args = vec![operation, orig, visit, beg, end, replace];
         return Ok(Step::Call { f, args, then: insert_coding::handled, saved: vec![orig, visit, beg, end, replace, empty_undo, f] });
     }
-    let path = cx.string_text(orig)?;
+    let path = file_name_path(cx, orig)?;
     let shape = cx.buffer_shape()?;
     let empty_undo = empty_undo != Value::NIL;
     let visiting = visit != Value::NIL;
@@ -350,7 +371,7 @@ fn insert_expanded(cx: &mut Leaf<'_>, orig: Value, saved: &[Value]) -> Next {
 /// writer (or a device) opens at once and reaches the non-regular refusal
 /// instead of blocking in open(2); the flag does not affect the regular files
 /// that are read.
-fn open_for_reading(path: &str) -> std::io::Result<crate::host::Input> {
+fn open_for_reading(path: &std::path::Path) -> std::io::Result<crate::host::Input> {
     let flags = libc::O_NONBLOCK;
     crate::host::open_input(path, flags)
 }
@@ -454,7 +475,7 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
 // expanded FILENAME.
 fn write_expanded(cx: &mut Leaf<'_>, name: Value, saved: &[Value]) -> Next {
     let [_, _, _, visit, _, mustbenew] = saved[..6] else { unreachable!() };
-    let path = cx.string_text(name)?;
+    let path = file_name_path(cx, name)?;
     let excl = symbol_is(cx, mustbenew, &["excl"]);
     if mustbenew != Value::NIL && !excl && crate::host::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_dir()) {
         // barf_or_query_if_file_exists checks directory before confirmation.
@@ -657,7 +678,7 @@ fn write_file(cx: &mut Leaf<'_>, r: &[Value], encoded: Value) -> Out {
     use super::write_coding as w;
     let (name, append, visit, mustbenew) = (r[w::FILENAME], r[w::APPEND], r[w::VISIT], r[w::MUSTBENEW]);
     let visiting = visit == Value::TRUE || stringp(cx, visit);
-    let path = cx.string_text(name)?;
+    let path = file_name_path(cx, name)?;
     let bytes = cx.string_view(encoded)?.bytes().to_vec();
     let excl = symbol_is(cx, mustbenew, &["excl"]);
     let mut options = crate::host::OpenOptions::new();
@@ -813,8 +834,8 @@ fn locate_suffix(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
         }
     }
     let found = match access_mode {
-        None => crate::host::probe(crate::host::Probe::IsFile, &candidate) && open_for_reading(&candidate).is_ok(),
-        Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(&candidate, mode).is_ok())
+        None => crate::host::probe(crate::host::Probe::IsFile, &candidate) && open_for_reading(std::path::Path::new(&candidate)).is_ok(),
+        Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(std::ffi::OsStr::new(&candidate), mode).is_ok())
             && !crate::host::probe(crate::host::Probe::IsDir, &candidate),
     };
     if found { return Ok(Step::Done(candidate_value)); }

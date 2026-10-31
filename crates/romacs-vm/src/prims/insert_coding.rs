@@ -525,16 +525,10 @@ fn replace(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
     let old = cx.region_text(begv, zv)?;
     let multibyte = !cx.buffer_shape()?.unibyte;
     let (old, new) = (cx.string_view(old)?.bytes().to_vec(), cx.string_view(text)?.bytes().to_vec());
-    if multibyte && !cx.string_view(text)?.is_multibyte() && new.iter().any(|&b| b >= 0x80) {
-        return Err(refuse("insert-file-contents of raw bytes into a multibyte buffer"));
-    }
+    // A unibyte decoding (no-conversion) into a multibyte buffer is
+    // inserted as insert_from_string does, bytes above 127 as raw bytes.
+    let new = if multibyte && !cx.string_view(text)?.is_multibyte() { crate::text::octets_to_multibyte(&new) } else { new };
     let (start, end, middle) = common_ends(&old, &new, multibyte);
-    // VM2 buffer text is Unicode: refuse a middle with raw-byte characters
-    // before anything changes (insert_before_point would refuse it after
-    // the deletion).
-    if multibyte && std::str::from_utf8(&new[middle.clone()]).is_err() {
-        return Err(refuse("insert-file-contents of raw bytes into a multibyte buffer"));
-    }
     let chars = |bytes: &[u8]| if multibyte { bytes.iter().filter(|&&b| b & 0xc0 != 0x80).count() } else { bytes.len() } as i64;
     let (from, to) = (begv + chars(&old[..start]), begv + chars(&old[..end]));
     let marker = cx.editor_point_marker()?;
@@ -619,50 +613,20 @@ fn decode_bytes(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<Option<(V
         return Err(refuse("insert-file-contents with a decoding translation table"));
     }
     let octets = cx.string_view(bytes)?.bytes().to_vec();
-    let (found, eol_seen) = cx.coding_detect(&octets, attrs)?;
+    // detect_coding, then decode_coding_gap's ASCII optimization for a
+    // system that detected nothing: check_ascii's EOL picks the subsidiary.
+    // The string decoder makes the same choices, but no ASCII EOL pick.
     let eols = cx.vector_get(spec, fixnum(2)?)?;
-    let vector = cx.kind(eols) == crate::prim::leaf::Kind::Vector;
-    let Some(found) = found else {
-        if cx.vector_get(attrs, fixnum(3)?)? != cx.intern("undecided") {
-            let mut coding = coding;
-            if let Some(index) = cx.coding_ascii_eol(&octets, attrs)?.filter(|_| vector) {
-                coding = cx.vector_get(eols, fixnum(index as i64)?)?;
-            }
-            let decoded = decode_with(cx, bytes, coding)?;
-            let name = var(cx, "last-coding-system-used")?;
-            return Ok(Some((decoded, name)));
-        }
-        // Nothing detected: the raw decoder, the EOL the scan saw.
-        let mut name = coding;
-        if let Some(index) = eol_seen.filter(|_| vector) {
-            name = cx.vector_get(eols, fixnum(index as i64)?)?;
-        }
-        let spec = cx.coding_spec(name)?;
-        let eol = cx.vector_get(spec, fixnum(2)?)?;
-        let mut out = Vec::with_capacity(octets.len());
-        let (mac, dos) = (eol == cx.intern("mac"), eol == cx.intern("dos"));
-        let inhibit = var(cx, "inhibit-eol-conversion")? != Value::NIL;
-        for (i, &byte) in octets.iter().enumerate() {
-            if !inhibit && byte == b'\r' && (mac || (dos && octets.get(i + 1) == Some(&b'\n'))) {
-                if mac { out.push(b'\n'); }
-                continue;
-            }
-            out.push(byte);
-        }
-        let decoded = cx.make_string(out, false);
-        return Ok(Some((decoded, name)));
+    let mut coding = match cx.coding_detected_system(spec, attrs, &octets)? {
+        Some(found) => found,
+        None => coding,
     };
-    // setup_coding_system (found), keeping an EOL CODING itself specified.
-    let mut found = found;
-    if !vector {
-        let found_spec = cx.coding_spec(found)?;
-        let found_eols = cx.vector_get(found_spec, fixnum(2)?)?;
-        if cx.kind(found_eols) == crate::prim::leaf::Kind::Vector {
-            let index = ["unix", "dos", "mac"].iter().position(|e| eols == cx.intern(e)).unwrap_or(0);
-            found = cx.vector_get(found_eols, fixnum(index as i64)?)?;
-        }
+    if coding == r[CODING] && cx.vector_get(attrs, fixnum(3)?)? != cx.intern("undecided")
+        && cx.kind(eols) == crate::prim::leaf::Kind::Vector
+        && let Some(index) = cx.coding_ascii_eol(&octets, attrs)? {
+        coding = cx.vector_get(eols, fixnum(index as i64)?)?;
     }
-    let decoded = decode_with(cx, bytes, found)?;
+    let decoded = decode_with(cx, bytes, coding)?;
     let name = var(cx, "last-coding-system-used")?;
     Ok(Some((decoded, name)))
 }
@@ -671,7 +635,7 @@ fn decode_bytes(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<Option<(V
 /// naming the system the decision chose.
 fn decode_with(cx: &mut Leaf<'_>, bytes: Value, coding: Value) -> Out {
     cx.coding_convert_string(bytes, coding, Value::TRUE, Value::NIL, false).map_err(|fault| match fault {
-        Fault::Error(message) if message.starts_with("string conversion for this coding type is not implemented") => {
+        Fault::Error(message) if message.starts_with("VM2 string conversion for the ") => {
             match cx.symbol_name(coding) {
                 Ok(name) => refuse(&format!("insert-file-contents decoding with {name}")),
                 Err(fault) => fault,

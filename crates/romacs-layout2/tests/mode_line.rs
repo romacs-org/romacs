@@ -12,8 +12,10 @@ fn scene() -> WindowSnapshot {
         text: TextSlice {
             utf8: "body\nnext\nlast".into(),
             face_runs: vec![],
+            raw: vec![],
         },
         mode_line: Some(TextSlice {
+            raw: vec![],
             utf8: "g1 Ω v=0".into(),
             face_runs: vec![FaceRun {
                 bytes: 3..5,
@@ -223,7 +225,7 @@ fn empty_band_still_reserves_height_and_none_preserves_body() {
 #[test]
 fn header_line_is_top_anchored_and_its_faces_stay_the_windows() {
     let mut header = scene();
-    header.header_line = Some(TextSlice { utf8: "head".into(), face_runs: vec![] });
+    header.header_line = Some(TextSlice { utf8: "head".into(), face_runs: vec![], raw: vec![] });
     header.header_line_face = FaceHandle(1);
     header.mode_line = None;
     let mut below = scene();

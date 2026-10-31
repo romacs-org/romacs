@@ -3754,7 +3754,7 @@ fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
         return None;
     }
     let length = chars.len();
-    if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
+    if !chars.is_utf8() || !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
         return None;
     }
     if vm.quiet_inserted(quiet, length).is_err() {

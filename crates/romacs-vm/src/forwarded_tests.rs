@@ -20,7 +20,7 @@ fn clear_one_preserves_visit_metadata_and_traces_remaining_slots() {
         vm.collect(&mut []);
         let index = vm.buffer_index().unwrap();
         let locals = vm.per_buffer(index).unwrap();
-        assert_eq!((locals.1, locals.2, locals.3.as_deref()), (stamp, Some((29, 31)), Some("/visited/truename")), "clear-one must preserve every visit field");
+        assert_eq!((locals.1, locals.2, locals.3.as_deref()), (stamp, Some((29, 31)), Some(&b"/visited/truename"[..])), "clear-one must preserve every visit field");
         let read = vm.eval_source_raw("(and (equal buffer-file-name \"visit\") (equal buffer-file-format '(\"format\")) (= fill-column 70) (not (local-variable-p 'fill-column)))").unwrap();
         assert_eq!(read, Value::TRUE, "surviving per-buffer values must be rewritten by moving GC");
         vm.collect(&mut []);

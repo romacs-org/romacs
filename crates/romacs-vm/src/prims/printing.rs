@@ -113,8 +113,10 @@ fn output(cx: &mut Leaf<'_>, result: Value, text: Value, stream: Value) -> Next 
         return echo_print(cx, result, text);
     }
     if stream == Value::TRUE {
-        let text = cx.string_text(text)?;
-        std::io::stdout().write_all(text.as_bytes()).map_err(|e| Fault::Error(e.to_string()))?;
+        // print.c strout: the string's bytes as they are (a raw-byte
+        // character as its internal two-byte form, as GNU writes it).
+        let bytes = cx.string_view(text)?.bytes().to_vec();
+        std::io::stdout().write_all(&bytes).map_err(|e| Fault::Error(e.to_string()))?;
         return Ok(Step::Done(result));
     }
     if matches!(cx.kind(stream), leaf::Kind::Buffer | leaf::Kind::ByteBuffer | leaf::Kind::Marker) {

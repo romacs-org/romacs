@@ -25,7 +25,9 @@ fn printed(src: &str) -> String { let mut vm=Vm::new(); vm.set_collection_floor(
 // Live GNU: bold
 #[test] fn p1a_review_existing_properties() { assert_eq!(printed("(let ((s (copy-sequence \"ab\"))) (put-text-property 0 1 'face 'bold s) (get-text-property 0 'face s))"), "bold"); }
 
-// Deliberate UTF-8 buffer-name boundary (VM2-STR7), not a GNU parity claim.
-#[test] fn p1a_review_display_buffer_name_refusal() {
-    assert_eq!(printed("(condition-case e (set-window-buffer nil (char-to-string 4194303)) (not-unicode-string 'named))"), "named");
+// Live GNU: (wrong-type-argument bufferp nil) for a name no buffer has, raw
+// bytes included (VM2-BUFNAME-RAW1); with such a buffer, its buffer.
+#[test] fn p1a_review_display_buffer_name_raw() {
+    assert_eq!(printed("(condition-case e (set-window-buffer nil (char-to-string 4194303)) (error e))"), "(wrong-type-argument bufferp nil)");
+    assert_eq!(printed("(progn (get-buffer-create (char-to-string 4194303)) (set-window-buffer nil (char-to-string 4194303)) (buffer-name (window-buffer)))"), "\"\\377\"");
 }

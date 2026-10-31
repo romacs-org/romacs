@@ -225,14 +225,23 @@ impl Vm {
             let index = vm.buffer_index()?;
             let Object::Buffer(b) = &vm.objects[index] else { return Err(Fault::Internal("multibyte buffer required".into())) };
             let accessible = b.accessible();
-            let text = b.as_str()[accessible.start.0..accessible.end.0].to_owned();
+            let mut text = b.as_str()[accessible.start.0..accessible.end.0].to_owned();
+            // BODY's text has, at a raw byte's two bytes, a character GNU's
+            // bidi classes also count as strong left-to-right (U+00AA), so
+            // the raw byte neither reads as its Latin-1 code nor moves an
+            // offset; the matcher reads GNU's internal form.
+            for &p in b.raw_in(accessible.start.0..accessible.end.0) {
+                let at = p as usize - accessible.start.0;
+                text.replace_range(at..at + 2, "\u{aa}");
+            }
+            let internal = b.internal(accessible.clone())?.into_owned();
             let point = b.point.0.clamp(accessible.start.0, accessible.end.0) - accessible.start.0;
             let patterns = patterns.iter().map(|&p| vm.regexp_input(p)).collect::<SearchResult<Vec<_>>>()?;
             let source = vm.regexp_syntax(None)?;
             let compiled = patterns.iter().map(|p| vm.regexp_compiled(p, true, false, false, &source)).collect::<SearchResult<Vec<_>>>()?;
             let syntax = syntax::VmSyntax::new(vm, source);
             let mut looks = |pattern: usize, at: usize| {
-                let found = regex::re_match(&compiled[pattern].borrow(), text.as_bytes(), at, text.len(), &syntax, point);
+                let found = regex::re_match(&compiled[pattern].borrow(), &internal, at, internal.len(), &syntax, point);
                 // An overflow is GNU's error; here it is no match.
                 (!regex::take_matcher_overflow()).then_some(found).flatten().map(|(end, _)| end - at)
             };
@@ -515,10 +524,7 @@ impl Vm {
                     if aa < t.accessible().start || bb > t.accessible().end || aa > bb {
                         return Err(fail());
                     }
-                    let range = aa..bb;
-                    let mut out = data::LispString::new(t.slice(range.clone())?);
-                    out.properties = t.properties.slice(range);
-                    Object::String(Box::new(out))
+                    data::string_object(t.lisp_string(aa..bb)?)
                 }
                 Object::ByteBuffer(t) => {
                     let aa = a.checked_sub(1).ok_or_else(fail)?;

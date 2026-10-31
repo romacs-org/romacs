@@ -103,6 +103,13 @@ romacs_snapshot::snapshot_struct!(LispString { bytes, chars, flags, properties, 
 const MULTIBYTE: u8 = 1;
 const ASCII: u8 = 2;
 const UTF8: u8 = 4;
+/// The heap object of STRING: a `String` when it is UTF-8, else a
+/// `RawString` (a multibyte string with raw bytes).
+pub(crate) fn string_object(string: LispString) -> Object {
+    let string = Box::new(string);
+    if string.is_utf8() { Object::String(string) } else { Object::RawString(string) }
+}
+
 impl LispString {
     pub fn new(s: &str) -> Self {
         let chars=s.chars().count();
@@ -381,13 +388,7 @@ impl Vm {
         if !multibyte {
             return self.allocate_object(Object::Bytes(bytes));
         }
-        let string = Box::new(LispString::from_bytes(bytes, multibyte));
-        let object = if string.is_utf8() {
-            Object::String(string)
-        } else {
-            Object::RawString(string)
-        };
-        self.allocate_object(object)
+        self.allocate_object(string_object(LispString::from_bytes(bytes, multibyte)))
     }
     pub(super) fn allocate_object(&mut self, object: Object) -> Value {
         self.objects.push(object);

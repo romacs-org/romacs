@@ -32,7 +32,8 @@ impl Leaf<'_> {
         self.vm.file_name_match(pattern, string)
     }
 
-    pub fn fileio_modtime(&mut self, buffer: Value) -> std::result::Result<(crate::forwarded::VisitedModtime, Option<String>), Fault> {
+    /// BUFFER's visited modtime state and its `buffer-file-name' string.
+    pub fn fileio_modtime(&mut self, buffer: Value) -> std::result::Result<(crate::forwarded::VisitedModtime, Option<Value>), Fault> {
         let current = self.current_buffer()?;
         let target = if buffer == Value::NIL { current } else { buffer };
         let index = target.index(0).ok().and_then(|i| i.checked_sub(1))
@@ -46,10 +47,7 @@ impl Leaf<'_> {
         // T1 leaf: no callbacks or collection. Restore even on variable errors.
         self.vm.slots[self.vm.buffer_slot].value = target;
         let symbol = self.intern("buffer-file-name");
-        let filename = self.variable_value(symbol).and_then(|v| match v {
-            Some(v) if matches!(self.kind(v), Kind::String | Kind::Bytes) => self.string_text(v).map(Some),
-            _ => Ok(None),
-        });
+        let filename = self.variable_value(symbol).map(|v| v.filter(|&v| matches!(self.kind(v), Kind::String | Kind::Bytes)));
         self.vm.slots[self.vm.buffer_slot].value = current;
         Ok((state, filename?))
     }
@@ -64,7 +62,7 @@ impl Leaf<'_> {
         Ok(())
     }
 
-    pub fn file_visits(&self) -> Vec<(Value, String, Option<(u64, u64)>, Option<String>)> {
+    pub fn file_visits(&self) -> Vec<(Value, Vec<u8>, Option<(u64, u64)>, Option<Vec<u8>>)> {
         self.vm.file_visits()
     }
 
@@ -266,13 +264,9 @@ impl Leaf<'_> {
             data::Object::Buffer(t) => {
                 let internal;
                 let bytes = if multibyte { bytes } else {
-                    internal = octets_to_multibyte(bytes);
+                    internal = crate::text::octets_to_multibyte(bytes);
                     &internal
                 };
-                // VM2 buffer text is Unicode: no raw-byte characters.
-                if std::str::from_utf8(bytes).is_err() {
-                    return Err(fileio_refusal("insert-file-contents of raw bytes into a multibyte buffer"));
-                }
                 let at = t.point;
                 let before = t.len_chars();
                 t.replace(at..at, bytes).map_err(Fault::Error)?;
@@ -349,7 +343,8 @@ impl Leaf<'_> {
                 }
                 let mut a: crate::annotations::AnnotatedBuffer = match &b.held {
                     Some(held) => (**held).clone(),
-                    None => crate::text::Text::decode_binary(b).map_err(Fault::Error)?.into(),
+                    // The buffer is empty: nothing grows.
+                    None => crate::text::Text::decode_binary(b).map_err(Fault::Error)?.0.into(),
                 };
                 *a.anchors = b.anchors.clone();
                 a.state = b.state.clone();
@@ -446,15 +441,3 @@ fn fileio_refusal(what: &str) -> Fault {
     Fault::Error(format!("VM2 {what} is unsupported"))
 }
 
-/// Octets as multibyte internal text: those above 127 become raw-byte
-/// characters (GNU str_to_multibyte).
-fn octets_to_multibyte(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
-    for &byte in bytes {
-        if byte < 128 { out.push(byte); continue; }
-        let mut encoded = [0; 5];
-        let width = crate::lstring::char_string(crate::lstring::BYTE8_OFFSET + u32::from(byte), &mut encoded);
-        out.extend_from_slice(&encoded[..width]);
-    }
-    out
-}

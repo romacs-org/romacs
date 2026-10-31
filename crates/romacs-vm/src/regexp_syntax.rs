@@ -188,6 +188,12 @@ impl<'a> VmSyntax<'a> {
         }
     }
 }
+impl VmSyntax<'_> {
+    /// `char_syntax_at` for a character code, raw bytes included.
+    pub(crate) fn code_syntax_at(&self, code: u32, pos: usize) -> SyntaxClass {
+        self.properties.get(&pos).copied().unwrap_or_else(|| self.class(code))
+    }
+}
 impl SyntaxLookup for VmSyntax<'_> {
     fn char_syntax(&self, c: char) -> SyntaxClass {
         self.class(c as u32)
@@ -400,9 +406,11 @@ impl Vm {
                 Some(Object::Buffer(t)) => {
                     let r = t.accessible();
                     for (offset, c) in t.as_str()[r.start.0..r.end.0].char_indices() {
+                        // A raw byte's code, not its placeholder's.
+                        let code = t.character_at(ByteOffset(r.start.0 + offset)).ok().flatten().map_or(u32::from(c), |code| code as u32);
                         record(
                             offset,
-                            c as u32,
+                            code,
                             t.properties
                                 .get_property(ByteOffset(r.start.0 + offset), "syntax-table"),
                         );

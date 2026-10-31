@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "47da669ccaebe69f82159b4b5906e63456c116d12c85e626b53eec005a3a29b8",
+    "input_hash": "ac5bd5686b3074d0c0834b0ac0b1d56da21093dc5eb9dacd522322544e65d2bd",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 5262
+    "vm2_universe": 5271
   },
   "schema": 2,
   "vm2": {
-    "count": 1134,
+    "count": 1137,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -262,6 +262,7 @@
       "delete-region",
       "delete-window-internal",
       "delq",
+      "detect-coding-string",
       "ding",
       "directory-file-name",
       "directory-files",
@@ -929,6 +930,7 @@
       "set-window-combination-limit",
       "set-window-configuration",
       "set-window-dedicated-p",
+      "set-window-display-table",
       "set-window-hscroll",
       "set-window-margins",
       "set-window-new-normal",
@@ -1097,6 +1099,7 @@
       "window-configuration-p",
       "window-dedicated-p",
       "window-discard-buffer-from-window",
+      "window-display-table",
       "window-end",
       "window-frame",
       "window-fringes",

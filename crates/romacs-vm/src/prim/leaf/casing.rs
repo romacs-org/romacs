@@ -205,7 +205,7 @@ impl Leaf<'_> {
         let range = (start - 1) as usize..(end - 1) as usize;
         let (multibyte, codes) = match &self.vm.objects[index] {
             data::Object::Buffer(b) => (true, range.map(|at| b.character_of_char(crate::coordinates::CharOffset(at))
-                .map(|c| c.map_or(0, u32::from))).collect::<crate::Result<Vec<_>>>().map_err(Fault::Error)?),
+                .map(|c| c.unwrap_or(0))).collect::<crate::Result<Vec<_>>>().map_err(Fault::Error)?),
             data::Object::ByteBuffer(b) => (false, b.bytes[range].iter().map(|&b| u32::from(b)).collect()),
             _ => return Err(Fault::Error("buffer required".into())),
         };
@@ -230,11 +230,6 @@ impl Leaf<'_> {
         let (_, begv, zv) = self.point_extent()?;
         let (start, end) = (start.max(begv), end.min(zv).max(start.max(begv)));
         let (multibyte, codes, cased) = self.region_casing(start, end, case)?;
-        // A VM2 multibyte buffer holds Unicode text: refuse a raw byte
-        // before anything changes.
-        if multibyte && cased.iter().flatten().any(|&c| char::from_u32(c).is_none()) {
-            return Err(Fault::Error("VM2 casing cannot put a raw byte in a multibyte buffer".into()));
-        }
         self.modify_text_tail(start, end, false)?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let buffer = self.current_buffer()?;
@@ -251,7 +246,7 @@ impl Leaf<'_> {
                 data::Object::Buffer(b) => {
                     if out.as_slice() == [code] { continue; }
                     last = at + 1 + out.len() as i64;
-                    let text: String = out.iter().filter_map(|&c| char::from_u32(c)).collect();
+                    let text = internal_bytes(out);
                     let from = b.byte_of_char(crate::coordinates::CharOffset(at as usize)).map_err(Fault::Error)?;
                     let to = b.byte_of_char(crate::coordinates::CharOffset(at as usize + 1)).map_err(Fault::Error)?;
                     if out.len() == 1 && text.len() == to.0 - from.0 {
@@ -285,4 +280,15 @@ impl Leaf<'_> {
         }
         Ok(first.map(|first| (first, last, added)))
     }
+}
+
+/// CODES in GNU's internal form (raw bytes as C0/C1 forms).
+fn internal_bytes(codes: &[u32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(codes.len());
+    for &c in codes {
+        let mut encoded = [0; 5];
+        let n = crate::lstring::char_string(c, &mut encoded);
+        bytes.extend_from_slice(&encoded[..n]);
+    }
+    bytes
 }

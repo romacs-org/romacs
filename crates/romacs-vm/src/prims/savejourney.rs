@@ -82,7 +82,7 @@ fn attributes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> N
         return Ok(Step::Done(Value::NIL));
     }
     let id_format = saved[0];
-    let path = cx.string_text(expanded)?;
+    let path = super::fileio::file_name_path(cx, expanded)?;
     let operation = cx.intern("file-attributes");
     let handler = super::fileio::find_file_name_handler(cx, expanded, operation)?;
     if handler != Value::NIL {
@@ -95,7 +95,7 @@ fn attributes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> N
 
 /// The attributes of the file PATH names, not following a symlink, in
 /// ID-FORMAT; nil when it cannot be examined.
-pub(super) fn native_attributes(cx: &mut Leaf<'_>, path: &str, id_format: Value) -> Out {
+pub(super) fn native_attributes(cx: &mut Leaf<'_>, path: &std::path::Path, id_format: Value) -> Out {
     use std::os::unix::fs::MetadataExt;
     let integer = cx.intern("integer");
     let named = id_format != Value::NIL && id_format != integer;
@@ -131,13 +131,13 @@ fn symlink_expanded(cx: &mut Leaf<'_>, filename: Value, _: &[Value]) -> Next {
     if handler != Value::NIL {
         return Ok(Step::Call { f: handler, args: vec![operation, filename], then: returned, saved: vec![] });
     }
-    let path = cx.string_text(filename)?;
+    let path = super::fileio::file_name_path(cx, filename)?;
     let target = match crate::host::read_link(path) {
         Ok(target) => target,
         Err(_) => return Ok(Step::Done(Value::NIL)),
     };
-    let target = target.to_str().ok_or_else(|| Fault::Error("VM2 file-symlink-p non-UTF-8 target decoding unsupported".into()))?;
-    Ok(Step::Done(cx.make_string(target.as_bytes().to_vec(), !target.is_ascii())))
+    use std::os::unix::ffi::OsStrExt;
+    Ok(Step::Done(super::fileio::file_name_value(cx, target.as_os_str().as_bytes())))
 }
 
 defsubr! { name = "file-symlink-p", gnu = "fileio.c:3162", effect = Global,
@@ -264,10 +264,8 @@ fn decoded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fa
     if view.is_multibyte() || view.bytes().is_ascii() { return Ok(name); }
     let bytes = view.bytes().to_vec();
     super::filename::utf8_file_names(cx, "file-name-case-insensitive-p")?;
-    if std::str::from_utf8(&bytes).is_err() {
-        return Err(Fault::Error("VM2 file-name-case-insensitive-p of a non-UTF-8 unibyte file name is unsupported".into()));
-    }
-    Ok(cx.make_string(bytes, true))
+    // DECODE_FILE: bytes that are not UTF-8 are raw-byte characters.
+    Ok(super::fileio::file_name_value(cx, &bytes))
 }
 
 defsubr! { name = "file-name-case-insensitive-p", gnu = "fileio.c:2688", effect = Global,
@@ -283,8 +281,8 @@ fn case_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Next {
     if handler != Value::NIL {
         return Ok(Step::Call { f: handler, args: vec![operation, expanded], then: returned, saved: vec![] });
     }
-    let path = cx.string_text(expanded)?.to_owned();
-    Ok(Step::Done(if folds_case(std::path::Path::new(&path)) { Value::TRUE } else { Value::NIL }))
+    let path = super::fileio::file_name_path(cx, expanded)?;
+    Ok(Step::Done(if folds_case(&path) { Value::TRUE } else { Value::NIL }))
 }
 
 // Deliberately differs from pinned GNU, whose GNU/Linux answer is nil by

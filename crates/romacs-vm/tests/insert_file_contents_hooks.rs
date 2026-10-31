@@ -129,12 +129,10 @@ fn insert_file_contents_records_undo_as_gnu() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-// A REPLACE whose new middle holds a raw-byte character cannot be put in a
-// VM2 buffer (Unicode text, VM2-FILEIO1). It is refused before anything
-// changes: text, point and undo list stay as they were. Pinned GNU, whose
-// buffers hold raw bytes, gives (("…/f" 2) "abcλ\377def" 9 nil).
+// A REPLACE whose new middle holds a raw-byte character puts it in the
+// buffer as GNU does (VM2-RAWTEXT1). Pinned GNU: (("…/f" 2) "abcλ\377def" 9 nil).
 #[test]
-fn an_unrepresentable_replace_changes_nothing() {
+fn a_raw_byte_replace_matches_gnu() {
     let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-raw-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("f"), b"abc\xce\xbb\xffdef").unwrap();
@@ -146,7 +144,7 @@ fn an_unrepresentable_replace_changes_nothing() {
         lisp(&dir.join("f")));
     let got = romacs(&mut vm, &expression);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(got, "\"((error \\\"VM2 insert-file-contents of raw bytes into a multibyte buffer is unsupported\\\") \\\"abcXYZdef\\\" 10 t)\"");
+    assert_eq!(got, format!("\"(({} 2) \\\"abcλ\\\\377def\\\" 9 nil)\"", lisp(&dir.join("f")).replace('"', "\\\"")));
 }
 
 // REPLACE's read-only checks are those of the ranges it changes: the

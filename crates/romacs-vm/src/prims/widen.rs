@@ -82,14 +82,15 @@ fn concat(cx; rest args) {
         }
         chunks.push((bytes,true));
     }
-    if multibyte {
-        if let Some(arg)=raw_byte_arg { return Err(Fault::Wrong("multibyte-string-p",arg)); }
-    }
+    // A unibyte part of a multibyte result: its bytes above 127 become
+    // raw-byte characters (fns.c concat, str_to_multibyte).
+    let _ = raw_byte_arg;
     let mut bytes=Vec::new();
     let mut offsets=Vec::with_capacity(chunks.len());
     for (chunk,multi) in chunks {
         offsets.push(bytes.len());
-        if multibyte || !multi || chunk.is_ascii() { bytes.extend_from_slice(&chunk); }
+        if multibyte && !multi { bytes.extend(crate::text::octets_to_multibyte(&chunk)); }
+        else if multibyte || !multi || chunk.is_ascii() { bytes.extend_from_slice(&chunk); }
         else {
             let mut tail=chunk.as_slice();
             while !tail.is_empty() { let (code,n)=crate::lstring::string_char(tail); bytes.push(code as u8); tail=&tail[n..]; }

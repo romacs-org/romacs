@@ -26,12 +26,15 @@ impl Leaf<'_> {
         let syntax = crate::regexp::VmSyntax::new(self.vm, source);
         // Byte offsets stay relative to the accessible region, matching the
         // syntax properties.
-        let (characters, start, end): (Vec<(usize, char)>, usize, usize) =
+        let (characters, start, end): (Vec<(usize, u32)>, usize, usize) =
             match &self.vm.objects[index] {
                 data::Object::Buffer(buffer) => {
                     let r = buffer.accessible();
                     (
-                        buffer.as_str()[r.start.0..r.end.0].char_indices().collect(),
+                        // Each character's code, a raw byte's as itself.
+                        buffer.as_str()[r.start.0..r.end.0].char_indices()
+                            .map(|(i, c)| (i, buffer.character_at(crate::coordinates::ByteOffset(r.start.0 + i)).ok().flatten().map_or(u32::from(c), |code| code as u32)))
+                            .collect(),
                         buffer.point.0 - r.start.0,
                         r.end.0 - r.start.0,
                     )
@@ -40,7 +43,7 @@ impl Leaf<'_> {
                     let r = &buffer.restriction;
                     (
                         buffer.bytes[r.start.0..r.end.0]
-                            .iter().enumerate().map(|(i, &c)| (i, char::from(c))).collect(),
+                            .iter().enumerate().map(|(i, &c)| (i, u32::from(c))).collect(),
                         buffer.point.0 - r.start.0,
                         r.end.0 - r.start.0,
                     )
@@ -48,8 +51,8 @@ impl Leaf<'_> {
                 _ => return Err(Fault::Error("buffer required".into())),
             };
         let word = |i: usize| {
-            let (offset, ch) = characters[i];
-            syntax.char_syntax_at(ch, offset) == SyntaxClass::Word
+            let (offset, code) = characters[i];
+            syntax.code_syntax_at(code, offset) == SyntaxClass::Word
         };
         let mut at = characters.partition_point(|&(offset, _)| offset < start);
         let mut remaining = count.unsigned_abs();
@@ -122,7 +125,7 @@ impl Leaf<'_> {
                     let character = if forward { at } else { at - 1 };
                     let Some(ch) = buffer.character_of_char(CharOffset(character)).map_err(Fault::Error)? else { break; };
                     let offset = buffer.byte_of_char(CharOffset(character)).map_err(Fault::Error)?.0 - accessible.start.0;
-                    if !classes[syntax.char_syntax_at(ch, offset) as usize] { break; }
+                    if !classes[syntax.code_syntax_at(ch, offset) as usize] { break; }
                     if forward { at += 1; } else { at -= 1; }
                 }
                 (start, at, buffer.byte_of_char(CharOffset(at)).map_err(Fault::Error)?)

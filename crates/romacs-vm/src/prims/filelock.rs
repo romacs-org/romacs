@@ -151,18 +151,18 @@ fn query_done(_: &mut Leaf<'_>, result: Value, _: &[Value]) -> Next { Ok(Step::D
 fn got_lock_name(cx: &mut Leaf<'_>, lock: Value, saved: &[Value]) -> Next {
     let mode = saved[1].integer_value().unwrap();
     if lock == Value::NIL { return Ok(Step::Done(Value::NIL)); }
-    let path = cx.string_text(lock)?;
-    if path.as_bytes().contains(&0) { return Err(Fault::Wrong("filenamep", lock)); }
+    let path = super::fileio::file_name_path(cx, lock)?;
+    if path.as_os_str().as_encoded_bytes().contains(&0) { return Err(Fault::Wrong("filenamep", lock)); }
     let local_host = host(cx)?;
     if mode == 0 {
-        return match owner(cx, Path::new(&path), &local_host) {
+        return match owner(cx, &path, &local_host) {
             Ok(Owner::Free) => Ok(Step::Done(Value::NIL)), Ok(Owner::Ours) => Ok(Step::Done(Value::TRUE)),
             Ok(Owner::Other { user, .. }) => Ok(Step::Done(cx.make_string(user, false))),
             Err(e) => Err(io_fault(cx, "Testing file lock", saved[0], e)),
         };
     }
     if mode == 2 {
-        let result = owner(cx, Path::new(&path), &local_host).and_then(|o| if matches!(o, Owner::Ours) { host::remove_file(&path) } else { Ok(()) });
+        let result = owner(cx, &path, &local_host).and_then(|o| if matches!(o, Owner::Ours) { host::remove_file(&path) } else { Ok(()) });
         if let Err(e) = result {
             if e.raw_os_error() != Some(libc::ENOENT) {
                 let Fault::Signal(condition, data) = io_fault(cx, "Unlocking file", saved[0], e) else { unreachable!() };
@@ -175,8 +175,9 @@ fn got_lock_name(cx: &mut Leaf<'_>, lock: Value, saved: &[Value]) -> Next {
     supersession(cx, lock, &[saved[0], lock])
 }
 fn supersession(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    let name = cx.string_text(saved[0])?;
-    let subject = cx.file_visits().into_iter().find(|(_, _, _, true_name)| true_name.as_deref() == Some(name.as_str()));
+    use std::os::unix::ffi::OsStrExt;
+    let name = super::fileio::file_name_path(cx, saved[0])?;
+    let subject = cx.file_visits().into_iter().find(|(_, _, _, true_name)| true_name.as_deref().map(|b| Path::new(std::ffi::OsStr::from_bytes(b))) == Some(name.as_path()));
     let state = match subject {
         Some((buffer, _, _, _)) => Some(cx.fileio_modtime(buffer)?.0),
         None => None,
@@ -190,9 +191,9 @@ fn supersession(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
         }
     });
     let ours = if saved[1] == Value::NIL { false } else {
-        let path = cx.string_text(saved[1])?;
+        let path = super::fileio::file_name_path(cx, saved[1])?;
         let local_host = host(cx)?;
-        matches!(owner(cx, Path::new(&path), &local_host), Ok(Owner::Ours))
+        matches!(owner(cx, &path, &local_host), Ok(Owner::Ours))
     };
     if threatened && !ours {
         return call(cx, "userlock--ask-user-about-supersession-threat", vec![saved[0]], acquire, saved.to_vec());
@@ -201,12 +202,12 @@ fn supersession(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 }
 fn acquire(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     if saved[1] == Value::NIL { return Ok(Step::Done(Value::NIL)); }
-    let path = cx.string_text(saved[1])?;
+    let path = super::fileio::file_name_path(cx, saved[1])?;
     let identity = identity(cx)?; let local_host = host(cx)?;
     loop {
-        match create(cx, Path::new(&path), &identity, false) {
+        match create(cx, &path, &identity, false) {
             Ok(()) => return Ok(Step::Done(Value::NIL)),
-            Err(e) if e.raw_os_error() == Some(libc::EEXIST) => match owner(cx, Path::new(&path), &local_host) {
+            Err(e) if e.raw_os_error() == Some(libc::EEXIST) => match owner(cx, &path, &local_host) {
                 Ok(Owner::Free) => continue, Ok(Owner::Ours) => return Ok(Step::Done(Value::NIL)),
                 Ok(Owner::Other { diagnostic, .. }) => {
                     let who = cx.make_string(diagnostic, false);
@@ -220,8 +221,8 @@ fn acquire(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 }
 fn attack(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
     if result != Value::NIL {
-        let path = cx.string_text(saved[0])?; let identity = identity(cx)?;
-        let _ = create(cx, Path::new(&path), &identity, true);
+        let path = super::fileio::file_name_path(cx, saved[0])?; let identity = identity(cx)?;
+        let _ = create(cx, &path, &identity, true);
     }
     Ok(Step::Done(Value::NIL))
 }
@@ -229,7 +230,11 @@ fn attack(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
 fn current_truename(cx: &mut Leaf<'_>) -> Out {
     let current = cx.current_buffer()?;
     Ok(cx.file_visits().into_iter().find(|(buffer, _, _, _)| *buffer == current)
-        .and_then(|(_, _, _, name)| name).map_or(Value::NIL, |name| cx.string(&name)))
+        .and_then(|(_, _, _, name)| name).map_or(Value::NIL, |name| match std::str::from_utf8(&name) {
+            // The truename a buffer records is a string, as bset_current recorded it.
+            Ok(text) => cx.string(text),
+            Err(_) => super::fileio::file_name_value(cx, &name),
+        }))
 }
 
 defsubr! { name = "lock-buffer", gnu = "filelock.c:725", effect = Global,

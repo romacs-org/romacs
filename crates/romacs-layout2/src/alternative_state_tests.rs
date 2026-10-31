@@ -24,6 +24,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
                 text: TextSlice {
                     utf8: "A".into(),
                     face_runs: vec![],
+                    raw: vec![],
                 },
                 mode_line: None,
                 mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),

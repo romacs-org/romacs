@@ -386,6 +386,7 @@ fn band_slice(table: &FaceTable, band: mode_line::Band) -> TextSlice {
             .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: table.handle(&face)? }))
             .collect(),
         utf8: band.text,
+        raw: vec![],
     }
 }
 
@@ -806,7 +807,7 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, line_numbers }
+        let ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, line_numbers }
             = self.window_text(window, height, None)?;
         self.display_state.bases.insert(id, base);
         match segments {
@@ -824,7 +825,7 @@ impl Vm {
         self.display_state.width = width;
         self.display_state.height = height;
         // The mini-window shows its overlay strings (icomplete's candidates).
-        let (utf8, face_runs, start_byte, point_byte) = if mini {
+        let (utf8, face_runs, raw, start_byte, point_byte) = if mini {
             let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
             if spliced.has_strings() {
                 let mut strings = vec![];
@@ -832,15 +833,20 @@ impl Vm {
                     strings.push(FaceRun { bytes: bytes.clone(), face: self.face_handle(&table, &mut faces, &mut merged, *value) });
                 }
                 let runs = mini_window::display_face_runs(&face_runs, &spliced.segments, strings);
+                // Each buffer segment's raw bytes, where the splice put it.
+                let raw = spliced.segments.iter().filter(|s| !s.string).flat_map(|s| {
+                    let (display, from, len) = (s.display, s.buffer, s.len);
+                    raw.iter().filter(move |&&p| (from..from + len).contains(&(p as usize))).map(move |&p| p - from as u32 + display as u32)
+                }).collect();
                 let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
                 self.display_state.segments.insert(id, spliced.segments);
-                (spliced.text, runs, start, point)
+                (spliced.text, runs, raw, start, point)
             } else {
                 self.display_state.segments.remove(&id);
-                (utf8, face_runs, start_byte, point_byte)
+                (utf8, face_runs, raw, start_byte, point_byte)
             }
         } else {
-            (utf8, face_runs, start_byte, point_byte)
+            (utf8, face_runs, raw, start_byte, point_byte)
         };
         let snapshot = WindowSnapshot {
             id,
@@ -849,7 +855,7 @@ impl Vm {
             start_byte,
             point_byte,
             buffer_version: self.display_state.version,
-            text: TextSlice { utf8, face_runs },
+            text: TextSlice { utf8, face_runs, raw },
             mode_line: bands.mode_line.map(|band| band_slice(&table, band)),
             mode_line_face: table.handle(&band_face).ok_or("mode-line face required")?,
             header_line: bands.header_line.map(|band| band_slice(&table, band)),
@@ -900,7 +906,7 @@ impl Vm {
             (true, _) => {
                 let name = if header { self.header_line_face_name(window)? } else { self.mode_line_face_name(window)? };
                 let face = self.display_faces()?.handle(&name).ok_or("band face required")?;
-                (Some(TextSlice { utf8: " ".into(), face_runs: vec![] }), face)
+                (Some(TextSlice { utf8: " ".into(), face_runs: vec![], raw: vec![] }), face)
             }
         })
     }
@@ -1065,7 +1071,7 @@ impl Vm {
             // Within the last run of one face, that face.
             let mut face = if (sources.run.0..sources.run.1).contains(&at) { sources.run.2 }
                 else { vm.element_face(&table, faces, sources, crate::prim::FaceKey::Buffer(0), Some(at))? };
-            if ch.is_control() && ch != '\n' && ch != '\t' && let Some(escape) = escape { face = escape; }
+            if ((ch.is_control() && ch != '\n' && ch != '\t') || b.is_raw_at(at)) && let Some(escape) = escape { face = escape; }
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
@@ -1100,13 +1106,16 @@ impl Vm {
         let Some(elements) = elements else {
             let base = shown.start;
             utf8.push_str(&b.as_str()[shown.clone()]);
+            // The raw bytes shown, as offsets into the published text; an
+            // element path publishes a raw byte as its escape's characters.
+            let raw: Vec<u32> = b.raw_in(shown.clone()).iter().map(|&p| p - base as u32).collect();
             // Without a region or terminal styles, a face holds through its
             // property run but on an escaped control character.
             let plain = region.is_none() && styles.is_empty();
             let mut run = (base, FaceHandle(0));
             for (offset, ch) in utf8.char_indices() {
                 let at = base + offset;
-                let escaped = ch.is_control() && ch != '\n' && ch != '\t';
+                let escaped = (ch.is_control() && ch != '\n' && ch != '\t') || b.is_raw_at(at);
                 let face = if plain && at < run.0 && !escaped { run.1 } else {
                     let face = buffer_face(self, &mut faces, &mut sources, at, ch)?;
                     if plain && !escaped { run = (sources.run.1, face); }
@@ -1126,7 +1135,7 @@ impl Vm {
                 let starts = std::iter::once(0).chain(utf8.match_indices('\n').map(|(at, _)| at + 1)).map(|at| (at, base + at)).collect();
                 line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
             });
-            return Ok(ShownText { text: TextSlice { utf8, face_runs }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
+            return Ok(ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
                 segments: None, stretches: vec![], line_numbers });
         };
         // Each element's character, its face, and the buffer byte it shows:
@@ -1181,14 +1190,14 @@ impl Vm {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
                 faces: faces.clone(),
-                text: TextSlice { utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }] },
+                text: TextSlice { utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }], raw: vec![] },
             };
             let advance = if self.has_layout_host() { self.host_layout(&input)?.glyphs[0].0 } else { self.window_state.column };
             let width = romacs_layout_input::StretchWidth::Width { width: (factor * f64::from(advance)) as i64, zero_ok: false };
             let at = stretches.partition_point(|s: &romacs_layout_input::Stretch| s.byte < byte);
             stretches.insert(at, romacs_layout_input::Stretch { byte, width });
         }
-        Ok(ShownText { text: TextSlice { utf8, face_runs }, start_byte: start_at.unwrap_or(len), point_byte: cursor_at.or(point_at).unwrap_or(len),
+        Ok(ShownText { text: TextSlice { utf8, face_runs, raw: vec![] }, start_byte: start_at.unwrap_or(len), point_byte: cursor_at.or(point_at).unwrap_or(len),
             faces, base: 0, at_zv, table: table.clone(), merged, segments: Some(segments), stretches, line_numbers })
     }
     /// Whether WINDOW shows BUFFER's bytes SHOWN as more than its
@@ -1809,7 +1818,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces,
-            text: TextSlice { utf8: text, face_runs },
+            text: TextSlice { utf8: text, face_runs, raw: vec![] },
         };
         self.host_layout(&input)
     }
@@ -1910,7 +1919,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces: vec![face],
-            text: TextSlice { utf8: c.to_string(), face_runs: vec![] },
+            text: TextSlice { utf8: c.to_string(), face_runs: vec![], raw: vec![] },
         };
         let measured = self.host_layout(&input)?;
         Ok((measured.glyphs[0].0, measured.face_heights[0]))
@@ -1944,7 +1953,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces,
-            text: TextSlice { utf8: " ".repeat(runs.len()), face_runs },
+            text: TextSlice { utf8: " ".repeat(runs.len()), face_runs, raw: vec![] },
         };
         let heights = self.host_layout(&input)?.face_heights;
         Ok(runs.into_iter().map(|i| heights[i]).max().unwrap_or(0))

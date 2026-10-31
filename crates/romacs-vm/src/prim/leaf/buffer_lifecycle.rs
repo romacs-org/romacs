@@ -35,9 +35,7 @@ impl Leaf<'_> {
         if self.lifecycle_buffer_p(value) {
             return Ok(value);
         }
-        let name = self
-            .string_text(value)
-            .map_err(|_| Fault::Wrong("stringp", value))?;
+        let name = self.buffer_name_text(value)?;
         Ok(self
             .vm
             .names
