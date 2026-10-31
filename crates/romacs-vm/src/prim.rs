@@ -1384,10 +1384,7 @@ mod leaf {
         }
         pub fn current_local_map(&mut self) -> std::result::Result<Value, Fault> {
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
-            match &self.vm.objects[index] {
-                crate::data::Object::Buffer(buffer) => Ok(buffer.local_keymap),
-                _ => Err(Fault::Error("current-local-map in unibyte buffers is not implemented".into())),
-            }
+            Ok(*self.vm.local_keymap(index))
         }
         pub fn keymap_at_point(&mut self, property: Value) -> super::Out {
             self.vm.keymap_at_point(property).map_err(Fault::Error)

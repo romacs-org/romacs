@@ -79,9 +79,10 @@ fn visit_startup_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<(), 
 }
 
 /// Visit FILES with their `+LINE[:COLUMN]` positions: into the selected
-/// window when SELECT, else with `romacs-gui-visit-file-noselect`.
+/// window when SELECT, by their true names, else with
+/// `romacs-gui-visit-file-noselect`, which expands each name as GNU's
+/// `process-file-arg' does and leaves the true name to `find-file-noselect'.
 fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result<(), String> {
-    let visitor = if select { "romacs-gui-visit-file" } else { "romacs-gui-visit-file-noselect" };
     let mut position = None;
     let mut literal = false;
     for file in files {
@@ -101,6 +102,13 @@ fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result
                 }
             }
         }
+        if !select {
+            let file = if file.is_absolute() { file.clone() } else { std::env::current_dir().map_err(|e| e.to_string())?.join(file) };
+            let path = file.to_str().ok_or_else(|| format!("{}: file name is not UTF-8", file.display()))?;
+            vm.eval_source(&format!("(romacs-gui-visit-file-noselect {})", lisp_string(path)))?;
+            visit_position(vm, position.take(), false)?;
+            continue;
+        }
         let normalized = file.canonicalize().or_else(|_| {
             let absolute = if file.is_absolute() { file.clone() } else { std::env::current_dir()?.join(file) };
             Ok::<_, std::io::Error>(absolute.parent().and_then(|p| p.canonicalize().ok())
@@ -110,15 +118,21 @@ fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result
         let name = file.file_name().map(|n| n.to_string_lossy().into_owned())
             .filter(|n| !n.is_empty()).unwrap_or_else(|| file.to_string_lossy().into_owned());
         let path = file.to_str().ok_or_else(|| format!("{}: file name is not UTF-8", file.display()))?;
-        vm.eval_source(&format!("({visitor} {} {})", lisp_string(path), lisp_string(&name)))?;
-        if let Some((line, column)) = position.take() {
-            if line > 0 {
-                vm.eval_source(&format!("(goto-char (point-min)) (forward-line {})", line - 1))?;
-            }
-            if column > 0 { visit_column(vm, column - 1)?; }
-            if select { vm.eval_source("(set-window-point (selected-window) (point))")?; }
-        }
+        vm.eval_source(&format!("(romacs-gui-visit-file {} {})", lisp_string(path), lisp_string(&name)))?;
+        visit_position(vm, position.take(), true)?;
     }
+    Ok(())
+}
+
+/// Point to a `+LINE[:COLUMN]' POSITION in the visited buffer, and the
+/// selected window's point with it when SELECT.
+fn visit_position(vm: &mut Vm, position: Option<(u64, u64)>, select: bool) -> Result<(), String> {
+    let Some((line, column)) = position else { return Ok(()) };
+    if line > 0 {
+        vm.eval_source(&format!("(goto-char (point-min)) (forward-line {})", line - 1))?;
+    }
+    if column > 0 { visit_column(vm, column - 1)?; }
+    if select { vm.eval_source("(set-window-point (selected-window) (point))")?; }
     Ok(())
 }
 
@@ -1171,7 +1185,7 @@ mod tests {
         let prompt = printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))");
         assert!(prompt.contains("(y/n"), "native close must show the keyboard quit prompt: {prompt}");
         assert!(!presentation.ready(), "must not overwrite an in-flight frame");
-        presentation.completed(1);
+        presentation.completed(1, std::time::Instant::now());
         assert!(presentation.ready(), "pending native-close prompt must redraw after the in-flight frame");
         fileio_native_keys(&mut vm, &[110]);
         assert_eq!(printed(&mut vm, "romacs-gui-quit-requested"), "nil");
@@ -1280,7 +1294,8 @@ mod tests {
         fileio_native_keys(&mut vm, &[24, 19, 121]);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "localagainfirst\nsecond\nthird\n", "MTIME_CONFIRMED_SAVE");
         assert_eq!(printed(&mut vm, "(verify-visited-file-modtime)"), "t");
-        assert_eq!(printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))"), "\"Saved\"", "MTIME_CONFIRMED_NOT_CANCELLED");
+        assert_eq!(printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))"),
+                   format!("\"Wrote {}\"", file.display()), "MTIME_CONFIRMED_NOT_CANCELLED");
         println!("C-x C-s saved unchanged metadata with CONTENT_READ_FORBIDDEN; supersession n/y through native command dispatch");
     }
 

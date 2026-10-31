@@ -13,18 +13,26 @@ impl Vm {
     pub(crate) fn keymap_at_point(&mut self, property: Value) -> Result<Value> {
         let index = self.buffer_index()?;
         let buffer = self.slots[self.buffer_slot].value;
-        let (at, left, right, same, local, overlays) = match &self.objects[index] {
+        // Point's neighbouring properties, whether one run spans point, the
+        // local map and the overlays at point. A unibyte buffer has no
+        // overlays (VM2-MD2).
+        let around = |properties: &crate::properties::Properties, at: ByteOffset, len: usize| {
+            let raw = |at| properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+            (if at.0 > 0 { raw(ByteOffset(at.0 - 1)) } else { vec![] },
+             if at.0 < len { raw(at) } else { vec![] },
+             at.0 > 0 && at.0 < len && properties.same_run_state(ByteOffset(at.0 - 1), at))
+        };
+        let (at, (left, right, same), local, overlays) = match &self.objects[index] {
             Object::Buffer(text) => {
                 let at = text.point;
-                let raw = |at| text.properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-                (at.0,
-                 if at.0 > 0 { raw(ByteOffset(at.0 - 1)) } else { vec![] },
-                 if at.0 < text.len_bytes() { raw(at) } else { vec![] },
-                 at.0 > 0 && at.0 < text.len_bytes() && text.properties.same_run_state(ByteOffset(at.0 - 1), at), text.local_keymap,
+                (at.0, around(&text.properties, at, text.len_bytes()), text.local_keymap,
                  text.intervals.query_with_end(at.0 as u32, at.0 as u32, true,
                      at.0 == text.len_bytes(), &text.anchors).0)
             }
-            Object::ByteBuffer(_) => return Err("keymap lookup in unibyte buffers is not implemented".into()),
+            Object::ByteBuffer(b) => {
+                let properties = crate::properties::Properties::from_map(&b.properties);
+                (b.point.0, around(&properties, b.point, b.bytes.len()), b.local_keymap, vec![])
+            }
             _ => unreachable!(),
         };
         let mut value = self.ordered_overlay_property(overlays, property)?;

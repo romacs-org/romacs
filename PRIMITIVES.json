@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "6dfd7c7b620aa4d47262b6693951ddcac261c5b11234f553673774178fa0418f",
+  "source_fingerprint": "e1cb9443f8e2f2add49c066339a769fdd1689255203bad4cff6a017532c32c71",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -532,7 +532,7 @@
   "buffer-list": {
    "name": "buffer-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:5"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:7"
   },
   "buffer-live-p": {
    "name": "buffer-live-p",
@@ -2035,7 +2035,7 @@
   "get-buffer-create": {
    "name": "get-buffer-create",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:11"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:13"
   },
   "get-buffer-process": {
    "name": "get-buffer-process",
@@ -2489,7 +2489,7 @@
   "kill-buffer": {
    "name": "kill-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:50"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:52"
   },
   "kill-emacs": {
    "name": "kill-emacs",
@@ -2619,7 +2619,7 @@
   "locate-file-internal": {
    "name": "locate-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:706"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:720"
   },
   "locate-library": {
    "name": "locate-library",
@@ -2753,7 +2753,7 @@
   "make-indirect-buffer": {
    "name": "make-indirect-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:65"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:67"
   },
   "make-interpreted-closure": {
    "name": "make-interpreted-closure",
@@ -3142,7 +3142,7 @@
   "next-read-file-uses-dialog-p": {
    "name": "next-read-file-uses-dialog-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:832"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:846"
   },
   "next-single-char-property-change": {
    "name": "next-single-char-property-change",
@@ -3240,7 +3240,7 @@
   "other-buffer": {
    "name": "other-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:59"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:61"
   },
   "overlay-buffer": {
    "name": "overlay-buffer",
@@ -4023,7 +4023,7 @@
   "romacs--kill-buffer-finish": {
    "name": "romacs--kill-buffer-finish",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:92"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:94"
   },
   "romacs--local-toplevel-cell": {
    "name": "romacs--local-toplevel-cell",

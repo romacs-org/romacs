@@ -87,6 +87,14 @@ impl Vm {
             other => other.map(Ok),
         }
     }
+    /// The local keymap of the buffer at INDEX, text or unibyte.
+    pub(crate) fn local_keymap(&mut self, index: usize) -> &mut Value {
+        match &mut self.objects[index] {
+            Object::Buffer(buffer) => &mut buffer.local_keymap,
+            Object::ByteBuffer(buffer) => &mut buffer.local_keymap,
+            _ => unreachable!("buffer_index names a buffer"),
+        }
+    }
     pub(super) fn resolve_keymap(&self, mut value: Value) -> Option<Value> {
         for _ in 0..=self.slots.len() {
             if let Ok((head, _)) = self.cons_pair(value) {
@@ -533,8 +541,7 @@ impl Vm {
             UseLocalMap => {
                 if args[0] != Value::NIL && self.resolve_keymap(args[0]).is_none() { return Err("keymap required".into()); }
                 let index = self.buffer_index()?;
-                let Object::Buffer(buffer) = &mut self.objects[index] else { return Err("Unicode buffer required".into()); };
-                buffer.local_keymap = args[0];
+                *self.local_keymap(index) = args[0];
                 Ok(Value::NIL)
             }
             KeyBinding => {
@@ -542,8 +549,7 @@ impl Vm {
                 if n > 3 && args[3] != Value::NIL { return Err("key-binding POSITION not supported".into()); }
                 let events = self.key_events(args[0])?;
                 let index = self.buffer_index()?;
-                let Object::Buffer(buffer) = &self.objects[index] else { return Err("Unicode buffer required".into()); };
-                let local = buffer.local_keymap;
+                let local = *self.local_keymap(index);
                 let defaults = n > 1 && args[1] != Value::NIL;
                 if local != Value::NIL {
                     let binding = self.lookup_keymap_key(local, &events, defaults)?;
