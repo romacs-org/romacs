@@ -435,7 +435,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         launch builds again
   --world-reset=all     remove the store's worlds and files altogether
   --geometry WxH        the window's size
-  -Q, --no-init         do not load the user's init file
+  -Q, -q, --no-init     do not load the user's init file
+  --batch ARG...        GNU's `emacs --batch ARG...', from a batch world of its own
   ROMACS_WORLD=off      boot from source, without a world
 ";
 
@@ -485,7 +486,7 @@ fn run() -> Result<(), String> {
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
             "-Q" => (quick, load_user_init) = (true, false),
-            "--no-init" => load_user_init = false,
+            "--no-init" | "-q" | "-no-init-file" | "--no-init-file" => load_user_init = false,
             "--trace-latency" => trace_latency = true,
             "--trace-scene" => trace_scene = true,
             "--gc-floor" => {
@@ -502,7 +503,7 @@ fn run() -> Result<(), String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()),
-            "--batch" => return batch::run(args.collect(), quick),
+            "--batch" => return batch::run(args.collect(), quick, world_store),
             "--isolate" => return isolate_worker::run(std::iter::once(arg).chain(args).collect()),
             "--" => {
                 startup::visit_at_startup("--");
