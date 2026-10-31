@@ -172,6 +172,7 @@ def main():
                 expected = '((hermes t t nil) (gnosis-dashboard t t nil))'
                 if at_init != expected:
                     raise AssertionError(f'at init: {at_init}, expected {expected}')
+                fio.wait(session.exists, args.timeout, 'session state after init', process)
                 at_init = session.read_text()
                 report['checks'].append({'session_state': at_init})
                 config_dir = f'{home}/config/romacs/'
@@ -187,6 +188,7 @@ def main():
                 if not font or int(font[-1][1]) < 10:
                     raise AssertionError(f'default face font {font}: not a readable size')
                 run('romacs-live-elisp-state', 'sample.el', '(defun sample-greet')
+                fio.wait(elisp.exists, args.timeout, 'Lisp buffer state', process)
                 fontified = elisp.read_text()
                 report['checks'].append({'elisp_state': fontified})
                 if not fontified.startswith('(emacs-lisp-mode t t ') or 'font-lock-keyword-face' not in fontified:
