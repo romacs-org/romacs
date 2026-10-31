@@ -347,6 +347,8 @@ enum Shape<'a> {
     Closure(usize, &'a [Value]),
     Marker(Value, Option<u32>),
     Overlay(Value, Option<(u32, u32)>, &'a [(Value, Value)]),
+    /// A tree-sitter node: the tree and node `ts_node_eq' compares.
+    TreesitNode((usize, usize)),
     Opaque,
 }
 
@@ -404,6 +406,10 @@ impl Vm {
                     }),
                     &o.properties,
                 ),
+                Some(data::Object::Treesit(t)) => match &**t {
+                    crate::treesit::Object::Node(n) => Shape::TreesitNode(n.node.identity()),
+                    _ => Shape::Opaque,
+                },
                 _ => Shape::Opaque,
             },
             _ => Shape::Atom,
@@ -465,6 +471,9 @@ impl Vm {
                 let (a, b) = range.unwrap_or((0, 0));
                 combine(a as u64, b as u64)
             }
+            // Coherent with `equal' (VM2-TREESIT-HASH): GNU hashes the
+            // node object's address, so `equal' nodes differ there.
+            Shape::TreesitNode((tree, id)) => combine(tree as u64, id as u64),
             Shape::Opaque => {
                 *moving |= Self::moving_reference(v);
                 if public { 0 } else { v.0 }
@@ -567,6 +576,8 @@ impl Vm {
                 (Shape::Marker(x, p), Shape::Marker(y, q)) => {
                     return Ok(x == y && (x == Value::NIL || p == q));
                 }
+                // fns.c internal_equal: treesit_node_eq.
+                (Shape::TreesitNode(x), Shape::TreesitNode(y)) => return Ok(x == y),
                 (Shape::Overlay(x, r, p), Shape::Overlay(y, s, q)) => {
                     if x != y || r != s || p.len() != q.len() {
                         return Ok(false);

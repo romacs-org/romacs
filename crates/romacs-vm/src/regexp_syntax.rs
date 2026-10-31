@@ -437,6 +437,27 @@ impl Vm {
     pub(super) fn regexp_syntax(&mut self, subject: Option<Value>) -> SearchResult<SyntaxSource> {
         self.regexp_standard_syntax();
         let current = self.regexp_current_syntax()?;
+        let object = subject.unwrap_or(self.slots[self.buffer_slot].value);
+        let base = match self.object_if(object) {
+            Some(Object::Buffer(t)) => t.accessible().start.0,
+            Some(Object::ByteBuffer(t)) => t.restriction.start.0,
+            _ => 0,
+        };
+        self.regexp_syntax_source(current, object, base)
+    }
+    /// The syntax a search of BUFFER's text from byte BASE reads, as if
+    /// BUFFER were current and narrowed to start there (treesit.c's
+    /// `#match?'): its table and, under `parse-sexp-lookup-properties', its
+    /// properties.
+    pub(super) fn regexp_buffer_syntax(&mut self, buffer: Value, base: usize) -> SearchResult<SyntaxSource> {
+        let standard = self.regexp_standard_syntax();
+        let table = match self.object_if(buffer) {
+            Some(Object::Buffer(t)) if t.syntax_table != Value::NIL => t.syntax_table,
+            _ => standard,
+        };
+        self.regexp_syntax_source(table, buffer, base)
+    }
+    fn regexp_syntax_source(&mut self, current: Value, object: Value, base: usize) -> SearchResult<SyntaxSource> {
         self.regexp_syntax_table(current)?;
         // char_table_get follows parents, so a cycle must be refused here.
         let mut seen = HashSet::default();
@@ -449,15 +470,17 @@ impl Vm {
         }
         // parse-sexp-lookup-properties: the subject's `syntax-table'
         // properties, read where the engine asks (GNU UPDATE_SYNTAX_TABLE).
-        let subject = (self.slots[self.names["parse-sexp-lookup-properties"]].value != Value::NIL).then(|| {
-            let object = subject.unwrap_or(self.slots[self.buffer_slot].value);
-            let base = match self.object_if(object) {
-                Some(Object::Buffer(t)) => t.accessible().start.0,
-                Some(Object::ByteBuffer(t)) => t.restriction.start.0,
-                _ => 0,
-            };
-            PropertySubject { object, base }
-        });
+        // The binding where the search runs: `syntax-propertize' sets it
+        // buffer-locally, and a treesit `#match?' searches its parser's
+        // buffer, which need not be current.
+        let slot = self.names["parse-sexp-lookup-properties"];
+        let current_buffer = self.slots[self.buffer_slot].value;
+        let lookup = match self.object_if(object) {
+            Some(Object::Buffer(_) | Object::ByteBuffer(_)) if object != current_buffer => self.value_in_buffer(slot, object),
+            _ => self.variable_value(slot),
+        }
+        .map_err(Fault::Internal)?;
+        let subject = (lookup != Value::NIL).then_some(PropertySubject { object, base });
         Ok(SyntaxSource { table: current, subject })
     }
     pub(super) fn regexp_syntax_primitive(

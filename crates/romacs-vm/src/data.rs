@@ -17,6 +17,7 @@ pub(super) enum Object {
     Terminal(Box<frame::Terminal>),
     WindowConfiguration(Box<crate::window::WindowConfiguration>),
     Sqlite(Box<crate::sqlite::Handle>),
+    Treesit(Box<crate::treesit::Object>),
     Process(Box<crate::subprocess::Process>),
     Finalizer(Value), // alloc.c's: its function, nil once called (gc.rs dooms it)
     String(Box<LispString>),
@@ -46,6 +47,8 @@ romacs_snapshot::snapshot_enum!(Object {
     // At rest: `foreign_resource` refuses a live connection or statement,
     // whose handles are SQLite's, in its own heap.
     Object::Sqlite(f0) => (),
+    // At rest: `foreign_resource` refuses every live treesit object.
+    Object::Treesit(f0) => (),
     Object::Process(f0) => (f0),
     Object::Finalizer(f0) => (f0),
     Object::String(f0) => (f0),
@@ -72,6 +75,7 @@ impl Object {
     pub(super) fn foreign_resource(&self) -> Option<&'static str> {
         match self {
             Object::Sqlite(handle) => handle.is_live().then_some("a live sqlite object"),
+            Object::Treesit(t) => t.foreign_resource(),
             // Its pipes, pty and child are the subprocess table's, which a
             // VM at rest holds none of; a live process is one of them.
             Object::Process(process) => process.alive.then_some("a live process"),
@@ -816,6 +820,7 @@ impl Vm {
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Treesit(_)
                             | Object::Finalizer(_)
                             | Object::Process(_)
                         | Object::HashTable(_)
@@ -865,6 +870,7 @@ impl Vm {
                         | Object::Terminal(_)
                         | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Treesit(_)
                             | Object::Finalizer(_)
                             | Object::Process(_)
                         | Object::HashTable(_)
@@ -916,6 +922,7 @@ impl Vm {
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Treesit(_)
                             | Object::Finalizer(_)
                             | Object::Process(_)
                         | Object::HashTable(_)

@@ -90,6 +90,9 @@ impl Vm {
                 (Some(data::Object::Float(x)), Some(data::Object::Float(y))) if x.to_bits() == y.to_bits() => {}
                 (Some(data::Object::Bytes(x)), Some(data::Object::Bytes(y))) if x == y => {}
                 (Some(data::Object::BoolVector(x)), Some(data::Object::BoolVector(y))) if x == y => {}
+                // fns.c internal_equal: treesit_node_eq.
+                (Some(data::Object::Treesit(x)), Some(data::Object::Treesit(y)))
+                    if matches!((&**x, &**y), (crate::treesit::Object::Node(m), crate::treesit::Object::Node(n)) if m.node.same(n.node)) => {}
                 (Some(data::Object::Vector(x)), Some(data::Object::Vector(y)))
                 | (Some(data::Object::Record(x)), Some(data::Object::Record(y)))
                     if x.len() == y.len() =>
@@ -655,7 +658,7 @@ impl Vm {
     fn print_unreadable(&self, value: Value) -> bool {
         use data::Object::*;
         prim::name(value).is_some() || matches!(self.object_if(value), Some(Buffer(_) | ByteBuffer(_) | Marker(_) | Window(_) | Frame(_)
-            | Terminal(_) | WindowConfiguration(_) | Process(_) | Overlay(_) | Obarray(_) | Sqlite(_)))
+            | Terminal(_) | WindowConfiguration(_) | Process(_) | Overlay(_) | Obarray(_) | Sqlite(_) | Treesit(_)))
     }
 
     /// print.c PVEC_MARKER: `#<marker [(moves after insertion) ]at N in

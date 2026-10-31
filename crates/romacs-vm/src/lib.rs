@@ -80,6 +80,7 @@ impl std::hash::BuildHasher for NameState {
 use std::sync::Arc;
 mod code_image;
 mod sqlite;
+mod treesit;
 mod random;
 mod digest;
 mod posix_tz;
@@ -3219,6 +3220,7 @@ impl Vm {
                             | data::Object::Terminal(_)
                             | data::Object::WindowConfiguration(_)
                             | data::Object::Sqlite(_)
+                            | data::Object::Treesit(_)
                             | data::Object::Finalizer(_)
                             | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
@@ -3259,6 +3261,7 @@ impl Vm {
                 data::Object::Terminal(_) => Ok("#<terminal initial>".into()),
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Sqlite(h) => Ok(h.describe()),
+                data::Object::Treesit(t) => Ok(crate::treesit::describe(self, t)),
                 // print.c PVEC_FINALIZER.
                 data::Object::Finalizer(function) => Ok(if *function == Value::NIL { "#<finalizer used>" } else { "#<finalizer>" }.into()),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
