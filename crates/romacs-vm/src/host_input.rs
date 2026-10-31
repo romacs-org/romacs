@@ -17,10 +17,12 @@
 //! `(end-of-file "Error reading from stdin")' outside a keyboard macro.
 use crate::{CommandEvent, Result, Value, Vm, threaded};
 
-/// One redisplay request: the frozen frame and the selected window's id.
+/// One redisplay request: the frozen frame, the selected window's id, and
+/// how long freezing the frame took (for latency traces).
 pub struct HostFrame {
     pub frame: romacs_layout_input::FrameSnapshot,
     pub selected: u64,
+    pub snapshot: std::time::Duration,
 }
 
 /// What the host answers a read with.
@@ -164,10 +166,12 @@ impl Vm {
                 // them, and then the wait ends for Lisp to compute it again.
                 let before = self.host_wait_state()?;
                 let (width, height) = (self.window_state.width, self.window_state.height);
+                let started = std::time::Instant::now();
                 let frame = self.frame_snapshot(width, height)?;
+                let snapshot = started.elapsed();
                 let selected = self.selected_window_value()?;
                 let selected = self.window(selected)?.id;
-                let ends = host.redisplay(HostFrame { frame, selected })?;
+                let ends = host.redisplay(HostFrame { frame, selected, snapshot })?;
                 self.display_apply_layout(&ends)?;
                 redraw = false;
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
