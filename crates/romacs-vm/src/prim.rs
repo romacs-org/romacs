@@ -609,9 +609,9 @@ mod leaf {
             Some(self.concat_result(bytes,false,&parts))
         }
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
-            if Vm::image_value(value) { return Err(Fault::Error("immutable image string".into())); }
+            if Vm::image_value(value) { return Err(self.read_only(value)); }
             let bytes=self.string_view(value)?.bytes.len();
-            self.vm.objects[value.payload() as usize-1]=data::Object::Bytes(vec![0;bytes]);
+            *self.object_mut(value)? = data::Object::Bytes(vec![0;bytes]);
             Ok(Value::NIL)
         }
         pub fn sxhash(&self, value: Value) -> Value {
@@ -647,7 +647,7 @@ mod leaf {
             Ok(value_hash)
         }
         pub fn fill_string(&mut self, value: Value, code: u32) -> std::result::Result<Value, Fault> {
-            if Vm::image_value(value) { return Err(Fault::Error("immutable image string".into())); }
+            if Vm::image_value(value) { return Err(self.read_only(value)); }
             let view = self.string_view(value)?;
             let mut bytes = Vec::new();
             if view.multibyte {
@@ -655,7 +655,7 @@ mod leaf {
                 if width * view.chars != view.bytes.len() { return Err(Fault::Error("Attempt to change byte length of a string".into())); }
                 for _ in 0..view.chars { bytes.extend_from_slice(&encoded[..width]); }
             } else { bytes.resize(view.chars, code as u8); }
-            let old = &mut self.vm.objects[value.payload() as usize - 1];
+            let old = self.object_mut(value)?;
             let properties = match old { data::Object::String(s) | data::Object::RawString(s) => Some(s.properties.clone()), _=>None };
             let mut string = data::LispString::from_bytes(bytes, view.multibyte);
             if let Some(mut properties) = properties {
@@ -764,7 +764,7 @@ mod leaf {
             if !matches!(self.vm.object_if(v), Some(data::Object::Vector(_))) {
                 return Err(Fault::Wrong("vectorp", v));
             }
-            let data::Object::Vector(a) = &mut self.vm.objects[v.payload() as usize - 1] else {
+            let data::Object::Vector(a) = self.object_mut(v)? else {
                 unreachable!()
             };
             let item = usize::try_from(n)
@@ -786,9 +786,9 @@ mod leaf {
             value: Value,
             car: bool,
         ) -> std::result::Result<Value, Fault> {
-            // Image conses are readable, never writable. No VM reference escapes.
-            if Vm::image_value(v) {
-                return Err(Fault::Wrong("consp", v));
+            // Image and frozen conses are readable, never writable.
+            if Vm::image_value(v) && v.tag() == 3 {
+                return Err(self.read_only(v));
             }
             let pair = v
                 .index_if(3)
@@ -1346,6 +1346,18 @@ mod leaf {
         pub fn intern(&mut self, name: &str) -> Value {
             self.vm.intern(name)
         }
+        /// The private object V names, for writing; a frozen or image value
+        /// is refused with `read_only`.
+        pub(crate) fn object_mut(&mut self, v: Value) -> std::result::Result<&mut data::Object, Fault> {
+            if Vm::image_value(v) { return Err(self.read_only(v)); }
+            self.vm.object_mut(v).map_err(Fault::Error)
+        }
+        /// GNU's `CHECK_IMPURE` signal for a write to the frozen or image
+        /// object V (`frozen.rs`).
+        pub fn read_only(&mut self, v: Value) -> Fault {
+            let (condition, data) = self.vm.read_only_signal(v);
+            Fault::Signal(condition, data)
+        }
         /// The window tree, through window.rs's own surface: reads, writes
         /// and allocation only, never evaluation or collection.
         pub fn windows(&mut self) -> crate::window::Windows<'_> {
@@ -1414,7 +1426,7 @@ mod leaf {
                 5 if (v.payload() as usize) < self.vm.cells.len() => Kind::Cell,
                 6 if super::descriptor(v.payload() as usize).is_some() => Kind::Subr,
                 7 if self.symbol_slot(v).is_ok() => Kind::Symbol,
-                0 if Vm::image_value(v) && self.vm.string_value(v).is_ok() => Kind::String,
+                0 if Vm::image_string(v) => Kind::String,
                 0 => match self.vm.object_if(v) {
                     Some(data::Object::Float(_)) => Kind::Float,
                     Some(data::Object::Bignum(_)) => Kind::Bignum,
@@ -1530,7 +1542,7 @@ mod leaf {
             if i < 0 || i as usize >= t.extras.len() { return Err(Fault::Range(table, n)); }
             let old = t.extras[i as usize];
             if let Some(value) = set {
-                let data::Object::CharTable(t) = &mut self.vm.objects[table.index(0).unwrap() - 1] else { unreachable!() };
+                let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
                 t.extras[i as usize] = value;
                 Ok(value)
             } else { Ok(old) }
@@ -1556,7 +1568,7 @@ mod leaf {
                     if next == table || !seen.insert(next.0) { return Err(Fault::Error("Attempt to make a chartable be its own parent".into())); }
                     next = t.parent;
                 }
-                let data::Object::CharTable(t) = &mut self.vm.objects[table.index(0).unwrap() - 1] else { unreachable!() };
+                let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
                 t.parent = parent;
                 Ok(parent)
             } else { Ok(old) }
@@ -1575,7 +1587,7 @@ mod leaf {
                 Some((character(from)?, character(to)?))
             } else { return Err(Fault::Error("Invalid RANGE argument to ‘set-char-table-range’".into())); };
             let slot = self.vm.literal_table_slot(value);
-            let data::Object::CharTable(t) = &mut self.vm.objects[table.index(0).unwrap() - 1] else { unreachable!() };
+            let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
             if let Some((from, to)) = bounds { t.set_range_slot(from, to, slot).map_err(Fault::Error)?; }
             else { t.default = value; }
             Ok(value)
@@ -1641,6 +1653,8 @@ mod leaf {
     mod overlays;
     mod invisible;
     mod buffer_locals;
+    mod frozen;
+    mod isolate;
     mod casetab;
     mod casing;
     pub(crate) use casing::RegionCase;
@@ -2099,7 +2113,8 @@ impl Vm {
     /// loops written in Lisp over leaf cursors, so their state is registers.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
         self.eval_source_raw(prims::PRELUDE)?;
-        self.eval_source_raw(prims::PROCESS_PRELUDE)
+        self.eval_source_raw(prims::PROCESS_PRELUDE)?;
+        self.eval_source_raw(prims::ISOLATE_PRELUDE)
     }
 }
 

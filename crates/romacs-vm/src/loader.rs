@@ -58,7 +58,7 @@ impl Vm {
         if v.tag() != 0 {
             return None;
         }
-        if Self::image_value(v) {
+        if Self::image_string(v) {
             return self.string_value(v).ok();
         }
         match self.object_if(v) {
@@ -68,7 +68,7 @@ impl Vm {
         }
     }
     pub(super) fn source_string(&self, v: Value) -> Result<&str> {
-        if Self::image_value(v) {
+        if Self::image_string(v) {
             return self.string_value(v);
         }
         match self.object(v)? {

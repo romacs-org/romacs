@@ -1626,6 +1626,231 @@ pub fn pidfd_open(pid: i32) -> Option<OwnedFd> {
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd as libc::c_int) })
 }
 
+/// A memfd holding BYTES, sealed against writing, shrinking and growing
+/// once written: the backing of a large frozen region (`frozen.rs`), which
+/// another process may map or read knowing the bytes cannot change.
+pub fn sealed_memfd(bytes: &[u8]) -> io::Result<File> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    effect(|| "memfd".into())?;
+    let fd = unsafe { libc::memfd_create(c"romacs-frozen".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    file.write_all(bytes)?;
+    status(unsafe { libc::fcntl(file.as_raw_fd(), libc::F_ADD_SEALS, SEALS) })?;
+    Ok(file)
+}
+
+const SEALS: libc::c_int = libc::F_SEAL_WRITE | libc::F_SEAL_SHRINK | libc::F_SEAL_GROW;
+
+/// FILE's bytes, when `sealed_memfd`'s seals are on it; a descriptor another
+/// process sent is refused otherwise, since its bytes could change under
+/// the reader.
+pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileExt;
+    let seals = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GET_SEALS) };
+    if seals < 0 || seals & SEALS != SEALS {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "frozen region descriptor is not sealed"));
+    }
+    let len = usize::try_from(file.metadata()?.len()).map_err(|_| io::Error::other("frozen region too large"))?;
+    let mut bytes = vec![0; len];
+    file.read_exact_at(&mut bytes, 0)?;
+    Ok(bytes)
+}
+
+// Isolates (`isolate.rs`): worker processes, their control sockets, the
+// descriptors they pass, and the signals between them.
+
+/// FD nonblocking: a worker's inherited control socket.
+pub fn set_nonblocking(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0 { return Err(io::Error::last_os_error()); }
+    status(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }.min(0))
+}
+
+/// A connected pair of close-on-exec, nonblocking `SOCK_SEQPACKET` sockets:
+/// one packet per `send_packet`, received whole or not at all; a full
+/// buffer makes a send fail with `WouldBlock` rather than wait.
+pub fn socketpair() -> io::Result<(OwnedFd, OwnedFd)> {
+    effect(|| "socketpair".into())?;
+    let mut fds = [0; 2];
+    status(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK, 0, fds.as_mut_ptr()) })?;
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+}
+
+/// BYTES as one packet on SOCKET, with FD passed beside it (`SCM_RIGHTS`);
+/// `WouldBlock` when the peer's buffer is full (a bounded queue).
+pub fn send_packet(socket: std::os::fd::BorrowedFd<'_>, bytes: &[u8], fd: Option<std::os::fd::BorrowedFd<'_>>) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    effect(|| "sendmsg".into())?;
+    let mut iov = libc::iovec { iov_base: bytes.as_ptr() as *mut libc::c_void, iov_len: bytes.len() };
+    let space = unsafe { libc::CMSG_SPACE(4) } as usize;
+    let mut control = vec![0u8; space];
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    if let Some(fd) = fd {
+        msg.msg_control = control.as_mut_ptr().cast();
+        msg.msg_controllen = space as _;
+        // SAFETY: the control buffer holds exactly one descriptor header.
+        unsafe {
+            let cmsg = libc::CMSG_FIRSTHDR(&msg);
+            (*cmsg).cmsg_level = libc::SOL_SOCKET;
+            (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+            (*cmsg).cmsg_len = libc::CMSG_LEN(4) as _;
+            std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), fd.as_raw_fd());
+        }
+    }
+    loop {
+        let n = unsafe { libc::sendmsg(socket.as_raw_fd(), &msg, libc::MSG_NOSIGNAL) };
+        if n >= 0 { return Ok(()); }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted { return Err(error); }
+    }
+}
+
+/// One packet from SOCKET, up to CAPACITY bytes, with the descriptors passed
+/// beside it (close-on-exec); None once the peer has closed. A packet the
+/// buffer cannot hold whole is an error, never a prefix.
+pub fn recv_packet(socket: std::os::fd::BorrowedFd<'_>, capacity: usize) -> io::Result<Option<(Vec<u8>, Vec<OwnedFd>)>> {
+    use std::os::fd::AsRawFd;
+    let mut bytes = vec![0u8; capacity];
+    let mut iov = libc::iovec { iov_base: bytes.as_mut_ptr().cast(), iov_len: capacity };
+    let space = unsafe { libc::CMSG_SPACE(4 * 8) } as usize;
+    let mut control = vec![0u8; space];
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control.as_mut_ptr().cast();
+    msg.msg_controllen = space as _;
+    let n = loop {
+        let n = unsafe { libc::recvmsg(socket.as_raw_fd(), &mut msg, libc::MSG_CMSG_CLOEXEC) };
+        if n >= 0 { break n as usize; }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted { return Err(error); }
+    };
+    let mut fds = Vec::new();
+    // SAFETY: the kernel filled the control buffer it was given.
+    unsafe {
+        let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
+        while !cmsg.is_null() {
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
+                let count = ((*cmsg).cmsg_len as usize - libc::CMSG_LEN(0) as usize) / 4;
+                let data = libc::CMSG_DATA(cmsg).cast::<libc::c_int>();
+                for i in 0..count { fds.push(OwnedFd::from_raw_fd(std::ptr::read_unaligned(data.add(i)))); }
+            }
+            cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
+        }
+    }
+    if n == 0 && fds.is_empty() { return Ok(None); }
+    if msg.msg_flags & libc::MSG_TRUNC != 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "isolate packet larger than its buffer"));
+    }
+    bytes.truncate(n);
+    Ok(Some((bytes, fds)))
+}
+
+/// `PIDFD_SIGNAL_PROCESS_GROUP` (linux/pidfd.h, Linux 6.9): SIGNAL goes to
+/// the process group of the process PIDFD names.
+const PIDFD_SIGNAL_PROCESS_GROUP: libc::c_uint = 1 << 2;
+
+/// SIGNAL through PIDFD, to the process or, with GROUP, to its whole
+/// process group (Linux 6.9 and later; `EINVAL` before). A pidfd names one
+/// process for good, so this never reaches a reused pid: a reaped process
+/// gives `ESRCH`, while its group, still alive without it, is signalled.
+pub fn pidfd_send_signal(pidfd: std::os::fd::BorrowedFd<'_>, signal: i32, group: bool) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    effect(|| format!("pidfd signal {signal}"))?;
+    let flags = if group { PIDFD_SIGNAL_PROCESS_GROUP } else { 0 };
+    status(unsafe { libc::syscall(libc::SYS_pidfd_send_signal, pidfd.as_raw_fd(), signal, std::ptr::null::<libc::siginfo_t>(), flags) } as libc::c_int)
+}
+
+/// prctl(PR_SET_PDEATHSIG): SIGNAL once the thread that made this process
+/// exits. The caller checks `parent_pid` after, for a parent gone before.
+pub fn set_parent_death_signal(signal: i32) -> io::Result<()> {
+    effect(|| "pdeathsig".into())?;
+    status(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) })
+}
+
+pub fn parent_pid() -> i32 {
+    if building() {
+        p_read(Fact::Pid, "ppid".into());
+        return 0;
+    }
+    unsafe { libc::getppid() }
+}
+
+/// The worker's end of an isolate's signals: SIGUSR1 notes an interrupt for
+/// the engine's safepoints, SIGTERM a termination for its loop. Neither
+/// restarts a wait, so a blocked poll returns to look.
+static INTERRUPT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static TERMINATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn note_interrupt(_: libc::c_int) {
+    INTERRUPT.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+extern "C" fn note_terminate(_: libc::c_int) {
+    TERMINATE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn catch_isolate_signals() -> io::Result<()> {
+    for (signal, handler) in [(libc::SIGUSR1, note_interrupt as extern "C" fn(libc::c_int)), (libc::SIGTERM, note_terminate)] {
+        effect(|| format!("handle signal {signal}"))?;
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = handler as *const () as usize;
+        action.sa_flags = 0;
+        unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+    }
+    Ok(())
+}
+
+/// An interrupt or a termination was signalled and not yet taken: two
+/// relaxed loads, for the engine's safepoints.
+#[inline(always)]
+pub fn interrupt_pending() -> bool {
+    INTERRUPT.load(std::sync::atomic::Ordering::Relaxed) || TERMINATE.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// Take the pending interrupt, if any.
+pub fn take_interrupt() -> bool {
+    INTERRUPT.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+pub fn terminate_pending() -> bool {
+    TERMINATE.load(std::sync::atomic::Ordering::SeqCst)
+}
+/// A termination's one `quit`: true the first time after SIGTERM, so the
+/// engine leaves the Lisp it runs once and the worker's loop can end.
+static TERMINATE_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn take_terminate_quit() -> bool {
+    TERMINATE.load(std::sync::atomic::Ordering::SeqCst) && !TERMINATE_QUIT.swap(true, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A worker process: PROGRAM with ARGS after `--isolate 3`, SOCKET as its
+/// descriptor 3, no stdin, this process's stderr. Its pid; the caller reaps.
+pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    let mut command = command(program)?;
+    command.arg("--isolate").arg("3").args(args).stdin(std::process::Stdio::null());
+    let fd = socket.as_raw_fd();
+    // SAFETY: dup2 and fcntl are async-signal-safe.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::dup2(fd, 3) < 0 || libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = command.spawn()?;
+    drop(socket);
+    Ok(child.id() as i32)
+}
+
 /// emacs_pipe: a close-on-exec pipe (read end, write end).
 pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     effect(|| "pipe".into())?;

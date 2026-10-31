@@ -421,6 +421,27 @@ impl World {
         }
     }
 
+    /// The world restored, when it is usable now, without building: for a
+    /// worker isolate, which runs its spawner's exact world or nothing
+    /// (rlisp/vm/isolate.el `isolate-world-unavailable').
+    pub fn restore_only<T: super::safe::SnapshotSafe + 'static>(&self) -> Result<(Box<Vm>, T), Json> {
+        if !arena::active() {
+            return Err(json!("no arena"));
+        }
+        let (image, _manifest) = self.usable()?;
+        let _store = self.store_lock(libc::LOCK_SH);
+        match arena::adopt(&image) {
+            arena::Restore::Mapped => match image::restore::<T>(&self.key) {
+                Some((vm, carry)) => {
+                    self.mark_use();
+                    Ok((Box::new(vm), carry))
+                }
+                None => Err(json!({"image": "made for another key"})),
+            },
+            refused => Err(json!({"image": format!("{refused:?}")})),
+        }
+    }
+
     /// The world's image, opened, and its manifest, when both hold: every
     /// record and the image's content.
     fn usable(&self) -> Result<(std::fs::File, Json), Json> {

@@ -15,7 +15,7 @@ impl Leaf<'_> {
         if !matches!(self.vm.object_if(record), Some(data::Object::Record(_))) {
             return Err(Fault::Wrong("recordp", record));
         }
-        let data::Object::Record(slots) = &mut self.vm.objects[record.payload() as usize - 1] else { unreachable!() };
+        let data::Object::Record(slots) = self.object_mut(record)? else { unreachable!() };
         *slots.get_mut(index).ok_or(Fault::Range(record, Value::integer(index as i64).unwrap()))? = value;
         Ok(())
     }

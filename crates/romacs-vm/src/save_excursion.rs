@@ -84,7 +84,7 @@ impl Vm {
         self.require_live_buffer(buffer)?;
         self.slots[self.buffer_slot].value = buffer;
         let at = ByteOffset(self.marker_byte(self.marker(data)?)?.ok_or("invalid marker anchor")?);
-        match &mut self.objects[buffer.index(0)? - 1] {
+        match self.object_mut(buffer)? {
             Object::Buffer(t) => {
                 let accessible = t.accessible();
                 t.point = at.clamp(accessible.start, accessible.end);
@@ -140,7 +140,7 @@ impl Vm {
     pub(crate) fn restore_restriction_data(&mut self, data: Value) -> Result<()> {
         let Ok((car, cdr)) = self.cons_pair(data) else {
             if self.buffer_state(data)?.live {
-                match &mut self.objects[data.index(0)? - 1] {
+                match self.object_mut(data)? {
                     Object::Buffer(t) => t.widen(),
                     Object::ByteBuffer(b) => b.restriction = ByteOffset(0)..ByteOffset(b.bytes.len()),
                     _ => unreachable!(),
@@ -152,7 +152,7 @@ impl Vm {
         let buffer = self.marker(car)?.buffer;
         if let (Some(beg), Some(end)) = (self.marker_byte(self.marker(car)?)?, self.marker_byte(self.marker(cdr)?)?) {
             let bounds = ByteOffset(beg.min(end))..ByteOffset(beg.max(end));
-            match &mut self.objects[buffer.index(0)? - 1] {
+            match self.object_mut(buffer)? {
                 Object::Buffer(t) => t.narrow(bounds)?,
                 Object::ByteBuffer(b) => {
                     b.point = b.point.clamp(bounds.start, bounds.end);

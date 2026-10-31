@@ -1428,6 +1428,9 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     if engine.vm.stress_due() && engine.vm.may_collect(1) {
         poll_collect(&mut engine);
     }
+    if crate::host::interrupt_pending() {
+        engine.budget = 0;
+    }
     // SAFETY: storage and lowered code satisfy the module invariants above.
     let mut value = unsafe { next(&mut engine, regs, std::ptr::null()) };
     // Unoptimized Rust does not perform sibling-call elimination. Drive the
@@ -1827,7 +1830,37 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if e.vm.collection_due() && e.vm.may_collect(1) {
         poll_collect(e);
     }
+    // An isolate's interrupt (SIGUSR1, `isolate.rs`) is GNU's C-g here:
+    // `quit` at this safepoint unless `inhibit-quit' is bound.
+    if crate::host::interrupt_pending() && let Some(value) = interrupt_quit(e) {
+        return value;
+    }
     unsafe { next(e, r, pc) }
+}
+/// The pending interrupt as a `quit` signal, taken unless `inhibit-quit'
+/// is non-nil, in which case it stays pending for a later safepoint.
+#[cold]
+#[inline(never)]
+fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
+    // Not while compiling (a lazy body's first call, a macro expansion): a
+    // compile-time escape unwinds past the Lisp handlers of the code being
+    // compiled. The signal stays pending for the next safepoint in Lisp.
+    if e.vm.compile_depth > 0 || !e.vm.expanding.is_empty() {
+        return None;
+    }
+    // A termination quits once, whatever `inhibit-quit' says: the worker's
+    // loop then ends (`romacs--isolate-terminated-p').
+    if !crate::host::take_terminate_quit() {
+        let slot = e.vm.slot("inhibit-quit");
+        if e.vm.variable_value(slot).is_ok_and(|v| v != Value::NIL && v != Value::UNBOUND) {
+            return None;
+        }
+        if !crate::host::take_interrupt() || !e.vm.isolate_interrupt_targets_running() {
+            return None;
+        }
+    }
+    // A signal, not an engine failure: `condition-case' catches it.
+    Some(raise(e, "quit", &[]))
 }
 #[cold]
 #[inline(never)]
@@ -2683,6 +2716,8 @@ unsafe fn generated_step(
             e.vm.propagated_eval_depth = None;
         }
         let step = e.vm.call_generated(target, base + start, argc);
+        // A region attached under id pressure (`frozen.rs`): poll, and collect, soon.
+        if e.vm.region_collect { e.budget = 0; }
         if !reader {
             return take_step(e, r, pc, step);
         }
@@ -3260,8 +3295,10 @@ fn primitive_value(
         Ok(value) => Some(value),
         Err(error) => {
             // A variable watcher's or `defalias-fset-function''s own signal
-            // travels behind the write's text.
-            if matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault | Primitive::Defalias) && let Some(escape) = e.vm.propagated_escape.take() {
+            // travels behind the write's text, as does GNU's read-only
+            // error with its object behind a frozen write's (`frozen.rs`).
+            if (matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault | Primitive::Defalias) || error == crate::frozen::READ_ONLY)
+                && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
                 e.failed_eval_depth = e.vm.propagated_eval_depth.take();

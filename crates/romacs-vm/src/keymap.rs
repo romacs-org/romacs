@@ -269,7 +269,7 @@ impl Vm {
     }
     fn set_keymap_table_range(&mut self, table: Value, from: usize, to: usize, value: Value) -> Result<()> {
         let slot = self.literal_table_slot(value);
-        let Object::CharTable(table) = &mut self.objects[table.index(0)? - 1] else { unreachable!() };
+        let Object::CharTable(table) = self.object_mut(table)? else { unreachable!() };
         table.set_range_slot(from, to, slot)
     }
     fn key_event_modifier(name: &str) -> Option<i64> {

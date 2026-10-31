@@ -427,6 +427,7 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     policy(vm, root, "romacs-mail.el", include_str!("../../../rlisp/romacs-mail.el"))?;
     policy(vm, root, "romacs-notmuch.el", include_str!("../../../rlisp/romacs-notmuch.el"))?;
     policy(vm, root, "romacs-install-command.el", include_str!("../../../rlisp/romacs-install-command.el"))?;
+    policy(vm, root, "romacs-project.el", include_str!("../../../rlisp/romacs-project.el"))?;
     crate::eval_last_sexp::define(vm)?;
     let bindings = bind_journey_keys(vm, false)?;
     let started = Started { launch: Launch::Workspace, loadup: None, bindings, gnu_mode_line: false, files: vec![] };
@@ -556,6 +557,7 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-find-file.el"))?;
     initialize_editing(vm)?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-project.el"))?;
     mark_phase("find-file+editing");
     let bindings = bind_journey_keys(vm, true)?;
     mark_phase("journey-keys");

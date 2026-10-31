@@ -126,7 +126,7 @@ runs no timers."
           ;; schedules a timer or requeues input ends the wait
           ;; (`romacs--wait-state').
           (let* ((background (romacs--dispatch-background))
-                 (dispatched (or (and timers (romacs--process-idle)) background))
+                 (dispatched (or (and timers (romacs--process-idle)) (and (fboundp (quote romacs--isolate-idle)) (romacs--isolate-idle)) background))
                  left)
             (and timers (romacs--timer-check))
             (when (and save-at (<= save-at (float-time)) (not (romacs--unread-p)) (not (input-pending-p)))
