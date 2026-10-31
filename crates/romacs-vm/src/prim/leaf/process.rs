@@ -246,7 +246,9 @@ impl Leaf<'_> {
                 }
             }
             "failed" => {
-                let code = if let Some(n) = code.integer_value() { n.to_string() } else { self.string_text(code).unwrap_or_default() };
+                // Fformat's %s of CODE: an errno, or a creation failure's error data.
+                let printed = self.print_string(code, false, Value::NIL, Value::NIL)?;
+                let code = self.string_text(printed)?;
                 format!("failed with code {code}\n")
             }
             _ => return Ok(self.make_string(name.into_bytes(), false)),
@@ -394,18 +396,6 @@ impl Leaf<'_> {
             self.vm.subprocesses.activity += 1;
             return Ok(Value::TRUE);
         }
-        // A :nowait connection refused at creation reports as soon as the
-        // wait looks.
-        for proc in self.process_values() {
-            if wait_proc != Value::NIL && just_this && proc != wait_proc {
-                continue;
-            }
-            if let Some(errno) = self.channel_mut(proc).and_then(|c| c.connect.take()) {
-                self.vm.subprocesses.activity += 1;
-                let connect = self.sym("connect");
-                return Ok(self.list(&[connect, proc, fixnum(errno.into()), Value::NIL, Value::NIL]));
-            }
-        }
         let (fds, owners) = self.select_set(wait_proc, just_this);
         if wait_proc != Value::NIL && just_this && !self.process_infd(wait_proc) {
             return Ok(self.sym("terminated"));
@@ -490,12 +480,7 @@ impl Leaf<'_> {
     fn process_connect_poll(&mut self, proc: Value) -> Option<Value> {
         let channel = self.channel_mut(proc)?;
         let fd = channel.infd.as_ref()?.as_raw_fd();
-        // Borrowed, never closed here: the channel owns the descriptor.
-        let stream = std::mem::ManuallyDrop::new(unsafe { <std::net::TcpStream as std::os::fd::FromRawFd>::from_raw_fd(fd) });
-        let mut errno = match stream.take_error() {
-            Ok(None) => 0,
-            Ok(Some(error)) | Err(error) => error.raw_os_error().unwrap_or(libc::ECONNREFUSED),
-        };
+        let mut errno = sp::socket_error(fd);
         while errno != 0 && let Some(next) = channel.connecting.as_mut().filter(|rest| !rest.is_empty()).map(|rest| rest.remove(0)) {
             match crate::host::connect_nonblocking(next).and_then(|fd| Ok((sp::dup(&fd)?, fd))) {
                 Ok((outfd, infd)) => {
@@ -507,10 +492,11 @@ impl Leaf<'_> {
             }
         }
         channel.connecting = None;
-        let addresses = (errno == 0).then(|| (stream.peer_addr().ok(), stream.local_addr().ok()));
-        let (remote, local) = addresses.unwrap_or((None, None));
-        let remote = remote.map_or(Value::NIL, |a| self.sockaddr_vector(a));
-        let local = local.map_or(Value::NIL, |a| self.sockaddr_vector(a));
+        let fd = channel.infd.as_ref()?.as_raw_fd();
+        let address = |local| (errno == 0).then(|| sp::socket_address(fd, local).ok().flatten()).flatten();
+        let (remote, local) = (address(false), address(true));
+        let remote = remote.map_or(Value::NIL, |a| self.address_lisp(&a));
+        let local = local.map_or(Value::NIL, |a| self.address_lisp(&a));
         let connect = self.sym("connect");
         Some(self.list(&[connect, proc, fixnum(errno.into()), remote, local]))
     }
@@ -964,10 +950,68 @@ impl Leaf<'_> {
     }
 
     /// The network half of make-network-process for a stream socket:
-    /// listen (SERVER) or connect to HOST:SERVICE in FAMILY. Returns
-    /// (LOCAL REMOTE PORT); signals GNU's file-error with CONTACT.
-    pub(crate) fn process_network(&mut self, proc: Value, server: bool, nowait: bool, host: String, port: u16, family: Option<bool>, contact: Value) -> Out {
-        let addrs: Vec<std::net::SocketAddr> = match crate::host::resolve(&host, port) {
+    /// listen (SERVER) or connect to TARGET. Returns (LOCAL REMOTE PORT),
+    /// the addresses as `process-contact' holds them and the port a server
+    /// got, or (failed . ERROR) for a :nowait connection that failed at
+    /// once, ERROR the file error's data (GNU's status); signals GNU's
+    /// file-error with CONTACT.
+    pub(crate) fn process_network(&mut self, proc: Value, server: bool, nowait: bool, target: Target, contact: Value) -> Out {
+        let socket = match target {
+            Target::Local(path) => self.local_socket(server, nowait, &path, contact)?,
+            Target::Inet { host, port, family } => self.inet_socket(server, nowait, &host, port, family, contact)?,
+        };
+        let (fd, remote, rest) = match socket {
+            Made::Socket(fd, remote, rest) => (fd, remote, rest),
+            Made::Failed(Fault::Signal(condition, data)) => {
+                let failed = self.sym("failed");
+                let error = self.cons(condition, data);
+                return Ok(self.cons(failed, error));
+            }
+            Made::Failed(fault) => return Err(fault),
+        };
+        sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
+        let local = sp::socket_address(fd.as_raw_fd(), true).ok().flatten();
+        let mut channel = Channel::default();
+        channel.outfd = Some(sp::dup(&fd).map_err(|e| self.file_errno("Setting socket", &e))?);
+        channel.infd = Some(fd);
+        let filter = self.process(proc)?.get(Slot::Filter);
+        channel.reading = server || (filter != Value::TRUE && !nowait);
+        if nowait {
+            channel.connecting = Some(rest);
+        }
+        self.attach_channel(proc, channel);
+        let port = match local {
+            Some(sp::Address::V4(_, port) | sp::Address::V6(_, port)) => fixnum(port.into()),
+            _ => Value::NIL,
+        };
+        let local = local.map_or(Value::NIL, |a| self.address_lisp(&a));
+        let remote = remote.map_or(Value::NIL, |a| self.address_lisp(&a));
+        Ok(self.list(&[local, remote, port]))
+    }
+    /// A local (Unix domain) socket at PATH: the socket, the remote address
+    /// a client connects to, and no further addresses.
+    fn local_socket(&mut self, server: bool, nowait: bool, path: &[u8], contact: Value) -> Result<Made> {
+        use std::os::unix::ffi::OsStrExt;
+        let file = std::path::Path::new(std::ffi::OsStr::from_bytes(path));
+        let remote = sp::Address::Local(path.to_vec());
+        let result = if server {
+            crate::host::listen_local(file).map(|l| (OwnedFd::from(l), None))
+        } else if nowait {
+            crate::host::connect_local_nonblocking(file).map(|fd| (fd, Some(remote)))
+        } else {
+            crate::host::connect_local(file).map(|s| (OwnedFd::from(s), Some(remote)))
+        };
+        match result {
+            Ok((fd, remote)) => Ok(Made::Socket(fd, remote, Vec::new())),
+            Err(error) if server => Err(self.file_errno("Cannot bind server socket", &error)),
+            Err(error) => self.client_failed(nowait, &error, contact),
+        }
+    }
+    /// An Internet socket listening on or connected to HOST:PORT in FAMILY
+    /// (None: either): the socket, the address connected (or, for :nowait,
+    /// tried) and the addresses left to try.
+    fn inet_socket(&mut self, server: bool, nowait: bool, host: &str, port: u16, family: Option<bool>, contact: Value) -> Result<Made> {
+        let addrs: Vec<std::net::SocketAddr> = match crate::host::resolve(host, port) {
             Ok(addrs) => addrs.into_iter().filter(|a| family.is_none_or(|v6| a.is_ipv6() == v6)).collect(),
             Err(_) => Vec::new(),
         };
@@ -979,63 +1023,52 @@ impl Leaf<'_> {
             return Err(Fault::Signal(self.intern("file-error"), data));
         }
         let mut last_error = None;
-        let mut socket: Option<(OwnedFd, std::net::SocketAddr, Option<std::net::SocketAddr>)> = None;
         let mut addrs = addrs.into_iter();
         for addr in addrs.by_ref() {
             let result = if server {
-                crate::host::listen(addr).and_then(|l| Ok((l.local_addr()?, None, OwnedFd::from(l))))
+                crate::host::listen(addr).map(|l| (OwnedFd::from(l), None))
             } else if nowait {
                 // GNU's remote is the address tried; the peer is not known yet.
-                crate::host::connect_nonblocking(addr).map(std::net::TcpStream::from)
-                    .and_then(|s| Ok((s.local_addr()?, Some(addr), OwnedFd::from(s))))
+                crate::host::connect_nonblocking(addr).map(|fd| (fd, Some(inet_address(addr))))
             } else {
-                crate::host::connect(addr).and_then(|s| Ok((s.local_addr()?, Some(s.peer_addr()?), OwnedFd::from(s))))
+                crate::host::connect(addr).and_then(|s| { let peer = s.peer_addr()?; Ok((OwnedFd::from(s), Some(inet_address(peer)))) })
             };
             match result {
-                Ok((local, remote, fd)) => { socket = Some((fd, local, remote)); break; }
+                Ok((fd, remote)) => return Ok(Made::Socket(fd, remote, addrs.collect())),
                 Err(error) => last_error = Some(error),
             }
         }
-        let Some((fd, local, remote)) = socket else {
-            let error = last_error.expect("an address was tried");
-            if nowait {
-                // A :nowait connection fails later, in the wait.
-                let errno = error.raw_os_error().unwrap_or(libc::ECONNREFUSED);
-                self.attach_channel(proc, Channel { connect: Some(errno), ..Channel::default() });
-                return Ok(Value::NIL);
-            }
-            return Err(self.file_errno_data(if server { "make server process failed" } else { "make client process failed" }, &error, contact));
-        };
-        sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
-        let mut channel = Channel::default();
-        channel.outfd = Some(sp::dup(&fd).map_err(|e| self.file_errno("Setting socket", &e))?);
-        channel.infd = Some(fd);
-        let filter = self.process(proc)?.get(Slot::Filter);
-        channel.reading = server || (filter != Value::TRUE && !nowait);
-        if nowait {
-            channel.connecting = Some(addrs.collect());
+        let error = last_error.expect("an address was tried");
+        if server {
+            return Err(self.file_errno_data("make server process failed", &error, contact));
         }
-        self.attach_channel(proc, channel);
-        let local_vec = self.sockaddr_vector(local);
-        let remote_vec = remote.map_or(Value::NIL, |r| self.sockaddr_vector(r));
-        Ok(self.list(&[local_vec, remote_vec, fixnum(local.port().into())]))
+        self.client_failed(nowait, &error, contact)
     }
-    /// conv_sockaddr_to_lisp: [A B C D PORT] or [X1 ... X8 PORT].
-    fn sockaddr_vector(&mut self, addr: std::net::SocketAddr) -> Value {
-        let mut items: Vec<Value> = match addr.ip() {
-            std::net::IpAddr::V4(ip) => ip.octets().iter().map(|&b| fixnum(b.into())).collect(),
-            std::net::IpAddr::V6(ip) => ip.segments().iter().map(|&s| fixnum(s.into())).collect(),
+    /// A client connection that failed with ERROR: GNU's file error, which
+    /// a :nowait connection takes as its `failed' status and another signals.
+    fn client_failed(&mut self, nowait: bool, error: &std::io::Error, contact: Value) -> Result<Made> {
+        let fault = self.file_errno_data("make client process failed", error, contact);
+        if nowait { Ok(Made::Failed(fault)) } else { Err(fault) }
+    }
+    /// conv_sockaddr_to_lisp: [A B C D PORT], [X1 ... X8 PORT], or a local
+    /// socket's path as a unibyte string.
+    fn address_lisp(&mut self, address: &sp::Address) -> Value {
+        let (mut items, port): (Vec<Value>, u16) = match address {
+            sp::Address::V4(octets, port) => (octets.iter().map(|&b| fixnum(b.into())).collect(), *port),
+            sp::Address::V6(segments, port) => (segments.iter().map(|&s| fixnum(s.into())).collect(), *port),
+            sp::Address::Local(path) => return self.make_string(path.clone(), false),
         };
-        items.push(fixnum(addr.port().into()));
+        items.push(fixnum(port.into()));
         self.vector(&items)
     }
     /// server_accept_connection's accept: nil when it would block,
-    /// (error . ERRNO), or (CONNECTION HOST SERVICE REMOTE LOCAL), where
-    /// CONNECTION is a channel handle for `romacs--process-attach'.
+    /// (error . ERRNO), or (CONNECTION HOST SERVICE REMOTE LOCAL SUFFIX),
+    /// where CONNECTION is a channel handle for `romacs--process-attach',
+    /// HOST and SERVICE the peer's (t and nil for a local socket) and
+    /// SUFFIX what the server's name gains for the connection's.
     pub(crate) fn process_accept(&mut self, server: Value) -> Out {
         let Some(fd) = self.channel(server).and_then(|c| c.infd.as_ref()).map(|f| f.as_raw_fd()) else { return Ok(Value::NIL) };
-        let listener = std::mem::ManuallyDrop::new(unsafe { <std::net::TcpListener as std::os::fd::FromRawFd>::from_raw_fd(fd) });
-        let (stream, remote) = match listener.accept() {
+        let (fd, remote) = match sp::accept(fd) {
             Ok(accepted) => accepted,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(Value::NIL),
             Err(error) => {
@@ -1043,22 +1076,28 @@ impl Leaf<'_> {
                 return Ok(self.cons(error_symbol, fixnum(error.raw_os_error().unwrap_or(0).into())));
             }
         };
-        let local = stream.local_addr().ok();
-        let fd = OwnedFd::from(stream);
         sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
+        let local = sp::socket_address(fd.as_raw_fd(), true).ok().flatten();
         let mut channel = Channel::default();
         channel.outfd = Some(sp::dup(&fd).map_err(|e| self.file_errno("Setting socket", &e))?);
         channel.infd = Some(fd);
         let serial = self.vm.subprocesses.insert(channel);
-        let host = match remote.ip() {
-            std::net::IpAddr::V4(ip) => ip.to_string(),
-            std::net::IpAddr::V6(ip) => ip.segments().iter().map(|s| format!("{s:x}")).collect::<Vec<_>>().join(":"),
+        self.vm.subprocesses.connect_counter += 1;
+        let (host, service, suffix) = match &remote {
+            Some(sp::Address::V4(octets, port)) => {
+                let host = octets.iter().map(u8::to_string).collect::<Vec<_>>().join(".");
+                (self.string(&host), fixnum((*port).into()), format!(" <{host}:{port}>"))
+            }
+            Some(sp::Address::V6(segments, port)) => {
+                let host = segments.iter().map(|s| format!("{s:x}")).collect::<Vec<_>>().join(":");
+                (self.string(&host), fixnum((*port).into()), format!(" <[{host}]:{port}>"))
+            }
+            _ => (Value::TRUE, Value::NIL, format!(" <{}>", self.vm.subprocesses.connect_counter)),
         };
-        let host = self.string(&host);
-        let remote_vec = self.sockaddr_vector(remote);
-        let local_vec = local.map_or(Value::NIL, |l| self.sockaddr_vector(l));
-        let v6 = if remote.is_ipv6() { Value::TRUE } else { Value::NIL };
-        Ok(self.list(&[fixnum(serial as i64), host, fixnum(remote.port().into()), remote_vec, local_vec, v6]))
+        let remote = remote.map_or(Value::NIL, |a| self.address_lisp(&a));
+        let local = local.map_or(Value::NIL, |a| self.address_lisp(&a));
+        let suffix = self.string(&suffix);
+        Ok(self.list(&[fixnum(serial as i64), host, service, remote, local, suffix]))
     }
     /// Give PROC the accepted channel CONNECTION.
     pub(crate) fn process_attach(&mut self, proc: Value, connection: i64) -> Out {
@@ -1146,6 +1185,29 @@ impl Vm {
         // The isolates' sockets and workers' pidfds wake the same wait.
         fds.extend(self.isolate_fds());
         fds
+    }
+}
+
+/// What making a socket came to: one, with its remote address (a client's)
+/// and the addresses left to try, or the file error a :nowait connection
+/// failed with at once, which is its status rather than a signal.
+enum Made {
+    Socket(OwnedFd, Option<sp::Address>, Vec<std::net::SocketAddr>),
+    Failed(Fault),
+}
+
+/// What make-network-process listens on or connects to.
+pub(crate) enum Target {
+    /// HOST:PORT, in one Internet family (Some(true) for IPv6) or either.
+    Inet { host: String, port: u16, family: Option<bool> },
+    /// A local (Unix domain) socket's path.
+    Local(Vec<u8>),
+}
+
+fn inet_address(addr: std::net::SocketAddr) -> sp::Address {
+    match addr.ip() {
+        std::net::IpAddr::V4(ip) => sp::Address::V4(ip.octets(), addr.port()),
+        std::net::IpAddr::V6(ip) => sp::Address::V6(ip.segments(), addr.port()),
     }
 }
 

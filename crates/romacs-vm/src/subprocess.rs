@@ -102,8 +102,6 @@ pub(crate) struct Channel {
     pub pending: Vec<u8>,
     /// add_process_read_fd: the wait polls `infd'.
     pub reading: bool,
-    /// A :nowait connection that failed at creation, not yet reported: its errno.
-    pub connect: Option<i32>,
     /// A :nowait connection in progress (GNU's NON_BLOCKING_CONNECT_FD): the
     /// addresses still to try if this one fails (GNU's addrinfos).
     pub connecting: Option<Vec<std::net::SocketAddr>>,
@@ -127,6 +125,9 @@ pub(crate) struct Table {
     /// How many selects found something ready: the command loop's idle
     /// wait asks whether its pass handled anything.
     pub activity: u64,
+    /// GNU connect_counter: how many connections servers have accepted,
+    /// naming those whose peer has no host.
+    pub connect_counter: u64,
 }
 
 impl Table {
@@ -527,6 +528,70 @@ pub(crate) fn poll(fds: &[(RawFd, i16)], timeout: Option<std::time::Duration>) -
         return Err(error);
     }
     Ok(set.iter().map(|p| p.revents).collect())
+}
+
+/// A socket address as conv_sockaddr_to_lisp reads it: IPv4 and IPv6 with
+/// their port, or a local socket's path (empty for an unnamed socket).
+pub(crate) enum Address {
+    V4([u8; 4], u16),
+    V6([u16; 8], u16),
+    Local(Vec<u8>),
+}
+
+/// The address LEN bytes of STORAGE hold, in GNU's families; None for another.
+fn decode_sockaddr(storage: &libc::sockaddr_storage, len: libc::socklen_t) -> Option<Address> {
+    let base = (storage as *const libc::sockaddr_storage).cast::<u8>();
+    match i32::from(storage.ss_family) {
+        libc::AF_INET => {
+            let sin = unsafe { &*(storage as *const libc::sockaddr_storage).cast::<libc::sockaddr_in>() };
+            Some(Address::V4(sin.sin_addr.s_addr.to_ne_bytes(), u16::from_be(sin.sin_port)))
+        }
+        libc::AF_INET6 => {
+            let sin6 = unsafe { &*(storage as *const libc::sockaddr_storage).cast::<libc::sockaddr_in6>() };
+            let octets = sin6.sin6_addr.s6_addr;
+            let segments = std::array::from_fn(|i| u16::from_be_bytes([octets[2 * i], octets[2 * i + 1]]));
+            Some(Address::V6(segments, u16::from_be(sin6.sin6_port)))
+        }
+        libc::AF_UNIX => {
+            // The name is what fits in LEN past the family; a NUL ends a
+            // path, while a Linux abstract name (leading NUL) may hold NULs.
+            let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+            let available = (len as usize).saturating_sub(offset).min(std::mem::size_of::<libc::sockaddr_un>() - offset);
+            let path = unsafe { std::slice::from_raw_parts(base.add(offset), available) };
+            let name = if path.first().is_some_and(|&b| b != 0) { path.iter().position(|&b| b == 0).map_or(path, |end| &path[..end]) } else { path };
+            Some(Address::Local(name.to_vec()))
+        }
+        _ => None,
+    }
+}
+
+/// getsockname (LOCAL) or getpeername of the socket FD.
+pub(crate) fn socket_address(fd: RawFd, local: bool) -> io::Result<Option<Address>> {
+    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+    let sa = (&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr>();
+    let result = if local { unsafe { libc::getsockname(fd, sa, &mut len) } } else { unsafe { libc::getpeername(fd, sa, &mut len) } };
+    if result != 0 {
+        return Err(last_error());
+    }
+    Ok(decode_sockaddr(&storage, len))
+}
+
+/// server_accept_connection's accept: the connection, close-on-exec, with
+/// the peer's address.
+pub(crate) fn accept(listener: RawFd) -> io::Result<(OwnedFd, Option<Address>)> {
+    let (fd, storage, len) = crate::host::accept(listener)?;
+    Ok((fd, decode_sockaddr(&storage, len)))
+}
+
+/// SO_ERROR of the socket FD: how its nonblocking connect ended.
+pub(crate) fn socket_error(fd: RawFd) -> i32 {
+    let mut error: libc::c_int = 0;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    if unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_ERROR, (&mut error as *mut libc::c_int).cast(), &mut len) } != 0 {
+        return last_error().raw_os_error().unwrap_or(libc::ECONNREFUSED);
+    }
+    error
 }
 
 /// emacs_get_tty_pgrp: the foreground group of the pty on FD.

@@ -1677,7 +1677,7 @@ mod leaf {
     mod insdel;
     mod sqlite;
     mod process;
-    pub(crate) use process::CallOutput;
+    pub(crate) use process::{CallOutput, Target};
     mod random;
     mod width;
     mod coding_safe;
@@ -1692,7 +1692,7 @@ mod leaf {
     mod world;
     mod finalizer;
 }
-pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
 
 /// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
 pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {

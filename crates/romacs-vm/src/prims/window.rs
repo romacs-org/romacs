@@ -337,6 +337,15 @@ fn raise_frame(cx; optional frame: Value) {
     Ok(Value::NIL)
 }}
 
+// Fx_focus_frame: the host's one window has the input focus whenever the
+// session does; a request to focus FRAME (server.el's, through
+// `select-frame-set-input-focus') has nothing left to ask.
+defsubr! { name = "x-focus-frame", gnu = "xfns.c:5069", effect = Global,
+fn x_focus_frame(cx, frame: Value; optional _noactivate: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "lower-frame", gnu = "frame.c:3686", effect = Global,
 fn lower_frame(cx; optional frame: Value) {
     cx.windows().decode_live_frame(frame)?;
