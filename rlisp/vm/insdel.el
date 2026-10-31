@@ -142,10 +142,16 @@ text if it was at or after the marker."
 END and LENGTH, the length of the text the change replaced, then the
 OVERLAYS' hooks and, after an insertion, the text's insert hooks BEHIND
 and IN-FRONT with BEG and END, all with `inhibit-modification-hooks'
-bound to t.  A non-local exit from `after-change-functions' resets it to nil."
+bound to t.  A non-local exit from `after-change-functions' resets it to nil.
+Under `combine-after-change-calls' the change is recorded for
+`combine-after-change-execute' instead, when GNU defers it."
   (save-current-buffer
     (set-buffer buffer)
-    (unless inhibit-modification-hooks
+    (cond
+     (inhibit-modification-hooks nil)
+     ((romacs--after-change-deferred-p) (romacs--defer-after-change beg end length))
+     (t
+      (if romacs--combined-changes (romacs--combine-after-change-execute))
       (let ((inhibit-modification-hooks t))
         (if after-change-functions
             (let ((done nil))
@@ -163,7 +169,62 @@ bound to t.  A non-local exit from `after-change-functions' resets it to nil."
             (let ((functions in-front))
               (while functions
                 (funcall (car functions) beg end)
-                (setq functions (cdr functions))))))))))
+                (setq functions (cdr functions)))))))))))
+
+(defvar romacs--combined-changes nil
+  "insdel.c combine_after_change_list: the deferred changes, newest first,
+each (UNCHANGED-AT-BEGINNING UNCHANGED-AT-END GROWTH) in characters.")
+
+(defvar romacs--combined-changes-buffer nil
+  "insdel.c combine_after_change_buffer: the buffer of the deferred changes.")
+
+(defun romacs--after-change-deferred-p ()
+  "Whether signal_after_change defers the current buffer's change:
+`combine-after-change-calls' is on, `before-change-functions' is nil or
+only a local `syntax-ppss-flush-cache', and the buffer has no overlays
+\(a VM2 unibyte buffer holds none)."
+  (and combine-after-change-calls
+       (or (null before-change-functions)
+           (and (eq (car-safe before-change-functions) t)
+                (null (default-value 'before-change-functions))
+                (equal (cdr before-change-functions) '(syntax-ppss-flush-cache))))
+       (or (not enable-multibyte-characters)
+           (null (save-restriction (widen) (overlays-in (point-min) (point-max)))))))
+
+(defun romacs--defer-after-change (beg end length)
+  "Record the current buffer's change of BEG..END, which replaced LENGTH
+characters, as signal_after_change does, after running the changes
+deferred in another buffer.  GNU's end count is the buffer's size past
+END less LENGTH, so a deletion's combined end falls before its start."
+  (if (and romacs--combined-changes
+           (not (eq (current-buffer) romacs--combined-changes-buffer)))
+      (romacs--combine-after-change-execute))
+  (setq romacs--combined-changes
+        (cons (list (1- beg) (- (1+ (buffer-size)) (- end length))
+                    (- end beg length))
+              romacs--combined-changes))
+  (setq romacs--combined-changes-buffer (current-buffer)))
+
+(defun romacs--combine-after-change-execute ()
+  "Fcombine_after_change_execute: run the after-change hooks once over the
+deferred changes' combined region, in their buffer, and forget them."
+  (let ((changes romacs--combined-changes)
+        (buffer romacs--combined-changes-buffer))
+    (setq romacs--combined-changes nil)
+    (when (and changes (buffer-live-p buffer))
+      (save-current-buffer
+        (set-buffer buffer)
+        (let* ((z (1+ (buffer-size))) (beg (1- z)) (end beg) (growth 0))
+          (while changes
+            (let ((change (car changes)))
+              (setq growth (+ growth (nth 2 change)))
+              (setq beg (min beg (nth 0 change)))
+              (setq end (min end (nth 1 change))))
+            (setq changes (cdr changes)))
+          (let ((combine-after-change-calls combine-after-change-calls)
+                (start (1+ beg)) (stop (- z end)))
+            (romacs--after-change buffer start stop (- stop start growth))))))
+    nil))
 
 (defun romacs--self-insert (n c)
   "The rest of cmds.c `self-insert-command' once N and C are checked:

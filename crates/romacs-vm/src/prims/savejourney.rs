@@ -284,152 +284,98 @@ fn case_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Next {
         return Ok(Step::Call { f: handler, args: vec![operation, expanded], then: returned, saved: vec![] });
     }
     let path = cx.string_text(expanded)?.to_owned();
-    let insensitive = crate::host::case_insensitive(std::path::Path::new(&path), filesystem_case_insensitive)
-        .map_err(|reason| Fault::Error(format!("VM2 filesystem case sensitivity unknown: {reason}")))?;
-    Ok(Step::Done(if insensitive { Value::TRUE } else { Value::NIL }))
+    Ok(Step::Done(if folds_case(std::path::Path::new(&path)) { Value::TRUE } else { Value::NIL }))
 }
 
-// Deliberately differs from pinned GNU's Linux constant: observe existing
-// directory entries only. Never create a probe or infer from the OS name.
-// Like GNU, a directory that cannot tell defers to its ancestors.
-#[cfg(unix)]
-pub(crate) fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    let mut directory = path;
+// Deliberately differs from pinned GNU, whose GNU/Linux answer is nil by
+// platform assumption (fileio.c `file_name_case_insensitive_err'): the
+// filesystem is measured, by its type and its directory's casefold flag. No
+// directory is listed, so its size cannot matter, and every failure answers
+// GNU's nil.
+#[cfg(target_os = "linux")]
+fn folds_case(path: &std::path::Path) -> bool {
+    let Some(directory) = containing_directory(path) else { return false };
+    classify_case(crate::host::filesystem_type(&directory), || crate::host::directory_flags(&directory))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn folds_case(_: &std::path::Path) -> bool {
+    cfg!(windows)
+}
+
+/// PATH when it is a directory, else the directory its name is in: the
+/// nearest that exists, as GNU's walk up the tree finds on trouble.
+#[cfg(target_os = "linux")]
+fn containing_directory(mut path: &std::path::Path) -> Option<std::path::PathBuf> {
     loop {
-        match crate::host::metadata(directory) {
-            Ok(m) if m.file_type().is_dir() => break,
-            Ok(m) if m.file_type().is_file() => {
-                directory = directory.parent().ok_or("no containing directory")?;
-                break;
-            }
-            Ok(_) => return Err("unsupported file class"),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                directory = directory.parent().ok_or("no existing ancestor")?;
-            }
-            Err(_) => return Err("cannot stat path"),
-        }
-    }
-    // fileio.c Ffile_name_case_insensitive_p: a directory that cannot say
-    // defers to its parent; the answer is still the nearest measurement.
-    loop {
-        match stable_case_witness(directory) {
-            Err(NO_WITNESS) => directory = directory.parent().ok_or(NO_WITNESS)?,
-            result => return result,
+        match crate::host::entry_type(path) {
+            Ok(t) if std::fs::FileType::is_dir(&t) => return Some(path.to_owned()),
+            Ok(_) => return path.parent().map(std::path::Path::to_owned),
+            Err(_) => path = path.parent()?,
         }
     }
 }
 
-const NO_WITNESS: &str = "no unambiguous ASCII case witness";
-const ENTRY_CHANGED: &str = "entry changed during probe";
-const DIRECTORY_CHANGED: &str = "directory changed during probe";
+// Filesystem magic numbers (statfs(2); linux/magic.h, else the driver).
+const MSDOS_SUPER_MAGIC: u32 = 0x4d44; // vfat and msdos
+const EXFAT_SUPER_MAGIC: u32 = 0x2011_bab0;
+const NTFS_SB_MAGIC: u32 = 0x5346_544e; // fs/ntfs, case-insensitive unless case_sensitive=yes
+const HFS_SUPER_MAGIC: u32 = 0x4244;
+const HFSPLUS_SUPER_MAGIC: u32 = 0x482b;
+const EXT4_SUPER_MAGIC: u32 = 0xef53; // ext2, ext3 and ext4
+const F2FS_SUPER_MAGIC: u32 = 0xf2f5_2010;
+const TMPFS_MAGIC: u32 = 0x0102_1994; // casefold since Linux 6.13
+/// linux/fs.h: "case-insensitive name lookup" on this directory.
+const FS_CASEFOLD_FL: u32 = 0x4000_0000;
 
-/// `case_witness', observed again (at most 8 times) while DIRECTORY or the
-/// witnessing entry changes under the probe: visits and saves ask about
-/// directories other processes write to, and only a stable observation
-/// answers.
-#[cfg(unix)]
-fn stable_case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    let mut observation = case_witness(directory);
-    for _ in 1..8 {
-        if !matches!(observation, Err(ENTRY_CHANGED | DIRECTORY_CHANGED)) { break; }
-        observation = case_witness(directory);
+/// Whether a filesystem of type FS_TYPE folds case: by its type, or, where
+/// folding is a per-directory attribute, by the directory's FLAGS, asked
+/// only there. Any error answers nil, as GNU does when it cannot tell.
+fn classify_case(fs_type: std::io::Result<u32>, flags: impl FnOnce() -> std::io::Result<u32>) -> bool {
+    match fs_type {
+        Ok(MSDOS_SUPER_MAGIC | EXFAT_SUPER_MAGIC | NTFS_SB_MAGIC | HFS_SUPER_MAGIC | HFSPLUS_SUPER_MAGIC) => true,
+        Ok(EXT4_SUPER_MAGIC | F2FS_SUPER_MAGIC | TMPFS_MAGIC) => flags().is_ok_and(|f| f & FS_CASEFOLD_FL != 0),
+        _ => false,
     }
-    observation
-}
-
-/// Classify DIRECTORY's filesystem from one of its own entries.
-#[cfg(unix)]
-fn case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    use std::os::unix::fs::MetadataExt;
-    let identity = |m: &std::fs::Metadata| (m.dev(), m.ino());
-    let directory_before = crate::host::metadata(directory).map_err(|_| "cannot stat directory")?;
-    let entries = crate::host::read_dir(directory).map_err(|_| "cannot read directory")?;
-    let mut names = std::collections::HashSet::new();
-    for entry in entries {
-        if names.len() >= 4096 {
-            return Err("directory exceeds read-only probe bound");
-        }
-        names.insert(
-            entry
-                .map_err(|_| "cannot read directory entry")?
-                .file_name(),
-        );
-    }
-    for name in &names {
-        let original = directory.join(name);
-        let before =
-            crate::host::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
-        // Special files and symlinks are not reliable filesystem witnesses.
-        if !(before.file_type().is_file() || before.file_type().is_dir()) {
-            continue;
-        }
-        for (index, byte) in name.as_bytes().iter().enumerate() {
-            if !byte.is_ascii_alphabetic() {
-                continue;
-            }
-            let mut bytes = name.as_bytes().to_vec();
-            bytes[index] ^= 0x20;
-            let alternate = std::ffi::OsString::from_vec(bytes);
-            let observed = match crate::host::symlink_metadata(directory.join(&alternate)) {
-                Ok(m) => Some(identity(&m)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(_) => return Err("cannot stat alternate spelling"),
-            };
-            let Some(result) =
-                classify_case_observation(identity(&before), observed, names.contains(&alternate))
-            else {
-                continue;
-            };
-            let after =
-                crate::host::symlink_metadata(&original).map_err(|_| ENTRY_CHANGED)?;
-            let directory_after =
-                crate::host::metadata(directory).map_err(|_| DIRECTORY_CHANGED)?;
-            if identity(&before) != identity(&after)
-                || identity(&directory_before) != identity(&directory_after)
-                || directory_before.mtime() != directory_after.mtime()
-                || directory_before.mtime_nsec() != directory_after.mtime_nsec()
-                || directory_before.ctime() != directory_after.ctime()
-                || directory_before.ctime_nsec() != directory_after.ctime_nsec()
-            {
-                return Err(DIRECTORY_CHANGED);
-            }
-            return Ok(result);
-        }
-    }
-    Err(NO_WITNESS)
-}
-
-// An explicitly listed alternate spelling with the same inode is a hardlink,
-// not evidence of case folding. A distinct inode establishes sensitivity.
-fn classify_case_observation(
-    original: (u64, u64),
-    alternate: Option<(u64, u64)>,
-    listed: bool,
-) -> Option<bool> {
-    match alternate {
-        None if !listed => Some(false),
-        Some(other) if other != original => Some(false),
-        Some(_) if !listed => Some(true),
-        _ => None,
-    }
-}
-
-#[cfg(not(unix))]
-fn filesystem_case_insensitive(_: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    Err("native file identity is unsupported on this platform")
 }
 
 #[cfg(test)]
 mod case_tests {
-    use super::classify_case_observation as classify;
+    use super::*;
+    fn error(errno: i32) -> std::io::Result<u32> { Err(std::io::Error::from_raw_os_error(errno)) }
+    fn unasked() -> std::io::Result<u32> { panic!("flags asked of a filesystem without casefold") }
+
     #[test]
-    fn case_identity_requires_an_unlisted_alias() {
-        assert_eq!(classify((1, 2), Some((1, 2)), false), Some(true));
-        assert_eq!(classify((1, 2), Some((1, 2)), true), None);
-        assert_eq!(classify((1, 2), Some((1, 3)), true), Some(false));
-        assert_eq!(classify((1, 2), Some((2, 2)), false), Some(false));
-        assert_eq!(classify((1, 2), None, false), Some(false));
-        assert_eq!(classify((1, 2), None, true), None);
+    fn a_folding_filesystem_type_answers_t_without_flags() {
+        for magic in [MSDOS_SUPER_MAGIC, EXFAT_SUPER_MAGIC, NTFS_SB_MAGIC, HFS_SUPER_MAGIC, HFSPLUS_SUPER_MAGIC] {
+            assert!(classify_case(Ok(magic), unasked), "{magic:#x}");
+        }
+    }
+
+    #[test]
+    fn other_filesystem_types_answer_nil_without_flags() {
+        // btrfs, xfs, ntfs3 (case-sensitive unless mounted nocase), CIFS,
+        // SMB2 (the server and mount options decide), FUSE.
+        for magic in [0x9123_683e, 0x5846_5342, 0x7366_746e, 0xff53_4d42, 0xfe53_4d42, 0x6573_5546] {
+            assert!(!classify_case(Ok(magic), unasked), "{magic:#x}");
+        }
+    }
+
+    #[test]
+    fn a_casefold_capable_filesystem_answers_from_the_directory_flag() {
+        for magic in [EXT4_SUPER_MAGIC, F2FS_SUPER_MAGIC, TMPFS_MAGIC] {
+            assert!(classify_case(Ok(magic), || Ok(FS_CASEFOLD_FL | 0x80000)), "{magic:#x}");
+            assert!(!classify_case(Ok(magic), || Ok(0x80000)), "{magic:#x}");
+            for errno in [libc::ENOTTY, libc::EPERM, libc::EACCES, libc::ELOOP] {
+                assert!(!classify_case(Ok(magic), || error(errno)), "{magic:#x} {errno}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_statfs_error_answers_nil() {
+        for errno in [libc::EACCES, libc::ENOENT, libc::ENOSYS] {
+            assert!(!classify_case(error(errno), unasked), "{errno}");
+        }
     }
 }

@@ -117,20 +117,26 @@ not created until saved.  Failed fresh visits are removed before signalling."
     (if (file-directory-p file) (dired-noselect file)
       (romacs-find-file--visit-local file name))))
 
-(defun find-file-noselect (filename &optional nowarn rawfile wildcards)
-  "Return a buffer visiting local UTF-8 FILENAME without selecting it.
+;; GNU's files.el owns visiting once loaded (--loadup): its
+;; `find-file-noselect' names buffers with uniquify, finds a visited
+;; file by truename and runs `after-find-file'.  The workspace, without
+;; it, visits with this slim reader.
+(unless (fboundp 'find-file-noselect-1)
+  (defun find-file-noselect (filename &optional nowarn rawfile wildcards)
+    "Return a buffer visiting local UTF-8 FILENAME without selecting it.
 Romacs's slim file visitor; NOWARN is accepted.  RAWFILE and wildcard
 expansion are unsupported.  Modes and hooks are independent Lisp policy."
-  (when (or rawfile wildcards)
-    (signal 'file-error (list "Raw or wildcard file visiting is unsupported" filename)))
-  (romacs-find-file-noselect filename))
+    (when (or rawfile wildcards)
+      (signal 'file-error (list "Raw or wildcard file visiting is unsupported" filename)))
+    (romacs-find-file-noselect filename))
 
-(defun find-file (filename &optional wildcards)
-  "Edit local UTF-8 FILENAME in the selected window.
+  (defun find-file (filename &optional wildcards)
+    "Edit local UTF-8 FILENAME in the selected window.
 Romacs implementation of the GNU-conventional API, reading FILENAME with
 `read-file-name'.  Local directories open the read-only Dired browser.
 Remote handlers, wildcards and file-local evaluation are unsupported."
-  (interactive (list (read-file-name "Find file: ") nil))
-  (let ((buffer (find-file-noselect filename nil nil wildcards)))
-    (romacs-select-buffer buffer)))
+    (interactive (list (read-file-name "Find file: ") nil))
+    (let ((buffer (find-file-noselect filename nil nil wildcards)))
+      (romacs-select-buffer buffer))))
+
 ;;; romacs-find-file.el ends here

@@ -13,18 +13,26 @@ impl Vm {
     pub(crate) fn keymap_at_point(&mut self, property: Value) -> Result<Value> {
         let index = self.buffer_index()?;
         let buffer = self.slots[self.buffer_slot].value;
-        let (at, left, right, same, local, overlays) = match &self.objects[index] {
+        // Point's neighbouring properties, whether one run spans point, the
+        // local map and the overlays at point. A unibyte buffer has no
+        // overlays (VM2-MD2).
+        let around = |properties: &crate::properties::Properties, at: ByteOffset, len: usize| {
+            let raw = |at| properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+            (if at.0 > 0 { raw(ByteOffset(at.0 - 1)) } else { vec![] },
+             if at.0 < len { raw(at) } else { vec![] },
+             at.0 > 0 && at.0 < len && properties.same_run_state(ByteOffset(at.0 - 1), at))
+        };
+        let (at, (left, right, same), local, overlays) = match &self.objects[index] {
             Object::Buffer(text) => {
                 let at = text.point;
-                let raw = |at| text.properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-                (at.0,
-                 if at.0 > 0 { raw(ByteOffset(at.0 - 1)) } else { vec![] },
-                 if at.0 < text.len_bytes() { raw(at) } else { vec![] },
-                 at.0 > 0 && at.0 < text.len_bytes() && text.properties.same_run_state(ByteOffset(at.0 - 1), at), text.local_keymap,
+                (at.0, around(&text.properties, at, text.len_bytes()), text.local_keymap,
                  text.intervals.query_with_end(at.0 as u32, at.0 as u32, true,
                      at.0 == text.len_bytes(), &text.anchors).0)
             }
-            Object::ByteBuffer(_) => return Err("keymap lookup in unibyte buffers is not implemented".into()),
+            Object::ByteBuffer(b) => {
+                let properties = crate::properties::Properties::from_map(&b.properties);
+                (b.point.0, around(&properties, b.point, b.bytes.len()), b.local_keymap, vec![])
+            }
             _ => unreachable!(),
         };
         let mut value = self.ordered_overlay_property(overlays, property)?;
@@ -72,7 +80,7 @@ impl Vm {
         Ok((Value::NIL, Value::NIL))
     }
 
-    fn overlay_order_key(&self, overlay: Value) -> (i64, u32, std::cmp::Reverse<u32>, usize) {
+    pub(crate) fn overlay_order_key(&self, overlay: Value) -> (i64, u32, std::cmp::Reverse<u32>, usize) {
         let priority = self.overlay_property_named(overlay, "priority").unwrap().integer_value().unwrap_or(0);
         let (start, end) = self.overlay_range(overlay).unwrap().unwrap();
         (priority, start, std::cmp::Reverse(end), overlay.index(0).unwrap())
@@ -218,7 +226,7 @@ impl Vm {
             let pos = tree.resolve(a).unwrap();
             assert!(tree.set(a, pos, b));
         }
-        let Object::Marker(m) = &mut self.objects[x.index(0)? - 1] else {
+        let Object::Marker(m) = self.object_mut(x)? else {
             unreachable!()
         };
         m.bias = b;
@@ -294,7 +302,7 @@ impl Vm {
             self.marker_anchors_mut(m.buffer)?.remove(a);
         }
         let anchor = destination.map(|p| self.marker_anchors_mut(buffer).unwrap().create(p, m.bias).unwrap());
-        let Object::Marker(target) = &mut self.objects[v.index(0)? - 1] else {
+        let Object::Marker(target) = self.object_mut(v)? else {
             unreachable!()
         };
         target.buffer = if anchor.is_some() { buffer } else { Value::NIL };
@@ -351,7 +359,7 @@ impl Vm {
                 b.evaporating.remove(&a);
             }
         }
-        let Object::Overlay(o) = &mut self.objects[v.index(0)? - 1] else {
+        let Object::Overlay(o) = self.object_mut(v)? else {
             unreachable!()
         };
         o.buffer = Value::NIL;
@@ -409,7 +417,7 @@ impl Vm {
             if evaporates {
                 target.evaporating.insert(a, v);
             }
-            let Object::Overlay(o) = &mut self.objects[v.index(0)? - 1] else {
+            let Object::Overlay(o) = self.object_mut(v)? else {
                 unreachable!()
             };
             o.buffer = buffer;
@@ -896,7 +904,7 @@ impl Vm {
             OverlayGet => self.overlay_get(x, args[1]),
             OverlayPut => {
                 self.overlay(x)?;
-                let Object::Overlay(o) = &mut self.objects[x.index(0)? - 1] else {
+                let Object::Overlay(o) = self.object_mut(x)? else {
                     unreachable!()
                 };
                 if let Some((_, v)) = o.properties.iter_mut().find(|(k, _)| *k == args[1]) {

@@ -125,7 +125,7 @@ fn a_reseed_form_reads_its_fact_and_fences_its_variable() {
     let after = write(&dir.join("after.el"), "(defvar seen (car cl--random-state))\n(defvar seen2 project-list-file)\n");
     let (_, trace) = build(&[extra, project, after]);
     let reseeds: Vec<_> = items(&trace, "records", "reseed").iter().map(|r| r["reads"].as_str().unwrap()).collect();
-    assert_eq!(reseeds, ["default-directory"], "{trace}");
+    assert_eq!(reseeds, ["clock", "default-directory"], "{trace}");
     let allowed: Vec<_> = items(&trace, "records", "p-read").iter().filter_map(|r| r["allowed"].as_str()).filter(|a| *a != "init").collect();
     assert_eq!(allowed, ["reseed"], "{trace}");
     let fenced: Vec<_> = items(&trace, "refusals", "fence").iter()
@@ -291,17 +291,22 @@ fn confinement_fails_and_lists_a_read_outside_the_roots() {
     let file = write(&dir.join("roots/read.el"), &format!(
         "(setq r (condition-case nil (with-temp-buffer (insert-file-contents {out}) 'read) (file-error 'failed)))\n", out = lisp(&outside)));
     // The pinned table's directories, empty and read-only, as the runner
-    // makes them: case sensitivity under cwd lists their parent.
+    // makes them, and a directory outside the roots: a case query measures
+    // each one's filesystem without reading beneath it.
     let store = dir.join("out.json.d");
     for name in ["cwd", "tmp", "bin"] {
         std::fs::create_dir_all(store.join("p").join(name)).unwrap();
     }
-    let probe = write(&dir.join("roots/probe.el"), &format!("(setq c (file-name-case-insensitive-p {}))\n", lisp(&store.join("p/cwd/x"))));
+    let probe = write(&dir.join("roots/probe.el"), &format!("(setq c (list (file-name-case-insensitive-p {}) (file-name-case-insensitive-p {})))\n",
+                                                             lisp(&store.join("p/cwd/x")), lisp(&dir.join("outside/x"))));
     let roots = romacs_vm::world::sandbox::build_roots(vec![dir.join("roots")], &store);
     romacs_vm::world::sandbox::confine(&roots, &[]).expect("Landlock");
     assert_eq!(std::fs::read(&outside).map_err(|e| e.raw_os_error()), Err(Some(libc::EACCES)));
+    assert_eq!(std::fs::read_dir(dir.join("outside")).map(drop).map_err(|e| e.raw_os_error()), Err(Some(libc::EACCES)));
+    // Its flags still answer, read outside the thread's domain.
+    assert_ne!(host::directory_flags(&dir.join("outside")).map_err(|e| e.raw_os_error()), Err(Some(libc::EACCES)));
     let (mut vm, trace) = build(&[file, probe]);
-    assert_eq!(eval(&mut vm, "(list r c)"), "(failed nil)");
+    assert_eq!(eval(&mut vm, "(list r c)"), "(failed (nil nil))");
     let confined: Vec<_> = items(&trace, "refusals", "confined").iter().map(|r| r["path"].as_str().unwrap().to_owned()).collect();
     assert_eq!(confined, [outside.to_string_lossy()], "{trace}");
 }
@@ -344,4 +349,28 @@ fn records_keep_names_that_are_not_utf8_distinct() {
     let mut path = dir.as_os_str().as_bytes().to_vec();
     path.extend(b"/n\xff");
     assert_eq!(probe[0]["path"], host::encoded(&path), "{probe:?}");
+}
+
+#[test]
+fn a_case_query_records_the_filesystem_facts_restore_asks_again() {
+    let dir = scratch("case");
+    std::fs::create_dir_all(dir.join("d")).unwrap();
+    // /dev/shm is a tmpfs, whose directories carry a casefold flag.
+    let probe = write(&dir.join("probe.el"), &format!("(setq c (list (file-name-case-insensitive-p {}) (file-name-case-insensitive-p \"/dev/shm/\")))\n",
+                                                       lisp(&dir.join("d/x"))));
+    let (mut vm, trace) = build(&[probe]);
+    assert_eq!(eval(&mut vm, "c"), "(nil nil)");
+    let facts: Vec<&Json> = items(&trace, "records", "probe").into_iter()
+        .filter(|r| r["probe"] == "fs-type" || r["probe"] == "dir-flags").collect();
+    let kinds: Vec<&str> = facts.iter().map(|r| r["probe"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["fs-type", "fs-type", "dir-flags"], "{trace}");
+    // The directory changes after the build, as HOME and TMPDIR do: the
+    // query keyed its type, not its times, so every record still holds.
+    write(&dir.join("d/new"), "");
+    let records = trace["records"].as_array().unwrap();
+    for record in records.iter().filter(|r| host::keyed(r)) {
+        let mut expected = record.clone();
+        expected.as_object_mut().unwrap().remove("site");
+        assert_eq!(host::replay(record), Some(expected));
+    }
 }

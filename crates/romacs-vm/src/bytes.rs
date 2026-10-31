@@ -49,6 +49,8 @@ pub(crate) struct ByteBuffer {
     /// The buffer's category table; nil means the standard one (category.c).
     pub category_table: Value,
     pub(crate) case_tables: [Value; 4],
+    /// The buffer's local keymap (`use-local-map'), as a text buffer's.
+    pub local_keymap: Value,
     pub point: ByteOffset,
     pub restriction: Range<ByteOffset>,
     /// The markers in this buffer, at byte offsets, which here are its
@@ -64,12 +66,12 @@ pub(crate) struct ByteBuffer {
     /// (fileio.c decide_coding_unwind); its anchors all stay at BEG.
     pub(crate) held: Option<Box<crate::annotations::AnnotatedBuffer>>,
 }
-romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, point, restriction, anchors, properties, had_intervals, per_buffer, held });
+romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, local_keymap, point, restriction, anchors, properties, had_intervals, per_buffer, held });
 impl ByteBuffer {
     /// An empty buffer's storage, with STATE.
     pub(crate) fn empty(state: BufferState, per_buffer: crate::forwarded::PerBuffer) -> Self {
         ByteBuffer {
-            state, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, case_tables: [Value::NIL; 4],
+            state, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, case_tables: [Value::NIL; 4], local_keymap: Value::NIL,
             point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0), anchors: AnchorTree::new(0),
             properties: Default::default(), had_intervals: false, per_buffer, held: None,
         }
@@ -152,6 +154,7 @@ impl ByteBuffer {
         visit(&mut self.syntax_table);
         visit(&mut self.category_table);
         for root in &mut self.case_tables { visit(root); }
+        visit(&mut self.local_keymap);
         self.per_buffer.visit_values(visit);
         if let Some(held) = &mut self.held { held.visit_values(visit); }
         for props in self.properties.values_mut() {

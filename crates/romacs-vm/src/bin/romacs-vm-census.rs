@@ -186,9 +186,15 @@ fn main() {
                     // Candidate-only call attribution. These sentinels run only
                     // after the verdict; fboundp-sensitive code can diverge, so
                     // Python never labels this a confirmed missing symbol.
+                    // The candidates are the symbols of every file a step was
+                    // read from (a completed step keeps no text of its own).
+                    let files: std::collections::BTreeSet<&str> = report["steps"].as_array().unwrap().iter()
+                        .filter_map(|step| step["file"].as_str()).collect();
                     let mut tokens = std::collections::BTreeSet::new();
-                    for step in report["steps"].as_array().unwrap() {
-                        for token in step["source"].as_str().unwrap_or("").split(|c: char| !c.is_ascii_alphanumeric() && !"-+*/<>=!?_:".contains(c)) {
+                    for file in files {
+                        // Lossy: the scan wants ASCII symbol names, whatever the file's coding.
+                        let text = String::from_utf8_lossy(&romacs_vm::host::read_file(file).unwrap_or_default()).into_owned();
+                        for token in text.split(|c: char| !c.is_ascii_alphanumeric() && !"-+*/<>=!?_:".contains(c)) {
                             if !token.is_empty() && token.as_bytes()[0].is_ascii_alphabetic() { tokens.insert(token.to_owned()); }
                         }
                     }

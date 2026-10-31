@@ -173,7 +173,7 @@ impl Vm {
     fn config_goto(&mut self, position: Value) -> Result<()> {
         let n = position.as_integer()?;
         let buffer = self.slots[self.buffer_slot].value;
-        if let Object::Buffer(b) = &mut self.objects[buffer.index(0)? - 1] {
+        if let Object::Buffer(b) = self.object_mut(buffer)? {
             b.point = b.byte_of_char(coordinates::CharOffset((n - 1) as usize))?;
         }
         Ok(())

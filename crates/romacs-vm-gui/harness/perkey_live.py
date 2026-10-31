@@ -3,7 +3,9 @@
 
 Each session is a fresh private headless labwc and a fresh `romacs-vm-gui -Q
 [--loadup] text.txt`, with private HOME/XDG/TMPDIR and no DISPLAY.  Keys are
-typed with wtype into that compositor only.  A session runs, in order:
+typed with wtype into that compositor only.  Under --loadup the session
+first sets `auto-save-timeout' nil with M-:, so no idle auto-save of the
+typed text lands in the second idle phase.  A session runs, in order:
 
   idle, self-insert (N x `a'), C-n (N), C-f (N), idle, then C-x C-s.
 
@@ -246,11 +248,27 @@ class Session:
                                         stdout=self.stdout.open('w'), stderr=self.stderr.open('w'))
         self.wait(lambda: any(r.get('ready') for r in records(self.stdout)), self.args.timeout, 'ready')
         self.tid = self.evaluator()
+        if self.args.regime == 'loadup':
+            self.no_idle_auto_save()
         self.quiesce()
         stderr_text = self.stderr.read_text(errors='replace')
         self.commands = bindings(stderr_text)
         self.renderer = next((l[len('romacs: gpu '):] for l in stderr_text.splitlines()
                               if l.startswith('romacs: gpu ')), None)
+
+    def no_idle_auto_save(self):
+        """M-: (setq auto-save-timeout nil).  read_char's idle auto-save of the
+        typed text, about 30 s after the last key, would land in the second
+        idle phase, which measures background, not typing.  -Q reads no init,
+        so the session sets it through its own command loop."""
+        before = len(records(self.stdout))
+        self.type(['-M', 'alt', ':', '-m', 'alt'])
+        self.type(['(setq auto-save-timeout nil)'])
+        self.type(['-k', 'Return'])
+        done = lambda: [r for r in records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
+        self.wait(done, self.args.timeout, 'M-: (setq auto-save-timeout nil)')
+        if any(r.get('signal') or r.get('native_error') for r in done()):
+            raise Invalid(f'M-: (setq auto-save-timeout nil) signalled: {done()}')
 
     def evaluator(self):
         for task in Path(f'/proc/{self.process.pid}/task').iterdir():

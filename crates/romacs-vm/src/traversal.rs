@@ -42,13 +42,7 @@ impl Vm {
                 Ok(if p == Car { pair.0 } else { pair.1 })
             }
             Setcar | Setcdr => {
-                if Self::image_value(x) && x.tag() == 3 {
-                    return Err("cannot mutate immutable image".into());
-                }
-                let pair = self
-                    .conses
-                    .get_mut(x.index(3)?)
-                    .ok_or("invalid cons reference")?;
+                let pair = self.cons_mut(x)?;
                 if p == Setcar {
                     pair.0 = y;
                 } else {

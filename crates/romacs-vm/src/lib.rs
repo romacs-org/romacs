@@ -24,6 +24,7 @@ mod oclosure;
 mod host_input;
 mod bidi;
 mod layout_host;
+mod display_host;
 mod session_host;
 mod terminal_host;
 mod process_jobs;
@@ -38,6 +39,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
+pub use display_host::{DisplayHost, FontEntity, FontQuery, OpenedFont, OtfTable};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
@@ -89,6 +91,9 @@ mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
+mod frozen;
+mod isolate;
+pub use isolate::worker_socket as isolate_worker_socket;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
@@ -133,6 +138,7 @@ pub use source_cache::{DIRECT_NODE_LIMIT, PreparedHandle, SourceCacheStats};
 mod bootstrap;
 mod capture;
 mod loader;
+pub use loader::{Step as LoadStep, StepStatus as LoadStepStatus};
 mod autoload;
 mod eval_form;
 mod productivity;
@@ -1224,6 +1230,8 @@ pub struct Vm {
     host_input: Option<Box<dyn host_input::HostInput>>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
+    /// The embedder's window system while one is attached (display_host.rs).
+    display: Option<display_host::Display>,
     /// The embedder's end of the session while one is attached (session_host.rs).
     session_host: Option<session_host::SessionHost>,
     /// keyboard.c timer_idleness_start_time: when the command loop began
@@ -1263,6 +1271,13 @@ pub struct Vm {
     expanded_macros: Vec<(usize, u64)>,
     expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
+    /// Frozen regions by id (`frozen.rs`); index 0 is the image above.
+    regions: Vec<Option<Box<frozen::Region>>>,
+    region_free: Vec<usize>,
+    /// Three quarters of the region ids are live: collect at the next entry.
+    region_collect: bool,
+    /// Worker isolates and, in a worker, the parent peer (`isolate.rs`).
+    isolates: isolate::Isolates,
     buffer_slot: usize,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
@@ -1479,11 +1494,16 @@ romacs_snapshot::snapshot_fields!(Vm {
     suspended_code,
     host_input,
     layout_host,
+    display,
     session_host,
     terminal_host,
     subprocesses,
     process_jobs,
     image,
+    regions,
+    region_free,
+    region_collect,
+    isolates,
     fence,
     execution,
     spare_programs,
@@ -1504,7 +1524,12 @@ impl Vm {
     pub fn set_collection_floor(&mut self, objects: usize) {
         self.gc_floor = Some(objects.max(1));
     }
+    /// The collector's measure of the heap: private objects plus the
+    /// weight of the frozen regions attached (`frozen.rs`).
     pub fn heap_objects(&self) -> usize {
+        self.private_objects() + self.region_weight()
+    }
+    pub(crate) fn private_objects(&self) -> usize {
         self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
     }
     pub fn new() -> Self {
@@ -1550,6 +1575,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             layout_host: None,
+            display: None,
             session_host: None,
             idle_since: None,
             keymap_generation: 0,
@@ -1571,6 +1597,10 @@ impl Vm {
             expanded_macros: vec![],
             expanded_symbols: NameSet::default(),
             image: None,
+            regions: vec![None],
+            region_free: Vec::new(),
+            region_collect: false,
+            isolates: isolate::Isolates::default(),
             buffer_slot: 0,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
@@ -3139,7 +3169,7 @@ impl Vm {
                     // Three sources: mapped UTF-8 strings, heap strings/vectors,
                     // and byte strings. Text counts scalars; byte strings count
                     // octets. Buffers are not sequences.
-                    return Value::integer(if Self::image_value(a[0]) {
+                    return Value::integer(if Self::image_string(a[0]) {
                         self.string_value(a[0])?.chars().count()
                     } else {
                         match self.object(a[0])? {
@@ -3190,7 +3220,7 @@ impl Vm {
         if depth > 100 {
             return Err("display depth exceeded".into());
         }
-        if v != Value::NIL && v.tag() == 0 && !Self::image_value(v) {
+        if v != Value::NIL && v.tag() == 0 && !Self::image_string(v) {
             return match self.object(v)? {
                 data::Object::Float(n) => Ok(numbers::print_float(*n)),
                 data::Object::Bignum(n) => Ok(n.to_string()),
@@ -3260,7 +3290,7 @@ impl Vm {
             Ok("nil".into())
         } else if v == Value::TRUE {
             Ok("t".into())
-        } else if v.tag() == 0 && Self::image_value(v) {
+        } else if Self::image_string(v) {
             Ok(serde_json::to_string(self.string_value(v)?).unwrap())
         } else if v.tag() == 1 {
             Ok(v.as_integer()?.to_string())

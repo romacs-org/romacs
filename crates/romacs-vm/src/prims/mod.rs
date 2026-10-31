@@ -12,6 +12,8 @@ include!(concat!(env!("OUT_DIR"), "/prims_mods.rs"));
 pub(crate) const PRELUDE: &str = include_str!("../../../../rlisp/vm/prelude.el");
 /// T3 tier: process.c's waits, filters, sentinels and timers over prims/process.rs.
 pub(crate) const PROCESS_PRELUDE: &str = include_str!("../../../../rlisp/vm/subprocess.el");
+/// T3 tier: isolates' spawning, futures, delivery and the worker's loop over prims/isolate.rs.
+pub(crate) const ISOLATE_PRELUDE: &str = include_str!("../../../../rlisp/vm/isolate.el");
 
 // Compile-fail probes for the T1 boundary. `tests/primitive_gc_boundary.rs`
 // checks this crate with `--cfg vm2_gc_probe="..."`, which places a fixture

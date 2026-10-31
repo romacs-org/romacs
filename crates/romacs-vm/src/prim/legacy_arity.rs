@@ -120,7 +120,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | OverlayPut
         | Puthash
         | DefineHashTableTest
-        | SetWindowVscroll
         | SetWindowParameter
         | MakeObsolete
         | SetAdvertisedCallingConvention => (3, Some(3)),
@@ -152,6 +151,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         YankFinalize => (4, Some(4)),
         MakeOverlay => (2, Some(5)),
         MoveOverlay | DefineKey | MakeObsoleteVariable => (3, Some(4)),
+        SetWindowVscroll => (2, Some(4)),
         RemoveOverlays => (0, Some(4)),
         StringMatch | PosixStringMatch => (2, Some(4)),
         MatchData => (0, Some(3)),

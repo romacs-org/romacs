@@ -150,11 +150,13 @@ impl Fixed {
     pub fn as_integer(self) -> Result<i64> {
         self.0.as_integer()
     }
-    /// Image references only: the IMAGE index bit is never a private index.
+    /// Executable-image references only: the IMAGE index bit is never a
+    /// private index, and a frozen region (`frozen.rs`) can be reclaimed, so
+    /// no `Fixed` may name one.
     pub(crate) fn image(value: Value) -> Self {
         debug_assert!(
-            Vm::image_value(value),
-            "Fixed::image requires a mapped reference"
+            Vm::image_value(value) && crate::frozen::region_of(value.payload() as usize) == 0,
+            "Fixed::image requires an executable-image reference"
         );
         Self(value)
     }

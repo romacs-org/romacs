@@ -54,7 +54,8 @@ mod tests {
 
     /// The host's layout of the frame, the selected window's cursor and
     /// that window's id and height.
-    struct Paint { glyphs: Vec<(char, f32, f32, f32, f32, GlyphRowRole)>, cursor: Option<(f32, f32, f32, f32)>, window_width: u32, window_height: u32 }
+    struct Paint { glyphs: Vec<(char, f32, f32, f32, f32, GlyphRowRole)>, cursor: Option<(f32, f32, f32, f32)>, window_width: u32, window_height: u32,
+        rows: Vec<romacs_layout_input::Row> }
 
     impl Hosted {
         fn eval(&mut self, source: &str) -> String {
@@ -79,7 +80,8 @@ mod tests {
                 _ => None,
             }).collect();
             let cursor = frame.window_cursors.iter().find(|c| c.window_id.get() == id as i64).map(|c| (c.x, c.y, c.width, c.height));
-            Paint { glyphs, cursor, window_width, window_height }
+            let rows = ends.iter().find(|e| e.id == id).map(|e| e.rows.clone()).unwrap_or_default();
+            Paint { glyphs, cursor, window_width, window_height, rows }
         }
     }
 
@@ -435,7 +437,11 @@ mod tests {
     /// A row a plain newline starts measures alone, whatever the line
     /// before holds: gnosis's review centres each line with an overlay
     /// string, then measures the next line.  The line holding the string
-    /// still refuses.
+    /// measures as the host paints it: the space, aligned past the window's
+    /// edge, stretches to a pixel short of the continuation glyph, and its
+    /// text continues on the next row, where pinned GNU's measure starts
+    /// (move_it_by_lines 0 to the screen line showing FROM; harness/wtps_live.py
+    /// `own-row-before-string').
     #[test]
     fn a_row_after_a_plain_newline_measures_without_the_line_before() {
         let mut h = hosted();
@@ -443,8 +449,14 @@ mod tests {
         let plain = h.eval("(window-text-pixel-size nil 12 22 1000)");
         h.eval(r#"(overlay-put (make-overlay 1 11) 'before-string (propertize " " 'display '(space :align-to 30)))"#);
         assert_eq!(h.eval("(window-text-pixel-size nil 12 22 1000)"), plain);
-        assert_eq!(h.eval("(condition-case e (window-text-pixel-size nil 1 11) (error (car (cdr e))))"),
-                   "\"VM2 window-text-pixel-size of text the host does not lay out as GNU displays it in a displayed window is unsupported\"");
+        h.eval("(setq truncate-partial-width-windows nil)");
+        let paint = h.paint();
+        let column = h.eval("(frame-char-width)").parse::<f32>().unwrap();
+        let first: Vec<_> = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text && g.2 == 0.0).collect();
+        assert_eq!((first[0].0, first[0].1, first[0].1 + first[0].3), ('\t', 0.0, paint.window_width as f32 - first.last().unwrap().3 - 1.0),
+                   "the space stretches to a pixel short of the continuation glyph, column {column}");
+        let second: f32 = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text && g.2 == paint.rows[1].y).map(|g| g.3).sum();
+        assert_eq!(h.eval("(window-text-pixel-size nil 1 11)"), cons(second, paint.rows[1].height));
     }
 
     /// `window-end' with UPDATE lays the window out from its start as
@@ -469,9 +481,10 @@ mod tests {
         h.eval("(widen)");
     }
 
-    /// A header line paints above the text, and the measures count from
-    /// the window's top as GNU's do (window_top_y): the text starts below
-    /// the band, whose height the body loses.
+    /// A header line paints above the text, and pos-visible-in-window-p
+    /// counts from the window's top as GNU's does (window_top_y), and
+    /// posn-at-point from the text area: the text starts below the band,
+    /// whose height the body loses.
     #[test]
     fn a_header_line_paints_above_the_text_and_shrinks_the_body() {
         let mut h = hosted();
@@ -488,7 +501,8 @@ mod tests {
         let body = (mode_y - band.1) as i64;
         assert_eq!(h.eval("(list (window-header-line-height) (window-body-height nil t))"), format!("({} {body})", band.1 as i64));
         assert_eq!(h.eval("(pos-visible-in-window-p 1 nil t)"), format!("(0 {})", band.1 as i64));
-        assert_eq!(h.eval("(nth 2 (posn-at-point 1))"), format!("(0 . {})", band.1 as i64));
+        // posn-at-point's (X . Y) counts from the text area (harness/wtps_live.py `tabulated-list').
+        assert_eq!(h.eval("(nth 2 (posn-at-point 1))"), "(0 . 0)");
         assert_eq!(update, h.eval("(window-end)"));
         h.eval("(setq header-line-format nil)");
     }
@@ -516,29 +530,177 @@ mod tests {
         assert_eq!(format!("{first:?}"), expected, "scroll-up keeps the old page's last lines");
     }
 
+    /// The display elements GNU's iterator delivers, as the host paints
+    /// them: each row's glyphs and stretches, and the VM's answers over
+    /// them. ROWS is each painted row's text, a stretch as a TAB; each
+    /// logical line is one row, measured to its newline, and where the host
+    /// shows the cursor for a position, pos-visible-in-window-p and
+    /// posn-at-point answer its place and glyph.
+    fn agree_painted(h: &mut Hosted, insert: &str, rows: &[&str]) {
+        // GNU's kill-all-local-variables resets the invisibility spec
+        // (buffer.c:1163); Romacs's keeps the last case's.
+        h.eval(&format!("(progn (erase-buffer) (delete-all-overlays) (kill-all-local-variables) (setq buffer-invisibility-spec t truncate-partial-width-windows nil) {insert} (goto-char 1) (set-window-start nil 1))"));
+        let paint = h.paint();
+        let mut text: Vec<_> = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).copied().collect();
+        text.sort_by(|a, b| (a.2, a.1).partial_cmp(&(b.2, b.1)).unwrap());
+        let row_of = |y: f32| paint.rows.iter().position(|r| r.y == y).unwrap();
+        let mut painted = vec![String::new(); paint.rows.len()];
+        let mut right = vec![0.0f32; paint.rows.len()];
+        for g in &text {
+            painted[row_of(g.2)].push(g.0);
+            right[row_of(g.2)] = right[row_of(g.2)].max(g.1 + g.3);
+        }
+        assert_eq!(painted, rows, "{insert}: painted rows");
+        let last = h.eval("(point-max)").parse::<usize>().unwrap();
+        let line_ends: Vec<usize> = h.eval("(let (ends) (save-excursion (goto-char 1) (while (search-forward \"\\n\" nil t) (push (1- (point)) ends))) (nreverse ends))")
+            .trim_matches(['(', ')']).split(' ').filter(|n| !n.is_empty() && *n != "nil").map(|n| n.parse().unwrap()).collect();
+        let mut start = 1;
+        for (row, &end) in line_ends.iter().chain([last].iter()).enumerate() {
+            let size = cons(right[row], paint.rows[row].height);
+            if end > start { assert_eq!(h.eval(&format!("(window-text-pixel-size nil {start} {end})")), size, "{insert}: line {row}"); }
+            start = end + 1;
+        }
+        let whole = cons(right.iter().copied().fold(0.0, f32::max), paint.rows.iter().map(|r| r.height).sum());
+        assert_eq!(h.eval(&format!("(window-text-pixel-size nil nil {last})")), whole, "{insert}: whole");
+        assert_eq!(h.eval("(buffer-text-pixel-size)"), whole, "{insert}: buffer");
+        for pos in 1..=last {
+            h.eval(&format!("(goto-char {pos})"));
+            let Some((x, y, _, _)) = h.paint().cursor else { continue };
+            let visible = h.eval(&format!("(pos-visible-in-window-p {pos} nil t)"));
+            // Around an ellipsis pos_visible_p answers where the text before
+            // it ends, not where the cursor shows (harness/wtps_live.py
+            // `ellipsis').
+            if h.eval(&format!("(and (or (invisible-p {pos}) (invisible-p (max 1 (1- {pos})))) t)")) == "t" { continue; }
+            assert_eq!(visible, format!("({} {})", x as i64, y as i64), "{insert}: visible {pos}");
+            let posn = h.eval(&format!("(let ((p (posn-at-point {pos}))) (list (nth 2 p) (nth 9 p)))"));
+            let size = text.iter().find(|g| (g.1, g.2) == (x, y)).map(|g| cons(g.3, g.4));
+            if let Some(size) = size { assert_eq!(posn, format!("({} {size})", cons(x, y)), "{insert}: posn-at-point {pos}"); }
+        }
+    }
+
+    /// `display' strings and spaces, invisible text, overlay strings and
+    /// faces, face lists: the host paints what GNU's iterator delivers in
+    /// the faces GNU merges, and the VM answers from that layout.
+    #[test]
+    fn display_elements_answer_as_the_host_paints_them() {
+        let mut h = hosted();
+        for (insert, rows) in [
+            (r#"(insert "a" (propertize "b" 'display "DISP") "c\nnext")"#, &["aDISPc", "next"][..]),
+            (r#"(insert "ab" (propertize "hid" 'invisible t) "cd\nx")"#, &["abcd", "x"]),
+            (r#"(insert "a" (propertize " " 'display '(space :width 3)) "b\nx" (propertize " " 'display '(space :align-to 12)) "y")"#, &["a\tb", "x\ty"]),
+            (r#"(insert "abc" (propertize " " 'display '(space :align-to right)) "\nz")"#, &["abc\t", "z"]),
+            (r#"(insert (propertize " " 'display '(space :width text)) "\nz")"#, &["\t", "z"]),
+            (r#"(insert "abc\ndef") (overlay-put (make-overlay 2 3) 'before-string "BEF") (overlay-put (make-overlay 5 6) 'after-string (propertize "AFT" 'face 'hosted-big))"#, &["aBEFbc", "dAFTef"]),
+            (r#"(insert "abc\ndef") (overlay-put (make-overlay 2 3) 'face 'hosted-big)"#, &["abc", "def"]),
+            (r#"(insert "a" (propertize "b" 'display (propertize "WIDE" 'face 'hosted-big)) "c")"#, &["aWIDEc"]),
+            (r#"(setq buffer-invisibility-spec '((hide . t))) (insert "ab" (propertize "xyz" 'invisible 'hide) "cd")"#, &["ab...cd"]),
+            (r#"(insert (propertize " " 'display '(space :width 2) 'face 'hosted-small) " " (propertize "Run" 'face 'hosted-sans) " 1s" (propertize " " 'display '(space :align-to right)))"#, &["\t Run 1s\t"]),
+            (r#"(insert (propertize "abc" 'face '(hosted-big bold)) "\n" (propertize "xyz" 'font-lock-face 'hosted-big))"#, &["abc", "xyz"]),
+            (r#"(insert "a" (propertize "b" 'display "") "c")"#, &["ac"]),
+            (r#"(insert "a" (propertize "bc" 'invisible t) "\nd")"#, &["a", "d"]),
+            // Org's table separators: a space as wide as the glyph it covers.
+            (r#"(insert "a" (propertize "-" 'display '(space :relative-width 1)) "b" (propertize "W" 'display '(space :relative-width 2) 'face 'hosted-sans) "c")"#, &["a\tb\tc"]),
+            // Line numbers start every row, before its TAB stops and
+            // alignments; point's line shows its own number.
+            (r#"(setq display-line-numbers t) (insert "a\tb\nc" (propertize " " 'display '(space :align-to 6)) "d")"#, &["  1 a\tb", "  2 c\td"]),
+            (r#"(setq display-line-numbers 'relative) (insert "one\ntwo\nthree")"#, &["  1 one", "  1 two", "  2 three"]),
+        ] { agree_painted(&mut h, insert, rows); }
+        // A line after hidden ones shows its own, longer number.
+        h.eval(r#"(progn (erase-buffer) (setq buffer-invisibility-spec t display-line-numbers t) (insert "a\n" (propertize (make-string 120 ?\n) 'invisible t) "b") (goto-char 1) (set-window-start nil 1))"#);
+        let paint = h.paint();
+        let mut glyphs: Vec<_> = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).collect();
+        glyphs.sort_by(|a, b| (a.2, a.1).partial_cmp(&(b.2, b.1)).unwrap());
+        let second: String = glyphs.iter().filter(|g| g.2 > 0.0).map(|g| g.0).collect();
+        assert_eq!(second, "122 b");
+        let b = glyphs.iter().find(|g| g.0 == 'b').unwrap().1;
+        assert_eq!(h.eval("(car (pos-visible-in-window-p (point-max) nil t))"), (b as i64 + 10).to_string());
+        // A continued row's gutter is blanks in the line numbers' face.
+        h.eval(r#"(progn (erase-buffer) (setq truncate-partial-width-windows nil display-line-numbers t) (insert (make-string 40 ?x)) (goto-char 1) (set-window-start nil 1))"#);
+        let paint = h.paint();
+        let mut glyphs: Vec<_> = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).collect();
+        glyphs.sort_by(|a, b| (a.2, a.1).partial_cmp(&(b.2, b.1)).unwrap());
+        let second: String = glyphs.iter().filter(|g| g.2 > 0.0).map(|g| g.0).collect();
+        assert!(second.starts_with("    x"), "{second:?}");
+        // With line numbers, vertical motion moves to the next line's start.
+        h.eval(r#"(progn (erase-buffer) (setq display-line-numbers t) (insert "first\nsecond\nthird") (goto-char 3) (set-window-start nil 1))"#);
+        h.paint();
+        assert_eq!(h.eval("(list (vertical-motion 1) (point) (line-number-display-width) (line-number-display-width 'columns))"), "(1 7 2 4.0)");
+        h.eval("(setq display-line-numbers nil)");
+        // The face lists and overlay faces GNU merges size the glyphs.
+        h.eval(r#"(progn (erase-buffer) (insert "abc") (goto-char 1))"#);
+        let plain = h.eval("(window-text-pixel-size)");
+        h.eval("(overlay-put (make-overlay 2 3) 'face 'hosted-big)");
+        assert_ne!(h.eval("(window-text-pixel-size)"), plain, "an overlay's face makes its text bigger");
+        // A string's glyph names the string in posn-at-point.
+        h.eval(r#"(progn (erase-buffer) (delete-all-overlays) (insert "a" (propertize "b" 'display "XY") "c") (goto-char 2))"#);
+        h.paint();
+        assert_eq!(h.eval("(nth 4 (posn-at-point 2))"), "(\"XY\" . 0)");
+    }
+
+    /// A window publishes the elements its rows show: past lines it hides,
+    /// with the strings an overlay ending at its start shows there.
+    #[test]
+    fn publication_reaches_what_the_rows_show() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer) (setq buffer-invisibility-spec t) (insert (propertize (make-string 100 ?\n) 'invisible t) "VISIBLE\nend") (goto-char 1) (set-window-start nil 1))"#);
+        let paint = h.paint();
+        let text: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).map(|g| g.0).collect();
+        assert_eq!(text, "VISIBLEend");
+        assert_eq!(h.eval("(window-end)"), h.eval("(window-end nil t)"));
+        h.eval(r#"(progn (erase-buffer) (insert "old\nnew\nend") (overlay-put (make-overlay 1 5) 'after-string "AFTER") (goto-char 5) (set-window-start nil 5))"#);
+        let paint = h.paint();
+        let first: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text && g.2 == 0.0).map(|g| g.0).collect();
+        assert_eq!(first, "AFTERnew");
+        let x = paint.glyphs.iter().find(|g| g.0 == 'n').unwrap().1;
+        assert_eq!(h.eval("(car (pos-visible-in-window-p 5 nil t))"), (x as i64).to_string());
+        // An empty buffer still shows an overlay's string, before point.
+        h.eval(r#"(progn (delete-all-overlays) (erase-buffer) (overlay-put (make-overlay 1 1) 'before-string "BEFORE") (set-window-start nil 1))"#);
+        let paint = h.paint();
+        let shown: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).map(|g| g.0).collect();
+        assert_eq!(shown, "BEFORE");
+        assert_eq!(h.eval("(car (pos-visible-in-window-p 1 nil t))"), (paint.cursor.unwrap().0 as i64).to_string());
+        // An overlay string's space is no text point shows on.
+        h.eval(r#"(progn (delete-all-overlays) (insert "ab") (overlay-put (make-overlay 1 1) 'before-string (propertize " " 'display '(space :relative-width 2))) (goto-char 1) (set-window-start nil 1))"#);
+        let paint = h.paint();
+        let a = paint.glyphs.iter().find(|g| g.0 == 'a').unwrap().1;
+        assert!(a > 0.0);
+        assert_eq!(paint.cursor.unwrap().0, a);
+        assert_eq!(h.eval("(car (pos-visible-in-window-p 1 nil t))"), (a as i64).to_string());
+        h.eval("(delete-all-overlays)");
+    }
+
+    /// A package's `make-display-table' leaves `standard-display-table' an
+    /// empty table; vertical motion (next-line) still runs on the host's
+    /// layout rather than refusing.
+    #[test]
+    fn an_empty_standard_display_table_leaves_motion_to_the_host() {
+        let mut h = hosted();
+        // disp-table.el's display tables, which this VM has not loaded.
+        h.eval("(put 'display-table 'char-table-extra-slots 18)");
+        h.eval("(progn (erase-buffer) (insert \"ab\\ncd\\n\") (goto-char 1) (set-window-start nil 1))");
+        assert_eq!(h.eval("(let ((standard-display-table (make-char-table 'display-table))) (list (vertical-motion 1) (point)))"), "(1 4)");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]
     fn displayed_window_refuses_what_the_host_does_not_lay_out() {
         let mut h = hosted();
+        h.eval("(put 'display-table 'char-table-extra-slots 18)");
         let long = "(make-string (+ (window-body-width) 2) ?x)";
         for (refused, twin, what) in [
             // The host continues lines at the window edge, never at a word.
             (format!("(setq truncate-partial-width-windows nil word-wrap t) (insert {long})"), "(setq word-wrap t) (insert (make-string (- (window-body-width) 2) ?x))".to_owned(), "of a continued or truncated line"),
+            // It draws a control character's escape itself, as one glyph.
             ("(insert \"a\\fb\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
-            ("(insert \"a\" (propertize \"b\" 'display \"D\") \"c\")".into(), "(insert \"abc\")".into(), "of text the host does not lay out as GNU displays it"),
-            ("(insert \"a\" (propertize \"b\" 'invisible t) \"c\")".into(), "(insert \"abc\")".into(), "of text the host does not lay out as GNU displays it"),
-            ("(insert \"abc\") (overlay-put (make-overlay 2 3) 'before-string \"S\")".into(), "(insert \"abc\") (make-overlay 2 3)".into(), "of text the host does not lay out as GNU displays it"),
-            ("(insert \"abc\") (overlay-put (make-overlay 2 3) 'face 'hosted-big)".into(), "(insert \"abc\") (overlay-put (make-overlay 2 3) 'mouse-face 'hosted-big)".into(), "of a face the host does not paint"),
-            ("(insert (propertize \"abc\" 'face '(hosted-big bold)))".into(), "(insert (propertize \"abc\" 'face 'hosted-big))".into(), "of a face the host does not paint"),
-            ("(insert (propertize \"abc\" 'font-lock-face 'hosted-big))".into(), "(insert (propertize \"abc\" 'face 'hosted-big))".into(), "of a face the host does not paint"),
-            ("(setq line-prefix \"> \") (insert \"abc\")".into(), "(insert \"abc\")".into(), "of a line or wrap prefix"),
-            // Hidden text at the end, or all of it, skips characters the
-            // host still paints; so does a multibyte control's escape.
-            ("(insert \"a\" (propertize \"b\" 'invisible t))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
-            ("(insert \"a\" (propertize \"b\" 'display \"\"))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
-            ("(insert (propertize \"ab\" 'invisible t))".into(), "(insert \"ab\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(insert \"a\\u0085b\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
+            ("(setq line-prefix \"> \") (insert \"abc\")".into(), "(insert \"abc\")".into(), "of a line or wrap prefix"),
+            ("(insert \"a\" (propertize \" \" 'display '(space :width 2 :height 2)) \"c\")".into(), "(insert \"a\" (propertize \" \" 'display '(space :width 2)) \"c\")".into(), "of a space with its own height"),
+            // A display table that maps glyphs refuses; an empty one does not.
+            ("(setq buffer-display-table (make-char-table 'display-table)) (aset buffer-display-table ?b [?B]) (insert \"abc\")".into(),
+             "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "with a display table"),
+            ("(setq buffer-display-table (make-char-table 'display-table)) (set-char-table-extra-slot buffer-display-table 1 ?|) (insert \"abc\")".into(),
+             "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "with a display table"),
         ] {
             for (form, refuse) in [(refused.as_str(), true), (twin.as_str(), false)] {
                 // Hosted since setup's paint.

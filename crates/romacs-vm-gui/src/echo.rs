@@ -1,10 +1,8 @@
-//! Echo area: the command loop's error report and its clearing.
-//!
-//! GNU does both in C (keyboard.c `command-error-default-function`, which
-//! prints with print.c `print_error_message`; and command_loop_1 clearing the
-//! echo area when the next command starts), so this is host code, not Lisp.
-//! The message text itself comes from the VM's `error-message-string`.
-use romacs_vm::{CommandSignal, Vm};
+//! Echo area: the message a command left, and its clearing when the next
+//! command starts (keyboard.c command_loop_1). A command's error reaches
+//! the echo area as GNU's does, through `command-error-function' in the
+//! Lisp command loop (rlisp/vm/keyboard.el).
+use romacs_vm::Vm;
 
 /// Show `text` in the echo area: the minibuffer window's buffer. Never selects
 /// the minibuffer window, and restores the current buffer and its point.
@@ -74,18 +72,6 @@ pub fn text(vm: &mut Vm) -> Result<String, String> {
              (set-buffer old-buffer)))",
     )?;
     serde_json::from_str(&value.display()?).map_err(|error| error.to_string())
-}
-
-/// GNU's text for a signal the command loop caught, from `error-message-string`
-/// over the error object rebuilt from the VM's printed condition and data.
-/// Unreadable data (`#<buffer x>`) cannot be rebuilt; it falls back to the
-/// printed pair rather than inventing a message.
-pub fn signal_message(vm: &mut Vm, signal: &CommandSignal) -> Result<String, String> {
-    let rebuilt = format!("(error-message-string (quote ({} . {})))", signal.condition, signal.data);
-    match vm.eval_source(&rebuilt) {
-        Ok(value) => serde_json::from_str(&value.display()?).map_err(|error| error.to_string()),
-        Err(_) => Ok(format!("{}: {}", signal.condition, signal.data)),
-    }
 }
 
 #[cfg(test)]
@@ -178,8 +164,8 @@ mod tests {
         // read; this test attaches no keyboard, so it ends as GNU batch does.
         let signal = outcome.signal.expect("M-x reports that no input is available");
         assert_eq!((signal.condition.as_str(), signal.data.as_str()), ("end-of-file", "(\"Error reading from stdin\")"));
-        let shown = text(&mut vm).unwrap();
-        assert_eq!(shown, signal_message(&mut vm, &signal).unwrap());
+        // GNU 32.0.50: (error-message-string (quote (end-of-file "Error reading from stdin"))).
+        assert_eq!(text(&mut vm).unwrap(), "End of file during parsing: Error reading from stdin");
         presentation.command(&mut vm, &mut commands, CommandEvent::Character('!' as i64)).unwrap();
         assert_eq!(text(&mut vm).unwrap(), "");
         let state = vm.eval_source("(buffer-string)").unwrap();

@@ -129,3 +129,33 @@ fn binary_scratch_replacement_does_not_panic() {
     });
     assert!(result.is_ok(), "BUFFER_LIFECYCLE_BINARY_REPLACEMENT: public buffer representation change must not panic");
 }
+
+/// buffer.c Fother_buffer against pinned GNU: the frame's
+/// `buffer-predicate', hidden, dead and visible buffers, VISIBLE-OK and
+/// FRAME. The predicate keeps the buffers each engine starts with out.
+#[test]
+fn other_buffer_matches_pinned_gnu() {
+    let source = r#"(append (prin1-to-string
+      (let* ((names (lambda (v) (if (bufferp v) (buffer-name v) v)))
+             (a (get-buffer-create "ob-a")) (b (get-buffer-create "ob-b")))
+        (get-buffer-create " ob-hidden")
+        (modify-frame-parameters nil (list (cons 'buffer-predicate (lambda (x) (string-match "ob-" (buffer-name x))))))
+        (list (funcall names (other-buffer a))
+              (funcall names (other-buffer))
+              (funcall names (other-buffer 'not-a-buffer))
+              (progn (set-window-buffer (selected-window) a) (funcall names (other-buffer b)))
+              (funcall names (other-buffer b t))
+              (let ((c (get-buffer-create "ob-c")))
+                (list (funcall names (other-buffer b)) (progn (kill-buffer c) (funcall names (other-buffer b)))))
+              (funcall names (other-buffer nil nil (selected-frame)))
+              (condition-case e (other-buffer nil nil 'nope) (error e))
+              (progn (modify-frame-parameters nil (list (cons 'buffer-predicate (lambda (x) (eq x b)))))
+                     (funcall names (other-buffer a)))
+              (subrp (symbol-function 'other-buffer))))) nil)"#;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    check(&mut vm, source, &String::from_utf8(output.stdout).unwrap(), "OTHER_BUFFER_GNU");
+}
