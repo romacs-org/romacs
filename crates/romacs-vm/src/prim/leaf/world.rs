@@ -15,6 +15,15 @@ impl Leaf<'_> {
         self.symbol_plist(symbol)
     }
 
+    /// The variable NAME's value read past the fence, by a caller whose
+    /// result this value does not decide; nil when void.
+    pub(crate) fn unfenced_variable(&mut self, name: &str) -> crate::prim::Out {
+        let symbol = self.intern(name);
+        let slot = self.symbol_slot(symbol)?;
+        let value = self.vm.unfenced(slot, |vm| vm.variable_value(slot)).map_err(Fault::Error)?;
+        Ok(if value == Value::UNBOUND { Value::NIL } else { value })
+    }
+
     /// The environment list NAME as its Rust owners read it: one named
     /// entry, which the host records, not a read of the fenced list.
     pub(crate) fn environment_list(&mut self, name: &str) -> crate::prim::Out {

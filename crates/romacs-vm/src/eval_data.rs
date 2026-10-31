@@ -607,10 +607,45 @@ impl Vm {
         if let Some(data::Object::SubCharTable(node)) = self.object_if(value) {
             return self.print_sub_char_table_body(node, quoted, options, depth);
         }
-        if matches!(self.object_if(value), Some(data::Object::SyntaxTable(_) | data::Object::Overlay(_) | data::Object::Frame(_) | data::Object::Terminal(_))) {
+        if let Some(text) = self.print_display_object(value, options, depth)? { return Ok(text); }
+        if matches!(self.object_if(value), Some(data::Object::SyntaxTable(_))) {
             return Err("printing this object representation is not supported".into());
         }
         self.display(value).map(|text| crate::symkey::escape_text(&text).into_owned())
+    }
+
+    /// print.c's PVEC_WINDOW, PVEC_FRAME, PVEC_TERMINAL and PVEC_OVERLAY,
+    /// whose names print as `princ' prints them; None for another object.
+    /// A frame's pointer is its record's address, as GNU's is.
+    fn print_display_object(&self, value: Value, options: &PrintOptions, depth: usize) -> Result<Option<String>> {
+        let buffer_name = |buffer: Value| self.buffer_state(buffer).ok()
+            .and_then(|state| state.name.as_deref()).map(|name| crate::symkey::escape_text(name).into_owned());
+        Ok(Some(match self.object_if(value) {
+            Some(data::Object::Window(window)) => match buffer_name(window.buffer).filter(|_| !window.dead) {
+                Some(name) => format!("#<window {} on {name}>", window.id),
+                None => format!("#<window {}>", window.id),
+            },
+            Some(data::Object::Frame(frame)) => {
+                let key = self.names.get("name").map(|&slot| Value::reference(slot + 1, 7));
+                let name = frame.parameters.iter().find(|(k, _)| Some(*k) == key).map_or(Value::NIL, |&(_, v)| v);
+                // A string, or a young frame's symbol, prints its name.
+                let name = if self.str_view(name).is_some() || name.tag() == 7 || name == Value::NIL {
+                    self.print_body(name, false, options, depth)?
+                } else { "*INVALID*FRAME*NAME*".into() };
+                let address = &**frame as *const crate::frame::Frame as usize;
+                format!("#<{}frame {name} {address:#x}>", if frame.live { "" } else { "dead " })
+            }
+            // The VM's one terminal is GNU's initial terminal; a deleted
+            // terminal has no name.
+            Some(data::Object::Terminal(terminal)) => {
+                if terminal.live { "#<terminal 0 on initial_terminal>".into() } else { "#<terminal 0>".into() }
+            }
+            Some(data::Object::Overlay(overlay)) => match (self.overlay_positions(value)?, buffer_name(overlay.buffer)) {
+                (Some((start, end)), Some(name)) => format!("#<overlay from {start} to {end} in {name}>"),
+                _ => "#<overlay in no buffer>".into(),
+            },
+            _ => return Ok(None),
+        }))
     }
 
     /// Whether print.c prints VALUE through print_vectorlike_unreadable:

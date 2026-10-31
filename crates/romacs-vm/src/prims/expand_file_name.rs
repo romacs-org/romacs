@@ -46,11 +46,8 @@ fn expand_file_name(cx, name: Value; optional default_directory: Value) -> Step 
     check_name(cx, name)?;
     if let Some(call) = handled(cx, name, name, default_directory)? { return call; }
     let mut default = default_directory;
-    // fileio.c reads the buffer's directory first and uses it only for a
-    // relative name; it is read here only then, so a world build's fence
-    // (`world`) sees no read an absolute or `~' name does not depend on.
-    let relative = !matches!(cx.string_bytes(name)?.first(), Some(b'/' | b'~'));
-    if default == Value::NIL && relative {
+    if default == Value::NIL {
+        if let Some(dir) = unread_directory(cx, name)? { return finish(cx, name, dir, true); }
         let dir = var(cx, "default-directory")?;
         if stringp(cx, dir) {
             if cx.string_bytes(dir)?.first() == Some(&b'/') {
@@ -70,6 +67,22 @@ fn expand_file_name(cx, name: Value; optional default_directory: Value) -> Step 
     with_default(cx, default, &[name])
 }}
 
+/// The buffer's directory, for an absolute NAME whose expansion it cannot
+/// change: an ASCII absolute directory without NUL bytes or an
+/// expand-file-name handler, which fileio.c would check and use only for
+/// the handler and the multibyteness of a relative name. It is read past
+/// a world build's fence (`world`), which sees the read when the
+/// directory could change the result, and so refuses only a dependence.
+fn unread_directory(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Option<Value>, Fault> {
+    if !super::filename::absolute(&cx.string_bytes(name)?) { return Ok(None); }
+    let dir = cx.unfenced_variable("default-directory")?;
+    if !stringp(cx, dir) { return Ok(None); }
+    let bytes = cx.string_bytes(dir)?;
+    if bytes.first() != Some(&b'/') || !bytes.is_ascii() || bytes.contains(&0) { return Ok(None); }
+    let operation = cx.intern("expand-file-name");
+    Ok((find_file_name_handler(cx, dir, operation)? == Value::NIL).then_some(dir))
+}
+
 fn with_default(cx: &mut Leaf<'_>, default: Value, saved: &[Value]) -> Next {
     let name = saved[0];
     let default = if stringp(cx, default) { default } else { root(cx) };
@@ -79,20 +92,26 @@ fn with_default(cx: &mut Leaf<'_>, default: Value, saved: &[Value]) -> Next {
     if !cx.eq(default, name) && cx.string_bytes(default)?.first() != Some(&b'/') {
         return recurse(cx, default, Value::NIL, reexpanded, vec![name]);
     }
-    finish(cx, name, default)
+    finish(cx, name, default, false)
 }
 
 fn reexpanded(cx: &mut Leaf<'_>, default: Value, saved: &[Value]) -> Next {
     let name = saved[0];
     if let Some(call) = handled(cx, default, name, default)? { return call; }
-    finish(cx, name, default)
+    finish(cx, name, default, false)
 }
 
-fn finish(cx: &mut Leaf<'_>, name: Value, default: Value) -> Next {
+/// NAME against DEFAULT; UNREAD when DEFAULT is the buffer's directory
+/// read past the fence (`unread_directory').
+fn finish(cx: &mut Leaf<'_>, name: Value, default: Value, unread: bool) -> Next {
     let (result, unchanged) = canonical_value(cx, name, default)?;
     if unchanged { return Ok(Step::Done(result)); }
     // The result can name a remote file again ("/foo/../user@host:/x").
-    if let Some(call) = handled(cx, result, result, default)? { return call; }
+    if let Some(call) = handled(cx, result, result, default)? {
+        // Its handler is given the directory: a read the fence sees.
+        if unread { var(cx, "default-directory")?; }
+        return call;
+    }
     Ok(Step::Done(result))
 }
 
