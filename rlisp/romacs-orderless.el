@@ -1,4 +1,5 @@
 ;;; romacs-orderless.el --- The orderless completion style, matched natively  -*- lexical-binding: t; -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; Copyright (C) 2021-2026 Free Software Foundation, Inc.
 

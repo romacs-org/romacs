@@ -86,6 +86,11 @@ class LispLayoutTests(unittest.TestCase):
                     self.assertIn(';; Copyright (C) 2008-2026 Free Software Foundation, Inc.', source)
                     self.assertIn('National Institute of Advanced Industrial Science and Technology (AIST)', source)
                     self.assertIn('Adapted from GNU admin/unidata/unidata-gen.el', source)
+                elif file == ROOT / 'rlisp/romacs-orderless.el':
+                    # Derived from orderless.el (GNU ELPA, FSF copyright),
+                    # outside gnu-lisp/; retains its notice and names the commit.
+                    self.assertIn(';; Copyright (C) 2021-2026 Free Software Foundation, Inc.', source)
+                    self.assertIn('derived from orderless.el, orderless commit e271a8e', source)
                 else:
                     self.assertNotRegex(source, copyright_pattern)
                 self.assertNotIn('This file is part of GNU Emacs.', source)
