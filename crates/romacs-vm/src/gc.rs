@@ -1073,6 +1073,7 @@ impl Vm {
             }
             live
         });
+        self.referrers = None;
         for f in &mut self.functions {
             // Function Arcs are private to this VM; no executable shares IR.
             let f = Arc::get_mut(f).expect("source IR must be exclusively owned at a wait point");

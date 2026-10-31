@@ -63,6 +63,28 @@ impl RenderApp {
             .retain(|id, _| !subtree.contains(id));
     }
 
+    /// Remove child FRAME_ID and its descendants from every top-level
+    /// window, retiring their presentations.
+    pub(super) fn remove_child_frame(&mut self, frame_id: u64) {
+        let mut retirements = Vec::new();
+        self.frame_windows.for_each_top_level_window_mut(|window| {
+            for presentation in window.render.child_subtree_presentations(frame_id) {
+                if let Some(presentation) =
+                    window.render.route_presentation_retirement(presentation)
+                {
+                    retirements.push(presentation);
+                }
+            }
+        });
+        self.frame_windows
+            .remove_child_frame_from_top_level_windows(frame_id);
+        self.remove_pending_child_subtree(frame_id);
+        for presentation in retirements {
+            self.comms
+                .send_input(InputEvent::PresentationRetired { presentation });
+        }
+    }
+
     pub(super) fn handle_window(&mut self, cmd: WindowCommand) {
         // PendingGpu already owns the exact primary native window, while the
         // frame lifecycle still retains CPU state. Replay only native-state
@@ -491,23 +513,7 @@ impl RenderApp {
                     frame_id,
                     "child_frame_lifecycle: render_thread_remove_command"
                 );
-                let mut retirements = Vec::new();
-                self.frame_windows.for_each_top_level_window_mut(|window| {
-                    for presentation in window.render.child_subtree_presentations(frame_id) {
-                        if let Some(presentation) =
-                            window.render.route_presentation_retirement(presentation)
-                        {
-                            retirements.push(presentation);
-                        }
-                    }
-                });
-                self.frame_windows
-                    .remove_child_frame_from_top_level_windows(frame_id);
-                self.remove_pending_child_subtree(frame_id);
-                for presentation in retirements {
-                    self.comms
-                        .send_input(InputEvent::PresentationRetired { presentation });
-                }
+                self.remove_child_frame(frame_id);
             }
             WindowCommand::ScrollBlit { .. } => {
                 // handled above in dispatch, here as exhaustive match

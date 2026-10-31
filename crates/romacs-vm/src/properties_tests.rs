@@ -209,3 +209,60 @@ fn packed_run_capacity_and_large_lengths() {
     assert_eq!(t.at(n - 1).unwrap().value, Value::NIL);
     check(&t);
 }
+#[test]
+fn previous_change_matches_the_per_byte_oracle() {
+    let mut p = Properties::new();
+    let len = 200;
+    let mut seed = 11u64;
+    for i in 0..1500 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let start = seed as usize % len;
+        let end = (start + ((seed >> 20) as usize % 40)).min(len);
+        let name = ["face", "fontified", "x"][(seed >> 32) as usize % 3];
+        // Few distinct values, so runs with equal values and different
+        // stamps abut.
+        let value = Value::integer((seed >> 40) as i64 % 3).unwrap();
+        if i % 4 == 3 {
+            p.remove(ByteOffset(start)..ByteOffset(end), name);
+        } else {
+            p.put(ByteOffset(start)..ByteOffset(end), name, value);
+        }
+        let state = |at: usize| ["face", "fontified", "x"].map(|k| p.get_property(ByteOffset(at), k));
+        for at in 0..=len {
+            for limit in [0, at / 2] {
+                let mut expected = at.saturating_sub(1);
+                while expected > 0 && state(expected - 1) == state(at - 1) {
+                    expected -= 1;
+                }
+                let expected = if at == 0 { limit } else { expected.max(limit) };
+                assert_eq!(p.previous_change(ByteOffset(at), ByteOffset(limit)), ByteOffset(expected), "operation {i} at {at} limit {limit}");
+            }
+        }
+    }
+}
+#[test]
+fn slice_matches_the_per_byte_oracle() {
+    let mut p = Properties::new();
+    let len = 600;
+    let mut seed = 5u64;
+    for i in 0..400 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let start = seed as usize % len;
+        let end = (start + 1 + ((seed >> 20) as usize % 30)).min(len);
+        let name = ["face", "fontified"][(seed >> 32) as usize % 2];
+        p.put(ByteOffset(start)..ByteOffset(end), name, Value::integer(i).unwrap());
+        let a = (seed >> 41) as usize % (len + 10);
+        let b = (a + ((seed >> 50) as usize % 300)).min(len + 10);
+        let part = p.slice(ByteOffset(a)..ByteOffset(b));
+        for tree in part.layers.values().flatten() {
+            check(tree);
+        }
+        for at in 0..b.saturating_sub(a) + 5 {
+            for name in ["face", "fontified"] {
+                let expected = if a + at < b { p.get_property(ByteOffset(a + at), name) } else { None };
+                assert_eq!(part.get_property(ByteOffset(at), name), expected, "operation {i} slice {a}..{b} at {at} {name}");
+            }
+        }
+        assert_eq!(part.properties_at(ByteOffset(0)), if a < b { p.properties_at(ByteOffset(a)) } else { vec![] });
+    }
+}

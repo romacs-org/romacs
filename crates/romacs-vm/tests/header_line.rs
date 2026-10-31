@@ -13,6 +13,7 @@ const CASES: &str = r###"
 (let ((header-line-format "h")) (set-window-parameter nil 'header-line-format 'none) (prog1 (window-header-line-height) (set-window-parameter nil 'header-line-format nil)))
 (let ((b (get-buffer-create "hl-other")) (w (selected-window))) (with-current-buffer b (setq header-line-format "o")) (with-temp-buffer (list (window-header-line-height w) (progn (set-window-buffer w b) (= (window-header-line-height w) (frame-char-height))))))
 (let ((header-line-format "h")) (list (/ (- (cdr (window-text-pixel-size nil nil nil nil nil 'header-line)) (cdr (window-text-pixel-size))) (frame-char-height)) (/ (- (cdr (window-text-pixel-size nil nil nil nil nil t)) (cdr (window-text-pixel-size nil nil nil nil nil 'mode-line))) (frame-char-height))))
+(let ((b (get-buffer-create "ml-other")) (w (selected-window))) (with-current-buffer b (setq mode-line-format nil)) (list (with-current-buffer b (= (window-mode-line-height w) (frame-char-height))) (progn (set-window-buffer w b) (list (window-mode-line-height w) (- (window-total-height w) (window-body-height w))))))
 (condition-case e (window-header-line-height 'x) (error e))
 "###;
 

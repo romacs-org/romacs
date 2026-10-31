@@ -15,8 +15,9 @@ pub struct Display {
     /// frame's font each time.
     opened: HashMap<(String, u32, i64), Option<OpenedFont>>,
     chars: HashMap<(String, u32, char), Option<(OpenedFont, u32)>>,
-    /// Where `alpha' setters go: the window's opacity state.
-    alpha_hook: Option<Box<dyn FnMut([f32; 2], f32)>>,
+    /// Where `alpha' setters go, with the frame's display id: the window's
+    /// opacity state.
+    alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
 }
 
 impl Display {
@@ -25,7 +26,7 @@ impl Display {
                   opened: HashMap::new(), chars: HashMap::new(), alpha_hook: None })
     }
     /// This display, sending each `alpha' setter to HOOK.
-    pub fn with_alpha_hook(self, hook: impl FnMut([f32; 2], f32) + 'static) -> Self {
+    pub fn with_alpha_hook(self, hook: impl FnMut(u64, [f32; 2], f32) + 'static) -> Self {
         Self { alpha_hook: Some(Box::new(hook)), ..self }
     }
     fn open_uncached(entity: &FontEntity, pixel_size: i64) -> Option<OpenedFont> {
@@ -107,8 +108,8 @@ impl romacs_vm::DisplayHost for Display {
         self.chars.insert(key, found.clone());
         found
     }
-    fn set_frame_alpha(&mut self, alpha: [f32; 2], limit: f32) {
-        if let Some(hook) = &mut self.alpha_hook { hook(alpha, limit); }
+    fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32) {
+        if let Some(hook) = &mut self.alpha_hook { hook(frame, alpha, limit); }
     }
 }
 
@@ -161,7 +162,7 @@ mod tests {
         let setters = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
         let seen = setters.clone();
         let mut vm = displayed();
-        vm.set_display_host(Some(Box::new(Display::new().unwrap().with_alpha_hook(move |alpha, limit| seen.borrow_mut().push((alpha, limit))))));
+        vm.set_display_host(Some(Box::new(Display::new().unwrap().with_alpha_hook(move |frame, alpha, limit| seen.borrow_mut().push((frame, alpha, limit))))));
         let set = |vm: &mut Vm, alist: &str| printed(vm, &format!(
             "(list (condition-case e (modify-frame-parameters nil '{alist}) (error e))
                    (frame-parameter nil 'alpha-background) (frame-parameter nil 'alpha))"));
@@ -180,7 +181,7 @@ mod tests {
         assert_eq!(background(&mut vm), 0.8, "a refused value leaves the applied one");
         // Both setters of one call reach the window, the later last.
         assert_eq!(set(&mut vm, "((alpha) (alpha . (50 . 70)))"), "(nil \"80\" nil)");
-        assert_eq!(*setters.borrow(), [([0.5, 0.7], 0.2), ([-1.0, -1.0], 0.2)]);
+        assert_eq!(*setters.borrow(), [(1, [0.5, 0.7], 0.2), (1, [-1.0, -1.0], 0.2)]);
         // Stored in reverse order, each before its handler: `alpha' signals
         // and `alpha-background' is never reached.
         assert_eq!(set(&mut vm, "((alpha-background . 40) (alpha . (a . 50)))"),

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "88781c74dbd74afea52853eea57ec782d6e907cc4decbc271d25dae5c3f2e6de",
+  "source_fingerprint": "110bd74b85ad90127a6ceaebb88064f202b7db618b1db112a2d5630c67fd55f9",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1129,
-  "parsed_vm2_only": 1129
+  "parsed_total": 1154,
+  "parsed_vm2_only": 1154
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -597,7 +597,7 @@
   "buffer-text-pixel-size": {
    "name": "buffer-text-pixel-size",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:395"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:400"
   },
   "bufferp": {
    "name": "bufferp",
@@ -1082,7 +1082,7 @@
   "current-message": {
    "name": "current-message",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:245"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:516"
   },
   "current-time": {
    "name": "current-time",
@@ -1285,6 +1285,11 @@
    "name": "delete-file-internal",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filesave.rs:395"
+  },
+  "delete-frame": {
+   "name": "delete-frame",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:401"
   },
   "delete-other-windows-internal": {
    "name": "delete-other-windows-internal",
@@ -1861,6 +1866,21 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/face.rs:552"
   },
+  "frame--set-was-invisible": {
+   "name": "frame--set-was-invisible",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:432"
+  },
+  "frame-after-make-frame": {
+   "name": "frame-after-make-frame",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:618"
+  },
+  "frame-ancestor-p": {
+   "name": "frame-ancestor-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:425"
+  },
   "frame-bottom-divider-width": {
    "name": "frame-bottom-divider-width",
    "implementation": "vm2",
@@ -1881,15 +1901,20 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:222"
   },
+  "frame-focus": {
+   "name": "frame-focus",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:429"
+  },
   "frame-initial-p": {
    "name": "frame-initial-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:342"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:613"
   },
   "frame-internal-border-width": {
    "name": "frame-internal-border-width",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:442"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:447"
   },
   "frame-list": {
    "name": "frame-list",
@@ -1904,27 +1929,32 @@
   "frame-native-height": {
    "name": "frame-native-height",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:410"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:415"
   },
   "frame-native-width": {
    "name": "frame-native-width",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:405"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:410"
   },
   "frame-or-buffer-changed-p": {
    "name": "frame-or-buffer-changed-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:306"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:577"
   },
   "frame-parameter": {
    "name": "frame-parameter",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:209"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:243"
   },
   "frame-parameters": {
    "name": "frame-parameters",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:203"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:237"
+  },
+  "frame-parent": {
+   "name": "frame-parent",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:423"
   },
   "frame-pixel-height": {
    "name": "frame-pixel-height",
@@ -1937,6 +1967,11 @@
    "implementation": "vm2",
    "variant": "Primitive::FramePixelWidth",
    "registered_at": "crates/romacs-vm/src/lib.rs:751"
+  },
+  "frame-position": {
+   "name": "frame-position",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:440"
   },
   "frame-right-divider-width": {
    "name": "frame-right-divider-width",
@@ -1960,10 +1995,40 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:8"
   },
+  "frame-text-cols": {
+   "name": "frame-text-cols",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:506"
+  },
+  "frame-text-height": {
+   "name": "frame-text-height",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:504"
+  },
+  "frame-text-lines": {
+   "name": "frame-text-lines",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:508"
+  },
+  "frame-text-width": {
+   "name": "frame-text-width",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:502"
+  },
+  "frame-total-cols": {
+   "name": "frame-total-cols",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:510"
+  },
+  "frame-total-lines": {
+   "name": "frame-total-lines",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:512"
+  },
   "frame-visible-p": {
    "name": "frame-visible-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:332"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:338"
   },
   "framep": {
    "name": "framep",
@@ -2215,7 +2280,7 @@
   "iconify-frame": {
    "name": "iconify-frame",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:326"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:332"
   },
   "identity": {
    "name": "identity",
@@ -2357,7 +2422,7 @@
   "internal-handle-focus-in": {
    "name": "internal-handle-focus-in",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:253"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:524"
   },
   "internal-lisp-face-attribute-values": {
    "name": "internal-lisp-face-attribute-values",
@@ -2402,12 +2467,12 @@
   "internal-show-cursor": {
    "name": "internal-show-cursor",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:265"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:536"
   },
   "internal-show-cursor-p": {
    "name": "internal-show-cursor-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:270"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:541"
   },
   "internal-subr-documentation": {
    "name": "internal-subr-documentation",
@@ -2587,7 +2652,7 @@
   "line-pixel-height": {
    "name": "line-pixel-height",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:422"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:427"
   },
   "list": {
    "name": "list",
@@ -2686,7 +2751,7 @@
   "long-line-optimizations-p": {
    "name": "long-line-optimizations-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:450"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:455"
   },
   "looking-at": {
    "name": "looking-at",
@@ -2702,7 +2767,7 @@
   "lower-frame": {
    "name": "lower-frame",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:359"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:364"
   },
   "macroexpand": {
    "name": "macroexpand",
@@ -2748,7 +2813,7 @@
   "make-frame-invisible": {
    "name": "make-frame-invisible",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:317"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:319"
   },
   "make-frame-visible": {
    "name": "make-frame-visible",
@@ -3067,7 +3132,7 @@
   "modify-frame-parameters": {
    "name": "modify-frame-parameters",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:215"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:249"
   },
   "modify-syntax-entry": {
    "name": "modify-syntax-entry",
@@ -3365,7 +3430,7 @@
   "pos-visible-in-window-p": {
    "name": "pos-visible-in-window-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:373"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:378"
   },
   "position-bytes": {
    "name": "position-bytes",
@@ -3400,7 +3465,7 @@
   "posn-at-point": {
    "name": "posn-at-point",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:400"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:405"
   },
   "preceding-char": {
    "name": "preceding-char",
@@ -3435,7 +3500,7 @@
   "previous-window": {
    "name": "previous-window",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:473"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:478"
   },
   "prin1": {
    "name": "prin1",
@@ -3613,7 +3678,7 @@
   "raise-frame": {
    "name": "raise-frame",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:344"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:349"
   },
   "random": {
    "name": "random",
@@ -3727,10 +3792,15 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:127"
   },
+  "redirect-frame-focus": {
+   "name": "redirect-frame-focus",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:427"
+  },
   "redisplay": {
    "name": "redisplay",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:367"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:372"
   },
   "redraw-display": {
    "name": "redraw-display",
@@ -3740,7 +3810,7 @@
   "redraw-frame": {
    "name": "redraw-frame",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:478"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:483"
   },
   "regexp-quote": {
    "name": "regexp-quote",
@@ -3884,6 +3954,11 @@
    "name": "romacs--concat-list",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/widen.rs:285"
+  },
+  "romacs--create-frame": {
+   "name": "romacs--create-frame",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:356"
   },
   "romacs--decode-output": {
    "name": "romacs--decode-output",
@@ -4044,6 +4119,16 @@
    "name": "romacs--oclosure-type",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/oclosure.rs:3"
+  },
+  "romacs--orderless-filter": {
+   "name": "romacs--orderless-filter",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/orderless.rs:13"
+  },
+  "romacs--orderless-highlight": {
+   "name": "romacs--orderless-highlight",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/orderless.rs:31"
   },
   "romacs--overlay-change-hooks": {
    "name": "romacs--overlay-change-hooks",
@@ -4291,6 +4376,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process.rs:492"
   },
+  "romacs--sort-by-history": {
+   "name": "romacs--sort-by-history",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/orderless.rs:72"
+  },
+  "romacs--sort-by-length-alpha": {
+   "name": "romacs--sort-by-length-alpha",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/orderless.rs:54"
+  },
   "romacs--startup-phase": {
    "name": "romacs--startup-phase",
    "implementation": "vm2",
@@ -4471,7 +4566,7 @@
   "select-window": {
    "name": "select-window",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:457"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:462"
   },
   "selected-frame": {
    "name": "selected-frame",
@@ -4619,10 +4714,30 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filesave.rs:666"
   },
+  "set-frame-height": {
+   "name": "set-frame-height",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:489"
+  },
+  "set-frame-position": {
+   "name": "set-frame-position",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:445"
+  },
   "set-frame-selected-window": {
    "name": "set-frame-selected-window",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:29"
+  },
+  "set-frame-size": {
+   "name": "set-frame-size",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:479"
+  },
+  "set-frame-width": {
+   "name": "set-frame-width",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:484"
   },
   "set-input-meta-mode": {
    "name": "set-input-meta-mode",
@@ -4746,6 +4861,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:289"
   },
+  "set-window-fringes": {
+   "name": "set-window-fringes",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:493"
+  },
   "set-window-hscroll": {
    "name": "set-window-hscroll",
    "implementation": "vm2",
@@ -4794,6 +4914,11 @@
    "name": "set-window-prev-buffers",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:232"
+  },
+  "set-window-scroll-bars": {
+   "name": "set-window-scroll-bars",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:499"
   },
   "set-window-start": {
    "name": "set-window-start",
@@ -5535,12 +5660,12 @@
   "vertical-motion": {
    "name": "vertical-motion",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:417"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:422"
   },
   "visible-frame-list": {
    "name": "visible-frame-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:338"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:344"
   },
   "visited-file-modtime": {
    "name": "visited-file-modtime",
@@ -5623,7 +5748,7 @@
   "window-end": {
    "name": "window-end",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:468"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:473"
   },
   "window-frame": {
    "name": "window-frame",
@@ -5653,7 +5778,7 @@
   "window-left-column": {
    "name": "window-left-column",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:432"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:437"
   },
   "window-list": {
    "name": "window-list",
@@ -5746,12 +5871,12 @@
   "window-pixel-left": {
    "name": "window-pixel-left",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:378"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:383"
   },
   "window-pixel-top": {
    "name": "window-pixel-top",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:383"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:388"
   },
   "window-pixel-width": {
    "name": "window-pixel-width",
@@ -5805,7 +5930,7 @@
   "window-scroll-bars": {
    "name": "window-scroll-bars",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:427"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:432"
   },
   "window-start": {
    "name": "window-start",
@@ -5816,7 +5941,7 @@
   "window-system": {
    "name": "window-system",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frame.rs:243"
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:514"
   },
   "window-tab-line-height": {
    "name": "window-tab-line-height",
@@ -5826,7 +5951,7 @@
   "window-text-pixel-size": {
    "name": "window-text-pixel-size",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:390"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:395"
   },
   "window-top-child": {
    "name": "window-top-child",
@@ -5836,7 +5961,7 @@
   "window-top-line": {
    "name": "window-top-line",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:437"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:442"
   },
   "window-total-height": {
    "name": "window-total-height",
@@ -5885,7 +6010,7 @@
   "x-focus-frame": {
    "name": "x-focus-frame",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:353"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:358"
   },
   "yank-handle-category-property": {
    "name": "yank-handle-category-property",

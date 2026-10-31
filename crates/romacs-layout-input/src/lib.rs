@@ -88,18 +88,43 @@ pub struct FrameSnapshot {
     /// The opacity of every background the frame paints, as its
     /// `alpha-background' setter last applied it (frame.c:6098).
     pub background_alpha: f32,
+    /// Visible child frames painted over the windows, lowest first.
+    pub children: Vec<ChildFrameSnapshot>,
 }
 
 impl FrameSnapshot {
     /// Whether OTHER lays out to the same glyphs as this frame, cursors
     /// aside: equal but for publication versions and cursor visibility.
+    /// Child frames lay out apart, so they do not count.
     pub fn lays_out_like(&self, other: &Self) -> bool {
         (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
             && self.font_alternatives == other.font_alternatives
-            && self.windows.len() == other.windows.len()
-            && self.windows.iter().zip(&other.windows)
-                .all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like(&b.snapshot))
+            && windows_lay_out_like(&self.windows, &other.windows)
     }
+}
+
+/// Whether window lists A and B lay out alike (`WindowSnapshot::lays_out_like').
+pub fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like(&b.snapshot))
+}
+
+/// A child frame (GNU's `parent-frame'): its own windows in a rect over the
+/// root frame's, in pixels. X and Y place its outer edge in the root frame;
+/// the windows are placed inside it, within BORDER.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChildFrameSnapshot {
+    /// The display's identity for the frame, never the root frame's 1.
+    pub id: u64,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub border: u32,
+    pub border_color: [u8; 3],
+    pub background: [u8; 3],
+    /// Its own `alpha-background' (FrameSnapshot::background_alpha).
+    pub background_alpha: f32,
+    pub windows: Vec<PlacedWindowSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

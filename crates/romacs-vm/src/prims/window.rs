@@ -306,23 +306,29 @@ fn window_body_height(cx; optional window: Value, pixelwise: Value) {
     cx.windows().window_body_size(window, pixelwise, false)
 }}
 
-// Frame visibility (frame.c). VM2's one frame is always visible, as a
-// terminal frame is in GNU batch: visibility requests change nothing, and
-// making the sole frame invisible needs FORCE.
+// Frame visibility (frame.c). The host frame is always visible, as a
+// terminal frame is in GNU batch: requests change nothing, and making it
+// invisible needs FORCE. A child frame shows and hides (VM2-CHILD-FRAME).
 defsubr! { name = "make-frame-visible", gnu = "frame.c:3505", effect = Global,
 fn make_frame_visible(cx; optional frame: Value) {
-    cx.windows().decode_live_frame(frame)
+    let frame = cx.windows().decode_live_frame(frame)?;
+    cx.windows().set_frame_visible(frame, true)?;
+    Ok(frame)
 }}
 
 defsubr! { name = "make-frame-invisible", gnu = "frame.c:3549", effect = Global,
 fn make_frame_invisible(cx; optional frame: Value, force: Value) {
-    cx.windows().decode_live_frame(frame)?;
-    if force == Value::NIL {
+    let frame = cx.windows().decode_live_frame(frame)?;
+    if cx.windows().is_child_frame(frame)? {
+        cx.windows().set_frame_visible(frame, false)?;
+    } else if force == Value::NIL {
         return Err(Fault::Error("Attempt to make invisible the sole visible or iconified frame".into()));
     }
     Ok(Value::NIL)
 }}
 
+// A child frame iconifies as `iconify-child-frame' says; its default makes
+// the top-level frame iconify, which the host frame does not.
 defsubr! { name = "iconify-frame", gnu = "frame.c:3591", effect = Global,
 fn iconify_frame(cx; optional frame: Value) {
     cx.windows().decode_live_frame(frame)?;
@@ -332,18 +338,17 @@ fn iconify_frame(cx; optional frame: Value) {
 defsubr! { name = "frame-visible-p", gnu = "frame.c:3633", effect = Reads,
 fn frame_visible_p(cx, frame: Value) {
     if cx.windows().frame_live_p(frame) == Value::NIL { return Err(Fault::Wrong("frame-live-p", frame)); }
-    Ok(Value::TRUE)
+    Ok(if cx.windows().frame_visible(frame)? { Value::TRUE } else { Value::NIL })
 }}
 
 defsubr! { name = "visible-frame-list", gnu = "frame.c:3652", effect = Reads,
 fn visible_frame_list(cx) {
-    let frame = cx.windows().decode_live_frame(Value::NIL)?;
-    Ok(cx.cons(frame, Value::NIL))
+    cx.windows().visible_frames()
 }}
 
 defsubr! { name = "raise-frame", gnu = "frame.c:3667", effect = Global,
 fn raise_frame(cx; optional frame: Value) {
-    cx.windows().decode_live_frame(frame)?;
+    cx.windows().restack(frame, true)?;
     Ok(Value::NIL)
 }}
 
@@ -358,7 +363,7 @@ fn x_focus_frame(cx, frame: Value; optional _noactivate: Value) {
 
 defsubr! { name = "lower-frame", gnu = "frame.c:3686", effect = Global,
 fn lower_frame(cx; optional frame: Value) {
-    cx.windows().decode_live_frame(frame)?;
+    cx.windows().restack(frame, false)?;
     Ok(Value::NIL)
 }}
 
@@ -481,4 +486,18 @@ fn redraw_frame(cx; optional frame: Value) {
     // redraw-display redraws it.
     cx.windows().check_live_frame(frame)?;
     cx.windows().redraw_display()
+}}
+
+// window.c:8605 and :8857: Romacs draws no fringes or scroll bars, so a
+// request changes nothing (window-fringes, window-scroll-bars).
+defsubr! { name = "set-window-fringes", gnu = "window.c:8605", effect = Global,
+fn set_window_fringes(cx, window: Value, _left: Value; optional _right: Value, _outside_margins: Value, _persistent: Value) {
+    cx.windows().window_fringes(window)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "set-window-scroll-bars", gnu = "window.c:8857", effect = Global,
+fn set_window_scroll_bars(cx, window: Value; optional _width: Value, _vertical_type: Value, _height: Value, _horizontal_type: Value, _persistent: Value) {
+    cx.windows().window_scroll_bars(window)?;
+    Ok(Value::NIL)
 }}

@@ -12,7 +12,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
         background_alpha: 1.0,
         width: 400,
         height: 300,
-        windows: vec![PlacedWindowSnapshot {
+        children: vec![], windows: vec![PlacedWindowSnapshot {
             x: 0,
             y: 0,
             snapshot: WindowSnapshot {

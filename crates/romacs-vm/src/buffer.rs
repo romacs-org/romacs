@@ -277,27 +277,36 @@ impl Vm {
                 && self.buffer_state(candidate).is_ok_and(|state| {
                     state.live && state.name.as_deref().is_some_and(|n| !n.starts_with(' '))
                 })
-                && !self.objects.iter().any(|object| {
-                    matches!(object, Object::Window(w) if w.mini && w.buffer == candidate)
-                })
+                && self.minibuffer_window_buffer() != Some(candidate)
         });
         found.map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))
     }
+    /// The indices of the heap's markers, overlays and windows
+    /// (`Vm::referrers`), listed by one walk of the heap when unknown.
+    pub(crate) fn referrers(&mut self) -> &[usize] {
+        let objects = &self.objects;
+        self.referrers.get_or_insert_with(|| {
+            objects.iter().enumerate()
+                .filter(|(_, object)| matches!(object, Object::Marker(_) | Object::Overlay(_) | Object::Window(_)))
+                .map(|(i, _)| i).collect()
+        })
+    }
     pub(crate) fn kill_buffer_model(&mut self, value: Value) -> Result<()> {
-        if !self.buffer_state(value)?.live || self.objects.iter().any(|object| {
-            matches!(object, Object::Window(w) if w.mini && w.buffer == value)
-        }) { return Ok(()); }
+        if !self.buffer_state(value)?.live || self.minibuffer_window_buffer() == Some(value) { return Ok(()); }
         self.kill_indirect_buffers(value)?;
-        for (name, slot) in &self.names {
-            if name.starts_with("#:vm2-buffer:") && self.slots[*slot].value == value {
-                self.slots[*slot].value = Value::UNBOUND;
-            }
+        // A live buffer is registered under its name alone (rename_buffer_model).
+        if let Some(name) = self.buffer_state(value)?.name.clone()
+            && let Some(&slot) = self.names.get(&format!("#:vm2-buffer:{name}"))
+            && self.slots[slot].value == value
+        {
+            self.slots[slot].value = Value::UNBOUND;
         }
         let mut order = self.buffer_order();
         order.retain(|&b| b != value);
         self.set_buffer_order(&order);
-        let windows: Vec<Value> = self.objects.iter().enumerate().filter_map(|(i, object)| {
-            match object {
+        let referrers = self.referrers().to_vec();
+        let windows: Vec<Value> = referrers.iter().filter_map(|&i| {
+            match &self.objects[i] {
                 Object::Window(w) if w.buffer == value => Some(Value::reference(i + 1, 0)),
                 _ => None,
             }
@@ -330,8 +339,8 @@ impl Vm {
         let tables: Vec<Value> = self.slots.iter().map(|s| s.local)
             .filter(|&v| v != Value::NIL).collect();
         for table in tables { self.declaration_hash_remove(table, value)?; }
-        for object in &mut self.objects {
-            match object {
+        for i in referrers {
+            match &mut self.objects[i] {
                 Object::Marker(m) if m.buffer == value => { m.buffer = Value::NIL; m.anchor = None; }
                 Object::Overlay(o) if o.buffer == value => {
                     o.buffer = Value::NIL; o.start = None; o.end = None;

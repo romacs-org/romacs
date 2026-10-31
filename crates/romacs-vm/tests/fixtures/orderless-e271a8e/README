@@ -1,0 +1,4 @@
+orderless.el exactly as orderless commit e271a8ec938929b726331236cf56d1c44571122e
+(https://github.com/oantolin/orderless, GPL-3.0-or-later, Copyright (C)
+2021-2026 Free Software Foundation, Inc.).  tests/orderless_oracle.rs loads
+it into pinned GNU as the reference rlisp/romacs-orderless.el must match.

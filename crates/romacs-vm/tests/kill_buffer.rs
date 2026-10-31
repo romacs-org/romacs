@@ -278,3 +278,45 @@ fn killing_the_current_buffer_makes_other_buffers_choice_current() {
     vm.set_frame_geometry(800, 600, 20, 10).unwrap();
     assert_eq!(printed(&mut vm, expression), gnu);
 }
+
+#[test]
+fn kill_buffer_detaches_its_markers_and_overlays_across_moving_collections() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(1);
+    // A marker or overlay made after a kill listed them, and those a
+    // collection moved since.
+    assert_eq!(printed(&mut vm, r#"(progn
+        (setq other (get-buffer-create "kept") a (get-buffer-create "a") b (get-buffer-create "b"))
+        (with-current-buffer other (insert "abc") (setq kept (copy-marker 2)))
+        (kill-buffer (get-buffer-create "first"))
+        (with-current-buffer a (insert "abcdef") (setq am (copy-marker 2) ao (make-overlay 2 4)))
+        (kill-buffer a)
+        (dotimes (_ 200) (make-string 10 ?x))
+        (with-current-buffer b (insert "abcdef") (setq bm (copy-marker 5) bo (make-overlay 1 3)))
+        (garbage-collect)
+        (kill-buffer b)
+        (list (marker-buffer am) (marker-position am) (overlay-buffer ao) (overlay-start ao)
+              (marker-buffer bm) (overlay-buffer bo)
+              (eq (marker-buffer kept) other) (marker-position kept)))"#),
+        "(nil nil nil nil nil nil t 2)");
+}
+
+#[test]
+fn kill_buffer_replaces_it_in_windows_made_and_moved_after_the_list() {
+    let mut vm = Vm::new();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    vm.set_collection_floor(1);
+    assert_eq!(printed(&mut vm, r#"(progn
+        (setq keep (get-buffer-create "keep") gone (get-buffer-create "gone"))
+        (set-window-buffer (selected-window) keep)
+        (kill-buffer (get-buffer-create "first"))
+        (dotimes (_ 200) (make-string 10 ?x))
+        (setq w (let* ((a (selected-window)) (half (/ (window-pixel-height a) 2)))
+                  (set-window-new-pixel a (- (window-pixel-height a) half))
+                  (split-window-internal a half nil 0.5)))
+        (set-window-buffer w gone)
+        (garbage-collect)
+        (kill-buffer gone)
+        (list (buffer-live-p (window-buffer w)) (buffer-live-p gone) (length (window-list))))"#),
+        "(t nil 2)");
+}

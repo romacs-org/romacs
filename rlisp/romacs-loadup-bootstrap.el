@@ -105,6 +105,11 @@
 ;; *Backtrace*, ERT), they print through the owned method instead.
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
 (load "minibuffer.el" nil t t)
+;; minibuffer.el's candidate sorts, natively: through `sort' with a Lisp
+;; predicate they cost most of a completion key over thousands of
+;; candidates (DIVERGENCES.md VM2-COMPLETION-SORT).
+(defalias 'minibuffer--sort-by-length-alpha #'romacs--sort-by-length-alpha)
+(defalias 'minibuffer--sort-by-position #'romacs--sort-by-history)
 (load "frame.el" nil t t)
 (load "startup.el" nil t t)
 (load "term/tty-colors.el" nil t t)

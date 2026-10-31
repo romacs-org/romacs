@@ -532,7 +532,12 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     if launch == Launch::Loadup {
         // GNU's icomplete, which rlisp/romacs-completion-defaults.el requires
         // and whose own require signals when a runtime lacks it.
-        vm.eval_source("(require 'icomplete nil t)")?;
+        // The orderless completion style, matched natively; a style any
+        // init can name in `completion-styles', where the runtime has
+        // GNU's completion.
+        if vm.eval_source("(require 'icomplete nil t)")? != romacs_vm::Fixed::NIL {
+            vm.eval_source(include_str!("../../../rlisp/romacs-orderless.el"))?;
+        }
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
@@ -540,6 +545,10 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
+    // Layers are child frames, which GNU's frame.el makes.
+    if launch == Launch::Loadup && vm.eval_source("(fboundp 'make-frame)")? != romacs_vm::Fixed::NIL {
+        vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
+    }
     mark_phase("session-definitions");
     Ok(())
 }

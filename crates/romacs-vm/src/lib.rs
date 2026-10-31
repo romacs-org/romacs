@@ -1358,6 +1358,13 @@ pub struct Vm {
     recent_keys: std::collections::VecDeque<RecentKey>,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
+    /// The indices in `objects` of every marker, overlay and window, the
+    /// objects that name a buffer: all buffers' marker chains and overlay
+    /// lists at once (GNU's BUF_MARKERS and overlay trees) and the windows,
+    /// so a buffer's or a window are found without walking the heap. None
+    /// until `referrers` lists them again after a collection moved objects;
+    /// it may name dead ones.
+    referrers: Option<Vec<usize>>,
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
@@ -1482,6 +1489,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     recent_keys,
     conses,
     objects,
+    referrers,
     caches,
     stack,
     external_roots,
@@ -1651,6 +1659,7 @@ impl Vm {
             recent_keys: std::collections::VecDeque::new(),
             conses: vec![],
             objects: vec![],
+            referrers: None,
             caches: vec![],
             stack: vec![],
             external_roots: vec![],
@@ -3552,3 +3561,4 @@ mod capture_tests {
         }
     }
 }
+mod orderless;

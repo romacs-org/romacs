@@ -282,6 +282,15 @@ mod frame_tests {
         vm.eval_source("(select-window (next-window))").unwrap();
         let selected = frame(&mut vm);
         assert!(selected.selected != moved.selected && selected != moved, "selecting another window must repaint");
+        // Opacity alone, the frame's or a child frame's, repaints.
+        let mut translucent = frame(&mut vm);
+        translucent.snapshot.background_alpha = 0.8;
+        assert!(translucent != selected, "a new `alpha-background' must repaint");
+        vm.eval_source("(romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 3)))").unwrap();
+        let child = frame(&mut vm);
+        let mut translucent = frame(&mut vm);
+        translucent.snapshot.children[0].background_alpha = 0.5;
+        assert!(translucent != child, "a child's new `alpha-background' must repaint");
     }
 
     /// A prompt read mid-command presents over the last paint; finishing it
@@ -340,10 +349,14 @@ impl PartialEq for Frame {
 /// Whether frames A and B paint identically; the prompt host (prompt.rs)
 /// asks it too.
 pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_layout_input::FrameSnapshot) -> bool {
+    let windows_alike = |a: &[romacs_layout_input::PlacedWindowSnapshot], b: &[romacs_layout_input::PlacedWindowSnapshot]| a.len() == b.len()
+        && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot));
     a.font_selection == b.font_selection
-        && a.font_alternatives == b.font_alternatives && (a.width, a.height) == (b.width, b.height)
-        && a.windows.len() == b.windows.len()
-        && a.windows.iter().zip(&b.windows).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot))
+        && a.font_alternatives == b.font_alternatives && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
+        && windows_alike(&a.windows, &b.windows)
+        && a.children.len() == b.children.len()
+        && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
+            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha) && windows_alike(&a.windows, &b.windows))
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
@@ -377,13 +390,13 @@ fn frame(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<Frame, String
     Ok(Frame { snapshot, selected })
 }
 
-/// The selected window's id, once the GUI's own Lisp lays out windows.
+/// The selected window's id, once the GUI's own Lisp lays out windows: a
+/// window of the root frame or of a child frame shown over it.
 fn selected_window(vm: &mut Vm, snapshot: &romacs_layout_input::FrameSnapshot) -> Result<Option<u64>, String> {
     if vm.eval_source("(boundp 'romacs-gui-quit-requested)")? == romacs_vm::Fixed::NIL { return Ok(None); }
-    let remaining = vm.eval_source(startup::SELECTED_TAIL)?;
-    let remaining = remaining.display()?.parse::<usize>().map_err(|e| e.to_string())?;
-    let index = snapshot.windows.len().checked_sub(1 + remaining).ok_or("selected window not in frame")?;
-    Ok(Some(snapshot.windows[index].snapshot.id))
+    let id = vm.selected_window_id()?;
+    let shown = snapshot.windows.iter().chain(snapshot.children.iter().flat_map(|c| &c.windows)).any(|w| w.snapshot.id == id);
+    if shown { Ok(Some(id)) } else { Err("selected window not in frame".into()) }
 }
 
 fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
@@ -391,8 +404,8 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
         // Preserve G1's explicitly full-height legacy selected-window fixture.
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
             font_alternatives: vm.font_alternative_state()?,
-            width: 400, height: 300, background_alpha: 1.0,
-            windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+            width: 400, height: 300,
+            background_alpha: 1.0, children: vec![], windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
             }],
         })
@@ -409,8 +422,8 @@ fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), 
     use romacs_layout_input::{FaceHandle, FrameSnapshot, PlacedWindowSnapshot, TextSlice, WindowSnapshot};
     let face = Vm::new().display_default_face()?;
     let snapshot = FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width, height, background_alpha: 1.0,
-        windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
+        font_selection: Default::default(), font_alternatives: Default::default(), width, height,
+        background_alpha: 1.0, children: vec![], windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { utf8: PREPARING.into(), face_runs: vec![], raw: vec![] }, mode_line: None,
             mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, faces: vec![face],
@@ -703,9 +716,10 @@ fn paint(
     }
     let layout_start = Instant::now();
     let (snapshot, selected) = (&shown.snapshot, shown.selected);
-    let (mut frame, ends) = if let Some(selected) = selected {
-        engine.layout_frame(snapshot, presentation, Some((selected, romacs_display_protocol::Color::from_pixel(0x9099d9))))?
-    } else { engine.layout_frame(snapshot, presentation, None)? };
+    let cursor = selected.map(|selected| (selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
+    let (mut frame, mut ends) = engine.layout_frame(snapshot, presentation, cursor)?;
+    let (children, child_ends) = engine.layout_children(snapshot, presentation, cursor)?;
+    ends.extend(child_ends);
     if selected.is_some() {
         let mut effects = romacs_display_protocol::EffectsConfig::default();
         effects.cursor_color_cycle.enabled = false;
@@ -729,16 +743,19 @@ fn paint(
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
         // Point as a buffer byte: a window publishes its text from a base byte.
         "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_buffer_byte(w.snapshot.id, w.snapshot.point_byte)})).collect::<Vec<_>>() }));
-    let glyphs: Vec<_> = frame.glyphs.iter().filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).filter_map(|glyph| {
-        if let romacs_display_protocol::FrameGlyph::Char { char, row_role, face_id, x, y, clip_rect, .. } = glyph {
-            let face = &frame.faces[face_id];
-            Some(json!({"char":char,"role":format!("{row_role:?}"),"foreground":hex(face.foreground),
-                "background":hex(face.background),"x":x,"y":y,"clip":clip_rect}))
-        } else { None }
+    let glyphs: Vec<_> = std::iter::once(&frame).chain(&children).filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).flat_map(|frame| {
+        let (id, origin) = (frame.frame_placement.frame().get(), frame.frame_placement.outer_in_parent());
+        frame.glyphs.iter().filter_map(move |glyph| {
+            if let romacs_display_protocol::FrameGlyph::Char { char, row_role, face_id, x, y, clip_rect, .. } = glyph {
+                let face = &frame.faces[face_id];
+                Some(json!({"char":char,"role":format!("{row_role:?}"),"foreground":hex(face.foreground),
+                    "background":hex(face.background),"x":x + origin.x(),"y":y + origin.y(),"clip":clip_rect,"frame":id}))
+            } else { None }
+        })
     }).collect();
     let diagnostics_prepare_ns = diagnostic_start.elapsed().as_nanos();
     let submit_start = Instant::now();
-    sender.submit(frame)?;
+    sender.submit_scene(frame, children)?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
     if synchronous { activate(sender, presentation, pending)?; }
@@ -797,7 +814,9 @@ fn paint_prompt(
     frame: &romacs_vm::HostFrame,
 ) -> Result<(usize, Vec<romacs_vm::WindowEnd>), String> {
     let cursor = Some((frame.selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
-    let (mut glyphs, ends) = engine.layout_frame(&frame.frame, presentation, cursor)?;
+    let (mut glyphs, mut ends) = engine.layout_frame(&frame.frame, presentation, cursor)?;
+    let (children, child_ends) = engine.layout_children(&frame.frame, presentation, cursor)?;
+    ends.extend(child_ends);
     let mut effects = romacs_display_protocol::EffectsConfig::default();
     effects.cursor_color_cycle.enabled = false;
     for window in &frame.frame.windows {
@@ -805,13 +824,16 @@ fn paint_prompt(
     }
     let count = glyphs.glyphs.len();
     let observed = SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed).then(|| {
-        glyphs.glyphs.iter().filter_map(|glyph| {
-            if let romacs_display_protocol::FrameGlyph::Char { char, row_role, x, y, clip_rect, .. } = glyph {
-                Some(json!({"char":char,"role":format!("{row_role:?}"),"x":x,"y":y,"clip":clip_rect}))
-            } else { None }
+        std::iter::once(&glyphs).chain(&children).flat_map(|frame| {
+            let (id, origin) = (frame.frame_placement.frame().get(), frame.frame_placement.outer_in_parent());
+            frame.glyphs.iter().filter_map(move |glyph| {
+                if let romacs_display_protocol::FrameGlyph::Char { char, row_role, x, y, clip_rect, .. } = glyph {
+                    Some(json!({"char":char,"role":format!("{row_role:?}"),"x":x + origin.x(),"y":y + origin.y(),"clip":clip_rect,"frame":id}))
+                } else { None }
+            })
         }).collect::<Vec<_>>()
     });
-    sender.submit(glyphs)?;
+    sender.submit_scene(glyphs, children)?;
     if let Some(observed) = observed {
         eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }
@@ -862,9 +884,9 @@ fn evaluate(
     if live { vm.set_session_host(Some(Box::new(|code| std::panic::resume_unwind(Box::new(SessionEnd(code)))))); }
     // Its window system, which the session opens (fonts.rs).
     let alpha_sender = sender.clone();
-    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_alpha_hook(move |alpha, limit| {
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_alpha_hook(move |frame, alpha, limit| {
         // Only a closed window refuses, and then nothing shows it.
-        let _ = alpha_sender.set_frame_alpha(alpha, limit);
+        let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
     }))));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();

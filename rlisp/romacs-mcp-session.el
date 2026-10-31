@@ -156,6 +156,18 @@ before- and after-strings appear.  Returns (TEXT . RUNS), each run
                         (if format (romacs-mcp-session--format-line format window) :null))
          "rows" (romacs-mcp-session--rows (car shown) (cdr shown) limit))))))
 
+(defun romacs-mcp-session--layers (faces limit)
+  "The visible child frames shown over the frame, oldest first: each one's
+root window as `windows' reports it, with the frame's place in its parent
+and its text size in columns and lines."
+  (vconcat
+   (cl-loop for frame in (visible-frame-list) for i from 0
+            when (frame-parent frame)
+            collect (let ((layer (romacs-mcp-session--window (frame-root-window frame) i faces limit)))
+                      (puthash "position" (vector (car (frame-position frame)) (cdr (frame-position frame))) layer)
+                      (puthash "size" (vector (frame-text-cols frame) (frame-text-lines frame)) layer)
+                      layer))))
+
 (defun romacs-mcp-session--tree (window windows)
   "WINDOW's subtree: a window index or a split with children."
   (if (window-live-p window)
@@ -230,6 +242,7 @@ and at most LINES *Messages* lines."
      "tree" (romacs-mcp-session--tree (frame-root-window) windows)
      "windows" (vconcat (cl-loop for w in windows for i from 0
                                  collect (romacs-mcp-session--window w i faces limit)))
+     "layers" (romacs-mcp-session--layers faces limit)
      "minibuffer" (if mini
                       (with-current-buffer (window-buffer mini)
                         (romacs-mcp--object

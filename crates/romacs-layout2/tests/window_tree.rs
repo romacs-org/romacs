@@ -63,8 +63,8 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     // window and the later would silently win.
     let duplicate = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
-        width: 400, height: 300, background_alpha: 1.0,
-        windows: vec![
+        width: 400, height: 300,
+        background_alpha: 1.0, children: vec![], windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snap(7, 400, 150, &face) },
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 150, snapshot: snap(7, 400, 150, &face) },
         ],
@@ -76,8 +76,8 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     // presented surface.
     let overflow = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
-        width: 400, height: 300, background_alpha: 1.0,
-        windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+        width: 400, height: 300,
+        background_alpha: 1.0, children: vec![], windows: vec![romacs_layout_input::PlacedWindowSnapshot {
             x: 0, y: 200, snapshot: snap(1, 400, 200, &face) }],
     };
     assert!(romacs_layout2::layout_frame(&overflow, 1).is_err(),
@@ -86,8 +86,8 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     // The honest control: the same windows, placed legally, do lay out.
     let valid = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
-        width: 400, height: 300, background_alpha: 1.0,
-        windows: vec![
+        width: 400, height: 300,
+        background_alpha: 1.0, children: vec![], windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snap(1, 400, 150, &face) },
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 150, snapshot: snap(2, 400, 150, &face) },
         ],
@@ -234,4 +234,10 @@ fn background_opacity_reaches_every_paint() {
     snapshot.background_alpha = 0.8;
     assert!(snapshot.lays_out_like(&snapshot.clone()), "opacity alone needs no new layout");
     assert_eq!(engine.layout_frame(&snapshot, 2, None).unwrap().0.background_alpha, 0.8);
+    // A child frame paints with its own.
+    vm.eval_source("(romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 3)))").unwrap();
+    let mut snapshot = vm.frame_snapshot(400, 300).unwrap();
+    snapshot.children[0].background_alpha = 0.6;
+    let (children, _) = engine.layout_children(&snapshot, 3, None).unwrap();
+    assert_eq!(children.iter().map(|c| c.background_alpha).collect::<Vec<_>>(), [0.6]);
 }

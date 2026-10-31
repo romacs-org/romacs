@@ -1379,15 +1379,21 @@ impl Vm {
         use crate::prim::Fault;
         let object = self.property_query_object(object)?;
         let limit = self.property_limit(limit)?;
-        let (pos, _, end) = self.property_query_cursor(object, position, false)?;
+        let (pos, bytes, end) = self.property_query_cursor(object, position, false)?;
         let none = || limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error));
         if pos >= end { return none(); }
         let here = self.property_textget(object, pos, prop)?;
-        for b in self.property_run_starts(object)?.into_iter().filter(|&b| b > pos) {
+        // The runs after POSITION, one at a time, as GNU walks intervals:
+        // the cost is the runs passed, not the object's.
+        let mut at = bytes.start;
+        loop {
+            let next = self.property_next_text_boundary(object, at, bytes.end);
+            if next >= bytes.end { return none(); }
+            let b = self.property_query_scalar(object, next)?;
             if limit.is_some_and(|l| b >= l) { return none(); }
             if self.property_textget(object, b, prop)? != here { return Value::integer(b).map_err(Fault::Error); }
+            at = next;
         }
-        none()
     }
 
     /// textprop.c Fprevious_single_property_change (PROP given) and
@@ -1398,20 +1404,22 @@ impl Vm {
         use crate::prim::Fault;
         let object = self.property_query_object(object)?;
         let limit = self.property_limit(limit)?;
-        let (pos, _, _) = self.property_query_cursor(object, position, false)?;
+        let (pos, bytes, _) = self.property_query_cursor(object, position, false)?;
         let none = || limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error));
-        let starts = self.property_run_starts(object)?;
-        let start = starts[0];
+        let (low, start) = self.property_text_start(object)?;
         let lower = limit.unwrap_or(start);
         if pos <= start { return none(); }
         // The run holding the character before POSITION, walked back over
-        // runs with the same value of PROP.
-        let run = |b: i64| *starts.iter().rev().find(|&&s| s < b).unwrap_or(&start);
-        let mut b = run(pos);
+        // runs with the same value of PROP, one run at a time.
+        let run = |vm: &Self, at: ByteOffset| -> std::result::Result<(ByteOffset, i64), Fault> {
+            let previous = vm.property_previous_text_boundary(object, at, low);
+            Ok((previous, vm.property_query_scalar(object, previous)?))
+        };
+        let (mut at, mut b) = run(self, bytes.start)?;
         if let Some(prop) = prop {
             let here = self.property_textget(object, pos - 1, prop)?;
             while b > start && limit.is_none_or(|l| b > l) && self.property_textget(object, b - 1, prop)? == here {
-                b = run(b);
+                (at, b) = run(self, at)?;
             }
         }
         if b <= start || b <= lower { none() } else { Value::integer(b).map_err(Fault::Error) }
@@ -1499,6 +1507,25 @@ impl Vm {
         let text = self.property_next_text_boundary(object, at, end);
         if !matches!(self.object_if(object), Some(Object::Buffer(_))) { return Ok(text); }
         Ok(text.min(self.next_overlay_change_byte(object, at)?).min(end))
+    }
+    /// OBJECT's accessible start, as a byte and a position.
+    fn property_text_start(&self, object: Value) -> std::result::Result<(ByteOffset, i64), crate::prim::Fault> {
+        match self.object_if(object) {
+            Some(Object::Buffer(b)) => {
+                let r = b.accessible();
+                Ok((r.start, b.char_of_byte(r.start).map_err(crate::prim::Fault::Error)?.0 as i64 + 1))
+            }
+            _ => Ok((ByteOffset(0), 0)),
+        }
+    }
+    /// The last byte before AT, at least START, where OBJECT's text
+    /// properties change.
+    fn property_previous_text_boundary(&self, object: Value, at: ByteOffset, start: ByteOffset) -> ByteOffset {
+        match self.object_if(object) {
+            Some(Object::String(s) | Object::RawString(s)) => s.properties.previous_change(at, start),
+            Some(Object::Buffer(buffer)) => buffer.properties.previous_change(at, start),
+            _ => start,
+        }
     }
     fn property_next_text_boundary(
         &self,

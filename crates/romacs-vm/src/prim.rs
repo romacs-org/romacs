@@ -1687,6 +1687,7 @@ mod leaf {
     mod font;
     mod value_order;
     mod completion;
+    pub(crate) use completion::{OrderlessPass, OrderlessSpec};
     mod backtrace;
     mod text_properties;
     pub(crate) use text_properties::{PropertyBegin, Retry};

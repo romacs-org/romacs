@@ -14,7 +14,8 @@
 ;; its own input method, so there is no GtkIMContext to switch.  The frame
 ;; is one undecorated Wayland surface: no title bar, external menu or tool
 ;; bar, no border, and no position on the display, as pinned GNU pgtk
-;; reports a Wayland frame's.
+;; reports a Wayland frame's.  `make-frame' makes child frames, drawn over
+;; it (VM2-CHILD-FRAME).
 
 ;;; Code:
 
@@ -134,24 +135,48 @@ Romacs's window reads text through its own input method, which stays in use."
     (signal 'wrong-type-argument (list 'terminal-live-p terminal)))
   nil)
 
+;; frame.el's frame creation (`make-frame'): Romacs's display makes
+;; child frames, painted over their parent (VM2-CHILD-FRAME).  Faces are
+;; the session's, not a frame's, so `x-create-frame-with-faces' would have
+;; no frame faces to set up.
+
+(cl-defmethod frame-creation-function (params &context (window-system pgtk))
+  (romacs--create-frame params))
+
+(defun x-get-resource (_attribute _class &optional _component _subclass)
+  "Return the value of ATTRIBUTE, of class CLASS, from the X defaults database.
+Romacs's display has no resource database, so there is none."
+  nil)
+
 ;; frame.el's geometry dispatch (`frame-geometry', `frame-edges',
 ;; `mouse-absolute-pixel-position', `frame-restack').
+
+(defun romacs-pgtk--border (frame)
+  "FRAME's internal border in pixels: a child frame's border, else 0."
+  (if (frame-parent frame) (/ (- (frame-native-width frame) (frame-text-width frame)) 2) 0))
 
 (defun pgtk-frame-geometry (&optional frame)
   "Return geometric attributes of FRAME, an alist; sizes are in pixels.
 Romacs's frame has no title bar, external menu or tool bar, tab bar or
-border, and a Wayland surface has no position on its display."
+border, and a Wayland surface has no position on its display; a child
+frame's position is in its parent."
   (let ((size (cons (frame-native-width frame) (frame-native-height frame))))
-    `((outer-position 0 . 0) (outer-size . ,size) (external-border-size 0 . 0)
+    `((outer-position . ,(frame-position frame)) (outer-size . ,size) (external-border-size 0 . 0)
       (title-bar-size 0 . 0) (menu-bar-external) (menu-bar-size 0 . 0)
       (tab-bar-size 0 . 0) (tool-bar-external) (tool-bar-position . top)
-      (tool-bar-size 0 . 0) (internal-border-width . 0))))
+      (tool-bar-size 0 . 0) (internal-border-width . ,(romacs-pgtk--border frame)))))
 
-(defun pgtk-frame-edges (&optional frame _type)
+(defun pgtk-frame-edges (&optional frame type)
   "Return edge coordinates of FRAME, (LEFT TOP RIGHT BOTTOM) in pixels.
-Romacs's frame has no decorations or borders, so its outer, native and
-inner edges are the same."
-  (list 0 0 (frame-native-width frame) (frame-native-height frame)))
+Romacs's frame has no decorations, so its outer and native edges are the
+same: a child frame's in its parent, the root frame's at the origin.
+TYPE `inner-edges' excludes a child frame's internal border."
+  (let* ((position (frame-position frame))
+         (left (car position)) (top (cdr position))
+         (inset (if (eq type 'inner-edges) (romacs-pgtk--border frame) 0)))
+    (list (+ left inset) (+ top inset)
+          (- (+ left (frame-native-width frame)) inset)
+          (- (+ top (frame-native-height frame)) inset))))
 
 (defun pgtk-mouse-absolute-pixel-position ()
   "Return absolute position of mouse cursor in pixels, (0 . 0) on Wayland."
@@ -161,10 +186,13 @@ inner edges are the same."
   "Move mouse pointer to absolute pixel position; Wayland moves no pointer."
   nil)
 
-(defun pgtk-frame-restack (frame1 frame2 &optional _above)
-  "Restack FRAME1 below FRAME2; a session's one frame stays where it is."
+(defun pgtk-frame-restack (frame1 frame2 &optional above)
+  "Restack FRAME1 below FRAME2, or above it with ABOVE.
+Child frames stack among themselves; the root frame stays where it is."
   (unless (frame-live-p frame1) (signal 'wrong-type-argument (list 'frame-live-p frame1)))
   (unless (frame-live-p frame2) (signal 'wrong-type-argument (list 'frame-live-p frame2)))
+  (when (frame-parent frame1)
+    (if above (raise-frame frame1) (lower-frame frame1)))
   t)
 
 ;; browse-url.el's dispatch for a pgtk frame.

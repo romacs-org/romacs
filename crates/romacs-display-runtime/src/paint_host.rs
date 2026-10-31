@@ -299,21 +299,30 @@ impl PaintSender {
     /// backpressure rather than silently dropping a repaint. The producer must
     /// use PRIMARY_FRAME and a fresh nonzero presentation ID for every revision.
     pub fn submit(&self, frame: FrameGlyphBuffer) -> Result<(), String> {
+        self.submit_scene(frame, Vec::new())
+    }
+
+    /// Queue a frame and the child frames shown over it, lowest first, as
+    /// one paint: each child names PRIMARY_FRAME as its parent and carries
+    /// the frame's presentation. A child the last scene showed and this one
+    /// does not is removed.
+    pub fn submit_scene(&self, frame: FrameGlyphBuffer, children: Vec<FrameGlyphBuffer>) -> Result<(), String> {
         validate_frame(&frame)?;
+        validate_children(&frame, &children)?;
         let result = self
             .comms
             .cmd_tx
-            .try_send(RenderCommand::Paint(Box::new(frame)))
+            .try_send(RenderCommand::Paint(Box::new(crate::thread_comm::PaintScene { root: frame, children })))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
     }
 
-    /// Apply the primary frame's `alpha' setter: ALPHA while active and
-    /// inactive (negative leaves the window's opacity alone), raised to
-    /// LIMIT.
-    pub fn set_frame_alpha(&self, alpha: [f32; 2], limit: f32) -> Result<(), String> {
-        self.comms.frame_opacity.lock().unwrap_or_else(|e| e.into_inner()).accept(PRIMARY_FRAME, alpha, limit);
+    /// Apply FRAME's `alpha' setter, the primary frame's or a child's: ALPHA
+    /// while active and inactive (negative leaves its opacity alone),
+    /// raised to LIMIT.
+    pub fn set_frame_alpha(&self, frame: u64, alpha: [f32; 2], limit: f32) -> Result<(), String> {
+        self.comms.frame_opacity.lock().unwrap_or_else(|e| e.into_inner()).accept(frame, alpha, limit);
         let result = self
             .comms
             .cmd_tx
@@ -342,6 +351,25 @@ impl Drop for PaintSender {
     fn drop(&mut self) {
         let _ = self.shutdown();
     }
+}
+
+/// Children of ROOT, distinct and none the primary frame.
+pub(crate) fn validate_children(root: &FrameGlyphBuffer, children: &[FrameGlyphBuffer]) -> Result<(), String> {
+    let mut ids = std::collections::HashSet::new();
+    for child in children {
+        let placement = child.frame_placement;
+        let id = placement.frame().get();
+        if id == PRIMARY_FRAME
+            || !ids.insert(id)
+            || placement.parent().map(|p| p.get()) != Some(PRIMARY_FRAME)
+            || child.presentation_id != root.presentation_id
+            || placement.presentation() != root.presentation_id
+            || !(child.width.is_finite() && child.height.is_finite() && child.width > 0.0 && child.height > 0.0)
+        {
+            return Err("paint host requires distinct child frames of the primary presentation".into());
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_frame(frame: &FrameGlyphBuffer) -> Result<(), String> {

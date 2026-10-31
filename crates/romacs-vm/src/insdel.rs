@@ -596,7 +596,7 @@ impl Vm {
     /// The markers of buffer INDEX's text at character positions FROM..=TO,
     /// those of the buffers sharing it too, with their insertion types, the
     /// last attached first as GNU's marker chain lists them.
-    pub(crate) fn markers_between(&self, index: usize, from: i64, to: i64) -> Result<Vec<(Value, i64, bool)>> {
+    pub(crate) fn markers_between(&mut self, index: usize, from: i64, to: i64) -> Result<Vec<(Value, i64, bool)>> {
         let Object::Buffer(b) = &self.objects[index] else { return Ok(Vec::new()) };
         let (a, z) = (b.byte_of_char(CharOffset((from - 1) as usize))?, b.byte_of_char(CharOffset((to - 1) as usize))?);
         if !b.anchors.any_between(a.0 as u32, z.0 as u32) {
@@ -606,8 +606,10 @@ impl Vm {
         let buffers: Vec<Value> = if family.is_empty() { vec![index] } else { family }
             .into_iter().map(|i| Value::reference(i + 1, 0)).collect();
         let mut found = Vec::new();
-        for (i, object) in self.objects.iter().enumerate() {
-            let Object::Marker(m) = object else { continue };
+        self.referrers();
+        let Object::Buffer(b) = &self.objects[index] else { unreachable!("buffer above") };
+        for &i in self.referrers.as_deref().unwrap_or_default() {
+            let Object::Marker(m) = &self.objects[i] else { continue };
             if !buffers.contains(&m.buffer) { continue; }
             let Some(anchor) = m.anchor else { continue };
             let Some(at) = b.anchors.resolve(anchor) else { continue };

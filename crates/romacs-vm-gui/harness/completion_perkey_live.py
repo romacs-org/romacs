@@ -15,8 +15,14 @@ render wait and key->render, in ms.  The terminal probe reports the pty
 size at creation, after the prompts, and every WINCH.  With --assert-stable
 the run fails when the pty changed size across the prompts.
 
+--init FILE is the session's init file.  The report's `completion' records
+what was in effect inside the first prompt: the completion styles for its
+metadata and the icomplete modes; --expect-styles fails the run unless the
+styles are exactly the given ones.
+
 usage: completion_perkey_live.py --binary BIN --output DIR [--files 5000]
        [--input file-1] [--cycles 3] [--font-size 15] [--assert-stable]
+       [--init FILE] [--expect-styles 'orderless basic']
 """
 import argparse
 import hashlib
@@ -31,6 +37,23 @@ import time
 import live_oracle as live
 
 KEYSYMS = {'-': 'minus', '/': 'slash', ' ': 'space'}
+# Records, once, what completion the first prompt used (run in the session).
+PROBE = '''
+(add-hook 'minibuffer-setup-hook
+          (lambda ()
+            (add-hook 'post-command-hook
+                      (lambda ()
+                        (unless (file-exists-p %(path)s)
+                          (write-region
+                           (prin1-to-string
+                            (list :styles (completion--styles
+                                           (completion--field-metadata (minibuffer-prompt-end)))
+                                  :fido (bound-and-true-p fido-mode)
+                                  :icomplete (bound-and-true-p icomplete-mode)
+                                  :vertical (bound-and-true-p icomplete-vertical-mode)))
+                           nil %(path)s nil 'quiet)))
+                      90 t)))
+'''
 FIELDS = ('command_ns', 'snapshot_ns', 'layout_ns', 'render_ns', 'key_to_render_ns')
 
 
@@ -87,6 +110,8 @@ def main():
     ap.add_argument('--mode', default='2560x1440')
     ap.add_argument('--timeout', type=float, default=60)
     ap.add_argument('--assert-stable', action='store_true')
+    ap.add_argument('--init', type=Path)
+    ap.add_argument('--expect-styles')
     ap.add_argument('--labwc', default=live.LABWC)
     ap.add_argument('--wlr-randr', default=live.RANDR)
     args = ap.parse_args()
@@ -107,6 +132,11 @@ def main():
                 (work / f'file-{n:04}.txt').write_text('x\n')
             (config / 'rc.xml').write_text(live.RC_XML)
             probe = root / 'pty-sizes'
+            styles = root / 'styles'
+            init = args.init.read_text() if args.init else ''
+            (home / 'config' / 'romacs').mkdir(parents=True)
+            (home / 'config' / 'romacs' / 'init.el').write_text(
+                init + PROBE % {'path': json.dumps(str(styles))})
             env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
@@ -178,9 +208,12 @@ def main():
                 report['pty'] = {'created': created[0], 'final': lines[-1],
                                  'winch': lines[len(created):-1], 'all': lines}
                 report['summary'] = summary(report['keys'])
+                report['completion'] = styles.read_text() if styles.exists() else None
                 stable = report['pty']['created'] == report['pty']['final'] and not report['pty']['winch']
                 report['pty']['stable'] = stable
-                report['status'] = 'PASS' if stable or not args.assert_stable else 'FAIL'
+                expected = args.expect_styles is None or (report['completion'] or '').startswith(
+                    f"(:styles ({args.expect_styles})")
+                report['status'] = 'PASS' if expected and (stable or not args.assert_stable) else 'FAIL'
                 ctrl('x')
                 ctrl('c')
                 time.sleep(1)
