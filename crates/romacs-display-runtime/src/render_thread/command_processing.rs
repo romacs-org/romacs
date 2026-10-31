@@ -92,7 +92,7 @@ impl RenderApp {
         {
             match cmd {
                 #[cfg(feature = "core-free")]
-                RenderCommand::Paint(frame) => self.ingest_paint(*frame),
+                RenderCommand::Paint(scene) => self.ingest_paint(*scene),
                 RenderCommand::Lifecycle(c) => {
                     if let LifecycleCommand::Shutdown = c {
                         tracing::info!("Render thread received shutdown command");

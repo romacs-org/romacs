@@ -15,21 +15,21 @@ fn current_window_configuration(cx; optional frame: Value) {
     Ok(config)
 }}
 
-// VM2 has one frame, which stays selected, so DONT-SET-FRAME changes nothing.
+// DONT-SET-FRAME keeps the frame selected at entry selected (window.c:8076).
 // A window that will show another buffer first records its current one.
 defsubr! { name = "set-window-configuration", gnu = "window.c:7661", effect = Global,
-fn set_window_configuration(cx, configuration: Value; optional _dont_set_frame: Value, dont_set_miniwindow: Value) -> Step {
+fn set_window_configuration(cx, configuration: Value; optional dont_set_frame: Value, dont_set_miniwindow: Value) -> Step {
     let windows = cx.windows().window_configuration_records(configuration)?;
     let list = windows.iter().rev().fold(Value::NIL, |tail, &w| cx.cons(w, tail));
-    record_next(cx, Value::NIL, &[configuration, dont_set_miniwindow, list])
+    record_next(cx, Value::NIL, &[configuration, dont_set_miniwindow, list, dont_set_frame])
 }}
 fn record_next(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    let (configuration, dont_set_miniwindow, windows) = (saved[0], saved[1], saved[2]);
+    let (configuration, dont_set_miniwindow, windows, dont_set_frame) = (saved[0], saved[1], saved[2], saved[3]);
     let record = cx.intern("record-window-buffer");
     if let Some((window, rest)) = cx.pair(windows) && cx.fboundp(record) {
-        return Ok(Step::Call { f: record, args: vec![window], then: record_next, saved: vec![configuration, dont_set_miniwindow, rest] });
+        return Ok(Step::Call { f: record, args: vec![window], then: record_next, saved: vec![configuration, dont_set_miniwindow, rest, dont_set_frame] });
     }
-    Ok(Step::Done(cx.windows().set_window_configuration(configuration, dont_set_miniwindow)?))
+    Ok(Step::Done(cx.windows().set_window_configuration(configuration, dont_set_frame, dont_set_miniwindow)?))
 }
 
 defsubr! { name = "window-configuration-p", gnu = "window.c:7640", effect = Pure,

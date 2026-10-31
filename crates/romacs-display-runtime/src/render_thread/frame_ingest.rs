@@ -156,11 +156,13 @@ struct FrameIngestOutcome {
 
 impl RenderApp {
     #[cfg(feature = "core-free")]
-    pub(super) fn ingest_paint(&mut self, frame: romacs_display_protocol::FrameGlyphBuffer) {
+    pub(super) fn ingest_paint(&mut self, scene: crate::thread_comm::PaintScene) {
+        let crate::thread_comm::PaintScene { root: frame, children } = scene;
         let current = self.frame_windows.primary_window().and_then(|window| {
             window.render.compositor.current_frame.as_ref()
         });
         if crate::paint_host::validate_frame(&frame).is_err()
+            || crate::paint_host::validate_children(&frame, &children).is_err()
             || current.is_some_and(|current| {
                 current.presentation_id.get() >= frame.presentation_id.get()
             })
@@ -182,6 +184,20 @@ impl RenderApp {
             Default::default(),
             Default::default(),
         );
+        // The scene's children replace the last scene's: one gone is removed.
+        let shown: Vec<u64> = children.iter().map(|c| c.frame_placement.frame().get()).collect();
+        for gone in std::mem::take(&mut self.scene_children) {
+            if !shown.contains(&gone) {
+                self.remove_child_frame(gone);
+            }
+        }
+        for child in children {
+            // A child removed by an earlier scene is marked hidden; this
+            // scene shows it again.
+            self.frame_windows.show_child_frame_in_top_level_windows(child.frame_placement.frame().get());
+            self.update_primary_child(child);
+        }
+        self.scene_children = shown;
         if let Some(window) = self.frame_windows.primary_window() {
             window.request_redraw();
         }
@@ -225,6 +241,82 @@ impl RenderApp {
                         },
                     );
                 }
+            }
+        } else {
+            self.comms.send_input(
+                crate::thread_comm::InputEvent::PresentationDiscarded {
+                    presentation: frame.presentation_id.get(),
+                    emacs_frame_id: frame_id.get(),
+                },
+            );
+        }
+    }
+
+    /// Install or update FRAME, a child of the primary frame, in the
+    /// primary window: its open, resize and drift animations, and the
+    /// presentation events its activation or discard owes the producer.
+    fn update_primary_child(&mut self, frame: crate::core::frame_glyphs::FrameGlyphBuffer) {
+        let frame_id = frame.frame_placement.frame();
+        if let Some(ws) = self.frame_windows.primary_window_mut() {
+            let old_presentation = ws
+                .render
+                .compositor
+                .child_frames
+                .frames
+                .get(&frame_id.get())
+                .map(|entry| entry.frame.presentation_id);
+            let new_presentation = frame.presentation_id;
+            let resize_crossfade = Self::lease_child_resize_crossfade(
+                &self.render_policy,
+                &self.child_frame_style,
+                self.renderer.as_mut(),
+                ws,
+                frame_id.get(),
+                &frame,
+            );
+            if ws.render.update_child_frame(frame) {
+                if let Some((old, old_width, old_height, resize_spec)) =
+                    resize_crossfade
+                {
+                    ws.render.compositor.child_frames.begin_resize_crossfade(
+                        frame_id.get(),
+                        old,
+                        old_width,
+                        old_height,
+                        resize_spec,
+                        romacs_display_protocol::frame_time::observe_platform_now(),
+                    );
+                    ws.render.compositor.dirty = true;
+                }
+                if let Some(transition) = ActivePresentationTransition::between(
+                    old_presentation,
+                    new_presentation,
+                ) {
+                    self.comms.send_input(
+                        crate::thread_comm::InputEvent::PresentationActivated {
+                            presentation: transition.activated.get(),
+                            emacs_frame_id: frame_id.get(),
+                        },
+                    );
+                    if let Some(presentation) =
+                        transition.replaced.and_then(|replaced| {
+                            ws.render.route_presentation_retirement(replaced.get())
+                        })
+                    {
+                        self.comms.send_input(
+                            crate::thread_comm::InputEvent::PresentationRetired {
+                                presentation,
+                            },
+                        );
+                    }
+                }
+            } else if old_presentation != Some(new_presentation) {
+                self.comms.send_input(
+                    crate::thread_comm::InputEvent::PresentationDiscarded {
+                        presentation: new_presentation.get(),
+                        emacs_frame_id: frame_id.get(),
+                    },
+                );
             }
         } else {
             self.comms.send_input(
@@ -1074,75 +1166,7 @@ impl RenderApp {
                 if parent_id != DisplayFrameId::new(0)
                     && self.frame_windows.is_primary_frame_id(parent_id.get())
                 {
-                    if let Some(ws) = self.frame_windows.primary_window_mut() {
-                        let old_presentation = ws
-                            .render
-                            .compositor
-                            .child_frames
-                            .frames
-                            .get(&frame_id.get())
-                            .map(|entry| entry.frame.presentation_id);
-                        let new_presentation = frame.presentation_id;
-                        let resize_crossfade = Self::lease_child_resize_crossfade(
-                            &self.render_policy,
-                            &self.child_frame_style,
-                            self.renderer.as_mut(),
-                            ws,
-                            frame_id.get(),
-                            &frame,
-                        );
-                        if ws.render.update_child_frame(frame) {
-                            if let Some((old, old_width, old_height, resize_spec)) =
-                                resize_crossfade
-                            {
-                                ws.render.compositor.child_frames.begin_resize_crossfade(
-                                    frame_id.get(),
-                                    old,
-                                    old_width,
-                                    old_height,
-                                    resize_spec,
-                                    romacs_display_protocol::frame_time::observe_platform_now(),
-                                );
-                                ws.render.compositor.dirty = true;
-                            }
-                            if let Some(transition) = ActivePresentationTransition::between(
-                                old_presentation,
-                                new_presentation,
-                            ) {
-                                self.comms.send_input(
-                                    crate::thread_comm::InputEvent::PresentationActivated {
-                                        presentation: transition.activated.get(),
-                                        emacs_frame_id: frame_id.get(),
-                                    },
-                                );
-                                if let Some(presentation) =
-                                    transition.replaced.and_then(|replaced| {
-                                        ws.render.route_presentation_retirement(replaced.get())
-                                    })
-                                {
-                                    self.comms.send_input(
-                                        crate::thread_comm::InputEvent::PresentationRetired {
-                                            presentation,
-                                        },
-                                    );
-                                }
-                            }
-                        } else if old_presentation != Some(new_presentation) {
-                            self.comms.send_input(
-                                crate::thread_comm::InputEvent::PresentationDiscarded {
-                                    presentation: new_presentation.get(),
-                                    emacs_frame_id: frame_id.get(),
-                                },
-                            );
-                        }
-                    } else {
-                        self.comms.send_input(
-                            crate::thread_comm::InputEvent::PresentationDiscarded {
-                                presentation: frame.presentation_id.get(),
-                                emacs_frame_id: frame_id.get(),
-                            },
-                        );
-                    };
+                    self.update_primary_child(frame);
                 } else if parent_id == DisplayFrameId::new(0)
                     && self.frame_windows.is_primary_frame_id(frame_id.get())
                 {

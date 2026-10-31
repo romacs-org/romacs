@@ -10,7 +10,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
+use romacs_layout_input::{ChildFrameSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -57,6 +57,19 @@ impl LayoutEngine {
         stamp(&mut frame, presentation)?;
         hide_cursors_off(&mut frame, snapshot);
         Ok((frame, last.ends.clone()))
+    }
+    /// SNAPSHOT's child frames laid out at PRESENTATION, each its own frame
+    /// placed over the root frame, lowest first, and their windows' ends.
+    /// The root frame's layout never depends on them.
+    pub fn layout_children(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(Vec<FrameGlyphBuffer>, Vec<WindowEnd>), String> {
+        let mut frames = Vec::with_capacity(snapshot.children.len());
+        let mut ends = Vec::new();
+        for (z, child) in snapshot.children.iter().enumerate() {
+            let (frame, child_ends) = layout_child(snapshot, child, presentation, z as i32, cursor, &mut self.resolver)?;
+            frames.push(frame);
+            ends.extend(child_ends);
+        }
+        Ok((frames, ends))
     }
     /// What laying SNAPSHOT out reports, presenting nothing and leaving the
     /// last painted frame, which a cursor-only repaint reuses, in place.
@@ -136,6 +149,30 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         let owns = |&(id, _): &(u64, Color)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id;
         ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
+    Ok((frame, ends))
+}
+
+/// CHILD of SNAPSHOT as a frame of its own: its windows inside its border,
+/// on its background, placed over the root frame at stacking Z. A child
+/// window has the cursor only when it is the selected window.
+fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentation: u64, z: i32, cursor: Option<(u64, Color)>, resolver: &mut FontResolver) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
+    if child.id == 1 || child.windows.is_empty() { return Err("invalid child frame".into()); }
+    let frame_snapshot = FrameSnapshot {
+        font_selection: snapshot.font_selection, font_alternatives: snapshot.font_alternatives.clone(),
+        width: child.width, height: child.height, windows: child.windows.clone(), children: vec![],
+    };
+    let cursor = cursor.filter(|(id, _)| child.windows.iter().any(|w| w.snapshot.id == *id));
+    let (mut frame, ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, resolver)?;
+    frame.background = color(child.background);
+    frame.border_width = child.border as f32;
+    frame.border_color = color(child.border_color);
+    frame.undecorated = true;
+    frame.no_accept_focus = true;
+    frame.frame_placement = PresentedFramePlacement::new(
+        DisplayFrameId::new(child.id), frame.presentation_id, Some(DisplayFrameId::new(1)),
+        ParentFrameRect::new(child.x as f32, child.y as f32, frame.width, frame.height).map_err(|e| e.to_string())?, z,
+    );
+    hide_cursors_off(&mut frame, &frame_snapshot);
     Ok((frame, ends))
 }
 

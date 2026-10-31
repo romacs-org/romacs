@@ -432,11 +432,47 @@ impl Vm {
     /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
     pub fn frame_snapshot(&mut self, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
         let font_alternatives = self.font_alternative_state()?;
-        let windows = self.frame_window_snapshots(width, height)?
-            .into_iter()
-            .map(|(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot })
-            .collect();
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows })
+        let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
+        let windows = self.frame_window_snapshots(width, height)?.into_iter().map(place).collect();
+        let children = self.child_frame_snapshots();
+        // Child windows measured with their own sizes; the frame's stand.
+        self.display_state.width = width;
+        self.display_state.height = height;
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, children: children? })
+    }
+    /// FRAME's parameter NAME when it is a `#RRGGBB' colour.
+    fn frame_hex_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
+        let key = self.intern(name);
+        let value = self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v);
+        let Some(text) = value.and_then(|v| self.source_string_if(v)) else { return Ok(None) };
+        let hex = text.strip_prefix('#').filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+        Ok(hex.map(|h| std::array::from_fn(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap())))
+    }
+    /// Every shown child frame, lowest first: a visible frame whose
+    /// ancestors are visible, placed in the host frame. Frames are named by
+    /// their ids: a window's redisplay runs Lisp, which may collect and
+    /// move them, or delete one.
+    fn child_frame_snapshots(&mut self) -> Result<Vec<romacs_layout_input::ChildFrameSnapshot>> {
+        let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
+        let ids: Vec<u64> = self.child_frames_bottom_up().into_iter().filter_map(|f| self.frame(f).ok().map(|f| f.id)).collect();
+        let mut children = vec![];
+        for id in ids {
+            let Some(frame) = self.frames().into_iter().find(|&f| self.frame(f).is_ok_and(|f| f.id == id)) else { continue };
+            if !self.frame_shown(frame) { continue; }
+            let (x, y) = self.frame_origin(frame)?;
+            let f = self.frame(frame)?;
+            let (width, height, border, root) = (f.width, f.height, f.border, f.root);
+            let default = self.display_face("default")?;
+            let edge = self.display_face("child-frame-border")?;
+            // An unspecified border face draws in the default foreground.
+            let border_color = if edge.background == default.background { default.foreground } else { edge.background };
+            let background = self.frame_hex_parameter(frame, "background-color")?.unwrap_or(default.background);
+            let leaves = self.leaf_ids(root)?;
+            let windows = self.snapshot_leaves(leaves)?.into_iter().map(place).collect();
+            children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
+                                                                     background, windows });
+        }
+        Ok(children)
     }
     /// The exact list returned by the family setter, held in a lazy traced slot.
     pub fn font_alternative_family_root(&self) -> crate::handle::Local<'_> {
@@ -618,7 +654,8 @@ impl Vm {
         } else {
             self.selected_window_value()?
         };
-        if frame && n > 0 && self.stack[start] != Value::NIL && self.stack[start] != identity {
+        let argument = if n > 0 && self.stack[start] != Value::NIL { self.stack[start] } else { identity };
+        if frame && !self.frame(argument).is_ok_and(|f| f.live) {
             return Err("unknown frame/window".into());
         }
         match p {
@@ -672,8 +709,12 @@ impl Vm {
                 }
                 self.window_vscroll_of(next, pixels)
             }
-            FramePixelWidth => Value::integer(self.display_state.width as i64),
-            FramePixelHeight => Value::integer(self.display_state.height as i64),
+            // The host frame's is the size it was last displayed at; a child
+            // frame's its own.
+            FramePixelWidth | FramePixelHeight if self.frame(argument)?.parent == Value::NIL => Value::integer(i64::from(
+                if p == FramePixelWidth { self.display_state.width } else { self.display_state.height })),
+            FramePixelWidth => Value::integer(i64::from(self.frame_native(argument)?.0)),
+            FramePixelHeight => Value::integer(i64::from(self.frame_native(argument)?.1)),
             _ => Err("unknown display primitive".into()),
         }
     }
@@ -713,6 +754,11 @@ impl Vm {
     pub fn display_version(&self) -> u64 {
         self.display_state.version
     }
+    /// The selected window's id, on whichever frame it is.
+    pub fn selected_window_id(&mut self) -> Result<u64> {
+        let window = self.selected_window_value()?;
+        Ok(self.window(window)?.id)
+    }
     pub fn display_snapshot(&mut self, width: u32, height: u32) -> Result<WindowSnapshot> {
         let window = self.selected_window_value()?;
         self.snapshot_window(window, width, height)
@@ -746,7 +792,7 @@ impl Vm {
     fn window_line_wrap(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::LineWrap> {
         let w = self.window(window)?;
         let (x, width) = (w.x, w.width);
-        let root = self.window_root_peek(crate::window::ROOT);
+        let root = self.root_of(window)?;
         let full_width = self.window(root).is_ok_and(|r| r.x == x && r.width == width);
         let columns = i64::from(width / self.window_state.column.max(1));
         let saved = self.slots[self.buffer_slot].value;
@@ -966,7 +1012,7 @@ impl Vm {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
-            windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+            children: vec![], windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
     /// The least height a painted row can have: the default face's row
