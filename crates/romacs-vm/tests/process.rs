@@ -75,6 +75,7 @@ const PROLOGUE: &str = r#"(progn
     (while (memq (process-status p) '(run open listen connect stop))
       (accept-process-output p 1))
     (accept-process-output nil 0.01))
+  (defun romacs-test-note (_p m) (setq romacs-test-events (cons m romacs-test-events)))
   (defun romacs-test-exited (p)
     (not (file-symlink-p (format "/proc/%d/exe" (process-id p)))))
   (defun romacs-test-chunks (command coding phases)
@@ -195,6 +196,41 @@ fn nowait_connect_does_not_block_like_gnu() {
     let failures = mismatches(&mut vm, &[&case], &base);
     drop(vm);
     std::fs::remove_dir_all(&base).unwrap();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Local (Unix domain) sockets against pinned GNU: a server's contact and
+/// its socket file (which `delete-process' leaves, as GNU does), an echo
+/// round trip with the accepted connection's name, contact and sentinels,
+/// :nowait connections that open or fail, GNU's errors, and the :local and
+/// :remote string address forms. @DIR@ is a short directory for the socket
+/// files (sun_path holds 108 bytes).
+const LOCAL_CASES: &str = r###"
+(let* ((f "@DIR@/a") (p (make-network-process :name "srv" :server t :family 'local :service f :noquery t))) (unwind-protect (list (process-contact p) (process-contact p :local) (process-contact p :service) (process-contact p :host) (process-contact p t) (file-exists-p f) (process-status p) (process-type p) (progn (delete-process p) (list (process-status p) (file-exists-p f) (process-list)))) (delete-file f)))
+(let* ((f "@DIR@/b") (log nil) (srv (make-network-process :name "srv" :server t :family 'local :service f :noquery t :log (lambda (s c m) (setq log (cons (list (process-name s) (string-match "\\`srv <[0-9]+>\\'" (process-name c)) m) log))) :filter (lambda (p s) (setq log (cons (list 'got s) log)) (process-send-string p (upcase s))) :sentinel (lambda (p m) (setq log (cons (list 'sentinel (process-status p) m) log))))) (got "") (c (make-network-process :name "cli" :family 'local :service f :noquery t :filter (lambda (_p s) (setq got (concat got s)))))) (unwind-protect (progn (process-send-string c "hello") (while (string= got "") (accept-process-output c 1)) (let ((peer (car (process-list)))) (delete-process c) (accept-process-output nil 0.05) (list got (reverse log) (process-status c) (process-status srv) (length (process-list)) (process-contact c) (process-contact c :remote) (process-contact c :local) (process-contact peer :host) (process-contact peer :service) (process-contact peer :remote) (process-contact peer :local) (process-contact peer :server) (process-buffer srv) (process-status peer)))) (mapc #'delete-process (process-list)) (delete-file f)))
+(let* ((f "@DIR@/c") (events nil) (srv (make-network-process :name "s3" :server t :family 'local :service f :noquery t)) (c (make-network-process :name "c3" :family 'local :service f :nowait t :noquery t :sentinel (lambda (p m) (setq events (cons (list (process-status p) m) events)))))) (unwind-protect (let ((first (process-status c))) (while (null events) (accept-process-output nil 1)) (list first events (process-status c) (process-contact c :remote) (process-contact c :local))) (mapc #'delete-process (process-list)) (delete-file f)))
+(let* ((c (progn (setq romacs-test-events nil) (make-network-process :name "c4" :family 'local :service "@DIR@/nope" :nowait t :noquery t :sentinel #'romacs-test-note)))) (let ((first (process-status c))) (accept-process-output nil 0.2) (prog1 (list first romacs-test-events (process-status c) (process-exit-status c) (process-contact c :remote) (process-contact c :local) (condition-case e (process-send-string c "x") (error e))) (delete-process c) (accept-process-output nil 0.05) romacs-test-events)))
+(list (format-network-address [127 0 0 1 80]) (format-network-address [127 0 0 1 80] t) (format-network-address [256 0 0 1]) (format-network-address [0 0 0 0 0 0 0 1 8080]) (format-network-address [0 0 0 0 0 0 0 1 8080] t) (format-network-address [1 2 3]) (format-network-address '(42 . [1 2])) (format-network-address [1 2 3 70000 1]) (format-network-address "x") (format-network-address nil))
+(let ((f "@DIR@/e")) (list (condition-case e (make-network-process :name "x" :family 'local :service f :noquery t) (error e)) (condition-case e (make-network-process :name "x" :family 'local :service 7) (error e)) (condition-case e (make-network-process :name "x" :family 'local :service (make-string 108 ?a)) (error e)) (condition-case e (make-network-process :name "x" :family 'local :service "@DIR@/nope" :server t :nowait t) (error e)) (let ((p (make-network-process :name "srv" :server t :family 'local :service f :noquery t))) (unwind-protect (list (condition-case e (make-network-process :name "x" :family 'local :service f :server t :noquery t) (error e)) (process-contact (make-network-process :name "h" :family 'local :host "h" :service f :noquery t) t) (process-contact (make-network-process :name "l" :family 'local :host 'local :service f :noquery t) t)) (mapc #'delete-process (process-list)) (delete-file f))) (process-list)))
+(let* ((f "@DIR@/f") (srv (make-network-process :name "srv" :server t :local f :noquery t :host "ignored" :service 99)) (c (make-network-process :name "cli" :remote f :noquery t))) (unwind-protect (list (process-contact srv t) (process-contact c t) (featurep 'make-network-process '(:family local)) (process-status c) (process-status srv) (format-network-address f)) (mapc #'delete-process (process-list)) (delete-file f)))
+"###;
+
+#[test]
+fn local_sockets_match_pinned_gnu() {
+    let base = scratch("local");
+    // Short paths: sun_path holds 108 bytes.
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let sockets = runtime.join(format!("romacs-ls-{}", std::process::id()));
+    std::fs::create_dir_all(&sockets).unwrap();
+    let cases: Vec<String> = LOCAL_CASES.lines().filter(|line| !line.is_empty())
+        .map(|line| line.replace("@DIR@", sockets.to_str().unwrap())).collect();
+    let cases: Vec<&str> = cases.iter().map(String::as_str).collect();
+    let mut vm = bootstrapped();
+    vm.eval_source(PROLOGUE).unwrap();
+    let failures = mismatches(&mut vm, &cases, &base);
+    drop(vm);
+    std::fs::remove_dir_all(&base).unwrap();
+    std::fs::remove_dir_all(&sockets).unwrap();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

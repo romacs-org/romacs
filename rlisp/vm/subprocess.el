@@ -13,8 +13,8 @@
 ;;
 ;; Limits (DIVERGENCES.md VM2-PROC1, VM2-PROC2): these waits never read
 ;; the keyboard; `undecided' output decoding detects only ASCII and UTF-8;
-;; network processes are TCP streams without :nowait, :local/:remote
-;; addresses, datagrams, local sockets or TLS.
+;; network processes are TCP and local (Unix domain) stream sockets,
+;; without Internet :local/:remote addresses, datagrams or TLS.
 
 ;;; Code:
 
@@ -345,7 +345,7 @@ GNU process.c Fmake_pipe_process."
 
 (defun make-network-process (&rest args)
   "Create and return a network server or client process.
-GNU process.c Fmake_network_process, for TCP streams."
+GNU process.c Fmake_network_process, for TCP and local stream sockets."
   (if (null args)
       nil
     (romacs--check-keyword-args args)
@@ -358,34 +358,48 @@ GNU process.c Fmake_network_process, for TCP streams."
              (sentinel (plist-get contact :sentinel))
              (server (plist-get contact :server))
              (nowait (plist-get contact :nowait))
-             (family-spec (plist-get contact :family))
+             (address (plist-get contact (if server :local :remote)))
              (family nil)
-             (service (plist-get contact :service))
-             (host (plist-get contact :host))
+             (service nil)
+             (host nil)
              (port nil)
              proc)
         (if (and server nowait) (error "`:server' is incompatible with `:nowait'"))
         ;; Refusals: VM2-PROC1.
-        (if (plist-get contact (if server :local :remote))
-            (error "VM2 network processes do not take :local or :remote addresses"))
         (if (plist-get contact :tls-parameters)
             (error "VM2 network processes do not support :tls-parameters"))
-        (if (plist-get contact :use-external-socket)
-            (error "VM2 network processes do not support :use-external-socket"))
-        (setq family (cond ((null family-spec) nil)
-                           ((eq family-spec 'ipv4) 'ipv4)
-                           ((eq family-spec 'ipv6) 'ipv6)
-                           ((eq family-spec 'local)
-                            (error "VM2 network processes do not support local sockets"))
-                           ((integerp family-spec)
-                            (error "VM2 network processes do not support numeric address families"))
-                           (t (error "Unknown address family"))))
-        (cond ((null host) (setq host (if (eq family 'ipv6) "::1" "127.0.0.1")))
-              ((eq host 'local) (setq host (if (eq family 'ipv6) "::1" "127.0.0.1"))))
-        (or (stringp host) (signal 'wrong-type-argument (list 'stringp host)))
-        (setq port (romacs--network-service service))
-        (if (not (and (<= 0 port) (< port 65536)))
-            (signal 'error (list (format "Unknown service: %s" service))))
+        ;; :use-external-socket names the socket a daemon was started
+        ;; with; there is none, so it is nil, as in GNU without one.
+        (cond
+         ;; :local ADDRESS or :remote ADDRESS: a string is a local socket's
+         ;; path, and :host and :service are ignored.
+         ((stringp address) (setq family 'local))
+         (address (error "VM2 network processes take only a local socket's path as :local or :remote"))
+         (t
+          (setq family (let ((spec (plist-get contact :family)))
+                         (cond ((null spec) nil)
+                               ((eq spec 'local) 'local)
+                               ((eq spec 'ipv4) 'ipv4)
+                               ((eq spec 'ipv6) 'ipv6)
+                               ((integerp spec)
+                                (error "VM2 network processes do not support numeric address families"))
+                               (t (error "Unknown address family")))))
+          (setq service (plist-get contact :service)
+                host (plist-get contact :host))
+          (cond ((null host) (if (not (eq family 'local)) (setq host (if (eq family 'ipv6) "::1" "127.0.0.1"))))
+                ((eq host 'local) (setq host (if (eq family 'ipv6) "::1" "127.0.0.1")))
+                ((not (stringp host)) (signal 'wrong-type-argument (list 'stringp host))))
+          (if (eq family 'local)
+              (progn
+                (if host
+                    (progn (message ":family local ignores the :host property")
+                           (setq contact (plist-put contact :host nil) host nil)))
+                (or (stringp service) (signal 'wrong-type-argument (list 'stringp service)))
+                (if (<= 108 (string-bytes service)) (error "Service name too long"))
+                (setq address service))
+            (setq port (romacs--network-service service))
+            (if (not (and (<= 0 port) (< port 65536)))
+                (signal 'error (list (format "Unknown service: %s" service)))))))
         (if buffer (setq buffer (get-buffer-create buffer)))
         (setq proc (romacs--proc-make name))
         (let ((done nil))
@@ -402,12 +416,13 @@ GNU process.c Fmake_network_process, for TCP streams."
                 (if (plist-get contact :stop) (romacs--proc-set proc 'command t))
                 (romacs--set-network-socket-coding-system proc host service name)
                 ;; connect_network_socket.
-                (let* ((addresses (romacs--proc-network proc server nowait host port family contact))
+                (let* ((addresses (romacs--proc-network proc server nowait host (or address port) family contact))
+                       (failed (eq (car-safe addresses) 'failed))
                        (local (nth 0 addresses))
                        (remote (nth 1 addresses)))
-                  (if (and addresses server (= port 0))
+                  (if (and addresses server (eql port 0))
                       (setq contact (plist-put contact :service (nth 2 addresses))))
-                  (if addresses
+                  (if (not failed)
                       (progn
                         (setq contact (plist-put contact (if server :local :remote) (if server local remote)))
                         (if (not server) (setq contact (plist-put contact :local local)))))
@@ -415,13 +430,16 @@ GNU process.c Fmake_network_process, for TCP streams."
                   (if server (romacs--proc-set proc 'status 'listen))
                   (romacs--update-process-mark proc)
                   ;; A :nowait connection is (connect) until the wait
-                  ;; sees its nonblocking connect finish.
-                  (if nowait
-                      (romacs--proc-set proc 'status (list 'connect))
+                  ;; sees its nonblocking connect finish; one that failed
+                  ;; at once is (failed ERROR), with no sentinel, as GNU's.
+                  (cond
+                   (failed (romacs--proc-set proc 'status (list 'failed (cdr addresses))))
+                   (nowait (romacs--proc-set proc 'status (list 'connect)))
+                   (t
                     (romacs--proc-set proc 'reading
                                       (or (and (not (eq (process-filter proc) t))
                                                (not (eq (process-command proc) t)))
-                                          (and server (null (process-command proc))))))
+                                          (and server (null (process-command proc)))))))
                   (romacs--setup-process-coding-systems proc))
                 (setq done t))
             (if (not done) (romacs--proc-remove proc))))
@@ -461,6 +479,31 @@ GNU process.c Fmake_network_process, for TCP streams."
                        ((consp default-process-coding-system) (cdr default-process-coding-system))))))
     (romacs--proc-set proc 'encode val)))
 
+(defun format-network-address (address &optional omit-port)
+  "Convert network ADDRESS from internal format to a string.
+GNU process.c Fformat_network_address: a 4 or 5 element vector is an
+IPv4 address, an 8 or 9 element one IPv6, each with a port unless
+OMIT-PORT; a string (a local socket's path) is itself; a cons is its
+family; nil for anything else, or for an element out of range."
+  (cond ((null address) nil)
+        ((stringp address) address)
+        ((vectorp address)
+         (let* ((size (length address))
+                (spec (cond ((or (= size 4) (and (= size 5) omit-port)) (cons "%d.%d.%d.%d" 4))
+                            ((= size 5) (cons "%d.%d.%d.%d:%d" 5))
+                            ((or (= size 8) (and (= size 9) omit-port)) (cons "%x:%x:%x:%x:%x:%x:%x:%x" 8))
+                            ((= size 9) (cons "[%x:%x:%x:%x:%x:%x:%x:%x]:%d" 9))))
+                (args (and spec (append (substring address 0 (cdr spec)) nil)))
+                (valid spec)
+                (i 0))
+           (dolist (item args)
+             (unless (and (fixnump item) (<= 0 item 65535)
+                          (or (> (cdr spec) 5) (>= i 4) (<= item 255)))
+               (setq valid nil))
+             (setq i (1+ i)))
+           (and valid (apply #'format (car spec) args))))
+        ((consp address) (format "<Family %d>" (car address)))))
+
 (defun romacs--server-accept-connection (server)
   "server_accept_connection: accept one client of SERVER."
   (let ((accepted (romacs--proc-accept server)))
@@ -476,8 +519,7 @@ GNU process.c Fmake_network_process, for TCP streams."
              (service (nth 2 accepted))
              (remote (nth 3 accepted))
              (local (nth 4 accepted))
-             (v6 (nth 5 accepted))
-             (suffix (if v6 (format " <[%s]:%d>" host service) (format " <%s:%d>" host service)))
+             (suffix (nth 5 accepted))
              (filter (process-filter server))
              (buffer nil)
              (contact nil)
@@ -1212,8 +1254,8 @@ GNU callproc.c Fcall_process_region."
 
 ;; syms_of_process (process.c:9083-9111): `make-network-process' with the
 ;; subfeatures this implementation supports, in GNU's order: TCP servers,
-;; `:service t', IPv6 and IPv4, and `:nowait' connections.  Not datagram
-;; or seqpacket types, local sockets or socket options (VM2-PROC1).
-(provide 'make-network-process '((:server t) (:service t) (:family ipv6) (:family ipv4) (:nowait t)))
+;; `:service t', IPv6, IPv4 and local sockets, and `:nowait' connections.
+;; Not datagram or seqpacket types or socket options (VM2-PROC1).
+(provide 'make-network-process '((:server t) (:service t) (:family ipv6) (:family ipv4) (:family local) (:nowait t)))
 
 ;;; subprocess.el ends here

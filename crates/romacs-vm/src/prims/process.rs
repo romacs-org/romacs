@@ -371,12 +371,21 @@ fn proc_pty(cx, process: Value) { cx.process_pty_only(process) }}
 defsubr! { name = "romacs--proc-pipe", gnu = "process.c:2441", effect = Global,
 fn proc_pipe(cx, process: Value) { cx.process_pipe(process) }}
 
+// SERVICE is a port for FAMILY ipv4, ipv6 or nil (either), or the socket
+// path for FAMILY `local'.
 defsubr! { name = "romacs--proc-network", gnu = "process.c:3827", effect = Global,
-fn proc_network(cx, process: Value, server: Value, nowait: Value, host: Value, port: Integer, family: Value, contact: Value) {
-    let host = cx.string_text(host)?;
-    let family = if family == cx.intern("ipv4") { Some(false) } else if family == cx.intern("ipv6") { Some(true) } else { None };
-    let port = u16::try_from(port.0).map_err(|_| Fault::Error(format!("Invalid service port {}", port.0)))?;
-    cx.process_network(process, server != Value::NIL, nowait != Value::NIL, host, port, family, contact)
+fn proc_network(cx, process: Value, server: Value, nowait: Value, host: Value, service: Value, family: Value, contact: Value) {
+    use crate::prim::Target;
+    let target = if family == cx.intern("local") {
+        Target::Local(cx.string_view(service)?.bytes().to_vec())
+    } else {
+        let host = cx.string_text(host)?;
+        let family = if family == cx.intern("ipv4") { Some(false) } else if family == cx.intern("ipv6") { Some(true) } else { None };
+        let port = service.integer_value().and_then(|port| u16::try_from(port).ok())
+            .ok_or_else(|| Fault::Error("Invalid service port".into()))?;
+        Target::Inet { host, port, family }
+    };
+    cx.process_network(process, server != Value::NIL, nowait != Value::NIL, target, contact)
 }}
 
 defsubr! { name = "romacs--proc-accept", gnu = "process.c:5000", effect = Global,
