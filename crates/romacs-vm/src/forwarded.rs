@@ -376,6 +376,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "throw-on-input", gnu: "keyboard.c:14316", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "timer-list", gnu: "keyboard.c:14247", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "timer-idle-list", gnu: "keyboard.c:14251", kind: Kind::Lisp(Init::Nil) },
+    // Bound in every process, as cus-start expects of a built-in; Romacs
+    // draws no tool bar.
+    CVariable { name: "tool-bar-mode", gnu: "frame.c:7545", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-separator-image-expression", gnu: "keyboard.c:14122", kind: Kind::Lisp(Init::Nil) },
     // What the command loop evaluates when a throw returns it to top level
     // (rlisp/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.

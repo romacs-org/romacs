@@ -101,7 +101,6 @@ fn reads_of_fenced_values_refuse_compiled_and_interpreted() {
     assert_refused(&[
         ("(defvar x1 (length fence-a))", 3, "read", "fence-a"),
         ("(symbol-value 'fence-a)", 3, "read", "fence-a"),
-        ("(boundp 'fence-b)", 3, "read", "fence-b"),
         ("(default-value 'fence-a)", 3, "read", "fence-a"),
         ("(funcall (eval '(lambda () fence-a) nil))", 3, "read", "fence-a"),
         ("(eval 'fence-a nil)", 3, "read", "fence-a"),
@@ -197,12 +196,14 @@ fn lets_buffers_and_startup_pass() {
 (setq p5 (buffer-name (get-buffer-create \"fence-new\")))
 (setq p6 (getenv-internal \"HOME\"))
 (setq p7 (list (expand-file-name \"/a/../b\") (stringp (expand-file-name \"~/x\")) (expand-file-name \"/c\" nil)))
+(setq p8 (list (boundp 'fence-b) (boundp 'process-environment) (boundp 'default-directory)))
 ";
     let (mut vm, trace) = run("pass", preload, true);
     let trace = trace.unwrap();
     assert!(trace["refusals"].as_array().unwrap().is_empty(), "{trace}");
-    let shown = vm.eval_source("(list p1 p2 p3 p4 p5 (stringp p6) (length startup-saw) p7)").and_then(|v| v.display()).unwrap();
-    assert_eq!(shown, "((\"/l/\" \"/l/\") 2 \"/x\" \"/y\" \"fence-new\" t 4 (\"/b\" t \"/c\"))");
+    // A fenced root's value is the process's; that it is bound is not.
+    let shown = vm.eval_source("(list p1 p2 p3 p4 p5 (stringp p6) (length startup-saw) p7 p8)").and_then(|v| v.display()).unwrap();
+    assert_eq!(shown, "((\"/l/\" \"/l/\") 2 \"/x\" \"/y\" \"fence-new\" t 4 (\"/b\" t \"/c\") (t t t))");
 }
 
 #[test]

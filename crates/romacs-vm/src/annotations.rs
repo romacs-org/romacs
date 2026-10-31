@@ -728,7 +728,7 @@ impl Vm {
     /// unchecked, exactly as given.
     pub(super) fn set_symbol_plist(&mut self, symbol: Value, plist: Value) -> Result<Value> {
         if self.fence.is_some() {
-            self.fence_property(symbol, None, crate::world::Access::Write);
+            self.fence_property(symbol, None, crate::world::Access::Write, None);
         }
         let slot = self.plist_owner_mut(symbol)?;
         self.slots[slot].plist = plist;
@@ -779,7 +779,7 @@ impl Vm {
         value: Value,
     ) -> std::result::Result<Value, PlistFault> {
         if self.fence.is_some() {
-            self.fence_property(symbol, Some(key), crate::world::Access::Write);
+            self.fence_property(symbol, Some(key), crate::world::Access::Write, Some(value));
         }
         let owner = self.plist_owner_mut(symbol).map_err(|_| PlistFault::Symbol(symbol))?;
         loop {
