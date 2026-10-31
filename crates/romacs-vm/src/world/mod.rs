@@ -8,12 +8,15 @@
 //! state. Outside startup, a read or write of a fenced binding refuses the
 //! build, naming the root and the site. A `let` is exempt: it moves the
 //! fenced value aside and back unread, and a binding it makes after the fence
-//! is the `let`'s own; the value it saved is still the root's (F2).
+//! is the `let`'s own; the value it saved is still the root's (F2). So is
+//! `boundp` of a bound root: that it is bound is no per-process fact.
 //!
 //! Root 6 keeps the startup re-run reading what the first run read (F1):
 //! while startup runs, every variable it reads, every property it reads and
 //! every function cell it calls through is recorded as an input, and after
-//! it a write to an input refuses, whatever value it stores. Reads pass.
+//! it a write to an input refuses, whatever value it stores, except a
+//! layer's library's `put` of the content startup read (`layer`). Reads
+//! pass.
 //! An in-place mutation has no write site, so the content of each input is
 //! digested as startup ends and compared at the end of the recipe.
 //!
@@ -418,6 +421,15 @@ impl Vm {
         result
     }
 
+    /// Whether `boundp` of SLOT answers t without a read: its value is
+    /// fenced, as the process's, but that it is bound is not. An unbound
+    /// root is read through the fence, and a read startup observes stays
+    /// its input.
+    pub(crate) fn fenced_and_bound(&mut self, slot: usize) -> bool {
+        self.fence_cell(slot).is_some_and(|cell| cell.root != Root::Observed)
+            && self.unfenced(slot, |vm| vm.variable_value(slot)).is_ok_and(|value| value != Value::UNBOUND)
+    }
+
     /// An ACCESS to the fenced variable at SLOT, then F through its own
     /// redirect.
     pub(crate) fn fenced<T>(&mut self, slot: usize, access: Access, f: impl FnOnce(&mut Vm) -> T) -> T {
@@ -523,8 +535,11 @@ impl Vm {
     }
 
     /// While startup runs, `get` of SYMBOL's property KEY (None: its whole
-    /// plist) is an input. After it, a write of one refuses.
-    pub(crate) fn fence_property(&mut self, symbol: Value, key: Option<Value>, access: Access) {
+    /// plist) is an input. After it, a write of one refuses, except a
+    /// layer's library's `put` of STORED holding what startup read there:
+    /// startup reads the same when it runs again after the libraries, as
+    /// cus-start puts `custom-set' again.
+    pub(crate) fn fence_property(&mut self, symbol: Value, key: Option<Value>, access: Access, stored: Option<Value>) {
         let Some(fence) = self.fence.as_ref() else { return };
         let (Some(slot), key) = (symbol.index_if(7).and_then(|i| i.checked_sub(1)), key.and_then(|k| k.index_if(7)).map(|i| i - 1)) else { return };
         if fence.observing {
@@ -537,10 +552,20 @@ impl Vm {
             Some(key) => fence.seen.contains(&Input::Property(slot, key)),
             None => fence.inputs.iter().any(|&input| matches!(input, Input::Property(s, _) if s == slot)),
         };
-        if access == Access::Write && written {
+        let again = || matches!(key.zip(stored), Some((key, stored)) if host::layer_active() && self.stores_input(slot, key, stored));
+        if access == Access::Write && written && !again() {
             let property = key.map(|key| self.symbol_names[key].clone());
             host::refuse("fence", json!({"root": Root::Input as u8, "access": "write", "symbol": self.symbol_names[slot], "property": property}));
         }
+    }
+
+    /// Whether STORED, as SLOT's property KEY, has the content startup read,
+    /// and startup read no more of SLOT's plist.
+    fn stores_input(&self, slot: usize, key: usize, stored: Value) -> bool {
+        let Some(fence) = self.fence.as_ref() else { return false };
+        if fence.seen.contains(&Input::Plist(slot)) { return false }
+        let Some(at) = fence.inputs.iter().position(|&input| input == Input::Property(slot, key)) else { return false };
+        matches!((&fence.digests[at], self.content_digest(stored)), (Ok(read), Ok(put)) if *read == put)
     }
 
     /// A write of SLOT's function cell: an input's refuses.
@@ -790,6 +815,7 @@ fn object_kind(object: &Object) -> &'static str {
         Object::Terminal(_) => "terminal",
         Object::WindowConfiguration(_) => "window-configuration",
         Object::Sqlite(_) => "sqlite",
+        Object::Treesit(_) => "treesit",
         Object::Process(_) => "process",
         Object::SubCharTable(_) => "sub-char-table",
         Object::MapKeymapCursor(_) => "keymap cursor",

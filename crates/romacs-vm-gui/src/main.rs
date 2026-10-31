@@ -282,6 +282,15 @@ mod frame_tests {
         vm.eval_source("(select-window (next-window))").unwrap();
         let selected = frame(&mut vm);
         assert!(selected.selected != moved.selected && selected != moved, "selecting another window must repaint");
+        // Opacity alone, the frame's or a child frame's, repaints.
+        let mut translucent = frame(&mut vm);
+        translucent.snapshot.background_alpha = 0.8;
+        assert!(translucent != selected, "a new `alpha-background' must repaint");
+        vm.eval_source("(romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 3)))").unwrap();
+        let child = frame(&mut vm);
+        let mut translucent = frame(&mut vm);
+        translucent.snapshot.children[0].background_alpha = 0.5;
+        assert!(translucent != child, "a child's new `alpha-background' must repaint");
     }
 
     /// A prompt read mid-command presents over the last paint; finishing it
@@ -343,11 +352,11 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
     let windows_alike = |a: &[romacs_layout_input::PlacedWindowSnapshot], b: &[romacs_layout_input::PlacedWindowSnapshot]| a.len() == b.len()
         && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot));
     a.font_selection == b.font_selection
-        && a.font_alternatives == b.font_alternatives && (a.width, a.height) == (b.width, b.height)
+        && a.font_alternatives == b.font_alternatives && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
-        && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background)
-            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background) && windows_alike(&a.windows, &b.windows))
+        && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
+            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha) && windows_alike(&a.windows, &b.windows))
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
@@ -396,7 +405,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
             font_alternatives: vm.font_alternative_state()?,
             width: 400, height: 300,
-            children: vec![], windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+            background_alpha: 1.0, children: vec![], windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
             }],
         })
@@ -414,7 +423,7 @@ fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), 
     let face = Vm::new().display_default_face()?;
     let snapshot = FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), width, height,
-        children: vec![], windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
+        background_alpha: 1.0, children: vec![], windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { utf8: PREPARING.into(), face_runs: vec![], raw: vec![] }, mode_line: None,
             mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, faces: vec![face],
@@ -555,6 +564,10 @@ fn run() -> Result<(), String> {
     if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
         world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor, init_layer.as_ref())?;
     }
+    // Fontconfig's configuration loads on a helper while the window and the
+    // world open: the evaluator's first font question finds it loaded, or
+    // waits for it.
+    if live { std::thread::spawn(romacs_font::load_catalog); }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
     let (host, sender) =
         PaintHost::wayland(std::path::Path::new(&socket), width, height, if live { "romacs — VM" } else { "VM G1a" }.into())?;
@@ -882,7 +895,11 @@ fn evaluate(
     // its children, as shut_down_emacs does) and exits with the status.
     if live { vm.set_session_host(Some(Box::new(|code| std::panic::resume_unwind(Box::new(SessionEnd(code)))))); }
     // Its window system, which the session opens (fonts.rs).
-    vm.set_display_host(Some(Box::new(fonts::Display::new()?)));
+    let alpha_sender = sender.clone();
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_alpha_hook(move |frame, alpha, limit| {
+        // Only a closed window refuses, and then nothing shows it.
+        let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
+    }))));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     // A completed background command wakes the same wait as a terminal.

@@ -524,7 +524,9 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
 /// Romacs's layers after the chain that only define: icomplete, which its
 /// completion defaults build on, and the session's command libraries. They
 /// read and set nothing of the process, so a world holds them with the
-/// chain (world.rs); a source boot takes them after it.
+/// chain (world.rs); a source boot takes them after it. Dired is GNU's
+/// dired.el here: the workspace's browser would shadow its autoloads and
+/// its `defvar` of `dired-mode-map` would keep GNU's keys out.
 pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path::Path) -> Result<(), String> {
     if launch == Launch::GnuOnly {
         return Ok(());
@@ -540,7 +542,6 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         }
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;

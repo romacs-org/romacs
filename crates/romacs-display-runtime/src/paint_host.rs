@@ -318,6 +318,20 @@ impl PaintSender {
         result
     }
 
+    /// Apply FRAME's `alpha' setter, the primary frame's or a child's: ALPHA
+    /// while active and inactive (negative leaves its opacity alone),
+    /// raised to LIMIT.
+    pub fn set_frame_alpha(&self, frame: u64, alpha: [f32; 2], limit: f32) -> Result<(), String> {
+        self.comms.frame_opacity.lock().unwrap_or_else(|e| e.into_inner()).accept(frame, alpha, limit);
+        let result = self
+            .comms
+            .cmd_tx
+            .try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+            .map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result
+    }
+
     pub fn input(&self) -> &crossbeam_channel::Receiver<crate::thread_comm::InputEvent> {
         &self.comms.input_rx
     }

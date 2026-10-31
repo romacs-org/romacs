@@ -272,6 +272,7 @@ impl Vm {
         let local = self.allocate_local_binding_slot();
         self.slots[local].value = if let Some(fwd) = self.localized_forwarded(slot) { self.forwarded_value(fwd)? } else { self.slots[slot].value };
         self.declaration_hash_put(table, buffer, Value::reference(local+1, 7))?;
+        self.note_local_binding(buffer, slot);
         Ok(local)
     }
     /// SLOT's value in BUFFER, as `buffer-local-value' reads it: its
@@ -451,6 +452,7 @@ impl Vm {
             let local = self.allocate_local_binding_slot();
             self.slots[local].value = value;
             self.declaration_hash_put(table, buffer, Value::reference(local+1,7))?;
+            self.note_local_binding(buffer, slot);
         }
         Ok(())
     }

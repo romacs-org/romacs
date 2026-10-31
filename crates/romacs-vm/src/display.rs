@@ -438,7 +438,8 @@ impl Vm {
         // Child windows measured with their own sizes; the frame's stand.
         self.display_state.width = width;
         self.display_state.height = height;
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, children: children? })
+        let background_alpha = self.frame_background_alpha()?;
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children? })
     }
     /// FRAME's parameter NAME when it is a `#RRGGBB' colour.
     fn frame_hex_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
@@ -461,7 +462,8 @@ impl Vm {
             if !self.frame_shown(frame) { continue; }
             let (x, y) = self.frame_origin(frame)?;
             let f = self.frame(frame)?;
-            let (width, height, border, root, hosts) = (f.width, f.height, f.border, f.root, f.hosts_minibuffer.is_some());
+            let (width, height, border, root, hosts, background_alpha) =
+                (f.width, f.height, f.border, f.root, f.hosts_minibuffer.is_some(), f.alpha_background);
             let default = self.display_face("default")?;
             let edge = self.display_face("child-frame-border")?;
             // An unspecified border face draws in the default foreground.
@@ -475,7 +477,7 @@ impl Vm {
                 windows.extend(self.snapshot_leaves(vec![mini])?.into_iter().map(|(wx, wy, snapshot)| place((local(wx, x), local(wy, y), snapshot))));
             }
             children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
-                                                                     background, windows });
+                                                                     background, background_alpha, windows });
         }
         Ok(children)
     }
@@ -550,8 +552,8 @@ impl Vm {
     pub fn display_apply_journal(&mut self) -> bool {
         let mut changed = false;
         self.referrers();
-        let (referrers, objects) = (self.referrers.as_deref().unwrap_or_default(), &mut self.objects);
-        for &i in referrers {
+        let (windows, objects) = (self.referrers.as_ref().map_or(&[][..], |r| &r.windows), &mut self.objects);
+        for &i in windows {
             if let Object::Window(w) = &mut objects[i]
                 && let Some(next) = w.pending_vscroll.take()
                 && next != w.vscroll_px
@@ -1019,7 +1021,7 @@ impl Vm {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
-            children: vec![], windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+            background_alpha: 1.0, children: vec![], windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
     /// The least height a painted row can have: the default face's row

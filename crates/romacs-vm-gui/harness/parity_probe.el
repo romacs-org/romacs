@@ -250,14 +250,29 @@ that are bound, else every bound non-custom variable named with
      :variables (parity-probe--variables buffer)
      :db (parity-probe-db queries))))
 
+(defvar parity-probe--earlier-timers nil
+  "The timers pending when the current step began (`parity-probe-step').")
+
+(defun parity-probe-step ()
+  "Note that a step begins: the one-shot timers pending now are not its work."
+  (setq parity-probe--earlier-timers (copy-sequence timer-list))
+  t)
+
 (defun parity-probe-quiet (&optional horizon)
-  "Whether no one-shot timer is due within HORIZON seconds (default 3).
-Repeating timers (this probe's, cursor blinking, autosave) never settle,
-and idle timers wait for the idleness the probe preserves; a one-shot
-timer is work the step started (a deferred render, a message to clear)."
+  "Whether no one-shot timer the step started is due within HORIZON
+seconds (default 3).  Repeating timers (this probe's, cursor blinking,
+autosave) never settle, and idle timers wait for the idleness the probe
+preserves; a one-shot timer is work the step started (a deferred render,
+a message to clear).  One pending when the step began is not: simple.el's
+`undo-auto--boundary-timer' fires 10s after the first undoable change
+since the last, and a package's heartbeat is re-armed on its own clock,
+so waiting for them delayed whichever step came within HORIZON of them.
+Timers are told apart by identity: one the step re-arms in place stays
+ignored."
   (let ((limit (+ (float-time) (or horizon 3))))
     (not (seq-some (lambda (timer)
                      (and (not (timer--repeat-delay timer))
+                          (not (memq timer parity-probe--earlier-timers))
                           (< (float-time (timer--time timer)) limit)))
                    timer-list))))
 

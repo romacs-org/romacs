@@ -71,8 +71,11 @@ pub struct TextBody {
     coordinate_steps: std::cell::Cell<usize>,
     #[cfg(test)]
     property_edit_visits: usize,
+    /// The tree-sitter parsers of this text (GNU's base buffer
+    /// `ts_parser_list'), whose trees every change edits.
+    pub(crate) treesit: crate::treesit::Registry,
 }
-romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, raw, flat_internal, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits });
+romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, raw, flat_internal, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit });
 // GNU's eight-bit characters (#x3FFF80..#x3FFFFF, the raw bytes 0x80..0xFF)
 // cannot be UTF-8, which the rope requires. Raw byte B is stored as the
 // placeholder character U+00B, whose UTF-8 is GNU's internal form of the
@@ -81,7 +84,7 @@ romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, t
 // placeholders that stand for raw bytes. Every write converts through
 // `internal_to_rope`, every Lisp-visible read back through
 // `rope_to_internal`.
-const RAW_LEAD_SHIFT: u8 = 2;
+pub(crate) const RAW_LEAD_SHIFT: u8 = 2;
 
 /// Rope text and the local offsets of its raw bytes for GNU-internal
 /// BYTES; borrowed when they are plain UTF-8 (no scan beyond validation).
@@ -198,8 +201,11 @@ pub struct Text {
     pub(crate) syntax_table: Value,
     /// The buffer's category table; nil means the standard one (category.c).
     pub(crate) category_table: Value,
+    /// GNU's `ts_linecol_begv/point/zv' caches; tracking once BEGV's is
+    /// set (treesit.c).
+    pub(crate) ts_linecols: [crate::treesit::Linecol; 3],
 }
-romacs_snapshot::snapshot_struct!(Text { body, restriction, state, point, syntax_table, category_table });
+romacs_snapshot::snapshot_struct!(Text { body, restriction, state, point, syntax_table, category_table, ts_linecols });
 impl std::ops::Deref for Text {
     type Target = TextBody;
     fn deref(&self) -> &TextBody {
@@ -238,12 +244,14 @@ impl Text {
                 coordinate_steps: std::cell::Cell::new(0),
                 #[cfg(test)]
                 property_edit_visits: 0,
+                treesit: Default::default(),
             }),
             restriction: ByteOffset(0)..ByteOffset(s.len()),
             state: Default::default(),
             point: ByteOffset(0),
             syntax_table: Value::NIL,
             category_table: Value::NIL,
+            ts_linecols: [crate::treesit::EMPTY_LINECOL; 3],
         })
     }
     /// A view of this text for a new indirect buffer: the same body and
@@ -259,6 +267,7 @@ impl Text {
             point: self.point,
             syntax_table: Value::NIL,
             category_table: Value::NIL,
+            ts_linecols: [crate::treesit::EMPTY_LINECOL; 3],
         }
     }
     /// Whether THIS and OTHER are views of one body.
@@ -374,10 +383,13 @@ impl Text {
         if s.is_empty() {
             return true;
         }
+        let at = self.point.0;
+        let linecols = self.ts_linecols_before(at..at);
         self.body.append_body(s, chars);
         self.point.0 += s.len();
         self.restriction.end.0 += s.len();
         self.state.record_text_change(chars);
+        self.ts_record(at..at, s.len(), linecols);
         true
     }
     pub fn replace(&mut self, r: Range<ByteOffset>, inserted: &[u8]) -> Result<()> {
@@ -396,7 +408,9 @@ impl Text {
                 p.0 - (r.end.0 - r.start.0) + s.len()
             })
         };
+        let linecols = self.ts_linecols_before(r.start.0..r.end.0);
         let changed = self.body.replace_body(&r, &s, &local);
+        self.ts_record(r.start.0..r.end.0, s.len(), linecols);
         self.point = shift(self.point);
         let old = self.restriction.clone();
         self.restriction = (if old.start <= r.start {
@@ -417,8 +431,49 @@ impl Text {
         let shift = |p: ByteOffset| if p < r.end { p } else { ByteOffset(p.0 - (r.end.0 - r.start.0) + s.len()) };
         self.point = shift(self.point);
         self.restriction = shift(self.restriction.start)..shift(self.restriction.end);
+        let linecols = self.ts_linecols_before(r.start.0..r.end.0);
+        let start = r.start.0;
+        let old = r.end.0;
         self.body.rewrite_body(r, &s, &local);
+        self.ts_record(start..old, s.len(), linecols);
         Ok(())
+    }
+    /// `TextBody::overwrite' of R, recorded for tree-sitter: editfns.c's
+    /// subst-char-in-region and translate-region record each character, one
+    /// record of the run is the same edit.
+    pub(crate) fn overwrite(&mut self, r: Range<ByteOffset>, replacement: &[u8]) -> Result<()> {
+        let linecols = self.ts_linecols_before(r.start.0..r.end.0);
+        self.body.overwrite(r.clone(), replacement)?;
+        self.ts_record(r.start.0..r.end.0, r.end.0 - r.start.0, linecols);
+        Ok(())
+    }
+    /// The linecols of a change's start and old end in a buffer tracking
+    /// them (treesit_linecol_maybe), from the point cache.
+    fn ts_linecols_before(&self, r: Range<usize>) -> Option<(crate::treesit::Linecol, crate::treesit::Linecol)> {
+        if self.body.treesit.is_empty() || self.ts_linecols[0].bytepos == 0 {
+            return None;
+        }
+        let start = crate::treesit::linecol_of_pos(&self.body, r.start as i64 + 1, self.ts_linecols[1]);
+        Some((start, crate::treesit::linecol_of_pos(&self.body, r.end as i64 + 1, start)))
+    }
+    /// treesit_record_change of the change of OLD to INSERTED bytes, made:
+    /// every parser's tree edited, and the linecol caches moved.
+    fn ts_record(&mut self, old: Range<usize>, inserted: usize, linecols: Option<(crate::treesit::Linecol, crate::treesit::Linecol)>) {
+        if self.body.treesit.is_empty() {
+            return;
+        }
+        let (start, old_end, new_end) = (old.start as i64 + 1, old.end as i64 + 1, (old.start + inserted) as i64 + 1);
+        let linecols = linecols.map(|(s, o)| (s, o, crate::treesit::linecol_of_pos(&self.body, new_end, s)));
+        self.body.treesit.record(crate::treesit::Change { start, old_end, new_end, linecols }, &self.body);
+        if let Some(change) = linecols {
+            let (begv, zv) = (self.restriction.start.0 as i64 + 1, self.restriction.end.0 as i64 + 1);
+            let body = &*self.body;
+            self.ts_linecols = [
+                crate::treesit::linecol_by_change(body, self.ts_linecols[0], change, begv),
+                change.2,
+                crate::treesit::linecol_by_change(body, self.ts_linecols[2], change, zv),
+            ];
+        }
     }
     /// This view's own values; the body's are its owner's to visit.
     pub(crate) fn visit_view_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
@@ -492,6 +547,51 @@ impl TextBody {
     }
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         self.properties.visit_values(visit);
+        self.treesit.visit_values(visit);
+    }
+    /// The bytes from AT to the end of its rope chunk (or the tail), for a
+    /// parse's reader; empty at the end.
+    pub(crate) fn chunk_from(&self, at: usize) -> &[u8] {
+        let rope_bytes = self.bytes_len - self.tail.len();
+        if at >= rope_bytes {
+            return self.tail.as_bytes().get(at - rope_bytes..).unwrap_or(&[]);
+        }
+        let (chunk, start, ..) = self.rope.chunk_at_byte(at);
+        &chunk.as_bytes()[at - start..]
+    }
+    /// The first newline in FROM..LIMIT (0-based bytes).
+    pub(crate) fn newline_after(&self, from: usize, limit: usize) -> Option<usize> {
+        let mut at = from;
+        while at < limit {
+            let chunk = self.chunk_from(at);
+            let chunk = &chunk[..chunk.len().min(limit - at)];
+            if chunk.is_empty() { return None; }
+            if let Some(i) = chunk.iter().position(|&b| b == b'\n') { return Some(at + i); }
+            at += chunk.len();
+        }
+        None
+    }
+    /// The last newline in LIMIT..FROM (0-based bytes).
+    pub(crate) fn newline_before(&self, from: usize, limit: usize) -> Option<usize> {
+        let mut end = from.min(self.bytes_len);
+        while end > limit {
+            let (chunk, start) = self.chunk_before(end);
+            let start = start.max(limit);
+            let slice = &chunk[start - (end - chunk.len())..];
+            if let Some(i) = slice.iter().rposition(|&b| b == b'\n') { return Some(start + i); }
+            end = start;
+        }
+        None
+    }
+    /// The bytes of the chunk holding the byte before END, up to END, and
+    /// where that chunk starts.
+    fn chunk_before(&self, end: usize) -> (&[u8], usize) {
+        let rope_bytes = self.bytes_len - self.tail.len();
+        if end > rope_bytes {
+            return (&self.tail.as_bytes()[..end - rope_bytes], rope_bytes);
+        }
+        let (chunk, start, ..) = self.rope.chunk_at_byte(end - 1);
+        (&chunk.as_bytes()[..end - start], start)
     }
     pub fn as_str(&self) -> &str {
         self.flat.get_or_init(|| {

@@ -188,3 +188,50 @@ fn a_hosted_minibuffer_wraps_wide_glyphs_whole() {
     vm.frame_snapshot(800, 600).unwrap();
     assert_eq!(vm.eval_source("(window-pixel-height (minibuffer-window))").unwrap().display().unwrap(), "60");
 }
+
+/// A window system that records each `alpha' setter with its frame's id.
+struct AlphaDisplay(std::rc::Rc<std::cell::RefCell<Vec<(u64, [f32; 2], f32)>>>);
+impl romacs_vm::DisplayHost for AlphaDisplay {
+    fn window_system(&self) -> &str { "pgtk" }
+    fn display_name(&self) -> String { String::new() }
+    fn list_fonts(&mut self, _: &romacs_vm::FontQuery) -> Vec<romacs_vm::FontEntity> { vec![] }
+    fn font_families(&mut self) -> Vec<String> { vec![] }
+    fn open_font(&mut self, _: &romacs_vm::FontEntity, _: i64) -> Option<romacs_vm::OpenedFont> { None }
+    fn char_font(&mut self, _: &str, _: f32, _: char) -> Option<(romacs_vm::OpenedFont, u32)> { None }
+    fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32) { self.0.borrow_mut().push((frame, alpha, limit)); }
+}
+
+/// A child frame's `alpha' and `alpha-background', given at creation or
+/// later, as pinned GNU's (x_create_frame's gui_default_parameter after the
+/// frame is listed, so a refused one leaves the frame): its own background
+/// opacity in its snapshot, its own `alpha' setters sent with its id, the
+/// host frame's untouched. GNU X11 answers (50 0.6999999998835846
+/// (args-out-of-range 0 100) (wrong-type-argument numberp a) 3 nil (40 . 60)
+/// (args-out-of-range 0.0 1.0) 1.5 nil); its 0.69... is X11 reading the
+/// window's opacity property back (xterm.c:19716), where pgtk keeps 70.
+#[test]
+fn child_frames_have_their_own_opacity() {
+    let setters = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    vm.set_display_host(Some(Box::new(AlphaDisplay(setters.clone()))));
+    assert!(vm.open_display());
+    let answer = vm.eval_source("(let* ((n (length (frame-list)))
+        (make (lambda (parms) (condition-case e (romacs--create-frame (cons (cons 'parent-frame (selected-frame)) parms)) (error e))))
+        (c (funcall make '((width . 30) (height . 8) (alpha-background . 50) (alpha . 70))))
+        (bad (funcall make '((alpha-background . 101))))
+        (bad2 (funcall make '((alpha . (a . 50))))))
+      (setq child c)
+      (list (frame-parameter c 'alpha-background) (frame-parameter c 'alpha) bad bad2 (- (length (frame-list)) n)
+            (condition-case e (modify-frame-parameters c '((alpha . (40 . 60)))) (error e)) (frame-parameter c 'alpha)
+            (condition-case e (modify-frame-parameters c '((alpha-background . 1.5))) (error e))
+            (frame-parameter c 'alpha-background) (frame-parameter nil 'alpha-background)))").unwrap();
+    assert_eq!(answer.display().unwrap(),
+               "(50 70 (args-out-of-range 0 100) (wrong-type-argument numberp a) 3 nil (40 . 60) (args-out-of-range 0.0 1.0) 1.5 nil)");
+    let snapshot = vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(snapshot.background_alpha, 1.0, "the host frame keeps its own");
+    assert_eq!(snapshot.children.iter().map(|c| c.background_alpha).collect::<Vec<_>>(), [0.5]);
+    let id = snapshot.children[0].id;
+    assert_eq!(*setters.borrow(), [(id, [0.7, 0.7], 0.2), (id, [0.4, 0.6], 0.2)]);
+}

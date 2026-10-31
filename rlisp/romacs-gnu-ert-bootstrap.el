@@ -78,6 +78,10 @@
 (load "fringe.el" nil t t)
 (load "image.el" nil t t)
 (load "vc/vc-hooks.el" nil t t)
+;; loaddefs.el's autoload of shortdoc's group macro, which treesit.el
+;; calls at top level.
+(defvar shortdoc--groups nil)
+(autoload 'define-short-documentation-group "shortdoc" nil nil 'macro)
 
 ;; GNU batch runs startup before the test file loads; the adapter does not
 ;; call `command-line', so take its runtime steps here.  normal-top-level

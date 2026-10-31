@@ -307,6 +307,7 @@ impl Vm {
         };
         target.buffer = if anchor.is_some() { buffer } else { Value::NIL };
         target.anchor = anchor;
+        if anchor.is_some() { self.note_referrer(buffer, v.index(0)? - 1); }
         Ok(v)
     }
     /// Whether overlay primitive P with ARGS changes what a window may show,
@@ -423,6 +424,7 @@ impl Vm {
             o.buffer = buffer;
             o.start = Some(a);
             o.end = Some(b);
+            self.note_referrer(buffer, v.index(0)? - 1);
         }
         if evaporates {
             self.finish_annotation_edit(buffer)?;

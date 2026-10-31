@@ -139,14 +139,7 @@ impl RenderApp {
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
 
-        let alpha_mode = if caps
-            .alpha_modes
-            .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
-        {
-            wgpu::CompositeAlphaMode::PreMultiplied
-        } else {
-            caps.alpha_modes[0]
-        };
+        let alpha_mode = composite_alpha_mode(&caps.alpha_modes);
         let surface_usage = surface_readback::surface_usage_for_debug_readback(
             caps.usages,
             &mut self.debug_first_frame_readback_pending,
@@ -425,6 +418,16 @@ impl RenderApp {
         self.comms.send_input(InputEvent::DisplayReset);
         true
     }
+}
+
+/// The surface's composite mode: pre-multiplied alpha, which `alpha' and
+/// `alpha-background' need, else the surface's first mode, opaque in effect.
+pub(super) fn composite_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlphaMode {
+    if modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+        return wgpu::CompositeAlphaMode::PreMultiplied;
+    }
+    eprintln!("romacs: surface composites {modes:?}, not pre-multiplied alpha; frame transparency renders opaque");
+    modes[0]
 }
 
 fn build_render_event_loop_impl(allow_any_thread: bool) -> Result<EventLoop, String> {

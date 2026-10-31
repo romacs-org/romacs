@@ -86,7 +86,7 @@ std::cfg_select! {
         /// Probe `file`[`face_index`] like GNU `font_open_entity`: try
         /// `pixel_size`, bumping upward (at most 15 times) until average
         /// width and height are positive.
-        pub fn probe_font_px_metrics(
+        fn probe_px_metrics(
             file: &str,
             face_index: u32,
             pixel_size: u32,
@@ -346,7 +346,7 @@ std::cfg_select! {
     }
     _ => {
         /// Target without the Fontconfig/FreeType probe.
-        pub fn probe_font_px_metrics(
+        fn probe_px_metrics(
             _file: &str,
             _face_index: u32,
             _pixel_size: u32,
@@ -408,17 +408,18 @@ pub struct OtfCapability {
     pub gpos: Vec<OtfScript>,
 }
 
-/// Metadata belongs to the native FontMetricsService and is retired with its
-/// caches. Store only parsed capabilities, never whole font allocations.
-#[derive(Default)]
-pub struct OtfCapabilityCache {
-    entries: std::collections::HashMap<(String, u32), (OtfFileIdentity, Option<OtfCapability>)>,
+/// Observations of font files by path and arguments, each kept only while
+/// its file's identity is unchanged. Every observation has one process-wide
+/// cache (`probe_font_px_metrics`, `otf_capability`), so the display host,
+/// the layout engines and their resolvers observe a font once between them
+/// (twice at most when two threads miss the same entry at once).
+pub struct FileCache<A, V> {
+    entries: std::collections::HashMap<(String, A), (FontFileIdentity, V)>,
+    cap: usize,
 }
 
-const OTF_CAPABILITY_CACHE_CAP: usize = 64;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct OtfFileIdentity {
+struct FontFileIdentity {
     len: u64,
     modified: std::time::SystemTime,
     #[cfg(unix)]
@@ -429,7 +430,7 @@ struct OtfFileIdentity {
     changed: (i64, i64),
 }
 
-impl OtfFileIdentity {
+impl FontFileIdentity {
     fn for_file(file: &str) -> Option<Self> {
         // On Unix, inode/device distinguish replacement, and ctime catches
         // in-place changes even if mtime is restored. Other platforms retain
@@ -457,57 +458,121 @@ impl OtfFileIdentity {
     }
 }
 
-impl OtfCapabilityCache {
+impl<A: Clone + Eq + std::hash::Hash, V: Clone> FileCache<A, V> {
+    #[must_use]
+    pub fn new(cap: usize) -> Self {
+        Self { entries: std::collections::HashMap::new(), cap }
+    }
+
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    pub fn get(&mut self, file: &str, face_index: u32) -> Option<OtfCapability> {
-        self.get_with(file, face_index, |path| std::fs::read(path))
+    /// The observation of FILE at ARGS while FILE is still IDENTITY. A
+    /// missing or changed file retires the earlier observation.
+    fn hit(&mut self, file: &str, args: &A, identity: Option<&FontFileIdentity>) -> Option<V> {
+        let key = (file.to_owned(), args.clone());
+        match (identity, self.entries.get(&key)) {
+            (Some(identity), Some((cached, value))) if identity == cached => Some(value.clone()),
+            _ => {
+                self.entries.remove(&key);
+                None
+            }
+        }
     }
 
-    fn get_with(
-        &mut self,
-        file: &str,
-        face_index: u32,
-        read: impl FnOnce(&str) -> std::io::Result<Vec<u8>>,
-    ) -> Option<OtfCapability> {
-        let key = (file.to_owned(), face_index);
-        let identity = OtfFileIdentity::for_file(file);
-        if let Some(identity) = &identity
-            && let Some((cached_identity, capability)) = self.entries.get(&key)
-            && identity == cached_identity
-        {
-            return capability.clone();
+    fn keep(&mut self, file: &str, args: A, identity: FontFileIdentity, value: V) {
+        if self.entries.len() >= self.cap {
+            self.clear();
         }
-        // Never return an earlier successful observation after a missing,
-        // unreadable or changed file. Read errors remain immediately retryable.
-        self.entries.remove(&key);
-        let data = read(file).ok()?;
-        let capability = otf_capability_from_bytes(&data, face_index);
-        // A malformed but unchanged readable asset may cache None; a changing
-        // asset is not cached. This is a metadata observation, not an atomic
-        // defense against adversarial concurrent file replacement.
-        if let Some(identity) = identity
-            && Some(&identity) == OtfFileIdentity::for_file(file).as_ref()
-        {
-            if self.entries.len() >= OTF_CAPABILITY_CACHE_CAP {
-                self.clear();
-            }
-            self.entries.insert(key, (identity, capability.clone()));
-        }
-        capability
+        self.entries.insert((file.to_owned(), args), (identity, value));
     }
+}
+
+/// FILE's observation at ARGS from CACHE, or OBSERVE's, made without holding
+/// CACHE's lock. OBSERVE returns `None` for a failure worth retrying (an
+/// unreadable file), which is never cached; an observation is cached only
+/// if FILE's identity is the same after it as before. This is a metadata
+/// observation, not an atomic defense against adversarial replacement.
+pub fn observe_file<A: Clone + Eq + std::hash::Hash, V: Clone>(
+    cache: &std::sync::Mutex<FileCache<A, V>>,
+    file: &str,
+    args: A,
+    observe: impl FnOnce() -> Option<V>,
+) -> Option<V> {
+    let lock = || cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let identity = FontFileIdentity::for_file(file);
+    if let Some(value) = lock().hit(file, &args, identity.as_ref()) {
+        return Some(value);
+    }
+    let value = observe()?;
+    if let Some(identity) = identity
+        && Some(&identity) == FontFileIdentity::for_file(file).as_ref()
+    {
+        lock().keep(file, args, identity, value.clone());
+    }
+    Some(value)
+}
+
+type PxMetricsCache = std::sync::Mutex<FileCache<(u32, u32, Option<u32>), FontPxMetrics>>;
+type OtfCapabilityCache = std::sync::Mutex<FileCache<u32, Option<OtfCapability>>>;
+
+fn px_metrics_cache() -> &'static PxMetricsCache {
+    static CACHE: std::sync::OnceLock<PxMetricsCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(FileCache::new(256)))
+}
+
+fn otf_capability_cache() -> &'static OtfCapabilityCache {
+    static CACHE: std::sync::OnceLock<OtfCapabilityCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(FileCache::new(64)))
+}
+
+/// Probe `file`[`face_index`] like GNU `font_open_entity` (see
+/// `probe_px_metrics`), once per unchanged file and arguments (see
+/// `FileCache`).
+pub fn probe_font_px_metrics(
+    file: &str,
+    face_index: u32,
+    pixel_size: u32,
+    wght: Option<f32>,
+) -> Option<FontPxMetrics> {
+    observe_file(px_metrics_cache(), file, (face_index, pixel_size, wght.map(f32::to_bits)), || {
+        probe_px_metrics(file, face_index, pixel_size, wght)
+    })
+}
+
+/// The GSUB/GPOS capability of `file`[`face_index`], read once per
+/// unchanged file. A malformed but readable file caches `None`; a read
+/// error stays retryable.
+pub fn otf_capability(file: &str, face_index: u32) -> Option<OtfCapability> {
+    otf_capability_in(otf_capability_cache(), file, face_index, mapped)
+}
+
+/// FILE mapped, not copied: a font collection runs to tens of megabytes,
+/// of which the layout tables are a small part. FreeType maps font files
+/// the same way.
+fn mapped(file: &str) -> std::io::Result<memmap2::Mmap> {
+    let file = std::fs::File::open(file)?;
+    // SAFETY: the map is read-only and dropped before this observation
+    // returns; a font file truncated meanwhile faults, as FreeType's do.
+    unsafe { memmap2::Mmap::map(&file) }
+}
+
+fn otf_capability_in<D: AsRef<[u8]>>(
+    cache: &OtfCapabilityCache,
+    file: &str,
+    face_index: u32,
+    read: impl FnOnce(&str) -> std::io::Result<D>,
+) -> Option<OtfCapability> {
+    observe_file(cache, file, face_index, || {
+        read(file).ok().map(|data| otf_capability_from_bytes(data.as_ref(), face_index))
+    })
+    .flatten()
 }
 
 #[cfg(all(test, unix))]
 #[path = "probe/tests/otf_cache_test.rs"]
 mod otf_cache_tests;
-
-pub fn otf_capability(file: &str, face_index: u32) -> Option<OtfCapability> {
-    let data = std::fs::read(file).ok()?;
-    otf_capability_from_bytes(&data, face_index)
-}
 
 pub fn otf_capability_from_bytes(data: &[u8], face_index: u32) -> Option<OtfCapability> {
     let face = ttf_parser::Face::parse(data, face_index).ok()?;

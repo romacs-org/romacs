@@ -34,12 +34,14 @@ pub(super) struct Frame {
     pub z: i64,
     /// GNU `f->focus_frame' (`redirect-frame-focus'), nil when unredirected.
     pub focus: Value,
+    /// What the `alpha-background' setter last applied (frame.c:6098).
+    pub alpha_background: f32,
     /// For the child frame that hosts the minibuffer window
     /// (`romacs--host-minibuffer'), the edge of its text area the window
     /// sits on; its root window takes the rest.
     pub hosts_minibuffer: Option<MiniEdge>,
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, hosts_minibuffer });
+romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer });
 /// Where a child frame hosting the minibuffer window keeps it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MiniEdge { Top, Bottom }
@@ -100,6 +102,11 @@ impl Vm {
             _ => Err("frame required".into()),
         }
     }
+    /// The host frame's background opacity, as painting presents it.
+    pub(crate) fn frame_background_alpha(&mut self) -> Result<f32> {
+        self.ensure_windows()?;
+        Ok(self.frame(self.host_frame_peek())?.alpha_background)
+    }
     pub(super) fn frame_mut(&mut self, value: Value) -> Result<&mut Frame> {
         match self.objects.get_mut(value.index(0)?.saturating_sub(1)) {
             Some(Object::Frame(f)) => Ok(f),
@@ -142,7 +149,7 @@ impl Vm {
             root, selected: root, minibuffer, terminal,
             parameters: vec![name], live: true, id: 1, parent: Value::NIL,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: 0, focus: Value::NIL,
-            hosts_minibuffer: None,
+            alpha_background: 1.0, hosts_minibuffer: None,
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
@@ -168,7 +175,7 @@ impl Vm {
         let id = self.window_state.next_frame;
         let frame = self.allocate_object(Object::Frame(Box::new(Frame {
             root, selected: root, minibuffer, terminal, parameters, live: true, id, parent,
-            left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL,
+            left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL, alpha_background: 1.0,
             hosts_minibuffer: None,
         })));
         self.window_mut(root)?.frame = frame;

@@ -80,6 +80,7 @@ impl std::hash::BuildHasher for NameState {
 use std::sync::Arc;
 mod code_image;
 mod sqlite;
+mod treesit;
 mod random;
 mod digest;
 mod posix_tz;
@@ -1358,13 +1359,18 @@ pub struct Vm {
     recent_keys: std::collections::VecDeque<RecentKey>,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
-    /// The indices in `objects` of every marker, overlay and window, the
-    /// objects that name a buffer: all buffers' marker chains and overlay
-    /// lists at once (GNU's BUF_MARKERS and overlay trees) and the windows,
-    /// so a buffer's or a window are found without walking the heap. None
-    /// until `referrers` lists them again after a collection moved objects;
-    /// it may name dead ones.
-    referrers: Option<Vec<usize>>,
+    /// The objects that name a buffer: each buffer's markers and overlays
+    /// (GNU's BUF_MARKERS and overlay trees) and the windows, so a buffer's
+    /// or a window are found without walking the heap. None until
+    /// `referrers` lists them again after a collection moved objects; it
+    /// may name dead ones.
+    referrers: Option<buffer::Referrers>,
+    /// The slots of the variables each buffer, by its index in `objects`,
+    /// has a Lisp local binding of: GNU's per-buffer `local_var_alist`, so
+    /// killing a buffer or resetting its locals visits its own bindings,
+    /// not every symbol. None until `local_slots` lists them again after a
+    /// collection moved objects; it may name slots whose binding is gone.
+    local_owners: Option<HashMap<usize, Vec<usize>>>,
     /// The `all-completions' walks begun, and the case ranges the latest
     /// one folds with: (walk, canon table root, ranges)
     /// (prim/leaf/completion.rs `walk_case_ranges').
@@ -1495,6 +1501,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     conses,
     objects,
     referrers,
+    local_owners,
     completion_walks,
     completion_case_memo,
     caches,
@@ -1667,6 +1674,7 @@ impl Vm {
             conses: vec![],
             objects: vec![],
             referrers: None,
+            local_owners: None,
             completion_walks: 0,
             completion_case_memo: None,
             caches: vec![],
@@ -3228,6 +3236,7 @@ impl Vm {
                             | data::Object::Terminal(_)
                             | data::Object::WindowConfiguration(_)
                             | data::Object::Sqlite(_)
+                            | data::Object::Treesit(_)
                             | data::Object::Finalizer(_)
                             | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
@@ -3268,6 +3277,7 @@ impl Vm {
                 data::Object::Terminal(_) => Ok("#<terminal initial>".into()),
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Sqlite(h) => Ok(h.describe()),
+                data::Object::Treesit(t) => Ok(crate::treesit::describe(self, t)),
                 // print.c PVEC_FINALIZER.
                 data::Object::Finalizer(function) => Ok(if *function == Value::NIL { "#<finalizer used>" } else { "#<finalizer>" }.into()),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),

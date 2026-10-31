@@ -85,6 +85,9 @@ pub struct FrameSnapshot {
     pub width: u32,
     pub height: u32,
     pub windows: Vec<PlacedWindowSnapshot>,
+    /// The opacity of every background the frame paints, as its
+    /// `alpha-background' setter last applied it (frame.c:6098).
+    pub background_alpha: f32,
     /// Visible child frames painted over the windows, lowest first.
     pub children: Vec<ChildFrameSnapshot>,
 }
@@ -119,6 +122,8 @@ pub struct ChildFrameSnapshot {
     pub border: u32,
     pub border_color: [u8; 3],
     pub background: [u8; 3],
+    /// Its own `alpha-background' (FrameSnapshot::background_alpha).
+    pub background_alpha: f32,
     pub windows: Vec<PlacedWindowSnapshot>,
 }
 

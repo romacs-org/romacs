@@ -211,7 +211,7 @@ impl Vm {
     /// buffer_lisp_local_variables (buffer.c) copied: every Lisp local of
     /// FROM becomes a binding of TO's own with FROM's value.
     fn clone_lisp_locals(&mut self, from: Value, to: Value) -> Result<()> {
-        for slot in 0..self.slots.len() {
+        for slot in self.local_slots(from.index(0)? - 1) {
             let table = self.slots[slot].local;
             if table == Value::NIL {
                 continue;
@@ -221,6 +221,7 @@ impl Vm {
                 let local = self.allocate_local_binding_slot();
                 self.slots[local].value = value;
                 self.declaration_hash_put(table, to, Value::reference(local + 1, 7))?;
+                self.note_local_binding(to, slot);
             }
         }
         Ok(())
@@ -280,7 +281,7 @@ impl Vm {
         }
         let mut overlays = Vec::new();
         let mut markers = Vec::new();
-        for i in self.referrers().to_vec() {
+        for i in self.buffer_referrers(index) {
             match &self.objects[i] {
                 Object::Marker(m) if m.buffer == value => markers.extend(m.anchor),
                 Object::Overlay(o) if o.buffer == value => overlays.push(Value::reference(i + 1, 0)),

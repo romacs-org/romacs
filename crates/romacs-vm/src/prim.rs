@@ -179,6 +179,9 @@ mod leaf {
         Sqlite,
         Process,
         Finalizer,
+        TreesitParser,
+        TreesitNode,
+        TreesitQuery,
         Invalid,
     }
 
@@ -1466,6 +1469,12 @@ mod leaf {
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
                     Some(data::Object::Finalizer(_)) => Kind::Finalizer,
+                    Some(data::Object::Treesit(t)) => match &**t {
+                        crate::treesit::Object::Parser(_) => Kind::TreesitParser,
+                        crate::treesit::Object::Node(_) => Kind::TreesitNode,
+                        crate::treesit::Object::Query(_) => Kind::TreesitQuery,
+                        crate::treesit::Object::Task(_) => Kind::Invalid,
+                    },
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -1620,9 +1629,18 @@ mod leaf {
         pub fn string_slice(&mut self, string: Value, from: usize, to: usize) -> std::result::Result<Value, Fault> {
             let view = self.vm.str_view(string).ok_or(Fault::Wrong("arrayp", string))?;
             let multibyte = view.is_multibyte();
+            let lisp = match self.vm.object_if(string) {
+                Some(data::Object::String(s) | data::Object::RawString(s)) => Some(s),
+                _ => None,
+            };
             let byte = |c: usize| {
                 if !multibyte || view.len() == view.bytes().len() {
                     return c;
+                }
+                // A Lisp string's cursors find it from the last position
+                // asked, as GNU's string_char_to_byte cache does.
+                if let Some(b) = lisp.and_then(|s| s.byte_offset(coordinates::CharOffset(c))) {
+                    return b;
                 }
                 let mut byte = 0;
                 for _ in 0..c {
@@ -1694,6 +1712,7 @@ mod leaf {
     mod undo;
     mod insdel;
     mod sqlite;
+    pub(crate) mod treesit;
     mod process;
     pub(crate) use process::{CallOutput, Target};
     mod random;

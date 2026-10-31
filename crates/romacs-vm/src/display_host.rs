@@ -69,6 +69,11 @@ pub trait DisplayHost {
     /// The font and glyph code the frame draws CH with in a face of FAMILY
     /// at PIXEL_SIZE, as painting resolves it; None when no font has CH.
     fn char_font(&mut self, family: &str, pixel_size: f32, ch: char) -> Option<(OpenedFont, u32)>;
+    /// Apply an `alpha' setter of the frame the display knows as FRAME
+    /// (pgtkterm.c:4663 pgtk_set_frame_alpha): ALPHA while it is active and
+    /// inactive, negative leaving its opacity alone, raised to LIMIT,
+    /// `frame-alpha-lower-limit'.
+    fn set_frame_alpha(&mut self, _frame: u64, _alpha: [f32; 2], _limit: f32) {}
 }
 
 /// The attached display: closed until the session opens it.

@@ -64,16 +64,22 @@ fn sfnt(base: usize, feature: &[u8; 4]) -> Vec<u8> {
     }
     out
 }
+fn new_cache() -> OtfCapabilityCache {
+    std::sync::Mutex::new(FileCache::new(64))
+}
 fn counted(
-    cache: &mut OtfCapabilityCache,
+    cache: &OtfCapabilityCache,
     file: &str,
     face: u32,
     reads: &mut usize,
 ) -> Option<OtfCapability> {
-    cache.get_with(file, face, |path| {
+    otf_capability_in(cache, file, face, |path| {
         *reads += 1;
         std::fs::read(path)
     })
+}
+fn read(cache: &OtfCapabilityCache, file: &str, face: u32) -> Option<OtfCapability> {
+    otf_capability_in(cache, file, face, mapped)
 }
 
 #[test]
@@ -83,11 +89,11 @@ fn unchanged_font_reads_once_and_preserves_both_layout_tables() {
     assert_eq!(expected.gsub[0].tag, "latn");
     assert_eq!(expected.gsub[0].lang_syses[0].features, ["liga"]);
     assert_eq!(expected.gpos[0].lang_syses[0].features, ["kern"]);
-    let mut cache = OtfCapabilityCache::default();
+    let cache = new_cache();
     let mut reads = 0;
     for _ in 0..30 {
         assert_eq!(
-            counted(&mut cache, font.path(), 0, &mut reads),
+            counted(&cache, font.path(), 0, &mut reads),
             Some(expected.clone())
         );
     }
@@ -95,9 +101,9 @@ fn unchanged_font_reads_once_and_preserves_both_layout_tables() {
         reads, 1,
         "same selected font must not be reread per navigation command"
     );
-    cache.clear();
+    cache.lock().unwrap().clear();
     assert_eq!(
-        counted(&mut cache, font.path(), 0, &mut reads),
+        counted(&cache, font.path(), 0, &mut reads),
         Some(expected)
     );
     assert_eq!(
@@ -117,11 +123,11 @@ fn collection_faces_keep_distinct_capabilities() {
     bytes.extend(first);
     bytes.extend(second);
     let font = Fixture::new(&bytes);
-    let mut cache = OtfCapabilityCache::default();
+    let cache = new_cache();
     let mut reads = 0;
     for _ in 0..3 {
         for (face, feature) in [(0, "liga"), (1, "calt")] {
-            let caps = counted(&mut cache, font.path(), face, &mut reads).unwrap();
+            let caps = counted(&cache, font.path(), face, &mut reads).unwrap();
             assert_eq!(caps, otf_capability_from_bytes(&bytes, face).unwrap());
             assert_eq!(caps.gsub[0].lang_syses[0].features, [feature]);
         }
@@ -132,9 +138,9 @@ fn collection_faces_keep_distinct_capabilities() {
 #[test]
 fn replacement_in_place_changes_and_failures_do_not_pin_stale_metadata() {
     let font = Fixture::new(&sfnt(0, b"liga"));
-    let mut cache = OtfCapabilityCache::default();
+    let cache = new_cache();
     let mut reads = 0;
-    let first = counted(&mut cache, font.path(), 0, &mut reads).unwrap();
+    let first = counted(&cache, font.path(), 0, &mut reads).unwrap();
     let original_time = std::fs::metadata(&font.0).unwrap().modified().unwrap();
     let replacement = Fixture::new(&sfnt(0, b"calt"));
     std::fs::File::open(&replacement.0)
@@ -142,7 +148,7 @@ fn replacement_in_place_changes_and_failures_do_not_pin_stale_metadata() {
         .set_times(std::fs::FileTimes::new().set_modified(original_time))
         .unwrap();
     std::fs::rename(&replacement.0, &font.0).unwrap();
-    let second = counted(&mut cache, font.path(), 0, &mut reads).unwrap();
+    let second = counted(&cache, font.path(), 0, &mut reads).unwrap();
     assert_ne!(first, second);
     assert_eq!(second.gsub[0].lang_syses[0].features, ["calt"]);
     // Same inode, same length, and restored mtime: ctime still invalidates.
@@ -152,46 +158,45 @@ fn replacement_in_place_changes_and_failures_do_not_pin_stale_metadata() {
         .set_times(std::fs::FileTimes::new().set_modified(original_time))
         .unwrap();
     assert_eq!(
-        counted(&mut cache, font.path(), 0, &mut reads),
+        counted(&cache, font.path(), 0, &mut reads),
         Some(first.clone())
     );
     std::fs::write(&font.0, b"invalid font").unwrap();
-    assert_eq!(counted(&mut cache, font.path(), 0, &mut reads), None);
+    assert_eq!(counted(&cache, font.path(), 0, &mut reads), None);
     let before = reads;
-    assert_eq!(counted(&mut cache, font.path(), 0, &mut reads), None);
+    assert_eq!(counted(&cache, font.path(), 0, &mut reads), None);
     assert_eq!(reads, before, "unchanged readable parse failure is cached");
     std::fs::write(&font.0, sfnt(0, b"liga")).unwrap();
     assert_eq!(
-        counted(&mut cache, font.path(), 0, &mut reads),
+        counted(&cache, font.path(), 0, &mut reads),
         Some(first.clone())
     );
     std::fs::remove_file(&font.0).unwrap();
-    assert_eq!(counted(&mut cache, font.path(), 0, &mut reads), None);
+    assert_eq!(counted(&cache, font.path(), 0, &mut reads), None);
     std::fs::write(&font.0, sfnt(0, b"liga")).unwrap();
-    assert_eq!(counted(&mut cache, font.path(), 0, &mut reads), Some(first));
+    assert_eq!(counted(&cache, font.path(), 0, &mut reads), Some(first));
 }
 
 #[test]
 fn failed_read_is_retryable_and_cache_is_bounded() {
     let bytes = sfnt(0, b"liga");
     let font = Fixture::new(&bytes);
-    let mut cache = OtfCapabilityCache::default();
+    let cache = new_cache();
     assert_eq!(
-        cache.get_with(font.path(), 0, |_| Err(
+        otf_capability_in(&cache, font.path(), 0, |_| Err::<Vec<u8>, _>(
             std::io::ErrorKind::PermissionDenied.into()
         )),
         None
     );
-    assert!(cache.get(font.path(), 0).is_some());
-    cache.clear();
-    let old = cache
-        .get_with(font.path(), 0, |path| {
+    assert!(read(&cache, font.path(), 0).is_some());
+    cache.lock().unwrap().clear();
+    let old = otf_capability_in(&cache, font.path(), 0, |path| {
             let data = std::fs::read(path)?;
             std::fs::write(path, sfnt(0, b"calt"))?;
             Ok(data)
         })
         .unwrap();
-    let current = cache.get(font.path(), 0).unwrap();
+    let current = read(&cache, font.path(), 0).unwrap();
     assert_ne!(
         old, current,
         "an asset changed during the read must not be cached"
@@ -199,11 +204,69 @@ fn failed_read_is_retryable_and_cache_is_bounded() {
     let fonts: Vec<_> = (0..65).map(|_| Fixture::new(&bytes)).collect();
     let mut reads = 0;
     for font in &fonts {
-        assert!(counted(&mut cache, font.path(), 0, &mut reads).is_some());
+        assert!(counted(&cache, font.path(), 0, &mut reads).is_some());
     }
-    assert!(counted(&mut cache, fonts[0].path(), 0, &mut reads).is_some());
+    assert!(counted(&cache, fonts[0].path(), 0, &mut reads).is_some());
     assert_eq!(
         reads, 66,
         "overflow must retire earlier entries instead of growing indefinitely"
     );
+}
+
+#[cfg(target_os = "linux")]
+fn px_cache() -> PxMetricsCache {
+    std::sync::Mutex::new(FileCache::new(256))
+}
+#[cfg(target_os = "linux")]
+fn px_counted(cache: &PxMetricsCache, file: &str, px: u32, probes: &mut usize) -> Option<FontPxMetrics> {
+    observe_file(cache, file, (0, px, None), || {
+        *probes += 1;
+        probe_px_metrics(file, 0, px, None)
+    })
+}
+
+// The FreeType probe exists only with the Fontconfig adapter.
+#[cfg(target_os = "linux")]
+#[test]
+fn px_metrics_are_probed_once_per_unchanged_file_and_size() {
+    let font = Fixture::new(&std::fs::read(romacs_test_fonts::noto_sans_mono_variable()).unwrap());
+    let direct = probe_px_metrics(font.path(), 0, 19, None).unwrap();
+    assert_eq!(probe_font_px_metrics(font.path(), 0, 19, None), Some(direct));
+    let cache = px_cache();
+    let mut probes = 0;
+    for _ in 0..5 {
+        assert_eq!(px_counted(&cache, font.path(), 19, &mut probes), Some(direct));
+    }
+    assert_eq!(probes, 1);
+    assert_eq!(px_counted(&cache, font.path(), 30, &mut probes), probe_px_metrics(font.path(), 0, 30, None));
+    assert_eq!(probes, 2, "each pixel size is its own observation");
+    // Same bytes, same length, restored mtime: the new ctime still misses.
+    let modified = std::fs::metadata(&font.0).unwrap().modified().unwrap();
+    std::fs::write(&font.0, std::fs::read(romacs_test_fonts::noto_sans_mono_variable()).unwrap()).unwrap();
+    std::fs::File::open(&font.0).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+    assert_eq!(px_counted(&cache, font.path(), 19, &mut probes), Some(direct));
+    assert_eq!(probes, 3);
+}
+
+// The FreeType probe exists only with the Fontconfig adapter.
+#[cfg(target_os = "linux")]
+#[test]
+fn unreadable_or_missing_fonts_are_not_cached() {
+    use std::os::unix::fs::PermissionsExt;
+    let font = Fixture::new(&std::fs::read(romacs_test_fonts::noto_sans_mono_variable()).unwrap());
+    let cache = px_cache();
+    let mut probes = 0;
+    std::fs::set_permissions(&font.0, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root reads it anyway; the retry below is what matters.
+    let unreadable = std::fs::read(&font.0).is_err();
+    let first = px_counted(&cache, font.path(), 19, &mut probes);
+    if unreadable {
+        assert_eq!(first, None);
+    }
+    std::fs::set_permissions(&font.0, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(px_counted(&cache, font.path(), 19, &mut probes).is_some());
+    assert_eq!(probes, 2, "a failed probe is retried");
+    std::fs::remove_file(&font.0).unwrap();
+    assert_eq!(px_counted(&cache, font.path(), 19, &mut probes), None);
+    assert_eq!(probes, 3, "a missing file never answers from the cache");
 }

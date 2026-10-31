@@ -368,6 +368,31 @@ impl Vm {
         run(self).map_err(|fault| self.regexp_fault(fault))
     }
 
+    /// Whether PATTERN matches somewhere in BYTES, GNU internal text:
+    /// treesit.c's fast_c_string_match of a node type and its `#match?'
+    /// search_buffer narrowed to a node. Case-sensitive, no match data.
+    /// SPAN, a buffer and the byte BYTES start at, gives the search that
+    /// buffer's syntax there; without it the current buffer's table holds.
+    pub(crate) fn bytes_search(&mut self, pattern: Value, bytes: &[u8], multibyte: bool, span: Option<(Value, usize)>) -> std::result::Result<bool, prim::Fault> {
+        let run = |vm: &mut Self| -> SearchResult<bool> {
+            let pattern = vm.regexp_input(pattern)?;
+            let source = match span {
+                Some((buffer, base)) => vm.regexp_buffer_syntax(buffer, base)?,
+                None => vm.regexp_syntax(None)?,
+            };
+            let compiled = vm.regexp_pattern(&pattern, false, Translation::None, None, &source)?;
+            let mut compiled = compiled.borrow_mut();
+            let syntax = syntax::VmSyntax::new(vm, source);
+            compiled.set_target_multibyte(multibyte);
+            let found = regex::re_search(&compiled, bytes, 0, bytes.len() as isize, &syntax, usize::MAX).is_some();
+            if regex::take_matcher_overflow() {
+                return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
+            }
+            Ok(found)
+        };
+        run(self).map_err(|fault| self.regexp_fault(fault))
+    }
+
     /// GNU fast_string_match: case-sensitive, current syntax, no match-data writes.
     pub(crate) fn file_name_match(&mut self, pattern: Value, string: Value) -> std::result::Result<Option<usize>, prim::Fault> {
         self.string_match_no_data(pattern, string, Translation::None, None)

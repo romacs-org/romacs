@@ -37,6 +37,9 @@ rustc-hash = "2"
 foldhash = "0.2"
 # SQLite for sqlite.c's primitives, built from the bundled amalgamation.
 libsqlite3-sys = { version = "0.38", features = ["bundled"] }
+# The tree-sitter runtime behind treesit.c's primitives (statically linked;
+# grammars are dlopened as GNU does).
+tree-sitter = "=0.27.0"
 
 [build-dependencies]
 sha2 = "0.11"

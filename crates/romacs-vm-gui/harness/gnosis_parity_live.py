@@ -69,8 +69,9 @@ import parity_live
 #     the process id (gnosis-scheduler-event-id), so the probe names each by
 #     the order it was made, <event-id-N>.
 #   * Settling: a step is observed once input is drained, its predicate
-#     holds and no one-shot timer is due within 3s (parity-probe-quiet), so
-#     work a step deferred to a timer has run on both sides.
+#     holds and no one-shot timer the step started is due within 3s
+#     (parity-probe-quiet), so work a step deferred to a timer has run on
+#     both sides.
 # Nothing else is ignored; an unexplained difference is a Romacs bug.
 # ---------------------------------------------------------------------------
 
@@ -101,8 +102,9 @@ def init_source(engine, root, lisp):
     """The init both engines load: identical except where each finds gnosis."""
     # GNU gets the packages Romacs bundles, installed as package.el would:
     # their directories on `load-path' and the same generated autoloads
-    # Romacs's --loadup loads.  gnosis and keymap-popup come byte-compiled.
-    bundled = [lisp] + [ROOT / 'rlisp' / d for d in ('hermes', 'jabber', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket')]
+    # Romacs's --loadup loads, whose rlisp/ libraries (romacs-video's
+    # find-file-hook) need rlisp/ too.  gnosis and keymap-popup come byte-compiled.
+    bundled = [lisp] + [ROOT / 'rlisp' / d for d in ('', 'hermes', 'jabber', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket')]
     load = '' if lisp is None else (
         f'(setq load-path (append (list {" ".join(lisp_string(str(d)) for d in bundled[:1])}) load-path'
         f' (list {" ".join(lisp_string(str(d)) for d in bundled[1:])})))\n'

@@ -891,7 +891,7 @@ impl Vm {
     fn live_window_index(&mut self, id: u64) -> Option<usize> {
         self.referrers();
         let objects = &self.objects;
-        self.referrers.as_deref().unwrap_or_default().iter().copied()
+        self.referrers.as_ref().map_or(&[][..], |r| &r.windows).iter().copied()
             .find(|&i| matches!(&objects[i], Object::Window(w) if w.id == id && w.live()))
     }
     /// The root frame's live windows in tree order, as `window-list' from
@@ -1887,6 +1887,22 @@ impl<'a> Windows<'a> {
             Some((_, v)) => *v = value,
             None => parameters.insert(0, (key, value)),
         }
+        Ok(())
+    }
+    /// FRAME's background opacity becomes ALPHA.
+    pub(crate) fn set_frame_background_alpha(&mut self, frame: Value, alpha: f32) -> std::result::Result<(), Fault> {
+        self.live_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        self.vm.frame_mut(frame).map_err(internal)?.alpha_background = alpha;
+        Ok(())
+    }
+    /// The window system's frame alpha hook (frame.c:6088) for FRAME:
+    /// ALPHA while active and inactive, LIMIT the lower limit it reads.
+    pub(crate) fn set_frame_alpha(&mut self, frame: Value, alpha: [f32; 2], limit: f32) -> std::result::Result<(), Fault> {
+        self.live_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        let id = self.vm.frame(frame).map_err(internal)?.id;
+        if let Some(host) = self.vm.window_system_host() { host.set_frame_alpha(id, alpha, limit); }
         Ok(())
     }
     /// frame.c:286: the frame's type, t on the initial terminal and the

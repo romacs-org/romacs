@@ -248,7 +248,7 @@ impl Vm {
         {
             if p == Get {
                 if self.fence.is_some() {
-                    self.fence_property(x, Some(y), world::Access::Read);
+                    self.fence_property(x, Some(y), world::Access::Read, None);
                 }
                 return Ok(self.symbol_property(x, y).expect("checked symbol"));
             }

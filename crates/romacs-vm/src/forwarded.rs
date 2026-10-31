@@ -187,6 +187,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "display-raw-bytes-as-hex", gnu: "xdisp.c:39451", kind: Kind::Bool(false) },
     CVariable { name: "double-click-fuzz", gnu: "keyboard.c:13909", kind: Kind::Int(3) },
     CVariable { name: "double-click-time", gnu: "keyboard.c:13899", kind: Kind::Lisp(Init::Fixnum(500)) },
+    CVariable { name: "dynamic-library-suffixes", gnu: "lread.c:5603", kind: Kind::Lisp(Init::List(&[Init::Str(".so"), Init::Str("")])) },
     CVariable { name: "echo-keystrokes", gnu: "keyboard.c:13880", kind: Kind::Lisp(Init::Fixnum(1)) },
     CVariable { name: "echo-keystrokes-help", gnu: "keyboard.c:13886", kind: Kind::Bool(true) },
     CVariable { name: "ebrowse-program-name", gnu: "callproc.c:2218", kind: Kind::Lisp(Init::Str("ebrowse")) },
@@ -206,6 +207,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "fontification-functions", gnu: "xdisp.c:39011", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "force-load-messages", gnu: "lread.c:5746", kind: Kind::Bool(false) },
     CVariable { name: "forward-comment-function", gnu: "syntax.c:3822", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "frame-alpha-lower-limit", gnu: "frame.c:7421", kind: Kind::Lisp(Init::Fixnum(20)) },
     CVariable { name: "frame-inhibit-implied-resize", gnu: "frame.c:7638", kind: Kind::Lisp(Init::True) },
     CVariable { name: "frame-resize-pixelwise", gnu: "frame.c:7625", kind: Kind::Bool(false) },
     CVariable { name: "frame-size-history", gnu: "frame.c:7695", kind: Kind::Lisp(Init::Nil) },
@@ -376,6 +378,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "throw-on-input", gnu: "keyboard.c:14316", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "timer-list", gnu: "keyboard.c:14247", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "timer-idle-list", gnu: "keyboard.c:14251", kind: Kind::Lisp(Init::Nil) },
+    // Bound in every process, as cus-start expects of a built-in; Romacs
+    // draws no tool bar.
+    CVariable { name: "tool-bar-mode", gnu: "frame.c:7545", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-separator-image-expression", gnu: "keyboard.c:14122", kind: Kind::Lisp(Init::Nil) },
     // What the command loop evaluates when a throw returns it to top level
     // (rlisp/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.
@@ -389,6 +394,10 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "translation-table-for-input", gnu: "coding.c:12221", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "translation-table-vector", gnu: "character.c:1100", kind: Kind::Lisp(Init::NilVector(16)) },
     CVariable { name: "treesit-extra-load-path", gnu: "treesit.c:5429", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "treesit-language-remap-alist", gnu: "treesit.c:5478", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "treesit-languages-require-line-column-tracking", gnu: "treesit.c:5491", kind: Kind::Lisp(Init::List(&[Init::Symbol("haskell")])) },
+    CVariable { name: "treesit-load-name-override-list", gnu: "treesit.c:5411", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "treesit-major-mode-remap-alist", gnu: "treesit.c:5502", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "treesit-thing-settings", gnu: "treesit.c:5443", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "truncate-partial-width-windows", gnu: "xdisp.c:38768", kind: Kind::Lisp(Init::Fixnum(50)) },
     CVariable { name: "tty-erase-char", gnu: "keyboard.c:13948", kind: Kind::Lisp(Init::Nil) },
@@ -893,6 +902,12 @@ impl PerBuffer {
         }
         self.0[i] = Some(value);
     }
+    /// Forget every binding but those at KEPT, keeping the visit metadata.
+    pub(crate) fn retain_locals(&mut self, kept: &[u16]) {
+        for (i, value) in self.0.iter_mut().enumerate() {
+            if !kept.contains(&(i as u16)) { *value = None; }
+        }
+    }
     /// Forget one binding without disturbing the other values or visit metadata.
     /// Absence is the local flag: removing the value also removes that flag.
     pub(crate) fn clear_local(&mut self, i: u16) {
@@ -934,6 +949,11 @@ impl Vm {
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
     /// A fenced built-in variable is the forwarding the fence keeps; a
     /// fenced plain one is `Fwd::Fence`.
+    /// The interned slots of the per-buffer built-ins (DEFVAR_PER_BUFFER),
+    /// the only ones a `Fwd::Buffer' forwards.
+    pub(crate) fn per_buffer_slots(&self) -> Vec<usize> {
+        self.forwarded.buffer_vars.iter().filter_map(|&v| self.names.get(C_VARIABLES[v].name).copied()).collect()
+    }
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {

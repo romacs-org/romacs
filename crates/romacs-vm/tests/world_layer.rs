@@ -19,19 +19,23 @@ const BOOTSTRAP: &str = "\
 (defvar romacs--world-reseed-forms nil)
 (defvar timer-list nil)
 (defvar fence-out nil)
-(defvar custom-delayed-init-variables nil)
+(defvar fence-mode nil)
+(put 'fence-mode 'custom-set 'fence-set-mode)
+(defun fence-mode-value () 'on)
+(defvar custom-delayed-init-variables '(fence-mode))
 (defmacro defcustom (symbol value &rest _) (list 'defvar symbol value))
 (defun fake-startup ()
   (unwind-protect
       (progn (romacs--startup-phase t)
              (setq fence-out (if (boundp 'lib-g-flag) 'g 'none))
+             (setq fence-mode (list (get 'fence-mode 'custom-set) (fence-mode-value)))
              (setq custom-delayed-init-variables t))
     (romacs--startup-phase nil)))
 (defvar romacs-startup-function #'fake-startup)
 (fake-startup)
 ";
 
-const LIBRARIES: [(&str, &str); 10] = [
+const LIBRARIES: [(&str, &str); 13] = [
     // A definition reading a fenced fact, and one reading its variable.
     ("lib-a", "(defcustom lib-a-program (car exec-path) \"doc\")\n(defvar lib-a-derived (concat lib-a-program \"!\"))\n(provide 'lib-a)\n"),
     // A plain form reading a fenced fact.
@@ -48,6 +52,13 @@ const LIBRARIES: [(&str, &str); 10] = [
     ("lib-i", "(setq lib-i-x (buffer-local-value 'lib-h-local (current-buffer)))\n(provide 'lib-i)\n"),
     // A definition an effect cuts short.
     ("lib-j", "(defvar-local lib-j-dir (let ((d \"/nonexistent-romacs-layer/x\")) (make-directory-internal d) d))\n(defvar lib-j-after lib-j-dir)\n(provide 'lib-j)\n"),
+    // As cus-start: whether a delayed variable is bound, and the property
+    // startup read, written with what it held.
+    ("lib-k", "(when (boundp 'fence-mode) (put 'fence-mode 'custom-set 'fence-set-mode))\n(provide 'lib-k)\n"),
+    // The property startup reads, written with another value.
+    ("lib-l", "(put 'fence-mode 'custom-set 'fence-other)\n(provide 'lib-l)\n"),
+    // A plain form reading a delayed variable.
+    ("lib-m", "(setq lib-m-x fence-mode)\n(provide 'lib-m)\n"),
 ];
 
 fn scratch(name: &str) -> PathBuf {
@@ -143,4 +154,24 @@ fn a_library_that_changes_what_startup_computes_refuses_the_build() {
         .map(|r| r["symbol"].as_str().unwrap()).collect();
     assert_eq!(changed, ["fence-out"]);
     assert!(refusals(&trace, "init-layer").is_empty(), "no entry is named: {trace}");
+}
+
+#[test]
+fn a_library_may_ask_whether_a_delayed_variable_is_bound_and_rewrite_what_startup_reads() {
+    let (mut vm, refused, trace) = build("cus-start", &["lib-k"]);
+    assert!(refused.is_empty(), "{}", trace["refusals"]);
+    assert!(refusals(&trace, "fence").is_empty(), "{trace}");
+    assert_eq!(eval(&mut vm, "(list (featurep 'lib-k) fence-mode)"), "(t (fence-set-mode on))");
+    // Its value is still the process's: reading it refuses the entry.
+    let (_, refused, trace) = build("delayed-read", &["lib-k", "lib-m"]);
+    assert_eq!(refused, [(1, "fence".to_owned())], "{}", trace["refusals"]);
+    let fences: Vec<(u64, &str)> = refusals(&trace, "fence").iter()
+        .filter_map(|r| Some((r["root"].as_u64()?, r["symbol"].as_str()?))).collect();
+    assert_eq!(fences, [(3, "fence-mode")]);
+    // Another value refuses its entry, whatever startup computes from it.
+    let (_, refused, trace) = build("rewritten", &["lib-l"]);
+    assert_eq!(refused, [(0, "fence".to_owned())], "{}", trace["refusals"]);
+    let written: Vec<(u64, &str, &str)> = refusals(&trace, "fence").iter().filter(|r| r["access"] == "write")
+        .map(|r| (r["root"].as_u64().unwrap(), r["symbol"].as_str().unwrap(), r["property"].as_str().unwrap())).collect();
+    assert_eq!(written, [(6, "fence-mode", "custom-set")], "{trace}");
 }
