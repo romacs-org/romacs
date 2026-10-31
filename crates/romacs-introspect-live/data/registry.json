@@ -8,10 +8,10 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "8078d7562feb710117eab8711e4abea5c0262a70b24ebb4cb9c0bc0dce81ec1f",
+    "input_hash": "cdafbb22ad188dc7a345e2d248a6106a3d5e51bd6377e55bc9b7d2e4e9544250",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 5271
+    "vm2_universe": 5272
   },
   "schema": 2,
   "vm2": {
@@ -33,6 +33,7 @@
       "#:vm2-insert-before-markers",
       "#:vm2-lookup-key",
       "#:vm2-message",
+      "#:vm2-nconc",
       "#:vm2-provide",
       "#:vm2-set-interactive-form",
       "#:vm2-temp-buffer",
@@ -570,9 +571,6 @@
       "map-keymap-internal",
       "mapatoms",
       "mapbacktrace",
-      "mapc",
-      "mapcan",
-      "mapconcat",
       "maphash",
       "mark-marker",
       "marker-buffer",
@@ -762,6 +760,7 @@
       "romacs--closure-arity",
       "romacs--closure-document",
       "romacs--code-converting-work",
+      "romacs--concat-list",
       "romacs--decode-output",
       "romacs--frozen-regions",
       "romacs--get-process",
@@ -791,6 +790,7 @@
       "romacs--keymap-generation",
       "romacs--kill-buffer-finish",
       "romacs--local-toplevel-cell",
+      "romacs--nconc-list",
       "romacs--note-command-point",
       "romacs--oclosure-type",
       "romacs--overlay-change-hooks",

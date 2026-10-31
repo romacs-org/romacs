@@ -108,6 +108,14 @@
    "class": "PRINTER",
    "row": "VM2-EV2"
   },
+  "mapcan/0243": {
+   "class": "DATA",
+   "row": "VM2-MAPCAR1"
+  },
+  "mapcan/0244": {
+   "class": "DATA",
+   "row": "VM2-MAPCAR1"
+  },
   "mapcan/0258": {
    "class": "PRINTER",
    "row": "VM2-EV2"

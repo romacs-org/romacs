@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "65be1706f1b51e645ee77d39653e0d7557d2c3d33f0343f849bd10e8cde771d6",
+  "input_hash": "e3ab778ca63cb5997b78749f59a2f3a9ef615e80680e9bed08795cb452fb922b",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 306,
-  "symbols": 819,
+  "symbols": 821,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -261,6 +261,9 @@
    61
   ],
   "byte-defop-compiler": [
+   58
+  ],
+  "byte-optimize-plus": [
    58
   ],
   "call-interactively": [
@@ -1651,7 +1654,11 @@
   ],
   "mapc": [
    64,
-   65
+   65,
+   126
+  ],
+  "mapcan": [
+   126
   ],
   "mapcar": [
    58,
@@ -1659,7 +1666,8 @@
    126
   ],
   "mapconcat": [
-   27
+   27,
+   126
   ],
   "maphash": [
    147
@@ -3790,7 +3798,7 @@
    "planned": false,
    "mechanism": "Calls of GNU's byte-op primitives are sealed: `car`, `cdr`, `cons`, `eq`, `memq`, `assq`, `nth`, `not`, `null`, `consp`, `listp`, `symbolp`, `stringp`, `length`, `aref`, `aset`, `setcar`, `setcdr`, `1+`, `1-`, `+`, `-`, `*`, `/`, `%`, `=`, `<`, `>`, `<=`, `>=`, `max`, `min`, `list`, `concat`, `insert`, `nconc`, `nreverse`, `get`, `set`, `fset`, `symbol-value`, `symbol-function`, `point`, `goto-char`, `char-after`, `set-buffer`, `current-buffer`, `equal`, `member`, `elt`, `nthcdr`, `substring`, `upcase`, `downcase`, `string=`, `string<`, the buffer and match primitives of `lisp/emacs-lisp/bytecomp.el:3970-4275` (`byte-defop-compiler` rows with an opcode), at the argument counts those handlers emit the opcode for (`crates/romacs-vm/src/sealed.rs` lists them; `sealed::tests` pins the list to the file).",
    "gnu": "The byte compiler emits a byte code for such a call (`src/bytecode.c:658` `Bcar`, `:1083` `Bnot`, `:1331` `Bplus`, `:1675` `Bnconc`); byte code never reads the function cell, so *compiled* code ignores `fset`, `defalias`, `advice-add` and `cl-letf` of these names, while the *interpreter* (`eval_sub`) reads the cell and sees them. Cell readers (`funcall` of a variable holding the symbol, `apply`, `mapcar`, `symbol-function`) see them in both; byte-opt folds `(funcall 'car x)` and `(apply #'car (list x))` into the byte code. Pinned GNU 32.0.50 after `(advice-add 'car :around ADV)`: byte-compiled `(car '(1 2))` => `1`, `(funcall f '(1 2))` with `f` = `car` and `(mapcar #'car l)` => advised; interpreted `(car '(1 2))` => `(advised . 1)`. After `(fset '+ (lambda (a b) 'plus-redefined))`: compiled `(+ 8 3)` => `11`, interpreted => `plus-redefined`; `(defalias 'null ...)` leaves compiled `(null nil)` and `(not nil)` at `t`.",
-   "romacs": "Every call of these names compiles to the primitive itself (`Op::Sealed`), with no function-cell guard; `funcall`, `apply`, `mapcar` and `symbol-function` read the cell as in GNU, and `advice-add`/`advice-remove` on a sealed name work for them. Romacs has no interpreter: `eval`, `eval-expression`, `ielm` and `load` of source compile, so where GNU's interpreter would see a redefinition of `car`, Romacs behaves as GNU's compiled code. `(funcall 'car x)` is not folded and reads the cell (GNU compiled: the byte code). A call with an argument count GNU does not compile to a byte code (`(car a b)`, `(+ a b c)`, `(max)`) is an ordinary call and reads the cell. Rationale: a small set of primitives whose semantics cannot be changed is accepted Elisp practice (`bytecomp.el`'s own open-coding), and the per-call guard it replaces was 9% of `ert-tests.el`'s instructions and 2% of the GUI journey's; measurements in the commit. No `gnu-lisp/`, `rlisp/` or test code redefines a byte-op name except fixtures that probe the redefinition itself (`evidence/text-known-answers.json`, re-recorded from compiled GNU). Tests: `sealed::tests`, `tests/sealed_primitives.rs` (advice, against pinned compiled GNU), `tests/traversal.rs`, `tests/core.rs`.",
+   "romacs": "Every call of these names compiles to the primitive itself (`Op::Sealed`), with no function-cell guard; `funcall`, `apply`, `mapcar` and `symbol-function` read the cell as in GNU, and `advice-add`/`advice-remove` on a sealed name work for them. Romacs has no interpreter: `eval`, `eval-expression`, `ielm` and `load` of source compile, so where GNU's interpreter would see a redefinition of `car`, Romacs behaves as GNU's compiled code. `(funcall 'car x)` is not folded and reads the cell (GNU compiled: the byte code). `(+ x y z)`, and the same three-argument `-`, `*`, `min` and `max`, with no number among the arguments, is `(+ (+ x y) z)`: two byte codes, as `byte-optimize-plus` and its siblings rewrite it (`lisp/emacs-lisp/byte-opt.el:917`). Any other call with an argument count GNU does not compile to a byte code (`(car a b)`, `(+ a b c d)`, `(max)`) is an ordinary call and reads the cell. Rationale: a small set of primitives whose semantics cannot be changed is accepted Elisp practice (`bytecomp.el`'s own open-coding), and the per-call guard it replaces was 9% of `ert-tests.el`'s instructions and 2% of the GUI journey's; measurements in the commit. No `gnu-lisp/`, `rlisp/` or test code redefines a byte-op name except fixtures that probe the redefinition itself (`evidence/text-known-answers.json`, re-recorded from compiled GNU). Tests: `sealed::tests`, `tests/sealed_primitives.rs` (advice, against pinned compiled GNU), `tests/traversal.rs`, `tests/core.rs`.",
    "why": "<!-- symbols: car, cdr, cons, eq, memq, assq, nth, not, null, consp, listp, symbolp, stringp, length, aref, aset, setcar, setcdr, 1+, 1-, +, -, *, /, %, =, <, >, <=, >=, max, min, list, concat, insert, nconc, nreverse, get, set, fset, symbol-value, symbol-function, point, point-min, point-max, buffer-size, goto-char, char-after, set-buffer, current-buffer, equal, member, elt, nthcdr, substring, upcase, downcase, string=, string<, string-equal, string-lessp, match-beginning, match-end, forward-char, forward-line, forward-word, end-of-line, bolp, eolp, bobp, eobp, widen, narrow-to-region, delete-region, buffer-substring, current-column, indent-to, indent-to-column, skip-chars-forward, skip-chars-backward, char-syntax, set-marker, move-marker, rplaca, rplacd, following-char, preceding-char, numberp, integerp, car-safe, cdr-safe, advice-add, advice-remove, cl-letf -->",
    "symbols": [
     "car",
@@ -3862,6 +3870,7 @@
     "eval-expression",
     "ielm",
     "load",
+    "byte-optimize-plus",
     "(max)",
     "gnu-lisp/",
     "rlisp/"
@@ -5056,12 +5065,15 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`mapcar` is a Lisp function in VM2",
-   "gnu": "`mapcar` is the C subr `Fmapcar` (`src/fns.c:3551`, arity `(2 . 2)`): `(subrp (symbol-function 'mapcar))` is t, and a wrong argument count signals `(wrong-number-of-arguments #<subr mapcar> N)`.",
-   "romacs": "VM2 defines `mapcar` in its built-in prelude (`crates/romacs-vm/src/prims/prelude.el`) because a Rust primitive must not call Lisp from a loop (GC doctrine): `subrp` of it is nil, `symbol-function` returns a closure, and a wrong count signals the compiled-closure form `(wrong-number-of-arguments (2 . 2) N)`. Its traversal, element order, length-first checking, shortening by the callback and its signals match GNU case for case on the bulk `core` corpus, except the four arity rows `mapcar/0203`-`0206` (pinned `DATA`) and a closure used as the SEQUENCE (`mapcar/0257`, VM2-CLOSEQ1).",
-   "why": "**Package-observable metadata:** code inspecting `subrp`/`subr-arity` of `mapcar`, or reading the function datum of its arity error, sees a closure. Ordinary calls over lists, vectors, strings and bool-vectors are indistinguishable.",
+   "mechanism": "`mapcar`, `mapc`, `mapcan` and `mapconcat` are Lisp functions in VM2",
+   "gnu": "They are the C subrs `Fmapcar`, `Fmapc`, `Fmapcan` and `Fmapconcat` (`src/fns.c:3484`-`3585`, arities `(2 . 2)` and `(2 . 3)`): `(subrp (symbol-function 'mapcar))` is t, and a wrong argument count signals `(wrong-number-of-arguments #<subr mapcar> N)`.",
+   "romacs": "VM2 defines all four in its built-in prelude (`rlisp/vm/prelude.el`) because a Rust primitive must not call Lisp from a loop (GC doctrine): `subrp` of them is nil, `symbol-function` returns a closure, and a wrong count signals the compiled-closure form `(wrong-number-of-arguments (2 . 2) N)`. Their traversal (`length` first, a list until the length or a tail the function shortened, a vector, string or bool-vector by index), element order, `mapconcat`'s `identity` shortcut and separator, `mapcan`'s `nconc` and their signals match GNU case for case on the bulk `core` corpus and the `mapc`/`mapcan` primitive evidence, except the arity rows `mapcar/0203`-`0206`, `mapc/0048`, `mapc/0049`, `mapc/0078`, `mapcan/0243`, `mapcan/0244` (pinned `DATA`/`PRINTER`) and a closure used as the SEQUENCE (`mapcar/0257`, VM2-CLOSEQ1). The frame a callback sees under the mapping function's is the function's own, as on GNU (`tests/backtrace.rs`, `tests/map_functions.rs`).",
+   "why": "**Package-observable metadata:** code inspecting `subrp`/`subr-arity` of these, or reading the function datum of their arity errors, sees a closure. Ordinary calls over lists, vectors, strings and bool-vectors are indistinguishable.",
    "symbols": [
     "mapcar",
+    "mapc",
+    "mapcan",
+    "mapconcat",
     "subrp",
     "symbol-function",
     "wrong-number-of-arguments"

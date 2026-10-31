@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "9de9a26c9bc57a764a18c246cdbbdbac030de7b9f564f72a9a7185185bd71236",
+  "source_fingerprint": "2fe442472cd4058b3f655dd7af14d7c445e0c89a0e09e09f8720e4d76264e673",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -110,6 +110,12 @@
    "implementation": "vm2",
    "variant": "Primitive::Message",
    "registered_at": "crates/romacs-vm/src/lib.rs:638"
+  },
+  "#:vm2-nconc": {
+   "name": "#:vm2-nconc",
+   "implementation": "vm2",
+   "variant": "Primitive::Nconc",
+   "registered_at": "crates/romacs-vm/src/lib.rs:644"
   },
   "#:vm2-provide": {
    "name": "#:vm2-provide",
@@ -2889,21 +2895,6 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/backtrace.rs:4"
   },
-  "mapc": {
-   "name": "mapc",
-   "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fns_map.rs:139"
-  },
-  "mapcan": {
-   "name": "mapcan",
-   "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fns_map.rs:3"
-  },
-  "mapconcat": {
-   "name": "mapconcat",
-   "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/leaf_sequences.rs:17"
-  },
   "maphash": {
    "name": "maphash",
    "implementation": "vm2",
@@ -3130,8 +3121,7 @@
   "nconc": {
    "name": "nconc",
    "implementation": "vm2",
-   "variant": "Primitive::Nconc",
-   "registered_at": "crates/romacs-vm/src/lib.rs:644"
+   "registered_at": "crates/romacs-vm/src/prims/fns_seq.rs:50"
   },
   "next-overlay-change": {
    "name": "next-overlay-change",
@@ -3890,6 +3880,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:420"
   },
+  "romacs--concat-list": {
+   "name": "romacs--concat-list",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/widen.rs:285"
+  },
   "romacs--decode-output": {
    "name": "romacs--decode-output",
    "implementation": "vm2",
@@ -4034,6 +4029,11 @@
    "name": "romacs--local-toplevel-cell",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/vars.rs:222"
+  },
+  "romacs--nconc-list": {
+   "name": "romacs--nconc-list",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/fns_seq.rs:57"
   },
   "romacs--note-command-point": {
    "name": "romacs--note-command-point",
@@ -4873,7 +4873,7 @@
   "sort": {
    "name": "sort",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/leaf_sequences.rs:102"
+   "registered_at": "crates/romacs-vm/src/prims/leaf_sequences.rs:13"
   },
   "special-variable-p": {
    "name": "special-variable-p",

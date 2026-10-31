@@ -613,6 +613,9 @@
   }
  ],
  "pinned": {
+  "mapc/0048": "DATA",
+  "mapc/0049": "DATA",
+  "mapc/0078": "PRINTER",
   "mapc/0081": "SIGNAL-VS-VALUE",
   "mapc/0088": "PRINTER",
   "mapc/0089": "PRINTER"

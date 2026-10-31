@@ -1,100 +1,11 @@
 //! GNU fns.c sequence callbacks. All state crossing Lisp calls is traced.
 use super::*;
 
-fn native(name: &str) -> Value {
-    (0..crate::prim::count())
-        .find(|&i| crate::prim::descriptor(i).is_some_and(|d| d.name() == name))
-        .map(|i| Value::reference(i, 6))
-        .expect("required native primitive is registered")
-}
 fn number(n: usize) -> Value {
     Value::integer(n as i64).expect("sequence index")
 }
 fn index(v: Value) -> usize {
     v.integer_value().expect("saved index") as usize
-}
-
-defsubr! { name = "mapconcat", gnu = "fns.c:3484", effect = Global,
-fn mapconcat(cx, function: Value, sequence: Value; optional separator: Value) -> Step {
-    Ok(Step::Call { f: native("length"), args: vec![sequence], then: map_measured,
-        saved: vec![function, sequence, separator] })
-}}
-
-// function, sequence, separator, length, index, list/byte cursor, mapped results.
-fn map_measured(cx: &mut Leaf<'_>, length: Value, saved: &[Value]) -> Next {
-    if cx.kind(saved[1]) == leaf::Kind::CharTable {
-        return Err(Fault::Wrong("listp", saved[1]));
-    }
-    let cursor = if cx.pair(saved[1]).is_some() {
-        saved[1]
-    } else {
-        number(0)
-    };
-    let mut state = saved.to_vec();
-    let results = cx.vector(&vec![Value::NIL; index(length)]);
-    state.extend([length, number(0), cursor, results]);
-    let seq = state[1];
-    if state[0] == cx.intern("identity") {
-        if let Ok(values) = cx.vector_values(seq) {
-            state[6] = cx.vector(&values);
-            state[4] = length;
-        } else if cx.pair(seq).is_some() {
-            let mut values = Vec::new();
-            let mut tail = seq;
-            while let Some((car, cdr)) = cx.pair(tail) {
-                values.push(car);
-                tail = cdr;
-            }
-            state[6] = cx.vector(&values);
-            state[4] = length;
-        }
-    }
-    map_next(cx, state)
-}
-fn map_next(cx: &mut Leaf<'_>, mut state: Vec<Value>) -> Next {
-    let i = index(state[4]);
-    if i >= index(state[3]) {
-        let mut parts = Vec::new();
-        let values = cx.vector_values(state[6])?;
-        for (i, &part) in values[..index(state[3])].iter().enumerate() {
-            if i != 0 {
-                parts.push(state[2]);
-            }
-            parts.push(part);
-        }
-        return super::widen::concat(cx, &parts).map(Step::Done);
-    }
-    let seq = state[1];
-    let element = if cx.pair(seq).is_some() {
-        let Some((car, _)) = cx.pair(state[5]) else {
-            state[3] = state[4];
-            return map_next(cx, state);
-        };
-        car
-    } else if matches!(cx.kind(seq), leaf::Kind::String | leaf::Kind::Bytes) {
-        let (code, width) = cx.string_char_at(seq, index(state[5])).ok_or_else(|| {
-            Fault::Error("String's bytes changed under a mapping function".into())
-        })?;
-        state[5] = number(index(state[5]) + width);
-        number(code as usize)
-    } else {
-        super::fns_access::elt(cx, seq, number(i))?
-    };
-    Ok(Step::Call {
-        f: state[0],
-        args: vec![element],
-        then: map_called,
-        saved: state,
-    })
-}
-fn map_called(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
-    let mut state = saved.to_vec();
-    cx.vector_set(state[6], state[4], value)?;
-    if let Some((_, cdr)) = cx.pair(state[5]) {
-        state[5] = cdr;
-    }
-    state[4] = number(index(state[4]) + 1);
-    map_next(cx, state)
 }
 
 // State: original, lessp, key, reverse, inplace, items, keys, i, j. Small

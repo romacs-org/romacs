@@ -54,7 +54,7 @@ impl Vm {
     ) -> Result<Value> {
         use Primitive::*;
         let arity = match p {
-            List | Nconc => None,
+            List => None,
             Get | Fset => Some(2),
             Put => Some(3),
             Defalias if (2..=3).contains(&n) => None,
@@ -178,42 +178,6 @@ impl Vm {
                     }
                 }
                 Ok(Value::NIL)
-            }
-            Nconc => {
-                let mut out = Value::NIL;
-                let mut last: Option<usize> = None;
-                for (i, &list) in a.iter().enumerate() {
-                    if list == Value::NIL {
-                        continue;
-                    }
-                    if let Some(index) = last {
-                        self.conses[index].1 = list;
-                    } else {
-                        out = list;
-                    }
-                    if i + 1 == a.len() {
-                        break;
-                    }
-                    let mut tail = list;
-                    let mut steps = 0;
-                    loop {
-                        if Self::image_value(tail) {
-                            return Err(self.refuse_read_only(tail));
-                        }
-                        let index = tail.index(3)?;
-                        let cdr = self.cons_pair(tail)?.1;
-                        if cdr == Value::NIL {
-                            last = Some(index);
-                            break;
-                        }
-                        tail = cdr;
-                        steps += 1;
-                        if steps > self.list_limit() {
-                            return Err("circular list".into());
-                        }
-                    }
-                }
-                Ok(out)
             }
             ExpandFileName => self.expand_file_name_legacy(a[0], a.get(1).copied().unwrap_or(Value::NIL)),
             FileDirectoryP => Ok(

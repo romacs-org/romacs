@@ -1663,6 +1663,8 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
             ("listp", 1) => Some(listp),
             ("numberp", 1) => Some(numberp),
             ("cdr-safe", 1) => Some(cdr_safe),
+            ("nconc", 2) => Some(nconc2),
+            ("symbol-function", 1) => Some(symbol_function),
             _ => None,
         };
     }
@@ -3939,6 +3941,62 @@ macro_rules! safe_half {
 }
 safe_half!(car_safe, false);
 safe_half!(cdr_safe, true);
+/// The function cell of symbol X (nil when void), as `symbol-function'
+/// answers; None for anything else, or a macro, whose answer it conses.
+#[inline(never)]
+fn function_cell(vm: &Vm, x: Value) -> Option<Value> {
+    if x == Value::UNBOUND {
+        return None;
+    }
+    let slot = x.index_if(7)?.checked_sub(1)?;
+    if vm.macros.contains(&slot) {
+        return None;
+    }
+    let function = vm.slots.get(slot)?.function;
+    Some(if function == Value::UNBOUND { Value::NIL } else { function })
+}
+unsafe fn symbol_function(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let Some(value) = function_cell(e.vm, *r.add(i.d)) else {
+            return sealed_call(e, r, pc);
+        };
+        *r.add(i.a) = value;
+        advance(e, r, pc)
+    }
+}
+/// `(nconc LIST TAIL)` where LIST is nil or a private list that ends within
+/// the list limit: TAIL on its last cons. Anything else (a non-list, an image
+/// cons, a cycle) is the primitive's, which signals as GNU's Fnconc does.
+unsafe fn nconc2(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let (list, tail) = (*r.add(i.d), *r.add(i.d + 1));
+        if list == Value::NIL {
+            *r.add(i.a) = tail;
+            return advance(e, r, pc);
+        }
+        let limit = e.vm.list_limit();
+        let mut last = list;
+        let mut steps = 0;
+        loop {
+            if last.tag() != 3 || Vm::image_value(last) || steps > limit {
+                return sealed_call(e, r, pc);
+            }
+            let Some(&(_, next)) = e.vm.conses.get(last.payload() as usize) else {
+                return sealed_call(e, r, pc);
+            };
+            if next.tag() != 3 {
+                break;
+            }
+            last = next;
+            steps += 1;
+        }
+        e.vm.conses[last.payload() as usize].1 = tail;
+        *r.add(i.a) = list;
+        advance(e, r, pc)
+    }
+}
 unsafe fn cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;

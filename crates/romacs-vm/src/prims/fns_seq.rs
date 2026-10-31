@@ -44,6 +44,53 @@ fn ntake(cx, n: Value, list: Value) {
     truncate(cx, n, list)
 }}
 
+// GNU Fnconc: each list but the last must be a cons, walked with
+// FOR_EACH_TAIL (a cycle signals); its last cons takes the next argument,
+// and a nil argument hands that cons on to the one after.
+defsubr! { name = "nconc", gnu = "fns.c:3390", effect = MutatesArgs,
+fn nconc(cx; rest lists) {
+    nconc_values(cx, lists)
+}}
+
+// `nconc' of the elements of a list: Fmapcan's Fnconc over its results,
+// which the prelude's `mapcan' collects (rlisp/vm/prelude.el).
+defsubr! { name = "romacs--nconc-list", gnu = "fns.c:3585", effect = MutatesArgs,
+fn nconc_list(cx, lists: Value) {
+    let lists = super::widen::list_elements(cx, lists)?;
+    nconc_values(cx, &lists)
+}}
+
+fn nconc_values(cx: &mut Leaf<'_>, lists: &[Value]) -> Out {
+    let mut lists = lists.to_vec();
+    let mut value = Value::NIL;
+    for k in 0..lists.len() {
+        let list = lists[k];
+        if list == Value::NIL {
+            continue;
+        }
+        if value == Value::NIL {
+            value = list;
+        }
+        if k + 1 == lists.len() {
+            break;
+        }
+        if cx.pair(list).is_none() {
+            return Err(Fault::Wrong("consp", list));
+        }
+        let (mut tail, mut last, mut tortoise, mut steps) = (list, list, list, 0);
+        while cx.pair(tail).is_some() {
+            last = tail;
+            (tail, tortoise, steps) = super::fns_equal::for_each_tail_step(cx, tail, tortoise, steps)?;
+        }
+        let next = lists[k + 1];
+        cx.setcdr(last, next)?;
+        if next == Value::NIL {
+            lists[k + 1] = last;
+        }
+    }
+    Ok(value)
+}
+
 fn delete_eq(cx: &mut Leaf<'_>, elt: Value, mut list: Value) -> Out {
     let mut tail = list;
     let mut previous = Value::NIL;

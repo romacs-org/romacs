@@ -2,6 +2,7 @@ use romacs_vm::Vm;
 
 fn check(name: &str, source: &str, expected: &str) {
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
     vm.set_collection_floor(1);
     let expression = if expected.starts_with('"') {
         format!("(equal {source} {expected})")

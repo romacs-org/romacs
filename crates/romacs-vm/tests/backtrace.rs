@@ -16,6 +16,7 @@ fn compare(name: &str, source: &str) {
     );
     let expected = String::from_utf8(output.stdout).unwrap();
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
     vm.eval_source("(defun bt-compile (function) function)")
         .unwrap();
     let actual = vm.eval_source(source).and_then(|v| v.display());

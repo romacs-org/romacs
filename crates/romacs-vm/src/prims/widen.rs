@@ -279,3 +279,25 @@ fn suffix_member(cx: &Leaf<'_>, needle: Value, list: Value) -> std::result::Resu
     if tail != Value::NIL { return Err(Fault::Wrong("listp", list)); }
     Ok(false)
 }
+
+// `concat' of the elements of a list: Fmapconcat's Fconcat over its
+// results, which the prelude's `mapconcat' collects (rlisp/vm/prelude.el).
+defsubr! { name = "romacs--concat-list", gnu = "fns.c:3484", effect = Pure,
+fn concat_list(cx, parts: Value) {
+    let parts = list_elements(cx, parts)?;
+    concat(cx, &parts)
+}}
+
+/// The elements of LIST, a proper list a mapping function built.
+pub(super) fn list_elements(cx: &Leaf<'_>, list: Value) -> std::result::Result<Vec<Value>, Fault> {
+    let mut values = Vec::new();
+    let (mut tail, mut tortoise, mut steps) = (list, list, 0);
+    while let Some((car, _)) = cx.pair(tail) {
+        values.push(car);
+        (tail, tortoise, steps) = super::fns_equal::for_each_tail_step(cx, tail, tortoise, steps)?;
+    }
+    if tail != Value::NIL {
+        return Err(Fault::Wrong("listp", tail));
+    }
+    Ok(values)
+}
