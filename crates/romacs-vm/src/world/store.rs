@@ -8,7 +8,7 @@
 //! (`libraries_digest`) and the embedder's recipe. The records bind every
 //! host fact the build read; a launch asks the host each of them again and
 //! boots from source on any difference. The manifest binds the image's
-//! content by its SHA-256, which a launch checks against the file it maps,
+//! content by its digest (`content_digest`), which a launch checks against the file it maps,
 //! hashed once and then known by its identity.
 //!
 //! A launch is one of two processes:
@@ -44,7 +44,7 @@ use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
 
-pub const FORMAT: &str = "romacs-world 2";
+pub const FORMAT: &str = "romacs-world 3";
 /// Set in a builder: the store it publishes to.
 const BUILD_ENV: &str = "ROMACS_WORLD_BUILD";
 /// Set in a builder: the descriptor of the world's lock, which its
@@ -111,13 +111,11 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     sha2::Sha256::digest(data).into()
 }
 
-/// The content digest of FILE, cached in STORE by the file's identity and
-/// change times: hashing tens or hundreds of megabytes at every launch
-/// would cost more than the rest of a restore. A write, a truncation or a
-/// change of mode changes the identity.
+/// The content digest of FILE (`content_digest`), cached in STORE by the
+/// file's identity and change times: hashing tens or hundreds of megabytes
+/// at every launch would cost more than the rest of a restore. A write, a
+/// truncation or a change of mode changes the identity.
 fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> {
-    use sha2::Digest;
-    use std::io::Read;
     let meta = host::file_metadata(file)?;
     let cached = store.join("ids").join(identity_name(&meta));
     if let Ok(text) = host::read_store_file(&cached)
@@ -125,18 +123,69 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
     {
         return Ok(digest.try_into().expect("32 bytes"));
     }
-    let mut digest = sha2::Sha256::new();
-    let mut buffer = vec![0u8; 1 << 20];
-    let mut reader = file;
-    loop {
-        match reader.read(&mut buffer)? {
-            0 => break,
-            n => digest.update(&buffer[..n]),
-        }
-    }
-    let digest: [u8; 32] = digest.finalize().into();
+    let digest = content_digest(file, meta.len())?;
     let _ = store_subdir(&store.join("ids")).and_then(|()| host::write_store_file(&cached, hex(&digest)));
     Ok(digest)
+}
+
+/// How much of a file one digest worker reads at a time.
+const DIGEST_CHUNK: u64 = 4 << 20;
+
+/// FILE's first LEN bytes as one digest: SHA-256 over LEN, then each
+/// `DIGEST_CHUNK` chunk's length and SHA-256, in order. Chunks are hashed
+/// on up to eight threads, each reading its own with `pread`, so a hole
+/// hashes as the zeros it reads as. A file that ends before LEN fails. The
+/// thread count is fixed, not the host's: the digest never depends on it.
+fn content_digest(file: &std::fs::File, len: u64) -> std::io::Result<[u8; 32]> {
+    use sha2::Digest;
+    use std::os::unix::fs::FileExt;
+    let chunks = len.div_ceil(DIGEST_CHUNK) as usize;
+    let bounds = |i: usize| (i as u64 * DIGEST_CHUNK, ((i as u64 + 1) * DIGEST_CHUNK).min(len));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let hash_chunks = || -> std::io::Result<Vec<(usize, [u8; 32])>> {
+        let (mut buffer, mut hashed) = (vec![0u8; 1 << 20], Vec::new());
+        loop {
+            let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if i >= chunks {
+                return Ok(hashed);
+            }
+            let (mut at, end) = bounds(i);
+            let mut digest = sha2::Sha256::new();
+            while at < end {
+                let n = (end - at).min(buffer.len() as u64) as usize;
+                file.read_exact_at(&mut buffer[..n], at)?;
+                digest.update(&buffer[..n]);
+                at += n as u64;
+            }
+            hashed.push((i, digest.finalize().into()));
+        }
+    };
+    let threads = chunks.min(8);
+    let parts: Vec<std::io::Result<Vec<(usize, [u8; 32])>>> = std::thread::scope(|scope| {
+        // A worker that cannot start (an address-space limit) leaves its
+        // chunks to the others; this thread takes part too.
+        let workers: Vec<_> = (1..threads)
+            .filter_map(|_| std::thread::Builder::new().stack_size(256 << 10).spawn_scoped(scope, hash_chunks).ok())
+            .collect();
+        let mine = hash_chunks();
+        std::iter::once(mine)
+            .chain(workers.into_iter().map(|w| w.join().unwrap_or_else(|_| Err(std::io::Error::other("digest worker panicked")))))
+            .collect()
+    });
+    let mut digests = vec![[0u8; 32]; chunks];
+    for part in parts {
+        for (i, digest) in part? {
+            digests[i] = digest;
+        }
+    }
+    let mut tree = sha2::Sha256::new();
+    tree.update(len.to_le_bytes());
+    for (i, digest) in digests.iter().enumerate() {
+        let (start, end) = bounds(i);
+        tree.update((end - start).to_le_bytes());
+        tree.update(digest);
+    }
+    Ok(tree.finalize().into())
 }
 
 /// A directory DIR of the store's own, made 0700 if missing: private
@@ -1341,7 +1390,7 @@ mod tests {
         fifo(&dir.join("ids").join(identity_name(&meta)));
         let store = dir.clone();
         let digest = bounded("the digest cache", move || file_digest(&store, &std::fs::File::open(input).unwrap())).unwrap();
-        assert_eq!(digest, sha256(b"bytes"));
+        assert_eq!(digest, tree_digest(b"bytes"));
         let w = world.clone();
         assert!(bounded("the world's lock", move || w.try_lock()).is_err());
         let w = world.clone();
@@ -1359,6 +1408,70 @@ mod tests {
         let store = dir.clone();
         assert!(bounded("the store lock", move || lock_store(&store, libc::LOCK_SH)).is_err());
         let _ = std::fs::remove_dir_all(marked);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `content_digest` of BYTES, made sequentially from its definition.
+    fn tree_digest(bytes: &[u8]) -> [u8; 32] {
+        let mut tree = (bytes.len() as u64).to_le_bytes().to_vec();
+        for chunk in bytes.chunks(DIGEST_CHUNK as usize) {
+            tree.extend((chunk.len() as u64).to_le_bytes());
+            tree.extend(sha256(chunk));
+        }
+        sha256(&tree)
+    }
+
+    fn digest_of(path: &Path) -> std::io::Result<[u8; 32]> {
+        let file = std::fs::File::open(path)?;
+        content_digest(&file, file.metadata()?.len())
+    }
+
+    #[test]
+    fn an_image_digest_binds_every_byte_and_the_length() {
+        let dir = std::env::temp_dir().join(format!("romacs-digest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("image");
+        let chunk = DIGEST_CHUNK as usize;
+        let bytes: Vec<u8> = (0..3 * chunk + 17).map(|i| (i * 31 % 251) as u8).collect();
+        for len in [0, 1, chunk - 1, chunk, chunk + 1, bytes.len()] {
+            std::fs::write(&path, &bytes[..len]).unwrap();
+            assert_eq!(digest_of(&path).unwrap(), tree_digest(&bytes[..len]), "{len} bytes");
+        }
+        let original = tree_digest(&bytes);
+        let changed = |at: usize| {
+            let mut bytes = bytes.clone();
+            bytes[at] ^= 1;
+            std::fs::write(&path, &bytes).unwrap();
+            digest_of(&path).unwrap()
+        };
+        for at in [0, chunk - 1, chunk, 2 * chunk + 5, bytes.len() - 1] {
+            assert_ne!(changed(at), original, "a flipped byte at {at}");
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        let file = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        file.set_len(bytes.len() as u64 - 1).unwrap();
+        assert!(content_digest(&file, bytes.len() as u64).is_err(), "a file shorter than its length");
+        let mut extended = bytes.clone();
+        extended.extend([0; 4096]);
+        std::fs::write(&path, &extended).unwrap();
+        assert_ne!(digest_of(&path).unwrap(), original, "a page more of zeros");
+        // A sparse file hashes as the zeros its hole reads as, and a write
+        // into the hole changes it.
+        let sparse = dir.join("sparse");
+        let file = std::fs::File::create(&sparse).unwrap();
+        file.set_len(2 * DIGEST_CHUNK + 9).unwrap();
+        {
+            use std::os::unix::fs::FileExt;
+            file.write_all_at(b"head", 0).unwrap();
+        }
+        let mut dense = vec![0; 2 * chunk + 9];
+        dense[..4].copy_from_slice(b"head");
+        assert_eq!(digest_of(&sparse).unwrap(), tree_digest(&dense));
+        {
+            use std::os::unix::fs::FileExt;
+            file.write_all_at(b"x", DIGEST_CHUNK + 3).unwrap();
+        }
+        assert_ne!(digest_of(&sparse).unwrap(), tree_digest(&dense), "a write into the hole");
         let _ = std::fs::remove_dir_all(dir);
     }
 
