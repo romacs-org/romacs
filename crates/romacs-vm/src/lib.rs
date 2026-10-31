@@ -1358,13 +1358,18 @@ pub struct Vm {
     recent_keys: std::collections::VecDeque<RecentKey>,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
-    /// The indices in `objects` of every marker, overlay and window, the
-    /// objects that name a buffer: all buffers' marker chains and overlay
-    /// lists at once (GNU's BUF_MARKERS and overlay trees) and the windows,
-    /// so a buffer's or a window are found without walking the heap. None
-    /// until `referrers` lists them again after a collection moved objects;
-    /// it may name dead ones.
-    referrers: Option<Vec<usize>>,
+    /// The objects that name a buffer: each buffer's markers and overlays
+    /// (GNU's BUF_MARKERS and overlay trees) and the windows, so a buffer's
+    /// or a window are found without walking the heap. None until
+    /// `referrers` lists them again after a collection moved objects; it
+    /// may name dead ones.
+    referrers: Option<buffer::Referrers>,
+    /// The slots of the variables each buffer, by its index in `objects`,
+    /// has a Lisp local binding of: GNU's per-buffer `local_var_alist`, so
+    /// killing a buffer or resetting its locals visits its own bindings,
+    /// not every symbol. None until `local_slots` lists them again after a
+    /// collection moved objects; it may name slots whose binding is gone.
+    local_owners: Option<HashMap<usize, Vec<usize>>>,
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
@@ -1490,6 +1495,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     conses,
     objects,
     referrers,
+    local_owners,
     caches,
     stack,
     external_roots,
@@ -1660,6 +1666,7 @@ impl Vm {
             conses: vec![],
             objects: vec![],
             referrers: None,
+            local_owners: None,
             caches: vec![],
             stack: vec![],
             external_roots: vec![],

@@ -52,9 +52,9 @@ impl Leaf<'_> {
             self.intern(name);
         }
         // Snapshot slot IDs, not borrowed values, before allocating list cells.
-        let slots = self.vm.slots.len();
+        let slots = self.vm.local_candidates(buffer.index(0).unwrap() - 1);
         let mut entries = Vec::new();
-        for slot in 0..slots {
+        for slot in slots {
             if self.vm.local_binding_slots.contains(&slot) { continue; }
             if self.vm.indirect_variable(slot) != slot { continue; }
             let symbol = Value::reference(slot + 1, 7);
@@ -74,8 +74,7 @@ impl Leaf<'_> {
         let permanent = self.intern("permanent-local");
         let permanent_hook = self.intern("permanent-local-hook");
         let reset = self.intern("reset");
-        let slots = self.vm.slots.len();
-        for slot in 0..slots {
+        for slot in self.vm.local_candidates(buffer.index(0).unwrap() - 1) {
             if self.vm.local_binding_slots.contains(&slot) || self.vm.indirect_variable(slot) != slot { continue; }
             let symbol = Value::reference(slot + 1, 7);
             if !self.has_buffer_local(symbol, buffer)? { continue; }

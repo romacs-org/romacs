@@ -29,6 +29,133 @@ mod model_tests {
         }
     }
 
+    /// What killing a buffer visits: its own Lisp locals, markers and
+    /// overlays (GNU's local_var_alist and BUF_MARKERS), and the windows.
+    /// Another buffer's size does not change it.
+    fn kill_work(others: usize) -> (usize, usize, usize) {
+        let mut vm = Vm::new();
+        vm.eval_source_raw(&format!(r#"
+          (setq big (get-buffer-create "big") kb-markers nil kb-overlays nil i 0)
+          (set-buffer big)
+          (insert (make-string {others} ?x))
+          (while (< i {others})
+            (set (make-local-variable (intern (format "kb-local-%d" i))) i)
+            (setq kb-markers (cons (copy-marker (1+ i)) kb-markers))
+            (setq kb-overlays (cons (make-overlay (1+ i) (1+ i)) kb-overlays))
+            (setq i (1+ i)))"#)).unwrap();
+        // Listed now, so what follows reaches the indices through allocation,
+        // `set-marker', `move-overlay' and `make-local-variable'.
+        vm.referrers();
+        vm.local_slots(0);
+        vm.eval_source_raw(r#"
+          (setq tmp (get-buffer-create " tmp" t))
+          (set-buffer tmp)
+          (insert "xy")
+          (set (make-local-variable 'kb-tmp) 1)
+          (setq own (copy-marker 1) moved (car kb-markers) moved-overlay (car kb-overlays))
+          (set-marker moved 2 tmp)
+          (move-overlay moved-overlay 1 2 tmp)
+          (set-buffer big)"#).unwrap();
+        let slot = vm.slot("tmp");
+        let tmp = vm.slots[slot].value;
+        let index = tmp.index(0).unwrap() - 1;
+        let work = (vm.local_slots(index).len(), vm.buffer_referrers(index).len(), vm.referrers().windows.len());
+        vm.eval_source_raw("(kill-buffer tmp)").unwrap();
+        let checks = vm.eval_source_raw(r#"
+          (list (marker-buffer own) (marker-buffer moved) (overlay-buffer moved-overlay)
+                (local-variable-p 'kb-tmp tmp)
+                (eq (marker-buffer (nth 1 kb-markers)) big) (eq (overlay-buffer (nth 1 kb-overlays)) big)
+                (buffer-local-value 'kb-local-0 big))"#).unwrap();
+        let checks = vm.list_values(checks).unwrap();
+        assert_eq!(&checks[..4], &[Value::NIL; 4], "the killed buffer's markers, overlays and locals are released");
+        assert_eq!(&checks[4..], &[Value::TRUE, Value::TRUE, Value::integer(0).unwrap()], "the other buffer's are untouched");
+        work
+    }
+
+    #[test]
+    fn killing_a_buffer_visits_its_own_state() {
+        let small = kill_work(10);
+        assert_eq!(small, kill_work(2000));
+        assert!(small.0 <= 1 && small.1 <= 3, "{small:?}");
+    }
+
+    /// A collection that moves objects drops both indices; they are listed
+    /// again from the heap and the local tables, and a kill still releases
+    /// only the killed buffer's state.
+    #[test]
+    fn kill_after_collection_releases_own_state() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw(r#"
+          (setq a (get-buffer-create "a") b (get-buffer-create "b"))
+          (set-buffer a) (insert "abc") (set (make-local-variable 'kb-x) 'a) (setq ma (copy-marker 2))
+          (set-buffer b) (insert "abc") (set (make-local-variable 'kb-x) 'b) (setq mb (copy-marker 2))
+          (garbage-collect)
+          (kill-buffer b)"#).unwrap();
+        let checks = vm.eval_source_raw("(list (marker-buffer mb) (local-variable-p 'kb-x b) (eq (marker-buffer ma) a) (buffer-local-value 'kb-x a))").unwrap();
+        let a = vm.intern("a");
+        assert_eq!(vm.list_values(checks).unwrap(), [Value::NIL, Value::NIL, Value::TRUE, a]);
+    }
+
+    /// A marker moved back and forth between two buffers stays listed once
+    /// per move only until its chain is pruned.
+    #[test]
+    fn moving_markers_keeps_chains_bounded() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw(r#"
+          (setq a (get-buffer-create "a") b (get-buffer-create "b") m (make-marker) i 0)
+          (with-current-buffer a (insert "abc"))
+          (with-current-buffer b (insert "abc"))"#).unwrap();
+        vm.referrers();
+        vm.eval_source_raw(r#"
+          (while (< i 5000) (set-marker m 1 a) (set-marker m 1 b) (setq i (1+ i)))"#).unwrap();
+        let slot = vm.slot("a");
+        let a = vm.slots[slot].value.index(0).unwrap() - 1;
+        let listed = vm.referrers.as_ref().and_then(|r| r.chains.get(&a)).map_or(0, |c| c.members.len());
+        assert!(listed < 128, "{listed}");
+    }
+
+    /// A marker that moved from a base buffer to its indirect buffer is in
+    /// both chains; a deletion of the shared text records its adjustment once.
+    #[test]
+    fn family_marker_moved_between_buffers_is_adjusted_once() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw(r#"
+          (setq base (get-buffer-create "base"))
+          (set-buffer base) (insert "abcdefgh")
+          (setq ind (make-indirect-buffer base "ind"))"#).unwrap();
+        vm.referrers();
+        let entries = vm.eval_source_raw(r#"
+          (setq m (copy-marker 4))
+          (set-marker m 4 ind)
+          (setq buffer-undo-list nil)
+          (delete-region 2 6)
+          (let ((n 0) (tail buffer-undo-list))
+            (while tail (if (and (consp (car tail)) (eq (car (car tail)) m)) (setq n (1+ n))) (setq tail (cdr tail)))
+            n)"#).unwrap();
+        assert_eq!(entries, Value::integer(1).unwrap());
+    }
+
+    /// `substring' finds a multibyte string's positions from its cursors:
+    /// slicing a string from start to end scans it about once, not once
+    /// per slice, and each slice holds the characters asked for.
+    #[test]
+    fn substring_walks_multibyte_strings_once() {
+        let mut vm = Vm::new();
+        let ok = vm.eval_source_raw(r#"
+          (setq s (apply #'string (let ((i 0) l) (while (< i 6000) (setq l (cons (aref [?é ?a ?字 4194303] (% i 4)) l) i (1+ i))) l))
+                i 0 ok t)
+          (while (< i 5990)
+            (let ((piece (substring s i (+ i 10))) (k 0))
+              (while (< k 10) (or (eq (aref piece k) (aref s (+ i k))) (setq ok nil)) (setq k (1+ k))))
+            (setq i (+ i 10)))
+          ok"#).unwrap();
+        assert_eq!(ok, Value::TRUE);
+        let slot = vm.slot("s");
+        let Some(Object::String(s) | Object::RawString(s)) = vm.object_if(vm.slots[slot].value) else { panic!("string") };
+        let scanned = s.scanned.get();
+        assert!(scanned > 0 && scanned < 4 * 6000, "{scanned}");
+    }
+
     #[test]
     fn killed_buffer_loses_symbol_local_bindings() {
         let mut vm = Vm::new();
@@ -112,6 +239,43 @@ pub(crate) fn widened_properties(from: &properties::Properties, octets: &[u8], b
         for (key, value) in values {
             into.put(range.clone(), &key, value);
         }
+    }
+}
+
+/// The objects that name a buffer, by index in `objects` (`Vm::referrers`).
+#[derive(Clone, Default)]
+pub(crate) struct Referrers {
+    /// Every window.
+    pub(crate) windows: Vec<usize>,
+    /// Each buffer's markers and overlays, by the buffer's index: GNU's
+    /// BUF_MARKERS and overlay tree.
+    chains: HashMap<usize, Chain>,
+}
+romacs_snapshot::snapshot_struct!(Referrers { windows, chains });
+/// One buffer's markers and overlays. A member may since have moved to
+/// another buffer or died, or be listed again after it came back.
+#[derive(Clone, Default)]
+pub(crate) struct Chain {
+    members: Vec<usize>,
+    /// The length when members that left were last dropped.
+    pruned: usize,
+}
+romacs_snapshot::snapshot_struct!(Chain { members, pruned });
+impl Referrers {
+    /// Note OBJECT, at index I, if it names a buffer.
+    pub(crate) fn list(&mut self, i: usize, object: &Object) {
+        match object {
+            Object::Window(_) => self.windows.push(i),
+            Object::Marker(m) => { self.attach(m.buffer, i); }
+            Object::Overlay(o) => { self.attach(o.buffer, i); }
+            _ => {}
+        }
+    }
+    /// List the object at index I in BUFFER's chain, returned.
+    fn attach(&mut self, buffer: Value, i: usize) -> Option<&mut Chain> {
+        let chain = self.chains.entry(buffer.index_if(0)?.checked_sub(1)?).or_default();
+        chain.members.push(i);
+        Some(chain)
     }
 }
 
@@ -281,15 +445,76 @@ impl Vm {
         });
         found.map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))
     }
-    /// The indices of the heap's markers, overlays and windows
+    /// The heap's windows and each buffer's markers and overlays
     /// (`Vm::referrers`), listed by one walk of the heap when unknown.
-    pub(crate) fn referrers(&mut self) -> &[usize] {
+    pub(crate) fn referrers(&mut self) -> &Referrers {
         let objects = &self.objects;
         self.referrers.get_or_insert_with(|| {
-            objects.iter().enumerate()
-                .filter(|(_, object)| matches!(object, Object::Marker(_) | Object::Overlay(_) | Object::Window(_)))
-                .map(|(i, _)| i).collect()
+            let mut referrers = Referrers::default();
+            for (i, object) in objects.iter().enumerate() { referrers.list(i, object); }
+            referrers
         })
+    }
+    /// The markers and overlays the buffer at object INDEX may hold, each
+    /// once, in heap order.
+    pub(crate) fn buffer_referrers(&mut self, index: usize) -> Vec<usize> {
+        let mut members = self.referrers().chains.get(&index).map(|c| c.members.clone()).unwrap_or_default();
+        members.sort_unstable();
+        members.dedup();
+        members
+    }
+    /// The marker or overlay at object INDEX is now in BUFFER. A chain twice
+    /// as long as when it was last pruned drops the members that left it,
+    /// so moving markers between buffers keeps it bounded.
+    pub(crate) fn note_referrer(&mut self, buffer: Value, index: usize) {
+        let (Some(referrers), objects) = (&mut self.referrers, &self.objects) else { return };
+        let Some(chain) = referrers.attach(buffer, index) else { return };
+        if chain.members.len() < 2 * chain.pruned.max(32) { return; }
+        chain.members.retain(|&i| match objects.get(i) {
+            Some(Object::Marker(m)) => m.buffer == buffer,
+            Some(Object::Overlay(o)) => o.buffer == buffer,
+            _ => false,
+        });
+        chain.members.sort_unstable();
+        chain.members.dedup();
+        chain.pruned = chain.members.len();
+    }
+    /// The slots of the variables the buffer at object INDEX may have a
+    /// Lisp local binding of (`Vm::local_owners`), in slot order, listed by
+    /// one pass over the local tables when unknown.
+    pub(crate) fn local_slots(&mut self, index: usize) -> Vec<usize> {
+        if self.local_owners.is_none() {
+            let mut owners: HashMap<usize, Vec<usize>> = HashMap::default();
+            for (slot, s) in self.slots.iter().enumerate() {
+                let Some(Object::HashTable(table)) = self.object_if(s.local) else { continue };
+                for (_, buffer, _) in table.entries() {
+                    if let Some(i) = buffer.index_if(0).and_then(|i| i.checked_sub(1)) { owners.entry(i).or_default().push(slot); }
+                }
+            }
+            self.local_owners = Some(owners);
+        }
+        let mut found = self.local_owners.as_ref().and_then(|owners| owners.get(&index)).cloned().unwrap_or_default();
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+    /// The slots of the variables the buffer at object INDEX may have a
+    /// local binding of, in slot order: the always local
+    /// `enable-multibyte-characters', the per-buffer built-ins and its
+    /// Lisp locals.
+    pub(crate) fn local_candidates(&mut self, index: usize) -> Vec<usize> {
+        let mut slots = self.local_slots(index);
+        slots.push(self.multibyte_slot);
+        slots.extend(self.per_buffer_slots());
+        slots.sort_unstable();
+        slots.dedup();
+        slots
+    }
+    /// BUFFER now has a Lisp local binding of the variable at SLOT.
+    pub(crate) fn note_local_binding(&mut self, buffer: Value, slot: usize) {
+        if let (Some(owners), Some(i)) = (&mut self.local_owners, buffer.index_if(0).and_then(|i| i.checked_sub(1))) {
+            owners.entry(i).or_default().push(slot);
+        }
     }
     pub(crate) fn kill_buffer_model(&mut self, value: Value) -> Result<()> {
         if !self.buffer_state(value)?.live || self.minibuffer_window_buffer() == Some(value) { return Ok(()); }
@@ -304,8 +529,8 @@ impl Vm {
         let mut order = self.buffer_order();
         order.retain(|&b| b != value);
         self.set_buffer_order(&order);
-        let referrers = self.referrers().to_vec();
-        let windows: Vec<Value> = referrers.iter().filter_map(|&i| {
+        let index = value.index(0)? - 1;
+        let windows: Vec<Value> = self.referrers().windows.clone().into_iter().filter_map(|i| {
             match &self.objects[i] {
                 Object::Window(w) if w.buffer == value => Some(Value::reference(i + 1, 0)),
                 _ => None,
@@ -336,10 +561,12 @@ impl Vm {
             }
         }
         self.leave_base(value)?;
-        let tables: Vec<Value> = self.slots.iter().map(|s| s.local)
-            .filter(|&v| v != Value::NIL).collect();
-        for table in tables { self.declaration_hash_remove(table, value)?; }
-        for i in referrers {
+        for slot in self.local_slots(index) {
+            let table = self.slots[slot].local;
+            if table != Value::NIL { self.declaration_hash_remove(table, value)?; }
+        }
+        if let Some(owners) = &mut self.local_owners { owners.remove(&index); }
+        for i in self.buffer_referrers(index) {
             match &mut self.objects[i] {
                 Object::Marker(m) if m.buffer == value => { m.buffer = Value::NIL; m.anchor = None; }
                 Object::Overlay(o) if o.buffer == value => {
@@ -348,6 +575,7 @@ impl Vm {
                 _ => {}
             }
         }
+        if let Some(referrers) = &mut self.referrers { referrers.chains.remove(&index); }
         // GNU kill-buffer resets ordinary locals but retains the visited filename.
         // Reuse the native per-buffer storage without retaining other Lisp locals.
         let fields = match self.object(value)? {
@@ -355,21 +583,15 @@ impl Vm {
             Object::ByteBuffer(b) => &b.per_buffer,
             _ => unreachable!(),
         };
-        let has_filename = ["buffer-file-name", "buffer-file-truename"].into_iter().any(|name| match self.forwarded.lookup(name) {
-            Some(crate::forwarded::Fwd::Buffer(i)) => fields.get(i).is_some_and(|v| v != Value::NIL),
-            _ => false,
-        });
+        let kept: Vec<u16> = ["buffer-file-name", "buffer-file-truename"].into_iter().filter_map(|name| match self.forwarded.lookup(name) {
+            Some(crate::forwarded::Fwd::Buffer(i)) => Some(i),
+            _ => None,
+        }).collect();
+        let has_filename = kept.iter().any(|&i| fields.get(i).is_some_and(|v| v != Value::NIL));
         let mut retained = if has_filename { fields.clone() } else { Default::default() };
-        for name in crate::forwarded::Forwarded::names() {
-            if name != "buffer-file-name" && name != "buffer-file-truename" {
-                if let Some(crate::forwarded::Fwd::Buffer(i)) = self.forwarded.lookup(name) {
-                    retained.clear_local(i);
-                }
-            }
-        }
+        retained.retain_locals(&kept);
         let mut state = self.buffer_state(value)?.clone();
         state.kill();
-        let index = value.index(0)? - 1;
         self.objects[index] = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer::empty(state, retained))),
             Object::Buffer(b) => {
