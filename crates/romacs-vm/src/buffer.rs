@@ -172,6 +172,25 @@ impl Vm {
         order.push(buffer);
         self.set_buffer_order(&order);
     }
+    /// buffer.c other_buffer_safely, the last defence of Fkill_buffer once
+    /// `replace-buffer-in-windows' and `other-buffer' (the Lisp half,
+    /// rlisp/vm/buffer_lifecycle.el) have had their say: the first buffer in
+    /// ORDER other than BUFFER that is live, not hidden and not the
+    /// minibuffer's, a text buffer when a window will SHOW it, else a new
+    /// *scratch*.
+    fn other_buffer_safely(&mut self, order: &[Value], buffer: Value, show: bool) -> Result<Value> {
+        let found = order.iter().copied().find(|&candidate| {
+            candidate != buffer
+                && (!show || matches!(self.object_if(candidate), Some(Object::Buffer(_))))
+                && self.buffer_state(candidate).is_ok_and(|state| {
+                    state.live && state.name.as_deref().is_some_and(|n| !n.starts_with(' '))
+                })
+                && !self.objects.iter().any(|object| {
+                    matches!(object, Object::Window(w) if w.mini && w.buffer == candidate)
+                })
+        });
+        found.map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))
+    }
     pub(crate) fn kill_buffer_model(&mut self, value: Value) -> Result<()> {
         if !self.buffer_state(value)?.live || self.objects.iter().any(|object| {
             matches!(object, Object::Window(w) if w.mini && w.buffer == value)
@@ -192,17 +211,7 @@ impl Vm {
             }
         }).collect();
         if self.slots[self.buffer_slot].value == value || !windows.is_empty() {
-            // The first other live buffer in the buffer list, as other-buffer.
-            let replacement = order.iter().copied().find(|&candidate| {
-                candidate != value
-                    && (windows.is_empty() || matches!(self.object_if(candidate), Some(Object::Buffer(_))))
-                    && self.buffer_state(candidate).is_ok_and(|state| {
-                        state.live && state.name.as_deref().is_some_and(|n| !n.starts_with(' '))
-                    })
-                    && !self.objects.iter().any(|object| {
-                        matches!(object, Object::Window(w) if w.mini && w.buffer == candidate)
-                    })
-            }).map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))?;
+            let replacement = self.other_buffer_safely(&order, value, !windows.is_empty())?;
             let point = match self.object(replacement)? {
                 Object::Buffer(b) => b.char_of_byte(b.point)?.0,
                 Object::ByteBuffer(b) => b.point.0,

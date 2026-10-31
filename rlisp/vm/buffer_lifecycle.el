@@ -63,15 +63,32 @@
                                 (error "Unable to kill buffer whose indirect buffer `%s' cannot be killed"
                                        (buffer-name other))))))
                     (setq tail (cdr tail)))))
-            ;; unlock_buffer: a modified buffer's file is unlocked.
-            (if (and (buffer-live-p buffer) (buffer-modified-p buffer)
-                     (stringp (buffer-local-value 'buffer-file-truename buffer)))
-                (unlock-file (buffer-local-value 'buffer-file-truename buffer)))
-            ;; kill_buffer_processes (process.c), once the hooks allowed the
-            ;; kill; absent only in a VM without the process prelude.
-            (if (and (buffer-live-p buffer) (fboundp 'romacs--kill-buffer-processes))
-                (romacs--kill-buffer-processes buffer))
-            (romacs--kill-buffer-finish buffer))
+            ;; replace_buffer_in_windows (buffer.c:2044), absent before
+            ;; window.el; then the buffer stops being current, for
+            ;; `other-buffer''s choice (buffer.c:2059), or for the
+            ;; finish's other_buffer_safely where it has none.  A buffer
+            ;; that is its own choice, or the minibuffer's only fallback,
+            ;; is not killed.
+            (if (and (buffer-live-p buffer) (fboundp 'replace-buffer-in-windows))
+                (replace-buffer-in-windows buffer))
+            (if (and (buffer-live-p buffer) (eq buffer (current-buffer)))
+                (let ((other (other-buffer buffer)))
+                  (if (eq other buffer) (setq allow nil)
+                    (if other (set-buffer other)))))
+            (if (and (buffer-live-p buffer)
+                     (or (not allow)
+                         (and (eq (current-buffer) (window-buffer (minibuffer-window)))
+                              (eq buffer (other-buffer buffer)))))
+                nil
+              ;; unlock_buffer: a modified buffer's file is unlocked.
+              (if (and (buffer-live-p buffer) (buffer-modified-p buffer)
+                       (stringp (buffer-local-value 'buffer-file-truename buffer)))
+                  (unlock-file (buffer-local-value 'buffer-file-truename buffer)))
+              ;; kill_buffer_processes (process.c), once the hooks allowed the
+              ;; kill; absent only in a VM without the process prelude.
+              (if (and (buffer-live-p buffer) (fboundp 'romacs--kill-buffer-processes))
+                  (romacs--kill-buffer-processes buffer))
+              (romacs--kill-buffer-finish buffer)))
         nil)))
   (defun romacs--other-buffer (buffer visible-ok frame)
     ;; Fother_buffer (buffer.c:1758) for live FRAME: the first live,

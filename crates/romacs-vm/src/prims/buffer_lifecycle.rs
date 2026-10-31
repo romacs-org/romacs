@@ -2,9 +2,11 @@ use super::*;
 
 defsubr! { name = "bufferp", gnu = "data.c:481", effect = Reads,
 fn bufferp(cx, object: Value) { Ok(if cx.lifecycle_buffer_p(object) { Value::TRUE } else { Value::NIL }) }}
+// A FRAME's own buffers come first; VM2 keeps none (VM2-FRAME1), so a
+// live frame's list is the buffer list.
 defsubr! { name = "buffer-list", gnu = "buffer.c:424", effect = Reads,
 fn buffer_list(cx; optional frame: Value) {
-    if frame != Value::NIL { return Err(Fault::Error("VM2 buffer-list FRAME is unsupported".into())); }
+    if frame != Value::NIL { cx.windows().decode_live_frame(frame)?; }
     Ok(cx.lifecycle_list())
 }}
 

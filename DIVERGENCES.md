@@ -309,15 +309,17 @@ GNU pin: `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea`, `src/search.c:2344`.
   kill hooks genuinely run; nil queries veto. Inhibited buffers skip all three
   lifecycle hooks for their lifetime. **Package-observable unresolved
   subsystem**, not an ignored optional argument or a disabled GNU query hook.
-- **VM2-BUFLIFE2 — replacement selection.** GNU uses `other-buffer`, frame
-  buffer lists, window dedication and `replace-buffer-in-windows`, and refuses
-  to kill its sole visible `*scratch*`. VM2 chooses a live named Unicode buffer
-  not beginning with a space, otherwise creates `*scratch*`; window point/start
-  markers are reanchored, but there is no MRU replacement policy, dedicated
-  window policy or active-minibuffer kill veto in this slice. Killing a sole
-  `*scratch*` may therefore replace it with a new identity and return t, not nil.
-  **Package-observable unresolved window policy**, not a dead-buffer identity
-  parity claim for every GUI/minibuffer configuration.
+- **VM2-BUFLIFE2 — replacement selection.** As GNU's Fkill_buffer, the
+  Lisp half (`rlisp/vm/buffer_lifecycle.el`) calls `replace-buffer-in-windows`
+  once window.el defines it, then makes `other-buffer`'s choice current in
+  place of a killed current buffer, and keeps the buffer when it is its own
+  choice (a sole `*scratch*`) or the minibuffer's only fallback. Where those leave the buffer shown or current
+  (the bare VM, or `other-buffer` finding none), the native kill takes
+  other_buffer_safely's: the first live Unicode buffer not beginning with a
+  space and not the minibuffer's, otherwise a new `*scratch*`. VM2 keeps no
+  frame buffer list (VM2-FRAME1), so `other-buffer` scans the buffer list
+  alone and `buffer-list` of a live frame is the buffer list. **Package-observable** only where GNU's frame buffer list would order
+  candidates differently.
 
 ## Observable by a package
 
