@@ -121,6 +121,54 @@ fn internal_copy_lisp_face(cx, from: Value, to: Value, frame: Value, new_frame: 
     Ok(to)
 }}
 
+defsubr! { name = "face-font", gnu = "xfaces.c:4423", effect = Reads,
+fn face_font(cx, face: Value; optional frame: Value, character: Value) {
+    if frame == Value::TRUE {
+        // The face's defaults for new frames: (bold), (italic) or both.
+        let resolved = resolve(cx, face, true)?;
+        let vector = cx.face_lookup(resolved, Value::NIL)?;
+        if vector == Value::NIL { return Err(signal(cx, "Invalid face", resolved)); }
+        let mut result = Value::NIL;
+        for (attribute, style) in [(":weight", "bold"), (":slant", "italic")] {
+            let index = LFACE_ATTRIBUTES.iter().position(|name| *name == attribute).unwrap() + 1;
+            let value = cx.vector_get(vector, Value::integer(index as i64).unwrap())?;
+            if value != cx.intern("unspecified") && value != cx.intern("normal") {
+                let style = cx.intern(style);
+                result = cx.cons(style, result);
+            }
+        }
+        return Ok(result);
+    }
+    cx.face_frame(frame, true)?;
+    let resolved = resolve(cx, face, true)?;
+    if cx.face_lookup(resolved, Value::NIL)? == Value::NIL { return Err(signal(cx, "Invalid face", resolved)); }
+    // The font the face draws CHARACTER, else ASCII, with on the display.
+    // The initial terminal realizes none, but under a graphic display
+    // record (a headless GUI) its one font, "tty", is every face's
+    // (DIVERGENCES.md VM2-WIN5).
+    if cx.font_host().is_none() {
+        return Ok(if graphic_record(cx)? { cx.string("tty") } else { Value::NIL });
+    }
+    let ch = if character == Value::NIL { ' ' } else {
+        let code = character.integer_value().filter(|c| (0..=0x3fffff).contains(c)).ok_or(Fault::Wrong("characterp", character))?;
+        char::from_u32(code as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
+    };
+    let name = cx.symbol_name(resolved)?;
+    Ok(match super::font::face_font(cx, &name, ch)? { Some(font) => cx.string(&font), None => Value::NIL })
+}}
+
+/// Whether romacs-frame.el's display record, `romacs-display', is graphic.
+fn graphic_record(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
+    let record = cx.intern("romacs-display");
+    let (graphic, mut tail) = (cx.intern(":graphic"), cx.variable_value(record)?.unwrap_or(Value::NIL));
+    while let Some((key, rest)) = cx.pair(tail) {
+        let Some((value, next)) = cx.pair(rest) else { break };
+        if key == graphic { return Ok(value != Value::NIL); }
+        tail = next;
+    }
+    Ok(false)
+}
+
 defsubr! { name = "internal-get-lisp-face-attribute", gnu = "xfaces.c:4230", effect = Reads,
 fn internal_get_lisp_face_attribute(cx, face: Value, attribute: Value; optional frame: Value) {
     let frame = if frame == Value::TRUE { Value::NIL } else { cx.face_frame(frame, true)? };
@@ -158,24 +206,11 @@ fn internal_lisp_face_attribute_values(cx, attribute: Value) {
     Ok(Value::NIL)
 }}
 
-// font.c weight_table, slant_table and width_table: the C defaults of
-// font-weight-table, font-slant-table and font-width-table, matched exactly
-// and then case-insensitively by font_style_to_value.
-const WEIGHTS: &[&str] = &["thin", "ultra-light", "ultralight", "extra-light", "extralight", "light",
-    "semi-light", "semilight", "demilight", "regular", "normal", "unspecified", "book", "medium",
-    "semi-bold", "semibold", "demibold", "demi-bold", "demi", "bold", "extra-bold", "extrabold",
-    "ultra-bold", "ultrabold", "black", "heavy", "ultra-heavy", "ultraheavy"];
-const SLANTS: &[&str] = &["reverse-oblique", "ro", "reverse-italic", "ri", "normal", "r", "unspecified",
-    "italic", "i", "ot", "oblique", "o"];
-const WIDTHS: &[&str] = &["ultra-condensed", "ultracondensed", "extra-condensed", "extracondensed",
-    "condensed", "compressed", "narrow", "semi-condensed", "semicondensed", "demicondensed", "normal",
-    "medium", "regular", "unspecified", "semi-expanded", "semiexpanded", "demiexpanded", "expanded",
-    "extra-expanded", "extraexpanded", "ultra-expanded", "ultraexpanded", "wide"];
-
-fn style_name(cx: &mut Leaf<'_>, value: Value, table: &[&str], message: &str) -> std::result::Result<(), Fault> {
+// A style font.c's tables (prims/font.rs) know (font_style_to_value).
+fn style_name(cx: &mut Leaf<'_>, value: Value, slot: usize, message: &str) -> std::result::Result<(), Fault> {
     if cx.kind(value) != Kind::Symbol { return Err(Fault::Wrong("symbolp", value)); }
     let name = cx.symbol_name(value)?;
-    if table.iter().any(|entry| entry.eq_ignore_ascii_case(&name)) { Ok(()) } else { Err(signal(cx, message, value)) }
+    if super::font::style_value(cx, slot, &name, false).is_some() { Ok(()) } else { Err(signal(cx, message, value)) }
 }
 
 fn string_nonempty(cx: &Leaf<'_>, value: Value) -> bool {
@@ -365,9 +400,9 @@ fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut valu
             }
             Some(":height")
         }
-        ":weight" => { if !special(value) { style_name(cx, value, WEIGHTS, "Invalid face weight")?; } Some(":weight") }
-        ":slant" => { if !special(value) { style_name(cx, value, SLANTS, "Invalid face slant")?; } Some(":slant") }
-        ":width" => { if !special(value) { style_name(cx, value, WIDTHS, "Invalid face width")?; } Some(":width") }
+        ":weight" => { if !special(value) { style_name(cx, value, super::font::WEIGHT, "Invalid face weight")?; } Some(":weight") }
+        ":slant" => { if !special(value) { style_name(cx, value, super::font::SLANT, "Invalid face slant")?; } Some(":slant") }
+        ":width" => { if !special(value) { style_name(cx, value, super::font::WIDTH, "Invalid face width")?; } Some(":width") }
         ":underline" => {
             if !special(value) && !valid_underline(cx, value) { return Err(signal(cx, "Invalid face underline", value)); }
             Some(":underline")

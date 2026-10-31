@@ -75,8 +75,8 @@ fn p1a_mapped_fill_refuses_without_panicking() {
     // SAFETY: this test never overwrites the immutable published inode.
     let image=unsafe { ImageRegion::open(&dir,&key) }.unwrap();
     let mut vm=Vm::new();vm.attach_image(image).unwrap();vm.declare_special("p1a-image-string",value);
-    // VM2 image immutability is a documented divergence, unlike GNU mutable strings.
-    assert_eq!(printed(&mut vm,"(fillarray p1a-image-string 97)"),"(error \"immutable image string\")");
+    // Image strings refuse writes with GNU's read-only error (DIVERGENCES.md VM2-FROZEN).
+    assert_eq!(printed(&mut vm,"(fillarray p1a-image-string 97)"),"(error \"Attempt to modify read-only object\" \"a\")");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

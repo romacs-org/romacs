@@ -253,3 +253,28 @@ fn kill_buffer_current_and_unibyte_survive_collection() {
         "KILL dead identity survives moving collection"
     );
 }
+
+/// Fkill_buffer (buffer.c:2059) makes `other-buffer''s choice current in
+/// place of the killed current buffer: one no window shows comes first,
+/// so with kb-a shown, killing current kb-x leaves kb-b current. Pinned
+/// GNU (-Q --batch) answers ("kb-a" "kb-b") for the same form.
+#[test]
+fn killing_the_current_buffer_makes_other_buffers_choice_current() {
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let expression = r#"(let* ((a (get-buffer-create "kb-a")) (b (get-buffer-create "kb-b")) (x (get-buffer-create "kb-x")))
+  (dolist (other (buffer-list)) (unless (memq other (list a b x)) (bury-buffer-internal other)))
+  (set-window-buffer (selected-window) a)
+  (set-buffer x)
+  (kill-buffer x)
+  (list (buffer-name (window-buffer)) (buffer-name)))"#;
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {expression}))")])
+        .stdin(std::process::Stdio::null())
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let gnu = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(gnu, r#"("kb-a" "kb-b")"#);
+    let mut vm = Vm::new();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    assert_eq!(printed(&mut vm, expression), gnu);
+}

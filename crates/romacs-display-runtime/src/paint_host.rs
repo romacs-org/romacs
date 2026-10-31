@@ -187,7 +187,16 @@ static KEY_TIMES: std::sync::Mutex<Vec<(romacs_display_protocol::input_progress:
     std::sync::Mutex::new(Vec::new());
 
 pub fn enable_key_latency_trace() {
+    let _ = TRACE_START.set(std::time::Instant::now());
     TRACE_KEYS.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+static TRACE_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+/// Under the latency trace, one line as a GPU startup PHASE ends:
+/// `romacs-gpu: {"phase": PHASE, "ms": since the trace was enabled}`.
+pub(crate) fn trace_gpu(phase: &str) {
+    if let Some(start) = TRACE_START.get().filter(|_| TRACE_KEYS.load(std::sync::atomic::Ordering::Relaxed)) {
+        eprintln!("romacs-gpu: {{\"phase\":\"{phase}\",\"ms\":{:.1}}}", start.elapsed().as_secs_f64() * 1000.0);
+    }
 }
 pub(crate) fn trace_key_enqueue(event: &crate::thread_comm::InputEvent, delivery: Option<&romacs_display_protocol::input_progress::InputDelivery>) {
     if TRACE_KEYS.load(std::sync::atomic::Ordering::Relaxed)

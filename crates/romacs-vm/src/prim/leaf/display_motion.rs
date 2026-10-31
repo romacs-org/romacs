@@ -39,6 +39,15 @@ pub(super) enum Shape {
     Glyphless { width: i64 },
     /// `:relative-width' FACTOR of a TAB, whose width depends on x.
     TabStretch { factor: f64 },
+    /// `:relative-width' FACTOR of the glyph C would make, in pixels once
+    /// a host measures it (a host's elements only).
+    RelativeStretch { factor: f64, c: u32 },
+    /// A stretch the host lays out, WIDTH pixels or to TARGET pixels from
+    /// the text area's left edge, in a row at least HEIGHT pixels tall
+    /// (romacs_layout_input::stretch_advance).
+    /// UNNUMBERED, when given, is its width while the row's line number is
+    /// not yet produced (calc_pixel_width_or_height counts it only then).
+    PixelStretch { width: romacs_layout_input::StretchWidth, unnumbered: Option<romacs_layout_input::StretchWidth>, height: i64 },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -55,6 +64,12 @@ pub(super) struct Elem {
     pub from_display: bool,
     /// The string delivering the element, else nil.
     pub object: crate::Value,
+    /// A glyph of the ellipsis that stands for invisible text, not of the
+    /// character at CHARPOS (or STRPOS), with its glyph code's face, else nil.
+    pub ellipsis: Option<crate::Value>,
+    /// A stretch's shape with no line number produced on its row, where
+    /// that differs.
+    pub unnumbered: Option<Shape>,
 }
 
 impl Elem {
@@ -77,6 +92,9 @@ pub(super) trait Elements {
     /// and whether it aligns visually (a wrap-prefix space spec).
     fn prefix(&mut self, index: usize, loaded: bool, wrap: bool) -> R<Option<(usize, bool)>>;
     fn prefix_elem(&self, id: usize, k: usize) -> Option<Elem>;
+    /// The index of the buffer line element INDEX shows, among the
+    /// accessible text's (display_count_lines_logically).
+    fn line_at(&mut self, index: usize) -> R<i64>;
 }
 
 /// The iterator state SAVE_IT copies.
@@ -98,6 +116,12 @@ pub(super) struct It {
     pub wrap_prefix_width: i64,
     pub pixel_width: i64,
     pub nglyphs: i64,
+    /// The x this row's line number took, once produced
+    /// (line_number_produced_p, lnum_pixel_width), else 0.
+    pub lnum_x: i64,
+    /// The x the last row's line number took (lnum_pixel_width), kept
+    /// across rows, 0 before any.
+    pub lnum_last: i64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -110,6 +134,8 @@ pub(super) struct Ctx {
     /// Whether a row may be continued or truncated. A host that lays out
     /// neither cannot show such a row, so meeting one is refused.
     pub breaks: bool,
+    /// `display-line-numbers': how each row's number is labelled.
+    pub lnum: Option<super::text_pixel_size::LineLabels>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -189,10 +215,16 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
         Shape::Tab => { let spaces = tab_spaces(cx, it); (spaces, spaces) }
         Shape::PixelTab { space, height: h } => { height = h; (pixel_tab(cx, it, space), 1) }
         Shape::TabStretch { factor } => stretch(cx, it, e, (factor * tab_spaces(cx, it) as f64) as i64, false),
+        Shape::RelativeStretch { .. } => (0, 0),
         Shape::Stretch { width, zero_ok } => stretch(cx, it, e, width, zero_ok),
         Shape::Align { target } => {
             let x = it.current_x + if it.align_visually { 0 } else { it.continuation_lines_width };
             stretch(cx, it, e, (target - x).max(0), true)
+        }
+        Shape::PixelStretch { width, unnumbered, height: h } => {
+            height = h;
+            let width = pixel_stretch(cx, it, e, if it.lnum_x > 0 { width } else { unnumbered.unwrap_or(width) });
+            (width, i64::from(width > 0))
         }
     };
     it.pixel_width = width;
@@ -207,15 +239,59 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
 
 /// The spaces a TAB at the iterator's x takes to the next tab stop.
 fn tab_spaces(cx: &Ctx, it: &It) -> i64 {
-    let x = it.current_x + continued_width(it);
+    let x = it.current_x + continued_width(it) - it.lnum_x;
     (x + cx.tab_width) / cx.tab_width * cx.tab_width - x
 }
 
 /// The pixels a host's TAB at the iterator's x stretches, SPACE being its
 /// face's space width.
 pub(super) fn pixel_tab(cx: &Ctx, it: &It, space: i64) -> i64 {
-    let x = it.current_x + continued_width(it);
+    let x = it.current_x + continued_width(it) - it.lnum_x;
     romacs_layout_input::tab_advance(x as f64, space as f64, cx.tab_width as u32) as i64
+}
+
+/// The element the iterator has loaded, if any.
+pub(super) fn loaded<E: Elements>(src: &mut E, it: &It) -> R<Option<Elem>> {
+    if it.loaded { element(src, it) } else { Ok(None) }
+}
+
+/// pos_visible_p's walk out of the display vector showing the character
+/// at IT: the iterator after the last element it produced before an
+/// element outside a vector, or at or after CHARPOS, and whether that
+/// element ends its line.
+pub(super) fn past_vector<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, charpos: i64) -> R<(It, bool)> {
+    loop {
+        let Some(e) = load(src, it)? else { return Ok((*it, false)) };
+        produce(cx, it, &e);
+        let produced = *it;
+        advance(src, it);
+        let next = element(src, it)?;
+        if !next.is_some_and(|n| matches!(n.method, Method::Vector { .. }) && n.charpos < charpos) { return Ok((produced, e.end_of_line())); }
+    }
+}
+
+/// pos_visible_p's walk along a display line from IT for a position a
+/// replacing display covers: the x where the first element at or after
+/// CHARPOS starts, or the line's last, and whether an element of STRING
+/// was the last one produced, with the x before the first of them.
+pub(super) fn x_at_or_after<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, charpos: i64, string: crate::Value) -> R<(i64, bool, i64)> {
+    let mut before = it.current_x;
+    let mut moved = false;
+    while let Some(e) = load(src, it)? {
+        if e.object != string { before = it.current_x; }
+        produce(cx, it, &e);
+        if e.charpos >= charpos || e.end_of_line() { return Ok((it.current_x - it.pixel_width, moved && e.object == string && e.charpos != charpos, before)); }
+        moved = true;
+        advance(src, it);
+    }
+    Ok((it.current_x - it.pixel_width, false, before))
+}
+
+/// The pixels a host's stretch of WIDTH in E takes at the iterator's x.
+pub(super) fn pixel_stretch(cx: &Ctx, it: &It, e: &Elem, width: romacs_layout_input::StretchWidth) -> i64 {
+    let line_x = it.current_x + if it.align_visually { 0 } else { it.continuation_lines_width };
+    let last = (e.text_area && wrap(cx, it) != Wrap::Truncate).then_some(cx.last_visible_x as f64);
+    romacs_layout_input::stretch_advance(width, it.current_x as f64, line_x as f64, last) as i64
 }
 
 /// The width of the screen lines before this one that a TAB's stop counts
@@ -249,6 +325,13 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
     let mut subject = 0u8;
     let reached = |e: &Elem| op.pos && e.reaches() && e.charpos >= to;
     if it.hpos == 0 {
+        // maybe_produce_line_number, unless moving to x 0 (GNU tests
+        // `op && MOVE_TO_X').
+        let moving = op.pos || op.x || op.y || op.vpos;
+        if let Some(lnum) = cx.lnum && !(moving && to_x == 0) && it.current_x == 0 {
+            let (glyphs, x) = lnum.prefix(src.line_at(it.index)?);
+            (it.current_x, it.hpos, it.lnum_x, it.lnum_last) = (x, glyphs, x, x);
+        }
         if it.prefix.is_none() { handle_line_prefix(src, it)?; }
         subject = u8::from(it.prefix.is_some());
     }
@@ -507,6 +590,7 @@ pub(super) fn move_to<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: i64, 
         it.wrap_prefix_width = 0;
         line_start_x = 0;
         it.hpos = 0;
+        it.lnum_x = 0;
         it.current_y += it.max_h;
         it.vpos += 1;
         it.max_h = 0;
@@ -593,6 +677,7 @@ pub(super) fn text_size<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, m: &Meas
     let start = m.start;
     it.current_x = 0;
     it.hpos = 0;
+    it.lnum_x = 0;
     it.wrap_prefix_width = 0;
     let mut start_x;
     if charpos(src, &it)? != start {

@@ -37,8 +37,9 @@ fn handled(abi: i64) -> u64 {
     (1 << rights) - 1
 }
 
-/// Confine this thread: read and execute beneath each of READ, list beneath
-/// each of `list_roots`, write each file of WRITE, nothing else. A root that
+/// Confine this thread: read and execute beneath each of READ, write each
+/// file of WRITE, nothing else, but for directory flags, which an
+/// unconfined thread reads for it (`host::directory_flags`). A root that
 /// does not exist is skipped.
 pub fn confine(read: &[PathBuf], write: &[PathBuf]) -> io::Result<()> {
     restrict(read, write, None)
@@ -65,15 +66,13 @@ fn restrict(read: &[PathBuf], write: &[PathBuf], store: Option<&Path>) -> io::Re
     for path in read {
         allow(&ruleset, path, EXECUTE | READ_FILE | READ_DIR)?;
     }
-    for path in list_roots() {
-        allow(&ruleset, &path, READ_DIR)?;
-    }
     for path in write {
         allow(&ruleset, path, WRITE_FILE | (handled & TRUNCATE))?;
     }
     if let Some(store) = store {
         allow(&ruleset, store, READ_FILE | READ_DIR | WRITE_FILE | REMOVE_FILE | MAKE_REG | (handled & TRUNCATE))?;
     }
+    crate::host::keep_flags_reader()?;
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
         return Err(io::Error::last_os_error());
     }
@@ -112,14 +111,6 @@ pub fn build_roots(recipe: Vec<PathBuf>, dir: &Path) -> Vec<PathBuf> {
     roots.push(dir.join("p"));
     roots.extend(runtime_roots());
     roots
-}
-
-/// The directories a build may list but not read files beneath: HOME, a
-/// keyed fact, and its ancestors, whose entries answer a case probe that
-/// climbs from an empty HOME (`host::case_insensitive`).
-pub fn list_roots() -> Vec<PathBuf> {
-    let Some(home) = crate::host::getenv("HOME").map(PathBuf::from) else { return vec![] };
-    home.ancestors().map(Path::to_owned).collect()
 }
 
 /// The roots this binary itself reads at run time: its build tree (etc/,

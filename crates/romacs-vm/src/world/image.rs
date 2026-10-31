@@ -19,7 +19,7 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 28] = [
+        let checks: [(&str, bool); 31] = [
             ("stack", self.stack.is_empty()),
             ("dynamic", self.dynamic.is_empty()),
             ("eval_depth", self.eval_depth == 0),
@@ -29,12 +29,16 @@ impl Vm {
             ("propagated_escape", self.propagated_escape.is_none()),
             ("host_input", self.host_input.is_none()),
             ("layout_host", self.layout_host.is_none()),
+            ("display", self.display.is_none()),
             ("session_host", self.session_host.is_none()),
             ("terminal_host", self.terminal_host.is_none()),
             ("terminal_bindings", self.terminal_bindings.is_empty()),
             ("subprocesses", self.subprocesses.is_empty()),
             ("process_jobs", self.process_jobs.is_idle()),
             ("image", self.image.is_none() && self.functions.iter().all(|f| f.mapped_code.is_none())),
+            // A frozen region is a mapping or a descriptor of this process.
+            ("regions", self.regions_empty()),
+            ("isolates", self.isolates.is_empty()),
             ("local_zone", matches!(self.local_zone, LocalZone::Process)),
             ("fence", self.fence.is_none()),
             ("rooted", self.rooted.is_empty()),

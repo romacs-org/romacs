@@ -110,6 +110,12 @@ fn reads_of_fenced_values_refuse_compiled_and_interpreted() {
         ("(defvar x2 (length process-environment))", 1, "read", "process-environment"),
         ("(let ((n 0)) (dolist (e initial-environment) (setq n (1+ n))))", 1, "read", "initial-environment"),
         ("(expand-file-name \"foo\")", 2, "read", "default-directory"),
+        // No such login: GNU expands the name against the buffer's directory.
+        ("(expand-file-name \"~nosuchuser-fence/a\")", 2, "read", "default-directory"),
+        // The buffer's directory has a handler, which an absolute name meets.
+        ("(progn (defun fence-dir-handler (op &rest args) (let ((inhibit-file-name-handlers '(fence-dir-handler)) (inhibit-file-name-operation op)) (apply op args))) (let ((file-name-handler-alist '((\"/\\\\'\" . fence-dir-handler)))) (expand-file-name \"/a\")))", 2, "read", "default-directory"),
+        // So does its expansion, whose handler is given the directory.
+        ("(let ((file-name-handler-alist '((\"\\\\`/fence-b\\\\'\" . fence-dir-handler)))) (expand-file-name \"/a/../fence-b\"))", 2, "read", "default-directory"),
         ("(let ((default-directory default-directory)) nil)", 2, "read", "default-directory"),
         ("(defvar x3 (random 100))", 5, "read", "random state"),
     ]);
@@ -123,6 +129,10 @@ fn writes_of_fenced_values_refuse() {
         ("(makunbound 'fence-b)", 3, "write", "fence-b"),
         ("(set-default 'fence-a 1)", 3, "write", "fence-a"),
         ("(make-local-variable 'fence-a)", 3, "write", "fence-a"),
+        // A built-in's forwarding is the one the fence keeps: localizing it
+        // goes through the fence, and ends (it looped once).
+        ("(make-local-variable 'transient-mark-mode)", 3, "write", "transient-mark-mode"),
+        ("(make-variable-buffer-local 'mark-even-if-inactive)", 6, "write", "mark-even-if-inactive"),
         ("(setq process-environment nil)", 1, "write", "process-environment"),
         ("(setq default-directory \"/\")", 2, "write", "default-directory"),
     ]);
@@ -186,12 +196,13 @@ fn lets_buffers_and_startup_pass() {
 (setq p4 (let ((default-directory \"/\")) (let ((b (current-buffer))) (save-current-buffer (set-buffer (get-buffer-create \" other\")) (set-buffer b) (expand-file-name \"y\")))))
 (setq p5 (buffer-name (get-buffer-create \"fence-new\")))
 (setq p6 (getenv-internal \"HOME\"))
+(setq p7 (list (expand-file-name \"/a/../b\") (stringp (expand-file-name \"~/x\")) (expand-file-name \"/c\" nil)))
 ";
     let (mut vm, trace) = run("pass", preload, true);
     let trace = trace.unwrap();
     assert!(trace["refusals"].as_array().unwrap().is_empty(), "{trace}");
-    let shown = vm.eval_source("(list p1 p2 p3 p4 p5 (stringp p6) (length startup-saw))").and_then(|v| v.display()).unwrap();
-    assert_eq!(shown, "((\"/l/\" \"/l/\") 2 \"/x\" \"/y\" \"fence-new\" t 4)");
+    let shown = vm.eval_source("(list p1 p2 p3 p4 p5 (stringp p6) (length startup-saw) p7)").and_then(|v| v.display()).unwrap();
+    assert_eq!(shown, "((\"/l/\" \"/l/\") 2 \"/x\" \"/y\" \"fence-new\" t 4 (\"/b\" t \"/c\"))");
 }
 
 #[test]

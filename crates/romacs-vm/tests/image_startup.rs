@@ -85,7 +85,7 @@ fn mapped_cli_proves_image_use_and_never_source_falls_back() {
     assert_eq!(display.stdout, "\"Ελλάδα\"\n".as_bytes());
     let mutation = run(&store, &key, "0", "[\"nreverse\",\"world\"]");
     assert!(!mutation.status.success());
-    assert!(String::from_utf8_lossy(&mutation.stderr).contains("immutable image"));
+    assert!(String::from_utf8_lossy(&mutation.stderr).contains("Attempt to modify read-only object"));
     for (bad_key, root) in [
         ("../escape".to_string(), "0"),
         ("0".repeat(64), "0"),

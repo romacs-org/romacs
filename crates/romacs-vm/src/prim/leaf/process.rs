@@ -1181,7 +1181,10 @@ impl Vm {
     /// (process.c:5358), each with the poll events it waits for.  They stay
     /// open while the VM runs no Lisp.
     pub fn process_wait_fds(&mut self) -> Vec<(RawFd, i16)> {
-        Leaf::new(self).select_set(Value::NIL, false).0
+        let mut fds = Leaf::new(self).select_set(Value::NIL, false).0;
+        // The isolates' sockets and workers' pidfds wake the same wait.
+        fds.extend(self.isolate_fds());
+        fds
     }
 }
 

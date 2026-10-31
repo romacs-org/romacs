@@ -36,6 +36,9 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
           (with-current-buffer (get-buffer-create messages-buffer-name)
             (messages-buffer-mode)
             (setq default-directory (or dir (expand-file-name "~/")))))
+        ;; startup.el normal-top-level (startup.el:584): the command line is
+        ;; processed once, so a later return to top level only says so.
+        (setq command-line-processed t)
         ;; startup.el normal-top-level (startup.el:591): the per-user directory.
         ;; Romacs's is $XDG_CONFIG_HOME/romacs/, else ~/.config/romacs/, the
         ;; directory of the init file the GUI loads (user_init.rs); loading that
@@ -49,9 +52,15 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         (romacs--startup-environment)
         ;; startup.el command-line (startup.el:1600, 1620): window-system
         ;; initialization and `frame-initialize' put the session on its display.
-        ;; Romacs's display is the record romacs-frame.el reads (VM2-DISPLAY1);
-        ;; the chain ran on the headless one, batch's.  The host's window is
-        ;; graphical, mouse-driven, with selections, and shows any 24-bit color.
+        ;; The host opened its display before this file loaded, so the frame is
+        ;; a `pgtk' frame there (VM2-WIN5) and `initial-window-system' and
+        ;; `window-system' name it, as GNU's C sets them; without a display
+        ;; host they stay nil.  Romacs's display is the record romacs-frame.el
+        ;; reads (VM2-DISPLAY1); the chain ran on the headless one, batch's.
+        ;; The host's window is graphical, mouse-driven, with selections, and
+        ;; shows any 24-bit color.
+        (setq initial-window-system (window-system)
+              window-system initial-window-system)
         (setq romacs-display
               `(:graphic t :mouse t :selections t :symbol-keys t
                 :screens 1 :pixel-width ,(frame-pixel-width) :pixel-height ,(frame-pixel-height)
@@ -60,6 +69,9 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
                 :planes 24 :color-cells 16777216 :visual-class true-color
                 :color t :grayscale nil :display-type color :background-mode dark
                 :palette nil))
+        ;; pgtk_term_init (pgtkterm.c:7082): a window-system terminal runs at
+        ;; 19200 baud, so isearch shows no one-line slow-terminal window.
+        (setq baud-rate 19200)
         ;; startup.el command-line (startup.el:1479): the delayed settings take
         ;; their standard values in this session's context, as GNU computes them
         ;; at startup: `global-font-lock-mode', `abbrev-file-name',

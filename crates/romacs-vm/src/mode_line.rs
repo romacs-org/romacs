@@ -660,8 +660,17 @@ impl Vm {
                 ]);
                 if self.eval_datum_raw(&form).is_ok_and(|v| v != Value::NIL) { "@" } else { "-" }.into()
             }
-            // No coding systems in VM2: GNU's "not yet decided" mnemonics
-            // (`decode_mode_spec_coding`, `xdisp.c:29346`).
+            // A window-system frame shows the buffer's coding system
+            // (xdisp.c:29840). The initial terminal keeps GNU's "not yet
+            // decided" mnemonics (`decode_mode_spec_coding`).
+            'z' | 'Z' if self.frame_type() != Value::TRUE => {
+                let slot = self.slot("enable-multibyte-characters");
+                let multibyte = !matches!(self.variable_value(slot)?, Value::NIL | Value::UNBOUND);
+                let slot = self.slot("buffer-file-coding-system");
+                let coding = self.variable_value(slot)?;
+                let coding = if coding == Value::UNBOUND { Value::NIL } else { coding };
+                self.mode_spec_coding(coding, multibyte, c == 'Z')?
+            }
             'z' => "-".into(),
             'Z' => {
                 let mnemonic = self.ml_symbol_value("eol-mnemonic-undecided")?;

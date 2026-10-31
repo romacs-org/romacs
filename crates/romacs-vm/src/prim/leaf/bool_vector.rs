@@ -14,7 +14,7 @@ impl Leaf<'_> {
         if !matches!(self.vm.object_if(value), Some(data::Object::BoolVector(_))) {
             return Err(Fault::Wrong("bool-vector-p", value));
         }
-        self.vm.objects[value.payload() as usize - 1] = data::Object::BoolVector(Box::new(bits));
+        *self.object_mut(value)? = data::Object::BoolVector(Box::new(bits));
         Ok(())
     }
 }

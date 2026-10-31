@@ -19,10 +19,10 @@ fn message_formats_session_values_and_frame_identity() {
     let mut vm = Vm::new();
     evaluate(&mut vm, "(setq wire1 2)");
     assert_eq!(evaluate(&mut vm, "(message \"%s\" (+ wire1 1))"), "\"3\"");
-    assert_eq!(
-        evaluate(&mut vm, "(message \"%s\" (selected-frame))"),
-        "\"#<frame initial>\""
-    );
+    // print.c PVEC_FRAME: its name and address, as prin1 prints it.
+    let frame = evaluate(&mut vm, "(message \"%s\" (selected-frame))");
+    assert!(frame.starts_with("\"#<frame F1 0x") && frame.ends_with(">\""), "{frame}");
+    assert_eq!(frame, evaluate(&mut vm, "(prin1-to-string (selected-frame))"));
     assert_eq!(
         evaluate(&mut vm, "(message \"%s\" (fboundp 'recursive-edit))"),
         "\"t\""

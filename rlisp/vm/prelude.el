@@ -722,6 +722,45 @@ Redisplay calls this in the buffer of a window showing START to END."
               (setq globals (cdr globals)))))
         (setq functions (cdr functions))))))
 
+
+;;; The debugger on the signal path
+
+;; GNU eval.c maybe_call_debugger.  The signal path (threaded_signal.rs
+;; debugger_wanted) has already found the debugger considered for the error,
+;; `inhibit-debugger' nil and `debug-on-quit' or `debug-on-error' non-nil;
+;; when this says yes, it calls `debugger' itself under call_debugger's
+;; bindings (threaded.rs call_debugger), so no frame of this file's sits
+;; between the debugger and the error.
+(defun romacs--call-debugger-p (conditions error)
+  "Whether to call `debugger' for ERROR, whose CONDITIONS are its
+`error-conditions': unless `debug-on-error' lists none of them,
+`debug-ignored-errors' matches it, or the debugger already ran for the
+current input event.  Yes notes the event, as call_debugger does."
+  (when (and (or (memq 'quit conditions)
+                 (not (consp debug-on-error))
+                 (let ((tail conditions) (found nil))
+                   (while (and (consp tail) (not found))
+                     (setq found (memq (car tail) debug-on-error)
+                           tail (cdr tail)))
+                   found))
+             (not (romacs--skip-debugger conditions error))
+             (< internal-when-entered-debugger num-nonmacro-input-events))
+    (setq debug-on-next-call nil
+          internal-when-entered-debugger num-nonmacro-input-events)
+    t))
+
+(defun romacs--skip-debugger (conditions error)
+  "eval.c skip_debugger: whether `debug-ignored-errors' names one of
+CONDITIONS or has a regexp matching ERROR's message."
+  (let ((tail debug-ignored-errors) (message nil) (skip nil))
+    (while (and (consp tail) (not skip))
+      (if (stringp (car tail))
+          (setq message (or message (error-message-string error))
+                skip (string-match (car tail) message nil t))
+        (setq skip (memq (car tail) conditions)))
+      (setq tail (cdr tail)))
+    skip))
+
 ;;; Finalizers
 
 (defun romacs--run-finalizers (&optional value)

@@ -158,6 +158,7 @@ impl Table {
             if done && let Some(file) = file {
                 let _ = crate::host::remove_file(file);
             }
+            if done { crate::isolate::child_reaped(*pid); }
             !done
         });
     }
@@ -387,7 +388,9 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     }
     let child = command.spawn()?;
     // The Child handle is dropped without waiting: the table reaps the pid.
-    Ok(child.id() as i32)
+    let pid = child.id() as i32;
+    crate::isolate::child_spawned(pid);
+    Ok(pid)
 }
 
 /// file_accessible_directory_p: DIR is a directory that can be searched.
@@ -406,6 +409,7 @@ pub(crate) fn wait_status(pid: i32, options: i32) -> Option<i32> {
     loop {
         let r = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG | options) };
         if r == pid {
+            if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) { crate::isolate::child_reaped(pid); }
             return Some(status);
         }
         if r < 0 && last_error().kind() == io::ErrorKind::Interrupted {
@@ -421,6 +425,7 @@ pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
     loop {
         let r = unsafe { libc::waitpid(pid, &mut status, 0) };
         if r == pid {
+            crate::isolate::child_reaped(pid);
             return Ok(status);
         }
         let error = last_error();

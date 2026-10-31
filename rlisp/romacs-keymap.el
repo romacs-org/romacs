@@ -57,6 +57,11 @@ buffer's local map is the fallback."
 
 (defun romacs-keymap--minor-maps ()
   "The active minor-mode keymaps, highest priority first (current_minor_maps)."
+  (mapcar #'cdr (romacs-keymap--minor-mode-maps)))
+
+(defun romacs-keymap--minor-mode-maps ()
+  "The active minor modes' (MODE . KEYMAP), highest priority first
+\(current_minor_maps)."
   (let ((maps nil)
         (alists (append (mapcar (lambda (alist)
                                   (if (symbolp alist) (and (boundp alist) (symbol-value alist)) alist))
@@ -71,8 +76,29 @@ buffer's local map is the fallback."
                    (not (and (eq alist minor-mode-map-alist)
                              (assq (car entry) minor-mode-overriding-map-alist))))
           (let ((map (indirect-function (cdr entry))))
-            (when map (push map maps))))))
+            (when map (push (cons (car entry) map) maps))))))
     (nreverse maps)))
+
+(defun minor-mode-key-binding (key &optional accept-default)
+  "Find the visible minor mode bindings of KEY.
+Return an alist of pairs (MODENAME . BINDING), where MODENAME is
+the symbol which names the minor mode binding KEY, and BINDING is
+KEY's definition in that mode.  In particular, if KEY has no
+minor-mode bindings, return nil.  If the first binding is a
+non-prefix, all subsequent bindings will be omitted, since they would
+be ignored.  Similarly, the list doesn't include non-prefix bindings
+that come after prefix bindings.
+
+If optional argument ACCEPT-DEFAULT is non-nil, recognize default
+bindings; see the description of `lookup-key' for more details about this."
+  (let ((prefixes nil))
+    (catch 'found
+      (dolist (entry (romacs-keymap--minor-mode-maps))
+        (let ((binding (lookup-key (cdr entry) key accept-default)))
+          (when (and binding (not (integerp binding)))
+            (cond ((keymapp binding) (push (cons (car entry) binding) prefixes))
+                  ((null prefixes) (throw 'found (list (cons (car entry) binding))))))))
+      (nreverse prefixes))))
 
 (defun current-active-maps (&optional olp position)
   "Return a list of the currently active keymaps.
