@@ -2009,26 +2009,14 @@ pub fn take_terminate_quit() -> bool {
     TERMINATE.load(std::sync::atomic::Ordering::SeqCst) && !TERMINATE_QUIT.swap(true, std::sync::atomic::Ordering::SeqCst)
 }
 
-/// A worker process: PROGRAM with ARGS after `--isolate 3`, SOCKET as its
-/// descriptor 3, no stdin, this process's stderr. Its pid; the caller reaps.
+/// A worker process: PROGRAM with ARGS after `--isolate 0`, SOCKET as its
+/// standard input, this process's stderr. Its pid; the caller reaps.
+/// Spawned, never forked, as a world builder is (`World::start_builder`):
+/// no pre_exec, so no driver's atfork handler runs.
 pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
-    use std::os::fd::AsRawFd;
-    use std::os::unix::process::CommandExt;
     let mut command = command(program)?;
-    command.arg("--isolate").arg("3").args(args).stdin(std::process::Stdio::null());
-    let fd = socket.as_raw_fd();
-    // SAFETY: dup2 and fcntl are async-signal-safe.
-    unsafe {
-        command.pre_exec(move || {
-            if libc::dup2(fd, 3) < 0 || libc::fcntl(3, libc::F_SETFD, 0) < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let child = command.spawn()?;
-    drop(socket);
-    Ok(child.id() as i32)
+    command.arg("--isolate").arg("0").args(args).stdin(socket);
+    Ok(command.spawn()?.id() as i32)
 }
 
 /// emacs_pipe: a close-on-exec pipe (read end, write end).

@@ -93,6 +93,32 @@ fn kill_leaves_no_zombie_and_settles_futures() {
     assert!(settles(|| !process_exists(worker)), "worker {worker} still exists: {out}");
 }
 
+thread_local! {
+    /// The forks this thread made since the handler was registered.
+    static FORKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+extern "C" fn count_fork() {
+    FORKS.with(|forks| forks.set(forks.get() + 1));
+}
+
+/// A worker is spawned, never forked: fork runs every library's atfork
+/// handlers, and a GPU driver unloading on another thread meanwhile
+/// crashes in its own (World::start_builder). Only a fork runs them.
+#[test]
+fn a_worker_is_spawned_without_running_atfork_handlers() {
+    use std::os::unix::process::CommandExt;
+    assert_eq!(unsafe { libc::pthread_atfork(Some(count_fork), None, None) }, 0);
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(isolate-await (isolate-spawn '+ 1 2))"), "3");
+    eval(&mut vm, "(isolate-kill-all)");
+    assert_eq!(FORKS.with(std::cell::Cell::get), 0, "spawning the worker forked");
+    // The handler sees a fork: a pre_exec makes the standard library fork.
+    let mut forked = std::process::Command::new("/bin/true");
+    unsafe { forked.pre_exec(|| Ok(())) };
+    assert!(forked.status().unwrap().success());
+    assert_eq!(FORKS.with(std::cell::Cell::get), 1);
+}
+
 #[test]
 fn a_worker_that_is_not_this_executable_is_refused_and_a_dead_one_reported() {
     let mut vm = vm();
