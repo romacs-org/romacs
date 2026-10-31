@@ -138,19 +138,43 @@ romacs_snapshot::snapshot_enum!(Translation {
     Translation::Completion(f0) => (f0),
 });
 
-/// search.c's searchbufs: the most recently used compiled patterns, so a
-/// pattern searched again is not compiled again (compile_pattern). A
-/// pattern whose compilation read the syntax table is kept for that table.
+/// search.c's searchbufs: compiled patterns by source, so a pattern
+/// searched again is not compiled again (compile_pattern). A pattern whose
+/// compilation read the syntax table is kept for that table. GNU keeps
+/// 20; one major mode's font-lock keywords and cc-mode's scanners use a
+/// few hundred, so this keeps enough for a session's working set and drops
+/// the least recently used beyond it.
 #[derive(Default)]
-pub(crate) struct PatternCache(Vec<CachedPattern>);
+pub(crate) struct PatternCache {
+    patterns: HashMap<Vec<u8>, Vec<CachedPattern>>,
+    len: usize,
+    /// Uses so far: the clock `CachedPattern::used` reads.
+    clock: u64,
+}
 impl PatternCache {
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.len == 0
+    }
+    fn retain(&mut self, keep: impl Fn(&CachedPattern) -> bool) {
+        self.patterns.retain(|_, v| { v.retain(&keep); !v.is_empty() });
+        self.len = self.patterns.values().map(Vec::len).sum();
+    }
+    /// Drop the least recently used pattern.
+    fn evict(&mut self) {
+        let oldest = self.patterns.iter()
+            .flat_map(|(source, v)| v.iter().enumerate().map(move |(i, e)| (e.used, source, i)))
+            .min_by_key(|&(used, ..)| used)
+            .map(|(_, source, i)| (source.clone(), i));
+        if let Some((source, i)) = oldest {
+            let v = self.patterns.get_mut(&source).expect("present");
+            v.swap_remove(i);
+            if v.is_empty() { self.patterns.remove(&source); }
+            self.len -= 1;
+        }
     }
 }
 
 struct CachedPattern {
-    source: Vec<u8>,
     multibyte: bool,
     /// Compiled for the longest match (search.c `posix').
     posix: bool,
@@ -158,10 +182,12 @@ struct CachedPattern {
     /// The syntax table the compiled fastmap read (GNU `used_syntax').
     syntax: Option<Value>,
     compiled: std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>,
+    /// The cache's clock at the last use.
+    used: u64,
 }
 
-/// search.c REGEXP_CACHE_SIZE.
-const PATTERN_CACHE_SIZE: usize = 20;
+/// The patterns [`PatternCache`] keeps.
+const PATTERN_CACHE_SIZE: usize = 1024;
 
 /// Patterns to test many strings, each taken from the pattern cache once:
 /// no Lisp runs between the tests, so the patterns, the current buffer's
@@ -223,13 +249,13 @@ impl Vm {
     fn regexp_pattern(&mut self, pattern: &Input, posix: bool, key: Translation, translation: Option<regex::CaseTranslation>,
                       source: &syntax::SyntaxSource) -> SearchResult<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
         let table = source.table();
-        let cache = &mut self.regexp_cache.0;
-        if let Some(i) = cache.iter().position(|e| e.source == pattern.bytes && e.multibyte == pattern.multibyte
-            && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table)) {
-            let entry = cache.remove(i);
-            let compiled = entry.compiled.clone();
-            cache.insert(0, entry);
-            return Ok(compiled);
+        let cache = &mut self.regexp_cache;
+        cache.clock += 1;
+        let clock = cache.clock;
+        if let Some(entry) = cache.patterns.get_mut(&pattern.bytes).and_then(|v| v.iter_mut().find(|e| e.multibyte == pattern.multibyte
+            && e.posix == posix && e.translation == key && e.syntax.is_none_or(|t| t == table))) {
+            entry.used = clock;
+            return Ok(entry.compiled.clone());
         }
         let mut compiled = regex::regex_compile_lisp_with_translation(
             &EmacsStr::new(&pattern.bytes, pattern.multibyte), posix, translation,
@@ -237,17 +263,20 @@ impl Vm {
         compiled.rebind_syntax_table(&syntax::VmSyntax::new(self, source.clone()));
         let syntax = compiled.used_syntax().then_some(table);
         let compiled = std::rc::Rc::new(std::cell::RefCell::new(compiled));
-        let cache = &mut self.regexp_cache.0;
-        cache.insert(0, CachedPattern { source: pattern.bytes.clone(), multibyte: pattern.multibyte, posix,
-                                        translation: key, syntax, compiled: compiled.clone() });
-        cache.truncate(PATTERN_CACHE_SIZE);
+        let cache = &mut self.regexp_cache;
+        if cache.len >= PATTERN_CACHE_SIZE {
+            cache.evict();
+        }
+        cache.patterns.entry(pattern.bytes.clone()).or_default().push(CachedPattern {
+            multibyte: pattern.multibyte, posix, translation: key, syntax, compiled: compiled.clone(), used: clock });
+        cache.len += 1;
         Ok(compiled)
     }
 
     /// syntax.c's clear_regexp_cache after `modify-syntax-entry'. A
     /// collection, which moves the tables, drops the patterns kept for one.
     pub(crate) fn clear_regexp_cache(&mut self, only_tables: bool) {
-        self.regexp_cache.0.retain(|e| only_tables && e.syntax.is_none() && !matches!(e.translation, Translation::Completion(_)));
+        self.regexp_cache.retain(|e| only_tables && e.syntax.is_none() && !matches!(e.translation, Translation::Completion(_)));
     }
 
     /// GNU fast_looking_at over the current buffer's accessible text, for
