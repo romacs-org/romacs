@@ -1088,10 +1088,16 @@ impl RestStack {
             visit(value);
         }
     }
-    fn enter(&mut self, depth: usize, rest: OpaqueRest) {
-        self.activations.push(RestActivation { depth, base: rest.start, pending: Some(rest) });
+    // Out of line and by scalars, as `leave_call`: a push inlined into a
+    // dispatching handler, or a struct argument's stack temporary whose
+    // address escapes, keeps the handler from tail-calling the next
+    // instruction (`funcall_and_apply_tail_dispatch_has_bounded_native_stack`).
+    #[inline(never)]
+    fn enter(&mut self, depth: usize, reg: usize, start: usize, end: usize) {
+        self.activations.push(RestActivation { depth, base: start, pending: Some(OpaqueRest { reg, start, end }) });
     }
     /// The activation at DEPTH leaves: its window goes with it.
+    #[inline(never)]
     fn leave(&mut self, depth: usize) {
         if self.activations.last().is_some_and(|a| a.depth == depth) {
             let base = self.activations.pop().unwrap().base;
@@ -2593,8 +2599,10 @@ unsafe fn enter_frame_marked(
             mark: e.apply_mark.take().unwrap_or(mark),
         });
         // An empty window needs no record: the rest register already holds nil.
-        if let Some(rest) = rest.filter(|rest| rest.start != rest.end) {
-            e.rest.enter(e.frames.len(), rest);
+        if let Some(rest) = rest
+            && rest.start != rest.end
+        {
+            e.rest.enter(e.frames.len(), rest.reg, rest.start, rest.end);
         }
         e.controls_base = e.controls.len();
         e.regs = new;
