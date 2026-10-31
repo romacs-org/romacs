@@ -25,6 +25,7 @@
 //! token counter (`Backtrace::observe`).
 pub mod arena;
 pub mod image;
+pub mod layer;
 pub mod store;
 pub mod sandbox;
 pub mod safe;
@@ -45,6 +46,10 @@ pub(crate) enum Root {
     Reseed = 4,
     Random = 5,
     Input = 6,
+    /// A variable a layer's re-seed form set from a per-process fact: a
+    /// definition form that reads it is re-seeded too; any other form
+    /// refuses (`layer`).
+    Tainted = 7,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +92,12 @@ pub(crate) struct Fence {
     /// Each input's content digest as startup ended, or the kind of object
     /// that made it undigestable.
     digests: Vec<Result<String, &'static str>>,
+    /// The variables startup wrote, each once, and their content digests
+    /// as it ended; and the last superseded run's, which a layer's run
+    /// after its libraries must reproduce (`layer`).
+    outputs: Vec<usize>,
+    output_digests: Vec<(usize, Result<String, &'static str>)>,
+    pub(super) previous_outputs: Vec<(usize, Result<String, &'static str>)>,
 }
 
 /// A fenced variable: its root, the redirect the fence keeps, and the
@@ -150,12 +161,61 @@ impl Vm {
         self.environment_snapshot = None;
     }
 
-    /// A top-level form of a loaded file ends: a re-seed form's variable is
-    /// fenced from here (root 4).
-    pub(crate) fn world_form_done(&mut self) {
-        if let Some(name) = host::reseed_output().filter(|_| self.fence.is_some()) {
+    /// A top-level FORM of a loaded file ends: a re-seed form's variable is
+    /// fenced from here (root 4); in a layer, a definition that read a
+    /// per-process fact is kept for restore to evaluate again
+    /// (`romacs--world-reseed-forms`), and its variable fenced (root 7).
+    pub(crate) fn world_form_done(&mut self, form: &crate::Form) {
+        if self.fence.is_none() {
+            return;
+        }
+        if let Some(name) = host::reseed_output() {
             let slot = self.slot(name);
             self.fence_variable(slot, Root::Reseed);
+        }
+        if let Some((kind, name, cut)) = host::layer_form_done() {
+            self.record_reseed_form(kind, &name, form, cut);
+        }
+    }
+
+    /// Keep the definition FORM of KIND, defining NAME, for restore: pushed
+    /// onto `romacs--world-reseed-forms` as (KIND NAME FORM CUT), CUT when
+    /// a refused effect cut the form short and restore evaluates it whole.
+    /// NAME's variable is fenced as tainted.
+    fn record_reseed_form(&mut self, kind: &str, name: &str, form: &crate::Form, cut: bool) {
+        let slot = self.slot(name);
+        // Defined again by a file loaded again: the first form is kept.
+        if self.fence_cell(slot).is_some_and(|cell| cell.root == Root::Tainted) {
+            return;
+        }
+        let entry = (|| -> crate::Result<()> {
+            let kind = self.intern(kind);
+            let symbol = self.intern(name);
+            let form = self.literal(form)?;
+            let cut = if cut { Value::TRUE } else { Value::NIL };
+            let entry = self.list_value(&[kind, symbol, form, cut]);
+            let list = self.slot("romacs--world-reseed-forms");
+            let old = self.variable_value(list).unwrap_or(Value::NIL);
+            self.conses.push((entry, old));
+            self.slots[list].value = Value::reference(self.conses.len() - 1, 3);
+            Ok(())
+        })();
+        host::record("layer-reseed", json!({"form": kind, "symbol": name, "kept": entry.is_ok(), "cut": cut}));
+        self.fence_variable(slot, Root::Tainted);
+    }
+
+    /// After a layer's libraries, the startup function ran again: each
+    /// variable the superseded run wrote must hold the content it left,
+    /// or the libraries changed what startup computes, and the build
+    /// refuses naming it.
+    pub(crate) fn world_check_startup_outputs(&mut self) {
+        let Some(fence) = self.fence.as_ref() else { return };
+        let previous: Vec<(usize, String)> = fence.previous_outputs.iter()
+            .filter_map(|(slot, digest)| Some((*slot, digest.clone().ok()?))).collect();
+        for (slot, digest) in previous {
+            if self.input_digest(Input::Variable(slot)).as_ref() != Ok(&digest) {
+                host::refuse("fence", json!({"root": Root::Input as u8, "access": "startup-output", "symbol": self.symbol_names[slot]}));
+            }
         }
     }
 
@@ -210,6 +270,8 @@ impl Vm {
         fence.inputs.clear();
         fence.seen.clear();
         fence.digests.clear();
+        fence.outputs.clear();
+        fence.previous_outputs = std::mem::take(&mut fence.output_digests);
         for slot in earlier {
             if let Some(cell) = self.fence_mut().cells.remove(&slot) {
                 self.variable_redirects[slot] = cell.redirect;
@@ -258,6 +320,9 @@ impl Vm {
             }
         }
         self.fence_mut().digests = digests;
+        let outputs = std::mem::take(&mut self.fence_mut().outputs);
+        let output_digests = outputs.into_iter().map(|slot| (slot, self.input_digest(Input::Variable(slot)))).collect();
+        self.fence_mut().output_digests = output_digests;
     }
 
     fn fence_mut(&mut self) -> &mut Fence {
@@ -272,7 +337,10 @@ impl Vm {
         let redirect = self.variable_redirects.get(slot).copied().flatten();
         match redirect {
             Some(VariableRedirect::Forwarded(Fwd::Fence(_))) => {}
-            Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_)) => {
+            // A tainted variable may be buffer-local already (`defvar-local`):
+            // its reads and writes go through the fence like any other's.
+            Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_))
+            | Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)) if root == Root::Tainted || !matches!(redirect, Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => {
                 let older = (0..self.dynamic.len()).filter(|&at| self.dynamic[at].0 == slot).collect();
                 self.fence_mut().cells.insert(slot, Cell { root, redirect, older });
                 self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Fence(slot as u32)));
@@ -308,6 +376,17 @@ impl Vm {
         self.fence.as_ref()?.cells.get(&slot)
     }
 
+    /// SLOT's own redirect: the one the fence keeps while it is fenced, else
+    /// the one it has. The localness inspections ask this, so a fenced
+    /// buffer-local variable (a tainted `defvar-local`) stays buffer-local
+    /// to them.
+    pub(crate) fn kept_redirect(&self, slot: usize) -> Option<VariableRedirect> {
+        match self.fence_cell(slot) {
+            Some(cell) => cell.redirect,
+            None => self.variable_redirects.get(slot).copied().flatten(),
+        }
+    }
+
     /// The forwarding the fence keeps for SLOT, for the kind queries.
     pub(crate) fn fenced_forwarding(&self, slot: usize) -> Option<Fwd> {
         match self.fence_cell(slot)?.redirect {
@@ -324,8 +403,11 @@ impl Vm {
         let Some(own) = self.fence_cell(slot).map(|cell| cell.redirect) else { return f(self) };
         let fenced = std::mem::replace(&mut self.variable_redirects[slot], own);
         let result = f(self);
+        let before = own;
         let own = self.variable_redirects[slot];
-        if matches!(own, Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) {
+        // Made buffer-local by F: leaves the fence. One fenced while
+        // buffer-local already (a tainted `defvar-local`) stays.
+        if own != before && matches!(own, Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) {
             self.fence_mut().cells.remove(&slot);
         } else {
             self.variable_redirects[slot] = fenced;
@@ -353,12 +435,20 @@ impl Vm {
         let Some(cell) = self.fence_cell(slot) else { return };
         let read = matches!(access, Access::Read | Access::SavedRead);
         if host::in_startup() {
-            if cell.root == Root::Observed && read {
-                self.observe(Input::Variable(slot));
+            if cell.root == Root::Observed {
+                if read { self.observe(Input::Variable(slot)) } else { self.output(slot) }
             }
             return;
         }
         if (cell.root == Root::Input && read) || host::reseed_reads(&self.symbol_names[slot]) {
+            return;
+        }
+        // A layer's libraries run before the startup function runs again,
+        // which observes its inputs anew: the earlier run's are free. A
+        // definition form of theirs may read a per-process value: it is
+        // re-seeded at restore.
+        if host::layer_active() && (cell.root == Root::Input || (read && host::layer_taint())
+                                    || (cell.root == Root::Tainted && host::layer_defines(&self.symbol_names[slot]))) {
             return;
         }
         let per_buffer = matches!(cell.redirect, Some(VariableRedirect::Forwarded(Fwd::Buffer(_))));
@@ -366,9 +456,16 @@ impl Vm {
         let shadowed = !saved && self.dynamic.iter().enumerate().any(|(at, &(bound, _, owner, let_default))|
             bound == slot && !cell.older.contains(&at) && (!per_buffer || let_default || owner == buffer));
         if !shadowed {
+            let within = self.innermost_function();
             host::refuse("fence", json!({"root": cell.root as u8, "access": access_name(access),
-                                         "symbol": self.symbol_names[slot]}));
+                                         "symbol": self.symbol_names[slot], "in": within}));
         }
+    }
+
+    /// The function the innermost Lisp call is in, for a refusal's
+    /// reader: the site names the top-level form, this the code under it.
+    pub(super) fn innermost_function(&self) -> Option<String> {
+        self.backtrace.frames.last().and_then(|frame| self.symbol_name_of(frame.function))
     }
 
     /// ACCESS to the value a `let` saved in dynamic entry AT, by
@@ -414,6 +511,14 @@ impl Vm {
         let fence = self.fence_mut();
         if fence.seen.insert(input) {
             fence.inputs.push(input);
+        }
+    }
+
+    /// Startup wrote the variable at SLOT.
+    fn output(&mut self, slot: usize) {
+        let fence = self.fence_mut();
+        if !fence.outputs.contains(&slot) {
+            fence.outputs.push(slot);
         }
     }
 
@@ -612,7 +717,7 @@ impl Vm {
 
     /// A use of the random state (root 5).
     pub(crate) fn fence_random(&self) {
-        if self.fence.as_ref().is_some_and(|fence| fence.random) && !host::in_startup() {
+        if self.fence.as_ref().is_some_and(|fence| fence.random) && !host::in_startup() && !host::layer_taint() {
             host::refuse("fence", json!({"root": Root::Random as u8, "access": "read", "symbol": "random state"}));
         }
     }

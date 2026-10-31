@@ -9,7 +9,9 @@ The bench is itself an MCP server whose tools take an engine argument --
 gnu, romacs or both -- so an agent can work in the two editors as a person
 would, look at them and compare them:
 
-  bench_start       start the pair (or one engine) on a profile's session
+  bench_start       start the pair (or one engine) on a profile's session;
+                    Romacs from a world prepared first (world_seconds), as
+                    GNU from its dump, so startup_seconds is a user's launch
   bench_send_keys   keys (kbd) or text through each command loop, or wtype
   bench_wait_idle   until each loop is idle and timers and processes settle
   bench_observe     what each frame shows (romacs_observe), paths normalised
@@ -420,6 +422,7 @@ class Bench:
             # Startup's own steps finish after the init; let them.
             engine.tool('romacs_wait_idle', 70, timeout=60)
             started[name] = {'profile': profile, 'startup_seconds': round(engine.startup_seconds, 3),
+                             'world_seconds': getattr(engine, 'world_seconds', None),
                              'ready_seconds': round(time.time() - t, 3), 'data': used,
                              'init_errors': errors or [], 'runtime': engine.ask('emacs-version'),
                              'startup_hook_ran': engine.ask('bench-startup-hook-ran') is not None}
@@ -447,7 +450,7 @@ class Bench:
             self.cursors[engine.name]['compare'] = self.cursors[engine.name]['observe'] = \
                 engine.tool('romacs_observe', maxRows=1)['messages']['next']
         result = {'session': str(self.session), 'engines': started}
-        return result, {'summary': {n: {k: v for k, v in s.items() if k in ('startup_seconds', 'init_errors', 'startup_hook_ran')}
+        return result, {'summary': {n: {k: v for k, v in s.items() if k in ('startup_seconds', 'world_seconds', 'init_errors', 'startup_hook_ran')}
                                     for n, s in started.items()}}
 
     def bench_send_keys(self, arguments):

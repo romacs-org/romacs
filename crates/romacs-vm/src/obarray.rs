@@ -123,7 +123,8 @@ impl Vm {
             if matches!(self.object_if(first), Some(Object::Obarray(_))) { return Ok(first); }
             if first.integer_value() == Some(0) {
                 let table = self.allocate_object(Object::Obarray(Box::new(Obarray::new(0, false))));
-                if let Object::Vector(v) = &mut self.objects[value.payload() as usize - 1] { v[0] = table; }
+                if Self::image_value(value) { return Err(self.read_only_fault(value)); }
+                if let Object::Vector(v) = self.object_mut(value).map_err(prim::Fault::Error)? { v[0] = table; }
                 return Ok(table);
             }
         }
@@ -157,7 +158,8 @@ impl Vm {
             self.obarray_symbol_names.insert(slot, name);
             symbol
         };
-        if let Object::Obarray(t) = &mut self.objects[table.payload() as usize - 1] { t.insert(bytes, chars, symbol); }
+        if Self::image_value(table) { return Err(self.read_only_fault(table)); }
+        if let Object::Obarray(t) = self.object_mut(table).map_err(prim::Fault::Error)? { t.insert(bytes, chars, symbol); }
         Ok(symbol)
     }
     pub(super) fn obarray_unintern(&mut self, table: Value, symbol: Value) -> bool {
@@ -171,7 +173,9 @@ impl Vm {
             }
             return false;
         }
-        if let Object::Obarray(t) = &mut self.objects[table.payload() as usize - 1] { t.remove(symbol) } else { false }
+        // A frozen obarray holds what it holds: nothing to remove.
+        if Self::image_value(table) { return false; }
+        if let Ok(Object::Obarray(t)) = self.object_mut(table) { t.remove(symbol) } else { false }
     }
     pub(super) fn obarray_next(&self, table: Value, bucket_index: usize, current: Value) -> Option<(usize, Value)> {
         let Object::Obarray(t) = self.object_if(table)? else { return None };

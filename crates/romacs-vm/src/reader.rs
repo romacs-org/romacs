@@ -1302,7 +1302,7 @@ impl Vm {
                 return Err("invalid marker anchor".into());
             }
         } else {
-            match &mut self.objects[buffer.index(0)? - 1] {
+            match self.object_mut(buffer)? {
                 Object::Buffer(b) => b.point = ByteOffset(at),
                 Object::ByteBuffer(b) => b.point = ByteOffset(at),
                 _ => unreachable!(),

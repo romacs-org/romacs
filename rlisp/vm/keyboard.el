@@ -97,14 +97,16 @@ timer) ends the wait, so the deadline is computed again (host_input.rs)."
       (setq times (cons 'idle times) lists (cdr lists)))
     (cons (romacs--unread-p) times)))
 
-(defun romacs--read-host-char (seconds)
+(defun romacs--read-host-char (seconds &optional auto-save)
   "keyboard.c kbd_buffer_get_event's wait for the host keyboard: the next
 host event, running timers as they fall due, or nil once SECONDS pass or a
 timer queues input in `unread-command-events' (which read_char reads next).
 Without SECONDS Emacs is idle meanwhile, so idle timers run too (read_char's
-timer_start_idle and timer_stop_idle).  A VM without the process prelude
+timer_start_idle and timer_stop_idle).  After AUTO-SAVE idle seconds with no
+input, it auto-saves once and waits on.  A VM without the process prelude
 runs no timers."
   (let ((end (and seconds (+ (float-time) seconds)))
+        (save-at (and auto-save (+ (float-time) auto-save)))
         (timers (fboundp 'romacs--timer-check))
         (c nil) (waiting t) (shown nil))
     (and timers (null end) (romacs--timer-start-idle))
@@ -124,16 +126,20 @@ runs no timers."
           ;; schedules a timer or requeues input ends the wait
           ;; (`romacs--wait-state').
           (let* ((background (romacs--dispatch-background))
-                 (dispatched (or (and timers (romacs--process-idle)) background))
+                 (dispatched (or (and timers (romacs--process-idle)) (and (fboundp (quote romacs--isolate-idle)) (romacs--isolate-idle)) background))
                  left)
             (and timers (romacs--timer-check))
+            (when (and save-at (<= save-at (float-time)) (not (romacs--unread-p)) (not (input-pending-p)))
+              (setq save-at nil shown nil)
+              (romacs--auto-save))
             (setq left (and end (- end (float-time))))
             (if (or (romacs--unread-p) (and left (<= left 0)))
                 (setq waiting nil)
               ;; A VM without the process prelude runs no timers.
-              (let ((ran (if timers romacs--timers-run 0))
-                    (delay (and timers (romacs--timer-delay))))
-                (setq c (romacs--read-host-event
+              (let* ((ran (if timers romacs--timers-run 0))
+                     (delay (and timers (romacs--timer-delay)))
+                     (delay (if save-at (min (or delay save-at) (max 0 (- save-at (float-time)))) delay)))
+                (setq c (romacs--host-event
                          (if (and delay left) (min delay left) (or delay left))
                          (and shown (not dispatched) (= shown ran)))
                       shown ran)
@@ -146,6 +152,65 @@ runs no timers."
                 (setq waiting (null c))))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
+
+(defun romacs--host-event (seconds display)
+  "`romacs--read-host-event', whose `quit' once the frame has closed leaves
+the innermost recursive edit first, as end of input does: the command loop
+there reports every signal (GNU's C `error' handler), so it would read, and
+quit, again.  Each level quits in turn, down to the host's command."
+  (if (> (recursion-depth) 0)
+      (condition-case nil (romacs--read-host-event seconds display)
+        (quit (throw 'exit (lambda () (signal 'quit nil)))))
+    (romacs--read-host-event seconds display)))
+
+(defvar romacs--last-auto-save 0
+  "keyboard.c last_auto_save: `num-nonmacro-input-events' at the command
+loop's last auto-save.")
+(defvar romacs--last-non-minibuffer-size 0
+  "keyboard.c last_non_minibuf_size: the size of the last buffer read_char
+saw outside the minibuffer, which slows idle auto-saves.")
+
+(defun romacs--auto-save ()
+  "read_char's auto-save: `do-auto-save', quietly with
+`auto-save-no-message', then record_auto_save.  The subr is fileio.c's.
+Value: whether it ran."
+  (prog1 (when (fboundp 'do-auto-save)
+           (do-auto-save auto-save-no-message nil)
+           t)
+    (setq romacs--last-auto-save num-nonmacro-input-events)))
+
+(defun romacs--auto-save-delay ()
+  "read_char's idle auto-save delay: `auto-save-timeout' seconds, slowed
+logarithmically by the size of the last buffer outside the minibuffer
+(four quarters up to about 50k), or nil when there is nothing new to save."
+  (unless (window-minibuffer-p (selected-window))
+    (setq romacs--last-non-minibuffer-size (buffer-size)))
+  (when (and (not noninteractive) (null executing-kbd-macro)
+             (> num-nonmacro-input-events romacs--last-auto-save)
+             (integerp auto-save-timeout) (> auto-save-timeout 0))
+    (let ((size (1+ (ash romacs--last-non-minibuffer-size -8))) (level 0))
+      (while (> size 64)
+        (setq level (1+ level) size (- size (ash size -2))))
+      (/ (* (max level 4) auto-save-timeout) 4))))
+
+(defun romacs--auto-save-due-p ()
+  "Whether more than `auto-save-interval' input events, and at least 20,
+came since the command loop's last auto-save."
+  (and (> auto-save-interval 0)
+       (> (- num-nonmacro-input-events romacs--last-auto-save) (max auto-save-interval 20))))
+
+(defun romacs--idle-auto-save ()
+  "read_char's auto-saves before a command's first key, for a host that
+waits for that key itself (the GUI), idle since `current-idle-time' and
+with no input pending, as timers and process output left it: by event
+count at once, else once the idle delay has passed.  Value: t when it
+saved, else the seconds until it is due, or nil when none is."
+  (cond ((or (romacs--unread-p) (input-pending-p)) nil)
+        ((romacs--auto-save-due-p) (romacs--auto-save))
+        (t (let ((delay (romacs--auto-save-delay)) (idle (current-idle-time)))
+             (when (and delay idle)
+               (let ((left (- delay (float-time idle))))
+                 (if (> left 0) left (romacs--auto-save))))))))
 
 (defun romacs--unread-p ()
   "Whether read_char has a requeued event: in any of its unread queues."
@@ -205,7 +270,13 @@ reports it, raised from the innermost recursive edit when there is one."
         (setq c (logior #x8000000 (logand c #x7f))))
       (setq executing-kbd-macro-index (1+ executing-kbd-macro-index)))
      ((romacs--host-input-p)
-      (setq c (romacs--keyboard-translate (romacs--read-host-char seconds)))
+      ;; read_char's auto-saves, for a command's keys: after
+      ;; `auto-save-interval' events, and while idle.
+      (when (and romacs--reading-command-keys (romacs--auto-save-due-p) (not (romacs--unread-p)) (not (input-pending-p)))
+        (romacs--auto-save))
+      (setq c (romacs--keyboard-translate
+               (romacs--read-host-char seconds (and romacs--reading-command-keys (null seconds)
+                                                    (romacs--auto-save-delay)))))
       (cond (c (unless executing-kbd-macro
                  (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))))
             ;; A timer queued input while the host waited: read it as GNU's
@@ -219,10 +290,12 @@ reports it, raised from the innermost recursive edit when there is one."
       (throw 'exit (lambda () (signal 'end-of-file '("Error reading from stdin")))))
      (t (signal 'end-of-file '("Error reading from stdin")))))
     (when c
-      ;; record_char: recent-keys leaves out keyboard-macro input.
+      ;; record_char: recent-keys and the macro being defined leave out
+      ;; keyboard-macro input.
       (unless (or recorded executing-kbd-macro
                   (and (boundp 'inhibit--record-char) inhibit--record-char))
-        (romacs--record-input c))
+        (romacs--record-input c)
+        (when defining-kbd-macro (romacs--store-kbd-macro-char c)))
       ;; A read with SECONDS leaves its event out of the command's keys.
       (when (and (null seconds)
                  (or (not reread) (= (length romacs--command-keys) 0)))
@@ -562,7 +635,11 @@ Return the keys read, nil at the end of an executing keyboard macro."
       (unless (consp last-command-event)
         (setq last-repeatable-command real-this-command))
       (setq romacs--command-keys [] romacs--single-command-key-start 0)
-      (romacs--after-command-mark previous-buffer previous-tick))
+      (romacs--after-command-mark previous-buffer previous-tick)
+      ;; The keys of a command that ran, unless it set a prefix argument
+      ;; for the next one, belong to the macro being defined.
+      (when (and defining-kbd-macro (null prefix-arg))
+        (romacs--finalize-kbd-macro-chars)))
     keys))
 
 (defun romacs--command-loop-1 ()
@@ -587,45 +664,110 @@ GNU's preloaded Lisp has the bindings but not frame.el's handlers."
   "keyboard.c command_loop_2 one command at a time, for a host whose own
 loop calls this whenever input waits (the GUI): read one key sequence,
 from the unread queues, a keyboard macro, then the host, and run its
-command as command_loop_1 does.  Value: (COMMAND . ERROR), COMMAND
-`this-command' and ERROR nil or the (CONDITION . DATA) it signalled,
-which the host reports as cmd_error would.  The loop then resumes, so
-`post-command-hook' runs for that command too.  The host waits for the
-next input at the top of the loop."
-  (prog1 (condition-case data
-             (progn (romacs--command-loop-step) (cons this-command nil))
-           (t (prog1 (cons this-command data)
-                (unless (memq 'minibuffer-quit (get (car data) 'error-conditions))
-                  (setq executing-kbd-macro nil romacs--executing-macro nil))
-                (setq quit-flag nil inhibit-quit nil)
-                (romacs--command-loop-resume))))
-    (romacs--command-loop-top)))
+command as command_loop_1 does.  A signal goes to cmd_error, a throw to
+`top-level' ends the command, and the loop then resumes, so
+`post-command-hook' runs for that command too.  Value: (COMMAND . ERROR),
+COMMAND `this-command' and ERROR nil or the (CONDITION . DATA) signalled.
+The host waits for the next input at the top of the loop."
+  (let ((error nil) (thrown t))
+    (catch 'top-level
+      (condition-case data
+          (romacs--note-signals #'romacs--command-loop-step)
+        ((debug t) (setq error data) (romacs--cmd-error data)))
+      (setq thrown nil))
+    (when (or error thrown)
+      (when thrown (catch 'top-level (romacs--top-level-1)))
+      (romacs--command-loop-resume))
+    (prog1 (cons this-command error)
+      (romacs--command-loop-top))))
+
+(defun romacs--top-level-1 ()
+  "keyboard.c top_level_1, which the command loop runs on reaching its outer
+level: evaluate `top-level', reporting an error as cmd_error does.  After a
+throw to `top-level', startup.el's `normal-top-level' says so."
+  (when top-level
+    (condition-case data (eval top-level t)
+      ((debug t) (romacs--cmd-error data)))))
+
+(defvar romacs--signaling-function nil
+  "eval.c Vsignaling_function: the function whose call signalled the error
+the command loop handles, for `command-error-function'.")
+
+(defun romacs--note-signals (function)
+  "Call FUNCTION, noting for cmd_error which function signals out of it."
+  (handler-bind-1 function '(t) #'romacs--note-signaling-function))
+
+(defun romacs--note-signaling-function (_error)
+  "eval.c signal_or_quit's Vsignaling_function, from the frames below this
+handler: past the top one, and past `error' after it.  A `signal' frame
+whose caller is `error' or `user-error' is dropped first: pinned GNU runs
+subr.el native-compiled, whose call to `signal' records no frame."
+  (let ((frames nil) (n 0))
+    (mapbacktrace (lambda (_evald function _args _flags)
+                    (when (< n 5) (setq frames (cons function frames) n (1+ n))))
+                  #'romacs--note-signaling-function)
+    (setq frames (cdr (nreverse frames)))
+    (if (and (eq (car frames) 'signal) (memq (car (cdr frames)) '(error user-error)))
+        (setq frames (cdr frames)))
+    (setq frames (cdr frames))
+    (if (eq (car frames) 'error) (setq frames (cdr frames)))
+    (setq romacs--signaling-function (car frames))))
 
 (defun romacs--cmd-error (data)
-  "keyboard.c cmd_error: report DATA through `command-error-function' and
-resume the command loop. Any error but `minibuffer-quit' ends the macro."
+  "keyboard.c cmd_error and cmd_error_internal: report DATA through
+`command-error-function' and resume the command loop.  Any error but
+`minibuffer-quit' ends the macro."
   (let ((context (cond ((null romacs--executing-macro) "")
                        ((= romacs--macro-iterations 1) "After 1 kbd macro iteration: ")
                        (t (format "After %d kbd macro iterations: "
-                                  romacs--macro-iterations)))))
-    (unless (memq 'minibuffer-quit (get (car data) 'error-conditions))
-      (setq executing-kbd-macro nil romacs--executing-macro nil))
-    (setq prefix-arg nil last-prefix-arg nil)
+                                  romacs--macro-iterations))))
+        (signal (if (memq 'quit (get (car data) 'error-conditions)) nil romacs--signaling-function)))
+    (setq romacs--signaling-function nil)
+    (if (not (memq 'minibuffer-quit (get (car data) 'error-conditions)))
+        (setq executing-kbd-macro nil romacs--executing-macro nil)
+      ;; An M-x that quit its minibuffer is part of the macro being defined.
+      (when defining-kbd-macro (romacs--finalize-kbd-macro-chars)))
+    (setq prefix-arg nil last-prefix-arg nil quit-flag nil)
     (let ((standard-output t) (standard-input t)
           (print-level 10) (print-length 10) (inhibit-quit t))
       (when command-error-function
-        (funcall command-error-function data context nil))))
+        (funcall command-error-function data context signal))))
   (setq quit-flag nil inhibit-quit nil)
   0)
 
+;; keyboard.c Fcommand_error_default_function, entered from Rust
+;; (prims/keyboard.rs) so that batch reports reach it before the rest of
+;; the command loop is in use.
+(defun romacs--command-error-default-function (data context signal)
+  "Produce default output for unhandled error message.
+In batch, print it to stderr and exit; a `minibuffer-quit' rings the bell
+and is printed to standard output instead.  Interactively, ring the bell
+and show it in the echo area; *Messages* logs it with SIGNAL, the function
+that signalled, as print_error_message logs its caller."
+  (or (stringp context) (signal 'wrong-type-argument (list 'stringp context)))
+  (let ((text (concat context (error-message-string data)))
+        (minibuffer-quit (memq 'minibuffer-quit (get (car-safe data) 'error-conditions))))
+    (cond ((and noninteractive (not minibuffer-quit))
+           (message "%s" text) (kill-emacs -1))
+          (noninteractive (ding t) (princ text t))
+          ((and signal (symbolp signal))
+           (if minibuffer-quit (ding t) (discard-input) (ding))
+           (let ((inhibit-message t))
+             (message "%s" (concat context (symbol-name signal) ": " (error-message-string data))))
+           (let ((message-log-max nil)) (message "%s" text)))
+          (t (if minibuffer-quit (ding t) (discard-input) (ding))
+             (message "%s" text))))
+  nil)
+
 (defun romacs--command-loop-2 (errors)
   "keyboard.c command_loop_2: run the command loop until it returns.
-With ERRORS, `error' is reported and the loop resumes (a recursive edit);
+With ERRORS, any signal is reported and the loop resumes (a recursive
+edit, whose handler is GNU's C `error', which also lets the debugger in);
 else only `minibuffer-quit' is (a keyboard macro), so any other signal
 leaves through the caller."
   (while (if errors
-             (condition-case data (romacs--command-loop-1)
-               (error (romacs--cmd-error data)))
+             (condition-case data (romacs--note-signals #'romacs--command-loop-1)
+               ((debug t) (romacs--cmd-error data)))
            (condition-case data (romacs--command-loop-1)
              (minibuffer-quit (romacs--cmd-error data)))))
   nil)
@@ -666,6 +808,87 @@ Its value t quits, a string is an error, a function is called."
   (throw 'top-level nil))
 
 ;;;; Keyboard macros
+
+(defvar romacs--kbd-macro-events nil
+  "macros.c kbd_macro_buffer up to kbd_macro_ptr: the events stored while
+a macro is defined, newest first.")
+(defvar romacs--kbd-macro-end 0
+  "macros.c kbd_macro_end: how many of `romacs--kbd-macro-events', oldest
+first, belong to the macro; later ones are the current command's.")
+
+(defun romacs--store-kbd-macro-char (event)
+  "macros.c store_kbd_macro_char: store EVENT in the macro being defined."
+  (when defining-kbd-macro
+    (setq romacs--kbd-macro-events (cons event romacs--kbd-macro-events)))
+  nil)
+
+(defun romacs--finalize-kbd-macro-chars ()
+  "macros.c finalize_kbd_macro_chars: the events stored so far belong to
+the macro."
+  (setq romacs--kbd-macro-end (length romacs--kbd-macro-events)))
+
+(defun romacs--cancel-kbd-macro-events ()
+  "macros.c Fcancel_kbd_macro_events: drop this command's stored events."
+  (setq romacs--kbd-macro-events
+        (nthcdr (- (length romacs--kbd-macro-events) romacs--kbd-macro-end)
+                romacs--kbd-macro-events))
+  nil)
+
+(defun romacs--end-kbd-macro ()
+  "macros.c end_kbd_macro: stop defining; the events that belong to the
+macro become `last-kbd-macro'."
+  (romacs--cancel-kbd-macro-events)
+  (setq defining-kbd-macro nil
+        last-kbd-macro (vconcat (reverse romacs--kbd-macro-events))))
+
+(defun romacs--start-kbd-macro (append no-exec)
+  "macros.c Fstart_kbd_macro."
+  (if defining-kbd-macro (error "Already defining kbd macro"))
+  (if (null append)
+      (progn (setq romacs--kbd-macro-events nil romacs--kbd-macro-end 0)
+             (message "Defining kbd macro..."))
+    (let ((macro last-kbd-macro) (events nil) (i 0))
+      (or (stringp macro) (vectorp macro) (signal 'wrong-type-argument (list 'arrayp macro)))
+      ;; A string's 0x80 bit is the meta modifier.
+      (while (< i (length macro))
+        (let ((c (aref macro i)))
+          (if (and (stringp macro) (natnump c) (/= 0 (logand c #x80)))
+              (setq c (logior #x8000000 (logand c (lognot #x80)))))
+          (setq events (cons c events) i (1+ i))))
+      (setq romacs--kbd-macro-events events romacs--kbd-macro-end (length events))
+      (unless no-exec (execute-kbd-macro macro 1))
+      (message "Appending to kbd macro...")))
+  (setq defining-kbd-macro t)
+  nil)
+
+(defun romacs--end-kbd-macro-command (repeat loopfunc)
+  "macros.c Fend_kbd_macro."
+  (unless defining-kbd-macro (error "Not defining kbd macro"))
+  (if (null repeat) (setq repeat 1)
+    (or (integerp repeat) (signal 'wrong-type-argument (list 'fixnump repeat))))
+  (romacs--end-kbd-macro)
+  (message "Keyboard macro defined")
+  (cond ((= repeat 0) (execute-kbd-macro last-kbd-macro repeat loopfunc))
+        ((> repeat 1) (execute-kbd-macro last-kbd-macro (1- repeat) loopfunc)))
+  nil)
+
+(defun romacs--call-last-kbd-macro (prefix loopfunc)
+  "macros.c Fcall_last_kbd_macro: the macro runs as the commands before it
+see it, and its last command stays `this-command'."
+  (setq this-command last-command real-this-command last-kbd-macro)
+  (cond (defining-kbd-macro (error "Can't execute anonymous macro while defining one"))
+        ((null last-kbd-macro) (error "No kbd macro has been defined"))
+        (t (execute-kbd-macro last-kbd-macro prefix loopfunc)))
+  (setq this-command last-command)
+  nil)
+
+(defun romacs--discard-input ()
+  "keyboard.c Fdiscard_input: end the macro being defined, without the
+current command's keys, and drop requeued input."
+  (when defining-kbd-macro
+    (romacs--end-kbd-macro))
+  (setq unread-command-events nil)
+  nil)
 
 (defun romacs--execute-kbd-macro (macro count loopfunc)
   "macros.c Fexecute_kbd_macro."

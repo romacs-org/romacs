@@ -19,10 +19,12 @@ pub fn take_batch(
 pub struct Presentation {
     dirty: bool,
     in_flight: Option<(u64, Instant)>,
+    /// The presentation last retired and when it rendered, until taken.
+    retired: Option<(u64, Instant)>,
 }
 
 impl Presentation {
-    pub fn new() -> Self { Self { dirty: false, in_flight: None } }
+    pub fn new() -> Self { Self { dirty: false, in_flight: None, retired: None } }
 
     pub fn changed(&mut self) { self.dirty = true; }
 
@@ -72,13 +74,10 @@ impl Presentation {
         // GNU's command loop clears the previous message when a new command
         // starts, not on each key of a prefix sequence.
         if !in_prefix { crate::echo::clear(vm)?; }
+        // A command's signal reached `command-error-function' in the
+        // command loop, whose default left its message like any other.
         let outcome = run(vm);
-        if let Ok(Some(romacs_vm::CommandOutcome { signal: Some(signal), .. })) = &outcome {
-            let message = crate::echo::signal_message(vm, signal)?;
-            crate::echo::show(vm, &message)?;
-        } else {
-            crate::echo::show_current_message(vm)?;
-        }
+        crate::echo::show_current_message(vm)?;
         crate::eval_last_sexp::after_command(vm)?;
         outcome
     }
@@ -100,9 +99,18 @@ impl Presentation {
 
     pub fn in_flight(&self) -> Option<(u64, Instant)> { self.in_flight }
 
-    pub fn completed(&mut self, presentation: u64) {
-        if self.in_flight.is_some_and(|(actual, _)| actual == presentation) { self.in_flight = None; }
+    /// PRESENTATION rendered AT, whether the loop saw it or a prompt
+    /// settled it first (main.rs `Lent').
+    pub fn completed(&mut self, presentation: u64, at: Instant) {
+        if self.in_flight.is_some_and(|(actual, _)| actual == presentation) {
+            self.in_flight = None;
+            self.retired = Some((presentation, at));
+        }
     }
+
+    /// The presentation retired since the last call, and when it rendered:
+    /// the latency trace's keys for it are complete.
+    pub fn take_retired(&mut self) -> Option<(u64, Instant)> { self.retired.take() }
 
     /// How long to block for input: briefly while a paint is in flight, whose
     /// completion nothing signals; otherwise until input or a wake.
@@ -220,7 +228,7 @@ mod tests {
         let value = vm.eval_source("(list (buffer-string) (point))").unwrap();
         assert_eq!(value.display().unwrap(), "(\"aλΔ\" 3)");
         assert!(vm.heap_stats().collections > collections);
-        presentation.completed(1);
+        presentation.completed(1, Instant::now());
         assert!(presentation.ready());
         let snapshot = crate::snapshot(&mut vm, false, 1200, 800).unwrap();
         assert_eq!(snapshot.windows[0].snapshot.text.utf8, "aλΔ");
@@ -250,7 +258,7 @@ mod tests {
         assert_eq!(next.windows[0].snapshot.text.utf8, "aλ!Δ");
         assert_eq!(next.windows[0].snapshot.point_byte, 4);
         assert_ne!(snapshot, next);
-        presentation.completed(2);
+        presentation.completed(2, Instant::now());
         assert!(presentation.ready());
     }
 
@@ -276,12 +284,12 @@ mod tests {
         presentation.changed();
         presentation.changed();
         assert!(!presentation.ready(), "input must not trigger per-command layout while rendering");
-        presentation.completed(0);
+        presentation.completed(0, Instant::now());
         assert!(!presentation.ready(), "stale completion cannot release a frame");
-        presentation.completed(1);
+        presentation.completed(1, Instant::now());
         assert!(presentation.ready(), "dirty commands must survive renderer completion");
         presentation.submitted(2, now);
-        presentation.completed(2);
+        presentation.completed(2, Instant::now());
         assert!(!presentation.ready());
     }
 }

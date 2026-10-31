@@ -650,17 +650,15 @@ impl CharTable {
     pub fn get(&self, index: usize) -> Result<Value> {
         self.span(index).map(|(value, ..)| value)
     }
-    /// Whether every character reads nil and no parent or extra slot is set.
-    pub(crate) fn holds_nothing(&self) -> bool {
-        if self.parent != Value::NIL || self.extras.iter().any(|&v| v != Value::NIL) { return false; }
-        let mut index = 0;
-        while index < Self::LEN {
-            match self.span(index) {
-                Ok((value, _, to)) if value == Value::NIL => index = to + 1,
-                _ => return false,
+    /// No character has a value of its own, nor a default.
+    pub(crate) fn all_nil(&self) -> bool {
+        fn nil(slot: &CharTableSlot) -> bool {
+            match slot {
+                CharTableSlot::Value(value) => *value == Value::NIL,
+                CharTableSlot::Node(node) => node.lock().unwrap().slots.iter().all(nil),
             }
         }
-        true
+        self.default == Value::NIL && nil(&self.ascii) && self.root.lock().unwrap().slots.iter().all(nil)
     }
     /// char_table_ref_and_range at slot granularity: INDEX's value (the
     /// default for nil) and the inclusive character range of its slot. ASCII

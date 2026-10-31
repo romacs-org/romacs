@@ -655,3 +655,35 @@ fn visited_modtime_flags_and_timestamp_forms() {
     let d = dir("mtime-missing"); let path = d.join("absent");
     assert_eq!(eval(&mut vm, &format!("(with-temp-buffer (condition-case nil (insert-file-contents {} t) (file-missing nil)) (list (visited-file-modtime) (verify-visited-file-modtime)))", lisp(&path))), "(-1 t)", "MTIME_MISSING_VISIT");
 }
+
+/// fileio.c:5859: an interactive write names what it wrote in the echo
+/// area and *Messages*: "Wrote" (a VISIT string's file), "Added to" for
+/// an append, "Updated" at an offset, nothing for a quiet VISIT. Pinned
+/// GNU under `emacs -nw -Q' answered these; in batch it says nothing.
+#[test]
+fn write_region_reports_the_file_it_wrote_as_gnu_does() {
+    let d = dir("wrote");
+    let (a, b) = (lisp(&d.join("a.txt")), lisp(&d.join("b.txt")));
+    let mut vm = Vm::new();
+    let report = eval(&mut vm, &format!("(progn (setq noninteractive nil)
+        (let (out)
+          (with-temp-buffer
+            (insert \"x\")
+            (write-region nil nil {a} nil t) (push (current-message) out) (message nil)
+            (write-region nil nil {a} t) (push (current-message) out) (message nil)
+            (write-region nil nil {a} 0) (push (current-message) out) (message nil)
+            (write-region \"y\" nil {a} nil 'quiet) (push (current-message) out) (message nil)
+            (write-region \"y\" nil {a} nil {b}) (push (current-message) out) (message nil)
+            (write-region \"y\" nil {a}) (push (current-message) out))
+          (push (with-current-buffer \"*Messages*\" (buffer-string)) out)
+          (equal (nreverse out)
+                 (list (concat \"Wrote \" {a}) (concat \"Added to \" {a}) (concat \"Updated \" {a}) nil
+                       (concat \"Wrote \" {b}) (concat \"Wrote \" {a})
+                       (concat \"Wrote \" {a} \"\\nAdded to \" {a} \"\\nUpdated \" {a} \"\\nWrote \" {b} \"\\nWrote \" {a} \"\\n\")))))"));
+    assert_eq!(report, "t");
+    let mut batch = Vm::new();
+    let quiet = eval(&mut batch, &format!("(progn (setq noninteractive t)
+        (with-temp-buffer (insert \"x\") (write-region nil nil {a} nil t))
+        (list (current-message) (get-buffer \"*Messages*\")))"));
+    assert_eq!(quiet, "(nil nil)");
+}

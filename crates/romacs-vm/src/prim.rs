@@ -609,9 +609,9 @@ mod leaf {
             Some(self.concat_result(bytes,false,&parts))
         }
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
-            if Vm::image_value(value) { return Err(Fault::Error("immutable image string".into())); }
+            if Vm::image_value(value) { return Err(self.read_only(value)); }
             let bytes=self.string_view(value)?.bytes.len();
-            self.vm.objects[value.payload() as usize-1]=data::Object::Bytes(vec![0;bytes]);
+            *self.object_mut(value)? = data::Object::Bytes(vec![0;bytes]);
             Ok(Value::NIL)
         }
         pub fn sxhash(&self, value: Value) -> Value {
@@ -647,7 +647,7 @@ mod leaf {
             Ok(value_hash)
         }
         pub fn fill_string(&mut self, value: Value, code: u32) -> std::result::Result<Value, Fault> {
-            if Vm::image_value(value) { return Err(Fault::Error("immutable image string".into())); }
+            if Vm::image_value(value) { return Err(self.read_only(value)); }
             let view = self.string_view(value)?;
             let mut bytes = Vec::new();
             if view.multibyte {
@@ -655,7 +655,7 @@ mod leaf {
                 if width * view.chars != view.bytes.len() { return Err(Fault::Error("Attempt to change byte length of a string".into())); }
                 for _ in 0..view.chars { bytes.extend_from_slice(&encoded[..width]); }
             } else { bytes.resize(view.chars, code as u8); }
-            let old = &mut self.vm.objects[value.payload() as usize - 1];
+            let old = self.object_mut(value)?;
             let properties = match old { data::Object::String(s) | data::Object::RawString(s) => Some(s.properties.clone()), _=>None };
             let mut string = data::LispString::from_bytes(bytes, view.multibyte);
             if let Some(mut properties) = properties {
@@ -764,7 +764,7 @@ mod leaf {
             if !matches!(self.vm.object_if(v), Some(data::Object::Vector(_))) {
                 return Err(Fault::Wrong("vectorp", v));
             }
-            let data::Object::Vector(a) = &mut self.vm.objects[v.payload() as usize - 1] else {
+            let data::Object::Vector(a) = self.object_mut(v)? else {
                 unreachable!()
             };
             let item = usize::try_from(n)
@@ -786,9 +786,9 @@ mod leaf {
             value: Value,
             car: bool,
         ) -> std::result::Result<Value, Fault> {
-            // Image conses are readable, never writable. No VM reference escapes.
-            if Vm::image_value(v) {
-                return Err(Fault::Wrong("consp", v));
+            // Image and frozen conses are readable, never writable.
+            if Vm::image_value(v) && v.tag() == 3 {
+                return Err(self.read_only(v));
             }
             let pair = v
                 .index_if(3)
@@ -1346,6 +1346,18 @@ mod leaf {
         pub fn intern(&mut self, name: &str) -> Value {
             self.vm.intern(name)
         }
+        /// The private object V names, for writing; a frozen or image value
+        /// is refused with `read_only`.
+        pub(crate) fn object_mut(&mut self, v: Value) -> std::result::Result<&mut data::Object, Fault> {
+            if Vm::image_value(v) { return Err(self.read_only(v)); }
+            self.vm.object_mut(v).map_err(Fault::Error)
+        }
+        /// GNU's `CHECK_IMPURE` signal for a write to the frozen or image
+        /// object V (`frozen.rs`).
+        pub fn read_only(&mut self, v: Value) -> Fault {
+            let (condition, data) = self.vm.read_only_signal(v);
+            Fault::Signal(condition, data)
+        }
         /// The window tree, through window.rs's own surface: reads, writes
         /// and allocation only, never evaluation or collection.
         pub fn windows(&mut self) -> crate::window::Windows<'_> {
@@ -1372,10 +1384,7 @@ mod leaf {
         }
         pub fn current_local_map(&mut self) -> std::result::Result<Value, Fault> {
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
-            match &self.vm.objects[index] {
-                crate::data::Object::Buffer(buffer) => Ok(buffer.local_keymap),
-                _ => Err(Fault::Error("current-local-map in unibyte buffers is not implemented".into())),
-            }
+            Ok(*self.vm.local_keymap(index))
         }
         pub fn keymap_at_point(&mut self, property: Value) -> super::Out {
             self.vm.keymap_at_point(property).map_err(Fault::Error)
@@ -1414,7 +1423,7 @@ mod leaf {
                 5 if (v.payload() as usize) < self.vm.cells.len() => Kind::Cell,
                 6 if super::descriptor(v.payload() as usize).is_some() => Kind::Subr,
                 7 if self.symbol_slot(v).is_ok() => Kind::Symbol,
-                0 if Vm::image_value(v) && self.vm.string_value(v).is_ok() => Kind::String,
+                0 if Vm::image_string(v) => Kind::String,
                 0 => match self.vm.object_if(v) {
                     Some(data::Object::Float(_)) => Kind::Float,
                     Some(data::Object::Bignum(_)) => Kind::Bignum,
@@ -1530,7 +1539,7 @@ mod leaf {
             if i < 0 || i as usize >= t.extras.len() { return Err(Fault::Range(table, n)); }
             let old = t.extras[i as usize];
             if let Some(value) = set {
-                let data::Object::CharTable(t) = &mut self.vm.objects[table.index(0).unwrap() - 1] else { unreachable!() };
+                let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
                 t.extras[i as usize] = value;
                 Ok(value)
             } else { Ok(old) }
@@ -1556,7 +1565,7 @@ mod leaf {
                     if next == table || !seen.insert(next.0) { return Err(Fault::Error("Attempt to make a chartable be its own parent".into())); }
                     next = t.parent;
                 }
-                let data::Object::CharTable(t) = &mut self.vm.objects[table.index(0).unwrap() - 1] else { unreachable!() };
+                let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
                 t.parent = parent;
                 Ok(parent)
             } else { Ok(old) }
@@ -1575,7 +1584,7 @@ mod leaf {
                 Some((character(from)?, character(to)?))
             } else { return Err(Fault::Error("Invalid RANGE argument to ‘set-char-table-range’".into())); };
             let slot = self.vm.literal_table_slot(value);
-            let data::Object::CharTable(t) = &mut self.vm.objects[table.index(0).unwrap() - 1] else { unreachable!() };
+            let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
             if let Some((from, to)) = bounds { t.set_range_slot(from, to, slot).map_err(Fault::Error)?; }
             else { t.default = value; }
             Ok(value)
@@ -1630,6 +1639,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod clipboard;
+    mod keyboard;
     mod filesave;
     mod charset;
     mod coding;
@@ -1640,6 +1650,8 @@ mod leaf {
     mod overlays;
     mod invisible;
     mod buffer_locals;
+    mod frozen;
+    mod isolate;
     mod casetab;
     mod casing;
     pub(crate) use casing::RegionCase;
@@ -1655,6 +1667,7 @@ mod leaf {
     mod syntax_scan;
     pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
+    mod font;
     mod value_order;
     mod completion;
     mod backtrace;
@@ -1671,14 +1684,15 @@ mod leaf {
     mod display_motion;
     mod display_elements;
     mod display_hosted;
+    pub(crate) use display_hosted::{FaceKey, Shown, ShownKind};
     mod text_pixel_size;
     mod bidi;
-    pub(crate) use text_pixel_size::TextSizeArgs;
+    pub(crate) use text_pixel_size::{TextSizeArgs, LineLabels};
     mod session;
     mod world;
     mod finalizer;
 }
-pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
 
 /// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
 pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {
@@ -1686,6 +1700,17 @@ pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point:
         Fault::Error(text) => text,
         _ => "the host's layout cannot choose this window start".into(),
     })
+}
+
+/// The display elements WINDOW shows of its buffer from FROM, a line
+/// start, to TO, as a host paints them (Leaf::window_shown_elements).
+pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i64) -> std::result::Result<Vec<Shown>, Fault> {
+    Leaf::new(vm).window_shown_elements(window, from, to)
+}
+
+/// The line numbers WINDOW shows from its start (Leaf::window_line_numbers).
+pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
+    Leaf::new(vm).window_line_numbers(window)
 }
 
 /// cmds.c beginning-of-line and end-of-line's target: the line boundary
@@ -1920,6 +1945,27 @@ fn no_collection<R>(vm: &mut Vm, run: impl FnOnce(&mut Vm) -> R) -> R {
 }
 
 impl Vm {
+    /// NAME under the user's home, as fileio.c expands `~' and `~/REST'
+    /// (`get_homedir'): the home directory, joined to REST. None for any
+    /// other name, `~user' included. No file name handler is asked.
+    pub(crate) fn expand_home_name(&mut self, name: &str) -> crate::Result<Option<String>> {
+        let Some(rest) = name.strip_prefix('~').filter(|rest| rest.is_empty() || rest.starts_with('/')) else { return Ok(None) };
+        let home = no_collection(self, |vm| prims::expand_file_name::home_directory(&mut Leaf::new(vm)));
+        let home = match home {
+            Ok(home) => home,
+            Err(fault) => {
+                let (condition, data) = self.fault(fault);
+                self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                return Err("expand-file-name signalled".into());
+            }
+        };
+        let mut joined = String::from_utf8_lossy(&home).into_owned();
+        if joined.is_empty() { joined.push('/'); }
+        if joined.ends_with('/') && rest.starts_with('/') { joined.pop(); }
+        joined.push_str(rest);
+        Ok(Some(joined))
+    }
+
     /// The legacy `expand-file-name' row (kept for its ordinal) runs the
     /// defsubr's expansion, refusing where a file name handler would be called.
     pub(crate) fn expand_file_name_legacy(&mut self, name: Value, default: Value) -> crate::Result<Value> {
@@ -1933,28 +1979,6 @@ impl Vm {
                 Err("expand-file-name signalled".into())
             }
         }
-    }
-    /// CODING_SYSTEM_SPEC's mnemonic and the variable naming its EOL type's
-    /// mnemonic (`decode_mode_spec_coding`, `xdisp.c:29346`), or None for a
-    /// system not yet decided (no spec).
-    pub(crate) fn coding_mnemonic_and_eol(&mut self, name: Value) -> crate::Result<Option<(Value, &'static str)>> {
-        let parts = no_collection(self, |vm| {
-            let mut cx = Leaf::new(vm);
-            let spec = cx.coding_spec(name)?;
-            if cx.kind(spec) != leaf::Kind::Vector { return Ok(None) }
-            let attrs = cx.vector_get(spec, Value::integer(0).unwrap())?;
-            let eol = cx.vector_get(spec, Value::integer(2).unwrap())?;
-            let eol = if eol == Value::NIL || cx.kind(eol) == leaf::Kind::Vector { "eol-mnemonic-undecided" }
-                else if eol == cx.intern("unix") { "eol-mnemonic-unix" }
-                else if eol == cx.intern("dos") { "eol-mnemonic-dos" }
-                else { "eol-mnemonic-mac" };
-            Ok(Some((cx.vector_get(attrs, Value::integer(2).unwrap())?, eol)))
-        });
-        parts.map_err(|fault| {
-            let (condition, data) = self.fault(fault);
-            self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
-            "coding system lookup signalled".into()
-        })
     }
     /// load-with-code-conversion for a source without a coding cookie that
     /// is not UTF-8: the detection walk over the coding priority, as
@@ -2107,7 +2131,8 @@ impl Vm {
     /// loops written in Lisp over leaf cursors, so their state is registers.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
         self.eval_source_raw(prims::PRELUDE)?;
-        self.eval_source_raw(prims::PROCESS_PRELUDE)
+        self.eval_source_raw(prims::PROCESS_PRELUDE)?;
+        self.eval_source_raw(prims::ISOLATE_PRELUDE)
     }
 }
 

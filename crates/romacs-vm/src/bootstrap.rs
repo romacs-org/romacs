@@ -198,7 +198,7 @@ impl Vm {
                     let mut steps = 0;
                     loop {
                         if Self::image_value(tail) {
-                            return Err("cannot mutate immutable image".into());
+                            return Err(self.refuse_read_only(tail));
                         }
                         let index = tail.index(3)?;
                         let cdr = self.cons_pair(tail)?.1;

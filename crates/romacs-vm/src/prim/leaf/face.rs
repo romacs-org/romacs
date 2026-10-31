@@ -95,10 +95,25 @@ impl Leaf<'_> {
             self.vm.slots[counter].value = Value::integer(id + 1).map_err(Fault::Error)?;
             let key = self.intern("face");
             self.vm.put_symbol_property(face, key, value).map_err(Fault::Error)?;
+            // Glyph codes name faces by these ids.
+            let names = self.vm.slot("#:vm2-face-names");
+            let entry = self.cons(value, face);
+            self.vm.slots[names].value = { let rest = self.vm.slots[names].value; let rest = if rest == Value::UNBOUND { Value::NIL } else { rest }; self.cons(entry, rest) };
             self.cons(value, vector)
         } else { vector };
         self.vm.declaration_hash_put(table, face, value).map_err(Fault::Error)?;
         Ok(vector)
+    }
+
+    /// The face whose `face-id' is ID, else nil.
+    pub(crate) fn face_named_by_id(&mut self, id: i64) -> Value {
+        let names = self.vm.slot("#:vm2-face-names");
+        let mut list = self.vm.slots[names].value;
+        while let Some((entry, rest)) = self.pair(list) {
+            if let Some((key, face)) = self.pair(entry) && key.integer_value() == Some(id) { return face; }
+            list = rest;
+        }
+        Value::NIL
     }
 
     pub(crate) fn face_property(&mut self, face: Value, property: Value) -> super::super::Out {

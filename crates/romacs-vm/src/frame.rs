@@ -71,7 +71,7 @@ impl Vm {
             root, selected: root, minibuffer, terminal,
             parameters: vec![name], live: true,
         })));
-        let Object::Terminal(t) = &mut self.objects[terminal.index(0)? - 1] else { unreachable!() };
+        let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
         let slot = self.slot(SELECTED_FRAME);
         self.slots[slot].value = frame;

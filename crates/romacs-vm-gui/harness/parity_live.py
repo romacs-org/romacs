@@ -289,7 +289,11 @@ def private_tree(engine, base, tools, prefix=None):
            'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
            'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop', 'PARITY_PROBE_DIR': str(root / 'probe'),
            'GSETTINGS_BACKEND': 'memory', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/nonexistent', 'NO_AT_BRIDGE': '1',
-           'GDK_BACKEND': 'wayland'}
+           'GDK_BACKEND': 'wayland',
+           # The headless pixman compositor presents no Vulkan surface: wgpu
+           # always ends on GL (llvmpipe) here, and probing the Vulkan loader
+           # and its drivers first costs ~250 ms of every launch's first paint.
+           'WGPU_BACKEND': 'gl'}
     if os.environ.get('ROMACS_GATE_FONTCONFIG'):
         env['FONTCONFIG_FILE'] = os.environ['ROMACS_GATE_FONTCONFIG']
     return root, home, env
@@ -330,16 +334,31 @@ def gnu_engine(root, home, env, init, lisp, timeout, tools, cls=None):
     return (cls or Engine)('gnu', [GNU, '--font', 'Iosevka-14'], root, lisp, env, timeout).start(tools)
 
 
+def prepare_world(romacs, env, cwd):
+    """The world `ROMACS --loadup' boots from in ENV, made usable with no
+    window (`--world-build'), as an installer prepares it before a user's
+    first launch: the seconds that took, or None when it could not be
+    (the launch then boots from source, and says so)."""
+    started = time.time()
+    done = subprocess.run([romacs, '--loadup', '--world-build'], env=env, cwd=cwd,
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=900)
+    return round(time.time() - started, 3) if done.returncode == 0 else None
+
+
 def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None):
-    """`romacs-vm-gui --loadup' on INIT, as ~/.config/romacs/init.el; CLS as
-    `gnu_engine'."""
+    """`romacs-vm-gui --loadup' on INIT, as ~/.config/romacs/init.el, from a
+    world prepared first (`prepare_world', its seconds in `world_seconds'),
+    as a user's HOME holds one; CLS as `gnu_engine'."""
     (home / '.config/romacs').mkdir()
     (home / '.config/romacs/init.el').write_text(init)
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
-    for key in ('ROMACS_GNU_SOURCE',):
+    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR'):
         if os.environ.get(key):
             env[key] = os.environ[key]
-    return (cls or Engine)('romacs', [romacs, '--loadup'], root, lisp, env, timeout).start(tools)
+    world_seconds = prepare_world(romacs, env, root / 'work')
+    engine = (cls or Engine)('romacs', [romacs, '--loadup'], root, lisp, env, timeout).start(tools)
+    engine.world_seconds = world_seconds
+    return engine
 
 
 # --- normalisation and comparison --------------------------------------------
@@ -498,11 +517,15 @@ def run_step(engines, step, perf_enabled, seed):
 class Harness:
     """What one harness supplies: its WORKFLOWS (name -> steps), LAUNCH
     (engine, base, args -> started Engine), the SNAPSHOT form the probe
-    evaluates, the random SEED prefix of each step, and an optional string
-    REWRITE its policy adds to `normalise'."""
+    evaluates, the random SEED prefix of each step, an optional string
+    REWRITE its policy adds to `normalise', and an optional CHECK
+    (engines -> {'errors': [...], ...}) run after a workflow's last step,
+    whose errors fail it.  WRITES names the workflows that change the
+    backend's data, which run only when named."""
 
-    def __init__(self, workflows, launch, snapshot='(parity-probe-snapshot)', seed='parity-', rewrite=None):
+    def __init__(self, workflows, launch, snapshot='(parity-probe-snapshot)', seed='parity-', rewrite=None, check=None, writes=()):
         self.workflows, self.launch, self.snapshot, self.seed, self.rewrite = workflows, launch, snapshot, seed, rewrite
+        self.check, self.writes = check, set(writes)
 
 
 def run_workflow(harness, name, args, base, report):
@@ -530,6 +553,10 @@ def run_workflow(harness, name, args, base, report):
             if args.keep_snapshots:
                 record['snapshots'] = snapshots
         entry['status'] = 'PASS' if not any(s['differences'] for s in entry['steps']) else 'DIFFER'
+        if harness.check:
+            entry['check'] = harness.check(engines)
+            if entry['check'].get('errors'):
+                entry['status'] = 'FAIL'
     except Exception as error:  # noqa: BLE001
         entry['error'] = repr(error)
         for engine in engines:
@@ -580,7 +607,7 @@ def main(harness, description, add_arguments=lambda parser: None):
     report = {'romacs': args.romacs, 'romacs_sha256': hashlib.sha256(Path(args.romacs).read_bytes()).hexdigest(),
               'gnu': GNU, 'grid': GRID, 'workflows': []}
     try:
-        for name in args.workflow or list(harness.workflows):
+        for name in args.workflow or [n for n in harness.workflows if n not in harness.writes]:
             entry = run_workflow(harness, name, args, base, report)
             print(name, entry['status'], entry.get('error', ''), flush=True)
             (output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')

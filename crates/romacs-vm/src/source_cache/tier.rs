@@ -10,8 +10,14 @@ impl Vm {
         }
         let Ok(name) = a[0].sym() else { return None };
         let &slot = self.names.get(name)?;
-        let target = self.slots[slot].function;
-        if target.tag() != 6 || self.macros.contains(&slot) {
+        // A macro (or alias of one) expands first, as in the compiler. Then a
+        // byte-op call is the primitive itself (sealed.rs); any other call is
+        // what the cell holds.
+        if self.call_is_macro(slot) {
+            return None;
+        }
+        let target = sealed::target(name, a.len() - 1).unwrap_or(self.slots[slot].function);
+        if target.tag() != 6 {
             return None;
         }
         let p = prim::legacy(target)?;

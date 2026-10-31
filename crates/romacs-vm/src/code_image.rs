@@ -38,6 +38,7 @@ impl Vm {
     ) -> Result<String> {
         self.require_live_function(entry)?;
         if self.image.is_some()
+            || !self.regions_empty()
             || !self.cells.is_empty()
             || !self.dynamic.is_empty()
             || !self.stack.is_empty()
@@ -413,7 +414,7 @@ impl Vm {
         copies: &mut HashMap<u64, Value>,
         pending: &mut Vec<(Value, usize)>,
     ) -> Result<Value> {
-        if !Self::image_value(value) {
+        if !Self::image_value(value) || crate::frozen::region_of(value.payload() as usize) != 0 {
             return Ok(value);
         }
         if let Some(&private) = copies.get(&value.0) {
@@ -560,6 +561,7 @@ impl Vm {
                 Op::Cell(r) | Op::Return(r) => reg(r),
                 Op::Global(d, s) | Op::ResolveHead(d, s) => reg(d) && slot(s),
                 Op::Prepared(d, t, s, c, a, n) => reg(d) && reg(t) && slot(s) && c < self.caches.len() && args(a, n),
+                Op::Sealed(d, s, a, n) => reg(d) && slot(s) && args(a, n),
                 Op::SetGlobal(s, r) | Op::Bind(s, r) | Op::Define(s, r) | Op::DefineMacro(s, r) => {
                     slot(s) && reg(r)
                 }
@@ -628,6 +630,7 @@ pub(crate) fn encode_op(op: Op) -> Json {
         ResumeExit => json!([23]),
         ResolveHead(a, b) => json!([24, a, b]),
         Prepared(a, b, c, d, e, f) => json!([25, a, b, c, d, e, f]),
+        Sealed(a, b, c, d) => json!([26, a, b, c, d]),
     }
 }
 pub(crate) fn decode_op(v: &Json) -> Result<Op> {
@@ -660,6 +663,7 @@ pub(crate) fn decode_op(v: &Json) -> Result<Op> {
         [23] => ResumeExit,
         [24, a, b] => ResolveHead(*a, *b),
         [25, a, b, c, d, e, f] => Prepared(*a, *b, *c, *d, *e, *f),
+        [26, a, b, c, d] => Sealed(*a, *b, *c, *d),
         _ => return Err("invalid image opcode".into()),
     })
 }

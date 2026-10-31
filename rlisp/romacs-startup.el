@@ -106,8 +106,10 @@
           (romacs-gui-echo "Buffer killed")))
     (romacs-gui-live-visits)))
 (defun romacs-gui-quit ()
+  "Quit, asking first while a file buffer is modified (any visit, as
+`save-buffers-kill-emacs' asks) or a terminal runs."
   (interactive)
-  (let ((buffers (romacs-gui-live-visits)) (dirty nil))
+  (let ((buffers (buffer-list)) (dirty nil))
     (while buffers
       (with-current-buffer (car buffers)
         (when (and buffer-file-name (romacs-gui-dirty-p)) (setq dirty t)))
@@ -234,14 +236,17 @@
   "The buffers --loadup's file arguments visited, the last one first:
 startup.el `command-line-1's `displayable-buffers', which
 `romacs-gui-loadup-command-line-1' displays.")
-(defun romacs-gui-visit-file-noselect (file name)
-  "Visit FILE, named NAME, as startup.el's `process-file-arg' does: the
+(defun romacs-gui-visit-file-noselect (file)
+  "Visit FILE as startup.el's `process-file-arg' does: GNU's
+`find-file-noselect' visits it, it joins `file-name-history', the
 buffer goes onto `romacs-gui-displayable-buffers' and becomes current,
 and no window shows it yet.  A file the visitor refuses gives the
 *romacs visit errors* buffer in its place."
-  (let ((buffer (condition-case err
-                    (romacs-find-file-noselect file name)
-                  (error (romacs-gui--visit-error file err)))))
+  (let* ((file (expand-file-name (command-line-normalize-file-name file)))
+         (buffer (condition-case err
+                     (find-file-noselect file)
+                   (error (romacs-gui--visit-error file err)))))
+    (file-name-history--add file)
     (setq romacs-gui-displayable-buffers (cons buffer romacs-gui-displayable-buffers))
     (set-buffer buffer)))
 (defun romacs-gui--visit-file (file name)
@@ -254,8 +259,8 @@ and no window shows it yet.  A file the visitor refuses gives the
   ;; As GNU's basic-save-buffer-1 and -2: keep the coding the save used.
   (if buffer-file-coding-system-explicit
       (setcar buffer-file-coding-system-explicit last-coding-system-used))
-  (setq buffer-file-coding-system last-coding-system-used)
-  (romacs-gui-echo "Saved"))
+  ;; `write-region' has reported the file as GNU's save does ("Wrote FILE").
+  (setq buffer-file-coding-system last-coding-system-used))
 (defun romacs-gui-save-buffer ()
   "Save modified visited text; ask before overwriting a superseded file."
   (interactive)

@@ -79,9 +79,10 @@ fn visit_startup_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<(), 
 }
 
 /// Visit FILES with their `+LINE[:COLUMN]` positions: into the selected
-/// window when SELECT, else with `romacs-gui-visit-file-noselect`.
+/// window when SELECT, by their true names, else with
+/// `romacs-gui-visit-file-noselect`, which expands each name as GNU's
+/// `process-file-arg' does and leaves the true name to `find-file-noselect'.
 fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result<(), String> {
-    let visitor = if select { "romacs-gui-visit-file" } else { "romacs-gui-visit-file-noselect" };
     let mut position = None;
     let mut literal = false;
     for file in files {
@@ -101,6 +102,13 @@ fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result
                 }
             }
         }
+        if !select {
+            let file = if file.is_absolute() { file.clone() } else { std::env::current_dir().map_err(|e| e.to_string())?.join(file) };
+            let path = file.to_str().ok_or_else(|| format!("{}: file name is not UTF-8", file.display()))?;
+            vm.eval_source(&format!("(romacs-gui-visit-file-noselect {})", lisp_string(path)))?;
+            visit_position(vm, position.take(), false)?;
+            continue;
+        }
         let normalized = file.canonicalize().or_else(|_| {
             let absolute = if file.is_absolute() { file.clone() } else { std::env::current_dir()?.join(file) };
             Ok::<_, std::io::Error>(absolute.parent().and_then(|p| p.canonicalize().ok())
@@ -110,15 +118,21 @@ fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result
         let name = file.file_name().map(|n| n.to_string_lossy().into_owned())
             .filter(|n| !n.is_empty()).unwrap_or_else(|| file.to_string_lossy().into_owned());
         let path = file.to_str().ok_or_else(|| format!("{}: file name is not UTF-8", file.display()))?;
-        vm.eval_source(&format!("({visitor} {} {})", lisp_string(path), lisp_string(&name)))?;
-        if let Some((line, column)) = position.take() {
-            if line > 0 {
-                vm.eval_source(&format!("(goto-char (point-min)) (forward-line {})", line - 1))?;
-            }
-            if column > 0 { visit_column(vm, column - 1)?; }
-            if select { vm.eval_source("(set-window-point (selected-window) (point))")?; }
-        }
+        vm.eval_source(&format!("(romacs-gui-visit-file {} {})", lisp_string(path), lisp_string(&name)))?;
+        visit_position(vm, position.take(), true)?;
     }
+    Ok(())
+}
+
+/// Point to a `+LINE[:COLUMN]' POSITION in the visited buffer, and the
+/// selected window's point with it when SELECT.
+fn visit_position(vm: &mut Vm, position: Option<(u64, u64)>, select: bool) -> Result<(), String> {
+    let Some((line, column)) = position else { return Ok(()) };
+    if line > 0 {
+        vm.eval_source(&format!("(goto-char (point-min)) (forward-line {})", line - 1))?;
+    }
+    if column > 0 { visit_column(vm, column - 1)?; }
+    if select { vm.eval_source("(set-window-point (selected-window) (point))")?; }
     Ok(())
 }
 
@@ -197,6 +211,48 @@ impl Started {
 /// How many leaf windows, from the selected one on, in the GUI's own window
 /// order: the host's paint reads it to find the selected window's snapshot.
 pub const SELECTED_TAIL: &str = "(length (memq (selected-window) (romacs-gui-leaves (romacs-gui-root))))";
+
+/// Startup's phases under the GUI's --trace-latency, one line each as they end:
+/// `romacs-startup: {"phase": NAME, "at_ms": since the process began,
+/// "ms": since the previous phase}`. The process began at its exec, as
+/// the kernel records it; `main` is the first phase.
+pub struct Phases { start: std::time::Instant, last: std::time::Instant }
+thread_local! { static PHASES: std::cell::RefCell<Option<Phases>> = const { std::cell::RefCell::new(None) }; }
+/// This thread's startup phases, from START; marks print only once begun
+/// (the GUI begins them under --trace-latency).
+pub fn begin_phases(start: std::time::Instant) { PHASES.with(|p| *p.borrow_mut() = Some(Phases::new(start))); }
+/// The end of PHASE on this thread's startup clock, if it keeps one.
+pub fn mark_phase(phase: &str) { PHASES.with(|p| if let Some(p) = p.borrow_mut().as_mut() { p.mark(phase) }); }
+impl Phases {
+    pub fn new(start: std::time::Instant) -> Self { Self { start, last: start } }
+    /// A clock of this process's exec: `main`'s now, less how long the
+    /// kernel says the process has run (/proc/self/stat's start time
+    /// against /proc/uptime, both in clock ticks).
+    pub fn from_exec() -> Self {
+        let now = std::time::Instant::now();
+        let ticks = |text: &str| -> Option<f64> {
+            let after = text.rsplit(") ").next()?;
+            after.split(' ').nth(19)?.parse::<f64>().ok()
+        };
+        let running = (|| {
+            let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+            let uptime: f64 = std::fs::read_to_string("/proc/uptime").ok()?.split(' ').next()?.parse().ok()?;
+            let hz = romacs_vm::host::clock_ticks_per_second() as f64;
+            Some(uptime - ticks(&stat)? / hz)
+        })().filter(|s| *s >= 0.0 && *s < 60.0).unwrap_or(0.0);
+        let start = now.checked_sub(std::time::Duration::from_secs_f64(running)).unwrap_or(now);
+        Self { start, last: start }
+    }
+    /// When this clock began: the process's exec, for a thread's own phases.
+    pub fn start(&self) -> std::time::Instant { self.start }
+    pub fn mark(&mut self, phase: &str) {
+        let now = std::time::Instant::now();
+        eprintln!("romacs-startup: {}", serde_json::json!({"phase": phase, "at_ms": (now - self.start).as_secs_f64() * 1000.0,
+                                               "ms": (now - self.last).as_secs_f64() * 1000.0}));
+        self.last = now;
+    }
+}
+
 
 /// GNU's `lisp/` for this process; see [`lisp_dir_from`].
 pub fn lisp_dir() -> std::path::PathBuf {
@@ -319,7 +375,9 @@ fn gnu_defined(vm: &mut Vm, command: &str) -> Result<bool, String> {
     Ok(v != romacs_vm::Fixed::NIL)
 }
 
-/// Bind every stand-in key: GNU's command where loadup defined it, else romacs's.
+/// Bind every stand-in key: GNU's command where loadup defined it, else
+/// romacs's. The workspace, which has no GNU maps, also gets its own C-x k
+/// and GNU's keys for the commands it has; GNU's maps bind those after loadup.
 fn bind_journey_keys(vm: &mut Vm, after_loadup: bool) -> Result<Vec<Binding>, String> {
     let mut bindings = vec![];
     for (key, gnu, romacs) in STAND_INS {
@@ -327,12 +385,14 @@ fn bind_journey_keys(vm: &mut Vm, after_loadup: bool) -> Result<Vec<Binding>, St
         vm.eval_source(&define_global(key, if gnu_defined { gnu } else { romacs }))?;
         bindings.push(Binding { key, gnu, gnu_defined });
     }
-    vm.eval_source(&define_global("[24 107]", "romacs-gui-kill-buffer"))?;
-    vm.eval_source(&define_global("[24 6]", "find-file"))?;
-    vm.eval_source(&define_global("[24 98]", "switch-to-buffer"))?;
-    vm.eval_source(&define_global("[24 100]", "dired"))?;
-    vm.eval_source(&define_global("[27 120]", "execute-extended-command"))?;
-    vm.eval_source(&define_global("[134217848]", "execute-extended-command"))?;
+    if !after_loadup {
+        vm.eval_source(&define_global("[24 107]", "romacs-gui-kill-buffer"))?;
+        vm.eval_source(&define_global("[24 6]", "find-file"))?;
+        vm.eval_source(&define_global("[24 98]", "switch-to-buffer"))?;
+        vm.eval_source(&define_global("[24 100]", "dired"))?;
+        vm.eval_source(&define_global("[27 120]", "execute-extended-command"))?;
+        vm.eval_source(&define_global("[134217848]", "execute-extended-command"))?;
+    }
     Ok(bindings)
 }
 
@@ -381,6 +441,7 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     policy(vm, root, "romacs-mail.el", include_str!("../../../rlisp/romacs-mail.el"))?;
     policy(vm, root, "romacs-notmuch.el", include_str!("../../../rlisp/romacs-notmuch.el"))?;
     policy(vm, root, "romacs-install-command.el", include_str!("../../../rlisp/romacs-install-command.el"))?;
+    policy(vm, root, "romacs-project.el", include_str!("../../../rlisp/romacs-project.el"))?;
     crate::eval_last_sexp::define(vm)?;
     let bindings = bind_journey_keys(vm, false)?;
     let started = Started { launch: Launch::Workspace, loadup: None, bindings, gnu_mode_line: false, files: vec![] };
@@ -404,7 +465,8 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     let files = take_queued();
     let dir = &lisp_root(dir)?;
     let loadup = initialize_chain(vm, launch, font, dir)?;
-    let session = initialize_session(vm, launch, loadup, dir)?;
+    install_session_definitions(vm, launch, dir)?;
+    let session = start_session(vm, launch, loadup, dir)?;
     open_workspace(vm, session, &files, dir)
 }
 
@@ -452,20 +514,54 @@ pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &s
 pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup) -> Result<Started, String> {
     let files = take_queued();
     let dir = lisp_root(&lisp_dir())?;
-    let session = initialize_session(vm, launch, loadup, &dir)?;
-    open_workspace(vm, session, &files, &dir)
+    let session = start_session(vm, launch, loadup, &dir)?;
+    let started = open_workspace(vm, session, &files, &dir);
+    mark_phase("workspace");
+    started
 }
 
-/// The launch after [`initialize_chain`]: the interactive session and
-/// Romacs's layers, up to the workspace.
-pub fn initialize_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup, dir: &std::path::Path) -> Result<Started, String> {
+/// Romacs's layers after the chain that only define: icomplete, which its
+/// completion defaults build on, and the session's command libraries. They
+/// read and set nothing of the process, so a world holds them with the
+/// chain (world.rs); a source boot takes them after it.
+pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path::Path) -> Result<(), String> {
+    if launch == Launch::GnuOnly {
+        return Ok(());
+    }
     if launch == Launch::Loadup {
-        // What an interactive session on this display adds to the batch
-        // chain, then Romacs's defaults for GNU's minibuffer completion,
-        // which the user's init may override.
+        // GNU's icomplete, which rlisp/romacs-completion-defaults.el requires
+        // and whose own require signals when a runtime lacks it.
+        vm.eval_source("(require 'icomplete nil t)")?;
+    }
+    vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
+    mark_phase("session-definitions");
+    Ok(())
+}
+
+/// The interactive session, after the chain and
+/// [`install_session_definitions`]: this process's startup steps on this
+/// display, Romacs's defaults for GNU's minibuffer completion, which the
+/// user's init may override, the layers that set a delayed variable or
+/// enable a mode (what a world build refuses), and the journey keys, up to
+/// the workspace.
+pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup, dir: &std::path::Path) -> Result<Started, String> {
+    if launch == Launch::Loadup {
+        // The session leaves the batch chain's initial terminal for the
+        // GUI's display, if one is attached (fonts.rs), as GNU's
+        // window-system initialization does; then what an interactive
+        // session on this display adds to the batch chain, and Romacs's
+        // defaults for GNU's minibuffer completion, which the user's init
+        // may override.
+        vm.open_display();
         for name in ["romacs-gui-loadup.el", "romacs-completion-defaults.el"] {
             let file = loadup_bootstrap(dir).with_file_name(name);
             vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            mark_phase(name);
         }
     }
     // buffer.c's default is "%-" until bindings.el replaces it.
@@ -474,18 +570,15 @@ pub fn initialize_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Lo
         return Ok(Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line, files: vec![] });
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-find-file.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     initialize_editing(vm)?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-project.el"))?;
+    mark_phase("find-file+editing");
     let bindings = bind_journey_keys(vm, true)?;
+    mark_phase("journey-keys");
     Ok(Started { launch, loadup: Some(loadup), bindings, gnu_mode_line, files: vec![] })
 }
 
-/// The launch after [`initialize_session`]: the GUI's extensions and the
+/// The launch after [`start_session`]: the GUI's extensions and the
 /// mode line, with FILES kept for [`finish_loadup`], which visits them
 /// and shows the startup screen once the user's init has run.
 pub fn open_workspace(vm: &mut Vm, started: Started, files: &[std::path::PathBuf], dir: &std::path::Path) -> Result<Started, String> {
@@ -1092,7 +1185,7 @@ mod tests {
         let prompt = printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))");
         assert!(prompt.contains("(y/n"), "native close must show the keyboard quit prompt: {prompt}");
         assert!(!presentation.ready(), "must not overwrite an in-flight frame");
-        presentation.completed(1);
+        presentation.completed(1, std::time::Instant::now());
         assert!(presentation.ready(), "pending native-close prompt must redraw after the in-flight frame");
         fileio_native_keys(&mut vm, &[110]);
         assert_eq!(printed(&mut vm, "romacs-gui-quit-requested"), "nil");
@@ -1201,7 +1294,8 @@ mod tests {
         fileio_native_keys(&mut vm, &[24, 19, 121]);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "localagainfirst\nsecond\nthird\n", "MTIME_CONFIRMED_SAVE");
         assert_eq!(printed(&mut vm, "(verify-visited-file-modtime)"), "t");
-        assert_eq!(printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))"), "\"Saved\"", "MTIME_CONFIRMED_NOT_CANCELLED");
+        assert_eq!(printed(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))"),
+                   format!("\"Wrote {}\"", file.display()), "MTIME_CONFIRMED_NOT_CANCELLED");
         println!("C-x C-s saved unchanged metadata with CONTENT_READ_FORBIDDEN; supersession n/y through native command dispatch");
     }
 
@@ -1465,11 +1559,10 @@ mod tests {
             assert_ne!(printed(&mut vm, &own_mode_line(name)), "GLOBAL", "{name}");
         }
         // The format is the labelled stand-in for bindings.el, expanded by
-        // GNU's engine: both windows show their own buffer and position,
-        // and %z%Z their utf-8-unix coding.
+        // GNU's engine: both windows show their own buffer and position.
         for window in &snapshot.windows[..2] {
             let band = &window.snapshot.mode_line.as_ref().unwrap().utf8;
-            assert!(band.starts_with("-UU:"), "{band}");
+            assert!(band.starts_with("---:"), "{band}");
             assert!(band.contains("[stand-in: no bindings.el]"), "{band}");
             assert!(band.contains(" L"), "{band}");
         }
@@ -2142,8 +2235,9 @@ mod tests {
     /// canonical character: `window-font-width' and `window-font-height',
     /// which read `font-info' on a multi-font display, are the frame's
     /// character size as pinned GNU pgtk's are for its default font (10 and
-    /// 25 for Iosevka-14), a font that does not open has no information,
-    /// and isearch, which sizes its prompt by them, finds as GNU's does.
+    /// 25 for Iosevka-14), for every face as for `default', a font that
+    /// does not open has no information, and isearch, which sizes its
+    /// prompt by them, finds as GNU's does.
     #[test]
     fn loadup_measures_the_frame_font_for_isearch() {
         let answer = on_evaluator(|| {
@@ -2154,10 +2248,11 @@ mod tests {
             finish_loadup(&mut vm, &started).unwrap();
             printed(&mut vm, "(list (display-multi-font-p) (window-font-width) (window-font-height)
                 (aref (font-info (face-font 'default)) 11) (font-info \"-no-such-font-*\")
+                (window-font-width nil 'fixed-pitch) (window-font-height nil 'bold) (face-font 'italic nil ?a)
                 (with-temp-buffer (switch-to-buffer (current-buffer)) (insert \"abc steam def\") (goto-char 1)
                   (isearch-mode t) (isearch-process-search-string \"steam\" \"steam\") (isearch-done) (point)))")
         });
-        assert_eq!(answer, "(t 10 25 10 nil 10)");
+        assert_eq!(answer, "(t 10 25 10 nil 10 25 \"tty\" 10)");
     }
 
     /// `--loadup` with no launch font: the default face keeps the frame's

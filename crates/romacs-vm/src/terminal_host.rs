@@ -193,7 +193,7 @@ impl Vm {
                 index += 1;
                 continue;
             }
-            let Object::Buffer(text) = &mut self.objects[buffer.index(0)? - 1] else {
+            let Object::Buffer(text) = self.object_mut(buffer)? else {
                 return Err("Terminal requires a Unicode buffer".into());
             };
             let old = text.as_str();
@@ -221,7 +221,7 @@ impl Vm {
                 self.family_fetch(marks);
                 edited?;
             }
-            let Object::Buffer(text) = &mut self.objects[buffer.index(0)? - 1] else { unreachable!("terminal buffer") };
+            let Object::Buffer(text) = self.object_mut(buffer)? else { unreachable!("terminal buffer") };
             let mut next_point = next_point.min(snapshot.text.len());
             while !snapshot.text.is_char_boundary(next_point) { next_point -= 1; }
             let accessible = text.accessible();

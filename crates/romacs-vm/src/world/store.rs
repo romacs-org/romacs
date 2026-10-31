@@ -88,6 +88,20 @@ pub enum Launch<T> {
     Chain { reason: Json },
 }
 
+/// Why the arena refused an image, for a launch's reason: a range the
+/// process could not map says at which step, with what error, and whether
+/// the range was reserved (not under an address-space limit, nor where
+/// something was mapped before the process's first allocation).
+fn refusal(refused: arena::Restore) -> Json {
+    match arena::map_failure() {
+        Some((step, errno, reserved)) if refused == arena::Restore::Map => {
+            let error = (errno != 0).then(|| std::io::Error::from_raw_os_error(errno).to_string());
+            json!({"image": "Map", "step": step, "error": error, "reserved": reserved})
+        }
+        _ => json!({"image": format!("{refused:?}")}),
+    }
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -127,7 +141,7 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
 
 /// A directory DIR of the store's own, made 0700 if missing: private
 /// whatever the umask, as the store is.
-fn store_subdir(dir: &Path) -> std::io::Result<()> {
+pub(super) fn store_subdir(dir: &Path) -> std::io::Result<()> {
     match host::create_dir(dir, 0o700) {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         made => made,
@@ -320,8 +334,40 @@ impl World {
         Ok(World { store, key: sha256(text.as_bytes()), recipe })
     }
 
+    /// The world LINES add to this one's recipe: keyed by this world's key
+    /// and LINES, so it binds all this one does (an init layer,
+    /// `super::layer`).
+    pub fn layered(&self, lines: Vec<String>) -> World {
+        let text = format!("{FORMAT}\nbase {}\n{}\n", hex(&self.key), lines.join("\n"));
+        let mut recipe = self.recipe.clone();
+        recipe.extend(lines);
+        World { store: self.store.clone(), key: sha256(text.as_bytes()), recipe }
+    }
+
     fn file(&self, suffix: &str) -> PathBuf {
         self.store.join(format!("{}{suffix}", hex(&self.key)))
+    }
+
+    /// The refusals of a build on these very inputs, when one stands: its
+    /// records all hold, so building again would refuse the same.
+    pub fn standing_refusal(&self) -> Option<Vec<Json>> {
+        match self.valid_manifest() {
+            Err(reason) => reason.get("refused")?.as_array().cloned(),
+            Ok(_) => None,
+        }
+    }
+
+    /// Whether a launch would restore this world now: its manifest holds
+    /// and its image is the one bound.
+    pub fn ready(&self) -> bool {
+        self.usable().is_ok()
+    }
+
+    /// Hold this world in use for the process's life (`prune` keeps it),
+    /// as a restored launch holds the world it restored: for a world a
+    /// launch boots beside, its layer's base.
+    pub fn keep(&self) {
+        self.mark_use();
     }
 
     /// The manifest, when its records still hold: every keyed fact the build
@@ -329,11 +375,10 @@ impl World {
     fn valid_manifest(&self) -> Result<Json, Json> {
         let text = host::read_store_file(self.file(".json")).map_err(|e| json!({"missing": e.to_string()}))?;
         let manifest: Json = serde_json::from_str(&text).map_err(|e| json!({"manifest": e.to_string()}))?;
-        let case = crate::prim::prims::savejourney::filesystem_case_insensitive;
         for record in manifest["records"].as_array().map(Vec::as_slice).unwrap_or_default() {
             let mut expected = record.clone();
             if let Some(fields) = expected.as_object_mut() { fields.remove("site"); }
-            match host::replay(record, case) {
+            match host::replay(record) {
                 Some(now) if now == expected => {}
                 now => return Err(json!({"stale": expected, "now": now})),
             }
@@ -392,7 +437,42 @@ impl World {
                 }
                 None => Launch::Chain { reason: json!({"image": "made for another key"}) },
             },
-            refused => Launch::Chain { reason: json!({"image": format!("{refused:?}")}) },
+            refused => Launch::Chain { reason: refusal(refused) },
+        }
+    }
+
+    /// The world made usable without mapping it: its manifest when it
+    /// already holds, else once a build made it so (built here, holding the
+    /// lock from the check through the spawn, or waited for). The reason it
+    /// could not be, otherwise, as `launch` would boot from source for.
+    pub fn prepare(&self, builder_args: impl FnOnce() -> Vec<OsString>) -> Result<Json, Json> {
+        if disabled() {
+            return Err(json!("ROMACS_WORLD=off"));
+        }
+        match self.usable() {
+            Ok((_, manifest)) => Ok(manifest),
+            Err(reason) => self.build_for(reason, builder_args, true, || {}).map(|(_, manifest)| manifest),
+        }
+    }
+
+    /// The world restored, when it is usable now, without building: for a
+    /// worker isolate, which runs its spawner's exact world or nothing
+    /// (rlisp/vm/isolate.el `isolate-world-unavailable').
+    pub fn restore_only<T: super::safe::SnapshotSafe + 'static>(&self) -> Result<(Box<Vm>, T), Json> {
+        if !arena::active() {
+            return Err(json!("no arena"));
+        }
+        let (image, _manifest) = self.usable()?;
+        let _store = self.store_lock(libc::LOCK_SH);
+        match arena::adopt(&image) {
+            arena::Restore::Mapped => match image::restore::<T>(&self.key) {
+                Some((vm, carry)) => {
+                    self.mark_use();
+                    Ok((Box::new(vm), carry))
+                }
+                None => Err(json!({"image": "made for another key"})),
+            },
+            refused => Err(json!({"image": format!("{refused:?}")})),
         }
     }
 
@@ -790,8 +870,8 @@ fn world_file(name: &str) -> Option<(&str, &str)> {
 
 /// Forget STORE's failure records: every world's transient failures and
 /// refused manifests, so its next launch builds again. With EVERYTHING,
-/// every world and the digest cache and pinned table too, leaving the
-/// marker and the store lock. Only a marked store is touched
+/// every world, the plans, the digest cache and the pinned table too,
+/// leaving the marker and the store lock. Only a marked store is touched
 /// (`checked_store`), and in it only regular files and real directories
 /// with a store's names: no symlink is followed. How many it removed.
 pub fn reset(store: &Path, everything: bool) -> std::io::Result<usize> {
@@ -839,6 +919,16 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         if real_dir(&p) {
             for name in ["cwd", "tmp", "bin"] {
                 if real_dir(&p.join(name)) && host::remove_dir(p.join(name)).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        let plans = store.join("plans");
+        if real_dir(&plans) {
+            for entry in host::read_dir(&plans)? {
+                let name = entry?.file_name().to_string_lossy().into_owned();
+                if super::layer::plan_file(&name) && regular(&plans.join(&name)) {
+                    host::remove_file(plans.join(&name))?;
                     removed += 1;
                 }
             }

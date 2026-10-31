@@ -22,6 +22,10 @@ pub(crate) struct ListedFace {
     pub slant: FontSlantKind,
     pub width: u16,
     pub spacing: Option<i32>,
+    /// Fontconfig's `FC_FOUNDRY', and its raw `FC_WEIGHT', `FC_SLANT' and
+    /// `FC_WIDTH', as GNU's ftfont.c reads them for a font-entity.
+    pub foundry: Option<String>,
+    pub fc_style: (i32, i32, i32),
 }
 
 impl ListedFace {
@@ -191,6 +195,7 @@ fn list_faces_inner(family: Option<&str>, required: Option<char>) -> Option<Vec<
         fontconfig::FC_SCALABLE,
         fontconfig::FC_VARIABLE,
         fontconfig::FC_POSTSCRIPT_NAME,
+        fontconfig::FC_FOUNDRY,
     ] {
         if unsafe { fontconfig_sys::FcObjectSetAdd(objects.ptr, key.as_ptr()) } == 0 {
             return None;
@@ -210,6 +215,39 @@ fn list_faces_inner(family: Option<&str>, required: Option<char>) -> Option<Vec<
         }
     }
     Some(out)
+}
+
+/// Every family Fontconfig lists, as GNU's ftfont_list_family asks: one
+/// `FcFontList' pattern per distinct family set, its first name each,
+/// scalable or not.
+pub(crate) fn list_families() -> Vec<String> {
+    if handle().is_none() {
+        return Vec::new();
+    }
+    let _serial = serialize();
+    list_families_inner().unwrap_or_default()
+}
+
+fn list_families_inner() -> Option<Vec<String>> {
+    // SAFETY (whole function): as `list_faces_inner`.
+    let pattern = Owned::new(
+        unsafe { fontconfig_sys::FcPatternCreate() },
+        fontconfig_sys::FcPatternDestroy,
+    )?;
+    let objects = Owned::new(
+        unsafe { fontconfig_sys::FcObjectSetCreate() },
+        fontconfig_sys::FcObjectSetDestroy,
+    )?;
+    if unsafe { fontconfig_sys::FcObjectSetAdd(objects.ptr, fontconfig::FC_FAMILY.as_ptr()) } == 0 {
+        return None;
+    }
+    let set = Owned::new(
+        unsafe { fontconfig_sys::FcFontList(std::ptr::null_mut(), pattern.ptr, objects.ptr) },
+        fontconfig_sys::FcFontSetDestroy,
+    )?;
+    let count = usize::try_from(unsafe { (*set.ptr).nfont }).ok()?;
+    let fonts = unsafe { (*set.ptr).fonts };
+    Some((0..count).filter_map(|index| get_string(unsafe { *fonts.add(index) }, fontconfig::FC_FAMILY)).collect())
 }
 
 /// Fontconfig's own preference order for FAMILY's pattern with CH required
@@ -339,6 +377,9 @@ fn listed_face(
             get_int(pattern, fontconfig::FC_WIDTH).unwrap_or(100),
         ),
         spacing: get_int(pattern, fontconfig::FC_SPACING),
+        foundry: get_string(pattern, fontconfig::FC_FOUNDRY),
+        fc_style: (weight.unwrap_or(80), get_int(pattern, fontconfig::FC_SLANT).unwrap_or(0),
+                   get_int(pattern, fontconfig::FC_WIDTH).unwrap_or(100)),
     })
 }
 

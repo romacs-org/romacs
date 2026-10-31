@@ -60,10 +60,10 @@ pub struct CharResolution {
 }
 
 #[cfg(target_os = "linux")]
-use crate::fontconfig_catalog::{self as catalog, ListedFace};
+pub(crate) use crate::fontconfig_catalog::{self as catalog, ListedFace};
 
 #[cfg(not(target_os = "linux"))]
-mod catalog {
+pub(crate) mod catalog {
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub(crate) struct ListedFace {
         pub family: String,
@@ -74,6 +74,8 @@ mod catalog {
         pub slant: romacs_display_protocol::font::FontSlantKind,
         pub width: u16,
         pub spacing: Option<i32>,
+        pub foundry: Option<String>,
+        pub fc_style: (i32, i32, i32),
     }
     impl ListedFace {
         pub fn is_monospace(&self) -> bool {
@@ -90,6 +92,9 @@ mod catalog {
         None
     }
     pub(crate) fn sort_faces(_: &str, _: char) -> Vec<ListedFace> {
+        Vec::new()
+    }
+    pub(crate) fn list_families() -> Vec<String> {
         Vec::new()
     }
 }
@@ -554,7 +559,7 @@ impl FontResolver {
 
 /// Faces of FAMILY covering CH (any coverage when `None`), resolving a
 /// generic family through Fontconfig's aliases when it lists nothing itself.
-fn list_family(family: &str, ch: Option<char>) -> Vec<ListedFace> {
+pub(crate) fn list_family(family: &str, ch: Option<char>) -> Vec<ListedFace> {
     let faces = catalog::list_faces(Some(family), ch);
     if !faces.is_empty() || !is_generic_family(family) {
         return faces;

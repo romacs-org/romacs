@@ -2,9 +2,11 @@ use super::*;
 
 defsubr! { name = "bufferp", gnu = "data.c:481", effect = Reads,
 fn bufferp(cx, object: Value) { Ok(if cx.lifecycle_buffer_p(object) { Value::TRUE } else { Value::NIL }) }}
+// A FRAME's own buffers come first; VM2 keeps none (VM2-FRAME1), so a
+// live frame's list is the buffer list.
 defsubr! { name = "buffer-list", gnu = "buffer.c:424", effect = Reads,
 fn buffer_list(cx; optional frame: Value) {
-    if frame != Value::NIL { return Err(Fault::Error("VM2 buffer-list FRAME is unsupported".into())); }
+    if frame != Value::NIL { cx.windows().decode_live_frame(frame)?; }
     Ok(cx.lifecycle_list())
 }}
 
@@ -54,6 +56,12 @@ fn kill_buffer(cx; optional arg: Value) -> Step {
     if !cx.lifecycle_killable(buffer) { return Ok(Step::Done(Value::NIL)); }
     let inhibit = if cx.buffer_state(buffer).unwrap().inhibit_buffer_hooks { Value::TRUE } else { Value::NIL };
     lifecycle_lisp(cx, "romacs--kill-buffer", vec![buffer, inhibit])
+}}
+
+defsubr! { name = "other-buffer", gnu = "buffer.c:1758", effect = Global,
+fn other_buffer(cx; optional buffer: Value, visible_ok: Value, frame: Value) -> Step {
+    let frame = cx.windows().decode_live_frame(frame)?;
+    lifecycle_lisp(cx, "romacs--other-buffer", vec![buffer, visible_ok, frame])
 }}
 
 defsubr! { name = "make-indirect-buffer", gnu = "buffer.c:807", effect = Global,

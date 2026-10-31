@@ -359,7 +359,7 @@ impl Vm {
     }
 
     pub(crate) fn str_view(&self, value: Value) -> Option<crate::lstring::StrView<'_>> {
-        if Self::image_value(value) {
+        if Self::image_string(value) {
             let text = self.string_value(value).ok()?;
             return Some(crate::lstring::StrView {
                 bytes: text.as_bytes(),
@@ -393,17 +393,45 @@ impl Vm {
         self.objects.push(object);
         Value::reference(self.objects.len(), 0)
     }
+    /// The object V names, private or frozen (`frozen.rs`); never an
+    /// executable-image string, which `string_value` reads.
     pub(super) fn object(&self, value: Value) -> Result<&Object> {
-        let index = value.index(0)?.checked_sub(1).ok_or("sequence required")?;
+        let index = value.index(0)?;
+        if index & crate::image::IMAGE != 0 {
+            return self.frozen_object(index).ok_or_else(|| "invalid frozen object reference".into());
+        }
         self.objects
-            .get(index)
+            .get(index.checked_sub(1).ok_or("sequence required")?)
             .ok_or_else(|| "invalid object reference".into())
     }
-    // Non-diagnostic type discrimination. Image references remain outside the
-    // private object arena; callers retain explicit mapped-object handling.
+    // Non-diagnostic type discrimination, total over private and frozen
+    // objects; executable-image strings are not objects.
     pub(super) fn object_if(&self, value: Value) -> Option<&Object> {
-        let index = value.index_if(0)?.checked_sub(1)?;
-        self.objects.get(index)
+        let index = value.index_if(0)?;
+        if index & crate::image::IMAGE != 0 {
+            return self.frozen_object(index);
+        }
+        self.objects.get(index.checked_sub(1)?)
+    }
+    /// The private object V names, for writing: a frozen or image value
+    /// refuses with GNU's read-only error, left pending (`refuse_read_only`).
+    pub(super) fn object_mut(&mut self, value: Value) -> Result<&mut Object> {
+        let index = value.index(0)?;
+        if index & crate::image::IMAGE != 0 {
+            return Err(self.refuse_read_only(value));
+        }
+        self.objects
+            .get_mut(index.checked_sub(1).ok_or("sequence required")?)
+            .ok_or_else(|| "invalid object reference".into())
+    }
+    /// The private cons V names, for writing; frozen and image conses refuse
+    /// as `object_mut` does.
+    pub(super) fn cons_mut(&mut self, value: Value) -> Result<&mut (Value, Value)> {
+        let index = value.index(3)?;
+        if index & crate::image::IMAGE != 0 {
+            return Err(self.refuse_read_only(value));
+        }
+        self.conses.get_mut(index).ok_or_else(|| "invalid cons reference".into())
     }
     pub(super) fn literal(&mut self, f: &Form) -> Result<Value> {
         match f {
@@ -664,7 +692,7 @@ impl Vm {
                 Setcar | Setcdr => ("consp", x),
                 Length | Nreverse | CopySequence => ("sequencep", x),
                 Aref | Aset
-                    if !(Self::image_value(x) && x.tag() == 0) && self.object_if(x).is_none() =>
+                    if !Self::image_string(x) && self.object_if(x).is_none() =>
                 {
                     ("arrayp", x)
                 }
@@ -726,9 +754,9 @@ impl Vm {
         match p {
             Aref | Aset => {
                 let index = usize::try_from(y.as_integer()?).map_err(|_| "index out of range")?;
-                if Self::image_value(x) && x.tag() == 0 {
+                if Self::image_string(x) {
                     if p == Aset {
-                        return Err("cannot mutate immutable image".into());
+                        return Err(self.refuse_read_only(x));
                     }
                     return Value::integer(
                         self.string_value(x)?
@@ -793,7 +821,7 @@ impl Vm {
                 self.object(x)?;
                 let value = self.stack[start + 2];
                 let table_slot = self.literal_table_slot(value);
-                match &mut self.objects[x.index(0)? - 1] {
+                match self.object_mut(x)? {
                     Object::String(s) | Object::RawString(s) => {
                         if index >= s.len() { return Err("index out of range".into()); }
                         let code = value
@@ -840,7 +868,7 @@ impl Vm {
                         return Err("array required".into());
                     }
                 }
-                let slot = &mut self.objects[x.index(0)? - 1];
+                let slot = self.object_mut(x)?;
                 let promote = matches!(slot, Object::String(s) if !s.is_utf8());
                 let demote = matches!(slot, Object::RawString(s) if s.is_utf8());
                 if promote || demote {
@@ -864,7 +892,7 @@ impl Vm {
                     let values = self.list_values(x)?;
                     return Ok(self.list_value(&values));
                 }
-                if Self::image_value(x) {
+                if Self::image_string(x) {
                     let copy = LispString::new(self.string_value(x)?);
                     return Ok(self.allocate_object(Object::String(Box::new(copy))));
                 }
