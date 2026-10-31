@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "ec89b13dcd6ca5b1e92261a09ef9ebdd82a30d508b7bd7e8ebd50f684603f010",
+    "input_hash": "47da669ccaebe69f82159b4b5906e63456c116d12c85e626b53eec005a3a29b8",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 5259
+    "vm2_universe": 5262
   },
   "schema": 2,
   "vm2": {
-    "count": 1133,
+    "count": 1134,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -1146,6 +1146,7 @@
       "windowp",
       "write-char",
       "write-region",
+      "x-focus-frame",
       "yank",
       "yank-handle-category-property",
       "yank-handle-font-lock-face-property",

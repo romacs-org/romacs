@@ -20,7 +20,7 @@ use std::ffi::{CStr, OsStr, OsString};
 use std::fs::{File, FileType, Metadata};
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -2148,6 +2148,20 @@ pub fn connect_local_nonblocking(path: &Path) -> io::Result<OwnedFd> {
         }
     }
     Ok(socket)
+}
+
+/// accept4 on the listening socket LISTENER: the connection, close-on-exec,
+/// and the peer's raw address with its length.
+pub fn accept(listener: RawFd) -> io::Result<(OwnedFd, libc::sockaddr_storage, libc::socklen_t)> {
+    effect(|| format!("accept on {listener}"))?;
+    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut len = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+    let sa = (&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr>();
+    let fd = unsafe { libc::accept4(listener, sa, &mut len, libc::SOCK_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((unsafe { OwnedFd::from_raw_fd(fd) }, storage, len))
 }
 
 /// connect_network_socket's nonblocking connect: a close-on-exec stream

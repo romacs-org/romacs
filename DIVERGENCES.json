@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "ef2fa6c4df6be6f0583ab65216704734c9032c0f9d5710f40df9039b0d66289d",
+  "input_hash": "f331c9edb8c49f3689d65cec7018afa77dc2f4c88c3c1adb04685895a2099a7e",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 297,
-  "symbols": 807,
+  "symbols": 808,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -2748,6 +2748,9 @@
   ],
   "wrong-type-argument": [
    247
+  ],
+  "x-focus-frame": [
+   209
   ],
   "x-gtk-launch-uri": [
    192
@@ -6066,8 +6069,8 @@
    "planned": false,
    "mechanism": "Subprocesses, waits and timers",
    "gnu": "process.c and callproc.c: process objects (`make-process`, `make-pipe-process`, `make-network-process` for every socket kind, `make-serial-process`), filters and sentinels run by `wait_reading_process_output` in every wait (`accept-process-output`, `sleep-for`, `sit-for`, and the command loop's idle wait), which also runs ordinary and idle timers (keyboard.c `timer_check`); SIGCHLD wakes the wait; `call-process` reads its output incrementally, with DISPLAY redisplaying",
-   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP stream servers and clients only, refusing datagrams, local sockets, `:local`/`:remote` addresses, numeric families, non-numeric service names, `:tls-parameters` and `:use-external-socket`; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does; `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
-   "why": "**Package-observable:** asynchronous network code beyond TCP and serial ports cannot run; batch runs have no keyboard wait, so idle timers never run there and `current-idle-time` is nil (keyboard.c:4949 answers nil whenever Emacs is not idle); process filters and sentinels run while the GUI waits for a key, never during a command except inside its Lisp waits, as GNU's",
+   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP and local (Unix domain) stream servers and clients, refusing datagrams, Internet `:local`/`:remote` addresses (a string address is a local socket's path, as GNU's), numeric families, non-numeric service names and `:tls-parameters`; `:use-external-socket` names the socket a daemon was started with, of which there is none; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does, and one whose connect fails at once has GNU's `(failed ERROR)` status and no sentinel; an accepted connection's name, contact and `open from` sentinel are GNU's for each family (a local peer has host `t`, no service and a connection-counter name); `delete-process` leaves a local server's socket file, as GNU does (server.el and `romacs-mcp-stop` delete theirs); `format-network-address` is Lisp (`rlisp/vm/subprocess.el`); `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)`, `(:family local)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
+   "why": "**Package-observable:** asynchronous network code beyond TCP and local stream sockets (datagrams, TLS, serial ports) cannot run; batch runs have no keyboard wait, so idle timers never run there and `current-idle-time` is nil (keyboard.c:4949 answers nil whenever Emacs is not idle); process filters and sentinels run while the GUI waits for a key, never during a command except inside its Lisp waits, as GNU's",
    "symbols": [
     "current-idle-time",
     "run-with-idle-timer",
@@ -6489,7 +6492,7 @@
    "planned": false,
    "mechanism": "Frame visibility is not modelled",
    "gnu": "GNU `frame-visible-p`, `make-frame-visible`, `make-frame-invisible`, `iconify-frame`, `raise-frame` and `lower-frame` (`src/frame.c:3505-3700`) track and change a frame's visibility through its terminal; a batch terminal frame always reads visible and ignores the requests",
-   "romacs": "VM2's one frame always reads visible, `visible-frame-list` lists it, the requests change nothing, and making the sole frame invisible without FORCE signals GNU's error. `tests/frame_visibility.rs` matches pinned GNU batch",
+   "romacs": "VM2's one frame always reads visible, `visible-frame-list` lists it, the requests change nothing (so does `x-focus-frame`, which frame.el's `select-frame-set-input-focus` asks of a multi-frame display: the host's one window has the focus whenever the session does), and making the sole frame invisible without FORCE signals GNU's error. `tests/frame_visibility.rs` matches pinned GNU batch",
    "why": "**Package-observable** only in the GUI, where iconifying or hiding the window is not performed",
    "symbols": [
     "frame-visible-p",
@@ -6498,6 +6501,7 @@
     "iconify-frame",
     "raise-frame",
     "lower-frame",
+    "x-focus-frame",
     "visible-frame-list"
    ],
    "symbols_derived": false

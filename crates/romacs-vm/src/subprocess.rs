@@ -577,17 +577,11 @@ pub(crate) fn socket_address(fd: RawFd, local: bool) -> io::Result<Option<Addres
     Ok(decode_sockaddr(&storage, len))
 }
 
-/// server_accept_connection's accept4: the connection, close-on-exec, with
+/// server_accept_connection's accept: the connection, close-on-exec, with
 /// the peer's address.
 pub(crate) fn accept(listener: RawFd) -> io::Result<(OwnedFd, Option<Address>)> {
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-    let sa = (&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr>();
-    let fd = unsafe { libc::accept4(listener, sa, &mut len, libc::SOCK_CLOEXEC) };
-    if fd < 0 {
-        return Err(last_error());
-    }
-    Ok((unsafe { OwnedFd::from_raw_fd(fd) }, decode_sockaddr(&storage, len)))
+    let (fd, storage, len) = crate::host::accept(listener)?;
+    Ok((fd, decode_sockaddr(&storage, len)))
 }
 
 /// SO_ERROR of the socket FD: how its nonblocking connect ended.
