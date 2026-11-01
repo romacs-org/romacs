@@ -107,6 +107,12 @@ pub(crate) struct Channel {
     pub connecting: Option<Vec<std::net::SocketAddr>>,
     /// CODING_MODE_LAST_BLOCK: end of file was seen and the carryover flushed.
     pub last_block: bool,
+    /// The TLS session `gnutls-boot' started (GNU's gnutls_state): reads
+    /// and writes go through it once it is READY.
+    pub tls: Option<Box<crate::tls::Session>>,
+    /// The stage `gnutls-deinit' left (GNUTLS_STAGE_INIT - 1 once a
+    /// session was initialized), reported while no session is attached.
+    pub tls_stage: u8,
 }
 
 #[derive(Default)]

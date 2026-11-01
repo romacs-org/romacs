@@ -190,11 +190,6 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "minibuffer--sort-by-" "romacs-"))
 
 
-;;; Generated autoloads from romacs-mail.el
-
-(register-definition-prefixes "romacs-mail" '("romacs-mail-"))
-
-
 ;;; Generated autoloads from romacs-mcp.el
 
 (autoload 'romacs-mcp-start "romacs-mcp"
@@ -271,11 +266,6 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 
 (fn MESHES &rest PLIST)")
 (register-definition-prefixes "romacs-model" '("romacs-model-"))
-
-
-;;; Generated autoloads from romacs-notmuch.el
-
-(register-definition-prefixes "romacs-notmuch" '("notmuch" "romacs-notmuch-"))
 
 
 ;;; Generated autoloads from romacs-oclosure.el

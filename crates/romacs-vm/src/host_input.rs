@@ -149,10 +149,57 @@ impl Vm {
         self.display(state)
     }
 
+    /// redisplay_internal's run_window_change_functions, which every
+    /// redisplay's frame snapshot runs first (display.rs): the command
+    /// loop's Lisp half (rlisp/vm/window-change.el) once it is installed.
+    /// Lisp runs only when the windows differ from what the last run saw,
+    /// so a redisplay that changed no window enters no Lisp.
+    pub(crate) fn run_window_change_functions(&mut self) -> Result<()> {
+        if self.window_change_signature()? == self.window_change_seen { return Ok(()); }
+        let run = "(lambda () (and (fboundp 'romacs--run-window-change-functions)
+                     (condition-case err (romacs--run-window-change-functions)
+                       (error (message \"Error in window change functions: %S\" err)))))";
+        self.call_prepared_source_raw(run, &[])?;
+        self.window_change_seen = self.window_change_signature()?;
+        Ok(())
+    }
+    /// What window_change_record keeps, for the run's gate: the selected
+    /// frame, and each frame with its selected window and its windows'
+    /// buffers, pixel boxes and what their body sizes also depend on (their
+    /// parameters, whether their buffers show a mode or header line, the
+    /// faces' revision and the frame's line and column). Its words are heap
+    /// indices, which a collection may reuse, so the count of collections
+    /// is part of it.
+    fn window_change_signature(&mut self) -> Result<Vec<u64>> {
+        let mut out = vec![self.gc_stats.collections, self.frame_value_peek().0, self.display_state.face_revision,
+                           u64::from(self.window_state.line), u64::from(self.window_state.column)];
+        let lines = [self.slot("mode-line-format"), self.slot("header-line-format")];
+        for frame in self.frames() {
+            let Ok(f) = self.frame(frame) else { continue };
+            out.extend([frame.0, f.selected.0]);
+            let mut pending = vec![f.root, f.minibuffer];
+            while let Some(window) = pending.pop() {
+                let Ok(w) = self.window(window) else { continue };
+                let buffer = w.buffer;
+                out.extend([window.0, buffer.0, u64::from(w.x), u64::from(w.y), u64::from(w.width), u64::from(w.height),
+                            u64::from(w.left_margin), u64::from(w.right_margin)]);
+                out.extend(w.parameters.iter().flat_map(|(k, v)| [k.0, v.0]));
+                pending.extend(w.children.iter().copied());
+                if buffer != Value::NIL {
+                    for slot in lines {
+                        let format = self.value_in_buffer(slot, buffer)?;
+                        out.push(u64::from(format != Value::NIL && format != Value::UNBOUND));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// keyboard.c timer_stop_idle: the host read a key for a command.
     pub fn timer_stop_idle(&mut self) { self.idle_since = None; }
 
-    fn redisplay_inhibited(&mut self) -> Result<bool> {
+    pub(crate) fn redisplay_inhibited(&mut self) -> Result<bool> {
         let slot = self.slot("inhibit-redisplay");
         Ok(self.variable_value(slot)? != Value::NIL)
     }

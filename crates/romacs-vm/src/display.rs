@@ -167,7 +167,7 @@ pub(super) struct DisplayState {
     /// Per window id, the buffer byte its last publication's text starts at.
     bases: std::collections::BTreeMap<u64, usize>,
     /// Advances when what fonts faces realize may change.
-    face_revision: u64,
+    pub(crate) face_revision: u64,
     /// The least height a painted row has, for a face revision.
     row_floor: Option<(u64, u32)>,
     pub version: u64,
@@ -437,6 +437,8 @@ impl LispGraph for Graph<'_> {
 impl Vm {
     /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
     pub fn frame_snapshot(&mut self, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
+        // redisplay_internal runs the window change functions first.
+        if !self.redisplay_inhibited()? { self.run_window_change_functions()?; }
         let font_alternatives = self.font_alternative_state()?;
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
         let windows = self.frame_window_snapshots(width, height)?.into_iter().map(place).collect();

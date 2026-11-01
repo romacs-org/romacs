@@ -503,8 +503,6 @@ fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool)
     policy(vm, root, "romacs-dired.el", include_str!("../../../rlisp/romacs-dired.el"))?;
     policy(vm, root, "romacs-term.el", include_str!("../../../rlisp/romacs-term.el"))?;
     policy(vm, root, "vm/process.el", include_str!("../../../rlisp/vm/process.el"))?;
-    policy(vm, root, "romacs-mail.el", include_str!("../../../rlisp/romacs-mail.el"))?;
-    policy(vm, root, "romacs-notmuch.el", include_str!("../../../rlisp/romacs-notmuch.el"))?;
     policy(vm, root, "romacs-install-command.el", include_str!("../../../rlisp/romacs-install-command.el"))?;
     policy(vm, root, "romacs-project.el", include_str!("../../../rlisp/romacs-project.el"))?;
     policy(vm, root, "romacs-fontify.el", include_str!("../../../rlisp/romacs-fontify.el"))?;
@@ -610,8 +608,6 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     // The session's command log, which each interactive process starts
     // itself (`romacs-usage-log-start').
     if launch == Launch::Loadup {

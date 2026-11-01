@@ -118,6 +118,32 @@ impl Leaf<'_> {
         }
         Ok(Value::NIL)
     }
+    /// charset.c find_charsets_in_text over a string START or the region
+    /// START..END: the names of the charsets of its characters after
+    /// TABLE's translation, in charset id order.  Multibyte ASCII text is
+    /// `ascii' alone; unibyte text is `ascii' and `eight-bit'.
+    pub fn find_charsets(&mut self, start: Value, end: Value, table: Value) -> super::super::Out {
+        let text = self.text_span(start, end, true)?;
+        let mut tables = Vec::new();
+        self.translation_char_tables(table, &mut HashSet::default(), &mut tables)?;
+        let mut found = std::collections::BTreeSet::new();
+        if text.multibyte && text.ascii() {
+            found.insert(self.named_charset_id("ascii")?);
+        } else {
+            let chars: Vec<u32> = text.view().chars().collect();
+            for c in chars {
+                let mut c = c;
+                for &table in &tables {
+                    let to = self.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
+                    if let Some(to) = to.integer_value().filter(|to| (0..=i64::from(crate::lstring::MAX_CHAR)).contains(to)) { c = to as u32; }
+                }
+                let id = if text.multibyte { self.char_charset_id(c)? } else { self.named_charset_id(if c < 0x80 { "ascii" } else { "eight-bit" })? };
+                found.insert(id);
+            }
+        }
+        let names: Vec<Value> = found.into_iter().map(|id| self.charset_id_name(id)).collect();
+        Ok(self.coding_list(&names))
+    }
     /// charset.c Fmap_charset_chars's argument handling: the clamped code
     /// range, then map_charset_chars's calls in order.
     pub fn charset_map_calls(&mut self, name: Value, from: Value, to: Value) -> std::result::Result<Vec<Run>, Fault> {
