@@ -1,4 +1,4 @@
-use super::{CONSECUTIVE_SURFACE_LOST_THRESHOLD, DeviceLossDetector};
+use super::{CONSECUTIVE_SURFACE_LOST_THRESHOLD, DeviceLossDetector, Fault, MAX_FAILED_RECOVERIES, fault};
 use std::sync::atomic::Ordering;
 
 #[test]
@@ -66,4 +66,46 @@ fn taking_a_callback_loss_resets_the_streak() {
     assert!(detector.take());
     // The rebuild starts from a clean streak.
     assert!(!detector.record_surface_lost());
+}
+
+fn validation(description: &str) -> wgpu::Error {
+    wgpu::Error::Validation { source: description.into(), description: description.into() }
+}
+
+#[test]
+fn a_validation_error_repaints_once_and_never_loses_the_device() {
+    let mut detector = DeviceLossDetector::new();
+    let handler = detector.uncaptured_errors();
+    assert_eq!(fault(&validation("bad bind group")), Fault::Rejected("bad bind group".into()));
+    handler(validation("bad bind group"));
+    assert!(detector.take_repaint(), "a new error repaints");
+    handler(validation("bad bind group"));
+    assert!(!detector.take_repaint(), "the same error again is not told or repainted");
+    handler(validation("bad buffer size"));
+    assert!(detector.take_repaint(), "a different one is");
+    assert!(!detector.take(), "no validation error is a device loss");
+}
+
+#[test]
+fn out_of_memory_and_internal_errors_rebuild_the_device() {
+    let mut detector = DeviceLossDetector::new();
+    let handler = detector.uncaptured_errors();
+    handler(wgpu::Error::OutOfMemory { source: "oom".into() });
+    assert!(detector.take());
+    handler(wgpu::Error::Internal { source: "internal".into(), description: "internal".into() });
+    assert!(detector.take());
+    assert!(!detector.take_repaint());
+}
+
+#[test]
+fn only_consecutive_failed_rebuilds_give_up() {
+    let mut detector = DeviceLossDetector::new();
+    for _ in 0..MAX_FAILED_RECOVERIES - 1 {
+        assert!(!detector.record_recovery(false));
+    }
+    assert!(!detector.record_recovery(true), "a rebuild that works resets the count");
+    for _ in 0..MAX_FAILED_RECOVERIES - 1 {
+        assert!(!detector.record_recovery(false));
+    }
+    assert!(detector.record_recovery(false), "the last failure in a row gives up");
 }

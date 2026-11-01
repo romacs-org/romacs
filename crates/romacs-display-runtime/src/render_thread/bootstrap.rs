@@ -125,6 +125,8 @@ impl RenderApp {
             tracing::error!(?reason, message, "wgpu device lost");
             lost_flag.store(true, std::sync::atomic::Ordering::SeqCst);
         });
+        // Never wgpu's default, which panics on any validation error.
+        device.on_uncaptured_error(Arc::new(self.device_lost.uncaptured_errors()));
 
         crate::paint_host::trace_gpu("installing");
         let phys = window.surface_size();

@@ -303,10 +303,32 @@ impl RenderApp {
             self.tooltips.shutdown();
             self.menus.cancel();
             self.menus.shutdown();
-            if !self.recover_from_device_loss(event_loop) {
-                event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+            let recovered = self.recover_from_device_loss(event_loop);
+            if self.device_lost.record_recovery(recovered) {
+                tracing::error!(
+                    "GPU device unrecoverable: {} rebuilds in a row failed",
+                    super::device_loss::MAX_FAILED_RECOVERIES
+                );
+                self.lifecycle_flags
+                    .request_shutdown(super::state::RenderShutdownReason::GpuLost);
+                self.handle_exiting();
+                event_loop.exit();
                 return;
             }
+            if !recovered {
+                // The latch stays set: retry in a second, whatever else wakes.
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    std::time::Instant::now() + std::time::Duration::from_secs(1),
+                ));
+                return;
+            }
+        }
+        // A newly seen validation error may have spoiled a frame: draw
+        // every window again from its kept CPU frame.
+        if self.device_lost.take_repaint() {
+            self.frame_windows.mark_top_level_dirty();
+            self.frame_windows
+                .for_each_top_level_window(|window_state| window_state.request_redraw());
         }
         if self.gpu.is_none() {
             if self.process_startup_commands() {
