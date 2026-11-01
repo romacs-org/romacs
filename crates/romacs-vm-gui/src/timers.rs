@@ -34,11 +34,11 @@ pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
         "(let* ((output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle))
                 (save (and (fboundp 'romacs--idle-auto-save) (romacs--idle-auto-save)))
                 (delay (if (numberp save) (if (cdr check) (min save (cdr check)) save) (cdr check))))
-           (list (or output (car check) (eq save t)) (not (eq (current-message) (bound-and-true-p romacs--echo-shown)))
+           (list (or output (car check) (eq save t)) (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown)))
                  (and delay (ceiling (* delay 1e6)))))"
     } else {
         "(let* ((output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle)))
-           (list (or output (car check)) (not (eq (current-message) (bound-and-true-p romacs--echo-shown)))
+           (list (or output (car check)) (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown)))
                  (and (cdr check) (ceiling (* (cdr check) 1e6)))))"
     })?.cons_pair()?;
     let ran = !ran.is_nil();

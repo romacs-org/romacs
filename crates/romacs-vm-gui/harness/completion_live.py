@@ -138,8 +138,9 @@ def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', '-M', 'ctrl', 'f', '-m', 'ctrl')
     fio.wait(lambda: 'Find file: ' in layer()[0], timeout, 'find-file prompt', process)
     keys('s/n')
+    # A file candidate's row is its name, then its directory.
     shown('ff-list', 'partial completion of s/n in the layer',
-          lambda m, rows: m.endswith(f'Find file: {work}/s/n') and 'sub/notes.txt' in rows)
+          lambda m, rows: m.endswith(f'Find file: {work}/s/n') and 'notes.txt  sub/' in rows)
     keys('-k', 'Tab')
     shown('ff-tab', 'find-file candidate inserted', lambda m, rows: m.endswith(f'Find file: {work}/sub/notes.txt'))
     keys('-k', 'Return')

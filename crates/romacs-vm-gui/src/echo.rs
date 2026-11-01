@@ -22,7 +22,7 @@ use romacs_vm::Vm;
 /// As GNU's echo area, a multibyte buffer, holds it: ASCII messages
 /// (`format''s and `set_echo_area_message''s) are unibyte strings; a raw
 /// byte shows as GNU's \ooo escape, so the text is always printable.
-const LISP: &str = r#"(unless (fboundp 'romacs--echo-sync)
+const LISP: &str = r#"(progn
   (defvar romacs--echo-shown nil)
   (defun romacs--echo-display (text)
     (let ((old-buffer (current-buffer)) (old-point (point)) (inhibit-read-only t))
@@ -42,8 +42,14 @@ const LISP: &str = r#"(unless (fboundp 'romacs--echo-sync)
       (unless (or (eq message romacs--echo-shown) (> (minibuffer-depth) 0))
         (romacs--echo-display (and message (romacs--echo-printable message)))))))"#;
 
+/// FORM, after LISP the first time. LISP holds strings, which keep a form
+/// from the source cache (source_cache.rs): it is read once per VM, and a
+/// key's clearing, with no string, is compiled once.
 fn display(vm: &mut Vm, form: &str) -> Result<(), String> {
-    vm.eval_source(&format!("{LISP} {form}"))?;
+    if vm.eval_source(&format!("(and (fboundp 'romacs--echo-sync) (progn {form} t))"))?.is_nil() {
+        vm.eval_source(LISP)?;
+        vm.eval_source(form)?;
+    }
     Ok(())
 }
 
