@@ -835,6 +835,8 @@ const MOST_BYTES: u64 = 4 << 30;
 #[derive(Clone, Debug, PartialEq)]
 struct Stored {
     key: String,
+    /// Its family (`family`), which `prune_plan` bounds alone.
+    family: String,
     /// When it was last used (seconds since the epoch).
     used: u64,
     /// Its files' size on disk.
@@ -843,11 +845,21 @@ struct Stored {
     busy: bool,
 }
 
-/// The worlds of WORLDS to delete, CURRENT's kept: those a builder or a
-/// restored process holds are kept too, and the others, most recently used
-/// first, while they were used within `UNUSED` and the store stays within
-/// `MOST_WORLDS` worlds and `MOST_BYTES` bytes.
+/// The worlds of WORLDS to delete, family by family (`plan_family`).
 fn prune_plan(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
+    let mut families: Vec<&str> = worlds.iter().map(|w| w.family.as_str()).collect();
+    families.sort_unstable();
+    families.dedup();
+    families.into_iter()
+        .flat_map(|family| plan_family(&worlds.iter().filter(|w| w.family == family).cloned().collect::<Vec<_>>(), current, now))
+        .collect()
+}
+
+/// The worlds of WORLDS, one family's, to delete, CURRENT's kept: those a
+/// builder or a restored process holds are kept too, and the others, most
+/// recently used first, while they were used within `UNUSED` and the family
+/// stays within `MOST_WORLDS` worlds and `MOST_BYTES` bytes.
+fn plan_family(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
     let kept = |w: &&Stored| w.key == current || w.busy;
     let (mut count, mut bytes) = worlds.iter().filter(kept).fold((0, 0), |(c, b), w| (c + 1, b + w.bytes));
     let mut others: Vec<&Stored> = worlds.iter().filter(|w| !kept(w)).collect();
@@ -945,10 +957,16 @@ impl World {
     /// for files no kept world or executable is, once they are a week old.
     /// The worlds deleted.
     pub fn prune(&self) -> std::io::Result<Vec<String>> {
-        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref())
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), false)
     }
 
-    fn prune_in(&self, home: Option<&Path>) -> std::io::Result<Vec<String>> {
+    /// `prune` within this world's family only: what a batch builder
+    /// bounds, so it never deletes a GUI's world, however long unused.
+    pub fn prune_family(&self) -> std::io::Result<Vec<String>> {
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), true)
+    }
+
+    fn prune_in(&self, home: Option<&Path>, own_family: bool) -> std::io::Result<Vec<String>> {
         use std::os::fd::AsRawFd;
         use std::os::unix::fs::MetadataExt;
         checked_store(&self.store, home)?;
@@ -971,11 +989,14 @@ impl World {
         };
         let worlds: Vec<Stored> = files.iter().map(|(key, files)| Stored {
             key: key.clone(),
+            family: self.family(key),
             used: files.iter().filter(|(n, _)| [".use", ".json", ".rwi"].iter().any(|s| n.ends_with(s))).map(|(_, m)| m.mtime().max(0) as u64).max().unwrap_or(0),
             bytes: files.iter().map(|(_, m)| m.blocks() * 512).sum(),
             busy: held(self.store.join(format!("{key}.lock"))) || held(self.store.join(format!("{key}.use"))),
         }).collect();
         let current = hex(&self.key);
+        let mine = self.family(&current);
+        let worlds: Vec<Stored> = worlds.into_iter().filter(|w| !own_family || w.family == mine).collect();
         let mut deleted = vec![];
         for key in prune_plan(&worlds, &current, now_seconds()) {
             // Taken now, these say no builder or restored process came since.
@@ -1008,6 +1029,26 @@ impl World {
         }
         Ok(deleted)
     }
+}
+
+impl World {
+    /// The family of the world KEY names in this store: this world's own,
+    /// whose manifest a build may not have published yet, or its manifest
+    /// recipe's (none without a manifest). A GUI's worlds and a batch
+    /// session's, one per locale or HOME it ran under, are pruned apart, so
+    /// neither evicts the other's.
+    fn family(&self, key: &str) -> String {
+        if key == hex(&self.key) { return family(self.recipe.iter().map(String::as_str)); }
+        let Ok(text) = host::read_store_file(self.store.join(format!("{key}.json"))) else { return String::new() };
+        let manifest: Json = serde_json::from_str(&text).unwrap_or_default();
+        family(manifest["recipe"].as_array().map(Vec::as_slice).unwrap_or_default().iter().filter_map(Json::as_str))
+    }
+}
+
+/// The lines of RECIPE that say which consumer, launch and executable a
+/// world is for: its family.
+fn family<'a>(recipe: impl Iterator<Item = &'a str>) -> String {
+    recipe.filter(|line| ["consumer ", "launch ", "exe "].iter().any(|p| line.starts_with(p))).collect::<Vec<_>>().join("\n")
 }
 
 /// STORE's store-wide lock (`World::store_lock`), taken as KIND.
@@ -1152,7 +1193,7 @@ mod tests {
         std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::write(plain.join(format!("{key}.failed")), "{}").unwrap();
         assert!(reset_in(&plain, true, None).is_err());
-        assert!(world(&plain).prune_in(None).is_err());
+        assert!(world(&plain).prune_in(None, false).is_err());
         assert!(plain.join(format!("{key}.failed")).exists());
         // Marked, but open to others: refused.
         let open = marked_store("open");
@@ -1161,7 +1202,7 @@ mod tests {
         // The home directory, or the root, even marked: refused.
         let home = marked_store("home");
         assert!(reset_in(&home, true, Some(&home)).is_err());
-        assert!(world(&home).prune_in(Some(&home)).is_err());
+        assert!(world(&home).prune_in(Some(&home), false).is_err());
         assert!(reset_in(Path::new("/"), true, None).is_err());
         // Symlinks: never followed, their targets intact.
         let outside = std::env::temp_dir().join(format!("romacs-store-{}-outside", std::process::id()));
@@ -1178,7 +1219,7 @@ mod tests {
         assert!(outside.join("1-2-3-4.5-6.7").exists() && outside.join("cwd").exists());
         assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "mine");
         assert!(!store.join(format!("{key}.json")).exists() && store.join(MARKER).exists());
-        world(&store).prune_in(None).unwrap();
+        world(&store).prune_in(None, false).unwrap();
         assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "mine");
         for dir in [plain, open, home, outside, store] {
             let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
@@ -1237,7 +1278,7 @@ mod tests {
         // Nor are reset and prune led through one to a real store.
         private_store(&elsewhere.join("store")).unwrap();
         assert!(reset_in(&root.join("linked/store"), true, None).is_err());
-        assert!(World { store: root.join("linked/store"), key: [0; 32], recipe: vec![] }.prune_in(None).is_err());
+        assert!(World { store: root.join("linked/store"), key: [0; 32], recipe: vec![] }.prune_in(None, false).is_err());
         assert!(elsewhere.join("store").join(MARKER).exists());
         mode(&shared, 0o700);
         let _ = std::fs::remove_dir_all(root);
@@ -1285,7 +1326,7 @@ mod tests {
         symlink(&target, linked.join(MARKER)).unwrap();
         assert!(private_store(&linked).is_err());
         assert!(reset_in(&linked, true, None).is_err());
-        assert!(World { store: linked.clone(), key: [0; 32], recipe: vec![] }.prune_in(None).is_err());
+        assert!(World { store: linked.clone(), key: [0; 32], recipe: vec![] }.prune_in(None, false).is_err());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), MARKER_TEXT);
         // A dangling one: never created through.
         let dangling = dir("dangling");
@@ -1351,7 +1392,7 @@ mod tests {
         let w = world.clone();
         assert!(bounded("the builder's log", move || w.start_builder(vec![], tempfile_lock(&w))).is_err());
         let w = world.clone();
-        bounded("pruning", move || w.prune_in(None)).unwrap();
+        bounded("pruning", move || w.prune_in(None, false)).unwrap();
         let store = dir.clone();
         bounded("reset", move || reset_in(&store, true, None)).unwrap();
         std::fs::remove_file(dir.join(STORE_LOCK)).unwrap();
@@ -1368,7 +1409,7 @@ mod tests {
     }
 
     fn stored(key: &str, days_ago: u64, mib: u64, busy: bool) -> Stored {
-        Stored { key: key.repeat(64 / key.len()), used: 100 * 86400 - days_ago * 86400, bytes: mib << 20, busy }
+        Stored { key: key.repeat(64 / key.len()), family: String::new(), used: 100 * 86400 - days_ago * 86400, bytes: mib << 20, busy }
     }
 
     #[test]
@@ -1387,6 +1428,13 @@ mod tests {
         // Four GiB at most: the older of two large worlds goes.
         let worlds = [stored("a", 0, 1024, false), stored("b", 1, 2048, false), stored("c", 2, 2048, false)];
         assert_eq!(prune_plan(&worlds, &key("a"), now), [key("c")]);
+        // Each family is bounded alone: three batch worlds beside three of
+        // a GUI's, whichever family the current world is of.
+        let batch = |k, days| Stored { family: "launch batch".into(), ..stored(k, days, 300, false) };
+        let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
+                      batch("d", 0), batch("e", 1), batch("f", 2), batch("g", 3)];
+        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("g")]);
+        assert_eq!(prune_plan(&worlds, &key("g"), now), [key("f")]);
     }
 
     #[test]
@@ -1416,6 +1464,31 @@ mod tests {
         assert_eq!(names.iter().filter(|n| n.starts_with(&held)).count(), 6);
         assert_eq!(names.iter().filter(|n| n.starts_with(&hex(&current.key))).count(), 6);
         assert!(!stale_id.exists(), "an old identity entry no kept file has");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_world_being_built_counts_in_its_familys_bound() {
+        let dir = marked_store("prune-family");
+        let recipe = |launch: &str, more: &str| vec!["consumer t".to_owned(), format!("launch {launch}"), more.to_owned()];
+        // The world a builder builds: its lock and log, no manifest yet.
+        let current = World { store: dir.clone(), key: [0xaa; 32], recipe: recipe("batch", "environment C") };
+        for suffix in ["lock", "log"] { std::fs::write(dir.join(format!("{}.{suffix}", hex(&current.key))), "").unwrap(); }
+        // Three batch worlds of other locales, the oldest first, and a GUI's.
+        let now = host::clock();
+        let worlds = [("b", "batch", 3), ("c", "batch", 2), ("d", "batch", 1), ("e", "gui", 4), ("f", "gui", 9 * 24)];
+        for (key, launch, hours) in worlds {
+            let manifest = json!({"recipe": recipe(launch, key)}).to_string();
+            for (suffix, text) in [("json", manifest.as_str()), ("rwi", "image")] {
+                let file = std::fs::File::create(dir.join(format!("{}.{suffix}", key.repeat(64)))).unwrap();
+                std::io::Write::write_all(&mut &file, text.as_bytes()).unwrap();
+                file.set_modified(now - std::time::Duration::from_secs(hours * 3600)).unwrap();
+            }
+        }
+        // A batch builder's prune leaves the GUI's family alone, even a
+        // world of it unused for over a week, which `prune` deletes.
+        assert_eq!(current.prune_family().unwrap(), ["b".repeat(64)]);
+        assert_eq!(current.prune().unwrap(), ["f".repeat(64)]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

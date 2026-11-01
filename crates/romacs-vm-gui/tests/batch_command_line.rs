@@ -9,8 +9,7 @@
 //! compares the status, stdout and stderr.
 //! The HOME holds an init file, which a batch session never loads. A
 //! Romacs session boots from its batch world in that HOME's cache
-//! (src/batch.rs): the cases run side by side, so one builds it and the
-//! rest wait for it and restore it.
+//! (src/batch.rs), which `--world-build` prepares first.
 use std::path::Path;
 use std::process::Command;
 
@@ -98,6 +97,7 @@ fn batch_command_line_matches_pinned_gnu() {
     std::fs::write(dir.join("lib/t-bad.el"), BAD).unwrap();
     std::fs::create_dir_all(dir.join(".emacs.d")).unwrap();
     std::fs::write(dir.join(".emacs.d/init.el"), INIT).unwrap();
+    world_build(&dir);
     let runs: Vec<_> = cases(&dir.join("lib")).into_iter().map(|case| {
         let (gnu, dir) = (gnu.clone(), dir.clone());
         std::thread::spawn(move || {
@@ -120,13 +120,30 @@ fn batch_command_line_matches_pinned_gnu() {
             failures.push(format!("{:?}\n  GNU    {:?}\n  Romacs {:?}\n  Romacs stderr {}", case.args, shown(&expected), shown(&actual), actual.2));
         }
     }
-    // One image, and its use file, which only a restore makes.
-    let worlds = |suffix: &str| std::fs::read_dir(dir.join("cache/romacs/worlds")).map(|entries| entries.flatten()
-        .filter(|entry| entry.path().extension().is_some_and(|e| e == suffix)).count()).unwrap_or(0);
-    let worlds = (worlds("rwi"), worlds("use"));
+    // The GUI's world and the batch world, and the batch world's use file,
+    // which only a restore makes.
+    let worlds = (stored(&dir, "rwi").len(), stored(&dir, "use").len());
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(worlds, (1, 1), "the sessions built one batch world and restored it");
+    assert_eq!(worlds, (2, 1), "the sessions restored the batch world --world-build prepared");
+}
+
+/// `--world-build` in DIR, the HOME `run` gives: the GUI's world and the
+/// batch world of `run`'s environment.
+fn world_build(dir: &Path) {
+    let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui")).args(["--loadup", "--world-build"]).current_dir(dir)
+        .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
+        .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
+        .env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY").env_remove("ROMACS_WORLD").output().unwrap();
+    assert!(output.status.success(), "--world-build: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+/// The files of DIR's default store with SUFFIX, sorted.
+fn stored(dir: &Path, suffix: &str) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<_> = std::fs::read_dir(dir.join("cache/romacs/worlds")).map(|entries| entries.flatten().map(|e| e.path())
+        .filter(|path| path.extension().is_some_and(|e| e == suffix)).collect()).unwrap_or_default();
+    files.sort();
+    files
 }
 
 /// Startup from a HOME and directory whose parent holds more entries than a
@@ -152,20 +169,72 @@ fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
     assert_eq!((actual.0, actual.1.as_str()), (expected.0, expected.1.as_str()), "Romacs stderr {}", actual.2);
 }
 
-/// With ROMACS_WORLD=off a batch session boots the chain from source, as
-/// one does whenever its world cannot be had, and makes no store.
+/// With ROMACS_WORLD=off, and in a fresh HOME, a batch session boots the
+/// chain from source, as one does whenever its world cannot be had, and
+/// makes no store: nothing is built for a HOME no Romacs ran in.
 #[test]
 fn batch_without_worlds_boots_from_source_as_pinned_gnu_does() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
-    let dir = std::env::temp_dir().join(format!("romacs-batch-source-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
     let args: Vec<String> = ["-Q", "--batch", "--eval", "(progn (princ (list noninteractive window-system (length command-line-args))) (kill-emacs 4))"]
         .iter().map(|a| a.to_string()).collect();
-    let expected = run(&gnu, &dir, &args, false);
-    let actual = run(romacs, &dir, &args, false);
-    let store = dir.join("cache/romacs/worlds").exists();
+    for world in [false, true] {
+        let dir = std::env::temp_dir().join(format!("romacs-batch-source-{}-{world}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let expected = run(&gnu, &dir, &args, world);
+        let actual = run(romacs, &dir, &args, world);
+        let store = dir.join("cache/romacs/worlds").exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!((actual.0, actual.1), (expected.0, expected.1), "worlds {world}: Romacs stderr {}", actual.2);
+        assert!(!store, "a session (worlds {world}) made a store");
+    }
+}
+
+/// In a store that exists, a session without its world boots from source
+/// while a builder prepares it, and the next restores it: one world per
+/// locale, so sessions alternating LANG=C and C.UTF-8 restore both once
+/// each was built, rebuilding neither, and answer as pinned GNU does.
+#[test]
+fn batch_prepares_its_world_per_locale_in_an_existing_store() {
+    let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let dir = std::env::temp_dir().join(format!("romacs-batch-locales-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!((actual.0, actual.1), (expected.0, expected.1), "Romacs stderr {}", actual.2);
-    assert!(!store, "a session without worlds made a store");
+    std::fs::create_dir_all(dir.join("cache/romacs")).unwrap();
+    std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(dir.join("cache/romacs/worlds")).unwrap();
+    let form = "(princ (list noninteractive current-language-environment locale-coding-system (terminal-coding-system)))";
+    let session = |binary: &str, lang: &str| {
+        let output = Command::new(binary).args(["-Q", "--batch", "--eval", form]).current_dir(&dir)
+            .env("HOME", &dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
+            .env("LANG", lang).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LC_MESSAGES").env_remove("ROMACS_WORLD")
+            .output().unwrap();
+        (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(), String::from_utf8_lossy(&output.stderr).into_owned())
+    };
+    // A builder publishes the image, then its manifest.
+    let built = |count: usize| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+        while stored(&dir, "rwi").iter().filter(|image| image.with_extension("json").is_file()).count() < count {
+            assert!(std::time::Instant::now() < deadline, "no world {count} after 600 s");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    };
+    let mut failures = Vec::new();
+    let mut check = |lang: &str| {
+        let (expected, actual) = (session(&gnu, lang), session(romacs, lang));
+        if (expected.0, &expected.1) != (actual.0, &actual.1) {
+            failures.push(format!("LANG={lang}: GNU {expected:?}, Romacs {actual:?}"));
+        }
+    };
+    check("C.UTF-8");
+    built(1);
+    check("C");
+    built(2);
+    assert!(stored(&dir, "use").is_empty(), "a session restored a world it had to build");
+    let images: Vec<_> = stored(&dir, "rwi").iter().map(|image| std::fs::metadata(image).unwrap().modified().unwrap()).collect();
+    for lang in ["C.UTF-8", "C", "C.UTF-8", "C"] { check(lang); }
+    let again: Vec<_> = stored(&dir, "rwi").iter().map(|image| std::fs::metadata(image).unwrap().modified().unwrap()).collect();
+    let used = stored(&dir, "use").len();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!((used, again), (2, images), "both locales' worlds restored, neither rebuilt");
 }
