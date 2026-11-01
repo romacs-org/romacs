@@ -24,7 +24,9 @@ fn locale_startup_matches_pinned_gnu() {
         let run = |binary: &str| {
             let mut command = Command::new(binary);
             command.args(["-Q", "--batch", "--eval", FORM]).current_dir(&dir)
-                .env("HOME", &dir).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LANG");
+                .env("HOME", &dir).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LANG")
+                // A batch world is per HOME and locale (src/batch.rs); this boots from source.
+                .env("ROMACS_WORLD", "off");
             if let Some(lang) = lang { command.env("LANG", lang); }
             let output = command.output().unwrap();
             (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -63,7 +65,9 @@ fn a_replayed_locale_step_matches_pinned_gnu_started_there() {
     let run = |binary: &str, lang: Option<&str>, form: &str| {
         let mut command = Command::new(binary);
         command.args(["-Q", "--batch", "--eval", form]).current_dir(&dir)
-            .env("HOME", &dir).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LANG");
+            .env("HOME", &dir).env_remove("LC_ALL").env_remove("LC_CTYPE").env_remove("LANG")
+            // A source boot: the test replays the restore itself.
+            .env("ROMACS_WORLD", "off");
         if let Some(lang) = lang { command.env("LANG", lang); }
         let output = command.output().unwrap();
         (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(),

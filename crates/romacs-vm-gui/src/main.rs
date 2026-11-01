@@ -438,13 +438,16 @@ const USAGE: &str = "\
 usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE...]
   --loadup              run GNU's loadup chain; a live launch boots from its world
   --world-store DIR     keep worlds in DIR (default $XDG_CACHE_HOME/romacs/worlds)
-  --world-build         make the world a live --loadup launch would boot from
-                        usable, with no window, and exit (what an installer runs)
+  --world-build         make the world a live --loadup launch would boot from,
+                        and a --batch session's, usable, with no window, and
+                        exit (what an installer runs)
   --world-reset         forget the store's failed and refused builds, so the next
                         launch builds again
   --world-reset=all     remove the store's worlds and files altogether
   --geometry WxH        the window's size
-  -Q, --no-init         do not load the user's init file
+  -Q, -q, --no-init     do not load the user's init file
+  --batch ARG...        GNU's `emacs --batch ARG...', from a batch world of its own
+                        once one is prepared in an existing store
   ROMACS_WORLD=off      boot from source, without a world
 ";
 
@@ -494,7 +497,7 @@ fn run() -> Result<(), String> {
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
             "-Q" => (quick, load_user_init) = (true, false),
-            "--no-init" => load_user_init = false,
+            "--no-init" | "-q" | "-no-init-file" | "--no-init-file" => load_user_init = false,
             "--trace-latency" => trace_latency = true,
             "--trace-scene" => trace_scene = true,
             "--gc-floor" => {
@@ -511,7 +514,7 @@ fn run() -> Result<(), String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()),
-            "--batch" => return batch::run(args.collect(), quick),
+            "--batch" => return batch::run(args.collect(), quick, world_store),
             "--isolate" => return isolate_worker::run(std::iter::once(arg).chain(args).collect()),
             "--" => {
                 startup::visit_at_startup("--");
@@ -535,18 +538,19 @@ fn run() -> Result<(), String> {
     if let Some(phases) = &mut phases { phases.mark("main"); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
     // --world-build: the world this launch would boot from, made usable
-    // (built here, or waited for), with no window; then exit. What an
-    // installer runs so a user's first launch restores.
+    // (built here, or waited for), with no window, and a batch session's
+    // in this environment; then exit. What an installer runs so a user's
+    // first launch and first `--batch' restore.
     if world_build {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
         if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
-        let base = world::open(store, width, height, floor)?;
+        let base = world::open(store.clone(), width, height, floor)?;
         world::prepare(&base, width, height, floor)?;
         if let Some(init) = user_init::path().filter(|_| load_user_init) {
             world::prepare_layer(&base, &init, width, height, floor);
         }
-        return Ok(());
+        return batch::prepare(store);
     }
     // A live --loadup launch boots from its world, in --world-store or by
     // default in the user's cache (world::default_store), unless
