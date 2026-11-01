@@ -608,6 +608,11 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
+    // The window change functions run from every redisplay (host_input.rs),
+    // including one a resize starts before the first key reaches the command
+    // loop that would install them; its state is defvar'd, so that install
+    // keeps it.
+    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el"))?;
     // The session's command log, which each interactive process starts
     // itself (`romacs-usage-log-start').
     if launch == Launch::Loadup {
