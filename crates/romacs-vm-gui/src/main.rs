@@ -790,6 +790,19 @@ fn activate(sender: &PaintSender, presentation: u64, pending: &mut std::collecti
         }
     }
 }
+/// How a paint waits for its render before it says so.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Wait {
+    /// Submit only; the live loop sees the render later.
+    No,
+    /// Rendered within 30 s, or an error: the oracle transport.
+    Rendered,
+    /// The live session's first frame: rendered within 30 s, or left in
+    /// flight undrawn (its window hidden as it starts). Its lines and the
+    /// `ready' reply follow the render, as harnesses expect.
+    Bounded,
+}
+
 fn paint(
     engine: &mut romacs_layout2::LayoutEngine,
     vm: &mut Vm,
@@ -799,7 +812,7 @@ fn paint(
     floor: Option<usize>,
     shown: Frame,
     pending: &mut std::collections::VecDeque<InputEvent>,
-    synchronous: bool,
+    wait: Wait,
     timings: &mut Option<latency::Paint>,
 ) -> Result<Shown, String> {
     if force_gc {
@@ -865,17 +878,20 @@ fn paint(
     sender.submit_scene(frame, children)?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
-    if synchronous { activate(sender, presentation, pending)?; }
+    if wait != Wait::No { activate(sender, presentation, pending)?; }
     let activation_ns = activation_start.elapsed().as_nanos();
     let wait_start = Instant::now();
-    let diagnostic = if synchronous {
-        Some(sender.wait_for_render(presentation, std::time::Duration::from_secs(30))?)
-    } else { None };
+    let render = || sender.wait_for_render(presentation, std::time::Duration::from_secs(30));
+    let diagnostic = match wait {
+        Wait::No => None,
+        Wait::Rendered => Some(render()?),
+        Wait::Bounded => render().ok(),
+    };
     let wait_render_ns = wait_start.elapsed().as_nanos();
     let diagnostic_write_start = Instant::now();
     if diagnostics() { eprintln!(
         "{}",
-        json!({"diagnostic":if synchronous { "paint" } else { "paint-submitted" },"presentation":presentation,
+        json!({"diagnostic":if diagnostic.is_some() { "paint" } else { "paint-submitted" },"presentation":presentation,
         "buffer_versions":snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),"resolved_fonts":resolved_fonts,
         "unresolved_face_text_total":diagnostic.map(|sample| sample.unresolved_face_text_total)})
     ); }
@@ -885,7 +901,7 @@ fn paint(
         "vscroll_px":snapshot.windows.first().map(|w|w.snapshot.vscroll_px),"glyphs":glyphs})
     ); }
     if tracing() {
-        eprintln!("{}", json!({"diagnostic":if synchronous { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
+        eprintln!("{}", json!({"diagnostic":if diagnostic.is_some() { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
             "layout_ns":layout_ns,"diagnostics_prepare_ns":diagnostics_prepare_ns,"submit_ns":submit_ns,
             "activation_ns":activation_ns,"wait_render_ns":wait_render_ns,
             "activation_and_render_ns":activation_ns + wait_render_ns,
@@ -1126,13 +1142,13 @@ fn evaluate(
     let mut pending = std::collections::VecDeque::new();
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
-    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending, !live, &mut paint_timings)?;
+    let first_submitted = Instant::now();
+    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending,
+                             if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?;
     let mut live_presentation = presentation::Presentation::new();
-    if live {
-        // The first frame on screen before the session is ready, unless the
-        // window is not drawn (hidden as it starts): the loop waits for it then.
-        live_presentation.submitted(previous.presentation, Instant::now());
-        let _ = sender.wait_for_render(previous.presentation, presentation::render_stall());
+    if live && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
+        // Not drawn (hidden as it starts): the loop waits for it, stalled.
+        live_presentation.submitted(previous.presentation, first_submitted);
     }
     startup::mark_phase("first-paint");
     let mut terminal_modal = false;
@@ -1266,7 +1282,7 @@ fn evaluate(
                     let next = frame(&mut vm, g1, width, height)?;
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     let presentation = next_presentation(&host)?;
-                    previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
+                    previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
@@ -1347,7 +1363,7 @@ fn evaluate(
                 // such as show-paren's runs after every key.
                 let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? else { return Ok(None) };
                 let presentation = next_presentation(&host)?;
-                previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, false, &mut paint_timings)?;
+                previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::No, &mut paint_timings)?;
                 Ok(Some((snapshot_start, snapshot_ns, presentation)))
             }) {
                 if let Some((snapshot_start, snapshot_ns, presentation)) = result? {
@@ -1418,7 +1434,7 @@ fn evaluate(
         let next = frame(&mut vm, g1, width, height)?;
         if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? {
             let presentation = next_presentation(&host)?;
-            previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
+            previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
         }
         match result {
             Err(error) => reply(json!({"error":error,"presentation":last_presentation()}))?,
