@@ -103,6 +103,10 @@ impl Vm {
     pub(crate) fn window_system_host(&mut self) -> Option<&mut (dyn DisplayHost + 'static)> {
         match self.display.as_mut() { Some(display) if display.open => Some(display.host.as_mut()), _ => None }
     }
+    /// Whether the frame is on an open display: GNU's FRAME_WINDOW_P.
+    pub(crate) fn window_system_open(&self) -> bool {
+        self.display.as_ref().is_some_and(|display| display.open)
+    }
     /// GNU's frame type: the open display's backend symbol, else t.
     pub(crate) fn frame_type(&mut self) -> crate::Value {
         match self.display.as_ref().filter(|display| display.open) {
