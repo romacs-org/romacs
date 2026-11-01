@@ -36,8 +36,8 @@ fn expand(args: &[String], file: &std::path::Path) -> Vec<String> {
 }
 
 /// Run the GUI binary with `args`, bounded. The Wayland socket does not
-/// exist, so a command line the binary ACCEPTS stops at the display connect
-/// with exactly that diagnostic; anything else means it was rejected.
+/// exist, so a command line the binary ACCEPTS ends its session at the display
+/// connect with exactly that diagnostic; anything else means it was rejected.
 fn accepted(args: &[String]) -> Result<(), String> {
     let dir = std::env::temp_dir().join(format!("romacs-desktop-entry-{}-{}", std::process::id(), args.len()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -65,8 +65,12 @@ fn accepted(args: &[String]) -> Result<(), String> {
     let mut stderr = String::new();
     std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
-    let expected = format!("romacs-vm-gui: Cannot connect to Wayland socket {}: ", socket.display());
-    if status.code() == Some(1) && stderr.starts_with(&expected) && stderr.lines().count() == 1 {
+    // The session's one line saying why it ended (src/exit.rs).
+    let expected = format!("Cannot connect to Wayland socket {}: ", socket.display());
+    let end: Option<serde_json::Value> = stderr.strip_prefix("romacs-exit: ").and_then(|line| serde_json::from_str(line).ok());
+    let said = end.as_ref().is_some_and(|end| end["reason"] == "startup-error" && end["status"] == 1
+        && end["detail"].as_str().is_some_and(|detail| detail.starts_with(&expected)));
+    if status.code() == Some(1) && said && stderr.lines().count() == 1 {
         Ok(())
     } else {
         Err(format!("{args:?}: exit {:?}, stderr {stderr:?}", status.code()))

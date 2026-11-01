@@ -28,6 +28,7 @@ mod fonts;
 mod timers;
 mod world;
 mod isolate_worker;
+mod exit;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -173,7 +174,7 @@ mod lent_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
         host.borrow_mut().presentation = 3;
-        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3 };
+        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3, tab_bar: vec![] };
         let mut live = presentation::Presentation::new();
         let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
@@ -301,11 +302,33 @@ mod frame_tests {
         let mut vm = romacs_vm::Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
-        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4 };
+        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4, tab_bar: vec![] };
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, same, 4).unwrap().is_none(), "an unchanged frame still on screen repaints");
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, same, 5).unwrap().is_some(), "a prompt's presentation left the frame unrepainted");
+    }
+
+    /// A button over the painted tab bar runs its binding with the column
+    /// of the character under the pointer; anywhere else it is no tab bar
+    /// click.
+    #[test]
+    fn a_click_over_the_tab_bar_names_its_column() {
+        use romacs_display_runtime::thread_comm::{InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput};
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
+        painted.snapshot.tab_bar = Some(romacs_layout_input::TabBarSnapshot { height: 20, face: Default::default(), faces: vec![],
+            text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
+        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)] };
+        let click = |x, y, button, pressed| super::tab_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
+            position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
+            action: PointerAction::Button { button, pressed, modifiers: 0 } }));
+        assert_eq!(click(15.0, 5.0, 1, true).as_deref(), Some("(romacs--tab-bar-click 1 'down-mouse-1)"));
+        assert_eq!(click(3.0, 5.0, 2, false).as_deref(), Some("(romacs--tab-bar-click 0 'mouse-2)"));
+        assert_eq!(click(500.0, 5.0, 1, false).as_deref(), Some("(romacs--tab-bar-click 2 'mouse-1)"));
+        assert_eq!(click(15.0, 25.0, 1, true), None, "below the tab bar");
     }
 
     /// Selecting the buffer a window already shows resets its end, though its
@@ -322,7 +345,7 @@ mod frame_tests {
         vm.display_apply_layout(&ends).unwrap();
         let end = vm.eval_source("(window-end)").unwrap().display().unwrap();
         assert_ne!(end, vm.eval_source("(point-max)").unwrap().display().unwrap(), "the window shows part of the buffer");
-        let shown = super::Shown { frame: painted, ends, presentation: 1 };
+        let shown = super::Shown { frame: painted, ends, presentation: 1, tab_bar: vec![] };
         vm.eval_source("(romacs-select-buffer (current-buffer))").unwrap();
         let next = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, next, 1).unwrap().is_none(), "the frame did not change");
@@ -369,6 +392,8 @@ struct Shown {
     frame: Frame,
     ends: Vec<romacs_vm::WindowEnd>,
     presentation: u64,
+    /// The painted tab bar's characters: each one's left edge and width.
+    tab_bar: Vec<(f32, f32)>,
 }
 
 /// The frame to paint after a batch, or None when the paint on screen still
@@ -405,7 +430,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
             font_alternatives: vm.font_alternative_state()?,
             width: 400, height: 300,
-            background_alpha: 1.0, children: vec![], windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+            background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
             }],
         })
@@ -423,10 +448,10 @@ fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), 
     let face = Vm::new().display_default_face()?;
     let snapshot = FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), width, height,
-        background_alpha: 1.0, children: vec![], windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
+        background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { utf8: PREPARING.into(), face_runs: vec![], raw: vec![] }, mode_line: None,
-            mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, faces: vec![face],
+            mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face],
         } }],
     };
     let (frame, _) = romacs_layout2::LayoutEngine::new()?.layout_frame(&snapshot, 1, None)?;
@@ -446,18 +471,31 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   --world-reset=all     remove the store's worlds and files altogether
   --geometry WxH        the window's size
   -Q, -q, --no-init     do not load the user's init file
+  -l, --load FILE       load FILE after the init, in order with the files
+  -f, --funcall FUNC    call FUNC (as a command when it is one) there
+  --eval EXPR           evaluate EXPR there
   --batch ARG...        GNU's `emacs --batch ARG...', from a batch world of its own
                         once one is prepared in an existing store
   ROMACS_WORLD=off      boot from source, without a world
 ";
 
 fn main() {
-    if let Err(error) = run() {
-        eprintln!("romacs-vm-gui: {error}");
-        std::process::exit(1);
-    }
+    // A session's every end says why (exit.rs); other modes keep their own.
+    let end = match std::panic::catch_unwind(run) {
+        Ok(Ok(None)) => return,
+        Ok(Ok(Some(end))) => end,
+        Ok(Err(error)) if exit::installed() => exit::Exit::new("startup-error", error, 1),
+        Ok(Err(error)) => {
+            eprintln!("romacs-vm-gui: {error}");
+            std::process::exit(1);
+        }
+        Err(_) if exit::installed() => exit::panicked("main thread"),
+        Err(payload) => std::panic::resume_unwind(payload),
+    };
+    exit::finish(end)
 }
-fn run() -> Result<(), String> {
+/// The session's end, when this process ran one.
+fn run() -> Result<Option<exit::Exit>, String> {
     let mut args = std::env::args().skip(1);
     let mut socket = None;
     let mut floor = None;
@@ -492,7 +530,7 @@ fn run() -> Result<(), String> {
             "--world-wait" => {}
             "--world-reset" => world_reset = Some(false),
             "--world-reset=all" => world_reset = Some(true),
-            "--help" => { print!("{USAGE}"); return Ok(()); }
+            "--help" => { print!("{USAGE}"); return Ok(None); }
             "--wayland" => { socket = Some(args.next().ok_or("missing socket")?); live = false; },
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
@@ -513,13 +551,25 @@ fn run() -> Result<(), String> {
             "--gnu-lisp" => launch = startup::Launch::GnuOnly,
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
-            "--loadup-report" => return loadup_report(args.collect()),
-            "--batch" => return batch::run(args.collect(), quick, world_store),
-            "--isolate" => return isolate_worker::run(std::iter::once(arg).chain(args).collect()),
+            "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
+            "--batch" => return batch::run(args.collect(), quick, world_store).map(|()| None),
+            // A worker's own end is its spawner's to report; its failure says why here.
+            "--isolate" => return Ok(isolate_worker::run(std::iter::once(arg).chain(args).collect()).err()
+                                     .map(|error| exit::Exit::new("isolate-error", error, 1))),
             "--" => {
                 startup::visit_at_startup("--");
                 for file in args.by_ref() { startup::visit_at_startup(&file); }
             },
+            option if startup::StartupOption::parse(option).is_some() => {
+                startup::visit_at_startup(option);
+                startup::visit_at_startup(&args.next().ok_or_else(|| format!("{option} needs an argument"))?);
+            }
+            // GNU's `--OPTION=VALUE' spelling of the same options.
+            packed if packed.split_once('=').is_some_and(|(o, _)| o.starts_with("--") && startup::StartupOption::parse(o).is_some()) => {
+                let (option, value) = packed.split_once('=').unwrap();
+                startup::visit_at_startup(option);
+                startup::visit_at_startup(value);
+            }
             file if !file.starts_with('-') => startup::visit_at_startup(file),
             _ => return Err(format!("unknown option {arg}")),
         }
@@ -528,7 +578,7 @@ fn run() -> Result<(), String> {
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store to reset")?;
         let removed = romacs_vm::world::store::reset(&store, everything).map_err(|e| e.to_string())?;
         eprintln!("romacs-world: {}", serde_json::json!({"event": "reset", "store": store, "everything": everything, "removed": removed}));
-        return Ok(());
+        return Ok(None);
     }
     TRACE_LATENCY.store(trace_latency, std::sync::atomic::Ordering::Relaxed);
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
@@ -550,7 +600,7 @@ fn run() -> Result<(), String> {
         if let Some(init) = user_init::path().filter(|_| load_user_init) {
             world::prepare_layer(&base, &init, width, height, floor);
         }
-        return batch::prepare(store);
+        return batch::prepare(store).map(|()| None);
     }
     // A live --loadup launch boots from its world, in --world-store or by
     // default in the user's cache (world::default_store), unless
@@ -568,6 +618,8 @@ fn run() -> Result<(), String> {
     if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
         world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor, init_layer.as_ref())?;
     }
+    // The session from here: its every end says why.
+    exit::install();
     // Fontconfig's configuration loads on a helper while the window and the
     // world open: the evaluator's first font question finds it loaded, or
     // waits for it.
@@ -621,32 +673,37 @@ fn run() -> Result<(), String> {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
                      isolate_world, worlds, first_presentation, prune)
         }));
-        let result = match result {
-            Ok(result) => result.map(|()| 0),
+        let end = match result {
+            Ok(Ok(end)) => end,
+            Ok(Err(error)) => {
+                eprintln!("romacs: evaluator stopped: {error}");
+                exit::Exit::new("evaluator-error", error, 1)
+            }
             Err(payload) => match payload.downcast::<SessionEnd>() {
-                Ok(end) => Ok(end.0),
+                Ok(end) => exit::Exit::new("kill-emacs", "", end.0),
                 Err(payload) => std::panic::resume_unwind(payload),
             },
         };
-        if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
-        // The status goes first: dropping the sender closes the window, and
+        // The end goes first: dropping the sender closes the window, and
         // the window's end lets the main thread look for it.
-        let _ = result_tx.send(result);
+        let _ = result_tx.send(end);
         drop(sender);
     })?;
-    host.run().map_err(|e| e.to_string())?;
-    // Native startup failure must not join an evaluator blocked in stdin.
-    match result_rx.try_recv() {
-        Ok(result) => {
-            worker.join().map_err(|_| "evaluator panicked")?;
-            match result? {
-                0 => Ok(()),
-                code => std::process::exit(code),
-            }
-        }
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("evaluator panicked".into()),
-        Err(std::sync::mpsc::TryRecvError::Empty) => Ok(()),
-    }
+    let host = host.run();
+    // An end the evaluator caused was sent before the loop could end; any
+    // other leaves it running. Native startup failure must not join an
+    // evaluator blocked in stdin; an ended one is joined, as its VM's drop
+    // kills its children.
+    let wait = if exit::evaluator_ended(&host) { std::time::Duration::from_secs(2) } else { std::time::Duration::ZERO };
+    let verdict = match result_rx.recv_timeout(wait) {
+        Ok(end) => match worker.join() {
+            Ok(()) => exit::Verdict::Ended(end),
+            Err(_) => exit::Verdict::Panicked,
+        },
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => exit::Verdict::Panicked,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => exit::Verdict::Running,
+    };
+    Ok(Some(exit::session(host, verdict)))
 }
 /// `--loadup-report [EXPR...]`: run `--loadup`'s GNU Lisp chain exactly as
 /// the GUI's startup does, on the same 64 MiB evaluator, with no window; print
@@ -758,6 +815,7 @@ fn paint(
         })
     }).collect();
     let diagnostics_prepare_ns = diagnostic_start.elapsed().as_nanos();
+    let tab_bar = romacs_layout2::tab_bar_extents(&frame);
     let submit_start = Instant::now();
     sender.submit_scene(frame, children)?;
     let submit_ns = submit_start.elapsed().as_nanos();
@@ -806,7 +864,21 @@ fn paint(
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
-    Ok(Shown { frame: shown, ends, presentation })
+    Ok(Shown { frame: shown, ends, presentation, tab_bar })
+}
+
+/// A mouse button event over the root frame's tab bar as the Lisp that
+/// runs its binding (`romacs--tab-bar-click'): the column of the painted
+/// character under the pointer, past the last one when none is.
+fn tab_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
+    let InputEvent::PositionedPointer(romacs_display_runtime::thread_comm::PositionedPointerInput {
+        position, action: romacs_display_runtime::thread_comm::PointerAction::Button { button, pressed, .. }, ..
+    }) = event else { return None };
+    let height = shown.frame.snapshot.tab_bar.as_ref()?.height as f32;
+    if position.target_frame_id != 1 || position.y < 0.0 || position.y >= height || !(1..=3).contains(button) { return None; }
+    let column = shown.tab_bar.iter().position(|&(x, width)| position.x >= x && position.x < x + width).unwrap_or(shown.tab_bar.len());
+    let kind = if *pressed { "down-mouse" } else { "mouse" };
+    Some(format!("(romacs--tab-bar-click {column} '{kind}-{button})"))
 }
 
 /// No cursor colour cycle in any window of SNAPSHOT, its child frames'
@@ -872,7 +944,7 @@ fn evaluate(
     worlds: Option<world::Worlds>,
     first_presentation: u64,
     after_first_frame: Option<impl FnOnce()>,
-) -> Result<(), String> {
+) -> Result<exit::Exit, String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
     startup::mark_phase("layout-engine");
     let (mut vm, carry) = match restored {
@@ -944,6 +1016,10 @@ fn evaluate(
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
         startup::mark_phase("session-lisp");
+        // This process's command log, from before the init (rlisp/romacs-usage-log.el).
+        if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
+            eprintln!("romacs: usage log: {error}");
+        }
         if quick && launch == startup::Launch::Loadup {
             vm.eval_source(startup::QUICK_START)?;
         }
@@ -960,10 +1036,15 @@ fn evaluate(
             }
         }
         startup::mark_phase("user-init");
-        if launch == startup::Launch::Loadup {
-            if let Err(error) = startup::finish_loadup(&mut vm, &started) {
-                eprintln!("romacs: startup after init failed: {error}");
-            }
+        let finished = match launch {
+            startup::Launch::Loadup => startup::finish_loadup(&mut vm, &started),
+            startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
+            startup::Launch::GnuOnly => Ok(()),
+        };
+        // As GNU's command loop reports an error that ends `command-line-1'.
+        if let Err(error) = finished {
+            eprintln!("romacs: startup after init failed: {error}");
+            let _ = echo::show(&mut vm, &error);
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
@@ -1022,7 +1103,7 @@ fn evaluate(
             let (changed, closed) = lent.run(&host, |_| service_native(&mut vm));
             if changed? { live_presentation.changed(); }
             if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
-                return shutdown_editor(&mut vm, sender);
+                return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
             }
         }
         let available = sender.input().len();
@@ -1045,7 +1126,7 @@ fn evaluate(
                 let event = event.expect("host input");
                 if matches!(event, InputEvent::WindowClose { .. }) {
                     if !live || close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
-                        return shutdown_editor(&mut vm, sender);
+                        return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
                     terminal_modal = true;
                     continue;
@@ -1064,6 +1145,12 @@ fn evaluate(
                         vm.set_frame_geometry(width, height, lh, cw)?;
                         live_presentation.changed();
                     }
+                    continue;
+                }
+                // A click on the tab bar runs its binding there and then.
+                if live && let Some(click) = tab_bar_click(&previous, &event) {
+                    if let Err(error) = vm.eval_source(&click) { echo::show(&mut vm, &error)?; }
+                    live_presentation.changed();
                     continue;
                 }
                 if live && let InputEvent::WindowFocus { focused, .. } = event {
@@ -1109,7 +1196,7 @@ fn evaluate(
                     let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
                     let (outcome, closed) = lent.run(&host, |live| live.host_command(&mut vm, first.as_ref()));
                     if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
-                        return shutdown_editor(&mut vm, sender);
+                        return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
                     outcome
                 } else {
@@ -1117,7 +1204,7 @@ fn evaluate(
                     vm.command_event(first.expect("a host key")).map(Some)
                 };
                 if live && vm.eval_source("romacs-gui-quit-requested")? != romacs_vm::Fixed::NIL {
-                    return shutdown_editor(&mut vm, sender);
+                    return shutdown_editor(&mut vm, sender, exit::Exit::new("gui-quit", "", 0));
                 }
                 if live {
                     terminal_modal = vm.eval_source("(and (boundp 'romacs-gui-pending) romacs-gui-pending)")? != romacs_vm::Fixed::NIL;
@@ -1228,7 +1315,7 @@ fn evaluate(
                 let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
                 let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm, auto_save));
                 if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
-                    return shutdown_editor(&mut vm, sender);
+                    return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                 }
                 let idle = idle.unwrap_or_else(|error| {
                     let _ = echo::show(&mut vm, &format!("Timer: {error}"));
@@ -1246,7 +1333,7 @@ fn evaluate(
                 if romacs_vm::host::termination_signal(true).is_some() { continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
-                    terminal_wait::Wake::Closed => return Ok(()),
+                    terminal_wait::Wake::Closed => return Ok(exit::Exit::new("host-input-closed", "", 1)),
                     terminal_wait::Wake::Terminal | terminal_wait::Wake::Process | terminal_wait::Wake::Timeout => {},
                 }
             }
@@ -1277,7 +1364,7 @@ fn evaluate(
             Ok(result) => reply(json!({"result":result,"presentation":last_presentation()}))?,
         }
     }
-    shutdown_editor(&mut vm, sender)
+    shutdown_editor(&mut vm, sender, exit::Exit::new("stdin-closed", "", 0))
 }
 
 /// Number the next presentation. The loop and every prompt read inside the
@@ -1354,9 +1441,11 @@ fn service_native(vm: &mut Vm) -> Result<bool, String> {
     Ok(changed)
 }
 
-fn shutdown_editor(vm: &mut Vm, sender: &PaintSender) -> Result<(), String> {
+/// END, once the session's processes and window are shut down.
+fn shutdown_editor(vm: &mut Vm, sender: &PaintSender, end: exit::Exit) -> Result<exit::Exit, String> {
     vm.shutdown_background_processes()?;
-    sender.shutdown()
+    sender.shutdown()?;
+    Ok(end)
 }
 
 fn parse_geometry(value: &str) -> Result<(u32, u32), String> {

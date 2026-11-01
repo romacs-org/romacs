@@ -7,6 +7,9 @@ use crate::{data::Object, *};
 pub(super) const SELECTED_FRAME: &str = "#:vm2-frame";
 /// The frame the host displays: the initial frame.
 const HOST_FRAME: &str = "#:vm2-host-frame";
+/// The fringe width a frame parameter of nil or a non-integer gives
+/// (frame.c gui_set_left_fringe).
+pub(crate) const DEFAULT_FRINGE: u32 = 8;
 /// Live frames, newest first: GNU's `Vframe_list' (frame.c:1438).
 const FRAME_LIST: &str = "#:vm2-frame-list";
 #[derive(Clone)]
@@ -40,8 +43,16 @@ pub(super) struct Frame {
     /// (`romacs--host-minibuffer'), the edge of its text area the window
     /// sits on; its root window takes the rest.
     pub hosts_minibuffer: Option<MiniEdge>,
+    /// GNU `FRAME_LEFT_FRINGE_WIDTH' and `FRAME_RIGHT_FRINGE_WIDTH': the
+    /// pixels a window without its own fringe widths gives each fringe on
+    /// a window-system frame, 8 until `left-fringe' or `right-fringe' sets
+    /// them (frame.c gui_set_left_fringe).
+    pub fringes: [u32; 2],
+    /// GNU `FRAME_TAB_BAR_LINES': the lines of the tab bar above the root
+    /// window, as `tab-bar-lines' set them (pgtkfns.c pgtk_set_tab_bar_lines).
+    pub tab_bar_lines: u32,
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer });
+romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines });
 /// Where a child frame hosting the minibuffer window keeps it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MiniEdge { Top, Bottom }
@@ -149,7 +160,7 @@ impl Vm {
             root, selected: root, minibuffer, terminal,
             parameters: vec![name], live: true, id: 1, parent: Value::NIL,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: 0, focus: Value::NIL,
-            alpha_background: 1.0, hosts_minibuffer: None,
+            alpha_background: 1.0, hosts_minibuffer: None, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0,
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
@@ -176,7 +187,7 @@ impl Vm {
         let frame = self.allocate_object(Object::Frame(Box::new(Frame {
             root, selected: root, minibuffer, terminal, parameters, live: true, id, parent,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL, alpha_background: 1.0,
-            hosts_minibuffer: None,
+            hosts_minibuffer: None, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0,
         })));
         self.window_mut(root)?.frame = frame;
         let mut frames = self.frames();
@@ -186,7 +197,8 @@ impl Vm {
         Ok(frame)
     }
     /// Place and size child FRAME, then lay its windows out in the text
-    /// area inside its border. Its parent's windows do not change. A frame
+    /// area inside its border, which its fringes widen as they do in GNU
+    /// (FRAME_TEXT_TO_PIXEL_WIDTH). Its parent's windows do not change. A frame
     /// hosting the minibuffer window gives it its lines at its edge, placed
     /// in the host frame, whose window it stays; the root window takes the
     /// rest, possibly nothing.
@@ -196,7 +208,8 @@ impl Vm {
         let edge = self.frame(frame)?.hosts_minibuffer;
         let mini_height = if edge.is_some() { self.window_state.mini_lines.max(1) * line } else { 0 };
         // A child frame keeps at least one line of two columns.
-        let (width, height) = (width.max(2 * column), height.max(line).max(mini_height));
+        let [left_fringe, right_fringe] = self.frame_fringes(frame)?;
+        let (width, height) = (width.max(2 * column) + left_fringe + right_fringe, height.max(line).max(mini_height));
         let root = {
             let f = self.frame_mut(frame)?;
             (f.left, f.top, f.border) = (left, top, border);
@@ -228,10 +241,15 @@ impl Vm {
         self.display_state.version += 1;
         Ok(())
     }
+    /// FRAME's fringe widths, none on a frame without a window system.
+    pub(crate) fn frame_fringes(&self, frame: Value) -> Result<[u32; 2]> {
+        Ok(if self.window_system_open() { self.frame(frame)?.fringes } else { [0, 0] })
+    }
     /// A child frame's geometry request as it stands.
     pub(super) fn child_geometry(&self, frame: Value) -> Result<ChildGeometry> {
         let f = self.frame(frame)?;
-        Ok(ChildGeometry { left: f.left, top: f.top, width: f.width - 2 * f.border,
+        let [left_fringe, right_fringe] = self.frame_fringes(frame)?;
+        Ok(ChildGeometry { left: f.left, top: f.top, width: f.width - 2 * f.border - left_fringe - right_fringe,
                            height: f.height - 2 * f.border, border: f.border })
     }
     /// FRAME's native size in pixels.

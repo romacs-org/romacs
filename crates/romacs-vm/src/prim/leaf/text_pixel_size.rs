@@ -743,12 +743,13 @@ struct Visible { x: i64, y: i64, rtop: i64, rbot: i64, rowh: i64, vpos: i64 }
 /// buffer_posn_from_coords's answer.
 struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height: i64, string: Option<(Value, usize)> }
 
-/// init_iterator's last visible x on a window-system frame without
-/// fringes, in the host's pixels: the text area less the truncation or
-/// continuation glyph's advance in the default face (xdisp.c:3510-3518).
-/// The host continues and truncates rows as GNU does, but wraps no words.
+/// init_iterator's last visible x on a window-system frame, in the
+/// host's pixels: the text area, less the truncation or continuation
+/// glyph's advance in the default face when there is no right fringe to
+/// show its indicator in (xdisp.c:3510-3518). The host continues and
+/// truncates rows as GNU does, but wraps no words.
 fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> std::result::Result<Ctx, Fault> {
-    let (advance, _) = hosted.default_advance(if cx.wrap == Wrap::Truncate { '$' } else { '\\' })?;
+    let advance = if area.right_fringe > 0 { 0 } else { hosted.default_advance(if cx.wrap == Wrap::Truncate { '$' } else { '\\' })?.0 };
     cx.last_visible_x = area.body_width - advance;
     cx.breaks = cx.wrap != Wrap::Word;
     Ok(cx)

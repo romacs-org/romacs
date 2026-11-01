@@ -716,6 +716,7 @@ impl Vm {
                 }
                 (_, Some(Object::HashTable(table))) => {
                     hasher.update([b'h', table.test.code(), table.weakness as u8]);
+                    if let crate::hash::Test::User(name, _) = table.test { hasher.update(name.0.to_le_bytes()); }
                     hasher.update([table.size(), table.count()].map(usize::to_le_bytes).concat());
                     let free: Vec<u8> = table.free_slots().iter().flat_map(|slot| slot.to_le_bytes()).collect();
                     framed(&mut hasher, &free);
