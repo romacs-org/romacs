@@ -493,6 +493,7 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
 fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool) -> Result<Started, String> {
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
     vm.install_lisp_prelude()?;
+    install_window_change(vm)?;
     policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
     policy(vm, root, "romacs-find-file.el", include_str!("../../../rlisp/romacs-find-file.el"))?;
     policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
@@ -589,7 +590,18 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
 /// chain (world.rs); a source boot takes them after it. Dired is GNU's
 /// dired.el here: the workspace's browser would shadow its autoloads and
 /// its `defvar` of `dired-mode-map` would keep GNU's keys out.
+/// window.c's change functions (rlisp/vm/window-change.el), which every
+/// redisplay runs (host_input.rs), installed before a live launch's first
+/// one: a resize can repaint before the first key reaches the command loop
+/// that would install them. Their state is defvar'd, so that later install
+/// keeps it.
+fn install_window_change(vm: &mut Vm) -> Result<(), String> {
+    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el"))?;
+    Ok(())
+}
+
 pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path::Path) -> Result<(), String> {
+    install_window_change(vm)?;
     if launch == Launch::GnuOnly {
         return Ok(());
     }
@@ -608,11 +620,6 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
-    // The window change functions run from every redisplay (host_input.rs),
-    // including one a resize starts before the first key reaches the command
-    // loop that would install them; its state is defvar'd, so that install
-    // keeps it.
-    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el"))?;
     // The session's command log, which each interactive process starts
     // itself (`romacs-usage-log-start').
     if launch == Launch::Loadup {
