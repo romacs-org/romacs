@@ -28,6 +28,7 @@ mod fonts;
 mod timers;
 mod world;
 mod isolate_worker;
+mod exit;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -452,12 +453,22 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
 ";
 
 fn main() {
-    if let Err(error) = run() {
-        eprintln!("romacs-vm-gui: {error}");
-        std::process::exit(1);
-    }
+    // A session's every end says why (exit.rs); other modes keep their own.
+    let end = match std::panic::catch_unwind(run) {
+        Ok(Ok(None)) => return,
+        Ok(Ok(Some(end))) => end,
+        Ok(Err(error)) if exit::installed() => exit::Exit::new("startup-error", error, 1),
+        Ok(Err(error)) => {
+            eprintln!("romacs-vm-gui: {error}");
+            std::process::exit(1);
+        }
+        Err(_) if exit::installed() => exit::panicked("main thread"),
+        Err(payload) => std::panic::resume_unwind(payload),
+    };
+    exit::finish(end)
 }
-fn run() -> Result<(), String> {
+/// The session's end, when this process ran one.
+fn run() -> Result<Option<exit::Exit>, String> {
     let mut args = std::env::args().skip(1);
     let mut socket = None;
     let mut floor = None;
@@ -492,7 +503,7 @@ fn run() -> Result<(), String> {
             "--world-wait" => {}
             "--world-reset" => world_reset = Some(false),
             "--world-reset=all" => world_reset = Some(true),
-            "--help" => { print!("{USAGE}"); return Ok(()); }
+            "--help" => { print!("{USAGE}"); return Ok(None); }
             "--wayland" => { socket = Some(args.next().ok_or("missing socket")?); live = false; },
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
@@ -513,9 +524,11 @@ fn run() -> Result<(), String> {
             "--gnu-lisp" => launch = startup::Launch::GnuOnly,
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
-            "--loadup-report" => return loadup_report(args.collect()),
-            "--batch" => return batch::run(args.collect(), quick, world_store),
-            "--isolate" => return isolate_worker::run(std::iter::once(arg).chain(args).collect()),
+            "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
+            "--batch" => return batch::run(args.collect(), quick, world_store).map(|()| None),
+            // A worker's own end is its spawner's to report; its failure says why here.
+            "--isolate" => return Ok(isolate_worker::run(std::iter::once(arg).chain(args).collect()).err()
+                                     .map(|error| exit::Exit::new("isolate-error", error, 1))),
             "--" => {
                 startup::visit_at_startup("--");
                 for file in args.by_ref() { startup::visit_at_startup(&file); }
@@ -528,7 +541,7 @@ fn run() -> Result<(), String> {
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store to reset")?;
         let removed = romacs_vm::world::store::reset(&store, everything).map_err(|e| e.to_string())?;
         eprintln!("romacs-world: {}", serde_json::json!({"event": "reset", "store": store, "everything": everything, "removed": removed}));
-        return Ok(());
+        return Ok(None);
     }
     TRACE_LATENCY.store(trace_latency, std::sync::atomic::Ordering::Relaxed);
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
@@ -550,7 +563,7 @@ fn run() -> Result<(), String> {
         if let Some(init) = user_init::path().filter(|_| load_user_init) {
             world::prepare_layer(&base, &init, width, height, floor);
         }
-        return batch::prepare(store);
+        return batch::prepare(store).map(|()| None);
     }
     // A live --loadup launch boots from its world, in --world-store or by
     // default in the user's cache (world::default_store), unless
@@ -568,6 +581,8 @@ fn run() -> Result<(), String> {
     if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
         world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor, init_layer.as_ref())?;
     }
+    // The session from here: its every end says why.
+    exit::install();
     // Fontconfig's configuration loads on a helper while the window and the
     // world open: the evaluator's first font question finds it loaded, or
     // waits for it.
@@ -621,32 +636,37 @@ fn run() -> Result<(), String> {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
                      isolate_world, worlds, first_presentation, prune)
         }));
-        let result = match result {
-            Ok(result) => result.map(|()| 0),
+        let end = match result {
+            Ok(Ok(end)) => end,
+            Ok(Err(error)) => {
+                eprintln!("romacs: evaluator stopped: {error}");
+                exit::Exit::new("evaluator-error", error, 1)
+            }
             Err(payload) => match payload.downcast::<SessionEnd>() {
-                Ok(end) => Ok(end.0),
+                Ok(end) => exit::Exit::new("kill-emacs", "", end.0),
                 Err(payload) => std::panic::resume_unwind(payload),
             },
         };
-        if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
-        // The status goes first: dropping the sender closes the window, and
+        // The end goes first: dropping the sender closes the window, and
         // the window's end lets the main thread look for it.
-        let _ = result_tx.send(result);
+        let _ = result_tx.send(end);
         drop(sender);
     })?;
-    host.run().map_err(|e| e.to_string())?;
-    // Native startup failure must not join an evaluator blocked in stdin.
-    match result_rx.try_recv() {
-        Ok(result) => {
-            worker.join().map_err(|_| "evaluator panicked")?;
-            match result? {
-                0 => Ok(()),
-                code => std::process::exit(code),
-            }
-        }
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("evaluator panicked".into()),
-        Err(std::sync::mpsc::TryRecvError::Empty) => Ok(()),
-    }
+    let host = host.run();
+    // An end the evaluator caused was sent before the loop could end; any
+    // other leaves it running. Native startup failure must not join an
+    // evaluator blocked in stdin; an ended one is joined, as its VM's drop
+    // kills its children.
+    let wait = if exit::evaluator_ended(&host) { std::time::Duration::from_secs(2) } else { std::time::Duration::ZERO };
+    let verdict = match result_rx.recv_timeout(wait) {
+        Ok(end) => match worker.join() {
+            Ok(()) => exit::Verdict::Ended(end),
+            Err(_) => exit::Verdict::Panicked,
+        },
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => exit::Verdict::Panicked,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => exit::Verdict::Running,
+    };
+    Ok(Some(exit::session(host, verdict)))
 }
 /// `--loadup-report [EXPR...]`: run `--loadup`'s GNU Lisp chain exactly as
 /// the GUI's startup does, on the same 64 MiB evaluator, with no window; print
@@ -872,7 +892,7 @@ fn evaluate(
     worlds: Option<world::Worlds>,
     first_presentation: u64,
     after_first_frame: Option<impl FnOnce()>,
-) -> Result<(), String> {
+) -> Result<exit::Exit, String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
     startup::mark_phase("layout-engine");
     let (mut vm, carry) = match restored {
@@ -1022,7 +1042,7 @@ fn evaluate(
             let (changed, closed) = lent.run(&host, |_| service_native(&mut vm));
             if changed? { live_presentation.changed(); }
             if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
-                return shutdown_editor(&mut vm, sender);
+                return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
             }
         }
         let available = sender.input().len();
@@ -1045,7 +1065,7 @@ fn evaluate(
                 let event = event.expect("host input");
                 if matches!(event, InputEvent::WindowClose { .. }) {
                     if !live || close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
-                        return shutdown_editor(&mut vm, sender);
+                        return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
                     terminal_modal = true;
                     continue;
@@ -1109,7 +1129,7 @@ fn evaluate(
                     let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
                     let (outcome, closed) = lent.run(&host, |live| live.host_command(&mut vm, first.as_ref()));
                     if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
-                        return shutdown_editor(&mut vm, sender);
+                        return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
                     outcome
                 } else {
@@ -1117,7 +1137,7 @@ fn evaluate(
                     vm.command_event(first.expect("a host key")).map(Some)
                 };
                 if live && vm.eval_source("romacs-gui-quit-requested")? != romacs_vm::Fixed::NIL {
-                    return shutdown_editor(&mut vm, sender);
+                    return shutdown_editor(&mut vm, sender, exit::Exit::new("gui-quit", "", 0));
                 }
                 if live {
                     terminal_modal = vm.eval_source("(and (boundp 'romacs-gui-pending) romacs-gui-pending)")? != romacs_vm::Fixed::NIL;
@@ -1228,7 +1248,7 @@ fn evaluate(
                 let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
                 let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm, auto_save));
                 if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
-                    return shutdown_editor(&mut vm, sender);
+                    return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                 }
                 let idle = idle.unwrap_or_else(|error| {
                     let _ = echo::show(&mut vm, &format!("Timer: {error}"));
@@ -1246,7 +1266,7 @@ fn evaluate(
                 if romacs_vm::host::termination_signal(true).is_some() { continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
-                    terminal_wait::Wake::Closed => return Ok(()),
+                    terminal_wait::Wake::Closed => return Ok(exit::Exit::new("host-input-closed", "", 1)),
                     terminal_wait::Wake::Terminal | terminal_wait::Wake::Process | terminal_wait::Wake::Timeout => {},
                 }
             }
@@ -1277,7 +1297,7 @@ fn evaluate(
             Ok(result) => reply(json!({"result":result,"presentation":last_presentation()}))?,
         }
     }
-    shutdown_editor(&mut vm, sender)
+    shutdown_editor(&mut vm, sender, exit::Exit::new("stdin-closed", "", 0))
 }
 
 /// Number the next presentation. The loop and every prompt read inside the
@@ -1354,9 +1374,11 @@ fn service_native(vm: &mut Vm) -> Result<bool, String> {
     Ok(changed)
 }
 
-fn shutdown_editor(vm: &mut Vm, sender: &PaintSender) -> Result<(), String> {
+/// END, once the session's processes and window are shut down.
+fn shutdown_editor(vm: &mut Vm, sender: &PaintSender, end: exit::Exit) -> Result<exit::Exit, String> {
     vm.shutdown_background_processes()?;
-    sender.shutdown()
+    sender.shutdown()?;
+    Ok(end)
 }
 
 fn parse_geometry(value: &str) -> Result<(u32, u32), String> {
