@@ -268,3 +268,22 @@ fn a_special_events_binding_is_redisplayed_before_the_next_wait() {
     assert_eq!(seen.mini, ["P: ", "P: ", "P: a"], "one redisplay after the focus binding, before the key");
     assert_eq!(seen.mode_lines[..2], ["before", "after"]);
 }
+
+/// An event a special event's binding (as a timer or a filter would) queues
+/// while the host waits outside read_char's auto-save `sit_for' (a
+/// `read-event', not a command's keys) is the wait's input, read as the
+/// keyboard's (kbd_buffer_get_event, keyboard.c:4169): counted, and wiping
+/// the echo area (keyboard.c:3231), so `read-event''s prompt goes once it
+/// comes. That prompt is shown, never logged (message_with_string).
+#[test]
+fn an_event_queued_during_the_wait_is_read_as_keyboard_input() {
+    let (mut vm, _) = vm_with(vec![HostEvent::Focus(true)], false);
+    assert_eq!(
+        eval(&mut vm, "(progn (message \"before\")
+           (define-key special-event-map [focus-in] (lambda () (interactive) (setq unread-command-events (list ?z))))
+           (let* ((count num-nonmacro-input-events) (got (read-event \"Pick: \")))
+             (list got (current-message) (- num-nonmacro-input-events count)
+                   (with-current-buffer \"*Messages*\" (and (string-search \"Pick\" (buffer-string)) t)))))"),
+        "(122 nil 1 nil)"
+    );
+}
