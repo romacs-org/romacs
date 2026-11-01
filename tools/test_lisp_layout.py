@@ -95,6 +95,14 @@ class LispLayoutTests(unittest.TestCase):
                     self.assertNotRegex(source, copyright_pattern)
                 self.assertNotIn('This file is part of GNU Emacs.', source)
 
+    def test_ported_rust_keeps_its_notice(self):
+        # src/fzf.rs ports fzf's matcher (MIT), which requires its notice.
+        source = (ROOT / 'crates/romacs-vm/src/fzf.rs').read_text()
+        self.assertTrue(source.startswith('// SPDX-License-Identifier: MIT\n'))
+        self.assertIn('// Copyright (c) 2013-2026 Junegunn Choi', source)
+        self.assertIn('commit\n// 26ff936df038b6a62ec42cf18db27b2ea2bb8ec3', source)
+        self.assertIn('// The above copyright notice and this permission notice shall be included in', source)
+
 
 if __name__ == '__main__':
     unittest.main()

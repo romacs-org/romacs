@@ -116,7 +116,7 @@ def init_source(engine, root, lisp):
                  '(setq scroll-conservatively 101)\n'
                  f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
     return f''';; -*- lexical-binding: t -*-
-{load}{gnu_setup}(setq inhibit-startup-screen t initial-scratch-message nil)
+{load}{gnu_setup}{parity_live.GNU_COMPLETION}(setq inhibit-startup-screen t initial-scratch-message nil)
 (setq gnosis-dir {lisp_string(str(root / 'gnosis') + '/')})
 (windmove-mode 1)
 (random "gnosis-parity")

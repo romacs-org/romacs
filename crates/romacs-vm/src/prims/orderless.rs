@@ -83,16 +83,16 @@ fn romacs_sort_by_history(cx, hist: Value, elems: Value) {
     Ok(list(cx, &sorted))
 }}
 
-fn number(n: usize) -> Value {
+pub(super) fn number(n: usize) -> Value {
     Value::integer(n as i64).unwrap()
 }
 
-fn list(cx: &mut Leaf<'_>, values: &[Value]) -> Value {
+pub(super) fn list(cx: &mut Leaf<'_>, values: &[Value]) -> Value {
     values.iter().rev().fold(Value::NIL, |tail, &value| cx.cons(value, tail))
 }
 
 /// LIST's elements, through FOR_EACH_TAIL.
-fn elements(cx: &mut Leaf<'_>, list: Value) -> std::result::Result<Vec<Value>, Fault> {
+pub(super) fn elements(cx: &mut Leaf<'_>, list: Value) -> std::result::Result<Vec<Value>, Fault> {
     let (mut tail, mut slow, mut steps, mut out) = (list, list, 0, vec![]);
     while let Some((element, _)) = cx.pair(tail) {
         out.push(element);

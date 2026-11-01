@@ -98,6 +98,9 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         std::fs::write(root.join("work/uq").join(dir).join("notes.org"), "* note\n").unwrap();
     }
     std::fs::write(root.join("work/uq/raw.txt"), "raw\n").unwrap();
+    for name in ["zq-a-b.txt", "xzqab.txt", "zqab.txt"] {
+        std::fs::write(root.join("work").join(name), "zq\n").unwrap();
+    }
     let work = format!("{}/", root.join("work").display());
     let home = root.join("home");
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
@@ -115,6 +118,17 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
             (equal (eval (car (get 'completions-sort 'standard-value)) t) completions-sort)
             fido-vertical-mode fido-mode icomplete-mode (eval (car (get 'fido-vertical-mode 'standard-value)) t)
             (lookup-key icomplete-fido-mode-map (kbd \"TAB\")) resize-mini-windows)"));
+        // The styles are standard values, which Custom returns to.
+        report.push(printed(&mut vm, "(let ((completion-styles nil)) (custom-reevaluate-setting 'completion-styles) completion-styles)"));
+        // Fido completes with fzf: its first candidate is fzf's best.
+        vm.eval_source("(progn (dolist (c '(xzqab zq-alpha-beta zqab-x)) (defalias c (lambda () (interactive) (setq fzf-probe-ran c))))
+            (add-hook 'minibuffer-setup-hook (lambda () (add-hook 'post-command-hook
+              (lambda () (setq fzf-probe (list (completion--styles (completion--field-metadata (minibuffer-prompt-end))) (let ((l (completion-all-sorted-completions))) (list (nth 0 l) (nth 1 l) (nth 2 l))))))
+              90 t))))").unwrap();
+        attach(&mut vm, "zqab\n");
+        let outcome = keys(&mut vm, &[(1 << 27) | 'x' as i64]);
+        report.push(format!("{:?}", outcome.and_then(|o| o.signal).map(|s| s.condition)));
+        report.push(printed(&mut vm, "(prin1-to-string (list fzf-probe-ran fzf-probe))"));
 
         // M-x: the vertical list, TAB takes the selected command, Return runs it.
         vm.eval_source("(defun gc-probe-command () (interactive) (setq gc-probe-ran 'ran))").unwrap();
@@ -150,6 +164,13 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
                               (with-current-buffer buffer (set-buffer-modified-p nil))))
                           (list a (find-file-noselect \"uq/raw.txt\" nil t)))))", quoted(&work))));
 
+        // C-x C-f: an fzf-only query, an exact term, visits fzf's best match.
+        vm.eval_source(&format!("(setq default-directory {})", quoted(&work))).unwrap();
+        attach(&mut vm, "'qab\n");
+        let outcome = keys(&mut vm, &[24, 6]);
+        report.push(format!("{:?}", outcome.and_then(|o| o.signal).map(|s| s.condition)));
+        report.push(printed(&mut vm, "(list (buffer-name) (car fzf-probe))"));
+
         // C-x b: the default in the prompt, completion over the buffers.
         vm.eval_source("(get-buffer-create \"alpha-kt-buffer\")").unwrap();
         let frames = attach(&mut vm, "alpha-kt\t\n");
@@ -162,10 +183,13 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
     }).unwrap().join().unwrap();
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(report, [
-        "((basic flex) t one-column historical ((file (styles partial-completion))) 0.15 t t t t t icomplete-force-complete grow-only)",
+        "((fzf basic partial-completion emacs22) t one-column historical ((file (styles fzf partial-completion)) (project-file (styles fzf substring))) 0.15 t t t t t icomplete-force-complete grow-only)",
+        "(fzf basic partial-completion emacs22)",
+        "None", r#""(zqab-x ((fzf basic partial-completion emacs22) (\"zqab-x\" \"zq-alpha-beta\" \"xzqab\")))""#,
         "None", "(ran \"gc-probe-command\")", "true true", "true", "true",
         "None", r#"("sub/notes.txt" "notes\n")"#, "true true", "true",
         r#"("notes.org<a>" "notes.org<b>" t ((nil quit) (nil quit)))"#,
+        "None", "(\"zqab.txt\" (fzf partial-completion basic emacs22))",
         "None", "(\"alpha-kt-buffer\" \"alpha-kt-buffer\")", "true",
     ]);
 }

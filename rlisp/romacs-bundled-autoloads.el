@@ -48,9 +48,14 @@
 (register-definition-prefixes "romacs-companion-receipts" '("romacs-companion-"))
 
 
+;;; Generated autoloads from romacs-completion-candidates.el
+
+(register-definition-prefixes "romacs-completion-candidates" '("romacs-completion-"))
+
+
 ;;; Generated autoloads from romacs-completion-defaults.el
 
-(register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-defaults"))
+(register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-"))
 
 
 ;;; Generated autoloads from romacs-dired.el
@@ -86,6 +91,27 @@
 ;;; Generated autoloads from romacs-frame.el
 
 (register-definition-prefixes "romacs-frame" '("color-" "defined-colors" "display-" "find-composition-internal" "frame-" "romacs-" "tty-color-alist"))
+
+
+;;; Generated autoloads from romacs-fzf.el
+
+(autoload 'romacs-fzf-all-completions "romacs-fzf"
+"TABLE's entries satisfying PRED that the fzf query in STRING matches.
+They come best first, with a nonzero base size in the last cdr; the matched
+characters are highlighted, lazily where `completion-lazy-hilit-p'.
+This function is part of the `fzf' completion style.
+
+(fn STRING TABLE PRED POINT)")
+(autoload 'romacs-fzf-try-completion "romacs-fzf"
+"Complete STRING to the one entry of TABLE its fzf query matches.
+STRING's prefix completion comes first, as `orderless' expands by
+default; otherwise one match completes to it, several leave STRING
+and POINT as they are, and none is nil.
+This function is part of the `fzf' completion style.
+
+(fn STRING TABLE PRED POINT)")
+(add-to-list 'completion-styles-alist '(fzf romacs-fzf-try-completion romacs-fzf-all-completions "fzf's extended search: terms in any order, best match first."))
+(register-definition-prefixes "romacs-fzf" '("romacs-fzf-"))
 
 
 ;;; Generated autoloads from romacs-gnu-ert-bootstrap.el

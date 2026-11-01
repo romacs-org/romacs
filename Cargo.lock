@@ -4621,6 +4621,7 @@ dependencies = [
  "libsqlite3-sys",
  "md-5",
  "num-bigint",
+ "rayon",
  "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",

@@ -48,7 +48,7 @@ def init_source(engine, root, debug):
                  f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
     variables = ' '.join(PROBE_VARIABLES)
     return f''';; -*- lexical-binding: t -*-
-{gnu_setup}(setq inhibit-startup-screen t initial-scratch-message nil)
+{gnu_setup}{parity_live.GNU_COMPLETION}(setq inhibit-startup-screen t initial-scratch-message nil)
 (setq eshell-directory-name {lisp_string(str(root / 'eshell') + '/')})
 {'(setq debug-on-error t)' if debug else ''}
 (setq parity-probe-variables '({variables}))

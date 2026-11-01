@@ -3572,3 +3572,5 @@ mod capture_tests {
     }
 }
 mod orderless;
+mod fzf;
+pub use fzf::advance_completion_generation;

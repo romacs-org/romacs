@@ -534,11 +534,13 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     if launch == Launch::Loadup {
         // GNU's icomplete, which rlisp/romacs-completion-defaults.el requires
         // and whose own require signals when a runtime lacks it.
-        // The orderless completion style, matched natively; a style any
-        // init can name in `completion-styles', where the runtime has
+        // The orderless and fzf completion styles, matched natively; styles
+        // any init can name in `completion-styles', where the runtime has
         // GNU's completion.
         if vm.eval_source("(require 'icomplete nil t)")? != romacs_vm::Fixed::NIL {
+            vm.eval_source(include_str!("../../../rlisp/romacs-completion-candidates.el"))?;
             vm.eval_source(include_str!("../../../rlisp/romacs-orderless.el"))?;
+            vm.eval_source(include_str!("../../../rlisp/romacs-fzf.el"))?;
         }
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;

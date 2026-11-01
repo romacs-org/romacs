@@ -28,6 +28,11 @@ as programs, and compatibility is judged by what those programs do.
 A user should be limited only by his imagination by what he can do
 with romacs.
 
+Minibuffer completion matches the way fzf does by default: fuzzy terms in
+any order, =^prefix=, =suffix$=, ='exact=, =!not= and =a | b=, best match
+first.  =(setopt completion-styles '(basic partial-completion emacs22)
+completion-category-overrides nil)= restores GNU's (DIVERGENCES.md VM2-FZF-DEFAULT).
+
 * Source layout
 
 =rlisp/= holds Romacs Lisp, =gnu-lisp/= the pinned GNU sources, and
