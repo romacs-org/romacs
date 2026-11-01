@@ -409,9 +409,10 @@ class Bench:
             # in both engines; an owner session, as the user's init.
             if stock:
                 (root / 'bench-init.el').write_text(init)
+                # -Q first: GNU's `command-line' reads it only before other options.
                 quick = ['-Q', '-l', str(root / 'bench-init.el')]
             if name == 'gnu' and stock:
-                engine = McpEngine('gnu', [options.gnu, '--font', 'Iosevka-14', *quick], root, None, env, options.timeout)
+                engine = McpEngine('gnu', [options.gnu, quick[0], '--font', 'Iosevka-14', *quick[1:]], root, None, env, options.timeout)
                 engine.start(options.tools)
             elif name == 'gnu':
                 engine = parity_live.gnu_engine(root, home, env, init, lisp, options.timeout, options.tools, McpEngine)
