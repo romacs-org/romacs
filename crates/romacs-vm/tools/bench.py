@@ -23,8 +23,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 GNU = "/usr/bin/emacs"
-SOURCE = Path.home() / ".hermes/cache/scratch/romacs/vmbench/slope_bench.py"
-COUNTER = Path.home() / "Projects/rust/romacs/scripts/romacs_accept_counter.py"
+COUNTER = ROOT.parents[1] / "scripts/romacs_accept_counter.py"
 
 
 def load(path, name):
@@ -141,7 +140,7 @@ def guarded(command, data, attributes, pressure=0):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--binary", default=str(ROOT / "target/release/romacs-vm"))
-    p.add_argument("--source", type=Path, default=SOURCE)
+    p.add_argument("--source", type=Path, required=True, help="the slope_bench.py whose bodies run")
     p.add_argument("--counter", type=Path, default=COUNTER)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--reps", type=int, default=3)

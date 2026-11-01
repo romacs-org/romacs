@@ -34,14 +34,15 @@ Workloads (--quick runs those marked q):
              redisplay); C-x C-f over 5,000 files, fido-vertical in both
              (icomplete-compute-delay 0, so each key's completion is
              synchronous), the keys of `file-1'.
-  owner      the owner profile (bench/owner.py): init body, from the init's
+  init       the real-init profile (real_init.py, from --profile-config or
+             $ROMACS_BENCH_PROFILE): init body, from the init's
              first form to its last, GNU against Romacs from source (its
              first launch, which builds the init layer) and from the layer;
              wall only.
   apps       gnosis dashboard open and back to it (gnosis_parity_live.py on
-             a copy of the database, --gnosis-db), hermes dashboard open
-             (hermes_parity_live.py, read-only against the running
-             dashboard): one run each, both engines, with --perf.
+             a copy of the database, --gnosis-db or the profile's), hermes
+             dashboard open (hermes_parity_live.py, read-only against the
+             running dashboard, the profile's hermes_url): one run each, both engines, with --perf.
 
 Wall times are refused (instructions still reported) for a workload during
 which the 1-minute load average exceeded --max-load.  Inputs are pinned:
@@ -51,8 +52,9 @@ generated with fixed contents and mtimes and checked by its manifest.
 
 usage: perfbench.py --romacs BIN [--runtime DIR] [--commit SHA] [--quick]
                     [--runs 3] [--only GROUP|WORKLOAD ...] [--max-load 8]
-                    [--out ~/.cache/claude-scratch/perf-bench]
+                    [--out ~/.cache/romacs/perf-bench (ROMACS_PERFBENCH_OUT)]
                     [--previous RESULTS.json] [--gnosis-db COPY --gnosis-db-repo REPO]
+                    [--profile-config FILE (ROMACS_BENCH_PROFILE)]
 The GNU engine is $ROMACS_GNU_ORACLE (or --gnu).  A binary installed
 beside its runtime (gnu-lisp/, rlisp/) uses that runtime; otherwise give
 --runtime, or the binary loads the Lisp of the checkout it was built in.
@@ -80,7 +82,7 @@ HARNESS = HERE.parent
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(HARNESS / 'bench'))
 import parity_live  # noqa: E402
-import owner  # noqa: E402
+import real_init  # noqa: E402
 
 PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 TREE = f'emacs-{PIN[:8]}'
@@ -131,8 +133,7 @@ ERT_FILES = ['lisp/emacs-lisp/cl-lib-tests.el', 'lisp/emacs-lisp/cl-macs-tests.e
 KEYS = {'self-insert': ['a'], 'C-f': ['-M', 'ctrl', 'f', '-m', 'ctrl'], 'C-n': ['-M', 'ctrl', 'n', '-m', 'ctrl']}
 CTRL = lambda keys: ['-M', 'ctrl', *[a for k in keys for a in ('-k', k)], '-m', 'ctrl']  # noqa: E731
 KEYSYM = {'-': 'minus'}
-GROUPS = ('batch', 'micro', 'ert', 'gui', 'owner', 'apps')
-HERMES_URL = 'http://127.0.0.1:9119/'
+GROUPS = ('batch', 'micro', 'ert', 'gui', 'init', 'apps')
 
 
 class Refused(Exception):
@@ -443,7 +444,7 @@ def gui_init(engine, idle_file=None):
     idle = ('(add-hook (quote emacs-startup-hook) (lambda () (run-with-idle-timer 0 nil'
             f' (lambda () (perfbench-gui-stamp {parity_live.lisp_string(str(idle_file))}) (kill-emacs 0)))))\n'
             if idle_file else '')
-    return (';; -*- lexical-binding: t -*-\n' + (owner.gnu_settings() if engine == 'gnu' else '')
+    return (';; -*- lexical-binding: t -*-\n' + (real_init.gnu_settings() if engine == 'gnu' else '')
             + '(setq inhibit-startup-screen t)\n'
             f'(load {parity_live.lisp_string(str(GUI_LISP))} nil t)\n' + idle
             + f'(load {parity_live.lisp_string(str(parity_live.PROBE))} nil t)\n'
@@ -633,21 +634,23 @@ def completion(session, directory, rate, rounds):
             'check': check, 'candidates': candidates, 'samples': sum(r['samples'] for r in runs)}
 
 
-# --- owner init ----------------------------------------------------------------
+# --- real init -----------------------------------------------------------------
 
-def owner_rows(ctx):
-    """Owner init body: GNU, Romacs from source (layer build), Romacs's layer."""
-    base = ctx.cache / 'owner'
+def init_rows(ctx):
+    """The real init's body: GNU, Romacs from source (layer build), Romacs's layer."""
+    config = real_init.load(ctx.args.profile_config)
+    real_init.profile_init(config)
+    base = ctx.cache / 'init'
     base.mkdir(exist_ok=True)
-    project = owner.default_project()
+    project = real_init.default_project(config)
     bodies, unlayered = {}, []
     for engine in ('gnu', 'romacs'):
         root, home, env = parity_live.private_tree(engine, ctx.work, ctx.tools)
         env.update(ctx.engine_env[engine])
         (root / 'mcp').mkdir(mode=0o700)
-        owner.populate(home, project, None, None)
-        lisp = owner.lisp_dir(base, engine)
-        source = owner.init_source(engine, lisp, root / 'mcp/port', secrets.token_hex(24), 'owner')
+        real_init.populate(home, project, None, None, config)
+        lisp = real_init.lisp_dir(base, engine, config)
+        source = real_init.init_source(engine, lisp, root / 'mcp/port', secrets.token_hex(24), 'init', config)
         first, rest = source.split('\n', 1)
         init = (f'{first}\n(with-temp-file (expand-file-name "init-start" (getenv "PARITY_PROBE_DIR"))'
                 f' (insert (number-to-string (float-time))))\n{rest}')
@@ -674,7 +677,7 @@ def owner_rows(ctx):
                 launched.stop()
             if engine == 'romacs':
                 log = (root / 'engine.log').read_text(errors='replace')
-                ctx.log(f'owner romacs launch {n}', log)
+                ctx.log(f'init romacs launch {n}', log)
                 if n > 0:
                     unlayered.append(layer_refusal(log))
                 elif 'build failed' in log:
@@ -683,13 +686,13 @@ def owner_rows(ctx):
                 run([ctx.engines['romacs'], '--loadup', '--world-build'], env, root / 'work', 900)
         bodies[engine] = samples
     gnu = {'instructions': None, 'wall': median(s[0] for s in bodies['gnu'])}
-    rows = [row('owner init body, Romacs source', 'owner', 'run', gnu,
+    rows = [row('init body, Romacs source', 'init', 'run', gnu,
                 {'instructions': None, 'wall': bodies['romacs'][0][0]}, 1,
                 'first launch: from source, builds the init layer; wall only'),
-            row('owner init body, Romacs layer', 'owner', 'run', gnu,
+            row('init body, Romacs layer', 'init', 'run', gnu,
                 {'instructions': None, 'wall': median(s[0] for s in bodies['romacs'][1:])}, ctx.runs,
                 layer_note(unlayered)),
-            row('owner start to init done, layer', 'owner', 'run',
+            row('start to init done, layer', 'init', 'run',
                 {'instructions': None, 'wall': median(s[1] for s in bodies['gnu'])},
                 {'instructions': None, 'wall': median(s[1] for s in bodies['romacs'][1:])}, ctx.runs,
                 'spawn to the init\'s last form; wall only')]
@@ -712,11 +715,11 @@ def layer_note(refusals):
     if not any(refusals):
         return 'init layer restored; wall only'
     return (f'NOT the layer: launches booted the base world'
-            f' ({"; ".join(r for r in refusals if r)[:240]}); see logs/owner-romacs-launch-*; wall only')
+            f' ({"; ".join(r for r in refusals if r)[:240]}); see logs/init-romacs-launch-*; wall only')
 
 
 def layer_built(root, timeout=300):
-    """Wait for launch 1's background layer build to end, as owner_layer.py does."""
+    """Wait for launch 1's background layer build to end."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         log = (root / 'engine.log').read_text(errors='replace')
@@ -729,21 +732,29 @@ def layer_built(root, timeout=300):
 
 def app_rows(ctx):
     rows = []
-    if ctx.args.gnosis_db and ctx.args.gnosis_db_repo:
-        steps = parity_steps(ctx, 'gnosis', ['--db', ctx.args.gnosis_db, '--db-repo', ctx.args.gnosis_db_repo,
+    config = real_init.load(ctx.args.profile_config)
+    db = ctx.args.gnosis_db or config.get('gnosis_db')
+    repo = ctx.args.gnosis_db_repo or config.get('gnosis_db_repo')
+    if db and repo:
+        steps = parity_steps(ctx, 'gnosis', ['--db', str(db), '--db-repo', str(repo),
                                              '--workflow', 'dashboard', '--until', 'back'])
         rows += [row('gnosis dashboard open', 'apps', 'run', *steps['open'], 1, 'gnosis_parity_live, DB copy'),
                  row('gnosis back to dashboard', 'apps', 'run', *steps['back'], 1, 'from all themata, q')]
     else:
         ctx.skipped.append('gnosis: no --gnosis-db/--gnosis-db-repo')
     try:
-        urllib.request.urlopen(HERMES_URL, timeout=3)
+        urllib.request.urlopen(real_init.hermes_url(config) + '/', timeout=3)
     except OSError as error:
-        ctx.skipped.append(f'hermes: no dashboard at {HERMES_URL} ({error})')
+        ctx.skipped.append(f'hermes: no dashboard at {real_init.hermes_url(config)} ({error})')
         return rows
     steps = parity_steps(ctx, 'hermes', ['--workflow', 'sessions', '--until', 'open'])
     rows.append(row('hermes dashboard open', 'apps', 'run', *steps['open'], 1, 'hermes_parity_live, read-only'))
     return rows
+
+
+def profile_args(ctx):
+    path = real_init.config_path(ctx.args.profile_config)
+    return ['--profile-config', str(path.resolve())] if path else []
 
 
 def parity_steps(ctx, harness, args):
@@ -751,7 +762,7 @@ def parity_steps(ctx, harness, args):
     (ctx.cache / harness).mkdir(exist_ok=True)
     log, _, _ = run([sys.executable, '-B', str(HARNESS / f'{harness}_parity_live.py'), '--romacs', ctx.engines['romacs'],
                      '--gnu', ctx.engines['gnu'], '--output', str(output / 'out'), '--work', str(ctx.cache / harness),
-                     '--perf', *args], {**os.environ, 'TMPDIR': str(output)}, HARNESS, 1800)
+                     '--perf', *profile_args(ctx), *args], {**os.environ, 'TMPDIR': str(output)}, HARNESS, 1800)
     ctx.log(f'{harness} harness', log)
     report = json.loads((output / 'out/report.json').read_text())
     steps = {}
@@ -907,17 +918,19 @@ def main():
     parser.add_argument('--quick', action='store_true')
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--only', nargs='+', help='groups, or workloads (a batch row, micro, ERT 25 files, launch,'
-                        ' keys, owner init, apps)')
+                        ' keys, init, apps)')
     parser.add_argument('--max-load', type=float, default=8.0)
-    parser.add_argument('--out', default=str(Path.home() / '.cache/claude-scratch/perf-bench'))
+    parser.add_argument('--out', default=os.environ.get('ROMACS_PERFBENCH_OUT', '~/.cache/romacs/perf-bench'))
     parser.add_argument('--previous', help='results.json to compare with (default: the newest saved run)')
     parser.add_argument('--gnosis-db')
     parser.add_argument('--gnosis-db-repo')
+    parser.add_argument('--profile-config', default=os.environ.get(real_init.CONFIG_ENV),
+                        help='the real-init profile config (real_init.py)')
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--keep', action='store_true', help='keep the private trees')
     args = parser.parse_args()
     if not args.gnu or not os.environ.get('ROMACS_GNU_SOURCE'):
-        raise SystemExit('source romacs-env.sh first: needs ROMACS_GNU_ORACLE (or --gnu) and ROMACS_GNU_SOURCE')
+        raise SystemExit('needs ROMACS_GNU_ORACLE (or --gnu) and ROMACS_GNU_SOURCE')
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     runtime, commit = runtime_of(args), commit_of(args)
     os.environ.update(ROMACS_RUNTIME_ROOT=str(runtime), ROMACS_LISP_DIR=str(runtime / 'gnu-lisp'))
@@ -944,7 +957,7 @@ def main():
                  ('ERT 25 files', 'ert', False, lambda: [ert_row(ctx, batch)]),
                  ('launch', 'gui', True, lambda: launch_rows(ctx)),
                  ('keys', 'gui', True, lambda: key_rows(ctx)),
-                 ('owner init', 'owner', False, lambda: owner_rows(ctx)),
+                 ('init', 'init', False, lambda: init_rows(ctx)),
                  ('apps', 'apps', False, lambda: app_rows(ctx))]
         check_selectors(args.only, plan)
         for name, group, quick, function in plan:

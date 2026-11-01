@@ -3,28 +3,29 @@
 
 Each workflow starts a fresh pair of sessions (parity_live.py): pinned GNU
 Emacs (pgtk) and `romacs-vm-gui --loadup', each in its own private headless
-labwc with a private HOME/XDG/TMPDIR.  Both load the owner's hermes checkout
-and the dependencies the owner's straight recipes load (keymap-popup,
-websocket, markdown-mode), copied once into the work directory: GNU's copy
-byte-compiled, as straight builds it, Romacs's as source.  Nothing here
-writes the checkouts or ~/.config.
+labwc with a private HOME/XDG/TMPDIR.  Both load hermes and its
+dependencies (keymap-popup, websocket, markdown-mode): the copies in rlisp/,
+or a profile config's hermes_sources (real_init.py), copied once into the
+work directory: GNU's copy byte-compiled, Romacs's as source.  Nothing here
+writes the sources or ~/.config.
 
-The backend is the owner's running dashboard at 127.0.0.1:9119, attached
-(`hermes-dashboard-transport-start-mode' remote), never started.  No
+The backend is a running dashboard, hermes's default URL or the profile
+config's hermes_url, attached (`hermes-dashboard-transport-start-mode'
+remote, and every acquisition made remote), never started.  No
 credential is supplied: hermes's loopback handshake discovers the
 dashboard's session token, which stays in the engine's memory; the probe
 reports "<secret>" for any string holding it, and nothing writes it.  The
 workflows only read: the dashboard, the session browser, a session's
 history, its search and quitting back.  They never press a key that
 renames, pins, archives, deletes, exports or resumes a session, or that
-sends anything -- but for the one write the owner authorized: the `chat'
+sends anything -- but for one deliberate write: the `chat'
 workflow opens a new chat, whose session the backend creates titled
 `romacs-parity-test' (hermes-chat-dashboard-session-title, set at creation,
 never a rename), sends `hello' and waits for the reply, once in each
 engine.  `chat-dry' runs its steps up to that send, writing nothing.
 
 usage: hermes_parity_live.py --romacs BIN [--gnu EMACS] --output DIR
-                             [--workflow NAME]... [--perf]
+                             [--profile-config FILE] [--workflow NAME]... [--perf]
 
 Without --workflow it runs the read-only ones; `chat' runs only by name.
 
@@ -43,22 +44,15 @@ composer are compared as they are, and its arrival is the send step's
 time.  After every workflow neither engine may have logged `Error running
 timer' or `Error during redisplay' in *Messages* or on stderr.
 """
-from pathlib import Path
+import os
 import sys
 
 from parity_live import (ROOT, C, Harness, M, MODE_IS, POPUP_HAS, PROMPT_IS, BUFFER_IS, T, gnu_engine, key,
                          lisp_copy, lisp_string, main, mx, private_tree, romacs_engine)
 import parity_live
+import real_init
 
-DASHBOARD_URL = 'http://127.0.0.1:9119'
 TEST_TITLE = 'romacs-parity-test'
-# The owner's checkouts, as ~/.config/emacs/init.el's straight recipes name them.
-SOURCES = [
-    (Path.home() / 'Projects/emacs-lisp/emacs-hermes/lisp', '*.el'),
-    (Path.home() / 'Projects/emacs-lisp/keymap-popup', 'keymap-popup.el'),
-    (Path.home() / '.config/emacs/straight/repos/emacs-websocket', 'websocket.el'),
-    (Path.home() / '.config/emacs/straight/repos/markdown-mode', 'markdown-mode.el'),
-]
 # Hermes's browser and history state; none of these holds a credential.
 PROBE_VARIABLES = [
     'hermes-browser--status', 'hermes-sessions--search-query', 'hermes-sessions--search-profile',
@@ -67,11 +61,7 @@ PROBE_VARIABLES = [
 ]
 
 
-def sources():
-    return sorted(p for directory, pattern in SOURCES for p in directory.glob(pattern))
-
-
-def init_source(engine, lisp):
+def init_source(engine, lisp, url):
     """The init both engines load: the same but for GNU's chrome and Romacs's
     defaults, which GNU takes as gnosis_parity_live.py's GNU does."""
     gnu_setup = ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
@@ -81,17 +71,17 @@ def init_source(engine, lisp):
     return f''';; -*- lexical-binding: t -*-
 (setq load-path (cons {lisp_string(str(lisp))} load-path))
 {gnu_setup}{parity_live.GNU_COMPLETION}(setq inhibit-startup-screen t initial-scratch-message nil)
-;; The owner's hermes settings, with every instance the local dashboard.
-(setq hermes-instances '(("local" . {lisp_string(DASHBOARD_URL)}))
-      hermes-dashboard-transport-url {lisp_string(DASHBOARD_URL)}
+;; Every instance the one dashboard, attached, never started.
+{real_init.HERMES_REMOTE}(setq hermes-instances '(("local" . {lisp_string(url)}))
+      hermes-dashboard-transport-url {lisp_string(url)}
       hermes-dashboard-transport-start-mode 'remote
       ;; A session this harness creates is titled as a test's.
       hermes-chat-dashboard-session-title {lisp_string(TEST_TITLE)})
 (require 'hermes)
-;; The owner's init.el numbers every buffer's lines, relative to point's.
+;; A common init's line numbers, relative to point's.
 (setq display-line-numbers-type 'relative)
 (global-display-line-numbers-mode 1)
-;; The owner's hermes (e8cf489) kills an http buffer that another live
+;; Hermes (as of e8cf489) kills an http buffer that another live
 ;; connection still holds, so `kill-buffer' would ask about that process at
 ;; a moment request timing chooses, in GNU and Romacs alike.  Neither asks.
 (setq kill-buffer-query-functions (delq 'process-kill-buffer-query-function kill-buffer-query-functions))
@@ -114,10 +104,12 @@ def init_source(engine, lisp):
 
 def launch(engine, base, args):
     root, home, env = private_tree(engine, base, args.tools)
-    lisp = lisp_copy(base, f'hermes-{engine}', sources(), engine == 'gnu')
+    config = real_init.load(args.profile_config)
+    lisp = lisp_copy(base, f'hermes-{engine}', real_init.hermes_sources(config), engine == 'gnu')
+    init = init_source(engine, lisp, real_init.hermes_url(config))
     if engine == 'gnu':
-        return gnu_engine(root, home, env, init_source(engine, lisp), lisp, args.timeout, args.tools)
-    return romacs_engine(args.romacs, root, home, env, init_source(engine, lisp), lisp, args.timeout, args.tools)
+        return gnu_engine(root, home, env, init, lisp, args.timeout, args.tools)
+    return romacs_engine(args.romacs, root, home, env, init, lisp, args.timeout, args.tools)
 
 
 # --- workflows ----------------------------------------------------------------
@@ -199,5 +191,10 @@ def check(engines):
 HARNESS = Harness(WORKFLOWS, launch, seed='hermes-parity-', check=check, writes=WRITES)
 
 
+def arguments(parser):
+    parser.add_argument('--profile-config', default=os.environ.get(real_init.CONFIG_ENV),
+                        help='hermes_url and hermes_sources (real_init.py)')
+
+
 if __name__ == '__main__':
-    sys.exit(main(HARNESS, __doc__))
+    sys.exit(main(HARNESS, __doc__, arguments))

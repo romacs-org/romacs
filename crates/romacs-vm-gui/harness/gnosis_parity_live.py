@@ -3,10 +3,10 @@
 
 Each workflow starts a fresh pair of sessions: pinned GNU Emacs (pgtk) and
 `romacs-vm-gui --loadup`, each in its own private headless labwc with a private
-HOME/XDG/TMPDIR and its own copy of the owner's Gnosis database.  pgtk under
+HOME/XDG/TMPDIR and its own copy of a Gnosis database.  pgtk under
 labwc, not -nw over a pty: both engines then take the same Wayland key events
 from wtype through the same compositor and both are graphical frames, so
-`display-graphic-p' code paths, faces and images are the ones the owner uses.
+`display-graphic-p' code paths, faces and images are a graphical session's.
 
 Both inits load parity_probe.el, whose timer answers Lisp requests
 through files.  The harness types each step's keys into both sessions, waits
@@ -22,11 +22,13 @@ counts its user-space instructions, including the probe's idle polling.
 
 usage: gnosis_parity_live.py --romacs BIN --gnu EMACS --db DB --db-repo REPO
                              --output DIR [--workflow NAME]... [--perf]
-DB is a copy of the owner's gnosis.db, never the live file; its images/ and
+DB and REPO default to a profile config's gnosis_db and gnosis_db_repo
+(--profile-config or $ROMACS_BENCH_PROFILE, real_init.py).
+DB is a copy of a gnosis.db, never the live file (refused); its images/ and
 assets/ siblings are copied with it.  REPO is a Git repository whose only
 commit holds that copy as gnosis.db: each session clones it (--shared), so
 gnosis's automatic commits after a review have a history to land on, as in
-the owner's gnosis-dir.  Nothing here writes DB, REPO or their directory.
+a real gnosis-dir.  Nothing here writes DB, REPO or their directory.
 """
 import os
 from pathlib import Path
@@ -37,6 +39,7 @@ import sys
 from parity_live import (ROOT, C, Harness, K, M, MODE_IS, POPUP_HAS, PROMPT_IS, BUFFER_IS, T, gnu_engine, key,
                          lisp_copy, lisp_list, lisp_string, main, mx, private_tree, romacs_engine, typed)
 import parity_live
+import real_init
 
 # ---------------------------------------------------------------------------
 # COMPARISON POLICY
@@ -125,24 +128,34 @@ def init_source(engine, root, lisp):
 '''
 
 
+def database(args):
+    """(DB, REPO) from the arguments or the profile config; a live DB refused."""
+    config = real_init.load(args.profile_config)
+    db, repo = args.db or config.get('gnosis_db'), args.db_repo or config.get('gnosis_db_repo')
+    if not (db and repo):
+        raise SystemExit('needs --db and --db-repo (or a profile config with gnosis_db and gnosis_db_repo)')
+    return real_init.refuse_live_gnosis(db, config), Path(repo)
+
+
 def gnosis_tree(engine, base, args):
     """A private tree holding a clone of the database repository."""
+    db, repo = database(args)
     root, home, env = private_tree(engine, base, args.tools)
     gitenv = {'HOME': str(home), 'PATH': os.environ['PATH'], 'GIT_CONFIG_NOSYSTEM': '1'}
     (home / '.gitconfig').write_text('[user]\n\tname = parity\n\temail = parity@localhost\n'
                                      '[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = master\n')
-    subprocess.run(['git', 'clone', '-q', '--shared', str(args.db_repo), str(root / 'gnosis')],
+    subprocess.run(['git', 'clone', '-q', '--shared', str(repo), str(root / 'gnosis')],
                    env=gitenv, check=True)
     for extra in ('images', 'assets'):
-        source = Path(args.db).parent / extra
+        source = db.parent / extra
         if source.is_dir():
             subprocess.run(['cp', '-r', '--reflink=auto', str(source), str(root / 'gnosis' / extra)], check=True)
     return root, home, env
 
 
 def gnu_lisp(base):
-    """gnosis and keymap-popup byte-compiled by the pinned GNU, as the owner
-    runs them; cached by source hash."""
+    """gnosis and keymap-popup byte-compiled by the pinned GNU, as a GNU
+    user runs them; cached by source hash."""
     sources = sorted((ROOT / 'rlisp/gnosis').glob('*.el')) + [ROOT / 'rlisp/emacs-lisp/keymap-popup.el']
     return lisp_copy(base, 'gnu-gnosis', sources, True)
 
@@ -237,8 +250,10 @@ HARNESS = Harness(WORKFLOWS, launch, f"(parity-probe-snapshot '{lisp_list(DB_QUE
 
 
 def arguments(parser):
-    parser.add_argument('--db', required=True, help='a copy of gnosis.db; never the live one')
-    parser.add_argument('--db-repo', required=True, help='a Git repository holding that copy as gnosis.db')
+    parser.add_argument('--profile-config', default=os.environ.get(real_init.CONFIG_ENV),
+                        help='gnosis_db and gnosis_db_repo defaults (real_init.py)')
+    parser.add_argument('--db', help='a copy of gnosis.db; never the live one')
+    parser.add_argument('--db-repo', help='a Git repository holding that copy as gnosis.db')
 
 
 if __name__ == '__main__':
