@@ -4662,6 +4662,8 @@ dependencies = [
  "romacs-test-fonts",
  "romacs-vm",
  "serde_json",
+ "tracing",
+ "tracing-subscriber",
  "wgpu",
 ]
 

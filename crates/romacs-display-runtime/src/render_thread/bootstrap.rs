@@ -726,10 +726,6 @@ fn run_render_loop_with_startup(
         }
         app
     });
-    if let Err(ref e) = result {
-        tracing::error!("Event loop error: {:?}", e);
-    }
-
     // Notify Emacs that the render thread is exiting so it can shut down gracefully.
     // This handles cases like Wayland connection loss (ExitFailure(1)) where the
     // window disappears without an explicit close request.

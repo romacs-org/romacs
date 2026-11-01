@@ -80,7 +80,7 @@ pub use startup::{
 use state::{FpsCounter, ImeCursorArea, RenderApp};
 pub use state::{
     ImageDecodeTerminal, ImageRenderState, ImageTerminalProbe, ImageTerminalPublication,
-    MonitorInfo, SharedImageRenderState, SharedMonitorInfo,
+    MonitorInfo, RenderShutdownReason, SharedImageRenderState, SharedMonitorInfo,
 };
 pub use thread_handle::RenderThread;
 

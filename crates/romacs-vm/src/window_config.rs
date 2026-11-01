@@ -24,6 +24,10 @@ pub(crate) struct SavedWindow {
     normal_cols: Value,
     left_margin: u32,
     right_margin: u32,
+    /// GNU `p->left_fringe_width' and the rest (window.c:8296).
+    fringes: [Option<u32>; 2],
+    fringes_outside_margins: bool,
+    fringes_persistent: bool,
     vscroll_px: u32,
     hscroll: i64,
     combination_limit: Value,
@@ -33,7 +37,7 @@ pub(crate) struct SavedWindow {
     /// makes persistent, VALUE nil where the window had none.
     parameters: Vec<(Value, Value)>,
 }
-romacs_snapshot::snapshot_struct!(SavedWindow { window, buffer, start, point, parent, children, horizontal, x, y, width, height, normal_lines, normal_cols, left_margin, right_margin, vscroll_px, hscroll, combination_limit, dedicated, parameters });
+romacs_snapshot::snapshot_struct!(SavedWindow { window, buffer, start, point, parent, children, horizontal, x, y, width, height, normal_lines, normal_cols, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, hscroll, combination_limit, dedicated, parameters });
 
 /// GNU `struct save_window_data`: one frame's windows, and the frame
 /// selected when they were saved.
@@ -139,6 +143,9 @@ impl Vm {
             normal_cols: w.normal_cols,
             left_margin: w.left_margin,
             right_margin: w.right_margin,
+            fringes: w.fringes,
+            fringes_outside_margins: w.fringes_outside_margins,
+            fringes_persistent: w.fringes_persistent,
             vscroll_px: w.vscroll_px,
             hscroll: w.hscroll,
             combination_limit: w.combination_limit,
@@ -281,6 +288,7 @@ impl Vm {
                 }
                 w.left_margin = p.left_margin;
                 w.right_margin = p.right_margin;
+                (w.fringes, w.fringes_outside_margins, w.fringes_persistent) = (p.fringes, p.fringes_outside_margins, p.fringes_persistent);
                 w.vscroll_px = p.vscroll_px;
                 w.hscroll = p.hscroll;
                 w.combination_limit = p.combination_limit;

@@ -266,3 +266,31 @@ fn slice_matches_the_per_byte_oracle() {
         assert_eq!(part.properties_at(ByteOffset(0)), if a < b { p.properties_at(ByteOffset(a)) } else { vec![] });
     }
 }
+#[test]
+fn runs_of_keys_end_only_where_those_keys_change() {
+    let mut p = Properties::new();
+    let one = Value::integer(1).unwrap();
+    for at in 0..10 {
+        p.put(ByteOffset(at)..ByteOffset(at + 1), "face", Value::integer(at as i64 % 2).unwrap());
+    }
+    p.put(ByteOffset(2)..ByteOffset(5), "read-only", Value::TRUE);
+    p.put(ByteOffset(4)..ByteOffset(7), "category", one);
+    let keys = ["read-only".to_owned(), "category".to_owned(), "absent".to_owned()];
+    let runs = p.runs_of(ByteOffset(1)..ByteOffset(9), &keys);
+    let starts: Vec<_> = runs.iter().map(|(at, _)| at.0).collect();
+    assert_eq!(starts, vec![1, 2, 4, 5, 7]);
+    fn names(values: &[(String, Value)]) -> Vec<&str> {
+        values.iter().map(|(k, _)| k.as_str()).collect()
+    }
+    assert_eq!(names(&runs[0].1), Vec::<&str>::new());
+    assert_eq!(names(&runs[2].1), vec!["read-only", "category"]);
+    assert_eq!(runs[3].1, vec![("category".to_owned(), one)]);
+    // Every run agrees with the full properties at its start, on KEYS.
+    for (at, values) in &runs {
+        let full: Vec<_> = p.properties_at(*at).into_iter().filter(|(k, _)| keys.iter().any(|key| key == k)).collect();
+        assert_eq!(full.len(), values.len());
+        assert!(full.iter().all(|(k, v)| values.iter().any(|(key, value)| key == k && value == v)));
+    }
+    assert!(p.runs_of(ByteOffset(3)..ByteOffset(3), &keys).is_empty());
+    assert_eq!(p.runs_of(ByteOffset(0)..ByteOffset(10), &["absent".to_owned()]).len(), 1);
+}

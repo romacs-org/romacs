@@ -164,12 +164,16 @@ fn frame_alist(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<Vec<(Valu
     let menu = cx.intern("menu-bar-mode");
     let lines = if cx.variable_value(menu)?.is_some_and(|v| v != Value::NIL) { 1 } else { 0 };
     store(&mut alist, cx.intern("menu-bar-lines"), Value::integer(lines).unwrap());
-    store(&mut alist, cx.intern("tab-bar-lines"), Value::integer(0).unwrap());
+    let ([left, right], tab_bar_lines) = cx.windows().frame_chrome(frame)?;
+    store(&mut alist, cx.intern("tab-bar-lines"), Value::integer(i64::from(tab_bar_lines)).unwrap());
     store(&mut alist, cx.intern("visibility"), Value::TRUE);
     store(&mut alist, cx.intern("no-accept-focus"), Value::NIL);
     // A window-system frame stores every parameter it has a handler for,
-    // nil when unset (pgtkfns.c:1599 gui_default_parameter).
+    // nil when unset (pgtkfns.c:1599 gui_default_parameter), and reports
+    // its fringes' widths (gui_report_frame_params).
     if cx.windows().window_system(frame)? != Value::NIL {
+        store(&mut alist, cx.intern("left-fringe"), Value::integer(i64::from(left)).unwrap());
+        store(&mut alist, cx.intern("right-fringe"), Value::integer(i64::from(right)).unwrap());
         for key in ["alpha", "alpha-background", "borders-respect-alpha-background"] {
             let key = cx.intern(key);
             if !alist.iter().any(|(k, _)| *k == key) { alist.insert(0, (key, Value::NIL)); }
@@ -209,11 +213,21 @@ fn alpha_lower_limit(cx: &mut Leaf<'_>) -> std::result::Result<f32, Fault> {
 /// (frame.c gui_set_frame_parameters_1): `alpha' (gui_set_alpha,
 /// frame.c:6047) is an opacity or a cons of the active and inactive ones,
 /// nil leaving the window's alone; `alpha-background' (frame.c:6098) the
-/// opacity of the backgrounds the frame paints. Other parameters, and
+/// opacity of the backgrounds the frame paints; `left-fringe' and
+/// `right-fringe' its fringes; `tab-bar-lines' its tab bar. Other parameters, and
 /// every parameter of a frame without a window system, are only stored.
 fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
     if cx.kind(key) != leaf::Kind::Symbol || cx.windows().window_system(frame)? == Value::NIL { return Ok(()); }
-    if key == cx.intern("alpha-background") {
+    let fringe = [cx.intern("left-fringe"), cx.intern("right-fringe")].iter().position(|&k| k == key);
+    if let Some(side) = fringe {
+        // gui_set_left_fringe (frame.c:5800): a fixnum's magnitude, else 8.
+        let width = value.integer_value().map_or(crate::frame::DEFAULT_FRINGE, |n| n.unsigned_abs().min(i32::MAX as u64) as u32);
+        cx.windows().set_frame_fringe(frame, side, width)
+    } else if key == cx.intern("tab-bar-lines") {
+        // pgtk_set_tab_bar_lines (pgtkfns.c:444): an integer >= 0, else 0.
+        let lines = value.integer_value().filter(|&n| n >= 0).map_or(0, |n| n.min(i64::from(i32::MAX)) as u32);
+        cx.windows().set_frame_tab_bar_lines(frame, lines)
+    } else if key == cx.intern("alpha-background") {
         let background = opacity(cx, value)?.unwrap_or(1.0);
         cx.windows().set_frame_background_alpha(frame, background)
     } else if key == cx.intern("alpha") {
@@ -386,7 +400,7 @@ fn romacs_create_frame(cx, parms: Value) {
     let frame = cx.windows().create_child_frame(parent, geometry, stored)?;
     // gui_default_parameter (pgtkfns.c:1599) on the frame already listed:
     // a refused value leaves it, not yet visible, as x_create_frame does.
-    for name in ["alpha", "alpha-background"] {
+    for name in ["alpha", "alpha-background", "left-fringe", "right-fringe"] {
         let key = cx.intern(name);
         if let Some(value) = lookup(cx, name) { handle_frame_parameter(cx, frame, key, value)?; }
     }
@@ -502,10 +516,11 @@ fn set_frame_height(cx, frame: Value, height: Value; optional _pretend: Value, p
     resize_frame(cx, frame, None, Some(height), pixelwise != Value::NIL)?;
     Ok(Value::NIL)
 }}
-// frame.c:4447-4490: the text area in pixels and in characters; Romacs
-// draws no fringes or scroll bars, so the total size is the text size.
+// frame.c:4447-4490: the text area in pixels and in characters, without
+// the fringes and the tab bar; the total columns and lines count them too
+// (Romacs draws no scroll bars).
 fn text_extent(cx: &mut Leaf<'_>, frame: Value, horizontal: bool, chars: bool) -> super::Out {
-    let (width, height) = cx.windows().frame_text_pixels(frame)?;
+    let (width, height) = cx.windows().frame_text_area(frame)?;
     let pixels = if horizontal { width } else { height };
     let unit = if chars { char_size(cx, horizontal)? } else { 1 };
     Ok(Value::integer(i64::from(pixels / unit)).unwrap())
@@ -519,9 +534,15 @@ fn frame_text_cols(cx; optional frame: Value) { text_extent(cx, frame, true, tru
 defsubr! { name = "frame-text-lines", gnu = "frame.c:4454", effect = Reads,
 fn frame_text_lines(cx; optional frame: Value) { text_extent(cx, frame, false, true) }}
 defsubr! { name = "frame-total-cols", gnu = "frame.c:4461", effect = Reads,
-fn frame_total_cols(cx; optional frame: Value) { text_extent(cx, frame, true, true) }}
+fn frame_total_cols(cx; optional frame: Value) {
+    let (width, _) = cx.windows().frame_text_pixels(frame)?;
+    Ok(Value::integer(i64::from(width / char_size(cx, true)?)).unwrap())
+}}
 defsubr! { name = "frame-total-lines", gnu = "frame.c:4468", effect = Reads,
-fn frame_total_lines(cx; optional frame: Value) { text_extent(cx, frame, false, true) }}
+fn frame_total_lines(cx; optional frame: Value) {
+    let (_, height) = cx.windows().frame_text_pixels(frame)?;
+    Ok(Value::integer(i64::from(height / char_size(cx, false)?)).unwrap())
+}}
 defsubr! { name = "window-system", gnu = "frame.c:415", effect = Reads,
 fn window_system(cx; optional frame: Value) { cx.windows().window_system(frame) }}
 defsubr! { name = "current-message", gnu = "editfns.c:3288", effect = Reads,
@@ -630,4 +651,23 @@ defsubr! { name = "frame-after-make-frame", gnu = "frame.c:3772", effect = Globa
 fn frame_after_make_frame(cx, frame: Value, made: Value) {
     cx.windows().decode_live_frame(frame)?;
     Ok(made)
+}}
+
+// xdisp.c:15013: the lines, or with PIXELWISE the pixels, of FRAME's tab
+// bar; a child frame shows none.
+defsubr! { name = "tab-bar-height", gnu = "xdisp.c:15013", effect = Reads,
+fn tab_bar_height(cx; optional frame: Value, pixelwise: Value) {
+    let frame = cx.windows().decode_live_frame(frame)?;
+    let lines = if cx.windows().is_child_frame(frame)? { 0 } else { i64::from(cx.windows().tab_bar_lines()) };
+    let unit = if pixelwise != Value::NIL { i64::from(char_size(cx, false)?) } else { 1 };
+    Ok(Value::integer(lines * unit).unwrap())
+}}
+
+// frame.c:4517: FRAME_TOTAL_FRINGE_WIDTH, none on a frame without a
+// window system.
+defsubr! { name = "frame-fringe-width", gnu = "frame.c:4517", effect = Reads,
+fn frame_fringe_width(cx; optional frame: Value) {
+    let ([left, right], _) = cx.windows().frame_chrome(frame)?;
+    let shown = cx.windows().window_system(frame)? != Value::NIL;
+    Ok(Value::integer(if shown { i64::from(left + right) } else { 0 }).unwrap())
 }}

@@ -30,11 +30,16 @@ pub(super) enum Test {
     Eq,
     Eql,
     Equal,
+    /// A test `define-hash-table-test' named, its symbol here, from GNU's
+    /// `equal-including-properties' and `sxhash-equal-including-properties'
+    /// (tab-bar.el's): hashed as `equal' hashes, which agrees with it.
+    Including(Value),
 }
 romacs_snapshot::snapshot_enum!(Test {
     Test::Eq => (),
     Test::Eql => (),
     Test::Equal => (),
+    Test::Including(name) => (name),
 });
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Weakness {
@@ -484,7 +489,7 @@ impl Vm {
     fn hash_key(&self, test: Test, key: Value) -> (u64, bool) {
         let mut moving = false;
         let hash = match (test, self.shape(key)) {
-            (Test::Equal, _) => self.sxhash(key, 0, &mut moving),
+            (Test::Equal | Test::Including(_), _) => self.sxhash(key, 0, &mut moving),
             (Test::Eql, Shape::Float(bits)) => bits,
             (Test::Eql, Shape::Bignum(n)) => hash_bytes(&n.to_signed_bytes_le()),
             _ => {
@@ -508,6 +513,7 @@ impl Vm {
             Test::Eq => a == b,
             Test::Eql => self.eql(a, b),
             Test::Equal => self.equal(a, b)?,
+            Test::Including(_) => self.equal_including_properties(a, b)?,
         })
     }
     /// GNU `internal_equal` (plain `equal`): cycle-aware and depth-limited.
@@ -923,6 +929,7 @@ impl Vm {
                     Test::Eq => "eq",
                     Test::Eql => "eql",
                     Test::Equal => "equal",
+                    Test::Including(name) => return Ok(name),
                 };
                 Ok(self.intern(name))
             }
@@ -1125,6 +1132,12 @@ impl Vm {
             let property = self.intern("hash-table-test");
             let user = self.symbol_property(test, property).unwrap_or(Value::NIL);
             let defined = self.cons_pair(user).is_ok_and(|(_, tail)| tail.tag() == 3);
+            let functions = self.cons_pair(user).and_then(|(equal, tail)| Ok((equal, self.cons_pair(tail)?.0)));
+            if test.tag() == 7 && functions.is_ok_and(|(equal, hash)| {
+                (equal, hash) == (self.intern("equal-including-properties"), self.intern("sxhash-equal-including-properties"))
+            }) {
+                Test::Including(test)
+            } else {
             return Err(HashFault::Error(
                 if defined {
                     "VM2 does not support user-defined hash table tests"
@@ -1133,6 +1146,7 @@ impl Vm {
                 },
                 Some(test),
             ));
+            }
         };
         let size = if size == Value::NIL {
             0
@@ -1187,6 +1201,10 @@ impl Vm {
         match t.test {
             Test::Eq => out.push_str(" test eq"),
             Test::Equal => out.push_str(" test equal"),
+            Test::Including(name) => {
+                out.push_str(" test ");
+                out.push_str(self.symbol_names.get((name.0 >> 3) as usize - 1).map_or("", String::as_str));
+            }
             Test::Eql => {}
         }
         if t.weakness != Weakness::None {

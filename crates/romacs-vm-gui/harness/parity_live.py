@@ -351,18 +351,20 @@ def prepare_world(romacs, env, cwd):
     return round(time.time() - started, 3) if done.returncode == 0 else None
 
 
-def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None):
-    """`romacs-vm-gui --loadup' on INIT, as ~/.config/romacs/init.el, from a
-    world prepared first (`prepare_world', its seconds in `world_seconds'),
-    as a user's HOME holds one; CLS as `gnu_engine'."""
+def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=()):
+    """`romacs-vm-gui --loadup ARGS' on INIT, as ~/.config/romacs/init.el
+    unless INIT is None, from a world prepared first (`prepare_world', its
+    seconds in `world_seconds'), as a user's HOME holds one; CLS as
+    `gnu_engine'."""
     (home / '.config/romacs').mkdir()
-    (home / '.config/romacs/init.el').write_text(init)
+    if init is not None:
+        (home / '.config/romacs/init.el').write_text(init)
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
     for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR'):
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')
-    engine = (cls or Engine)('romacs', [romacs, '--loadup'], root, lisp, env, timeout).start(tools)
+    engine = (cls or Engine)('romacs', [romacs, '--loadup', *args], root, lisp, env, timeout).start(tools)
     engine.world_seconds = world_seconds
     return engine
 

@@ -92,7 +92,8 @@ pub enum RenderLoopError {
 }
 
 pub enum RenderLoopExit {
-    Finished,
+    /// The loop ended for this cause, or for none it recorded.
+    Finished(Option<super::RenderShutdownReason>),
     /// Native resources have been released, but a driver worker may still be
     /// inside foreign code. Process exit must bypass library exit callbacks.
     GpuStartupCancelled,
@@ -131,6 +132,8 @@ pub(super) struct StartingApp {
     outcome: Rc<RefCell<Outcome>>,
     evaluator: Option<Receiver<Result<InitialWindowSize, String>>>,
     retained: bool,
+    /// The running app's shutdown cause, once it has one (`run').
+    ended: Rc<std::cell::Cell<Option<super::RenderShutdownReason>>>,
 }
 
 impl StartingApp {
@@ -141,6 +144,7 @@ impl StartingApp {
             outcome: Default::default(),
             evaluator: None,
             retained: true,
+            ended: Default::default(),
         }
     }
     pub(super) fn install(&mut self, receiver: InitialWindowReceiver, app: RenderApp) {
@@ -153,6 +157,13 @@ impl StartingApp {
     pub(super) fn retire(&mut self) {
         self.evaluator = None;
         self.phase = Phase::Stopped;
+    }
+}
+
+/// Keep APP's shutdown cause for the loop's exit.
+fn note_end(ended: &std::cell::Cell<Option<super::RenderShutdownReason>>, app: &RenderApp) {
+    if let Some(reason) = app.lifecycle_flags.shutdown_reason() {
+        ended.set(Some(reason));
     }
 }
 
@@ -184,6 +195,7 @@ impl ApplicationHandler for StartingApp {
                 *self.outcome.borrow_mut() = Outcome::Running;
             }
             app.window_event(event_loop, id, event);
+            note_end(&self.ended, app);
         }
     }
 
@@ -306,6 +318,7 @@ impl ApplicationHandler for StartingApp {
             }
             if app.startup_error.is_none() {
                 app.about_to_wait(event_loop);
+                note_end(&self.ended, app);
             }
             if let Some(error) = app.startup_error.take() {
                 if self.retained {
@@ -350,37 +363,60 @@ pub(super) fn run(
     };
     let mut app = Box::new(create(size));
     app.gpu_startup_cancelled = gpu_cancelled.clone();
+    let ended = Rc::default();
     let result = event_loop.run_app(StartingApp {
         phase: Phase::Preparing { initial, app },
         can_create_surfaces: false,
         outcome: Rc::clone(&outcome),
         evaluator: None,
         retained: false,
+        ended: Rc::clone(&ended),
     });
-    let successful_exit = || {
+    let successful_exit = |reason| {
         if gpu_cancelled.load(std::sync::atomic::Ordering::Relaxed) {
             RenderLoopExit::GpuStartupCancelled
         } else {
-            RenderLoopExit::Finished
+            RenderLoopExit::Finished(reason)
         }
     };
+    let reason = ended.get();
     match &mut *outcome.borrow_mut() {
         Outcome::Preparing => Err(RenderLoopError::StartupInterrupted(
             result
                 .err()
-                .map_or_else(|| "event loop exited".into(), |error| error.to_string()),
+                .map_or_else(|| "event loop exited".into(), |error| describe(&error)),
         )),
         Outcome::Failed(error) => Err(RenderLoopError::Preparation(std::mem::take(error))),
         Outcome::GpuFailed(error) => {
             Err(RenderLoopError::StartupInterrupted(std::mem::take(error)))
         }
-        Outcome::EvaluatorExited => Ok(successful_exit()),
-        Outcome::Running => result.map(|()| successful_exit()).map_err(|error| {
+        Outcome::EvaluatorExited => Ok(successful_exit(
+            reason.or(Some(super::RenderShutdownReason::EvaluatorShutdown)),
+        )),
+        Outcome::Running => result.map(|()| successful_exit(reason)).map_err(|error| {
             if gpu_cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-                RenderLoopError::StartupInterrupted(error.to_string())
+                RenderLoopError::StartupInterrupted(describe(&error))
             } else {
-                RenderLoopError::EventLoop(error.to_string())
+                RenderLoopError::EventLoop(describe(&error))
             }
         }),
+    }
+}
+
+/// ERROR, saying what an exit failure's status means: winit ends its loop
+/// with the OS error a native dispatch failed with, or 1 for a connection
+/// that broke or would not flush.
+fn describe(error: &winit::error::EventLoopError) -> String {
+    match error {
+        winit::error::EventLoopError::ExitFailure(1) => {
+            "Exit Failure: 1 (the display connection broke or would not flush)".into()
+        }
+        winit::error::EventLoopError::ExitFailure(code) => {
+            format!(
+                "Exit Failure: {code} ({})",
+                std::io::Error::from_raw_os_error(*code)
+            )
+        }
+        other => other.to_string(),
     }
 }

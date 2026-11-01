@@ -1125,8 +1125,10 @@ pub(crate) struct AnnotatedBuffer {
     /// A base buffer's live indirect buffers (GNU counts them in
     /// `indirections` and finds them in the buffer list).
     pub(crate) indirect: Vec<Value>,
+    /// Overlays inserted into this buffer's tree so far (Overlay::inserted).
+    pub overlay_insertions: u64,
 }
-romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect });
+romacs_snapshot::snapshot_struct!(AnnotatedBuffer { text, anchors, intervals, reversed_pairs, evaporating, local_keymap, case_tables, per_buffer, base, indirect, overlay_insertions });
 impl From<Text> for AnnotatedBuffer {
     fn from(text: Text) -> Self {
         let extent =
@@ -1142,6 +1144,7 @@ impl From<Text> for AnnotatedBuffer {
             per_buffer: Default::default(),
             base: Value::NIL,
             indirect: Vec::new(),
+            overlay_insertions: 0,
         }
     }
 }
@@ -1317,8 +1320,11 @@ pub(crate) struct Overlay {
     pub front: Bias,
     pub rear: Bias,
     pub properties: Vec<(Value, Value)>,
+    /// When it last entered its buffer's overlay tree, by that buffer's
+    /// count: GNU's itree puts a node before those with an equal start.
+    pub inserted: u64,
 }
-romacs_snapshot::snapshot_struct!(Overlay { buffer, start, end, front, rear, properties });
+romacs_snapshot::snapshot_struct!(Overlay { buffer, start, end, front, rear, properties, inserted });
 const _: () = assert!(std::mem::offset_of!(AnnotatedBuffer, text) == 0);
 impl Marker {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {

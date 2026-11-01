@@ -133,9 +133,8 @@ and its comparison policy in its docstring:
 `bench/bench.py` is an MCP server for agents.  `bench_start` launches pinned
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
 HOME, on one of two profiles (`bench/owner.py`).  The default, `stock`, loads
-no one's init: GNU runs `-Q` and loads only the bench's endpoint with `-l`,
-and Romacs runs `--loadup` with that endpoint as its only init, because its
-GUI has `-Q` but no `-l`.  Both use only the stock gnu-lisp and rlisp, on a
+no one's init: both engines run `-Q` and load only the bench's endpoint
+with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock gnu-lisp and rlisp, on a
 generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
 Markdown, Org and a Makefile, with a five-commit history whose authors and
 dates are fixed, so the hashes match everywhere).  `owner` is the owner's
