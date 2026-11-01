@@ -1201,7 +1201,7 @@ pub struct FrameGlyphBuffer {
     /// Whether this frame should not accept keyboard focus
     pub no_accept_focus: bool,
     /// How a child frame shown as a layer animates.
-    pub layer: crate::child_frame_animation::LayerMotion,
+    pub layer: crate::child_frame_animation::Layer,
     /// The producer's identity for this frame's glyphs: two buffers with
     /// the same nonzero identity carry the same glyphs, faces and fonts,
     /// so one paints as the other but for their cursors and opacity. Zero
@@ -1589,7 +1589,7 @@ impl FrameGlyphBuffer {
             background_alpha: 1.0,
             frame_alpha: [-1.0; 2],
             no_accept_focus: false,
-            layer: crate::child_frame_animation::LayerMotion::default(),
+            layer: crate::child_frame_animation::Layer::default(),
             layout_identity: 0,
             text_over_backgrounds: false,
             glyphs: Vec::with_capacity(10000),

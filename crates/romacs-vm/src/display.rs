@@ -489,15 +489,28 @@ impl Vm {
                 let local = |n: u32, origin: i32| u32::try_from(i64::from(n) - i64::from(origin)).unwrap_or(0);
                 windows.extend(self.snapshot_leaves(vec![mini])?.into_iter().map(|(wx, wy, snapshot)| place((local(wx, x), local(wy, y), snapshot))));
             }
+            // The frame's `background-color' is its default face's background
+            // (frame.c gui_set_background_color): text whose faces leave the
+            // background unspecified shows it.
+            if background != default.background {
+                for face in windows.iter_mut().flat_map(|w| w.snapshot.faces.iter_mut()) {
+                    if face.background == default.background { face.background = background; }
+                }
+            }
             let edge = match self.frame_parameter_of(frame, "romacs-layer-edge")? {
                 Some(v) if v == self.intern("top") => romacs_layout_input::LayerEdge::Top,
                 _ => romacs_layout_input::LayerEdge::Bottom,
             };
             let selection = self.frame_parameter_of(frame, "romacs-layer-selection")?
                 .and_then(|v| v.integer_value()).and_then(|row| u32::try_from(row).ok());
+            let radius = self.frame_parameter_of(frame, "romacs-layer-radius")?
+                .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
+            let glow = self.frame_hex_parameter(frame, "romacs-layer-glow")?;
+            let shadow = self.frame_parameter_of(frame, "romacs-layer-shadow")?.is_some_and(|v| v != Value::NIL);
             children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
                                                                      background, background_alpha, windows,
-                                                                     animation: self.layer_animation(), edge, selection });
+                                                                     animation: self.layer_animation(), edge, selection,
+                                                                     radius, glow, shadow });
         }
         Ok(children)
     }

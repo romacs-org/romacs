@@ -233,7 +233,26 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         let outcome = keys(&mut vm, &[(1 << 27) | 'x' as i64]);
         report.push(format!("{:?}", outcome.and_then(|o| o.signal).map(|s| s.condition)));
         report.push(printed(&mut vm, "(list (bound-and-true-p rc-ahead-ran) (car extended-command-history))"));
+        // The panel floats centred, glass: rounded, lit, padded, its own background.
+        report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
+            (list romacs-complete-position (frame-parameter f 'romacs-layer-radius) (frame-parameter f 'romacs-layer-shadow)
+                  (frame-parameter f 'romacs-layer-glow) (frame-parameter f 'child-frame-border-width)
+                  (stringp (frame-parameter f 'background-color))
+                  (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
+                    (= (+ l (/ w 2)) (/ (- (frame-text-width) (* 2 (frame-parameter f 'child-frame-border-width))) 2)))))"));
+        // Messages stack as toasts in the top-right corner, newest on top, at
+        // most three; the same message again extends the newest.
+        report.push(printed(&mut vm, "(progn (dolist (m '(\"one\" \"two\" \"three\" \"four\" \"four\")) (romacs-layer-toast m))
+            (list (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts)
+                  (let ((tops (mapcar (lambda (toast) (cdr (frame-position (romacs-layer--frame (car toast))))) romacs-layer--toasts)))
+                    (equal tops (sort (copy-sequence tops) #'<)))
+                  (let ((f (romacs-layer--frame (caar romacs-layer--toasts))))
+                    (list (frame-parameter f 'romacs-layer-edge)
+                          (= (+ (car (frame-position f)) (frame-pixel-width f) 12) (frame-text-width))))
+                  (current-message)))"));
         report
     }).unwrap().join().unwrap();
-    assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#]);
+    assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#,
+                        r##"(center 12 t "#d48a20" 10 t t)"##,
+                        "((\"four\" \"three\" \"two\") t (top t) nil)"]);
 }

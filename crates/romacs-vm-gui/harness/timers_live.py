@@ -212,8 +212,8 @@ def checked(binary, args, output, report):
         fio.wait(lambda: any(r.startswith('(dwell') for r in records(state)), 15, 'dwell probe', process)
         check("a timer's queued input wakes a read (gnosis-feed--dwell-supported-p)",
               '(dwell t)' in records(state), records(state))
-        # Shown at some point: the echo area keeps it, romacs-complete's
-        # message layer shows it for `romacs-complete-message-timeout'.
+        # Shown at some point: the echo area keeps it, a message toast shows
+        # it for `romacs-layer-toast-timeout'.
         check('echo area shows the idle probe', ff.ever_shown(log_path.read_text(errors='replace'), 'Idle probe 1'),
               rows()[-2:])
         time.sleep(args.cpu_window)

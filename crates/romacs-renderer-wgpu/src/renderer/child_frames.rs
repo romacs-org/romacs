@@ -486,7 +486,7 @@ impl WgpuRenderer {
         // and its radii and border widths thin proportionally.
         let frame_w = child.width * scale;
         let frame_h = child.height * scale;
-        let corner_radius = corner_radius * scale;
+        let corner_radius = corner_radius.max(child.layer.radius) * scale;
         let bg_alpha = child.background_alpha * alpha;
         let Some(scissor) = child_scissor(
             clip_in_root,
@@ -506,6 +506,47 @@ impl WgpuRenderer {
             bw,
             child.glyphs.len(),
         );
+
+        // A layer's lighting falls outside its rect: a soft shadow below it
+        // and its glow around it, clipped only by the surface.
+        if child.layer.shadow || child.layer.glow.is_some() {
+            let mut light: Vec<RoundedRectVertex> = Vec::new();
+            if child.layer.shadow {
+                let shade = Color::new(0.0, 0.0, 0.0, 0.55 * alpha);
+                self.add_rounded_rect_styled(&mut light, (offset_x, offset_y + 6.0 * scale, frame_w, frame_h),
+                                             corner_radius, &shade, 11, 18.0 * scale);
+            }
+            if let Some(glow) = child.layer.glow {
+                let glow = Color::new(glow.r, glow.g, glow.b, 0.35 * alpha);
+                self.add_rounded_rect_styled(&mut light, (offset_x, offset_y, frame_w, frame_h),
+                                             corner_radius, &glow, 12, 14.0 * scale);
+            }
+            if let Some(upload) = self.arenas.rounded.upload(&self.device, &self.queue, &light) {
+                let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Child Frame Light Encoder"),
+                });
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Child Frame Light Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view,
+                            resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    pass.set_pipeline(&self.pipelines.rounded_rect);
+                    pass.set_bind_group(0, draw.binding(), &[]);
+                    pass.set_vertex_buffer(0, upload.buffer_slice());
+                    pass.draw(0..light.len() as u32, 0..1);
+                }
+                self.submit_commands(std::iter::once(encoder.finish()));
+            }
+        }
 
         // Child-frame-specific rendering: shadow + background + border.
         {
@@ -643,7 +684,8 @@ impl WgpuRenderer {
                 }
             }
 
-            if bw > 0.0 || corner_radius > 0.0 {
+            // A glowing layer is lit, not outlined.
+            if bw > 0.0 || (corner_radius > 0.0 && child.layer.glow.is_none()) {
                 let mut border_verts: Vec<RoundedRectVertex> = Vec::new();
                 let bc = if bw > 0.0 {
                     child.border_color

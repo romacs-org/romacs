@@ -55,6 +55,41 @@ environment variable ROMACS_LAYER_ANIMATION is 1."
   "Frame parameters of a layer's child frame."
   :type '(alist :key-type symbol :value-type sexp))
 
+(defface romacs-layer-glow '((t :foreground "#d48a20"))
+  "The colour a raised layer glows in: the key light of the Ember Lattice
+design language, the Omarchy accent.")
+
+(defcustom romacs-layer-glass t
+  "Whether raised layers (the completion panel, message toasts) are glass:
+rounded, padded, on the background lifted 8% toward the foreground,
+casting a soft shadow and glowing in `romacs-layer-glow'.  nil gives
+them GNU's square child-frame border."
+  :type 'boolean)
+
+(defun romacs-layer--hex (color)
+  "COLOR, a colour name, as #RRGGBB, or nil when it is unknown."
+  (when-let* ((values (and color (color-values color))))
+    (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (/ v 257)) values))))
+
+(defun romacs-layer--glass-background ()
+  "The default background lifted 8% toward the default foreground."
+  (let ((bg (color-values (face-background 'default nil t)))
+        (fg (color-values (face-foreground 'default nil t))))
+    (when (and bg fg)
+      (apply #'format "#%02x%02x%02x"
+             (seq-mapn (lambda (b f) (/ (round (+ (* 0.92 b) (* 0.08 f))) 257)) bg fg)))))
+
+(defun romacs-layer-glass-parameters ()
+  "Frame parameters that make a layer glass (`romacs-layer-glass'), or nil.
+The host rounds its corners (`romacs-layer-radius'), lights it
+\(`romacs-layer-shadow', `romacs-layer-glow') and leaves its border,
+here padding, unpainted."
+  (when romacs-layer-glass
+    `((romacs-layer-radius . 12) (romacs-layer-shadow . t)
+      (romacs-layer-glow . ,(romacs-layer--hex (face-foreground 'romacs-layer-glow nil t)))
+      (child-frame-border-width . 10)
+      (background-color . ,(romacs-layer--glass-background)))))
+
 (defvar romacs-layer--frames nil
   "Alist of (BUFFER . FRAME): the child frame showing each layer's buffer.")
 
@@ -197,6 +232,81 @@ columns and lines."
   (let ((root (romacs-layer--root-frame)))
     (cons romacs-layer-max-lines
           (- (/ (frame-text-width root) (frame-char-width root)) 2))))
+
+;; Messages as toasts: a stack in the frame's top-right corner, which
+;; covers no mode line and no minibuffer.  The echo area's semantics are
+;; GNU's (`message', `current-message', *Messages*); only where a message
+;; shows is ours (DIVERGENCES.md VM2-MESSAGE-TOAST).
+
+(defcustom romacs-layer-toast-timeout 4
+  "Seconds a message toast shows before it fades."
+  :type 'number)
+
+(defcustom romacs-layer-toast-max 3
+  "Most message toasts shown at once; the oldest goes first."
+  :type 'natnum)
+
+(defvar romacs-layer--toasts nil
+  "The toasts shown, newest first: each (BUFFER TEXT TIMER).")
+
+(defun romacs-layer--toast-buffer ()
+  "A toast buffer no shown toast uses."
+  (let ((used (mapcar #'car romacs-layer--toasts)) (n 0) buffer)
+    (while (memq (setq buffer (get-buffer-create (format " *romacs-toast-%d*" n))) used)
+      (setq n (1+ n)))
+    (with-current-buffer buffer
+      (setq-local mode-line-format nil header-line-format nil cursor-type nil
+                  truncate-lines nil word-wrap t))
+    buffer))
+
+(defun romacs-layer--toast-size (text columns)
+  "TEXT's size in a toast at most COLUMNS wide: (COLUMNS . LINES)."
+  (let* ((lines (split-string text "\n"))
+         (width (min columns (max 1 (apply #'max (mapcar #'string-width lines))))))
+    (cons width (min 6 (apply #'+ (mapcar (lambda (l) (max 1 (ceiling (string-width l) (float width)))) lines))))))
+
+(defun romacs-layer--toast-stack ()
+  "Place the shown toasts at the top right, newest on top."
+  (let* ((root (romacs-layer--root-frame))
+         (cw (frame-char-width root)) (ch (frame-char-height root))
+         (margin 12) (gap 8) (top margin))
+    (dolist (toast romacs-layer--toasts)
+      (let* ((frame (romacs-layer--frame (car toast)))
+             (border (or (frame-parameter frame 'child-frame-border-width) 0))
+             (size (romacs-layer--toast-size (nth 1 toast) (max 20 (/ (frame-text-cols root) 3))))
+             ;; One column more: a window's last holds its continuation glyph.
+             (width (* (1+ (car size)) cw)) (height (* (cdr size) ch)))
+        (set-frame-size frame width height t)
+        (set-frame-position frame (- (frame-text-width root) width (* 2 border) margin) top)
+        (set-frame-parameter frame 'romacs-layer-edge 'top)
+        (unless (frame-visible-p frame) (make-frame-visible frame))
+        (setq top (+ top height (* 2 border) gap))))))
+
+(defun romacs-layer--toast-expire (buffer)
+  "Hide the toast showing BUFFER and close up the stack."
+  (setq romacs-layer--toasts (seq-remove (lambda (toast) (eq (car toast) buffer)) romacs-layer--toasts))
+  (romacs-layer-hide buffer)
+  (romacs-layer--toast-stack))
+
+(defun romacs-layer-toast (text)
+  "Show TEXT as a toast for `romacs-layer-toast-timeout' seconds.
+The same TEXT as the newest toast shows that one longer instead."
+  (if (equal text (nth 1 (car romacs-layer--toasts)))
+      (timer-set-time (nth 2 (car romacs-layer--toasts))
+                      (timer-relative-time nil romacs-layer-toast-timeout))
+    (while (>= (length romacs-layer--toasts) (max 1 romacs-layer-toast-max))
+      (let ((oldest (car (last romacs-layer--toasts))))
+        (cancel-timer (nth 2 oldest))
+        (romacs-layer--toast-expire (car oldest))))
+    (let ((buffer (romacs-layer--toast-buffer)))
+      (with-current-buffer buffer
+        (let ((inhibit-read-only t)) (erase-buffer) (insert text)))
+      (let ((frame (romacs-layer--frame buffer)))
+        (modify-frame-parameters frame (romacs-layer-glass-parameters))
+        (set-window-start (frame-root-window frame) 1))
+      (push (list buffer text (run-at-time romacs-layer-toast-timeout nil #'romacs-layer--toast-expire buffer))
+            romacs-layer--toasts)
+      (romacs-layer--toast-stack))))
 
 (provide 'romacs-layer)
 ;;; romacs-layer.el ends here

@@ -136,6 +136,11 @@ pub struct ChildFrameSnapshot {
     /// The row of its first window that shows its selection, counted from
     /// the window start: its `romacs-layer-selection' parameter.
     pub selection: Option<u32>,
+    /// Its corner radius in pixels (`romacs-layer-radius'), glow colour
+    /// (`romacs-layer-glow', `#RRGGBB') and shadow (`romacs-layer-shadow').
+    pub radius: u32,
+    pub glow: Option<[u8; 3]>,
+    pub shadow: bool,
 }
 
 /// `romacs-layer-animation': no layer animation, fades only, or fades,

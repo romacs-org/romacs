@@ -34,11 +34,12 @@
 ;; `romacs-complete-mode' on, the frame reserves no minibuffer line: the
 ;; minibuffer window is hosted by a child frame (`romacs--host-minibuffer'),
 ;; which shows the prompt and input and, for `completing-read', the
-;; candidates above them (`romacs-complete-position' `bottom') or below
-;; them (`center').  The minibuffer stays GNU's buffer and window, with
-;; its contents, prompt, point, hooks, history and recursion; only where
-;; it is drawn changes.  Messages show briefly in a layer of their own and
-;; stay in *Messages* (DIVERGENCES.md VM2-MINI-COMPLETION-LAYER).
+;; candidates below them in a floating glass panel (`romacs-complete-position'
+;; `center' or `top') or above them in a strip (`bottom').  The minibuffer
+;; stays GNU's buffer and window, with its contents, prompt, point, hooks,
+;; history and recursion; only where it is drawn changes.  Messages show
+;; as toasts in the frame's top-right corner and stay in *Messages*
+;; (DIVERGENCES.md VM2-MINI-COMPLETION-LAYER, VM2-MESSAGE-TOAST).
 ;;
 ;; Candidates come from `completion-all-completions' over the table and
 ;; predicate the reader was given, with `completion-styles' (orderless
@@ -108,21 +109,19 @@ The value should lie between 0 and romacs-complete-count/2."
   "Override sort function which overrides the `display-sort-function'."
   :type '(choice (const nil) function))
 
-;; Romacs: where the layer goes (owner decision: a strip at the frame's
-;; bottom, or a centred box as vertico-posframe draws it).
-(defcustom romacs-complete-position 'bottom
+;; Romacs: where the layer goes: a floating panel, as a command palette
+;; or a launcher shows one, or a strip at the frame's bottom.
+(defcustom romacs-complete-position 'center
   "Where the minibuffer's layer shows.
-`bottom': the frame's full width at its bottom edge, candidates above
-the prompt.  `center': a box centred on the frame, prompt on top."
-  :type '(choice (const bottom) (const center)))
+`center': a panel centred on the frame, prompt on top, candidates below.
+`top': the same panel near the frame's top.  `bottom': the frame's full
+width at its bottom edge, candidates above the prompt.  The floating
+panel is glass (`romacs-layer-glass')."
+  :type '(choice (const center) (const top) (const bottom)))
 
 (defcustom romacs-complete-center-width 0.6
-  "Width of the `center' box, as a fraction of the frame's width."
+  "Width of the floating panel, as a fraction of the frame's width."
   :type 'number)
-
-(defcustom romacs-complete-message-timeout 3
-  "Seconds a message's layer shows, or nil to keep it until the next command."
-  :type '(choice (const :tag "Until the next command" nil) number))
 
 (defgroup romacs-complete-faces nil
   "Faces used by `romacs-complete-mode'."
@@ -899,7 +898,7 @@ Exit with current input if prefix ARG is given."
 
 (defun romacs-complete--edge ()
   "The edge of the layer where the minibuffer window sits."
-  (if (eq romacs-complete-position 'center) 'top 'bottom))
+  (if (eq romacs-complete-position 'bottom) 'bottom 'top))
 
 (defun romacs-complete--frame ()
   "The child frame that hosts the minibuffer window, made once."
@@ -915,6 +914,7 @@ Exit with current input if prefix ARG is given."
       (set-window-parameter window 'no-other-window t)
       (set-window-parameter window 'no-delete-other-windows t)
       (setq romacs-complete--layer frame)))
+  (romacs-complete--look romacs-complete--layer)
   (romacs--host-minibuffer romacs-complete--layer (romacs-complete--edge))
   (unless (eq (frame-parameter romacs-complete--layer 'romacs-layer-edge) (romacs-complete--edge))
     (set-frame-parameter romacs-complete--layer 'romacs-layer-edge (romacs-complete--edge)))
@@ -932,13 +932,30 @@ in the root frame and the text size."
          (frame-height (frame-text-height root))
          (height (+ (* rows ch) mini)))
     (pcase romacs-complete-position
-      ('center
+      ((or 'center 'top)
        (let* ((width (max (* 20 cw) (min (- frame-width (* 4 cw))
                                          (round (* romacs-complete-center-width frame-width)))))
               ;; Centred at its tallest, so it grows downward and stays put.
-              (tallest (+ (* romacs-complete-count ch) mini (* 2 border))))
-         (list (/ (- frame-width width) 2) (max 0 (/ (- frame-height tallest) 2)) width height)))
+              (tallest (+ (* romacs-complete-count ch) mini (* 2 border)))
+              (top (if (eq romacs-complete-position 'top)
+                       (max (* 2 ch) (/ frame-height 12))
+                     (/ (- frame-height tallest) 2))))
+         (list (/ (- frame-width width) 2) (max 0 top) width height)))
       (_ (list 0 (max 0 (- frame-height height (* 2 border))) frame-width height)))))
+
+(defvar romacs-complete--looks nil
+  "The position and glass setting the layer's look was last made for.")
+
+(defun romacs-complete--look (frame)
+  "Make FRAME glass (`romacs-layer-glass') while it floats, else GNU's
+square border, when the position or setting changed."
+  (let ((look (list romacs-complete-position romacs-layer-glass)))
+    (unless (equal look romacs-complete--looks)
+      (setq romacs-complete--looks look)
+      (modify-frame-parameters
+       frame (or (and (not (eq romacs-complete-position 'bottom)) (romacs-layer-glass-parameters))
+                 `((romacs-layer-radius) (romacs-layer-shadow) (romacs-layer-glow) (background-color)
+                   (child-frame-border-width . ,(alist-get 'child-frame-border-width romacs-layer-frame-parameters))))))))
 
 (defun romacs-complete--show (buffer rows &optional selection)
   "Show the minibuffer's layer with BUFFER's ROWS candidate rows,
@@ -975,41 +992,24 @@ show the enclosing minibuffer's candidates again."
           (romacs-complete--show outer (with-current-buffer outer
                                          (if (= (buffer-size) 0) 0 (count-lines (point-min) (point-max))))))))))
 
-;;;; Messages (Romacs): the echo area as a transient layer
+;;;; Messages (Romacs): toasts (romacs-layer.el)
 
 (defvar romacs-echo-area-functions nil
   "Functions the host calls with the echo area's new message, a string,
 or nil once the echo area is cleared.")
 
-(defvar romacs-complete--message-timer nil
-  "The timer hiding the message layer.")
-
-(defun romacs-complete--message-buffer ()
-  "The buffer the message layer shows."
-  (let ((buffer (get-buffer-create " *romacs-message*")))
-    (with-current-buffer buffer
-      (setq-local mode-line-format nil header-line-format nil truncate-lines t cursor-type nil))
-    buffer))
+(defun romacs-complete--message (text)
+  "Show TEXT, the echo area's new message, as a toast.  The echo area's
+clearing at the next command leaves a toast to its own timeout: it
+covers nothing that needs it gone."
+  (when (and text (not (equal text "")))
+    (romacs-layer-toast text)))
 
 (defun romacs-complete--hide-message ()
-  "Hide the message layer."
-  (when (timerp romacs-complete--message-timer) (cancel-timer romacs-complete--message-timer))
-  (setq romacs-complete--message-timer nil)
-  (when-let* ((buffer (get-buffer " *romacs-message*"))) (romacs-layer-hide buffer)))
-
-(defun romacs-complete--message (text)
-  "Show TEXT, the echo area's new message, in a layer for
-`romacs-complete-message-timeout' seconds; hide the layer when TEXT is nil."
-  (if (or (null text) (equal text ""))
-      (romacs-complete--hide-message)
-    (let ((buffer (romacs-complete--message-buffer)))
-      (with-current-buffer buffer
-        (let ((inhibit-read-only t)) (erase-buffer) (insert text)))
-      (romacs-layer-show buffer :position 'bottom)
-      (when (timerp romacs-complete--message-timer) (cancel-timer romacs-complete--message-timer))
-      (setq romacs-complete--message-timer
-            (and romacs-complete-message-timeout
-                 (run-at-time romacs-complete-message-timeout nil #'romacs-complete--hide-message))))))
+  "Hide every message toast."
+  (dolist (toast romacs-layer--toasts)
+    (cancel-timer (nth 2 toast))
+    (romacs-layer--toast-expire (car toast))))
 
 ;;;; The mode
 
@@ -1022,8 +1022,8 @@ or nil once the echo area is cleared.")
   "Vertical minibuffer completion, with the minibuffer shown in a layer.
 The frame then reserves no minibuffer line: the prompt, the input and
 the candidates show in a child frame over the frame's windows, placed by
-`romacs-complete-position', and messages show briefly in a layer of
-their own.  Turning it on turns `fido-mode' and `fido-vertical-mode' off."
+`romacs-complete-position', and messages show briefly as toasts in the
+frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode' and `fido-vertical-mode' off."
   :global t :group 'romacs-complete
   (dolist (fun '(completing-read-default completing-read-multiple))
     (if romacs-complete-mode

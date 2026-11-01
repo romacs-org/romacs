@@ -17,7 +17,7 @@
 //!
 //! `movement` ships off: a popup whose anchor is exact (a tooltip under
 //! one character) reads a few-pixels-behind target as a positioning bug.
-//! Whether any of them applies to a frame is its [`LayerMotion`], which
+//! Whether any of them applies to a frame is its [`Layer`], which
 //! Lisp's `romacs-layer-animation` sets.
 //!
 //! # Why a copy of the ten window-animation slots rather than a shared type
@@ -233,16 +233,23 @@ pub fn default_child_frame_selection() -> ChildFrameAnimation {
     ChildFrameAnimation::easing(60, TransitionEasing::EaseOutCubic, 0.0)
 }
 
-/// How one child frame, shown as a Romacs layer, animates: whether, from
-/// which edge, and where its selection is. The slots above say how long
-/// and on what curve; this says which of them apply to the frame.
+/// One child frame shown as a Romacs layer: how it animates (whether, from
+/// which edge, and where its selection is; the slots above say how long
+/// and on what curve) and how it looks.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct LayerMotion {
+pub struct Layer {
     pub animation: LayerAnimation,
     pub edge: LayerEdge,
     /// The band its selection highlight paints, in the frame's own
     /// coordinates, when it shows one.
     pub selection: Option<SelectionBand>,
+    /// Its corners' radius in logical pixels; zero is square.
+    pub radius: f32,
+    /// The colour it glows in, outside its edge (graphics.md's "light,
+    /// not chrome": a raised layer glows, it is not outlined).
+    pub glow: Option<crate::Color>,
+    /// Whether it casts a soft shadow onto what lies beneath.
+    pub shadow: bool,
 }
 
 /// `romacs-layer-animation': whether a layer animates. `Full` leaves every

@@ -81,11 +81,26 @@ fn a_layer_publishes_how_it_animates_and_its_selection_band() {
     let band = layer.selection.expect("row 1 is shown");
     assert_eq!((band.y, band.height), (line as f32, line as f32));
     assert_eq!(band.color, romacs_display_protocol::Color::from_pixel(0xff0000));
-    // As wide as the row paints the highlight: "two", not the window.
-    assert_eq!((band.x, band.width), (0.0, (3 * column) as f32));
+    // The window's whole width, painted as a background after its row's text.
+    assert_eq!((band.x, band.width), (0.0, children[0].width));
+    assert!(matches!(children[0].glyphs.last(), Some(romacs_display_protocol::FrameGlyph::Background { bounds, color })
+        if bounds.y == band.y && bounds.width == band.width && *color == band.color));
     vm.eval_source("(setq romacs-layer-animation t) (modify-frame-parameters c '((romacs-layer-selection . 7)))").unwrap();
     let snapshot = vm.frame_snapshot(400, 300).unwrap();
     let (children, _) = engine.layout_children(&snapshot, 4, None).unwrap();
     assert_eq!(children[0].layer.animation, romacs_display_protocol::LayerAnimation::Full);
     assert_eq!(children[0].layer.selection, None, "no band past the rows shown");
+    // Glass: rounded and lit, its border padding (unpainted), and its
+    // `background-color' its text's background, as a frame's default face's.
+    vm.eval_source("(modify-frame-parameters c '((romacs-layer-radius . 12) (romacs-layer-shadow . t) \
+                    (romacs-layer-glow . \"#d48a20\") (child-frame-border-width . 10) (background-color . \"#102030\")))").unwrap();
+    let snapshot = vm.frame_snapshot(400, 300).unwrap();
+    let (children, _) = engine.layout_children(&snapshot, 5, None).unwrap();
+    let child = &children[0];
+    assert_eq!((child.layer.radius, child.layer.shadow, child.layer.glow),
+               (12.0, true, Some(romacs_display_protocol::Color::from_pixel(0xd48a20))));
+    assert_eq!(child.border_width, 0.0);
+    let glass = romacs_display_protocol::Color::from_pixel(0x102030);
+    assert!(child.glyphs.iter().any(|g| matches!(g, FrameGlyph::Char { char: 'o', face_id, .. }
+        if child.resolved_face(*face_id).bg == glass)), "text shows the frame's background");
 }

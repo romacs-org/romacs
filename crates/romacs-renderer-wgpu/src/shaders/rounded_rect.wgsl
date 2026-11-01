@@ -15,6 +15,11 @@
 //   8 = Iridescent (position + time chromatic shift)
 //   9 = Fire / Plasma (procedural noise)
 //  10 = Heartbeat (pulsing border width, two-color blend)
+//  11 = Soft shadow (Gaussian falloff of the box, sigma = speed)
+//  12 = Glow (emitted light outside the box, reach = speed)
+//
+// 11 and 12 are a layer's lighting (graphics.md "light, not chrome"); their
+// falloffs come from the scene-graph SDF terms of feat/scene-gpu 8b6b0b3b.
 
 // ─── Constants ───────────────────────────────────────────────────────
 
@@ -341,6 +346,13 @@ fn style_heartbeat(
 
 // ─── Fragment Shader ─────────────────────────────────────────────────
 
+// erf to |error| < 2e-4 (Abramowitz-Stegun 7.1.26 style), enough for 8 bits.
+fn erf_approx(x: f32) -> f32 {
+    let a = 0.147;
+    let x2 = x * x;
+    return sign(x) * sqrt(1.0 - exp(-x2 * (1.2732395 + a * x2) / (1.0 + a * x2)));
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let border_width = in.params.x;
@@ -360,6 +372,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // a fading child frame fades its border and fill together regardless of
     // which style produced them.
     var result: vec4<f32>;
+
+    if (style_id == 11u) {
+        // Coverage of a Gaussian-blurred box: 1/2 - erf(d / (sigma sqrt 2)) / 2.
+        let sigma = max(speed, 1e-4);
+        let a = in.color.a * (0.5 - 0.5 * erf_approx(d_outer / (sigma * 1.4142135))) * uniforms.content_alpha;
+        return vec4<f32>(in.color.rgb * a, a);
+    }
+    if (style_id == 12u) {
+        // Full strength at the edge, smoothly nothing at `speed`, outside only.
+        let t = clamp(d_outer / max(speed, 1e-4), 0.0, 1.0);
+        let falloff = (1.0 - t) * (1.0 - t) * (1.0 - t * 0.5);
+        let a = in.color.a * falloff * (1.0 - outer_alpha) * uniforms.content_alpha;
+        return vec4<f32>(in.color.rgb * a, a);
+    }
 
     // Filled mode (no inner cutout)
     if (border_width <= 0.0) {

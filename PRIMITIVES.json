@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "9d762bf10f871c3f0559de6876573065717b4c2bb6181f427c71d621b0656d78",
+  "source_fingerprint": "7122ef4aa8a627e46f5cf7c5fb8ac735164070dda4e105d054bf79da2579fdfd",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -126,7 +126,7 @@
   "#:vm2-set-interactive-form": {
    "name": "#:vm2-set-interactive-form",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:772"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:771"
   },
   "#:vm2-temp-buffer": {
    "name": "#:vm2-temp-buffer",
@@ -628,7 +628,7 @@
   "call-interactively": {
    "name": "call-interactively",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:281"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:280"
   },
   "call-last-kbd-macro": {
    "name": "call-last-kbd-macro",
@@ -903,7 +903,7 @@
   "command-modes": {
    "name": "command-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:846"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:845"
   },
   "command-remapping": {
    "name": "command-remapping",
@@ -913,7 +913,7 @@
   "commandp": {
    "name": "commandp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:781"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:780"
   },
   "compare-strings": {
    "name": "compare-strings",

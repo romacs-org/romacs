@@ -225,15 +225,23 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
         ParentFrameRect::new(child.x as f32, child.y as f32, frame.width, frame.height).map_err(|e| e.to_string())?, z,
     );
     hide_cursors_off(&mut frame, &frame_snapshot);
-    frame.layer = layer_motion(child, &ends, &frame);
+    frame.layer = layer_motion(child, &ends);
+    // The selection fills its row to the window's edge, as a palette's does
+    // (the band GNU's `:extend' would draw); the text's own background is
+    // the band's colour, so the row reads as one band.
+    if let Some(band) = frame.layer.selection {
+        frame.add_background(band.x, band.y, band.width, band.height, band.color);
+    }
+    // A rounded layer is light, not chrome: its border is padding, unpainted.
+    if child.radius > 0 { frame.border_width = 0.0; }
     Ok((frame, ends))
 }
 
-/// How CHILD animates, with its selection band where ENDS laid its rows
-/// and FRAME painted them.
-fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd], frame: &FrameGlyphBuffer) -> romacs_display_protocol::LayerMotion {
-    use romacs_display_protocol::{LayerAnimation, LayerEdge, LayerMotion};
-    LayerMotion {
+/// How CHILD animates and looks, with its selection band where ENDS laid
+/// its rows.
+fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_display_protocol::Layer {
+    use romacs_display_protocol::{LayerAnimation, LayerEdge, Layer};
+    Layer {
         animation: match child.animation {
             romacs_layout_input::LayerAnimation::Off => LayerAnimation::Off,
             romacs_layout_input::LayerAnimation::Reduced => LayerAnimation::Reduced,
@@ -243,30 +251,25 @@ fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd], frame: &FrameGly
             romacs_layout_input::LayerEdge::Bottom => LayerEdge::Bottom,
             romacs_layout_input::LayerEdge::Top => LayerEdge::Top,
         },
-        selection: child.selection.and_then(|row| selection_band(child, ends.first()?, row, frame)),
+        selection: child.selection.and_then(|row| selection_band(child, ends.first()?, row)),
+        radius: child.radius as f32,
+        glow: child.glow.map(color),
+        shadow: child.shadow,
     }
 }
 
-/// The band row ROW of CHILD's first window paints, laid out as END and
-/// painted in FRAME: the row's height, in the background of the face at
-/// the row's start, as wide as the row's glyphs in that background reach;
-/// none past the rows shown, under a header line, or where the row paints
-/// no such glyph.
-fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32, frame: &FrameGlyphBuffer) -> Option<romacs_display_protocol::SelectionBand> {
+/// The band row ROW of CHILD's first window shows its selection in, laid
+/// out as END: the window's inner width, the row's height, in the
+/// background of the face at the row's start; none past the rows shown or
+/// under a header line.
+fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32) -> Option<romacs_display_protocol::SelectionBand> {
     let placed = child.windows.first()?;
     let window = &placed.snapshot;
     let row = end.rows.get(row as usize).filter(|_| window.header_line.is_none())?;
     let face = window.text.face_runs.iter().find(|run| run.bytes.contains(&row.start)).map_or(0, |run| run.face.0 as usize);
-    let (band, y) = (color(window.faces.get(face)?.background), placed.y as f32 + row.y);
-    let id = DisplayWindowId::new(window.id as i64);
-    let (left, right) = frame.glyphs.iter().filter_map(|glyph| match glyph {
-        romacs_display_protocol::FrameGlyph::Char { window_id, x, y: gy, width, face_id, .. }
-        | romacs_display_protocol::FrameGlyph::Stretch { window_id, x, y: gy, width, face_id, .. }
-            if *window_id == id && *gy == y && frame.resolved_face(*face_id).bg == band => Some((*x, x + width)),
-        _ => None,
-    }).fold(None, |extent: Option<(f32, f32)>, (l, r)| Some(extent.map_or((l, r), |(a, b)| (a.min(l), b.max(r)))))?;
     Some(romacs_display_protocol::SelectionBand {
-        x: left, y, width: right - left, height: row.height, color: band, base: color(window.faces.first()?.background),
+        x: placed.x as f32, y: placed.y as f32 + row.y, width: window.width as f32, height: row.height,
+        color: color(window.faces.get(face)?.background), base: color(window.faces.first()?.background),
     })
 }
 
