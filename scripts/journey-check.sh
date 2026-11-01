@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# journey-check.sh -- re-measure the owner's first-session journey ladder.
+# journey-check.sh -- re-measure the first-session journey ladder.
 #
 #   scripts/journey-check.sh [OUT_DIR]
 #
 # Builds this checkout's GUI and census binaries in RELEASE into a private
-# target (never the owner's ~/.cache/romacs/target), then:
+# target (never the default ~/.cache/romacs/target), then:
 #   1. GNU 32.0.50 (-Q, throwaway HOME): which file defines each journey
 #      command, and GNU's C primitive list;
 #   2. VM2 (census binary, WARM: loadup.el chain first): which of those
 #      primitives are not fbound, and where each journey file stops loading;
 #   3. GNU interactive (-nw in a private tmux pty): every VM2-missing
 #      primitive GNU calls while doing each step (gnu-trace.el);
-#   4. the REAL GUI on the owner's Hyprland (workspace 2, HDMI-A-1), driven
+#   4. the REAL GUI on the user's Hyprland (workspace 2), driven
 #      with wtype, for the default launcher (VM2's workspace, no GNU Lisp),
 #      --gnu-lisp (loadup.el alone) and --loadup (GNU's loadup.el + romacs
 #      stand-ins where GNU's command did not load) (ladder.py); plus the GUI's
@@ -45,7 +45,7 @@ gnu() { local h; h=$(mktemp -d "$out/gnuhome.XXXX"); env -i PATH=/usr/bin:/bin H
 echo "journey-check: 1/5 GNU command files and primitive list" >&2
 gnu --batch -l "$j/where.el" >"$out/gnu-where.txt" 2>/dev/null
 gnu --batch -l "$j/gnu-primitives.el" "$out/gnu-primitives.txt"
-(cd ~/Projects/rust/gnu-emacs-ref/src && grep -o 'DEFUN ("[^"]*"' ./*.c | sed 's|^\./||; s/:DEFUN ("/ /; s/"$//') >"$out/defun-files.txt"
+(cd "${ROMACS_GNU_SOURCE:?the pinned GNU source tree}/src" && grep -o 'DEFUN ("[^"]*"' ./*.c | sed 's|^\./||; s/:DEFUN ("/ /; s/"$//') >"$out/defun-files.txt"
 
 echo "journey-check: 2/5 VM2 warm: missing primitives, load frontier" >&2
 chain=(emacs-lisp/debug-early emacs-lisp/byte-run emacs-lisp/backquote subr keymap version widget custom

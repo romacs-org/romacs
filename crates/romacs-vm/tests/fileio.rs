@@ -312,7 +312,7 @@ fn visiting_inserts_decoded_text_and_names_the_buffer() {
     }
 }
 
-/// The owner's journey in Lisp: visit, edit, save with VISIT t; the file on
+/// A user's journey in Lisp: visit, edit, save with VISIT t; the file on
 /// disk must be exactly the edited text's UTF-8, not merely "written".
 #[test]
 fn an_edited_visit_saves_back_byte_identically() {

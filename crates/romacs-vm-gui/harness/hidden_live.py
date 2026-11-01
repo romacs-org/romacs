@@ -2,7 +2,7 @@
 """A window on a hidden workspace, in a native --loadup session in a private
 headless labwc with two desktops.
 
-The owner's sessions died a little after he switched Hyprland workspaces: a
+Sessions died a little after the user switched Hyprland workspaces: a
 window the compositor does not draw gets no frame callbacks, winit then
 withholds RedrawRequested, the paint in flight never renders, and the loop
 gave up after 30 s.  Here labwc's GoToDesktop (bound to a key wtype sends)

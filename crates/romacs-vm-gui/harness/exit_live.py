@@ -3,12 +3,13 @@
 
 Each workflow starts a fresh session in its own private headless labwc,
 HOME, XDG and TMPDIR (parity_live.py), with ROMACS_USAGE_LOG naming a file
-in its tree, as the Omarchy launcher sets it; keys go through the command
-loop, typed by wtype.  With --launcher, the session runs through that
-launcher (romacs-preview) instead, from a runtime directory its private
-HOME names as ~/.local/state/romacs/current; the launcher then owns the
-stderr log and the usage log, and --sessions (romacs-sessions) summarises
-them.
+in its tree, as a launcher sets it; keys go through the command loop,
+typed by wtype.  With --launcher, the session runs through that external
+launcher instead, from a runtime directory linked at --launcher-runtime
+(a path under the private HOME); the launcher then owns the stderr log and
+the usage log, which it keeps in a directory per session under
+--launcher-sessions (another such path), and --sessions, a session
+summariser, summarises them.
 
   kill-emacs  self-insert keys, a command of 300 ms (F5), a command that
               signals with a file name in its message (F6), a command of
@@ -23,7 +24,8 @@ them.
               with status 1, stderr saying `romacs-exit' with the reason
               display-lost.
 
-usage: exit_live.py --romacs BIN --output DIR [--launcher romacs-preview --sessions romacs-sessions] [--workflow NAME]...
+usage: exit_live.py --romacs BIN --output DIR [--workflow NAME]...
+                   [--launcher LAUNCHER --launcher-runtime REL --launcher-sessions REL [--sessions SUMMARISER]]
 """
 import argparse
 import json
@@ -75,8 +77,8 @@ def start(args, base, name):
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
     if args.launcher:
         directory = runtime(root, args.romacs)
-        (home / '.local/state/romacs').mkdir(parents=True)
-        (home / '.local/state/romacs/current').symlink_to(directory)
+        (home / args.launcher_runtime).parent.mkdir(parents=True, exist_ok=True)
+        (home / args.launcher_runtime).symlink_to(directory)
         env.update(ROMACS_RUNTIME_ROOT=str(directory), ROMACS_LISP_DIR=str(directory / 'gnu-lisp'))
         argv = [args.launcher]
     else:
@@ -87,7 +89,7 @@ def start(args, base, name):
     # Keys typed before the window has the keyboard are lost.
     ready(engine, '(eq (frame-focus-state) t)', 'focus')
     if args.launcher:
-        session = next((home / '.local/state/romacs/sessions').glob('*/'))
+        session = next((home / args.launcher_sessions).glob('*/'))
         return engine, session / 'stderr.log', session / 'usage.jsonl'
     return engine, root / 'engine.log', root / 'usage.jsonl'
 
@@ -158,14 +160,18 @@ WORKFLOWS = {'kill-emacs': run_kill_emacs, 'compositor': run_compositor}
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--romacs', required=True)
-    parser.add_argument('--launcher', help='run each session through this launcher (romacs-preview)')
-    parser.add_argument('--sessions', help='with --launcher: the session summariser (romacs-sessions)')
+    parser.add_argument('--launcher', help='run each session through this launcher')
+    parser.add_argument('--launcher-runtime', help="with --launcher: where, under HOME, it finds the build's runtime")
+    parser.add_argument('--launcher-sessions', help='with --launcher: where, under HOME, it keeps per-session logs')
+    parser.add_argument('--sessions', help='with --launcher: the session summariser')
     parser.add_argument('--output', required=True)
     parser.add_argument('--work', default=os.environ.get('TMPDIR', '/tmp'))
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--workflow', action='append')
     parser.add_argument('--timeout', type=float, default=120)
     args = parser.parse_args()
+    if args.launcher and not (args.launcher_runtime and args.launcher_sessions):
+        parser.error('--launcher needs --launcher-runtime and --launcher-sessions')
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     output = Path(args.output)
     output.mkdir(parents=True)

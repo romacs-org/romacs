@@ -109,15 +109,17 @@ apart, and each step's wall time and, with `--perf`, its `instructions:u`.
 It never invokes Cargo.  Each harness names its workflows, its private trees
 and its comparison policy in its docstring:
 
-* `gnosis_parity_live.py`: the owner's gnosis workflows (dashboard, search
+* `gnosis_parity_live.py`: everyday gnosis workflows (dashboard, search
   and tags, review, adding and editing a thema), each engine on its own copy
-  of a Gnosis database.
-* `hermes_parity_live.py`: the owner's hermes checkout, read-only against
-  the running dashboard at 127.0.0.1:9119 (dashboard, session browser and
+  of a Gnosis database (`--db`, or a profile config's; a live database is
+  refused).
+* `hermes_parity_live.py`: hermes (rlisp's copy, or a profile config's
+  `hermes_sources`), read-only against a running dashboard (hermes's
+  default URL, or the profile's `hermes_url`), never started (dashboard, session browser and
   search, a session's history), its token discovered by hermes and never
   reported.
 * `notmuch_parity_live.py`: the real notmuch package (the system's
-  site-lisp) through the owner's mail settings as a Romacs init holds them
+  site-lisp) through a user's mail settings as a Romacs init holds them
   (`--snippet`): notmuch-hello, a saved search, tagging and archiving,
   notmuch-show with HTML and attachments, notmuch-tree, composing with
   address completion, an attachment and a saved draft, and sending a new
@@ -141,14 +143,17 @@ and its comparison policy in its docstring:
 
 `bench/bench.py` is an MCP server for agents.  `bench_start` launches pinned
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
-HOME, on one of two profiles (`bench/owner.py`).  The default, `stock`, loads
+HOME, on one of two profiles (`real_init.py`).  The default, `stock`, loads
 no one's init: both engines run `-Q` and load only the bench's endpoint
 with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock gnu-lisp and rlisp, on a
 generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
 Markdown, Org and a Makefile, with a five-commit history whose authors and
-dates are fixed, so the hashes match everywhere).  `owner` is the owner's
-session: init.el's editing, completion (fido-vertical), org, dired, project,
-vc, vc-plus, eat, eshell, gnosis and hermes blocks, without straight.  Both
+dates are fixed, so the hashes match everywhere).  `init` is a real-init
+profile, described by a JSON profile config kept outside the repository
+(`--profile-config FILE` or `ROMACS_BENCH_PROFILE`): the init's blocks, the
+package sources it loads, the project to clone, an org file, a gnosis
+database copy and the hermes dashboard URL; `real_init.py`'s docstring
+lists the keys.  Both
 profiles give GNU the settings Romacs's `--loadup` makes by design, as the
 parity harnesses do.  Each engine serves
 `rlisp/romacs-mcp.el` with the session tools from
@@ -185,20 +190,24 @@ the docstring) and `bench_stop`.  Every call is appended to the session's
 
 Data safety: the project is a `git clone --no-hardlinks` copy and the org
 file a copy, both in the private HOME.  The gnosis database is a reflink copy
-of the copy named by `--gnosis-db`, never the live database.  Hermes attaches
-to the running dashboard at 127.0.0.1:9119.  A key that sends a hermes prompt
+of the copy named by `--gnosis-db` or the profile config, never the live
+database: gnosis's default locations and the profile's `live_gnosis_db` are
+refused.  Hermes attaches to a running dashboard and never starts one: an
+init that sets another start mode is refused, and every acquisition is made
+remote.  A key that sends a hermes prompt
 must carry `effect=hermes-prompt`.  The bench allows one per engine per
 session, and replay skips such keys unless `--allow-effect hermes-prompt` is
 given.
 
 ```sh
-source ~/.cache/claude-scratch/bin/romacs-env.sh   # pinned GNU, ROMACS_GNU_SOURCE
+# in the project environment (pinned GNU, ROMACS_GNU_SOURCE)
+export ROMACS_BENCH_PROFILE=/path/to/profile.json   # only for the init profile
 export ROMACS_BENCH_ROMACS=$CARGO_TARGET_DIR/gate/romacs-vm-gui
 export ROMACS_BENCH_OUTPUT=~/.cache/romacs-bench ROMACS_BENCH_GNOSIS_DB=/path/to/copy/gnosis.db
 export ROMACS_BENCH_ORG=/path/to/notes.org   # copied to ~/Documents/<its name> in each private HOME
 # Claude Code
 claude mcp add romacs-bench -e ROMACS_BENCH_ROMACS -e ROMACS_GNU_ORACLE -e ROMACS_GNU_SOURCE \
-  -e ROMACS_BENCH_OUTPUT -e ROMACS_BENCH_GNOSIS_DB -e ROMACS_BENCH_ORG -- python3 -B "$PWD/crates/romacs-vm-gui/harness/bench/bench.py" mcp
+  -e ROMACS_BENCH_PROFILE -e ROMACS_BENCH_OUTPUT -e ROMACS_BENCH_GNOSIS_DB -e ROMACS_BENCH_ORG -- python3 -B "$PWD/crates/romacs-vm-gui/harness/bench/bench.py" mcp
 # Codex: ~/.codex/config.toml
 #   [mcp_servers.romacs-bench]
 #   command = "python3"
@@ -212,12 +221,12 @@ python3 -B crates/romacs-vm-gui/harness/bench/bench.py call --control $XDG_RUNTI
   bench_send_keys '{"keys": "C-x C-f", "wait": 10, "step": "find-file"}'
 # Re-drive a recording against a new binary, the GNU side cached from a run
 python3 -B crates/romacs-vm-gui/harness/bench/bench.py replay \
-  crates/romacs-vm-gui/harness/bench/recordings/daily-journey.jsonl \
+  crates/romacs-vm-gui/harness/bench/recordings/general-usage.jsonl \
   --output OUT --gnu-cache RUN/session-*/results.jsonl
 ```
 
 A `stock` start takes about 4 s for GNU and 17 s for Romacs.  The first
-`owner` start for a package set has the pinned GNU byte-compile that set,
+`init` start for a package set has the pinned GNU byte-compile that set,
 which takes minutes; after that it takes about 10 s for GNU and 25-35 s for
 Romacs.
 
@@ -245,12 +254,9 @@ the recording needs no change when it is fixed.  A `--gnu-cache` must come
 from a live run of this same recording, since compares are matched by
 order.  It leaves out list-packages, which would need the network.
 
-`recordings/daily-journey.jsonl`, on the `owner` profile, is the owner's
-daily journey: find-file
-and minibuffer motion, editing, project commands, org, a gnosis review,
-one hermes project-chat prompt, help and search commands, and quitting.
-It has 103 compared steps.  Replaying it with the GNU side cached takes
-about 5 minutes.  It keeps observations out of the repository: only the
+A recording made on the `init` profile names a user's own files and
+projects, so it is kept beside the profile config, outside the repository,
+and replayed the same way.  A recording keeps observations out: only the
 calls and their verdicts are recorded, and a run's `results.jsonl` stays
 local.  Gnosis due cards and model replies depend on the day, so on
 replay those steps can diverge for reasons outside Romacs.
@@ -263,7 +269,7 @@ in a given Romacs build and prints one table: per workload, each engine's
 default 3), the Romacs/GNU ratio of each, and the change of Romacs's
 figures since the previous saved run.  Each run is saved as
 `results.json` and `table.md` under `OUT/<commit>/<UTC time>/` (default
-OUT `~/.cache/claude-scratch/perf-bench`), so a rerun after every master
+OUT `~/.cache/romacs/perf-bench`, or `$ROMACS_PERFBENCH_OUT`), so a rerun after every master
 shows the trend.  The workloads, and how each is counted, are in the
 script's docstring:
 
@@ -288,10 +294,11 @@ script's docstring:
   paused while a phase is counted.  Wall per key runs from
   `pre-command-hook` to the next idle moment, after redisplay
   (`perfbench-gui.el`).
-* owner init body (bench/owner.py's profile), GNU against Romacs from
+* `init`, the real-init profile's init body (`--profile-config`), GNU against Romacs from
   source and from its init layer; wall only.
 * gnosis dashboard open and back (`gnosis_parity_live.py` on a database
-  copy given with `--gnosis-db` and `--gnosis-db-repo`), and hermes
+  copy given with `--gnosis-db` and `--gnosis-db-repo`, or the profile
+  config's), and hermes
   dashboard open (`hermes_parity_live.py`, read-only, only when the
   dashboard answers), one run each.
 
@@ -301,19 +308,18 @@ Instructions are still reported.  The inputs are pinned.  The Emacs tree
 is a `--shared` clone of `$ROMACS_GNU_SOURCE` at the oracle's commit,
 checked clean, and its fixture files are checked against SHA-256s.  The
 5,000 files have fixed contents and mtimes.  Every engine runs in private
-HOME/XDG/TMPDIR trees, and no workload writes owner data.
+HOME/XDG/TMPDIR trees, and no workload writes a user's data.
 
 ```sh
-source ~/.cache/claude-scratch/bin/romacs-env.sh
+# in the project environment (pinned GNU oracle and source)
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py \
-  --romacs ~/.local/state/romacs/current/romacs-vm-gui \
-  --gnosis-db COPY/gnosis.db --gnosis-db-repo REPO   # about 15 minutes
+  --romacs INSTALLED/romacs-vm-gui --profile-config PROFILE.json  # about 15 minutes
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --quick  # about 4
 ```
 
-A binary installed beside its runtime (`gnu-lisp/`, `rlisp/`, as under
-`~/.local/state/romacs/current`) runs that runtime; otherwise give
+A binary installed beside its runtime (`gnu-lisp/`, `rlisp/`, as an
+installed build has them) runs that runtime; otherwise give
 `--runtime`.  The commit comes from the `build.json` beside the binary, or
-from `--commit`.  `--only` takes groups (`batch micro ert gui owner apps`)
+from `--commit`.  `--only` takes groups (`batch micro ert gui init apps`)
 or workloads: a batch row's name, `micro`, `ERT 25 files`, `launch`,
-`keys`, `owner init` or `apps`.
+`keys`, `init` or `apps`.

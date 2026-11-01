@@ -361,7 +361,7 @@ def main():
                 fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'private compositor', compositor)
                 env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
                 # Every client below connects to XDG_RUNTIME_DIR/WAYLAND_DISPLAY:
-                # the private compositor's socket, never the owner's display.
+                # the private compositor's socket, never the user's display.
                 socket = Path(env['XDG_RUNTIME_DIR']) / env['WAYLAND_DISPLAY']
                 assert socket.is_socket() and socket.parent == root, socket
                 assert 'DISPLAY' not in env

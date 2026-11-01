@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the GNU-suite floor restatement for the owner's review.
+"""Render the GNU-suite floor restatement for review.
 
     python3 tools/restatement_report.py OLD.json NEW.json [--command FILE] > REPORT.md
 
@@ -7,7 +7,7 @@ OLD is the ratchet in force (parity-ratchet.json), NEW what
 `parity_ratchet.py record --out NEW.json` measured. The report shows the
 arithmetic from the recorded figure to the honest ones, and lists EVERY
 member whose standing changes with its class and evidence. It decides
-nothing: the restatement happens only when the owner runs `record` with the
+nothing: the restatement happens only when a maintainer runs `record` with the
 `--lower` arguments it prints.
 """
 from __future__ import annotations
@@ -36,9 +36,9 @@ def render(old: dict, new: dict, evidence: dict, command: str | None) -> str:
     h = ng['honest']
     real = ng['real_ert']
     lines = [
-        '# GNU-suite floor restatement: proposal for the owner',
+        '# GNU-suite floor restatement: proposal',
         '',
-        'Nothing here is applied. The ratchet in force stays as it is until the owner runs the',
+        'Nothing here is applied. The ratchet in force stays as it is until a maintainer runs the',
         '`record --lower` command at the end. Every number below was measured by',
         '`tools/parity_ratchet.py record --out` on the tree named in its provenance.',
         '',

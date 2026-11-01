@@ -1228,7 +1228,7 @@ def apply_lowerings(old: dict, data: dict, lower: dict[str, str], verdicts: dict
     if refused:
         needed = sorted({e['unit'] for e in result['lower'] if floor_unit(e['unit'])} - set(lower))
         if needed:
-            refused.append('if, and only if, the owner authorises lowering these units, the command is:\n    '
+            refused.append('if, and only if, lowering these units is deliberate, the command is:\n    '
                            + RECORD_COMMAND + ''.join(f' \\\n      --lower {u} --because "REASON"' for u in needed))
         raise Refusal(EXIT_LOWER, 'refusing to lower floors:\n  ' + '\n  '.join(refused)
                       + '\n  a regression is fixed, not recorded. Only if the measured thing was replaced '
@@ -1239,8 +1239,8 @@ def apply_lowerings(old: dict, data: dict, lower: dict[str, str], verdicts: dict
 def budget_growth(result: dict, lowered: dict[str, set]) -> list[str]:
     """Members added to the vacuous budget that no lowering moved there.
 
-    The budget may only decrease. The one way a member enters it is the
-    owner reclassifying a PROTECTED floor member through a lowering record
+    The budget may only decrease. The one way a member enters it is a
+    deliberate reclassification of a PROTECTED floor member through a lowering record
     for that file's gnu: unit, in the same step: the floor and the budget
     then change together and nothing is gained. A brand-new pass never
     enters the budget, and neither does a member nobody lowered.

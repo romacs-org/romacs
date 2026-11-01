@@ -149,7 +149,7 @@ def main():
                 keyboard = subprocess.Popen(["/usr/bin/wtype", "-s", "120000", "-k", "Shift_L"], env=env,
                                             stdout=blog, stderr=blog)
                 time.sleep(0.3)
-                # Exactly what the owner types: a RELATIVE name, from its directory.
+                # Exactly what a user types: a RELATIVE name, from its directory.
                 cmd = [str(a.binary.resolve()), "--trace-scene", "+1:1", "--", "-notes.org"]
                 report["command"] = cmd
                 proc = subprocess.Popen(cmd, env=env, cwd=work, stdin=subprocess.DEVNULL,

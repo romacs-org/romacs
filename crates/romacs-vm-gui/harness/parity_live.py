@@ -325,7 +325,7 @@ def lisp_copy(base, name, sources, compile_):
 
 
 def gnu_engine(root, home, env, init, lisp, timeout, tools, cls=None):
-    """Pinned GNU pgtk on INIT, as the owner's ~/.config/emacs/init.el;
+    """Pinned GNU pgtk on INIT, as a user's ~/.config/emacs/init.el;
     LISP is the package directory its paths are normalised from.  GNU's
     native compiler, which Romacs lacks, compiles nothing: neither the
     packages (the harness byte-compiles them) nor the trampolines advising

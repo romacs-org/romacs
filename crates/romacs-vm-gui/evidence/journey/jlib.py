@@ -2,7 +2,7 @@
 
 Launches the GUI binary built from this checkout with exactly the environment
 scripts/romacs gives it (ROMACS_LISP_DIR, launch font, RUST_MIN_STACK unset),
-on Hyprland workspace 2 (HDMI-A-1) without stealing the owner's workspace,
+on Hyprland workspace 2 without stealing the user's workspace,
 drives it with real Wayland key events (wtype) and reads back:
 
   * stdout   -- the VM's own reply per executed command: the command symbol
@@ -91,7 +91,7 @@ class Gui:
     def safe(self):
         c = active()
         if c.get('address') != self.addr:
-            # Focus moved (a notification, or the owner). Take it back at most
+            # Focus moved (a notification, or the user). Take it back at most
             # a few times per run, and say so in the record.
             self.refocus = getattr(self, 'refocus', 0) + 1
             if self.refocus > 3:

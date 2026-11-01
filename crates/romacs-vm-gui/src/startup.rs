@@ -1857,7 +1857,7 @@ mod tests {
 
     /// A private HOME and XDG_CONFIG_HOME for `vm`'s session: the interactive
     /// session's user directory, which GNU's startup creates, is never the
-    /// owner's.
+    /// user's own.
     fn private_home(vm: &mut Vm, name: &str) -> std::path::PathBuf {
         let home = scratch_lisp(&format!("{name}-home"), &[]);
         let entries = [format!("HOME={}", home.display()), format!("XDG_CONFIG_HOME={}", home.join("config").display())];
