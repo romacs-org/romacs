@@ -293,6 +293,10 @@ impl RenderApp {
         // consecutive surface-Lost acquisitions, or by the debug simulation
         // command. Rebuild the whole GPU stack before doing anything else
         // with it.
+        if let Some(at) = self.device_lost.retry_wait(std::time::Instant::now()) {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(at));
+            return;
+        }
         if self.device_lost.take() {
             if self.process_startup_commands() {
                 self.handle_exiting();
@@ -304,7 +308,7 @@ impl RenderApp {
             self.menus.cancel();
             self.menus.shutdown();
             let recovered = self.recover_from_device_loss(event_loop);
-            if self.device_lost.record_recovery(recovered) {
+            if self.device_lost.record_recovery(recovered, std::time::Instant::now()) {
                 tracing::error!(
                     "GPU device unrecoverable: {} rebuilds in a row failed",
                     super::device_loss::MAX_FAILED_RECOVERIES
@@ -316,10 +320,7 @@ impl RenderApp {
                 return;
             }
             if !recovered {
-                // The latch stays set: retry in a second, whatever else wakes.
-                event_loop.set_control_flow(ControlFlow::WaitUntil(
-                    std::time::Instant::now() + std::time::Duration::from_secs(1),
-                ));
+                // The latch stays set: retry_wait holds the next try a second off.
                 return;
             }
         }

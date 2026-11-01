@@ -100,12 +100,42 @@ fn out_of_memory_and_internal_errors_rebuild_the_device() {
 #[test]
 fn only_consecutive_failed_rebuilds_give_up() {
     let mut detector = DeviceLossDetector::new();
+    let now = std::time::Instant::now();
     for _ in 0..MAX_FAILED_RECOVERIES - 1 {
-        assert!(!detector.record_recovery(false));
+        assert!(!detector.record_recovery(false, now));
     }
-    assert!(!detector.record_recovery(true), "a rebuild that works resets the count");
+    assert!(!detector.record_recovery(true, now), "a rebuild that works resets the count");
     for _ in 0..MAX_FAILED_RECOVERIES - 1 {
-        assert!(!detector.record_recovery(false));
+        assert!(!detector.record_recovery(false, now));
     }
-    assert!(detector.record_recovery(false), "the last failure in a row gives up");
+    assert!(detector.record_recovery(false, now), "the last failure in a row gives up");
+}
+
+/// Another wake (input, a resize) is no retry: a failed rebuild holds the
+/// latched loss a second, so wakes cannot spend every attempt at once.
+#[test]
+fn a_failed_rebuild_holds_the_next_a_second() {
+    let mut detector = DeviceLossDetector::new();
+    let now = std::time::Instant::now();
+    detector.mark_lost_now();
+    assert!(detector.take());
+    detector.record_recovery(false, now);
+    detector.mark_lost_now(); // what a failed recover_from_device_loss leaves
+    let second = std::time::Duration::from_secs(1);
+    assert_eq!(detector.retry_wait(now), Some(now + second));
+    assert_eq!(detector.retry_wait(now + second), None, "due a second later");
+    detector.record_recovery(true, now + second);
+    assert_eq!(detector.retry_wait(now), None, "a rebuild that works clears it");
+}
+
+#[test]
+fn validation_errors_past_the_bound_are_not_told() {
+    let detector = DeviceLossDetector::new();
+    let handler = detector.uncaptured_errors();
+    for n in 0..32 {
+        handler(validation(&format!("error {n}")));
+    }
+    assert!(detector.take_repaint());
+    handler(validation("error 33"));
+    assert!(!detector.take_repaint(), "a full set stops telling and repainting");
 }

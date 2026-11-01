@@ -171,16 +171,20 @@ mod lent_tests {
     }
 
     /// A prompt that painted into a window the compositor does not draw
-    /// leaves its paint in flight in place of the loop's, still dated from
-    /// the loop's undrawn one: the stall goes on counting, and its render
-    /// when the window shows settles both.
+    /// leaves the loop's undrawn paint in flight: the stall goes on counting,
+    /// and the prompt's render when the window shows settles it, by its own
+    /// id, so the latency trace retires it and takes the next paint (it
+    /// asserted, ending the session, when the prompt's id replaced it).
     #[test]
-    fn an_undrawn_prompt_paint_goes_back_in_flight() {
+    fn an_undrawn_prompt_paint_leaves_the_loops_in_flight() {
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
         let since = Instant::now();
         let mut live = presentation::Presentation::new();
+        let mut trace = latency::Trace::default();
+        let paint = || latency::Paint { submitted: since, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 };
         host.borrow_mut().presentation = 7;
         live.submitted(7, since);
+        trace.submitted(7, paint(), since, 0);
         let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
         lent.run(&host, |_| {
@@ -188,10 +192,13 @@ mod lent_tests {
             shared.presentation += 1;
             shared.in_flight = Some((shared.presentation, shared.in_flight.unwrap().1));
         });
-        assert_eq!(live.in_flight(), Some((8, since)));
+        assert_eq!(live.in_flight(), Some((7, since)));
         live.completed(8, Instant::now());
-        assert_eq!(live.take_retired().map(|(p, _)| p), Some(8));
+        let (retired, at) = live.take_retired().unwrap();
+        assert_eq!(retired, 7);
+        trace.completed(retired, at);
         assert!(live.ready(), "the prompt's paint leaves the frame to repaint");
+        trace.submitted(9, paint(), since, 0);
     }
 
     /// A prompt read inside any Lisp the loop runs (a timer, a background

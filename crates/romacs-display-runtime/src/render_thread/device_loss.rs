@@ -52,8 +52,8 @@ pub(super) fn fault(error: &wgpu::Error) -> Fault {
 /// Whether DESCRIPTION is new to SEEN, which keeps a bounded few.
 fn first_seen(seen: &std::sync::Mutex<Vec<String>>, description: &str) -> bool {
     let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
-    if seen.iter().any(|known| known == description) { return false; }
-    if seen.len() < 32 { seen.push(description.to_owned()); }
+    if seen.len() >= 32 || seen.iter().any(|known| known == description) { return false; }
+    seen.push(description.to_owned());
     true
 }
 
@@ -66,6 +66,8 @@ pub(super) struct DeviceLossDetector {
     /// Set by a newly seen validation error; drained by [`Self::take_repaint`].
     repaint: Arc<AtomicBool>,
     failed_recoveries: u32,
+    /// After a failed rebuild, none before this: other wakes come sooner.
+    retry_at: Option<std::time::Instant>,
 }
 
 impl DeviceLossDetector {
@@ -75,6 +77,7 @@ impl DeviceLossDetector {
             consecutive_surface_lost: 0,
             repaint: Arc::new(AtomicBool::new(false)),
             failed_recoveries: 0,
+            retry_at: None,
         }
     }
 
@@ -107,11 +110,17 @@ impl DeviceLossDetector {
         self.repaint.swap(false, Ordering::SeqCst)
     }
 
-    /// Count a rebuild's outcome; true once rebuilds failed
-    /// [`MAX_FAILED_RECOVERIES`] times in a row.
-    pub(super) fn record_recovery(&mut self, recovered: bool) -> bool {
+    /// Count a rebuild's outcome at NOW; true once rebuilds failed
+    /// [`MAX_FAILED_RECOVERIES`] times in a row. The next waits a second.
+    pub(super) fn record_recovery(&mut self, recovered: bool, now: std::time::Instant) -> bool {
         self.failed_recoveries = if recovered { 0 } else { self.failed_recoveries + 1 };
+        self.retry_at = (!recovered).then(|| now + std::time::Duration::from_secs(1));
         self.failed_recoveries >= MAX_FAILED_RECOVERIES
+    }
+
+    /// When a latched loss may next be rebuilt, if not yet at NOW.
+    pub(super) fn retry_wait(&self, now: std::time::Instant) -> Option<std::time::Instant> {
+        self.retry_at.filter(|at| *at > now && self.flag.load(Ordering::SeqCst))
     }
 
     /// Latch a loss from the render thread itself (debug simulation, or a
