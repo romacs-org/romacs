@@ -984,6 +984,15 @@ Exit with current input if prefix ARG is given."
     (set-frame-parameter romacs-complete--layer 'romacs-layer-edge (romacs-complete--edge)))
   romacs-complete--layer)
 
+(defun romacs-complete--panel-width (room column)
+  "The floating panel's text width in pixels, with ROOM pixels across the
+frame and COLUMN-pixel characters: `romacs-complete-center-width' of the
+room, at least 60 columns, never more than the room: a narrow frame or a
+large font gets a panel as wide as the frame."
+  (min room (max (* 60 column)
+                 (min (- room (* 4 column))
+                      (round (* romacs-complete-center-width room))))))
+
 (defun romacs-complete--placement (frame rows)
   "Where FRAME goes with ROWS candidate rows above or below the
 minibuffer window: (LEFT TOP WIDTH HEIGHT) in pixels, the outer position
@@ -997,8 +1006,7 @@ in the root frame and the text size."
          (height (+ (* rows ch) mini)))
     (pcase romacs-complete-position
       ((or 'center 'top)
-       (let* ((width (max (* 60 cw) (min (- frame-width (* 4 cw))
-                                         (round (* romacs-complete-center-width frame-width)))))
+       (let* ((width (romacs-complete--panel-width frame-width cw))
               ;; Centred at its tallest, so it grows downward and stays put.
               (tallest (+ (* romacs-complete-count ch) mini (* 2 border)))
               (top (if (eq romacs-complete-position 'top)

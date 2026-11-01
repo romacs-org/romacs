@@ -183,6 +183,20 @@ def quiet(process, seconds, timeout):
             last, since = now, time.monotonic()
 
 
+def scenes(text):
+    """Every complete submitted scene in TEXT, oldest first."""
+    result = []
+    for line in text.split('\n'):
+        if line.startswith('{') and '"submitted-scene"' in line:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if record.get('diagnostic') == 'submitted-scene':
+                result.append(record)
+    return result
+
+
 def checked(binary, args, output, report):
     """The timer checks, over --trace-scene's scene dumps."""
     with session(binary, args, output, 'binary', report, True) as (env, state, process, log_path):
@@ -217,15 +231,20 @@ def checked(binary, args, output, report):
         check("a timer's queued input wakes a read (gnosis-feed--dwell-supported-p)",
               '(dwell t)' in records(state), records(state))
         # The display received it (whatever draws it, the echo line or a
-        # toast) and `current-message' was it: a recorded condition, not a
-        # frame that may already have changed.
+        # toast) with `current-message' it, and a frame submitted before any
+        # key showed it: recorded conditions, not a frame that may already
+        # have changed.
         shown = '(echo "Idle probe 1" "Idle probe 1")'
+        def drawn():
+            return any('Idle probe 1' in row for scene in scenes(log_path.read_text(errors='replace'))
+                       for row in fio.scene_rows(scene))
         try:
-            fio.wait(lambda: shown in records(state), 15, 'idle probe echoed', process)
+            fio.wait(lambda: shown in records(state) and drawn(), 15, 'idle probe shown', process)
         except Exception:
             pass
         check('echo area shows the idle probe', shown in records(state),
               [r for r in records(state) if r.startswith('(echo')])
+        check('a frame shows the idle probe before any key', drawn(), rows())
         time.sleep(args.cpu_window)
         check('no more idle probes without input', len([r for r in records(state) if r.startswith('(idle')]) == 1,
               records(state))
