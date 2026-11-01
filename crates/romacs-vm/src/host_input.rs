@@ -26,6 +26,8 @@ pub struct HostFrame {
     /// window, or a child frame's when one hosts it.
     pub minibuffer: u64,
     pub snapshot: std::time::Duration,
+    /// The text animations drawn over this frame (`Vm::text_animations').
+    pub text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
 
 /// What the host answers a read with.
@@ -82,12 +84,6 @@ pub trait HostInput {
     /// host with no window, every test's, shows none.
     fn display_animates(&mut self) -> Option<bool> {
         Some(false)
-    }
-
-    /// Install, change or (None) remove text animation ID, which the
-    /// display draws over its frames by itself (`romacs--text-animation').
-    fn text_animation(&mut self, _id: u64, _animation: Option<romacs_display_protocol::text_animation::TextAnimation>) -> std::result::Result<(), String> {
-        Err("this display draws no text animation".into())
     }
 }
 
@@ -235,7 +231,8 @@ impl Vm {
                 let selected = self.selected_window_value()?;
                 let selected = self.window(selected)?.id;
                 let minibuffer = self.window(self.mini_window())?.id;
-                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot })?;
+                let text_animations = self.text_animations()?;
+                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
                 self.display_apply_layout(&ends)?;
                 redraw = false;
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }

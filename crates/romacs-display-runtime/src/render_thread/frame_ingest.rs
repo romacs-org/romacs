@@ -157,7 +157,7 @@ struct FrameIngestOutcome {
 impl RenderApp {
     #[cfg(feature = "core-free")]
     pub(super) fn ingest_paint(&mut self, scene: crate::thread_comm::PaintScene) {
-        let crate::thread_comm::PaintScene { root: mut frame, children } = scene;
+        let crate::thread_comm::PaintScene { root: mut frame, children, text_animations } = scene;
         if self.frame_windows.primary_window().and_then(|window| window.lifecycle.native())
             .is_some_and(|native| !native.composites_alpha())
         {
@@ -183,6 +183,11 @@ impl RenderApp {
         super::frame_stats::note_scene_commit(
             romacs_display_protocol::frame_time::observe_platform_now(),
         );
+        // The frame names the animations drawn over it: the last frame's
+        // are gone with it.
+        if let Some(window) = self.frame_windows.primary_window_mut() {
+            window.render.compositor.text_animations.replace(text_animations);
+        }
         self.ingest_primary_paint(
             frame,
             Default::default(),

@@ -34,14 +34,17 @@ pub(crate) struct TextAnimations {
 }
 
 impl TextAnimations {
-    /// Install, change (None: remove) animation ID.  A change that
-    /// continues its motion keeps the motion time.
-    pub(crate) fn set(&mut self, id: u64, animation: Option<TextAnimation>) {
-        let Some(animation) = animation else { self.running.remove(&id); return };
-        let previous = self.running.remove(&id).filter(|r| r.animation.continues(&animation));
-        let moved = previous.as_ref().map_or(0.0, |r| r.moved);
-        let last = previous.and_then(|r| r.last).filter(|_| animation.moving);
-        self.running.insert(id, Running { animation, moved, last, cells: None });
+    /// The animations a new frame names, by key: these and no others.
+    /// One that continues its motion keeps its motion time.
+    pub(crate) fn replace(&mut self, animations: Vec<(u64, TextAnimation)>) {
+        let mut previous = std::mem::take(&mut self.running);
+        for (id, animation) in animations {
+            let before = previous.remove(&id).filter(|r| r.animation.continues(&animation));
+            let moved = before.as_ref().map_or(0.0, |r| r.moved);
+            let last = before.as_ref().and_then(|r| r.last).filter(|_| animation.moving);
+            let cells = before.filter(|r| r.animation == animation).and_then(|r| r.cells);
+            self.running.insert(id, Running { animation, moved, last, cells });
+        }
     }
 
     pub(crate) fn focus(&mut self, focused: bool) { self.halt_if(!focused, |s| &mut s.unfocused); }
@@ -96,19 +99,11 @@ impl TextAnimations {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool { self.running.is_empty() }
 }
 
 impl super::state::RenderApp {
-    /// `RenderCommand::TextAnimation`: on the primary window, drawn from
-    /// its next frame on.
-    pub(super) fn set_text_animation(&mut self, id: u64, animation: Option<TextAnimation>) {
-        if let Some(window) = self.frame_windows.primary_window_mut() {
-            window.render.compositor.text_animations.set(id, animation);
-            redraw(window);
-        }
-    }
-
     /// Advance the primary window's due animations and redraw it if one
     /// moved; when the next frame is due.
     pub(super) fn service_text_animations(&mut self, now: Instant) -> Option<Instant> {

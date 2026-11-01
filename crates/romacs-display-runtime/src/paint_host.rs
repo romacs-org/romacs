@@ -263,14 +263,6 @@ fn latency_receipt_does_not_pair_a_discarded_native_event() {
 }
 
 impl PaintSender {
-    /// Install, change or (None) remove the primary frame's text animation
-    /// ID, which the render thread draws by itself from its next frame on.
-    pub fn set_text_animation(&self, id: u64, animation: Option<romacs_display_protocol::text_animation::TextAnimation>) -> Result<(), String> {
-        let result = self.comms.cmd_tx.try_send(RenderCommand::TextAnimation { id, animation }).map_err(|error| error.to_string());
-        self.proxy.wake_up();
-        result
-    }
-
     /// Whether the window draws on a software rasterizer: None until the
     /// render thread has chosen its adapter.
     pub fn software_adapter(&self) -> Option<bool> {
@@ -335,20 +327,27 @@ impl PaintSender {
     /// backpressure rather than silently dropping a repaint. The producer must
     /// use PRIMARY_FRAME and a fresh nonzero presentation ID for every revision.
     pub fn submit(&self, frame: FrameGlyphBuffer) -> Result<(), String> {
-        self.submit_scene(frame, Vec::new())
+        self.submit_scene(frame, Vec::new(), Vec::new())
     }
 
-    /// Queue a frame and the child frames shown over it, lowest first, as
-    /// one paint: each child names PRIMARY_FRAME as its parent and carries
-    /// the frame's presentation. A child the last scene showed and this one
-    /// does not is removed.
-    pub fn submit_scene(&self, frame: FrameGlyphBuffer, children: Vec<FrameGlyphBuffer>) -> Result<(), String> {
+    /// Queue a frame, the child frames shown over it, lowest first, and the
+    /// text animations drawn over it, as one paint: each child names
+    /// PRIMARY_FRAME as its parent and carries the frame's presentation. A
+    /// child or an animation the last scene showed and this one does not is
+    /// removed.
+    pub fn submit_scene(
+        &self,
+        frame: FrameGlyphBuffer,
+        children: Vec<FrameGlyphBuffer>,
+        text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
+    ) -> Result<(), String> {
         validate_frame(&frame)?;
         validate_children(&frame, &children)?;
+        let scene = crate::thread_comm::PaintScene { root: frame, children, text_animations };
         let result = self
             .comms
             .cmd_tx
-            .try_send(RenderCommand::Paint(Box::new(crate::thread_comm::PaintScene { root: frame, children })))
+            .try_send(RenderCommand::Paint(Box::new(scene)))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result
