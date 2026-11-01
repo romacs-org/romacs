@@ -1,7 +1,9 @@
 //! `select-window' records its buffer at the front of `buffer-list' unless
 //! NORECORD (window.c select_window, buffer.c record_buffer, which runs
 //! `buffer-list-update-hook'), and `window-discard-buffer-from-window'
-//! drops a buffer from a window's previous and next buffers (window.c:3445); both as pinned GNU answers.
+//! drops a buffer from a window's previous and next buffers (window.c:3445);
+//! `set-window-configuration' records its restored selected window's
+//! buffer (window.c:8068). All as pinned GNU answers.
 use romacs_vm::Vm;
 
 const EXPRESSIONS: &[&str] = &[
@@ -34,6 +36,26 @@ const EXPRESSIONS: &[&str] = &[
          (let ((buffer-list-update-hook (list (lambda () (setq log (cons (buffer-name) log))))))
            (select-window (selected-window)))
          (list log (eq (car (buffer-list)) quiet)))"#,
+    // set-window-configuration records the restored selected window's
+    // buffer (window.c:8068), running buffer-list-update-hook: a buffer
+    // recorded or buried inside save-window-excursion does not stay so.
+    r#"(let ((a (get-buffer-create "cfg-a")) (b (get-buffer-create "cfg-b")) (log nil))
+         (set-window-buffer nil a) (select-window (selected-window))
+         (let ((config (current-window-configuration)))
+           (bury-buffer-internal a)
+           (let ((buried (not (eq (car (buffer-list)) a)))
+                 (buffer-list-update-hook (list (lambda () (setq log (cons (buffer-name) log))))))
+             (set-window-configuration config)
+             (list buried (buffer-name (car (buffer-list))) log (eq (window-buffer (selected-window)) a)))))"#,
+    // The hook runs at the recording, in the selected window's buffer,
+    // before the buffer current at saving is current again.
+    r#"(let ((a (get-buffer-create "cfg2-a")) (b (get-buffer-create "cfg2-b")) (log nil))
+         (set-window-buffer nil a) (select-window (selected-window))
+         (let ((config (save-current-buffer (set-buffer b) (current-window-configuration))))
+           (bury-buffer-internal a)
+           (let ((buffer-list-update-hook (list (lambda () (setq log (cons (buffer-name) log))))))
+             (set-window-configuration config)
+             (list log (buffer-name (current-buffer)) (buffer-name (car (buffer-list)))))))"#,
     r#"(condition-case err (window-discard-buffer-from-window (let ((b (get-buffer-create "dis-dead"))) (kill-buffer b) b) (selected-window)) (error err))"#,
 ];
 
