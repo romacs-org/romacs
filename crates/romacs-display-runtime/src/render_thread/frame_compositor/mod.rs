@@ -34,6 +34,8 @@ mod overlays;
 pub(crate) struct FrameCompositor {
     pub current_frame: Option<FrameGlyphBuffer>,
     pub(in crate::render_thread) input_scroll: input_scroll::InputScroll,
+    /// Text animations drawn over the current frame at every draw.
+    pub(in crate::render_thread) text_animations: super::text_animations::TextAnimations,
     /// Video identities present in the root or any accepted child
     /// presentation. Rebuilt only when editor presentation data changes, so
     /// decoder wakeups do not rescan every glyph at video frame rate.
@@ -186,6 +188,7 @@ impl FrameCompositor {
         Self {
             current_frame: None,
             input_scroll: input_scroll::InputScroll::default(),
+            text_animations: Default::default(),
             #[cfg(feature = "video")]
             visible_videos: HashSet::new(),
             current_scene_generation: 0,

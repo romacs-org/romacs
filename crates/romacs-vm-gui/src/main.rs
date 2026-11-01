@@ -29,6 +29,7 @@ mod timers;
 mod world;
 mod isolate_worker;
 mod exit;
+mod preparing;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -461,27 +462,6 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
     } else { vm.frame_snapshot(width, height) }
 }
 
-/// What a first launch shows while it builds its world.
-const PREPARING: &str = "Preparing Romacs (first start)…";
-
-/// Show PREPARING in the window as presentation 1, before any VM can
-/// paint: one window of that text in a default face, laid out by an engine
-/// of its own. The launch's own frames then start at 2.
-fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), String> {
-    use romacs_layout_input::{FaceHandle, FrameSnapshot, PlacedWindowSnapshot, TextSlice, WindowSnapshot};
-    let face = Vm::new().display_default_face()?;
-    let snapshot = FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width, height,
-        background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
-            id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
-            text: TextSlice { utf8: PREPARING.into(), face_runs: vec![], raw: vec![] }, mode_line: None,
-            mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face],
-        } }],
-    };
-    let (frame, _) = romacs_layout2::LayoutEngine::new()?.layout_frame(&snapshot, 1, None)?;
-    sender.submit(frame)
-}
-
 /// `--help`.
 const USAGE: &str = "\
 usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE...]
@@ -674,14 +654,18 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase("world-open");
         let restored_layer = layer.as_ref().and_then(world::restore_layer);
         let from_layer = restored_layer.is_some();
+        let mut preparing = None;
         let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
             // Said first, so a launcher sees it whether or not a window can.
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": PREPARING}));
-            let painted = preparing_frame(&sender, width, height);
-            if painted.is_ok() { first_presentation = 2; }
+            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": preparing::MESSAGE}));
+            let painted = preparing::start(sender.clone(), width, height);
             eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing-frame", "painted": painted.is_ok(),
-                                                               "error": painted.err()}));
+                                                               "error": painted.as_ref().err()}));
+            // A first frame that failed may still have been submitted.
+            if painted.is_err() { first_presentation = 2; }
+            preparing = painted.ok();
         })));
+        if let Some(preparing) = preparing { first_presentation = preparing.finish(); }
         // The world this launch booted from, which its worker isolates adopt.
         let booted = world.as_ref().map(|base| if from_layer { &layer.as_ref().unwrap().world } else { base });
         let isolate_world = booted.map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
@@ -1175,6 +1159,9 @@ fn evaluate(
                         width = w; height = h;
                         let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
                         vm.set_frame_geometry(width, height, lh, cw)?;
+                        // GNU's redisplay runs `window-size-change-functions' then.
+                        let resized = "(when (fboundp 'romacs-gui-loadup-frame-resized) (romacs-gui-loadup-frame-resized (selected-frame)))";
+                        if let Err(error) = vm.eval_source(resized) { echo::show(&mut vm, &error)?; }
                         live_presentation.changed();
                     }
                     continue;

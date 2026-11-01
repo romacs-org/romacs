@@ -152,6 +152,15 @@ impl GuiHost {
 
 }
 
+/// Whether SENDER's window shows animation drawn frame by frame: on a GPU,
+/// and on a software rasterizer, every headless harness's, only when
+/// ROMACS_LAYER_ANIMATION is 1 or more, as for layers.  None until the
+/// window has chosen its adapter.
+pub(crate) fn display_animates(sender: &PaintSender) -> Option<bool> {
+    let forced = || std::env::var("ROMACS_LAYER_ANIMATION").ok().and_then(|v| v.parse::<f32>().ok()).is_some_and(|n| n >= 1.0);
+    sender.software_adapter().map(|software| !software || forced())
+}
+
 impl HostInput for GuiHost {
     fn clipboard_text(&mut self) -> Result<Option<String>, String> {
         self.sender.clipboard_text()
@@ -159,6 +168,14 @@ impl HostInput for GuiHost {
 
     fn set_clipboard_text(&mut self, text: &str) -> Result<(), String> {
         self.sender.set_clipboard_text(text)
+    }
+
+    fn display_animates(&mut self) -> Option<bool> {
+        display_animates(&self.sender)
+    }
+
+    fn text_animation(&mut self, id: u64, animation: Option<romacs_display_protocol::text_animation::TextAnimation>) -> Result<(), String> {
+        self.sender.set_text_animation(id, animation)
     }
 
     fn input_pending(&mut self) -> bool {

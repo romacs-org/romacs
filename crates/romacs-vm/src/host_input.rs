@@ -76,6 +76,19 @@ pub trait HostInput {
     fn set_clipboard_text(&mut self, _text: &str) -> std::result::Result<(), String> {
         Err("native clipboard is unavailable".into())
     }
+
+    /// Whether the display shows frame-by-frame animation
+    /// (`romacs--display-animates'): None until it knows its adapter.  A
+    /// host with no window, every test's, shows none.
+    fn display_animates(&mut self) -> Option<bool> {
+        Some(false)
+    }
+
+    /// Install, change or (None) remove text animation ID, which the
+    /// display draws over its frames by itself (`romacs--text-animation').
+    fn text_animation(&mut self, _id: u64, _animation: Option<romacs_display_protocol::text_animation::TextAnimation>) -> std::result::Result<(), String> {
+        Err("this display draws no text animation".into())
+    }
 }
 
 /// The Lisp variable that tells the minibuffer a host keyboard exists.

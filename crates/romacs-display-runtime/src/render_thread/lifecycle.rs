@@ -542,6 +542,9 @@ impl RenderApp {
             deadline = Some(deadline.map_or(image_poll, |d| d.min(image_poll)));
         }
 
+        if let Some(animation) = self.service_text_animations(now.into_instant()) {
+            deadline = Some(deadline.map_or(animation, |d| d.min(animation)));
+        }
         if let Some(tooltip_deadline) = self.tooltips.deadline() {
             deadline = Some(deadline.map_or(tooltip_deadline, |d| d.min(tooltip_deadline)));
         }
