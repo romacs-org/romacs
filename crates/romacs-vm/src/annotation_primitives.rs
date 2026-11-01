@@ -7,6 +7,7 @@ use crate::{
     annotations::{Marker, Overlay},
     coordinates::{ByteOffset, CharOffset},
     data::Object,
+    overlay_order::SortItem,
     *,
 };
 impl Vm {
@@ -71,19 +72,46 @@ impl Vm {
 
     /// The highest-priority overlay among OVERLAYS with a non-nil PROPERTY:
     /// (VALUE, OVERLAY), or (nil, nil) when none has it.
-    fn ordered_overlay_hit(&self, mut overlays: Vec<Value>, property: Value) -> Result<(Value, Value)> {
-        overlays.sort_by_key(|&overlay| self.overlay_order_key(overlay));
-        for overlay in overlays.into_iter().rev() {
+    fn ordered_overlay_hit(&self, overlays: Vec<Value>, property: Value) -> Result<(Value, Value)> {
+        let mut having = vec![];
+        for overlay in overlays {
             let value = self.overlay_get(overlay, property)?;
-            if value != Value::NIL { return Ok((value, overlay)); }
+            if value != Value::NIL { having.push((self.overlay_sort_item(overlay)?, value)); }
         }
-        Ok((Value::NIL, Value::NIL))
+        Ok(crate::overlay_order::highest_overlay(having, |h| h.0).map_or((Value::NIL, Value::NIL), |(item, value)| (value, item.overlay)))
     }
 
-    pub(crate) fn overlay_order_key(&self, overlay: Value) -> (i64, u32, std::cmp::Reverse<u32>, usize) {
-        let priority = self.overlay_property_named(overlay, "priority").unwrap().integer_value().unwrap_or(0);
-        let (start, end) = self.overlay_range(overlay).unwrap().unwrap();
-        (priority, start, std::cmp::Reverse(end), overlay.index(0).unwrap())
+    /// buffer.c make_sortvec_item for a live OVERLAY: its range and its
+    /// `priority' as `overlay-get' reads it.
+    pub(crate) fn overlay_sort_item(&self, overlay: Value) -> Result<SortItem> {
+        let (start, end) = self.overlay_range(overlay)?.ok_or("live overlay required")?;
+        let priority = match self.names.get("priority") {
+            Some(&slot) => self.overlay_get(overlay, Value::reference(slot + 1, 7))?,
+            None => Value::NIL,
+        };
+        let fixnum = |v: Value| v.integer_value().unwrap_or(0);
+        let (priority, secondary) = match self.cons_pair(priority) {
+            Ok((primary, secondary)) => (fixnum(primary), fixnum(secondary)),
+            Err(_) => (fixnum(priority), 0),
+        };
+        Ok(SortItem { overlay, start, end, priority, secondary, inserted: self.overlay(overlay)?.inserted })
+    }
+
+    /// buffer.c sort_overlays: OVERLAYS in increasing precedence, without
+    /// those whose `window' is a window other than SORTED when SORTED is a
+    /// window.
+    fn sort_overlays_for(&self, mut overlays: Vec<Value>, sorted: Value) -> Result<Vec<Value>> {
+        if matches!(self.object_if(sorted), Some(Object::Window(_))) {
+            overlays.retain(|&overlay| self.overlay_applies_to(overlay, sorted));
+        }
+        self.sort_overlays(overlays)
+    }
+
+    /// buffer.c sort_overlays without a window: OVERLAYS in increasing
+    /// precedence.
+    pub(crate) fn sort_overlays(&self, overlays: Vec<Value>) -> Result<Vec<Value>> {
+        let items = overlays.into_iter().map(|o| self.overlay_sort_item(o)).collect::<Result<Vec<_>>>()?;
+        Ok(crate::overlay_order::sort_overlays(items, |&i| i).into_iter().map(|i| i.overlay).collect())
     }
 
     /// Visit covering overlays without allocating a result list or Lisp conses.
@@ -345,6 +373,7 @@ impl Vm {
             front: source.front,
             rear: source.rear,
             properties: Vec::new(),
+            inserted: source.inserted,
         };
         if o.buffer != Value::NIL {
             let b = self.annotated_mut(o.buffer)?;
@@ -388,6 +417,7 @@ impl Vm {
             front: source.front,
             rear: source.rear,
             properties: Vec::new(),
+            inserted: source.inserted,
         };
         let evaporates = self.names.get("evaporate").is_some_and(|&slot| {
             source
@@ -395,6 +425,8 @@ impl Vm {
                 .iter()
                 .any(|&(k, v)| k == Value::reference(slot + 1, 7) && v != Value::NIL)
         });
+        // itree_node_set_region reinserts a node whose start moves.
+        let reinserted = o.buffer != buffer || self.overlay_range(v)?.is_none_or(|(old, _)| old != start);
         if o.buffer == buffer {
             let target = self.annotated_mut(buffer)?;
             target.intervals.remove(o.start.unwrap(), &target.anchors);
@@ -426,10 +458,20 @@ impl Vm {
             o.end = Some(b);
             self.note_referrer(buffer, v.index(0)? - 1);
         }
+        if reinserted { self.note_overlay_insertion(buffer, v)?; }
         if evaporates {
             self.finish_annotation_edit(buffer)?;
         }
         Ok(v)
+    }
+    /// Count OVERLAY as BUFFER's latest insertion into its overlay tree.
+    pub(crate) fn note_overlay_insertion(&mut self, buffer: Value, overlay: Value) -> Result<()> {
+        let target = self.annotated_mut(buffer)?;
+        target.overlay_insertions += 1;
+        let count = target.overlay_insertions;
+        let Object::Overlay(o) = self.object_mut(overlay)? else { return Err("overlay required".into()) };
+        o.inserted = count;
+        Ok(())
     }
     pub(super) fn finish_annotation_edit(&mut self, buffer: Value) -> Result<()> {
         // A deletion empties the overlays of every buffer sharing the text
@@ -576,19 +618,21 @@ impl Vm {
         let text = self.annotated(buffer)?;
         let at = byte as u32;
         let mut found = text.intervals.query_with_end(at, at, true, at == text.anchors.extent(), &text.anchors).0;
-        found.retain(|&overlay| self.overlay_applies_to(overlay, window));
-        found.sort_by_key(|&overlay| self.overlay_order_key(overlay));
-        for overlay in found.into_iter().rev() {
+        let mut having = vec![];
+        for overlay in found.into_iter().filter(|&overlay| self.overlay_applies_to(overlay, window)) {
             let value = self.overlay_property(overlay, property)?;
-            if value != Value::NIL { return Ok((value, overlay)); }
+            if value != Value::NIL { having.push((self.overlay_sort_item(overlay)?, value)); }
         }
+        if let Some((item, value)) = crate::overlay_order::highest_overlay(having, |h| h.0) { return Ok((value, item.overlay)); }
         let raw = self.annotation_raw(buffer, text.char_of_byte(ByteOffset(byte))?.0 + 1)?;
         Ok((self.annotation_resolve(&raw, property)?, Value::NIL))
     }
     /// The display ignores an overlay whose `window' property names
     /// another window (xdisp.c load_overlay_strings).
     pub(crate) fn overlay_applies_to(&self, overlay: Value, window: Value) -> bool {
-        let named = self.overlay_property_named(overlay, "window").unwrap_or(Value::NIL);
+        let named = self.names.get("window")
+            .map_or(Ok(Value::NIL), |&slot| self.overlay_get(overlay, Value::reference(slot + 1, 7)))
+            .unwrap_or(Value::NIL);
         !matches!(self.object_if(named), Some(Object::Window(_))) || named == window
     }
     /// An overlay's start and end as character positions, if it is live.
@@ -646,7 +690,7 @@ impl Vm {
         // ITREE_FOREACH (posn - 1, posn + 1): every overlay meeting that span.
         self.visit_overlay_bytes(object, ByteOffset(low as usize)..ByteOffset(high as usize), false, |overlay, _| candidates.push(overlay))
             .map_err(Fault::Error)?;
-        let mut best: Option<(Value, Value)> = None;
+        let mut having: Vec<(SortItem, Value)> = vec![];
         for overlay in candidates {
             let value = self.overlay_property(overlay, property).map_err(Fault::Error)?;
             let Some((start, end)) = self.overlay_range(overlay).map_err(Fault::Error)? else { continue };
@@ -655,11 +699,9 @@ impl Vm {
                 && !(start == at && o.front == Bias::Right)
                 && !(end == at && o.rear != Bias::Right);
             if value == Value::NIL || !covers { continue; }
-            if best.is_none_or(|(winner, _)| self.overlay_order_key(winner) < self.overlay_order_key(overlay)) {
-                best = Some((overlay, value));
-            }
+            having.push((self.overlay_sort_item(overlay).map_err(Fault::Error)?, value));
         }
-        if let Some((_, value)) = best { return Ok(value); }
+        if let Some((_, value)) = crate::overlay_order::highest_overlay(having, |h| h.0) { return Ok(value); }
         // text_property_stickiness: rear-sticky by default, unless
         // text-property-default-nonsticky or rear-nonsticky says otherwise;
         // front-sticky inherits from after; a conflict prefers the side
@@ -740,7 +782,8 @@ impl Vm {
             }
             CopyMarker => n <= 2,
             MarkerPosition | MarkerBuffer | MarkerInsertionType | DeleteOverlay | OverlayStart
-            | OverlayEnd | OverlaysAt | NextOverlayChange => n == 1,
+            | OverlayEnd | NextOverlayChange => n == 1,
+            OverlaysAt => (1..=2).contains(&n),
             SetMarkerInsertionType | OverlayGet | OverlaysIn => n == 2,
             OverlayPut => n == 3,
             MakeOverlay => (2..=5).contains(&n),
@@ -850,6 +893,7 @@ impl Vm {
                     front: if n > 3 { bias(args[3]) } else { Bias::Left },
                     rear: if n > 4 { bias(args[4]) } else { Bias::Left },
                     properties: Vec::new(),
+                    inserted: 0,
                 })));
                 self.move_overlay_object(o, args[0], args[1], buffer)
             }
@@ -928,7 +972,12 @@ impl Vm {
                         },
                     )
                 } else {
-                    let a = self.buffer_position(buffer, x, false)?;
+                    let a = match self.buffer_position(buffer, x, false) {
+                        // Any position may be asked; none outside the
+                        // buffer is inside an overlay.
+                        Err(e) if p == OverlaysAt && e == "index out of range" => return Ok(Value::NIL),
+                        a => a?,
+                    };
                     let b = if p == OverlaysIn {
                         self.buffer_position(buffer, args[1], false)?
                     } else {
@@ -1023,6 +1072,10 @@ impl Vm {
                             }
                         }
                         Ok(Value::NIL)
+                    }
+                    OverlaysAt if n == 2 && args[1] != Value::NIL => {
+                        let found = self.sort_overlays_for(found, args[1])?;
+                        Ok(self.list_value(&found.into_iter().rev().collect::<Vec<_>>()))
                     }
                     _ => Ok(self.list_value(&found)),
                 }

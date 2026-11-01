@@ -322,7 +322,7 @@ impl Vm {
     }
 
     /// A `face' property's name: a symbol, or a face list's first symbol.
-    fn ml_face_name(&self, value: Value) -> Option<String> {
+    pub(crate) fn ml_face_name(&self, value: Value) -> Option<String> {
         let name = |v: Value| (v.tag() == 7 && v != Value::NIL).then(|| v.index(7).ok())
             .flatten().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned())
             .filter(|n| !n.starts_with(':'));
@@ -652,8 +652,24 @@ impl Vm {
                     if top == bottom { format!("{top}%") } else { format!("{top}-{bottom}%") }
                 }
             }
-            // No processes in VM2.
-            's' => "no process".into(),
+            // The status of the buffer's process (xdisp.c:29813).
+            's' => {
+                let process = Form::List(vec![Form::Sym("get-buffer-process".into()), Form::List(vec![Form::Sym("current-buffer".into())])]);
+                let form = Form::List(vec![
+                    Form::Sym("let".into()),
+                    Form::List(vec![Form::List(vec![Form::Sym("process".into()), process])]),
+                    Form::List(vec![
+                        Form::Sym("if".into()),
+                        Form::Sym("process".into()),
+                        Form::List(vec![Form::Sym("symbol-name".into()), Form::List(vec![Form::Sym("process-status".into()), Form::Sym("process".into())])]),
+                        Form::String("no process".into()),
+                    ]),
+                ]);
+                match self.eval_datum_raw(&form) {
+                    Ok(value) => string_of(Some(self.mode_line_form(value))),
+                    Err(_) => "no process".into(),
+                }
+            }
             '@' => {
                 let form = crate::Form::List(vec![
                     Form::Sym("and".into()),

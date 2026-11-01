@@ -29,7 +29,7 @@ impl Leaf<'_> {
     pub(crate) fn process(&self, v: Value) -> Result<&Process> {
         self.process_if(v).ok_or(Fault::Wrong("processp", v))
     }
-    fn process_mut(&mut self, v: Value) -> &mut Process {
+    pub(super) fn process_mut(&mut self, v: Value) -> &mut Process {
         let index = v.index(0).expect("checked process") - 1;
         match &mut self.vm.objects[index] {
             data::Object::Process(p) => p,
@@ -47,11 +47,11 @@ impl Leaf<'_> {
         self.process_mut(v).set(slot, value);
         Ok(value)
     }
-    fn channel(&self, v: Value) -> Option<&Channel> {
+    pub(super) fn channel(&self, v: Value) -> Option<&Channel> {
         let serial = self.process_if(v)?.serial;
         self.vm.subprocesses.get(serial)
     }
-    fn channel_mut(&mut self, v: Value) -> Option<&mut Channel> {
+    pub(super) fn channel_mut(&mut self, v: Value) -> Option<&mut Channel> {
         let serial = self.process_if(v)?.serial;
         self.vm.subprocesses.get_mut(serial)
     }
@@ -63,10 +63,10 @@ impl Leaf<'_> {
     pub(crate) fn process_infd(&self, v: Value) -> bool {
         self.channel(v).is_some_and(|c| c.infd.is_some())
     }
-    fn sym(&mut self, name: &str) -> Value {
+    pub(super) fn sym(&mut self, name: &str) -> Value {
         self.intern(name)
     }
-    fn list(&mut self, items: &[Value]) -> Value {
+    pub(super) fn list(&mut self, items: &[Value]) -> Value {
         items.iter().rev().fold(Value::NIL, |tail, &v| self.cons(v, tail))
     }
 
@@ -400,6 +400,15 @@ impl Leaf<'_> {
         if wait_proc != Value::NIL && just_this && !self.process_infd(wait_proc) {
             return Ok(self.sym("terminated"));
         }
+        // Records a TLS session already decrypted wake no descriptor
+        // (gnutls_record_check_pending in wait_reading_process_output).
+        let decrypted: Vec<Value> = owners.iter().filter(|(_, w)| matches!(w, Wake::Read)).map(|(p, _)| *p)
+            .filter(|&p| self.channel_mut(p).and_then(|c| c.tls.as_deref_mut()).is_some_and(|s| s.active && s.plaintext_pending()))
+            .collect();
+        if !decrypted.is_empty() {
+            self.vm.subprocesses.activity += 1;
+            return self.process_select_ready(decrypted, Vec::new());
+        }
         let timeout = seconds.map(|s| std::time::Duration::from_secs_f64(s.clamp(0.0, 1e7)));
         let revents = sp::poll(&fds, timeout).map_err(|e| self.file_errno("Failed select", &e))?;
         if revents.iter().all(|&r| r == 0) {
@@ -417,10 +426,24 @@ impl Leaf<'_> {
                 Wake::Read => readable.push(proc),
                 Wake::Write => self.process_flush(proc)?,
                 Wake::Connect => connected.push(proc),
+                Wake::Handshake => match self.gnutls_handshake_poll(proc) {
+                    super::gnutls::Handshake::Pending => {}
+                    super::gnutls::Handshake::Ready => return Ok(self.tls_event(proc, Value::TRUE)),
+                    super::gnutls::Handshake::Failed(code) => {
+                        let code = self.gnutls_make_error(code);
+                        return Ok(self.tls_event(proc, code));
+                    }
+                },
                 Wake::Child => {}
             }
         }
         self.process_select_ready(readable, connected)
+    }
+    /// (tls PROC RESULT): PROC's handshake ended, with gnutls_make_error's
+    /// RESULT.
+    fn tls_event(&mut self, proc: Value, result: Value) -> Value {
+        let tls = self.sym("tls");
+        self.list(&[tls, proc, result])
     }
     /// The descriptors the wait selects on, with what each readiness means:
     /// WAIT_PROC's alone when JUST_THIS, else every process's.
@@ -435,11 +458,17 @@ impl Leaf<'_> {
                 fds.push((fd.as_raw_fd(), libc::POLLOUT));
                 owners.push((proc, Wake::Connect));
             }
-            if !connecting && (channel.reading || (just_this && proc == wait_proc)) && let Some(fd) = &channel.infd {
+            let handshaking = channel.tls.as_deref().is_some_and(|s| s.active && s.stage == crate::tls::stage::HANDSHAKE_TRIED);
+            if !connecting && handshaking && let Some(fd) = &channel.infd {
+                let out = if channel.tls.as_deref().is_some_and(|s| s.wants_write()) { libc::POLLOUT } else { 0 };
+                fds.push((fd.as_raw_fd(), libc::POLLIN | out));
+                owners.push((proc, Wake::Handshake));
+            } else if !connecting && (channel.reading || (just_this && proc == wait_proc)) && let Some(fd) = &channel.infd {
                 fds.push((fd.as_raw_fd(), libc::POLLIN));
                 owners.push((proc, Wake::Read));
             }
-            if !channel.pending.is_empty() && let Some(fd) = &channel.outfd {
+            let records = channel.tls.as_deref().is_some_and(|s| s.active && s.stage == crate::tls::stage::READY && s.wants_write());
+            if (!channel.pending.is_empty() || records) && let Some(fd) = &channel.outfd {
                 fds.push((fd.as_raw_fd(), libc::POLLOUT));
                 owners.push((proc, Wake::Write));
             }
@@ -502,6 +531,10 @@ impl Leaf<'_> {
     }
     /// A zero-timeout poll of every reading channel: is any input waiting?
     pub(crate) fn process_input_pending(&mut self) -> Result<bool> {
+        let procs = self.process_values();
+        if procs.into_iter().any(|p| self.channel_mut(p).filter(|c| c.reading).and_then(|c| c.tls.as_deref_mut()).is_some_and(|s| s.active && s.plaintext_pending())) {
+            return Ok(true);
+        }
         let fds: Vec<(RawFd, i16)> = self.process_values().into_iter()
             .filter_map(|p| self.channel(p).filter(|c| c.reading).and_then(|c| c.infd.as_ref()).map(|fd| (fd.as_raw_fd(), libc::POLLIN)))
             .collect();
@@ -516,7 +549,11 @@ impl Leaf<'_> {
         let Some(channel) = self.channel_mut(proc) else { return Ok(self.cons(fixnum(-1), fixnum(libc::EBADF.into()))) };
         let Some(fd) = channel.infd.as_ref().map(|f| f.as_raw_fd()) else { return Ok(self.cons(fixnum(-1), fixnum(libc::EBADF.into()))) };
         let mut buf = vec![0; readmax];
-        let nbytes = match sp::read(fd, &mut buf) {
+        let read = match channel.tls.as_deref_mut().filter(|s| s.active) {
+            Some(session) => session.read(fd, &mut buf),
+            None => sp::read(fd, &mut buf),
+        };
+        let nbytes = match read {
             Ok(n) => n,
             Err(error) => {
                 let errno = error.raw_os_error().unwrap_or(libc::EIO);
@@ -679,6 +716,20 @@ impl Leaf<'_> {
     fn process_flush(&mut self, proc: Value) -> Result<()> {
         let Some(channel) = self.channel_mut(proc) else { return Ok(()) };
         let Some(fd) = channel.outfd.as_ref().map(|f| f.as_raw_fd()) else { return Ok(()) };
+        if let Some(session) = channel.tls.as_deref_mut().filter(|s| s.active) {
+            // emacs_gnutls_write: the session takes the bytes into records
+            // and holds what the socket does not take yet; before READY it
+            // takes nothing, and the bytes wait for the handshake.
+            let written = session.flush(fd).and_then(|()| if channel.pending.is_empty() { Ok(0) } else { session.write(fd, &channel.pending) });
+            return match written {
+                Ok(n) => { channel.pending.drain(..n); Ok(()) }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(()),
+                Err(error) => {
+                    channel.pending.clear();
+                    Err(self.file_errno_value("Writing to process", &error, proc))
+                }
+            };
+        }
         while !channel.pending.is_empty() {
             match sp::write(fd, &channel.pending) {
                 Ok(0) => break,
@@ -1219,6 +1270,8 @@ enum Wake {
     Read,
     Write,
     Connect,
+    /// A non-blocking client's TLS handshake can go on.
+    Handshake,
     Child,
 }
 

@@ -31,6 +31,9 @@ impl PaintDiagnostics {
         self.changed.notify_all();
     }
 
+    /// The latest sample once PRESENTATION or a later one has rendered: the
+    /// renderer draws only its newest frame, so a later presentation drawn
+    /// supersedes an earlier one it never drew.
     fn wait(
         &self,
         presentation: u64,
@@ -43,11 +46,11 @@ impl PaintDiagnostics {
                     .lock()
                     .map_err(|_| "paint diagnostic lock poisoned")?,
                 timeout,
-                |latest| latest.is_none_or(|sample| sample.presentation != presentation),
+                |latest| latest.is_none_or(|sample| sample.presentation < presentation),
             )
             .map_err(|_| "paint diagnostic lock poisoned")?;
         latest
-            .filter(|sample| sample.presentation == presentation)
+            .filter(|sample| sample.presentation >= presentation)
             .ok_or_else(|| format!("no rendered atlas diagnostic for presentation {presentation}"))
     }
 }
@@ -86,6 +89,11 @@ mod diagnostic_tests {
                 presentation: 2,
                 unresolved_face_text_total: 27,
             }
+        );
+        assert_eq!(
+            state.wait(1, Duration::ZERO).unwrap().presentation,
+            2,
+            "a later presentation drawn settles an earlier one never drawn"
         );
     }
 
@@ -285,8 +293,8 @@ impl PaintSender {
     }
 
     /// Wait for a successfully rendered primary presentation, not merely ingress
-    /// activation. Submit sequentially: this bounded snapshot retains only the
-    /// latest presentation. No sample exists before the first successful render.
+    /// activation: PRESENTATION or a later one, since this bounded snapshot
+    /// retains only the latest. No sample exists before the first successful render.
     pub fn wait_for_render(
         &self,
         presentation: u64,

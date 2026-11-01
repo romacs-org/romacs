@@ -1716,6 +1716,7 @@ mod leaf {
     mod sqlite;
     pub(crate) mod treesit;
     mod process;
+    mod gnutls;
     pub(crate) use process::{CallOutput, Target};
     mod random;
     mod width;

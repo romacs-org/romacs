@@ -29,6 +29,9 @@ mod session_host;
 mod terminal_host;
 mod process_jobs;
 mod subprocess;
+mod tls;
+mod html;
+mod html_entities;
 pub mod host;
 pub mod world;
 mod environment;
@@ -113,6 +116,8 @@ mod lstring;
 mod let_forms;
 mod symkey;
 mod display;
+mod fringe;
+mod tab_bar;
 mod overlay_order;
 mod window;
 mod frame;
@@ -340,7 +345,6 @@ enum Primitive {
     Aset,
     CopySequence,
     Assq,
-    PlistGet,
     Setcar,
     Setcdr,
     Remainder,
@@ -531,7 +535,6 @@ enum Primitive {
     SymbolValue,
     SpecialVariableP,
     MakeVariableBufferLocal,
-    LocalVariableIfSetP,
     CustomVariableP,
     DefvarBoundp,
     DefvarSetDefault,
@@ -587,7 +590,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("aset", Primitive::Aset),
     ("copy-sequence", Primitive::CopySequence),
     ("assq", Primitive::Assq),
-    ("plist-get", Primitive::PlistGet),
     ("setcar", Primitive::Setcar),
     ("setcdr", Primitive::Setcdr),
     ("%", Primitive::Remainder),
@@ -797,7 +799,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("symbol-value", Primitive::SymbolValue),
     ("special-variable-p", Primitive::SpecialVariableP),
     ("make-variable-buffer-local", Primitive::MakeVariableBufferLocal),
-    ("local-variable-if-set-p", Primitive::LocalVariableIfSetP),
     ("custom-variable-p", Primitive::CustomVariableP),
     ("#:vm2-defvar-boundp", Primitive::DefvarBoundp),
     ("#:vm2-defvar-set-default", Primitive::DefvarSetDefault),
@@ -1274,6 +1275,11 @@ pub struct Vm {
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
     keep_captures: bool,
+    /// Eager `lambda' bodies being compiled around the current form.
+    lambda_depth: usize,
+    /// The windows the last window change functions run saw
+    /// (host_input.rs `window_change_signature').
+    window_change_seen: Vec<u64>,
     expanded_macros: Vec<(usize, u64)>,
     expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
@@ -1458,6 +1464,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     defer_expansion_errors,
     loader_order_request,
     keep_captures,
+    lambda_depth,
+    window_change_seen,
     expanded_macros,
     expanded_symbols,
     buffer_slot,
@@ -1624,6 +1632,8 @@ impl Vm {
             defer_expansion_errors: false,
             loader_order_request: false,
             keep_captures: false,
+            lambda_depth: 0,
+            window_change_seen: Vec::new(),
             expanded_macros: vec![],
             expanded_symbols: NameSet::default(),
             image: None,
@@ -2145,12 +2155,20 @@ impl Vm {
         r
     }
     fn lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form]) -> Result<usize> {
-        if self.lazy_regime {
+        // A lambda inside another's body that sees no lexical binding, as
+        // `with-eval-after-load' wraps a `defun', compiles at its first
+        // call: GNU's interpreter decides whether each `let' binds
+        // dynamically when it runs, after the files loaded since have
+        // declared their variables special (VM2-LATE-SPECIAL1).
+        if self.lazy_regime || (self.lambda_depth > 0 && b.env.is_empty()) {
             return self.lazy_lambda(b, args, body, false);
         }
         // Ordinary closures retain only executable state. Source metadata is
         // reserved for explicit make-interpreted-closure values.
-        let (id, names) = match self.function(args, body, &b.env, &b.local_specials) {
+        self.lambda_depth += 1;
+        let compiled = self.function(args, body, &b.env, &b.local_specials);
+        self.lambda_depth -= 1;
+        let (id, names) = match compiled {
             Ok(function) => function,
             // Loading a function must not execute its body. Keep the owner's
             // constant-binding rejection at call time, without aborting all
@@ -3129,7 +3147,7 @@ impl Vm {
         }
         if matches!(
             p,
-            Car | Cdr | Null | Eq | Memq | Assq | PlistGet | Nth | Setcar | Setcdr
+            Car | Cdr | Null | Eq | Memq | Assq | Nth | Setcar | Setcdr
         ) {
             return self.traversal_primitive(p, start, n);
         }
@@ -3184,7 +3202,7 @@ impl Vm {
         }
         if matches!(
             p,
-            Vector | Aref | Aset | CopySequence | Assq | PlistGet | Setcar | Setcdr
+            Vector | Aref | Aset | CopySequence | Assq | Setcar | Setcdr
         ) {
             return self.data_primitive(p, start, n);
         }

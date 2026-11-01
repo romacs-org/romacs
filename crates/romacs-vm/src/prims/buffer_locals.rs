@@ -42,3 +42,8 @@ fn variable_binding_locus(cx, variable: Value) {
     let buffer = cx.decode_buffer(Value::NIL)?;
     Ok(if cx.has_buffer_local(variable, buffer)? { buffer } else { Value::NIL })
 }}
+
+defsubr! { name = "local-variable-if-set-p", gnu = "data.c:2465", effect = Reads,
+fn local_variable_if_set_p(cx, variable: Value; optional buffer: Value) {
+    Ok(if cx.local_if_set(variable, buffer)? { Value::TRUE } else { Value::NIL })
+}}

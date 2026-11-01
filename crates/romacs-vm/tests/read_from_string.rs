@@ -39,3 +39,42 @@ fn documented_reader_boundaries_are_not_claimed_as_gnu_parity() {
         assert_eq!(value.display().unwrap(), expected, "{source}");
     }
 }
+
+/// String literals read from Lisp strings take each run of plain characters
+/// in one pass (`Reader::string_literal_run'); GNU's results across the
+/// run's edges: escapes and continuations inside it, multibyte and unibyte
+/// sources with raw bytes, a start after multibyte text, an END cutting the
+/// literal, and the position after it.
+#[test]
+fn string_literal_runs_read_as_gnu_does() {
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let cases = [
+        r#"(read-from-string "\"plain text\" tail")"#,
+        r#"(read-from-string "\"a\\\"b\\\\c\\nd\\\ne\\ f\\x41\\ g\" tail")"#,
+        r#"(read-from-string "x \"λ μ\\u00e9ν\" y" 1)"#,
+        r#"(read-from-string "λλ \"κείμενον\\tλ\"" 3)"#,
+        r#"(read-from-string (string-to-unibyte "\"a\377b\"") 0)"#,
+        r#"(read-from-string "\"\\351\" rest")"#,
+        r#"(read-from-string "\"abcdef\"" 0 4)"#,
+        r#"(read-from-string "(\"one\" \"two λ\" . \"three\")")"#,
+        r##"(read-from-string "#(\"text\" 0 2 (face bold))")"##,
+        r#"(read-from-string "\"\"")"#,
+    ];
+    let mut failures = Vec::new();
+    for case in cases {
+        // As character codes with multibyteness, as tests/json.rs compares.
+        let source = format!(
+            "(let ((r (condition-case e {case} (error (list 'signal e))))) (append (prin1-to-string (list r (and (stringp (car-safe r)) (multibyte-string-p (car r))))) nil))"
+        );
+        let output = std::process::Command::new(&oracle).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = String::from_utf8(output.stdout).unwrap();
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let actual = vm.eval_source(&source).and_then(|v| v.display());
+        if actual.as_deref() != Ok(expected.as_str()) {
+            failures.push(format!("{case}\n  GNU    {expected}\n  Romacs {actual:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

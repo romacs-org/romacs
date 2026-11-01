@@ -38,7 +38,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | DeleteOverlay
         | OverlayStart
         | OverlayEnd
-        | OverlaysAt
         | NextOverlayChange
         | Consp
         | CarSafe
@@ -70,7 +69,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | SymbolValue
         | SpecialVariableP
         | MakeVariableBufferLocal
-        | LocalVariableIfSetP
         | CustomVariableP
         | DefvarBoundp
         | GetBuffer
@@ -81,7 +79,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | Throw
         | Aref
         | Assq
-        | PlistGet
         | Setcar
         | Setcdr
         | Remainder
@@ -139,7 +136,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | MakeSparseKeymap | ForwardLine | MenuBarMode | ForceModeLineUpdate | TempBuffer => {
             (0, Some(1))
         }
-        Eval | Provide | Featurep
+        Eval | Provide | Featurep | OverlaysAt
         | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | LookingAt | PosixLookingAt
         | MatchString | Macroexpand | Signal => (1, Some(2)),
         Require | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
@@ -160,6 +157,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
             (0, Some(2))
         }
         ClosureMetadata => (6, Some(6)),
-        MakeInterpretedClosure => (5, Some(5)),
+        MakeInterpretedClosure => (3, Some(5)),
     }
 }

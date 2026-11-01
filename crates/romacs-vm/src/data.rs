@@ -704,7 +704,8 @@ impl Vm {
                 }
                 Aref | Aset if matches!(self.object_if(x), Some(Object::Record(_))) => ("fixnump", y),
                 Aref | Aset => ("integerp", y),
-                CharAfter => ("integer-or-marker-p", x),
+                CharAfter | OverlaysAt | NextOverlayChange => ("integer-or-marker-p", x),
+                OverlaysIn => ("integer-or-marker-p", if self.scalar_position(x).is_ok() { y } else { x }),
                 BufferSize => ("bufferp", x),
                 Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
                     let value = self.stack[start..start + argc]

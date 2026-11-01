@@ -278,7 +278,7 @@ impl Vm {
         start: usize,
         n: usize,
     ) -> Result<Value> {
-        let a = self.stack[start..start + n].to_vec();
+        let mut a = self.stack[start..start + n].to_vec();
         match p {
             Primitive::ClosureMetadata => {
                 if n != 6 {
@@ -332,9 +332,11 @@ impl Vm {
                 Ok(a[0])
             }
             Primitive::MakeInterpretedClosure => {
-                if n != 5 {
+                // eval.c:525: ARGS BODY ENV &optional DOCSTRING IFORM.
+                if !(3..=5).contains(&n) {
                     return Err("wrong primitive arity".into());
                 }
+                a.resize(5, Value::NIL);
                 let args = self
                     .list_values(a[0])?
                     .into_iter()

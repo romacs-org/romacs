@@ -87,22 +87,29 @@ pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings:
     merged
 }
 
-/// The rows LINE takes in rows of WIDTH columns: a glyph that does not
-/// fit in what is left of a row starts the next. A TAB goes to the next
-/// tab stop of the line, a control character takes two (^X), others
-/// their Unicode width.
-fn rows(line: &str, width: usize) -> usize {
-    let (mut rows, mut at, mut column) = (1, 0, 0);
-    for c in line.chars() {
+/// Where each display row of TEXT starts, a byte offset: every text line
+/// starts one, and when WRAPPED a glyph that does not fit in what is left
+/// of a row of WIDTH columns starts the next. A TAB goes to the next tab
+/// stop of its line, a control character takes two (^X), others their
+/// Unicode width.
+fn row_starts(text: &str, width: usize, wrapped: bool) -> Vec<usize> {
+    let mut starts = vec![0];
+    let (mut at, mut column) = (0, 0);
+    for (byte, c) in text.char_indices() {
+        if c == '\n' {
+            starts.push(byte + 1);
+            (at, column) = (0, 0);
+            continue;
+        }
         let glyph = match c {
             '\t' => 8 - column % 8,
             '\u{0}'..='\u{1f}' | '\u{7f}' => 2,
             _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(1),
         };
-        if at > 0 && at + glyph > width { (rows, at) = (rows + 1, 0); }
+        if wrapped && at > 0 && at + glyph > width { starts.push(byte); at = 0; }
         (at, column) = (at + glyph, column + glyph);
     }
-    rows
+    starts
 }
 
 /// How a string character displays with `ctl-arrow' at COLUMN: a tab as
@@ -227,21 +234,21 @@ impl Vm {
             _ => limit.integer_value().map_or(i64::from(total / 4), |n| n.saturating_mul(i64::from(unit))),
         }.clamp(i64::from(unit), i64::from(total.max(unit)));
         let max_lines = (max / i64::from(unit)) as usize;
-        let lines = spliced.text.split('\n').count();
         // A continued row ends a column short, for the `\\' glyph (layout2).
         let column = self.window_state.column.max(1);
         let row = (width.saturating_sub(column) / column).max(1) as usize;
         let wrapped = self.window_line_wrap(mini, buffer)? != romacs_layout_input::LineWrap::Truncate;
-        let rows: usize = if wrapped { spliced.text.split('\n').map(|line| rows(line, row)).sum() } else { lines };
+        let starts = row_starts(&spliced.text, row, wrapped);
+        let lines = starts.len();
         if lines > max_lines && adhoc {
-            // Start at the display line that shows the last MAX_LINES.
-            let line_start = spliced.text.match_indices('\n').nth(lines - max_lines - 1).map_or(0, |(i, _)| i + 1);
-            let byte = buffer_of(&spliced.segments, line_start, text.len());
+            // Start at the screen row that shows the last MAX_LINES, a
+            // continuation row of a text line too (xdisp.c resize_mini_window).
+            let byte = buffer_of(&spliced.segments, starts[lines - max_lines], text.len());
             let Object::Buffer(b) = self.object(buffer)? else { return Err("text buffer required".into()) };
             let start = b.char_of_byte(coordinates::ByteOffset(byte))?.0 as i64 + 1;
             self.set_window_start_if_moved(marker, buffer, start)?;
         }
-        let height = rows.min(max_lines).max(1) as u32;
+        let height = lines.min(max_lines).max(1) as u32;
         let old = self.window_state.mini_lines;
         // grow-only's shrink to one line, then the next cycle's growth
         // (window.c shrink_mini_window), in one step.

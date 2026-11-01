@@ -187,12 +187,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-loadup-bootstrap.el
 
-(register-definition-prefixes "romacs-loadup-bootstrap" '("minibuffer--sort-by-" "romacs-"))
-
-
-;;; Generated autoloads from romacs-mail.el
-
-(register-definition-prefixes "romacs-mail" '("romacs-mail-"))
+(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "minibuffer--sort-by-" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-mcp.el
@@ -271,11 +266,6 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 
 (fn MESHES &rest PLIST)")
 (register-definition-prefixes "romacs-model" '("romacs-model-"))
-
-
-;;; Generated autoloads from romacs-notmuch.el
-
-(register-definition-prefixes "romacs-notmuch" '("notmuch" "romacs-notmuch-"))
 
 
 ;;; Generated autoloads from romacs-oclosure.el
@@ -381,6 +371,11 @@ recompiling; signals an error if no frame shader is installed
 ;;; Generated autoloads from romacs-unidata.el
 
 (register-definition-prefixes "romacs-unidata" '("romacs-unidata-"))
+
+
+;;; Generated autoloads from romacs-usage-log.el
+
+(register-definition-prefixes "romacs-usage-log" '("romacs-usage-log-"))
 
 
 ;;; Generated autoloads from romacs-video.el

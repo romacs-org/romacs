@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Private native clipboard, word-delete and disposable mail-draft GUI journey.
+"""Private native clipboard and word-delete GUI journey.
 
 Use an already-built binary: --binary PATH --output NEW_DIRECTORY. All input,
 clipboard fixtures and captures target a new headless compositor, never the
 user's display. wl-copy/wl-paste are external fixture applications only; native
-C-y/M-w must traverse the editor's ordinary GNU kill/selection hooks. No mail
-index, account configuration, send command or transport is used.
+C-y/M-w must traverse the editor's ordinary GNU kill/selection hooks.
 
 Submitted trace rows synchronize input; retained PNGs require human visual
 review. This is correctness acceptance, not a performance benchmark.
@@ -30,7 +29,6 @@ CLIPBOARD = 'Clipboard λ — café\n第二行: naïve e\u0301\n'.encode('utf-8'
 ORDINARY = b'Ordinary file remains intact\nsecond line\n'
 WORDS = b'one_two three-four'
 WORD_PREFIX = b'one_two three-'
-DRAFT_BODY = 'Private unsent fixture λ; never send this draft.'
 TOOLS = '/nix/store/klrgwbvpwd7napzdhacw1nhj8xmpbpdc-romacs-gate-headless-tools/bin'
 QUESTIONS = (
     'Do we provide the user all the essential information properly formatted?',
@@ -253,21 +251,6 @@ def run(args, output: Path, report: dict) -> None:
                 capture('word-kill-restored')
 
                 find('ordinary.txt')
-                evaluate('(romacs-mail-compose \'(:name "fixture" :from "user@example.invalid"))',
-                         'QOL_COMPOSE_OPENED')
-                visible('--text follows this line--')
-                keys(DRAFT_BODY)
-                visible(DRAFT_BODY)
-                evaluate('(setq qol-draft (current-buffer))', 'QOL_DRAFT_PINNED')
-                require("(and (eq major-mode 'romacs-mail-compose-mode) "
-                        '(buffer-modified-p) (not buffer-file-name))', 'QOL_REAL_DIRTY_MAIL_DRAFT')
-                capture('dirty-mail-draft')
-                control('x')
-                keys('k')
-                fio.wait(lambda: not any(DRAFT_BODY in row for row in ff.current_rows(trace())),
-                         args.timeout, 'dirty mail draft killed without discard prompt or veto', process)
-                require('(not (buffer-live-p qol-draft))', 'QOL_DIRTY_DRAFT_KILLED_WITHOUT_VETO')
-                find('ordinary.txt')
                 visible('Ordinary file remains intact')
                 require('(equal (buffer-string) "Ordinary file remains intact\\nsecond line\\n")',
                         'QOL_ORDINARY_BUFFER_UNCHANGED')
@@ -275,7 +258,7 @@ def run(args, output: Path, report: dict) -> None:
                     raise AssertionError('ordinary file changed on disk')
                 (output / 'ordinary-unchanged.txt').write_bytes(ordinary.read_bytes())
                 report['saved_bytes']['ordinary-unchanged'] = ordinary.read_bytes().hex()
-                capture('draft-killed-ordinary-intact')
+                capture('ordinary-intact')
                 control('x')
                 control('c')
                 process.wait(timeout=args.timeout)
@@ -311,7 +294,7 @@ def main() -> int:
     report = {'status': 'FAIL', 'binary': str(args.binary), 'checks': [], 'captures': [],
               'saved_bytes': {}, 'cleanup': {}, 'geometry': [2532, 1347],
               'visual_review': {question: 'PENDING: inspect retained PNGs' for question in QUESTIONS},
-              'scope': 'private native correctness; no performance claim or mail transport'}
+              'scope': 'private native correctness; no performance claim'}
     try:
         if not args.binary.is_file() or not os.access(args.binary, os.X_OK):
             raise ValueError('--binary must name an executable file')

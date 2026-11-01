@@ -90,6 +90,8 @@ pub struct FrameSnapshot {
     pub background_alpha: f32,
     /// Visible child frames painted over the windows, lowest first.
     pub children: Vec<ChildFrameSnapshot>,
+    /// The tab bar above the windows, while `tab-bar-lines' shows one.
+    pub tab_bar: Option<TabBarSnapshot>,
 }
 
 impl FrameSnapshot {
@@ -99,6 +101,7 @@ impl FrameSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
             && self.font_alternatives == other.font_alternatives
+            && self.tab_bar == other.tab_bar
             && windows_lay_out_like(&self.windows, &other.windows)
     }
 }
@@ -151,7 +154,7 @@ pub struct PlacedWindowSnapshot {
     pub snapshot: WindowSnapshot,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FaceHandle(pub u32);
 romacs_snapshot::snapshot_tuple!(FaceHandle(f0));
 
@@ -215,8 +218,93 @@ pub struct WindowSnapshot {
     pub stretches: Vec<Stretch>,
     /// `display-line-numbers': what starts each row.
     pub line_numbers: Option<LineNumbers>,
+    /// The margins and fringes around the text area: WIDTH is the text
+    /// area's, and the window's placed X its left edge.
+    pub chrome: WindowChrome,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off, stretches, line_numbers });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off, stretches, line_numbers, chrome });
+
+/// What GNU's window box shows of a window beside its text area
+/// (window_box, dispextern.h): its margins and fringes in pixels, the
+/// fringes between the margins and the text or, when OUTSIDE_MARGINS,
+/// outside the margins, painted in FRINGE_FACE; the vertical border GNU
+/// draws at a window's left edge when another window is left of it
+/// (gui_draw_vertical_border), in BORDER's foreground; and the bitmaps the
+/// fringes show. A window with neither margins nor fringes has the default.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WindowChrome {
+    pub left_margin: u32,
+    pub right_margin: u32,
+    pub left_fringe: u32,
+    pub right_fringe: u32,
+    pub outside_margins: bool,
+    pub fringe_face: FaceHandle,
+    pub border: Option<FaceHandle>,
+    pub indicators: Indicators,
+}
+romacs_snapshot::snapshot_struct!(WindowChrome { left_margin, right_margin, left_fringe, right_fringe, outside_margins, fringe_face, border, indicators });
+
+impl WindowChrome {
+    /// The pixels left and right of the text area.
+    pub fn insets(&self) -> (u32, u32) {
+        (self.left_margin + self.left_fringe, self.right_margin + self.right_fringe)
+    }
+}
+
+/// The bitmaps GNU's fringes show for each logical indicator
+/// (fringe-indicator-alist, update_window_fringes), [left, right]: none
+/// where that side shows none. BOB and EOB say whether the window's text
+/// starts at the buffer's accessible start and reaches its end, which the
+/// boundary indicators mark.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Indicators {
+    pub truncation: [Option<FringeBitmap>; 2],
+    pub continuation: [Option<FringeBitmap>; 2],
+    pub top: [Option<FringeBitmap>; 2],
+    pub bottom: [Option<FringeBitmap>; 2],
+    pub top_bottom: [Option<FringeBitmap>; 2],
+    pub up: [Option<FringeBitmap>; 2],
+    pub down: [Option<FringeBitmap>; 2],
+    pub empty_line: [Option<FringeBitmap>; 2],
+    pub bob: bool,
+    pub eob: bool,
+}
+romacs_snapshot::snapshot_struct!(Indicators { truncation, continuation, top, bottom, top_bottom, up, down, empty_line, bob, eob });
+
+/// One fringe bitmap (fringe.c `struct fringe_bitmap`): a row of BITS per
+/// pixel row, its leftmost of WIDTH pixels in the most significant bit,
+/// drawn centred in its fringe in FACE's foreground, placed in its row as
+/// ALIGN says and, with a PERIOD, repeated down the whole row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FringeBitmap {
+    /// GNU's bitmap number (the symbol's `fringe' property).
+    pub number: u16,
+    pub bits: Vec<u16>,
+    pub width: u8,
+    pub align: BitmapAlign,
+    pub period: u8,
+    pub face: FaceHandle,
+}
+romacs_snapshot::snapshot_struct!(FringeBitmap { number, bits, width, align, period, face });
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BitmapAlign { #[default] Center, Top, Bottom }
+romacs_snapshot::snapshot_enum!(BitmapAlign {
+    BitmapAlign::Center => (),
+    BitmapAlign::Top => (),
+    BitmapAlign::Bottom => (),
+});
+
+/// The frame's tab bar (GNU's tab bar window, xdisp.c display_tab_bar):
+/// one row of TEXT across the top of the frame, HEIGHT pixels tall, on
+/// FACE's background, its faces indexing FACES.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabBarSnapshot {
+    pub height: u32,
+    pub text: TextSlice,
+    pub face: FaceHandle,
+    pub faces: Vec<Face>,
+}
 
 /// GNU's line numbers (xdisp.c maybe_produce_line_number): every row
 /// starts with the label of the line starting at its byte, in FACE
@@ -298,10 +386,10 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _, stretches, line_numbers } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _, stretches, line_numbers, chrome } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.tab_width)
-            && *wrap == other.wrap && *stretches == other.stretches && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces
+            && *wrap == other.wrap && *stretches == other.stretches && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
     }
 }
 

@@ -79,6 +79,22 @@ fn printing_to_t_reaches_the_echo_area_an_embedder_renders() {
     assert_eq!(ask(&mut vm, "(setq noninteractive t) (princ 8 t) (setq noninteractive nil) (current-message)"), "\"7\"");
 }
 
+/// print.c strout logs what it prints to the echo area as part of a line
+/// (message_dolog without its newline): successive prints extend that line,
+/// a print after another message starts a new one, and the next message,
+/// even `(message nil)', ends it first (message_log_maybe_newline). So
+/// `eval-expression''s value reaches *Messages*, as in GNU.
+#[test]
+fn printing_to_the_echo_area_logs_part_lines() {
+    let mut vm = Vm::new();
+    vm.set_echo_area_host(true);
+    let source = "(progn (message \"first\") (prin1 42 t) (princ \" (x)\" t) (message \"next\") (prin1 7 t) \
+                  (message nil) (princ 8 t) (princ 9 t) (with-current-buffer \"*Messages*\" (buffer-string)))";
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), r#""first\n42 (x)\nnext\n7\n89""#);
+    let repeated = "(progn (message \"89\") (with-current-buffer \"*Messages*\" (buffer-string)))";
+    assert_eq!(vm.eval_source(repeated).unwrap().display().unwrap(), r#""first\n42 (x)\nnext\n7\n89 [2 times]\n""#);
+}
+
 /// `message' of a raw byte succeeds as pinned GNU's does, returning the
 /// unibyte string it formatted, and leaves it as the echo area's message.
 /// The log is off here: logging inserts the text into *Messages*, and a VM2

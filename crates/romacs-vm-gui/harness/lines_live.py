@@ -5,8 +5,8 @@ tabs: GNU's own Lisp is visited from the command line (a copy of a
 gnu-lisp/ file with TABs).  Every glyph the binary submits on the file's
 rows must sit at the column GNU gives it on a terminal frame: TABs stop at
 multiples of `tab-width' from the line start, a control character shows as
-its escape.  The window's font is monospace, so a column is x over the
-frame's character width.
+its escape.  The window's font is monospace, so a column is x from the
+text area's left edge over the frame's character width.
 
 motion: C-f, C-n and C-p run GNU's next-line and previous-line over a
 mixed buffer (long continued lines, short and empty lines, non-ASCII
@@ -61,6 +61,7 @@ INIT = '''(setq inhibit-startup-screen t)
   (write-region (concat (prin1-to-string form) "\\n") nil {state} 'append 'silent))
 (run-with-timer 1 nil (lambda () (lines-live-record
   (list 'geometry (frame-char-width) (frame-char-height) (window-body-width nil t) tab-width
+        (car (window-inside-pixel-edges)) (nth 1 (window-fringes))
         (line-number-at-pos (window-start)) (buffer-name)))))
 '''
 
@@ -166,8 +167,8 @@ def check_tabs(args, report, check):
     with session(args.binary, ['+58', TAB_FILE.name], output, args.tools, INIT, files=[TAB_FILE]) as (process, env, work, state, display):
         report['display'] = display
         fio.wait(lambda: any(r.startswith('(geometry') for r in records(state)), args.timeout, 'geometry record', process)
-        _, cw, ch, body, tab_width, start, name = records(state)[0].strip('()').split(' ')
-        cw, ch, body, tab_width, start, name = int(cw), int(ch), int(body), int(tab_width), int(start), json.loads(name)
+        _, cw, ch, body, tab_width, left, right_fringe, start, name = records(state)[0].strip('()').split(' ')
+        cw, ch, body, tab_width, left, start, name = int(cw), int(ch), int(body), int(tab_width), int(left), int(start), json.loads(name)
         lines = TAB_FILE.read_text().split('\n')
         log = output / 'binary.stderr'
         time.sleep(1)
@@ -185,13 +186,15 @@ def check_tabs(args, report, check):
         painted = {round((y - top) / ch): sorted(row) for y, row in window.items()}
         compared = tabbed = 0
         mismatches = []
-        columns = body // cw - 1
+        # The glyphs a row holds: without a right fringe, one column less
+        # for the continuation glyph.
+        columns = body // cw - (int(right_fringe) == 0)
         for index, line in enumerate(lines[:len(lines) and max(painted) + 1]):
             row = painted.get(index, [])
             expected = gnu_columns(line, tab_width)
             if expected and expected[-1][0] >= columns:
                 break  # a continued line: rows no longer pair with lines
-            got = [(round(x / cw), c) for x, c in row]
+            got = [(round((x - left) / cw), c) for x, c in row]
             compared += 1
             tabbed += '\t' in line
             if got != expected:
@@ -285,8 +288,12 @@ def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion')
     with session(args.binary, [file.name], output, args.tools, INIT, files=[file]) as (process, env, work, state, display):
         report[f'{name}_display'] = display
         fio.wait(lambda: any(r.startswith('(geometry') for r in records(state)), args.timeout, 'geometry record', process)
-        _, cw, _, body, *_ = records(state)[0].strip('()').split(' ')
-        columns = int(body) // int(cw)
+        _, cw, _, body, _, _, right_fringe, *_ = records(state)[0].strip('()').split(' ')
+        # A native row holds the body's columns, less the continuation
+        # glyph's without a right fringe; GNU -nw always shows the glyph,
+        # so its terminal is that many columns and one more.
+        glyphs = int(body) // int(cw) - (int(right_fringe) == 0)
+        columns = glyphs + 1
         time.sleep(.5)
         fio.shot(args.output / f'{name}-before.png', env, report)
         for index, (key, _) in enumerate(keys):
@@ -305,9 +312,8 @@ def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion')
         report[f'{name}_echo'] = fio.rows((output / 'binary.stderr').read_text(errors='replace'))[-2:]
     gnu = gnu_points(args.gnu, file, columns, 40, keys)
     report[name] = {'columns': columns, 'gnu_geometry': gnu[:1], 'gnu': gnu[1:], 'romacs': romacs}
-    # A monospace native row holds COLUMNS - 1 glyphs before its `\\'.
-    check(f'GNU -nw at {columns} columns continues lines after {columns - 1} glyphs, as the native window does',
-          bool(gnu) and gnu[0].endswith(f' {columns - 1})'), gnu[:1])
+    check(f'GNU -nw at {columns} columns continues lines after {glyphs} glyphs, as the native window does',
+          bool(gnu) and gnu[0].endswith(f' {glyphs})'), gnu[:1])
     # GNU signals only where a motion runs out of buffer: point stays put.
     edges = [i for i in range(1, len(gnu) - 1) if i > 6 and gnu[i + 1] == gnu[i]]
     expected = [('end-of-buffer nil' if keys[i][0] == 'n' else 'beginning-of-buffer nil') if i in edges else None

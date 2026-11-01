@@ -116,6 +116,15 @@ and its comparison policy in its docstring:
   the running dashboard at 127.0.0.1:9119 (dashboard, session browser and
   search, a session's history), its token discovered by hermes and never
   reported.
+* `notmuch_parity_live.py`: the real notmuch package (the system's
+  site-lisp) through the owner's mail settings as a Romacs init holds them
+  (`--snippet`): notmuch-hello, a saved search, tagging and archiving,
+  notmuch-show with HTML and attachments, notmuch-tree, composing with
+  address completion, an attachment and a saved draft, and sending a new
+  mail over STARTTLS and a reply over implicit TLS.  Each engine has its
+  own copy of a synthetic store (`notmuch_fixture.py`) and its own
+  loopback SMTP server (`fake_smtp.py`); the captured submissions must
+  agree.
 * `command_errors_live.py`: the command loop and the session's end on a
   plain init: command errors' echo area, *Messages* and bells, the
   debugger's *Backtrace* from M-: and from a `debug-on-error` command,
@@ -133,9 +142,8 @@ and its comparison policy in its docstring:
 `bench/bench.py` is an MCP server for agents.  `bench_start` launches pinned
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
 HOME, on one of two profiles (`bench/owner.py`).  The default, `stock`, loads
-no one's init: GNU runs `-Q` and loads only the bench's endpoint with `-l`,
-and Romacs runs `--loadup` with that endpoint as its only init, because its
-GUI has `-Q` but no `-l`.  Both use only the stock gnu-lisp and rlisp, on a
+no one's init: both engines run `-Q` and load only the bench's endpoint
+with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock gnu-lisp and rlisp, on a
 generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
 Markdown, Org and a Makefile, with a five-commit history whose authors and
 dates are fixed, so the hashes match everywhere).  `owner` is the owner's

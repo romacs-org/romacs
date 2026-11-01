@@ -33,6 +33,12 @@ any order, =^prefix=, =suffix$=, ='exact=, =!not= and =a | b=, best match
 first.  =(setopt completion-styles '(basic partial-completion emacs22)
 completion-category-overrides nil)= restores GNU's (DIVERGENCES.md VM2-FZF-DEFAULT).
 
+Mail is the real notmuch package, loaded from the user's init, on GNU's
+message.el and smtpmail over Romacs's native TLS; Romacs ships no mail
+interface of its own (DIVERGENCES.md VM2-MAIL1).  A distribution's notmuch
+installs its Lisp in =/usr/share/emacs/site-lisp=, which the init adds to
+=load-path= (VM2-SITELISP1).
+
 * Source layout
 
 =rlisp/= holds Romacs Lisp, =gnu-lisp/= the pinned GNU sources, and

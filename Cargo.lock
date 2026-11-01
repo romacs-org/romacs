@@ -4632,6 +4632,8 @@ dependencies = [
  "romacs-vm",
  "ropey",
  "rustc-hash 2.1.3",
+ "rustls",
+ "rustls-webpki",
  "serde_json",
  "sha1",
  "sha2",
@@ -4662,6 +4664,8 @@ dependencies = [
  "romacs-test-fonts",
  "romacs-vm",
  "serde_json",
+ "tracing",
+ "tracing-subscriber",
  "wgpu",
 ]
 

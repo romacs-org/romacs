@@ -164,16 +164,18 @@ impl Vm {
         let Object::Buffer(from) = &self.objects[arena(base)?] else { return Err("buffer required".into()) };
         let mut per_buffer = from.per_buffer.clone();
         let (keymap, cases, syntax, category) = (from.local_keymap, from.case_tables, from.syntax_table, from.category_table);
-        // copy_overlays walks the overlays in ascending order of start.
-        let mut overlays: Vec<(Value, u32, u32)> = self.objects.iter().enumerate().filter_map(|(i, object)| match object {
+        // copy_overlays walks the overlays in tree order: ascending start,
+        // equal starts latest inserted first (overlay_order::tree_order).
+        let mut overlays: Vec<(Value, u32, u32, u64)> = self.objects.iter().enumerate().filter_map(|(i, object)| match object {
             Object::Overlay(o) if o.buffer == base => Some((
                 Value::reference(i + 1, 0),
                 from.anchors.resolve(o.start?)?,
                 from.anchors.resolve(o.end?)?,
+                o.inserted,
             )),
             _ => None,
         }).collect();
-        overlays.sort_by_key(|&(_, start, _)| start);
+        overlays.sort_by_key(|&(_, start, _, inserted)| (start, std::cmp::Reverse(inserted)));
         per_buffer.reset_visit();
         let mark = per_buffer.editor_mark();
         let Object::Buffer(to) = &mut self.objects[arena(buffer)?] else { return Err("buffer required".into()) };
@@ -202,7 +204,7 @@ impl Vm {
             let Object::Buffer(to) = &mut self.objects[arena(buffer)?] else { unreachable!("indirect buffer") };
             to.per_buffer.set_editor_mark(copy);
         }
-        for (overlay, start, end) in overlays {
+        for (overlay, start, end, _) in overlays {
             self.copy_overlay(overlay, start, end, buffer)?;
         }
         Ok(())
@@ -240,6 +242,7 @@ impl Vm {
         let end = anchors.create(end, rear).ok_or("invalid overlay")?;
         let copy = self.allocate_object(Object::Overlay(Box::new(crate::annotations::Overlay {
             buffer, start: Some(start), end: Some(end), front: source.front, rear: source.rear, properties: source.properties.clone(),
+            inserted: 0,
         })));
         let Object::Buffer(b) = &mut self.objects[arena(buffer)?] else { unreachable!("indirect buffer") };
         // The turned-over overlays are the shared text's, of every member.
@@ -250,7 +253,7 @@ impl Vm {
             b.evaporating.insert(start, copy);
         }
         b.intervals.insert(copy, start, end, &b.anchors);
-        Ok(())
+        self.note_overlay_insertion(buffer, copy)
     }
 
     /// Fkill_buffer (buffer.c:2019): killing a base buffer kills its

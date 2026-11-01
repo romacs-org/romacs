@@ -39,6 +39,7 @@ handle.rs execute execute_raw 1 boundary  # embedder API: the result is a Local 
 handle.rs invoke_prepared invoke_prepared_raw 1 boundary  # embedder API: arguments come from Rooted handles
 handle.rs load_file load_file_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
 host_input.rs host_wait_state call_prepared_source_raw 1 clean  # no arguments; its value is printed before anything else allocates
+host_input.rs run_window_change_functions call_prepared_source_raw 1 clean  # no arguments; its value is discarded
 insdel.rs mark_deactivated set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 lib.rs execute_raw execute_rooted 1 clean  # no roots
 lib.rs execute_rooted execute 1 rooted  # ROOTS are a frame, written back after
@@ -79,7 +80,7 @@ macroexpand.rs call_macro_expander reader_call 2 clean  # FUNCTION and ARGS are 
 macroexpand.rs macroexpand_primitive macroexpand_value 1 clean  # ARGS are not used after the expansion
 macroexpand.rs macroexpand_steps autoload_do_load 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
 macroexpand.rs macroexpand_steps call_macro_expander 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
-mode_line.rs decode_mode_spec eval_datum_raw 1 clean  # a constant form; the window and buffer are #: slots (display.rs)
+mode_line.rs decode_mode_spec eval_datum_raw 2 clean  # constant forms (%@, %s); the window and buffer are #: slots (display.rs); %s reads only the result
 mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms with rooted objects; the window and buffer are #: slots (display.rs)
 prim.rs attach_variable_history set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs default_cell_set notify 2 held  # a leaf or T2 continuation: its engine is not suspended
@@ -153,6 +154,7 @@ source_cache/prepared.rs invoke_prepared_raw prepared_function 1 rooted  # ARGS 
 source_cache/prepared.rs prepare_source prepared_function 1 clean  # no caller Values
 source_cache/prepared.rs prepared_function cached_source_form 1 held  # an open compiler builder holds collection
 source_cache/prepared.rs prepared_function execute_raw 1 clean  # FORM's objects are rooted
+tab_bar.rs tab_bar_snapshot call_prepared_source_raw 1 clean  # no arguments; only the returned row is read after it, by reads that do not allocate
 terminal_host.rs declare_terminal_errors eval_source_raw 1 boundary  # a world build or host setup declaring a constant error: no caller Values
 threaded.rs autoload_then autoload_do_load 1 suspended  # inside call_suspended
 threaded.rs autoload_then nested_then 1 suspended  # FUNCTION and FUNDEF are rooted by the load

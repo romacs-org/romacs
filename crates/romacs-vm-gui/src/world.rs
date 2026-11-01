@@ -369,9 +369,10 @@ fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, la
     args
 }
 
-/// The read roots of a GUI build beside the store's own: the Lisp trees and
-/// the fonts the layout engine measures with.
-fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
+/// The read roots of a build beside the store's own: the Lisp trees and
+/// the fonts the layout engine measures with (a batch world's too,
+/// `batch::boot`, which measures none).
+pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut roots = vec![dir.to_owned()];
     roots.extend(dir.parent().map(|parent| parent.join("rlisp")));
     roots.extend(startup::bundled_load_path(dir).unwrap_or_default());

@@ -396,7 +396,9 @@ class Bench:
 
         def launch(name):
             t = time.time()
-            root, home, env = parity_live.private_tree(name, work, options.tools)
+            # Roots of one length: the paths an engine shows (prompts, dired
+            # headers) then wrap and size alike in both.
+            root, home, env = parity_live.private_tree(name, work, options.tools, prefix=f'{name[:3]}-')
             (root / 'mcp').mkdir(mode=0o700)
             token = secrets.token_hex(24)
             used = owner.populate(home, project, org, None if stock else options.gnosis_db)
@@ -405,13 +407,20 @@ class Bench:
                 used['project'] = '~/src/tally'
             lisp = None if stock else owner.lisp_dir(work, name)
             init = owner.init_source(name, lisp, root / 'mcp/port', token, profile)
-            if name == 'gnu' and stock:
+            # A stock session loads the bench's init as `emacs -Q -l' does,
+            # in both engines; an owner session, as the user's init.
+            if stock:
                 (root / 'bench-init.el').write_text(init)
-                engine = McpEngine('gnu', [options.gnu, '-Q', '--font', 'Iosevka-14', '-l', str(root / 'bench-init.el')],
-                                   root, None, env, options.timeout)
+                # -Q first: GNU's `command-line' reads it only before other options.
+                quick = ['-Q', '-l', str(root / 'bench-init.el')]
+            if name == 'gnu' and stock:
+                engine = McpEngine('gnu', [options.gnu, quick[0], '--font', 'Iosevka-14', *quick[1:]], root, None, env, options.timeout)
                 engine.start(options.tools)
             elif name == 'gnu':
                 engine = parity_live.gnu_engine(root, home, env, init, lisp, options.timeout, options.tools, McpEngine)
+            elif stock:
+                engine = parity_live.romacs_engine(options.romacs, root, home, env, None, lisp, options.timeout,
+                                                   options.tools, McpEngine, quick)
             else:
                 engine = parity_live.romacs_engine(options.romacs, root, home, env, init, lisp, options.timeout,
                                                    options.tools, McpEngine)
@@ -441,6 +450,7 @@ class Bench:
         if failures:
             self.stop_engines()
             raise ToolError(f'start failed: {failures}')
+        self.match_output_heights()
         if self.gnu_cache is not None:
             self.cursors['gnu'] = {'error': None}
         for engine in self.engines.values():
@@ -452,6 +462,27 @@ class Bench:
         result = {'session': str(self.session), 'engines': started}
         return result, {'summary': {n: {k: v for k, v in s.items() if k in ('startup_seconds', 'world_seconds', 'init_errors', 'startup_hook_ran')}
                                     for n, s in started.items()}}
+
+    def match_output_heights(self):
+        """Give every engine's output the tallest fitted height.
+
+        Each engine fits its own output to the grid.  GNU starts with its
+        minibuffer a pixel taller than a line, so its output fits a pixel
+        taller; when the minibuffer shrinks back, that pixel goes to the root
+        window as a partly visible last row, which `window-end' and the mode
+        line's All count.  Romacs gives such a pixel to the root window at
+        once.  Equal outputs compare the two on the same frame."""
+        if len(self.engines) < 2:
+            return
+        sizes = {name: engine.output_size() for name, engine in self.engines.items()}
+        height = max(h for _, h in sizes.values())
+        changed = False
+        for name, (width, h) in sizes.items():
+            if h != height:
+                self.engines[name].randr(width, height)
+                changed = True
+        if changed:
+            time.sleep(1)
 
     def bench_send_keys(self, arguments):
         effect = arguments.get('effect')

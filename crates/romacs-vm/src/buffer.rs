@@ -2040,7 +2040,7 @@ impl Vm {
     /// verify_interval_modification's hooks: the distinct `modification-hooks'
     /// values of the characters in RANGE of BUFFER, in order.
     pub(crate) fn modification_hooks_in(&mut self, buffer: Value, range: std::ops::Range<ByteOffset>) -> std::result::Result<Vec<Value>, crate::prim::Fault> {
-        let runs = self.property_runs(buffer, range);
+        let runs = self.property_runs(buffer, range, &["modification-hooks"]);
         let current = self.slots[self.buffer_slot].value;
         self.slots[self.buffer_slot].value = buffer;
         let mut hooks = Vec::new();
@@ -2323,23 +2323,49 @@ impl Vm {
         }
     }
 
-    /// The property runs of BUFFER over RANGE: each run's start and its
-    /// characters' properties, read without copying the buffer's runs.
-    pub(crate) fn property_runs(&self, buffer: Value, range: std::ops::Range<ByteOffset>) -> Vec<(ByteOffset, Vec<(String, Value)>)> {
-        let runs = |properties: &properties::Properties| {
-            let mut runs = Vec::new();
-            let mut at = range.start;
-            while at < range.end {
-                runs.push((at, properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect()));
-                at = properties.next_change(at, range.end);
-            }
-            runs
+    /// The property runs of BUFFER over RANGE as `text_property_in' sees
+    /// PROPERTIES: each run's start and its characters' values of the keys
+    /// that textget reads for them, so a run ends only where one could change.
+    pub(crate) fn property_runs(
+        &mut self,
+        buffer: Value,
+        range: std::ops::Range<ByteOffset>,
+        properties: &[&str],
+    ) -> Vec<(ByteOffset, Vec<(String, Value)>)> {
+        let keys = self.textget_keys(properties);
+        let runs = |text: &properties::Properties| match &keys {
+            Some(keys) => text.runs_of(range.clone(), keys),
+            None => text.runs(range.clone()).into_iter().map(|(run, values)| (run.start, values)).collect(),
         };
         match self.object_if(buffer) {
             Some(Object::Buffer(b)) => runs(&b.properties),
             Some(Object::ByteBuffer(b)) => runs(&properties::Properties::from_map(&b.properties)),
             _ => Vec::new(),
         }
+    }
+
+    /// The keys `text_property_in' reads for PROPERTIES: each, `category',
+    /// and their `char-property-alias-alist' aliases.  None, meaning every
+    /// key, when that list is malformed, so its error surfaces as before.
+    fn textget_keys(&mut self, properties: &[&str]) -> Option<Vec<String>> {
+        let aliases = self.text_property_variable("char-property-alias-alist").ok()?;
+        let mut keys = vec!["category".to_owned()];
+        for property in properties {
+            keys.push((*property).to_owned());
+            let symbol = Value::reference(self.slot(property) + 1, 7);
+            let entry = self.text_property_find(aliases, |entry| self.cons_pair(entry).is_ok_and(|(key, _)| key == symbol)).ok()?;
+            let Some(entry) = entry else { continue };
+            let (_, mut tail) = self.cons_pair(entry).ok()?;
+            let mut walk = annotations::TailWalk::new(tail);
+            while let Ok((alias, next)) = self.cons_pair(tail) {
+                keys.extend(self.text_property_name(alias).map(str::to_owned));
+                tail = next;
+                if walk.cycle(tail) {
+                    return None;
+                }
+            }
+        }
+        Some(keys)
     }
 
     /// Whether BUFFER's text has an interval tree (verify_interval_modification
@@ -2368,7 +2394,7 @@ impl Vm {
         let inhibit = self.text_property_variable("inhibit-read-only")?;
         let read_only =
             self.text_property_variable("buffer-read-only")? != Value::NIL && inhibit == Value::NIL;
-        let runs = self.property_runs(object, range.clone());
+        let runs = self.property_runs(object, range.clone(), &["read-only", "inhibit-read-only"]);
         let first = self.char_properties(object, range.start);
         if read_only && self.text_property_in(&first, "inhibit-read-only")? == Value::NIL {
             return Err(self.text_property_signal("buffer-read-only", &[object]));
