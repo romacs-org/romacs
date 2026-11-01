@@ -1172,6 +1172,12 @@ impl WgpuRenderer {
         let mut sharp_border_vertices: Vec<RectVertex> = Vec::new();
         let mut rounded_border_vertices: Vec<RoundedRectVertex> = Vec::new();
         let mut rounded_fill_vertices: Vec<RoundedRectVertex> = Vec::new();
+        // A layer's selection band, under the text and over the row's own
+        // backgrounds (which share its colour).
+        if let Some(band) = frame.layer.selection {
+            self.add_rounded_rect(&mut rounded_fill_vertices, band.x + offset_x, band.y + offset_y,
+                                  band.width, band.height, 0.0, band.radius, &band.color);
+        }
 
         for span in box_spans {
             if let Some(face) = faces.get(&span.face_id) {

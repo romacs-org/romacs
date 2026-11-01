@@ -250,9 +250,25 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                     (list (frame-parameter f 'romacs-layer-edge)
                           (= (+ (car (frame-position f)) (frame-pixel-width f) 12) (frame-text-width))))
                   (current-message)))"));
+        // Only the characters fzf matched carry the match face; a file shows
+        // its name, then its directory, muted.
+        report.push(printed(&mut vm, "(let* ((completion-styles '(fzf)) (completion-lazy-hilit nil)
+                (s (romacs-complete--dim-directory
+                    (romacs-complete--accent (copy-sequence (car (completion-all-completions \"band\" '(\"docs/band.rs\") nil 4))))))
+                (with (lambda (face) (seq-filter (lambda (i) (memq face (ensure-list (get-text-property i 'face s))))
+                                                 (number-sequence 0 (1- (length s)))))))
+            (list (string-to-multibyte (substring-no-properties s)) (funcall with 'romacs-complete-match) (funcall with 'romacs-complete-directory)))"));
+        // A panel made again is glass again; with glass off a toast is square.
+        report.push(printed(&mut vm, "(progn (romacs-complete-mode -1) (romacs-complete-mode 1)
+            (list (frame-parameter romacs-complete--layer 'romacs-layer-radius)
+                  (let ((romacs-layer-glass nil)) (romacs-layer-toast \"square\")
+                    (let ((f (romacs-layer--frame (caar romacs-layer--toasts))))
+                      (list (frame-parameter f 'romacs-layer-radius) (frame-parameter f 'child-frame-border-width))))))"));
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#,
-                        r##"(center 12 t "#d48a20" 10 t t)"##,
-                        "((\"four\" \"three\" \"two\") t (top t) nil)"]);
+                        r##"(top 8 t "#d48a20" 10 t t)"##,
+                        "((\"four\" \"three\" \"two\") t (top t) nil)",
+                        "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
+                        "(8 (nil 1))"]);
 }

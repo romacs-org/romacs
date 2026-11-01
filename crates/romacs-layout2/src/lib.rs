@@ -226,14 +226,12 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
     );
     hide_cursors_off(&mut frame, &frame_snapshot);
     frame.layer = layer_motion(child, &ends);
-    // The selection fills its row to the window's edge, as a palette's does
-    // (the band GNU's `:extend' would draw); the text's own background is
-    // the band's colour, so the row reads as one band.
-    if let Some(band) = frame.layer.selection {
-        frame.add_background(band.x, band.y, band.width, band.height, band.color);
+    // A rounded layer is light, not chrome: its border is padding, unpainted,
+    // and a hairline parts its stacked windows (a picker's input from its list).
+    if child.radius > 0 {
+        frame.border_width = 0.0;
+        separate_windows(child, &mut frame);
     }
-    // A rounded layer is light, not chrome: its border is padding, unpainted.
-    if child.radius > 0 { frame.border_width = 0.0; }
     Ok((frame, ends))
 }
 
@@ -258,17 +256,31 @@ fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_displa
     }
 }
 
+/// A 1px line across CHILD above each of its windows but the topmost, in
+/// its background lifted 15% toward the default foreground.
+fn separate_windows(child: &ChildFrameSnapshot, frame: &mut FrameGlyphBuffer) {
+    let Some(top) = child.windows.iter().map(|w| w.y).min() else { return };
+    let Some(fg) = child.windows.first().and_then(|w| w.snapshot.faces.first()).map(|f| f.foreground) else { return };
+    let line = color(std::array::from_fn(|i| (f32::from(child.background[i]) * 0.85 + f32::from(fg[i]) * 0.15).round() as u8));
+    for placed in child.windows.iter().filter(|w| w.y > top && w.snapshot.height > 0) {
+        frame.add_background(0.0, placed.y as f32 - 1.0, child.width as f32, 1.0, line);
+    }
+}
+
 /// The band row ROW of CHILD's first window shows its selection in, laid
-/// out as END: the window's inner width, the row's height, in the
-/// background of the face at the row's start; none past the rows shown or
-/// under a header line.
+/// out as END: a picker's selected row (Zed's inset `ListItem`, ideas and
+/// values only): the window's width and up to 4px of the padding either
+/// side, the row's height, corners of 4px, in the background of the face
+/// at the row's start; none past the rows shown or under a header line.
 fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32) -> Option<romacs_display_protocol::SelectionBand> {
     let placed = child.windows.first()?;
     let window = &placed.snapshot;
     let row = end.rows.get(row as usize).filter(|_| window.header_line.is_none())?;
     let face = window.text.face_runs.iter().find(|run| run.bytes.contains(&row.start)).map_or(0, |run| run.face.0 as usize);
+    let inset = (placed.x as f32).min(4.0);
     Some(romacs_display_protocol::SelectionBand {
-        x: placed.x as f32, y: placed.y as f32 + row.y, width: window.width as f32, height: row.height,
+        x: placed.x as f32 - inset, y: placed.y as f32 + row.y, width: window.width as f32 + 2.0 * inset, height: row.height,
+        radius: 4.0,
         color: color(window.faces.get(face)?.background), base: color(window.faces.first()?.background),
     })
 }

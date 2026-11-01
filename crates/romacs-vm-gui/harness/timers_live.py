@@ -39,6 +39,10 @@ INIT = '''(setq gnosis-dir {gnosis})
 (defun timers-live-record (form)
   (write-region (concat (prin1-to-string form) "\\n") nil {state} 'append 'silent))
 (timers-live-record '(init))
+;; What the host hands the display for each echo-area message (the echo
+;; line, or a toast in romacs-complete-mode), with `current-message' then.
+(add-hook 'romacs-echo-area-functions
+          (lambda (text) (when text (timers-live-record (list 'echo text (current-message))))))
 (run-with-timer 2 nil (lambda () (timers-live-record (list 'ordinary (and (current-idle-time) t)))))
 (run-with-timer 3 nil (lambda () (require 'gnosis-feed) (timers-live-record (list 'dwell (gnosis-feed--dwell-supported-p)))))
 (run-with-idle-timer 1 t
@@ -212,10 +216,16 @@ def checked(binary, args, output, report):
         fio.wait(lambda: any(r.startswith('(dwell') for r in records(state)), 15, 'dwell probe', process)
         check("a timer's queued input wakes a read (gnosis-feed--dwell-supported-p)",
               '(dwell t)' in records(state), records(state))
-        # Shown at some point: the echo area keeps it, a message toast shows
-        # it for `romacs-layer-toast-timeout'.
-        check('echo area shows the idle probe', ff.ever_shown(log_path.read_text(errors='replace'), 'Idle probe 1'),
-              rows()[-2:])
+        # The display received it (whatever draws it, the echo line or a
+        # toast) and `current-message' was it: a recorded condition, not a
+        # frame that may already have changed.
+        shown = '(echo "Idle probe 1" "Idle probe 1")'
+        try:
+            fio.wait(lambda: shown in records(state), 15, 'idle probe echoed', process)
+        except Exception:
+            pass
+        check('echo area shows the idle probe', shown in records(state),
+              [r for r in records(state) if r.startswith('(echo')])
         time.sleep(args.cpu_window)
         check('no more idle probes without input', len([r for r in records(state) if r.startswith('(idle')]) == 1,
               records(state))

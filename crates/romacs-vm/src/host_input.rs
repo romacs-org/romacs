@@ -224,6 +224,10 @@ impl Vm {
                 // queues; a redisplay's Lisp (a mode-line :eval) may change
                 // them, and then the wait ends for Lisp to compute it again.
                 let before = self.host_wait_state()?;
+                // GNU's `message' redisplays the echo area at once (xdisp.c
+                // message3_nolog): a host that renders it shows a message
+                // left during this wait (a timer's) before the snapshot.
+                self.call_prepared_source_raw("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])?;
                 let (width, height) = (self.window_state.width, self.window_state.height);
                 let started = crate::host::monotonic();
                 let frame = self.frame_snapshot(width, height)?;

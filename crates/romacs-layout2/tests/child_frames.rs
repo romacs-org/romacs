@@ -81,10 +81,9 @@ fn a_layer_publishes_how_it_animates_and_its_selection_band() {
     let band = layer.selection.expect("row 1 is shown");
     assert_eq!((band.y, band.height), (line as f32, line as f32));
     assert_eq!(band.color, romacs_display_protocol::Color::from_pixel(0xff0000));
-    // The window's whole width, painted as a background after its row's text.
-    assert_eq!((band.x, band.width), (0.0, children[0].width));
-    assert!(matches!(children[0].glyphs.last(), Some(romacs_display_protocol::FrameGlyph::Background { bounds, color })
-        if bounds.y == band.y && bounds.width == band.width && *color == band.color));
+    // The window's whole width (no padding to inset into here), rounded;
+    // the renderer draws it under the row's text.
+    assert_eq!((band.x, band.width, band.radius), (0.0, children[0].width, 4.0));
     vm.eval_source("(setq romacs-layer-animation t) (modify-frame-parameters c '((romacs-layer-selection . 7)))").unwrap();
     let snapshot = vm.frame_snapshot(400, 300).unwrap();
     let (children, _) = engine.layout_children(&snapshot, 4, None).unwrap();

@@ -1389,7 +1389,7 @@ fn evaluate(
                     let _ = echo::show(&mut vm, &format!("Timer: {error}"));
                     timers::Idle { ran: true, message: false, delay: None }
                 });
-                if idle.ran {
+                if idle.ran || idle.message {
                     if idle.message { echo::sync_current_message(&mut vm)?; }
                     live_presentation.changed();
                     continue;

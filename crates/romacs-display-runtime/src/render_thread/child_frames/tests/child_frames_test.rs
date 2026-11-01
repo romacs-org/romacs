@@ -1330,7 +1330,13 @@ fn finished_drifts_clear_so_the_retained_path_returns() {
 #[test]
 fn a_reshape_draws_the_rect_from_its_departure_to_the_placed_rect() {
     let mut mgr = make_manager();
-    mgr.update_frame(make_child_buf(1, 0.0, 300.0, 800.0, 100.0, 0));
+    let mut buf = make_child_buf(1, 0.0, 300.0, 800.0, 100.0, 0);
+    buf.layer.radius = 8.0;
+    buf.layer.selection = Some(romacs_display_protocol::SelectionBand {
+        x: 0.0, y: 20.0, width: 800.0, height: 20.0, radius: 4.0,
+        color: romacs_display_protocol::Color::WHITE, base: romacs_display_protocol::Color::BLACK,
+    });
+    mgr.update_frame(buf);
     let origin = origin_now();
     mgr.begin_reshape(1, [0.0, 100.0, 800.0, 300.0], tween_100ms(), origin);
     let entry = mgr.frames.get(&1).unwrap();
@@ -1338,10 +1344,12 @@ fn a_reshape_draws_the_rect_from_its_departure_to_the_placed_rect() {
     let mid = entry.drawn_rect(sample_at(origin, 50));
     assert!(mid[1] > 100.0 && mid[1] < 300.0 && mid[3] > 100.0 && mid[3] < 300.0, "{mid:?}");
     assert_eq!(entry.drawn_rect(sample_at(origin, 200)), [0.0, 300.0, 800.0, 100.0]);
-    // The box carries the frame's background and border, sized each pass.
+    // The box carries the frame's background, border and look (not its
+    // selection, which the content draws), sized each pass.
     mgr.advance(sample_at(origin, 50));
     let frame_box = &mgr.frames.get(&1).unwrap().reshape.as_ref().unwrap().frame_box;
     assert!(frame_box.glyphs.is_empty());
+    assert_eq!((frame_box.layer.radius, frame_box.layer.selection), (8.0, None));
     assert_eq!((frame_box.width, frame_box.height), (mid[2], mid[3]));
     assert!(mgr.reclaim_finished_composition(sample_at(origin, 200)));
     assert!(mgr.frames.get(&1).unwrap().reshape.is_none());
@@ -1353,22 +1361,24 @@ fn a_glide_moves_the_band_over_the_rows_and_hides_the_new_row_s_highlight() {
     let mut buf = make_child_buf(1, 0.0, 0.0, 800.0, 200.0, 0);
     let (band, base) = (romacs_display_protocol::Color::WHITE, romacs_display_protocol::Color::BLACK);
     buf.layer.selection = Some(romacs_display_protocol::SelectionBand {
-        x: 0.0, y: 60.0, width: 800.0, height: 20.0, color: band, base,
+        x: 0.0, y: 60.0, width: 800.0, height: 20.0, radius: 4.0, color: band, base,
     });
     let glyphs = buf.glyphs.len();
     mgr.update_frame(buf);
     let origin = origin_now();
     mgr.begin_glide(1, 20.0, tween_100ms(), origin);
     let glide = mgr.frames.get(&1).unwrap().glide.as_ref().unwrap();
-    // The payload's glyphs, then its base over the selected row, then the band,
-    // and its text drawn over the band, not on its own face's background.
-    assert_eq!(glide.frame.glyphs.len(), glyphs + 2);
+    // The payload's glyphs, then its base over the row it settles on; its
+    // band moves, and its text draws over the band, not on its own face's
+    // background.
+    assert_eq!(glide.frame.glyphs.len(), glyphs + 1);
     assert!(glide.frame.text_over_backgrounds && !mgr.frames[&1].frame.text_over_backgrounds);
     assert!(matches!(glide.frame.glyphs[glyphs], FrameGlyph::Background { bounds, color }
         if bounds.y == 60.0 && color == base));
-    let band_y = |mgr: &ChildFrameManager| match mgr.frames[&1].glide.as_ref().unwrap().frame.glyphs[glyphs + 1] {
-        FrameGlyph::Background { bounds, color } => { assert_eq!(color, band); bounds.y }
-        _ => panic!("the band is a background"),
+    let band_y = |mgr: &ChildFrameManager| {
+        let moving = mgr.frames[&1].glide.as_ref().unwrap().frame.layer.selection.unwrap();
+        assert_eq!(moving.color, band);
+        moving.y
     };
     mgr.advance(sample_at(origin, 0));
     assert_eq!(band_y(&mgr), 20.0);

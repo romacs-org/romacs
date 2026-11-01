@@ -273,14 +273,15 @@ pub enum LayerEdge {
     Top,
 }
 
-/// A layer's selection highlight: the row band it paints in COLOR, and
-/// BASE, the colour the row shows without it.
+/// A layer's selection highlight: the rounded row band it paints in COLOR
+/// under the row's text, and BASE, the colour the row shows without it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SelectionBand {
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub radius: f32,
     pub color: crate::Color,
     pub base: crate::Color,
 }

@@ -35,16 +35,6 @@ def current_rows(text):
     return result
 
 
-def ever_shown(text, needle):
-    """Whether any prompt snapshot or submitted scene in TEXT showed NEEDLE
-    on a row."""
-    rows = []
-    for line in text.split('\n'):
-        if line.startswith('{'):
-            rows += current_rows(line)
-    return any(needle in row for row in rows)
-
-
 def prompt_shown(rows, prompt):
     """Whether ROWS show PROMPT on the first or last row: the minibuffer's
     text, which romacs-complete's candidate count may precede."""

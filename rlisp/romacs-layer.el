@@ -80,16 +80,18 @@ them GNU's square child-frame border."
       (apply #'format "#%02x%02x%02x"
              (seq-mapn (lambda (b f) (/ (round (+ (* 0.92 b) (* 0.08 f))) 257)) bg fg)))))
 
-(defun romacs-layer-glass-parameters ()
-  "Frame parameters that make a layer glass (`romacs-layer-glass'), or nil.
-The host rounds its corners (`romacs-layer-radius'), lights it
-\(`romacs-layer-shadow', `romacs-layer-glow') and leaves its border,
-here padding, unpainted."
-  (when romacs-layer-glass
-    `((romacs-layer-radius . 12) (romacs-layer-shadow . t)
-      (romacs-layer-glow . ,(romacs-layer--hex (face-foreground 'romacs-layer-glow nil t)))
-      (child-frame-border-width . 10)
-      (background-color . ,(romacs-layer--glass-background)))))
+(defun romacs-layer-glass-parameters (glass)
+  "Frame parameters that make a layer glass when GLASS is non-nil, else
+the ones that make it GNU's square child frame again.  The host rounds a glass layer's corners (`romacs-layer-radius'),
+lights it (`romacs-layer-shadow', `romacs-layer-glow') and leaves its
+border, there padding, unpainted."
+  (if glass
+      `((romacs-layer-radius . 8) (romacs-layer-shadow . t)
+        (romacs-layer-glow . ,(romacs-layer--hex (face-foreground 'romacs-layer-glow nil t)))
+        (child-frame-border-width . 10)
+        (background-color . ,(romacs-layer--glass-background)))
+    `((romacs-layer-radius) (romacs-layer-shadow) (romacs-layer-glow) (background-color)
+      (child-frame-border-width . ,(alist-get 'child-frame-border-width romacs-layer-frame-parameters)))))
 
 (defvar romacs-layer--frames nil
   "Alist of (BUFFER . FRAME): the child frame showing each layer's buffer.")
@@ -303,7 +305,7 @@ The same TEXT as the newest toast shows that one longer instead."
       (with-current-buffer buffer
         (let ((inhibit-read-only t)) (erase-buffer) (insert text)))
       (let ((frame (romacs-layer--frame buffer)))
-        (modify-frame-parameters frame (romacs-layer-glass-parameters))
+        (modify-frame-parameters frame (romacs-layer-glass-parameters romacs-layer-glass))
         (set-window-start (frame-root-window frame) 1))
       (push (list buffer text (run-at-time romacs-layer-toast-timeout nil #'romacs-layer--toast-expire buffer))
             romacs-layer--toasts)

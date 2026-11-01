@@ -135,11 +135,9 @@ pub(crate) struct EntryGlide {
     pub(in crate::render_thread) motion: Motion,
     pub(in crate::render_thread) from_y: f32,
     /// The payload drawn while the glide runs: its own glyphs, then its base
-    /// colour over the selected row and the band itself, both in the
-    /// background pass, so the text draws over the band wherever it is.
+    /// colour over the row it settles on, with its band moved before each
+    /// pass; the text draws over the band wherever it is.
     pub(in crate::render_thread) frame: FrameGlyphBuffer,
-    /// Index of the band's glyph in `frame`, moved before each pass.
-    pub(in crate::render_thread) band: usize,
 }
 
 /// A placement drift: the popup gliding from where it was drawn to where
@@ -312,6 +310,8 @@ impl ChildFrameManager {
             frame_box.border_width = entry.frame.border_width;
             frame_box.border_color = entry.frame.border_color;
             frame_box.undecorated = entry.frame.undecorated;
+            // Its look (rounded, lit), not its selection, which the content draws.
+            frame_box.layer = romacs_display_protocol::Layer { selection: None, ..entry.frame.layer };
             entry.reshape = Some(EntryReshape { motion, from, frame_box });
             tracing::debug!(frame_id, ?from, "child_frame_lifecycle: reshape_started");
         }
@@ -326,9 +326,8 @@ impl ChildFrameManager {
         // Text's own pre-mixed background would show the row it settled on.
         frame.text_over_backgrounds = true;
         frame.add_background(band.x, band.y, band.width, band.height, band.base);
-        frame.add_background(band.x, from_y, band.width, band.height, band.color);
-        let band = frame.glyphs.len() - 1;
-        entry.glide = Some(EntryGlide { motion, from_y, frame, band });
+        if let Some(moving) = frame.layer.selection.as_mut() { moving.y = from_y; }
+        entry.glide = Some(EntryGlide { motion, from_y, frame });
     }
 
     /// Bring every reshape box and gliding band to where SAMPLE puts it,
@@ -343,8 +342,8 @@ impl ChildFrameManager {
             let to = entry.frame.layer.selection.map(|band| band.y);
             if let (Some(glide), Some(to)) = (entry.glide.as_mut(), to) {
                 let progress = glide.motion.sample(sample).progress;
-                if let Some(crate::core::frame_glyphs::FrameGlyph::Background { bounds, .. }) = glide.frame.glyphs.get_mut(glide.band) {
-                    bounds.y = glide.from_y + (to - glide.from_y) * progress;
+                if let Some(band) = glide.frame.layer.selection.as_mut() {
+                    band.y = glide.from_y + (to - glide.from_y) * progress;
                 }
             }
         }
