@@ -830,10 +830,18 @@ impl Vm {
     pub(crate) fn resize_mini_window_now(&mut self) -> Result<bool> {
         let mini = self.window_root(MINI);
         if !self.resize_mini_window(mini)? { return Ok(false); }
-        let state = &self.window_state;
-        let (width, height, line, column) = (state.width, state.height, state.line, state.column);
-        self.set_frame_geometry(width, height, line, column)?;
+        let (width, height) = (self.window_state.width, self.window_state.height);
+        self.refit_mini_window(width, height)?;
         Ok(true)
+    }
+    /// Lay out again after the mini-window's height changed: a hosted
+    /// mini-window's host frame takes its new height, else the frame's
+    /// windows, WIDTH by HEIGHT, make room for it.
+    fn refit_mini_window(&mut self, width: u32, height: u32) -> Result<()> {
+        match self.minibuffer_host() {
+            Some((frame, edge)) => self.refit_minibuffer_host(frame, edge),
+            None => self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column),
+        }
     }
 
     /// Freeze leaf publications using stable scalar IDs across collecting mode-line eval.
@@ -856,12 +864,7 @@ impl Vm {
         let host = self.minibuffer_host();
         if host.is_none() { ids.push(self.window(mini)?.id); }
         // Redisplay sizes the mini-window to its display before laying out.
-        if self.resize_mini_window(mini)? {
-            match host {
-                Some((frame, edge)) => self.refit_minibuffer_host(frame, edge)?,
-                None => self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column)?,
-            }
-        }
+        if self.resize_mini_window(mini)? { self.refit_mini_window(width, height)?; }
         self.reconcile_terminal_geometry()?;
         let outcome = self.snapshot_leaves(ids);
         self.display_state.width = width;

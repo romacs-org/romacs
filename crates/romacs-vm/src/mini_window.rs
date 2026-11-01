@@ -87,22 +87,29 @@ pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings:
     merged
 }
 
-/// The rows LINE takes in rows of WIDTH columns: a glyph that does not
-/// fit in what is left of a row starts the next. A TAB goes to the next
-/// tab stop of the line, a control character takes two (^X), others
-/// their Unicode width.
-fn rows(line: &str, width: usize) -> usize {
-    let (mut rows, mut at, mut column) = (1, 0, 0);
-    for c in line.chars() {
+/// Where each display row of TEXT starts, a byte offset: every text line
+/// starts one, and when WRAPPED a glyph that does not fit in what is left
+/// of a row of WIDTH columns starts the next. A TAB goes to the next tab
+/// stop of its line, a control character takes two (^X), others their
+/// Unicode width.
+fn row_starts(text: &str, width: usize, wrapped: bool) -> Vec<usize> {
+    let mut starts = vec![0];
+    let (mut at, mut column) = (0, 0);
+    for (byte, c) in text.char_indices() {
+        if c == '\n' {
+            starts.push(byte + 1);
+            (at, column) = (0, 0);
+            continue;
+        }
         let glyph = match c {
             '\t' => 8 - column % 8,
             '\u{0}'..='\u{1f}' | '\u{7f}' => 2,
             _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(1),
         };
-        if at > 0 && at + glyph > width { (rows, at) = (rows + 1, 0); }
+        if wrapped && at > 0 && at + glyph > width { starts.push(byte); at = 0; }
         (at, column) = (at + glyph, column + glyph);
     }
-    rows
+    starts
 }
 
 /// How a string character displays with `ctl-arrow' at COLUMN: a tab as
@@ -231,15 +238,12 @@ impl Vm {
         let column = self.window_state.column.max(1);
         let row = (width.saturating_sub(column) / column).max(1) as usize;
         let wrapped = self.window_line_wrap(mini, buffer)? != romacs_layout_input::LineWrap::Truncate;
-        let rows: Vec<usize> = spliced.text.split('\n').map(|line| if wrapped { rows(line, row) } else { 1 }).collect();
-        let lines: usize = rows.iter().sum();
+        let starts = row_starts(&spliced.text, row, wrapped);
+        let lines = starts.len();
         if lines > max_lines && adhoc {
-            // Start at the text line from which the rest takes at most
-            // MAX_LINES display lines (the last one when it alone takes more).
-            let mut shown = 0;
-            let first = (0..rows.len()).rev().find(|&i| { shown += rows[i]; shown > max_lines }).map_or(0, |i| (i + 1).min(rows.len() - 1));
-            let line_start = if first == 0 { 0 } else { spliced.text.match_indices('\n').nth(first - 1).map_or(0, |(i, _)| i + 1) };
-            let byte = buffer_of(&spliced.segments, line_start, text.len());
+            // Start at the screen row that shows the last MAX_LINES, a
+            // continuation row of a text line too (xdisp.c resize_mini_window).
+            let byte = buffer_of(&spliced.segments, starts[lines - max_lines], text.len());
             let Object::Buffer(b) = self.object(buffer)? else { return Err("text buffer required".into()) };
             let start = b.char_of_byte(coordinates::ByteOffset(byte))?.0 as i64 + 1;
             self.set_window_start_if_moved(marker, buffer, start)?;
