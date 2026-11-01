@@ -311,7 +311,7 @@ fn pane_conversion_refuses_before_motion_and_recovers_under_held_pressure() {
             assert_eq!(render.compositor.current_frame, current);
             assert_eq!(format!("{:?}", render.compositor.interaction), interaction);
             assert!(render.compositor.layout.wants_frames());
-            assert!(render.child_opacity_src.is_none() && render.child_resize_src.is_none());
+            assert!(render.child_opacity_src.is_none());
         }
         renderer.set_frame_sample(FrameSample::new(
             origin.plus(Duration::from_secs(2)),

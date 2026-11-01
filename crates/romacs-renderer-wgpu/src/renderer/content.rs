@@ -616,7 +616,8 @@ impl WgpuRenderer {
         let mut mask_data: Vec<(AnyAtlasEntry, [CoverageGlyphVertex; 6])> = Vec::new();
         let mut subpixel_data: Vec<(AnyAtlasEntry, [CoverageGlyphVertex; 6])> = Vec::new();
         let mut color_data: Vec<(AnyAtlasEntry, [GlyphVertex; 6])> = Vec::new();
-        let enable_subpixel = glyph_atlas.subpixel_enabled() && frame.background_alpha == 1.0;
+        let opaque_text = frame.background_alpha == 1.0 && !frame.text_over_backgrounds;
+        let enable_subpixel = glyph_atlas.subpixel_enabled() && opaque_text;
 
         let mut text_face_cache: Option<(FaceId, MaterializedFaceData)> = None;
         for (glyph_index, glyph) in frame.glyphs.iter().enumerate() {
@@ -1246,7 +1247,7 @@ impl WgpuRenderer {
                 *channel *= frame.background_alpha;
             }
         }
-        let glyph_pl = if frame.background_alpha != 1.0 {
+        let glyph_pl = if !opaque_text {
             if use_stencil {
                 &self.pipelines.stencil_transparent_glyph
             } else {

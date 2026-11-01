@@ -20,7 +20,7 @@ use super::webview_cache::WgpuWebViewCache;
 
 mod box_tessellation;
 mod child_frames;
-pub use child_frames::{ChildPreparationError, ChildResizePicture, PreparedChildFrame};
+pub use child_frames::{ChildPreparationError, PreparedChildFrame};
 mod composition_ring;
 pub use composition_ring::CompositionRing;
 mod content;

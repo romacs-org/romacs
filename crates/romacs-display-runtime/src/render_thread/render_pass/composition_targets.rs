@@ -166,6 +166,10 @@ pub(super) fn report_unpooled_gpu_textures(
         Some(retained) => renderer.record_full_frame_texture(owner, &retained.texture),
         None => renderer.retire_full_frame_texture(owner, UnpooledTexture::RetainedStaticScene),
     }
+    match render.compositor.retained_root.as_ref() {
+        Some(retained) => renderer.record_full_frame_texture(owner, &retained.texture),
+        None => renderer.retire_full_frame_texture(owner, UnpooledTexture::RetainedRootScene),
+    }
     let atlas_bytes = render
         .compositor
         .glyph_atlas
@@ -186,7 +190,6 @@ pub(super) fn report_unpooled_gpu_textures(
 /// sampling. Keep this order in one production entry point.
 pub(super) struct FrameTargets {
     pub(super) picture: Option<SnapshotLease>,
-    pub(super) resize: Option<SnapshotLease>,
     pub(super) native: Option<SnapshotLease>,
 }
 
@@ -255,11 +258,10 @@ pub(super) fn prepare_frame_targets_for_scene(
     {
         render.native_content_src = None;
     }
-    let (picture, resize) = prepare_child_targets(renderer, render, size)?;
+    let picture = prepare_child_targets(renderer, render, size)?;
     let native = native_content_target(renderer, render, surface, plan)?;
     Ok(FrameTargets {
         picture,
-        resize,
         native,
     })
 }
@@ -286,12 +288,12 @@ pub(super) fn mandatory_child_target(
 mod tests;
 
 /// Preflight child composition before acquiring a surface or advancing any
-/// presentation/projection state. Both leases remain local until admitted.
+/// presentation/projection state. The lease remains local until admitted.
 pub(super) fn prepare_child_targets(
     renderer: &mut WgpuRenderer,
     render: &mut GuiFrameRenderState,
     size: SnapshotSize,
-) -> Result<(Option<SnapshotLease>, Option<SnapshotLease>), super::surface::FrameRenderFailure> {
+) -> Result<Option<SnapshotLease>, super::surface::FrameRenderFailure> {
     reclaim_finished_child_composition(render, renderer.frame_sample());
     let children = &render.compositor.child_frames;
     let needs_picture = children.has_dying()
@@ -300,17 +302,8 @@ pub(super) fn prepare_child_targets(
                 || entry.applied_frame_alpha != 1.0
                 // Dormant policy components are not applied picture opacity.
                 || entry.animation.is_some()
-                || entry.crossfade.is_some()
         });
-    mandatory_child_targets(
-        renderer,
-        needs_picture,
-        children
-            .frames
-            .values()
-            .any(|entry| entry.crossfade.is_some()),
-        size,
-    )
+    mandatory_child_target(renderer, needs_picture, size)
 }
 
 fn reclaim_finished_child_composition(
@@ -329,17 +322,4 @@ fn reclaim_finished_child_composition(
         render.compositor.current_row_damage = None;
         render.mark_dirty();
     }
-}
-
-/// Both mandatory scratch leases are accepted atomically by the caller.
-/// A second refusal releases the first before returning the typed retry.
-pub(super) fn mandatory_child_targets(
-    renderer: &mut WgpuRenderer,
-    picture: bool,
-    resize: bool,
-    size: SnapshotSize,
-) -> Result<(Option<SnapshotLease>, Option<SnapshotLease>), super::surface::FrameRenderFailure> {
-    let picture = mandatory_child_target(renderer, picture, size)?;
-    let mixed = mandatory_child_target(renderer, resize, size)?;
-    Ok((picture, mixed))
 }

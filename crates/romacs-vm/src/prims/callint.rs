@@ -227,6 +227,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "widen" | "garbage-collect" | "redraw-display" | "unix-sync" | "do-auto-save" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
         "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" | "start-kbd-macro" => "P", "end-kbd-macro" | "call-last-kbd-macro" => "p", "kill-buffer" => "bKill buffer: ",
         "search-forward" => "MSearch: ",
+        "lossage-size" => "(list (read-number \"Set maximum keystrokes to: \" (lossage-size)))",
         "re-search-forward" => "sRE search: ",
         "re-search-backward" => "sRE search backward: ",
         "modify-syntax-entry" => "cSet syntax for character: \nsSet syntax for %s to: ",

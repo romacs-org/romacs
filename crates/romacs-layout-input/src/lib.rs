@@ -125,7 +125,24 @@ pub struct ChildFrameSnapshot {
     /// Its own `alpha-background' (FrameSnapshot::background_alpha).
     pub background_alpha: f32,
     pub windows: Vec<PlacedWindowSnapshot>,
+    /// How the host animates it: `romacs-layer-animation'.
+    pub animation: LayerAnimation,
+    /// The edge it is anchored at, its `romacs-layer-edge' parameter: it
+    /// opens from there and grows away from it.
+    pub edge: LayerEdge,
+    /// The row of its first window that shows its selection, counted from
+    /// the window start: its `romacs-layer-selection' parameter.
+    pub selection: Option<u32>,
 }
+
+/// `romacs-layer-animation': no layer animation, fades only, or fades,
+/// slides and tweens.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayerAnimation { #[default] Off, Reduced, Full }
+
+/// The edge a layer is anchored at.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayerEdge { #[default] Bottom, Top }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedWindowSnapshot {

@@ -157,6 +157,31 @@ fn recent_keys(cx; optional include_cmds: Value) {
     Ok(cx.recent_keys(include_cmds != Value::NIL))
 }}
 
+// Flossage_size: the number of recent keys kept, or with ARG a new number
+// from 100 (MIN_NUM_RECENT_KEYS) to MAX_NUM_RECENT_KEYS, keeping the
+// newest; anything else is a `user-error' with GNU's message.
+defsubr! { name = "lossage-size", gnu = "keyboard.c:12173", effect = Global,
+fn lossage_size(cx; optional arg: Value) {
+    const MIN: i64 = 100;
+    const MAX: i64 = i32::MAX as i64 / 64;
+    if arg != Value::NIL {
+        let message = match arg.integer_value() {
+            Some(n) if n < 0 => Some("Value must be a positive integer".to_owned()),
+            None => Some("Value must be a positive integer".to_owned()),
+            Some(n) if n as usize == cx.lossage_limit() => None,
+            Some(n) if n < MIN => Some(format!("Value must be >= {MIN}")),
+            Some(n) if n > MAX => Some(format!("Value must be <= {MAX}")),
+            Some(n) => { cx.set_lossage_limit(n as usize); None }
+        };
+        if let Some(message) = message {
+            let message = cx.string(&message);
+            let data = cx.cons(message, Value::NIL);
+            return Err(Fault::Signal(cx.intern("user-error"), data));
+        }
+    }
+    Value::integer(cx.lossage_limit() as i64).map_err(Fault::Error)
+}}
+
 // The count of keymap changes, which keymap.c keeps implicitly as the
 // validity of its where_is_cache: `where-is-internal' (rlisp/vm/prelude.el)
 // rebuilds its reverse map when this moves.

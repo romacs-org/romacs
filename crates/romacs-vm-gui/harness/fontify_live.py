@@ -150,7 +150,7 @@ def main():
                 if not defmacro or not comment or plain in colours['defmacro'] or plain in colours['comment']:
                     raise AssertionError(f'not fontified on screen: {colours}')
                 subprocess.run(['wtype', '-d', '40', '-M', 'alt', 'x', '-m', 'alt'], env=env, check=True, timeout=20)
-                fio.wait(lambda: rows()[:1] == ['M-x '], args.timeout, 'M-x prompt', process)
+                fio.wait(lambda: ff.prompt_shown(rows(), 'M-x '), args.timeout, 'M-x prompt', process)
                 subprocess.run(['wtype', '-d', '40', 'romacs-live-fontify-state', '-k', 'Return'],
                                env=env, check=True, timeout=20)
                 fio.wait(state.exists, args.timeout, 'fontify state', process)

@@ -28,6 +28,20 @@
 `point': below point in the selected window."
   :type '(choice (const bottom) (const center) (const point)))
 
+(defcustom romacs-layer-animation t
+  "How the display animates layers.
+t: a layer fades in with a short slide from the edge it is anchored
+at, fades out, tweens its height when it grows or shrinks, and its
+selection highlight (the `romacs-layer-selection' frame parameter)
+glides between rows.  `reduced': the fades only.  nil: no animation.
+Animation is the display's alone: Lisp sees each layer's final
+geometry at once, and a key ends any animation in flight.  A display
+on a software renderer (headless test displays) draws none unless the
+environment variable ROMACS_LAYER_ANIMATION is 1."
+  :type '(choice (const :tag "Fades, slides and tweens" t)
+                 (const :tag "Fades only" reduced)
+                 (const :tag "None" nil)))
+
 (defcustom romacs-layer-max-lines 12
   "Most lines a layer shows; its buffer scrolls past them."
   :type 'natnum)
@@ -140,7 +154,10 @@ frame."
                                           (min (or lines (cdr text)) romacs-layer-max-lines)
                                           border)))
       (set-frame-size frame width height t)
-      (set-frame-position frame left top))
+      (set-frame-position frame left top)
+      ;; The edge it slides in from and grows away from.
+      (set-frame-parameter frame 'romacs-layer-edge
+                           (if (eq (or position romacs-layer-position) 'bottom) 'bottom 'top)))
     (set-window-start (frame-root-window frame) (with-current-buffer buffer (point-min)))
     (make-frame-visible frame)
     frame))

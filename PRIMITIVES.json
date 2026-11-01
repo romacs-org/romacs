@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "2b7e1fa9f47d18fd0402315da12e9f00bf04838205a95227f0e0f0912d990a9a",
+  "source_fingerprint": "cf69152dce28dea2237a1c2c0d91f0fa10d37e48d2c4918e7d32346b08c13c27",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1217,
-  "parsed_vm2_only": 1217
+  "parsed_total": 1218,
+  "parsed_vm2_only": 1218
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -126,7 +126,7 @@
   "#:vm2-set-interactive-form": {
    "name": "#:vm2-set-interactive-form",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:771"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:772"
   },
   "#:vm2-temp-buffer": {
    "name": "#:vm2-temp-buffer",
@@ -628,7 +628,7 @@
   "call-interactively": {
    "name": "call-interactively",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:280"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:281"
   },
   "call-last-kbd-macro": {
    "name": "call-last-kbd-macro",
@@ -903,7 +903,7 @@
   "command-modes": {
    "name": "command-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:845"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:846"
   },
   "command-remapping": {
    "name": "command-remapping",
@@ -913,7 +913,7 @@
   "commandp": {
    "name": "commandp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:780"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:781"
   },
   "compare-strings": {
    "name": "compare-strings",
@@ -2764,6 +2764,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/keymap.rs:130"
   },
+  "lossage-size": {
+   "name": "lossage-size",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keymap.rs:163"
+  },
   "lower-frame": {
    "name": "lower-frame",
    "implementation": "vm2",
@@ -4113,7 +4118,7 @@
   "romacs--keymap-generation": {
    "name": "romacs--keymap-generation",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keymap.rs:163"
+   "registered_at": "crates/romacs-vm/src/prims/keymap.rs:188"
   },
   "romacs--kill-buffer-finish": {
    "name": "romacs--kill-buffer-finish",

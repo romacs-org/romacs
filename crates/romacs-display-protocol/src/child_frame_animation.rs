@@ -1,24 +1,24 @@
-//! How a child frame's lifecycle animates: four slots in the same vocabulary
+//! How a child frame's lifecycle animates: five slots in the same vocabulary
 //! the window animations use.
 //!
-//! A child frame (posframe, Corfu, company popup) is a floating overlay
+//! A child frame (posframe, Corfu, a Romacs layer) is a floating overlay
 //! composited over its parent, so its animation questions are the window
-//! ones minus the tiling constraints: it can fade in when it appears, fade
-//! out when Emacs deletes it, and drift or resize as it re-anchors. Two of
-//! those ship enabled, two ship off:
+//! ones minus the tiling constraints. Romacs's layer animation (design note
+//! ui-layer §j; Zed gpui's `Animation` with an easing over a duration is
+//! the concept reference) uses four of the slots:
 //!
-//! * `open` — on. A popup fading in costs nothing beyond drawing the popup
-//!   itself across the animation, which the scheduler already does for the
-//!   animated cursor.
-//! * `close` — on. Unlike a deleted *window*, a deleted child frame leaves no
-//!   successor growing across its ground: the parent's pixels were always
-//!   underneath, so fading it out has no doubled-picture artifact to
-//!   apologise for.
-//! * `movement` and `resize` — off. Both change where the *next* update
-//!   lands relative to where Emacs anchored the frame, and a popup whose
-//!   anchor is exact (a tooltip under one specific character) reads a
-//!   few-pixels-behind target as a positioning bug. They are fully
-//!   configurable for users who prefer the drift.
+//! * `open` — a 140ms ease-out-cubic fade with an 8px slide from the
+//!   frame's anchored edge ([`LayerEdge`]).
+//! * `close` — a 90ms fade.
+//! * `resize` — an 80ms tween of the frame's rect, as a candidate list
+//!   grows or shrinks: the new content is placed where it settles and
+//!   clipped to the moving rect, never stretched.
+//! * `selection` — a 60ms glide of a layer's selection band between rows.
+//!
+//! `movement` ships off: a popup whose anchor is exact (a tooltip under
+//! one character) reads a few-pixels-behind target as a positioning bug.
+//! Whether any of them applies to a frame is its [`LayerMotion`], which
+//! Lisp's `romacs-layer-animation` sets.
 //!
 //! # Why a copy of the ten window-animation slots rather than a shared type
 //!
@@ -197,16 +197,17 @@ impl Default for ChildFrameAnimationsConfig {
     }
 }
 
-/// A child frame appearing: 150ms ease-out-expo with an 8px rise.
+/// A layer appearing: 140ms ease-out cubic with an 8px slide from its
+/// anchored edge.
 #[must_use]
 pub fn default_child_frame_open() -> ChildFrameAnimation {
-    ChildFrameAnimation::easing(150, TransitionEasing::EaseOutExpo, 8.0)
+    ChildFrameAnimation::easing(140, TransitionEasing::EaseOutCubic, 8.0)
 }
 
-/// A child frame going away: 150ms ease-out quad, pure fade.
+/// A layer going away: a 90ms fade.
 #[must_use]
 pub fn default_child_frame_close() -> ChildFrameAnimation {
-    ChildFrameAnimation::easing(150, TransitionEasing::EaseOutQuad, 0.0)
+    ChildFrameAnimation::easing(90, TransitionEasing::EaseOutCubic, 0.0)
 }
 
 /// Drift toward a new anchor: a critically damped spring, **off**.
@@ -218,20 +219,63 @@ pub fn default_child_frame_movement() -> ChildFrameAnimation {
     }
 }
 
-/// A child frame whose content resize arrives: a critically damped spring,
-/// **off** and reserved.
-///
-/// The glyph content a child frame draws is fixed per update, so a geometry
-/// animation between two sizes would stretch one picture across both rects.
-/// This slot is wired for a future content-crossfade implementation that can
-/// blend two updates rather than stretch one; until then a resize is instant
-/// exactly as GNU Emacs does it.
+/// A layer whose size changes, as a candidate list grows or shrinks: its
+/// rect tweens over 80ms from the old to the new, the new content placed
+/// where it settles and clipped to the rect, so no picture is stretched.
 #[must_use]
 pub fn default_child_frame_resize() -> ChildFrameAnimation {
-    ChildFrameAnimation {
-        enabled: false,
-        ..ChildFrameAnimation::spring(1.0, 800)
-    }
+    ChildFrameAnimation::easing(80, TransitionEasing::EaseOutCubic, 0.0)
+}
+
+/// A layer's selection highlight gliding between rows: 60ms.
+#[must_use]
+pub fn default_child_frame_selection() -> ChildFrameAnimation {
+    ChildFrameAnimation::easing(60, TransitionEasing::EaseOutCubic, 0.0)
+}
+
+/// How one child frame, shown as a Romacs layer, animates: whether, from
+/// which edge, and where its selection is. The slots above say how long
+/// and on what curve; this says which of them apply to the frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LayerMotion {
+    pub animation: LayerAnimation,
+    pub edge: LayerEdge,
+    /// The band its selection highlight paints, in the frame's own
+    /// coordinates, when it shows one.
+    pub selection: Option<SelectionBand>,
+}
+
+/// `romacs-layer-animation': whether a layer animates. `Full` leaves every
+/// slot to the visual configuration (the default for frames no layer
+/// produced); `Reduced` keeps only the open and close fades, without
+/// their slide; `Off` animates nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayerAnimation {
+    Off,
+    Reduced,
+    #[default]
+    Full,
+}
+
+/// The edge a layer is anchored at: it slides in from there, and a height
+/// change keeps it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayerEdge {
+    #[default]
+    Bottom,
+    Top,
+}
+
+/// A layer's selection highlight: the row band it paints in COLOR, and
+/// BASE, the colour the row shows without it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectionBand {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub color: crate::Color,
+    pub base: crate::Color,
 }
 
 #[cfg(test)]

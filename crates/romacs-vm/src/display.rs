@@ -441,10 +441,14 @@ impl Vm {
         let background_alpha = self.frame_background_alpha()?;
         Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children? })
     }
+    /// FRAME's parameter NAME, if it has one.
+    fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
+        let key = self.intern(name);
+        Ok(self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v))
+    }
     /// FRAME's parameter NAME when it is a `#RRGGBB' colour.
     fn frame_hex_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
-        let key = self.intern(name);
-        let value = self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v);
+        let value = self.frame_parameter_of(frame, name)?;
         let Some(text) = value.and_then(|v| self.source_string_if(v)) else { return Ok(None) };
         let hex = text.strip_prefix('#').filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()));
         Ok(hex.map(|h| std::array::from_fn(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap())))
@@ -476,10 +480,29 @@ impl Vm {
                 let local = |n: u32, origin: i32| u32::try_from(i64::from(n) - i64::from(origin)).unwrap_or(0);
                 windows.extend(self.snapshot_leaves(vec![mini])?.into_iter().map(|(wx, wy, snapshot)| place((local(wx, x), local(wy, y), snapshot))));
             }
+            let edge = match self.frame_parameter_of(frame, "romacs-layer-edge")? {
+                Some(v) if v == self.intern("top") => romacs_layout_input::LayerEdge::Top,
+                _ => romacs_layout_input::LayerEdge::Bottom,
+            };
+            let selection = self.frame_parameter_of(frame, "romacs-layer-selection")?
+                .and_then(|v| v.integer_value()).and_then(|row| u32::try_from(row).ok());
             children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
-                                                                     background, background_alpha, windows });
+                                                                     background, background_alpha, windows,
+                                                                     animation: self.layer_animation(), edge, selection });
         }
         Ok(children)
+    }
+    /// `romacs-layer-animation': nil (or void, where romacs-layer.el is not
+    /// loaded) none, `reduced' fades only, anything else all.
+    fn layer_animation(&mut self) -> romacs_layout_input::LayerAnimation {
+        use romacs_layout_input::LayerAnimation;
+        let slot = self.slot("romacs-layer-animation");
+        match self.variable_value(slot) {
+            Ok(v) if v == Value::NIL || v == Value::UNBOUND => LayerAnimation::Off,
+            Ok(v) if v == self.intern("reduced") => LayerAnimation::Reduced,
+            Ok(_) => LayerAnimation::Full,
+            Err(_) => LayerAnimation::Off,
+        }
     }
     /// The exact list returned by the family setter, held in a lazy traced slot.
     pub fn font_alternative_family_root(&self) -> crate::handle::Local<'_> {

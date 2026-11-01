@@ -356,7 +356,8 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
         && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
-            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha) && windows_alike(&a.windows, &b.windows))
+            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha)
+            && (a.animation, a.edge, a.selection) == (b.animation, b.edge, b.selection) && windows_alike(&a.windows, &b.windows))
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {

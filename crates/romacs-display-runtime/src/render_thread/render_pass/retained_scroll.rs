@@ -13,7 +13,7 @@ use std::sync::Arc;
 // Inactive parameters do not affect body pixels. In particular, startup's
 // Lisp gallery rounds colors through sRGB strings even for disabled effects.
 // Check activation rather than comparing complete configuration snapshots.
-fn static_body_effects(effects: &romacs_display_protocol::EffectsConfig) -> bool {
+pub(super) fn static_body_effects(effects: &romacs_display_protocol::EffectsConfig) -> bool {
     !effects.has_enabled_effects_other_than_cursor_color_cycle()
         && effects.bg_pattern.style == 0
         && effects.mode_line_separator.style == 0

@@ -49,7 +49,8 @@ impl LayoutEngine {
     pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
         let reusable = self.last.as_ref().is_some_and(|last| last.cursor == cursor && last.snapshot.lays_out_like(snapshot));
         if !reusable {
-            let (frame, ends) = layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)?;
+            let (mut frame, ends) = layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)?;
+            frame.layout_identity = next_layout_identity();
             self.last = Some(Laid { snapshot: snapshot.clone(), cursor, frame, ends });
         }
         let last = self.last.as_ref().expect("laid out above");
@@ -96,6 +97,13 @@ impl LayoutEngine {
         append_window(snapshot, &mut frame, &mut self.resolver, 0.0, 0.0, None)?;
         Ok(frame)
     }
+}
+
+/// A fresh `FrameGlyphBuffer::layout_identity`: every new layout gets
+/// one, and a frame reused from the last layout keeps it.
+fn next_layout_identity() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Stateless convenience for fixtures; interactive hosts retain a LayoutEngine.
@@ -175,7 +183,49 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
         ParentFrameRect::new(child.x as f32, child.y as f32, frame.width, frame.height).map_err(|e| e.to_string())?, z,
     );
     hide_cursors_off(&mut frame, &frame_snapshot);
+    frame.layer = layer_motion(child, &ends, &frame);
     Ok((frame, ends))
+}
+
+/// How CHILD animates, with its selection band where ENDS laid its rows
+/// and FRAME painted them.
+fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd], frame: &FrameGlyphBuffer) -> romacs_display_protocol::LayerMotion {
+    use romacs_display_protocol::{LayerAnimation, LayerEdge, LayerMotion};
+    LayerMotion {
+        animation: match child.animation {
+            romacs_layout_input::LayerAnimation::Off => LayerAnimation::Off,
+            romacs_layout_input::LayerAnimation::Reduced => LayerAnimation::Reduced,
+            romacs_layout_input::LayerAnimation::Full => LayerAnimation::Full,
+        },
+        edge: match child.edge {
+            romacs_layout_input::LayerEdge::Bottom => LayerEdge::Bottom,
+            romacs_layout_input::LayerEdge::Top => LayerEdge::Top,
+        },
+        selection: child.selection.and_then(|row| selection_band(child, ends.first()?, row, frame)),
+    }
+}
+
+/// The band row ROW of CHILD's first window paints, laid out as END and
+/// painted in FRAME: the row's height, in the background of the face at
+/// the row's start, as wide as the row's glyphs in that background reach;
+/// none past the rows shown, under a header line, or where the row paints
+/// no such glyph.
+fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32, frame: &FrameGlyphBuffer) -> Option<romacs_display_protocol::SelectionBand> {
+    let placed = child.windows.first()?;
+    let window = &placed.snapshot;
+    let row = end.rows.get(row as usize).filter(|_| window.header_line.is_none())?;
+    let face = window.text.face_runs.iter().find(|run| run.bytes.contains(&row.start)).map_or(0, |run| run.face.0 as usize);
+    let (band, y) = (color(window.faces.get(face)?.background), placed.y as f32 + row.y);
+    let id = DisplayWindowId::new(window.id as i64);
+    let (left, right) = frame.glyphs.iter().filter_map(|glyph| match glyph {
+        romacs_display_protocol::FrameGlyph::Char { window_id, x, y: gy, width, face_id, .. }
+        | romacs_display_protocol::FrameGlyph::Stretch { window_id, x, y: gy, width, face_id, .. }
+            if *window_id == id && *gy == y && frame.resolved_face(*face_id).bg == band => Some((*x, x + width)),
+        _ => None,
+    }).fold(None, |extent: Option<(f32, f32)>, (l, r)| Some(extent.map_or((l, r), |(a, b)| (a.min(l), b.max(r)))))?;
+    Some(romacs_display_protocol::SelectionBand {
+        x: left, y, width: right - left, height: row.height, color: band, base: color(window.faces.first()?.background),
+    })
 }
 
 fn new_frame(width: u32, height: u32, presentation: u64) -> Result<FrameGlyphBuffer, String> {

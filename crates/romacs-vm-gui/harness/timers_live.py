@@ -212,13 +212,16 @@ def checked(binary, args, output, report):
         fio.wait(lambda: any(r.startswith('(dwell') for r in records(state)), 15, 'dwell probe', process)
         check("a timer's queued input wakes a read (gnosis-feed--dwell-supported-p)",
               '(dwell t)' in records(state), records(state))
-        check('echo area shows the idle probe', any('Idle probe 1' in row for row in rows()), rows()[-2:])
+        # Shown at some point: the echo area keeps it, romacs-complete's
+        # message layer shows it for `romacs-complete-message-timeout'.
+        check('echo area shows the idle probe', ff.ever_shown(log_path.read_text(errors='replace'), 'Idle probe 1'),
+              rows()[-2:])
         time.sleep(args.cpu_window)
         check('no more idle probes without input', len([r for r in records(state) if r.startswith('(idle')]) == 1,
               records(state))
 
         keys(env, '-M', 'alt', 'x', '-m', 'alt')
-        fio.wait(lambda: rows()[-1:] == ['M-x '] or rows()[:1] == ['M-x '], args.timeout, 'M-x prompt', process)
+        fio.wait(lambda: ff.prompt_shown(rows(), 'M-x '), args.timeout, 'M-x prompt', process)
         keys(env, 'gnosis-dashboard', '-k', 'Return')
         fio.wait(lambda: any('Gnosis Dashboard' in row or 'Studied today' in row for row in rows()),
                  args.timeout, 'gnosis dashboard', process)

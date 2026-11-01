@@ -222,17 +222,20 @@ impl RenderQualityPolicy {
 
     /// How child frames travel under this policy, one spec per lifecycle role.
     ///
-    /// Unlike [`Self::pane_motion`], a reduced-quality plan does **not**
-    /// decline this family. A pane morph animates the whole tiling and needs
-    /// the previous picture composed offscreen; a child-frame fade draws the
-    /// popup's own pixels onto the retained root scene, the same work the
-    /// popup itself already costs every frame, and the software-mode smoke
-    /// and close-confirmation suites already sustain display-rate demand for
-    /// exactly that kind of redraw. A user on a software adapter gets the
-    /// fade they asked for; turning it off remains their `enabled` setting.
+    /// A software adapter draws none: every display harness, screenshot
+    /// oracle and GUI test runs on one (headless compositors), and their
+    /// pictures and parity must not depend on when a frame was sampled;
+    /// a software frame also costs several times the 4ms an animation
+    /// frame may take. `ROMACS_LAYER_ANIMATION=1` opts a test in
+    /// (`layer_animation_forced`).
     pub(super) fn child_frame_motion(&self) -> ChildFrameMotionSpecs {
+        let forced = layer_animation_forced();
+        if self.mode != QualityMode::Full && forced.is_none() {
+            return ChildFrameMotionSpecs::INSTANT;
+        }
         let config = &self.effective_visual_config;
-        let globals = config.child_frame_animations;
+        let mut globals = config.child_frame_animations;
+        globals.slowdown *= forced.unwrap_or(1.0);
         ChildFrameMotionSpecs {
             open: config.child_frame_open.motion(globals),
             open_slide: config.child_frame_open.slide_pixels,
@@ -242,6 +245,7 @@ impl RenderQualityPolicy {
             close_scale_from: config.child_frame_close.scale_from,
             movement: config.child_frame_movement.motion(globals),
             resize: config.child_frame_resize.motion(globals),
+            selection: config.child_frame_selection.motion(globals),
         }
     }
 
@@ -361,8 +365,10 @@ pub(super) struct ChildFrameMotionSpecs {
     pub(super) close_scale_from: f32,
     /// Placement drift toward a re-anchored frame.
     pub(super) movement: MotionSpec,
-    /// Reserved for content-crossfade resizes; resolves Instant today.
+    /// The rect tween of a frame whose size changed.
     pub(super) resize: MotionSpec,
+    /// A layer's selection band gliding between rows.
+    pub(super) selection: MotionSpec,
 }
 
 impl ChildFrameMotionSpecs {
@@ -376,7 +382,27 @@ impl ChildFrameMotionSpecs {
         close_scale_from: 1.0,
         movement: MotionSpec::Instant,
         resize: MotionSpec::Instant,
+        selection: MotionSpec::Instant,
     };
+
+    /// The specs a frame whose layer animation is ANIMATION gets: all of
+    /// them, the open and close fades alone without slide or scale, or none.
+    pub(super) fn for_layer(self, animation: romacs_display_protocol::LayerAnimation) -> Self {
+        use romacs_display_protocol::LayerAnimation;
+        match animation {
+            LayerAnimation::Full => self,
+            LayerAnimation::Reduced => Self { open: self.open, close: self.close, ..Self::INSTANT },
+            LayerAnimation::Off => Self::INSTANT,
+        }
+    }
+}
+
+/// What `ROMACS_LAYER_ANIMATION` asks of child-frame animation: a number
+/// of at least 1 forces it on a software adapter, which otherwise draws
+/// none, at that many times its length (the opt-in the animation tests
+/// use; a slowed run lets screenshots catch its middle).
+fn layer_animation_forced() -> Option<f32> {
+    std::env::var("ROMACS_LAYER_ANIMATION").ok()?.parse().ok().filter(|slowdown: &f32| *slowdown >= 1.0)
 }
 
 fn software_compat_visual_config(requested: &VisualConfig) -> VisualConfig {

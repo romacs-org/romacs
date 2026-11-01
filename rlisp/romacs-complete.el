@@ -210,6 +210,9 @@ the prompt.  `center': a box centred on the frame, prompt on top."
   "Prompt selection is allowed.")
 
 ;; Romacs: the rows shown, for the layer's size and for agents and tests.
+(defvar-local romacs-complete--current-line nil
+  "The row of the shown candidates the current one is on, or nil.")
+
 (defvar-local romacs-complete--lines nil
   "The candidate rows last shown.")
 
@@ -591,6 +594,8 @@ The stack trace of an error is shown in the *Messages* buffer."
              (if (< curr-line (/ count 2))
                  (nbutlast lines)
                (setq curr-line (1- curr-line) lines (cdr lines))))
+    ;; Romacs: the row the host draws the selection band on.
+    (setq romacs-complete--current-line (and (>= romacs-complete--index 0) curr-line))
     ;; Format candidates
     (let ((max-width (- (romacs-complete--window-width) 4)) start)
       (cl-loop for line on lines do
@@ -614,7 +619,7 @@ The stack trace of an error is shown in the *Messages* buffer."
         (apply #'insert lines)
         (when lines (delete-char -1))
         (goto-char (point-min))))
-    (romacs-complete--show buffer (length lines))))
+    (romacs-complete--show buffer (length lines) romacs-complete--current-line)))
 
 (defun romacs-complete--prepare ()
   "Ensure that the state is prepared before running the next command."
@@ -811,6 +816,10 @@ The shift will decay away after `romacs-complete-sort-history-duplicate' times
   "Enter directory or exit completion with current candidate.
 Exit with current input if prefix ARG is given."
   (interactive "P")
+  ;; Romacs: RET runs this in every minibuffer, and `romacs-complete--prepare'
+  ;; leaves directory commands to the state the last key left; keys typed
+  ;; faster than candidates compute leave that state behind the input.
+  (romacs-complete--update)
   (if-let* (((not arg))
             ((>= romacs-complete--index 0))
             ((eq 'file (romacs-complete--metadata-get 'category)))
@@ -907,6 +916,8 @@ Exit with current input if prefix ARG is given."
       (set-window-parameter window 'no-delete-other-windows t)
       (setq romacs-complete--layer frame)))
   (romacs--host-minibuffer romacs-complete--layer (romacs-complete--edge))
+  (unless (eq (frame-parameter romacs-complete--layer 'romacs-layer-edge) (romacs-complete--edge))
+    (set-frame-parameter romacs-complete--layer 'romacs-layer-edge (romacs-complete--edge)))
   romacs-complete--layer)
 
 (defun romacs-complete--placement (frame rows)
@@ -929,10 +940,13 @@ in the root frame and the text size."
          (list (/ (- frame-width width) 2) (max 0 (/ (- frame-height tallest) 2)) width height)))
       (_ (list 0 (max 0 (- frame-height height (* 2 border))) frame-width height)))))
 
-(defun romacs-complete--show (buffer rows)
-  "Show the minibuffer's layer with BUFFER's ROWS candidate rows."
+(defun romacs-complete--show (buffer rows &optional selection)
+  "Show the minibuffer's layer with BUFFER's ROWS candidate rows,
+SELECTION the row of the current one, if any."
   (let* ((frame (romacs-complete--frame))
          (window (frame-root-window frame)))
+    (unless (eq (frame-parameter frame 'romacs-layer-selection) selection)
+      (set-frame-parameter frame 'romacs-layer-selection selection))
     (unless (eq (window-buffer window) buffer)
       (set-window-buffer window buffer))
     (pcase-let ((`(,left ,top ,width ,height) (romacs-complete--placement frame rows)))
