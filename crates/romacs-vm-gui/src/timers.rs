@@ -138,14 +138,20 @@ mod tests {
         let start = std::time::Instant::now();
         assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.05) probe (current-idle-time))"), "(nil (ordinary) nil)");
         assert!(start.elapsed() >= Duration::from_millis(50));
-        // A timer's message during the read reaches the echo area before
-        // the read ends, as GNU's `message' redisplays it at once.
+        // A timer's message during the read is in the echo area when the
+        // wait redisplays, as GNU's `message' redisplays it at once; the key
+        // that ends the read then clears it (keyboard.c read_char).
         crate::echo::clear(&mut vm).unwrap();
-        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_millis(80)), Step::Key('k')].into()))));
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil
-              romacs-echo-area-functions (list (lambda (text) (push (and text (string-to-multibyte text)) probe))))
+              romacs-echo-area-functions
+              (list (lambda (text)
+                      (push (list (and text (string-to-multibyte text))
+                                  (string-to-multibyte (with-current-buffer (window-buffer (minibuffer-window)) (buffer-string))))
+                            probe))))
             (run-with-timer 0.01 nil (lambda () (message \"during\")))");
-        assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.1) probe)"), "(nil (\"during\"))");
+        assert_eq!(printed(&mut vm, "(prog1 (list (read-event) probe (current-message)) (setq romacs-echo-area-functions nil))"),
+                   "(107 ((\"during\" \"during\")) nil)");
         // A timer that adds a timer: the wait checks again before blocking,
         // so the new one runs when due, not when the limit ends the block.
         // Pinned GNU 45b0f7699df, batch, stdin open: (nil (a (b t))).

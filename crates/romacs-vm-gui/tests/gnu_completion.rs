@@ -264,11 +264,19 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                   (let ((romacs-layer-glass nil)) (romacs-layer-toast \"square\")
                     (let ((f (romacs-layer--frame (caar romacs-layer--toasts))))
                       (list (frame-parameter f 'romacs-layer-radius) (frame-parameter f 'child-frame-border-width))))))"));
+        // The panel is 42% of the room, at least 60 columns, never wider
+        // than the room: a narrow frame or a large font is not clipped.
+        report.push(printed(&mut vm, "(mapcar (lambda (room-column) (apply #'romacs-complete--panel-width room-column))
+            '((1260 10) (2000 10) (480 10) (1260 30)))"));
+        vm.set_frame_geometry(500, 800, LINE, 10).unwrap();
+        report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
+            (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
+              (list l (+ l w (* 2 (frame-parameter f 'child-frame-border-width))) (frame-text-width))))"));
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#,
                         r##"(top 8 t "#d48a20" 10 t t)"##,
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
-                        "(8 (nil 1))"]);
+                        "(8 (nil 1))", "(600 840 480 1260)", "(0 484 484)"]);
 }

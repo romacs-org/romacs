@@ -16,8 +16,8 @@ use romacs_vm::Vm;
 /// the outer loop does after timers and the evaluator's own waits do before
 /// they redisplay (romacs_vm host_input.rs), as GNU's `message' redisplays
 /// the echo area at once (xdisp.c message3_nolog). Not while a minibuffer
-/// is active: its window shows the minibuffer, and the message waits for
-/// the prompt to end.
+/// is active: its window shows the minibuffer, and the prompt's next key
+/// clears the message unseen (DIVERGENCES.md VM2-ECHO-LAYER).
 ///
 /// As GNU's echo area, a multibyte buffer, holds it: ASCII messages
 /// (`format''s and `set_echo_area_message''s) are unibyte strings; a raw
