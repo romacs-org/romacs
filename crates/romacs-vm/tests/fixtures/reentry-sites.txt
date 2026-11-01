@@ -79,7 +79,7 @@ macroexpand.rs call_macro_expander reader_call 2 clean  # FUNCTION and ARGS are 
 macroexpand.rs macroexpand_primitive macroexpand_value 1 clean  # ARGS are not used after the expansion
 macroexpand.rs macroexpand_steps autoload_do_load 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
 macroexpand.rs macroexpand_steps call_macro_expander 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
-mode_line.rs decode_mode_spec eval_datum_raw 1 clean  # a constant form; the window and buffer are #: slots (display.rs)
+mode_line.rs decode_mode_spec eval_datum_raw 2 clean  # constant forms (%@, %s); the window and buffer are #: slots (display.rs); %s reads only the result
 mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms with rooted objects; the window and buffer are #: slots (display.rs)
 prim.rs attach_variable_history set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs default_cell_set notify 2 held  # a leaf or T2 continuation: its engine is not suspended
