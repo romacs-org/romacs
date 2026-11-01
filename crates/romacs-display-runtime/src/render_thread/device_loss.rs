@@ -67,7 +67,7 @@ pub(super) struct DeviceLossDetector {
     repaint: Arc<AtomicBool>,
     failed_recoveries: u32,
     /// After a failed rebuild, none before this: other wakes come sooner.
-    retry_at: Option<std::time::Instant>,
+    retry_at: Option<romacs_display_protocol::frame_time::EventTime>,
 }
 
 impl DeviceLossDetector {
@@ -112,14 +112,21 @@ impl DeviceLossDetector {
 
     /// Count a rebuild's outcome at NOW; true once rebuilds failed
     /// [`MAX_FAILED_RECOVERIES`] times in a row. The next waits a second.
-    pub(super) fn record_recovery(&mut self, recovered: bool, now: std::time::Instant) -> bool {
+    pub(super) fn record_recovery(
+        &mut self,
+        recovered: bool,
+        now: romacs_display_protocol::frame_time::EventTime,
+    ) -> bool {
         self.failed_recoveries = if recovered { 0 } else { self.failed_recoveries + 1 };
-        self.retry_at = (!recovered).then(|| now + std::time::Duration::from_secs(1));
+        self.retry_at = (!recovered).then(|| now.plus(std::time::Duration::from_secs(1)));
         self.failed_recoveries >= MAX_FAILED_RECOVERIES
     }
 
     /// When a latched loss may next be rebuilt, if not yet at NOW.
-    pub(super) fn retry_wait(&self, now: std::time::Instant) -> Option<std::time::Instant> {
+    pub(super) fn retry_wait(
+        &self,
+        now: romacs_display_protocol::frame_time::EventTime,
+    ) -> Option<romacs_display_protocol::frame_time::EventTime> {
         self.retry_at.filter(|at| *at > now && self.flag.load(Ordering::SeqCst))
     }
 

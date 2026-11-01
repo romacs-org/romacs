@@ -293,8 +293,8 @@ impl RenderApp {
         // consecutive surface-Lost acquisitions, or by the debug simulation
         // command. Rebuild the whole GPU stack before doing anything else
         // with it.
-        if let Some(at) = self.device_lost.retry_wait(std::time::Instant::now()) {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(at));
+        if let Some(at) = self.device_lost.retry_wait(now) {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(at.into_instant()));
             return;
         }
         if self.device_lost.take() {
@@ -308,7 +308,8 @@ impl RenderApp {
             self.menus.cancel();
             self.menus.shutdown();
             let recovered = self.recover_from_device_loss(event_loop);
-            let now = std::time::Instant::now();
+            // A rebuild can take a while: observe again.
+            let now = romacs_display_protocol::frame_time::observe_platform_now();
             if self.device_lost.record_recovery(recovered, now) {
                 tracing::error!(
                     "GPU device unrecoverable: {} rebuilds in a row failed",
@@ -323,7 +324,9 @@ impl RenderApp {
             if !recovered {
                 // Retry in a second even if nothing else wakes the loop;
                 // retry_wait holds earlier wakes off.
-                event_loop.set_control_flow(ControlFlow::WaitUntil(now + std::time::Duration::from_secs(1)));
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    now.plus(std::time::Duration::from_secs(1)).into_instant(),
+                ));
                 return;
             }
         }

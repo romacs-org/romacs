@@ -100,7 +100,7 @@ fn out_of_memory_and_internal_errors_rebuild_the_device() {
 #[test]
 fn only_consecutive_failed_rebuilds_give_up() {
     let mut detector = DeviceLossDetector::new();
-    let now = std::time::Instant::now();
+    let now = romacs_display_protocol::frame_time::observe_platform_now();
     for _ in 0..MAX_FAILED_RECOVERIES - 1 {
         assert!(!detector.record_recovery(false, now));
     }
@@ -116,15 +116,15 @@ fn only_consecutive_failed_rebuilds_give_up() {
 #[test]
 fn a_failed_rebuild_holds_the_next_a_second() {
     let mut detector = DeviceLossDetector::new();
-    let now = std::time::Instant::now();
+    let now = romacs_display_protocol::frame_time::observe_platform_now();
     detector.mark_lost_now();
     assert!(detector.take());
     detector.record_recovery(false, now);
     detector.mark_lost_now(); // what a failed recover_from_device_loss leaves
     let second = std::time::Duration::from_secs(1);
-    assert_eq!(detector.retry_wait(now), Some(now + second));
-    assert_eq!(detector.retry_wait(now + second), None, "due a second later");
-    detector.record_recovery(true, now + second);
+    assert_eq!(detector.retry_wait(now), Some(now.plus(second)));
+    assert_eq!(detector.retry_wait(now.plus(second)), None, "due a second later");
+    detector.record_recovery(true, now.plus(second));
     assert_eq!(detector.retry_wait(now), None, "a rebuild that works clears it");
 }
 
