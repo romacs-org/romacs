@@ -609,6 +609,24 @@ impl Properties {
         }
         runs
     }
+    /// The runs inside RANGE seen through KEYS alone, each with its start:
+    /// a run ends only where one of KEYS changes, and holds those of KEYS
+    /// its characters have.  Costs the runs of KEYS, not of every property.
+    pub fn runs_of(&self, range: Range<ByteOffset>, keys: &[String]) -> Vec<(ByteOffset, Vec<(String, Value)>)> {
+        let layers: Vec<(&str, &Tree)> =
+            keys.iter().filter_map(|key| Some((key.as_str(), self.layers.get(key)?.as_deref()?))).collect();
+        let mut runs = Vec::new();
+        let mut at = range.start;
+        while at < range.end {
+            let values = layers
+                .iter()
+                .filter_map(|(key, root)| root.at(at.0).filter(|r| r.stamp != 0).map(|r| ((*key).to_owned(), r.value)))
+                .collect();
+            runs.push((at, values));
+            at = layers.iter().fold(range.end, |next, (_, root)| next.min(root.change_after(at, range.end)));
+        }
+        runs
+    }
     /// Whether any text has the property KEY.
     pub fn has_key(&self, key: &str) -> bool {
         self.layers.contains_key(key)
