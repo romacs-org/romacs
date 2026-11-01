@@ -74,11 +74,15 @@ fn cases(lib: &Path) -> Vec<Case> {
     ]
 }
 
-fn run(binary: &str, dir: &Path, args: &[String]) -> (Option<i32>, String, String) {
-    let output = Command::new(binary).args(args).current_dir(dir)
+/// BINARY with ARGS in DIR, its HOME; a Romacs session from its world in
+/// DIR's cache, or from source without WORLD.
+fn run(binary: &str, dir: &Path, args: &[String], world: bool) -> (Option<i32>, String, String) {
+    let mut command = Command::new(binary);
+    command.args(args).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
-        .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
-        .output().unwrap();
+        .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"));
+    if !world { command.env("ROMACS_WORLD", "off"); }
+    let output = command.output().unwrap();
     let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
     (output.status.code(), text(output.stdout), text(output.stderr))
 }
@@ -97,8 +101,8 @@ fn batch_command_line_matches_pinned_gnu() {
     let runs: Vec<_> = cases(&dir.join("lib")).into_iter().map(|case| {
         let (gnu, dir) = (gnu.clone(), dir.clone());
         std::thread::spawn(move || {
-            let expected = run(&gnu, &dir, &case.args);
-            let actual = run(romacs, &dir, &case.args);
+            let expected = run(&gnu, &dir, &case.args, true);
+            let actual = run(romacs, &dir, &case.args, true);
             (case, expected, actual)
         })
     }).collect();
@@ -141,8 +145,8 @@ fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
     let args: Vec<String> = ["-Q", "--batch", "--eval",
         "(princ (format \"%S\\n\" (list (file-name-case-insensitive-p default-directory) (abbreviate-file-name default-directory) (file-name-case-insensitive-p \"../entry-7\"))))"]
         .iter().map(|a| a.to_string()).collect();
-    let expected = run(&gnu, &home, &args);
-    let actual = run(romacs, &home, &args);
+    let expected = run(&gnu, &home, &args, false);
+    let actual = run(romacs, &home, &args, false);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!((expected.0, expected.1.as_str()), (Some(0), "(nil \"~/\" nil)\n"), "GNU {expected:?}");
     assert_eq!((actual.0, actual.1.as_str()), (expected.0, expected.1.as_str()), "Romacs stderr {}", actual.2);
@@ -158,12 +162,10 @@ fn batch_without_worlds_boots_from_source_as_pinned_gnu_does() {
     std::fs::create_dir_all(&dir).unwrap();
     let args: Vec<String> = ["-Q", "--batch", "--eval", "(progn (princ (list noninteractive window-system (length command-line-args))) (kill-emacs 4))"]
         .iter().map(|a| a.to_string()).collect();
-    let expected = run(&gnu, &dir, &args);
-    let output = Command::new(romacs).args(&args).current_dir(&dir).env("ROMACS_WORLD", "off")
-        .env("HOME", &dir).env("XDG_CACHE_HOME", dir.join("cache")).output().unwrap();
+    let expected = run(&gnu, &dir, &args, false);
+    let actual = run(romacs, &dir, &args, false);
     let store = dir.join("cache/romacs/worlds").exists();
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!((output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned()), (expected.0, expected.1),
-               "Romacs stderr {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!((actual.0, actual.1), (expected.0, expected.1), "Romacs stderr {}", actual.2);
     assert!(!store, "a session without worlds made a store");
 }

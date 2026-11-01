@@ -84,9 +84,18 @@ fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(
 /// builds the world and exits here.
 fn boot(store: Option<PathBuf>) -> Result<Vm, String> {
     let dir = super::startup::lisp_root(&super::startup::lisp_dir())?;
+    let named = store.is_some();
     let world = store.or_else(|| super::world::default_store(|name| std::env::var_os(name)))
         .filter(|_| !romacs_vm::world::store::disabled())
-        .and_then(|store| World::new(store, recipe(&dir)).ok());
+        .and_then(|store| match World::new(store, recipe(&dir)) {
+            Ok(world) => Some(world),
+            // A --world-store that cannot be used says why; the default
+            // store's session stays as quiet as GNU's.
+            Err(reason) => {
+                if named { eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason.to_string()})); }
+                None
+            }
+        });
     let Some(world) = world else { return chain(&dir) };
     let waited = std::cell::Cell::new(false);
     match world.launch::<()>(|| builder_args(&world), true, || waited.set(true)) {
