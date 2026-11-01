@@ -45,8 +45,9 @@ INIT = '''(write-region
   (write-region "ran" nil {probe}))
 '''
 
-EXPECTED_DEFAULTS = ('((basic flex) t visible one-column historical 20 t 0.15 400 '
-                     '((file (styles partial-completion))) t icomplete-force-complete)')
+EXPECTED_DEFAULTS = ('((fzf basic partial-completion emacs22) t visible one-column historical 20 t 0.15 400 '
+                     '((file (styles fzf partial-completion)) (project-file (styles fzf substring))) '
+                     't icomplete-force-complete)')
 
 
 def main():

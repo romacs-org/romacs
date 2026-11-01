@@ -39,7 +39,7 @@ def init_source(engine, root, debug):
                  '(setq scroll-conservatively 101)\n'
                  f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n') if engine == 'gnu' else ''
     return f''';; -*- lexical-binding: t -*-
-{gnu_setup}(setq inhibit-startup-screen t initial-scratch-message nil)
+{gnu_setup}{parity_live.GNU_COMPLETION}(setq inhibit-startup-screen t initial-scratch-message nil)
 {'(setq debug-on-error t)' if debug else ''}
 (setq parity-probe-variables nil)
 (load {lisp_string(str(parity_live.PROBE))} nil t)

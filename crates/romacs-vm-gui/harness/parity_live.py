@@ -27,6 +27,12 @@ PROBE = HARNESS / 'parity_probe.el'
 # The gate's headless tools: labwc, wlr-randr, wtype.
 TOOLS = os.environ.get('ROMACS_HEADLESS_TOOLS', '/nix/store/klrgwbvpwd7napzdhacw1nhj8xmpbpdc-romacs-gate-headless-tools/bin')
 GRID = (120, 33)  # the root window's body columns and lines in both frames
+# Completion as GNU's engine has it after loading rlisp/romacs-completion-defaults.el,
+# which lacks the fzf style, set in both engines' inits: Romacs's own default
+# completes with fzf (DIVERGENCES.md VM2-FZF-DEFAULT), and these harnesses
+# compare GNU's completion.
+GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"
+                  "      completion-category-overrides '((file (styles partial-completion))))\n")
 RC_XML = '''<?xml version="1.0"?>
 <labwc_config><core><gap>0</gap></core>
 <windowRules><windowRule identifier="*" serverDecoration="no"><action name="Maximize"/></windowRule></windowRules>

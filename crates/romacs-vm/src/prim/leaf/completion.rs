@@ -119,20 +119,22 @@ impl Leaf<'_> {
 /// Orderless components compiled for one pass over candidates, during which
 /// no Lisp runs: each component's regexp, and the native matcher
 /// (crate::orderless) that answers for it where the native rules hold.
-/// Case folds through the current buffer's case-canon table, as the
-/// completion translation does; that translation, which walks the whole
-/// table, is built only once a regexp has to run.
+/// Case folds as `CaseFold`; the completion translation, which walks the
+/// whole case table, is built only once a regexp has to run.
 pub(crate) struct OrderlessPass {
     natives: Vec<Option<crate::orderless::Component>>,
     sources: Vec<Value>,
     regexps: Option<OrderlessRegexps>,
-    fold: Option<OrderlessFold>,
+    fold: Option<CaseFold>,
     words: [bool; 128],
     original: Vec<u32>,
     folded: Vec<u32>,
 }
 
-struct OrderlessFold {
+/// Case folding for the native matchers (orderless, fzf): through the
+/// current buffer's case-canon table, as the completion translation does,
+/// read entry by entry and kept per character.
+pub(crate) struct CaseFold {
     canon: Value,
     /// Whether CANON is Romacs's own standard table, whose non-ASCII
     /// entries it leaves to the standard folding.
@@ -159,14 +161,7 @@ impl Leaf<'_> {
     /// SPECS ready to match, ignoring case when FOLD as `all-completions'
     /// does under `completion-ignore-case'.
     pub(crate) fn orderless_pass(&mut self, specs: Vec<OrderlessSpec>, fold: bool) -> std::result::Result<OrderlessPass, Fault> {
-        let fold = if fold {
-            let canon = self.completion_case_canon()?;
-            let native = self.native_case_mapping(canon, 2);
-            let mut fold = OrderlessFold { canon, native, standard: CaseTranslation::standard(), ascii: [0; 128],
-                                           other: Default::default() };
-            for c in 0..128 { fold.ascii[c] = self.orderless_canon(&fold, c as u32)?; }
-            Some(fold)
-        } else { None };
+        let fold = if fold { Some(self.case_fold()?) } else { None };
         let mut pass = OrderlessPass { natives: vec![], sources: specs.iter().map(|spec| spec.regexp).collect(),
                                        regexps: None, fold, words: self.vm.ascii_word_syntax()?,
                                        original: vec![], folded: vec![] };
@@ -176,7 +171,7 @@ impl Leaf<'_> {
                     let mut folded = Vec::with_capacity(pieces.len());
                     for piece in pieces {
                         let mut codes = Vec::with_capacity(piece.len());
-                        for c in piece { codes.push(self.orderless_fold(&mut pass, c)?); }
+                        for c in piece { codes.push(self.fold_code(pass.fold.as_mut(), c)?); }
                         folded.push(codes);
                     }
                     // Word syntax a candidate's properties may change is the regexp's.
@@ -190,8 +185,18 @@ impl Leaf<'_> {
         Ok(pass)
     }
 
+    /// The current buffer's case folding, as `completion-ignore-case' folds.
+    pub(crate) fn case_fold(&mut self) -> std::result::Result<CaseFold, Fault> {
+        let canon = self.completion_case_canon()?;
+        let native = self.native_case_mapping(canon, 2);
+        let mut fold = CaseFold { canon, native, standard: CaseTranslation::standard(), ascii: [0; 128],
+                                  other: Default::default() };
+        for c in 0..128 { fold.ascii[c] = self.canon_code(&fold, c as u32)?; }
+        Ok(fold)
+    }
+
     /// CODE through FOLD's canon table, as CompletionCase translates it.
-    fn orderless_canon(&self, fold: &OrderlessFold, code: u32) -> std::result::Result<u32, Fault> {
+    fn canon_code(&self, fold: &CaseFold, code: u32) -> std::result::Result<u32, Fault> {
         let mapped = self.char_table_element(fold.canon, code as usize)?;
         Ok(match mapped.integer_value() {
             Some(n) if n >= 0 => n as u32,
@@ -200,11 +205,12 @@ impl Leaf<'_> {
         })
     }
 
-    fn orderless_fold(&mut self, pass: &mut OrderlessPass, code: u32) -> std::result::Result<u32, Fault> {
-        let Some(fold) = pass.fold.as_mut() else { return Ok(code) };
+    /// CODE folded by FOLD, or itself without one.
+    pub(crate) fn fold_code(&self, fold: Option<&mut CaseFold>, code: u32) -> std::result::Result<u32, Fault> {
+        let Some(fold) = fold else { return Ok(code) };
         if let Some(&folded) = fold.ascii.get(code as usize) { return Ok(folded); }
         if let Some(&folded) = fold.other.get(&code) { return Ok(folded); }
-        let folded = self.orderless_canon(fold, code)?;
+        let folded = self.canon_code(fold, code)?;
         fold.other.insert(code, folded);
         Ok(folded)
     }
@@ -241,13 +247,10 @@ impl Leaf<'_> {
         let (ascii, multibyte) = (view.bytes().is_ascii(), view.is_multibyte());
         pass.original.clear();
         pass.original.extend(view.chars());
-        let mut original = std::mem::take(&mut pass.original);
         pass.folded.clear();
-        for &c in &original {
-            let folded = self.orderless_fold(pass, c)?;
-            pass.folded.push(folded);
+        for &c in &pass.original {
+            pass.folded.push(self.fold_code(pass.fold.as_mut(), c)?);
         }
-        std::mem::swap(&mut pass.original, &mut original);
         Ok((ascii, !ascii && !multibyte))
     }
 
@@ -269,5 +272,48 @@ impl Leaf<'_> {
             Some(last) if last > 0 => groups[1..=last].iter().flatten().copied().collect(),
             _ => groups[0].into_iter().collect(),
         }))
+    }
+}
+
+impl Leaf<'_> {
+    /// QUERY compiled to fzf terms (crate::fzf).  CASE is `smart' (a
+    /// term with an upper-case letter respects case, others ignore it),
+    /// nil (all respect it) or anything else (all ignore it).  The
+    /// folding, when a term ignores case, comes back to decode the
+    /// candidates with.
+    pub(crate) fn fzf_query(&mut self, query: Value, case: Value)
+        -> std::result::Result<(crate::fzf::Query, Option<CaseFold>), Fault> {
+        let codes: Vec<u32> = self.string_view(query)?.chars().collect();
+        let smart = case == self.intern("smart");
+        let has_upper = |t: &[u32]| t.iter().any(|&c| char::from_u32(c).is_some_and(|ch| !ch.to_lowercase().eq([ch])));
+        let sensitive = |t: &[u32]| if smart { has_upper(t) } else { case == Value::NIL };
+        let mut query = crate::fzf::parse(&codes, &sensitive);
+        let folds = query.sets.iter().flatten().any(|term| !term.sensitive);
+        let mut fold = if folds { Some(self.case_fold()?) } else { None };
+        for term in query.sets.iter_mut().flatten().filter(|term| !term.sensitive) {
+            for c in term.text.iter_mut() { *c = self.fold_code(fold.as_mut(), *c)?; }
+        }
+        Ok((query, fold))
+    }
+
+    /// Add STRING's characters to CORPUS, folded too when FOLD.
+    pub(crate) fn fzf_decode(&mut self, corpus: &mut crate::fzf::Corpus, fold: &mut Option<CaseFold>, string: Value)
+        -> std::result::Result<(), Fault> {
+        let start = corpus.original.len();
+        let view = self.vm.str_view(string).ok_or(Fault::Wrong("stringp", string))?;
+        if view.bytes().is_ascii() {
+            corpus.original.extend(view.bytes().iter().map(|&b| b as u32));
+        } else {
+            corpus.original.extend(view.chars());
+        }
+        if let Some(case) = fold.as_mut() {
+            for i in start..corpus.original.len() {
+                let c = corpus.original[i];
+                let folded = match case.ascii.get(c as usize) { Some(&f) => f, None => self.fold_code(Some(&mut *case), c)? };
+                corpus.folded.push(folded);
+            }
+        }
+        corpus.end(start);
+        Ok(())
     }
 }

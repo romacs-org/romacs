@@ -80,7 +80,7 @@ def init_source(engine, lisp):
     variables = ' '.join(PROBE_VARIABLES)
     return f''';; -*- lexical-binding: t -*-
 (setq load-path (cons {lisp_string(str(lisp))} load-path))
-{gnu_setup}(setq inhibit-startup-screen t initial-scratch-message nil)
+{gnu_setup}{parity_live.GNU_COMPLETION}(setq inhibit-startup-screen t initial-scratch-message nil)
 ;; The owner's hermes settings, with every instance the local dashboard.
 (setq hermes-instances '(("local" . {lisp_string(DASHBOARD_URL)}))
       hermes-dashboard-transport-url {lisp_string(DASHBOARD_URL)}

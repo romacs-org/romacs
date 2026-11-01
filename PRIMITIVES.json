@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "982a00c9acd3c7658218d60a93522c91f5662f0694a2c6261b2fbd75986bd2ec",
+  "source_fingerprint": "479d1107798d6c2bfbd5f35faec3e359056c02620964181fd91aa34f75f3282e",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1154,
-  "parsed_vm2_only": 1154
+  "parsed_total": 1157,
+  "parsed_vm2_only": 1157
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3969,6 +3969,21 @@
    "name": "romacs--frozen-regions",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frozen.rs:24"
+  },
+  "romacs--fzf-filter": {
+   "name": "romacs--fzf-filter",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/fzf.rs:16"
+  },
+  "romacs--fzf-highlight": {
+   "name": "romacs--fzf-highlight",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/fzf.rs:46"
+  },
+  "romacs--fzf-sort": {
+   "name": "romacs--fzf-sort",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/fzf.rs:28"
   },
   "romacs--get-process": {
    "name": "romacs--get-process",

@@ -68,6 +68,8 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
+;; Romacs: the candidate listing native styles share.
+(require 'romacs-completion-candidates)
 
 (defgroup orderless nil
   "Completion method that matches space-separated regexps in any order."
@@ -584,62 +586,6 @@ then return (cons REGEXP u); else return nil."
                always (isearch-no-upper-case-p regexp t))
     completion-ignore-case))
 
-(defvar orderless--file-candidates nil
-  "A file name table's candidates while its directory is unchanged.
-Romacs: (KEY CANDIDATES . NAMES), KEY as `orderless--file-key' makes it
-and NAMES as `orderless--file-names'.")
-
-(defun orderless--file-key (prefix table pred)
-  "What decides TABLE's candidates for PREFIX, when TABLE lists a directory.
-It includes the directory's modification time, link count and inode,
-so that a change to its entries is a different key.  Nil for any other
-TABLE or PRED, and where a file name handler or an environment variable
-is involved."
-  (when (and (memq table '(read-file-name-internal completion-file-name-table))
-             ;; `completion-file-name-table' lists for this PRED as for nil.
-             (memq pred '(nil file-exists-p))
-             (not (string-search "$" prefix)))
-    (let ((dir (expand-file-name (or (file-name-directory (substitute-in-file-name prefix))
-                                     default-directory))))
-      (unless (find-file-name-handler dir 'file-name-all-completions)
-        (when-let* ((attributes (file-attributes dir)))
-          (list table prefix default-directory completion-ignore-case
-                (file-attribute-modification-time attributes)
-                (file-attribute-link-number attributes)
-                (file-attribute-inode-number attributes)))))))
-
-(defun orderless--file-names (candidates table)
-  "What `file-name-all-completions' matches for each of TABLE's CANDIDATES.
-It matches the directory entry's name, before a directory's slash and,
-in `read-file-name-internal', before its dollars are doubled.  Nil when
-these are the CANDIDATES themselves."
-  (let ((names (mapcar (lambda (c)
-                         (let ((name (if (string-suffix-p "/" c) (substring c 0 -1) c)))
-                           (if (and (eq table 'read-file-name-internal) (string-search "$" name))
-                               (string-replace "$$" "$" name)
-                             name)))
-                       candidates)))
-    (let ((n names) (c candidates))
-      (while (and n (eq (car n) (car c))) (setq n (cdr n) c (cdr c)))
-      (and n names))))
-
-(defun orderless--candidates (prefix table pred)
-  "TABLE's candidates for PREFIX and PRED, or t where TABLE must filter them.
-The value is (CANDIDATES . NAMES), NAMES what to match for CANDIDATES
-when not themselves.  A collection with no PRED lists them; a file name
-table's are kept while their directory is unchanged
-(`orderless--file-candidates')."
-  (let ((completion-regexp-list nil))
-    (cond
-     ((and (null pred) (not (functionp table))) (list (all-completions prefix table)))
-     ((when-let* ((key (orderless--file-key prefix table pred)))
-        (unless (equal key (car orderless--file-candidates))
-          (let ((candidates (all-completions prefix table pred)))
-            (setq orderless--file-candidates
-                  (cons key (cons candidates (orderless--file-names candidates table))))))
-        (cdr orderless--file-candidates)))
-     (t t))))
-
 (defun orderless--filter (prefix regexps ignore-case table pred)
   "Filter TABLE by PREFIX, REGEXPS and PRED.
 The matching should be case-insensitive if IGNORE-CASE is non-nil."
@@ -656,7 +602,7 @@ The matching should be case-insensitive if IGNORE-CASE is non-nil."
          ;; candidates where they are listed without calling a predicate;
          ;; otherwise a predicate is called only for the candidates the
          ;; regexps match, as GNU's `all-completions' does.
-         (candidates (orderless--candidates prefix table pred)))
+         (candidates (romacs-completion-candidates prefix table pred)))
     (if (consp candidates)
         (romacs--orderless-filter
          (car candidates)
