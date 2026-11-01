@@ -85,6 +85,29 @@ definition."
              (append args (list :isolate worker :require (romacs-project--features project))))
     (isolate-error nil)))
 
+(defun romacs-project--note (format &rest args)
+  "Show FORMAT with ARGS in the echo area while a worker runs the job, and
+return it.  GNU's synchronous command shows nothing, so it is not logged."
+  (let ((message-log-max nil))
+    (apply #'message format args)))
+
+(defun romacs-project--resume (note window buffer function)
+  "Continue a command by calling FUNCTION in its WINDOW and BUFFER.
+Clear the progress NOTE if the echo area still shows it.  WINDOW is
+selected and BUFFER made current as the command had them.  The window
+FUNCTION selects stays selected and its buffer is current after, as the
+command loop leaves them once GNU's command returns (command_loop_1):
+`xref-show-xrefs' selects its buffer's window, which then heads the
+buffer list, and the keys read next are looked up in that buffer."
+  (when (equal (current-message) note)
+    (message nil))
+  (when (window-live-p window)
+    (select-window window 'norecord))
+  (when (buffer-live-p buffer)
+    (set-buffer buffer))
+  (prog1 (funcall function)
+    (set-buffer (window-buffer (selected-window)))))
+
 ;;;; The jobs, run in the worker
 
 ;; Lambda forms, not symbols: a worker adopts the session's world or boots
@@ -120,26 +143,27 @@ ready worker, which is then warmed for the next time."
     (if (null future)
         (prog1 (funcall original include-all)
           (unless include-all (romacs-project--warm-when-idle project)))
-      (isolate-on-done future
-                       (lambda (future)
-                         (romacs-project--find-file-continue future project suggested buffer window)))
-      (message "Finding files in %s..." (project-root project))
+      (let ((note (romacs-project--note "Finding files in %s..." (project-root project))))
+        (isolate-on-done future
+                         (lambda (future)
+                           (romacs-project--find-file-continue future project suggested note buffer window))))
       nil)))
 
-(defun romacs-project--find-file-continue (future project suggested buffer window)
+(defun romacs-project--find-file-continue (future project suggested note buffer window)
   "`project-find-file-in' from its file list, FUTURE's value, in the WINDOW
 and BUFFER it was invoked from, as the prompt and the visit would be."
   (condition-case err
-      (with-selected-window (if (window-live-p window) window (selected-window))
-        (with-current-buffer (if (buffer-live-p buffer) buffer (current-buffer))
-          (let* ((all-files (thaw (isolate-await future)))
-                 (completion-ignore-case read-file-name-completion-ignore-case)
-                 (default-directory (project-root project))
-                 (file (project--read-file-name
-                        project "Find file" all-files nil 'file-name-history suggested)))
-            (if (string-empty-p file)
-                (user-error "You didn't specify the file")
-              (find-file file)))))
+      (romacs-project--resume
+       note window buffer
+       (lambda ()
+         (let* ((all-files (thaw (isolate-await future)))
+                (completion-ignore-case read-file-name-completion-ignore-case)
+                (default-directory (project-root project))
+                (file (project--read-file-name
+                       project "Find file" all-files nil 'file-name-history suggested)))
+           (if (string-empty-p file)
+               (user-error "You didn't specify the file")
+             (find-file file)))))
     (quit nil)
     (error (message "%s" (error-message-string err)))))
 
@@ -158,33 +182,34 @@ ready worker, which is then warmed for the next time."
           (unless current-prefix-arg (romacs-project--warm-when-idle project)))
       (require 'xref)
       (require 'grep)
-      (isolate-on-done future
-                       (lambda (future)
-                         (romacs-project--show-matches future regexp project root buffer window)))
-      (message "Searching %s for %s..." root regexp)
+      (let ((note (romacs-project--note "Searching %s for %s..." root regexp)))
+        (isolate-on-done future
+                         (lambda (future)
+                           (romacs-project--show-matches future regexp project root note buffer window))))
       nil)))
 
-(defun romacs-project--show-matches (future regexp project root buffer window)
+(defun romacs-project--show-matches (future regexp project root note buffer window)
   "`project-find-regexp' from its matches, FUTURE's value, where it was invoked."
   (condition-case err
       (let ((matches (thaw (isolate-await future))))
         (unless matches
           (user-error "No matches for: %s" regexp))
-        (with-selected-window (if (window-live-p window) window (selected-window))
-          (with-current-buffer (if (buffer-live-p buffer) buffer (current-buffer))
-            (let ((default-directory root)
-                  (first t))
-              ;; The fetcher gives the worker's matches once; a revert
-              ;; searches again, as GNU's does, here.
-              (xref-show-xrefs
-               (lambda ()
-                 (if first
-                     (progn (setq first nil) matches)
-                   (project--find-regexp-in-files
-                    regexp (let ((default-directory root)
-                                 (project-files-relative-names t))
-                             (project-files project)))))
-               nil)))))
+        (romacs-project--resume
+         note window buffer
+         (lambda ()
+           (let ((default-directory root)
+                 (first t))
+             ;; The fetcher gives the worker's matches once; a revert
+             ;; searches again, as GNU's does, here.
+             (xref-show-xrefs
+              (lambda ()
+                (if first
+                    (progn (setq first nil) matches)
+                  (project--find-regexp-in-files
+                   regexp (let ((default-directory root)
+                                (project-files-relative-names t))
+                            (project-files project)))))
+              nil)))))
     (quit nil)
     (user-error (message "%s" (error-message-string err)))
     (error (message "%s" (error-message-string err)))))
