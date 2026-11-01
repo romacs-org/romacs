@@ -405,13 +405,19 @@ class Bench:
                 used['project'] = '~/src/tally'
             lisp = None if stock else owner.lisp_dir(work, name)
             init = owner.init_source(name, lisp, root / 'mcp/port', token, profile)
-            if name == 'gnu' and stock:
+            # A stock session loads the bench's init as `emacs -Q -l' does,
+            # in both engines; an owner session, as the user's init.
+            if stock:
                 (root / 'bench-init.el').write_text(init)
-                engine = McpEngine('gnu', [options.gnu, '-Q', '--font', 'Iosevka-14', '-l', str(root / 'bench-init.el')],
-                                   root, None, env, options.timeout)
+                quick = ['-Q', '-l', str(root / 'bench-init.el')]
+            if name == 'gnu' and stock:
+                engine = McpEngine('gnu', [options.gnu, '--font', 'Iosevka-14', *quick], root, None, env, options.timeout)
                 engine.start(options.tools)
             elif name == 'gnu':
                 engine = parity_live.gnu_engine(root, home, env, init, lisp, options.timeout, options.tools, McpEngine)
+            elif stock:
+                engine = parity_live.romacs_engine(options.romacs, root, home, env, None, lisp, options.timeout,
+                                                   options.tools, McpEngine, quick)
             else:
                 engine = parity_live.romacs_engine(options.romacs, root, home, env, init, lisp, options.timeout,
                                                    options.tools, McpEngine)

@@ -445,6 +445,9 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   --world-reset=all     remove the store's worlds and files altogether
   --geometry WxH        the window's size
   -Q, --no-init         do not load the user's init file
+  -l, --load FILE       load FILE after the init, in order with the files
+  -f, --funcall FUNC    call FUNC (as a command when it is one) there
+  --eval EXPR           evaluate EXPR there
   ROMACS_WORLD=off      boot from source, without a world
 ";
 
@@ -517,6 +520,16 @@ fn run() -> Result<(), String> {
                 startup::visit_at_startup("--");
                 for file in args.by_ref() { startup::visit_at_startup(&file); }
             },
+            option if startup::StartupOption::parse(option).is_some() => {
+                startup::visit_at_startup(option);
+                startup::visit_at_startup(&args.next().ok_or_else(|| format!("{option} needs an argument"))?);
+            }
+            // GNU's `--OPTION=VALUE' spelling of the same options.
+            packed if packed.split_once('=').is_some_and(|(o, _)| o.starts_with("--") && startup::StartupOption::parse(o).is_some()) => {
+                let (option, value) = packed.split_once('=').unwrap();
+                startup::visit_at_startup(option);
+                startup::visit_at_startup(value);
+            }
             file if !file.starts_with('-') => startup::visit_at_startup(file),
             _ => return Err(format!("unknown option {arg}")),
         }
@@ -956,10 +969,15 @@ fn evaluate(
             }
         }
         startup::mark_phase("user-init");
-        if launch == startup::Launch::Loadup {
-            if let Err(error) = startup::finish_loadup(&mut vm, &started) {
-                eprintln!("romacs: startup after init failed: {error}");
-            }
+        let finished = match launch {
+            startup::Launch::Loadup => startup::finish_loadup(&mut vm, &started),
+            startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
+            startup::Launch::GnuOnly => Ok(()),
+        };
+        // As GNU's command loop reports an error that ends `command-line-1'.
+        if let Err(error) = finished {
+            eprintln!("romacs: startup after init failed: {error}");
+            let _ = echo::show(&mut vm, &error);
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
