@@ -157,10 +157,13 @@ pub(super) struct WindowState {
     pub column: u32,
     /// The mini-window's height in lines (xdisp.c resize_mini_window).
     pub mini_lines: u32,
+    /// The pixels the host frame's last layout left below its root
+    /// windows for the mini-window: none while a child frame hosts it.
+    pub mini_reserved: u32,
     /// The last frame identity or stacking rank handed out (frame.rs).
     pub next_frame: u64,
 }
-romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, next_frame });
+romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame });
 impl Default for WindowState {
     fn default() -> Self {
         Self {
@@ -171,6 +174,7 @@ impl Default for WindowState {
             line: 20,
             column: 10,
             mini_lines: 1,
+            mini_reserved: 0,
             next_frame: 1,
         }
     }
@@ -219,6 +223,10 @@ impl Vm {
         let frame = if name == SELECTED { self.frame_value_peek() } else { self.host_frame_peek() };
         let Ok(f) = self.frame(frame) else { return Value::UNBOUND; };
         match name { ROOT => f.root, SELECTED => f.selected, MINI => f.minibuffer, _ => unreachable!() }
+    }
+    /// The minibuffer window, which every frame shares.
+    pub(super) fn mini_window(&self) -> Value {
+        self.window_root_peek(MINI)
     }
     /// The root window of the frame window V is on.
     pub(super) fn root_of(&self, v: Value) -> Result<Value> {
@@ -830,10 +838,15 @@ impl Vm {
         let mut ids = vec![];
         self.window_leaf_ids(root, &mut ids)?;
         let mini = self.window_root(MINI);
-        ids.push(self.window(mini)?.id);
+        // A hosted mini-window is shown with its host's windows.
+        let host = self.minibuffer_host();
+        if host.is_none() { ids.push(self.window(mini)?.id); }
         // Redisplay sizes the mini-window to its display before laying out.
         if self.resize_mini_window(mini)? {
-            self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column)?;
+            match host {
+                Some((frame, edge)) => self.refit_minibuffer_host(frame, edge)?,
+                None => self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column)?,
+            }
         }
         self.reconcile_terminal_geometry()?;
         let outcome = self.snapshot_leaves(ids);
@@ -850,6 +863,8 @@ impl Vm {
         for id in ids {
             let Some(v) = live(self, id) else { continue };
             let w = self.window(v)?;
+            // A hosting child frame's root window may have no lines.
+            if w.height == 0 { continue; }
             let (x, y, width, height) = (
                 w.x + w.left_margin * self.window_state.column,
                 w.y,
@@ -892,9 +907,10 @@ impl Vm {
         walk(self, self.window_root_peek(ROOT), &mut out)?;
         Ok(out)
     }
-    /// WINDOW's text body in (columns, rows) with a one-line mini-window:
-    /// the size it has whenever the mini-window is not grown, planned
-    /// without changing any window. A mode line takes one row.
+    /// WINDOW's text body in (columns, rows) with a one-line mini-window,
+    /// or none while a child frame hosts it: the size it has whenever the
+    /// mini-window is not grown, planned without changing any window. A
+    /// mode line takes one row.
     pub(crate) fn stable_window_body(&self, window: Value) -> Result<Option<(u16, u16)>> {
         let state = &self.window_state;
         let (line, column) = (state.line, state.column);
@@ -902,7 +918,8 @@ impl Vm {
         let mut geometry = vec![];
         let root = self.window_root_peek(ROOT);
         let now = self.mini_growth()?;
-        if self.plan_window_geometry(root, 0, 0, state.width, state.height - line, (now, 0), line, column, &mut geometry).is_err() {
+        let reserved = if self.minibuffer_host().is_some() { 0 } else { line };
+        if self.plan_window_geometry(root, 0, 0, state.width, state.height - reserved, (now, 0), line, column, &mut geometry).is_err() {
             return Ok(None);
         }
         let Some(&(_, _, _, width, height)) = geometry.iter().find(|g| g.0 == window) else { return Ok(None) };
@@ -913,10 +930,9 @@ impl Vm {
         Ok(Some((columns, rows)))
     }
     /// The root window's growth now: minus the rows past one line that
-    /// the mini-window takes.
+    /// the last layout left the mini-window.
     fn mini_growth(&self) -> Result<i64> {
-        let mini = self.window(self.window_root_peek(MINI))?;
-        Ok((i64::from(self.window_state.line) - i64::from(mini.height)).min(0))
+        Ok((i64::from(self.window_state.line) - i64::from(self.window_state.mini_reserved)).min(0))
     }
     /// GNU `window-normal-size' of V along an axis, when it is a number.
     fn normal_size(&self, v: Value, horizontal: bool) -> Result<Option<f64>> {
@@ -955,12 +971,14 @@ impl Vm {
         }
         self.ensure_windows()?;
         let root = self.window_root(ROOT);
+        // A hosted mini-window takes none of the root windows' lines.
+        let hosted = self.minibuffer_host().is_some();
         // A mini-window the root windows cannot make room for keeps one
         // line (window.c grow_mini_window, bug#69140).
-        let mini_height = self.window_state.mini_lines.saturating_mul(line_height).min(height - line_height);
+        let mini_height = if hosted { 0 } else { self.window_state.mini_lines.saturating_mul(line_height).min(height - line_height) };
         let mut geometry = vec![];
         let now = self.mini_growth()?;
-        let wanted = i64::from(line_height) - i64::from(mini_height);
+        let wanted = if hosted { 0 } else { i64::from(line_height) - i64::from(mini_height) };
         let planned = self.plan_window_geometry(root, 0, 0, width, height - mini_height, (now, wanted), line_height, column_width, &mut geometry);
         let mini_height = if planned.is_err() && mini_height > line_height {
             self.window_state.mini_lines = 1;
@@ -971,8 +989,11 @@ impl Vm {
             planned?;
             mini_height
         };
-        let mini = self.window_root(MINI);
-        geometry.push((mini, 0, height - mini_height, width, mini_height));
+        if !hosted {
+            let mini = self.window_root(MINI);
+            geometry.push((mini, 0, height - mini_height, width, mini_height));
+        }
+        self.window_state.mini_reserved = mini_height;
         for (v, x, y, w, h) in geometry {
             let window = self.window_mut(v)?;
             if (window.x, window.y, window.width, window.height) != (x, y, w, h) {

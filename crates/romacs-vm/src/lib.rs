@@ -1371,6 +1371,11 @@ pub struct Vm {
     /// not every symbol. None until `local_slots` lists them again after a
     /// collection moved objects; it may name slots whose binding is gone.
     local_owners: Option<HashMap<usize, Vec<usize>>>,
+    /// The `all-completions' walks begun, and the case ranges the latest
+    /// one folds with: (walk, canon table root, ranges)
+    /// (prim/leaf/completion.rs `walk_case_ranges').
+    completion_walks: u64,
+    completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
@@ -1497,6 +1502,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     objects,
     referrers,
     local_owners,
+    completion_walks,
+    completion_case_memo,
     caches,
     stack,
     external_roots,
@@ -1668,6 +1675,8 @@ impl Vm {
             objects: vec![],
             referrers: None,
             local_owners: None,
+            completion_walks: 0,
+            completion_case_memo: None,
             caches: vec![],
             stack: vec![],
             external_roots: vec![],

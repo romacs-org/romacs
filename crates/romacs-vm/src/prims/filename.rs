@@ -292,7 +292,7 @@ fn completion_candidates(cx: &mut Leaf<'_>, file: Value, path: &std::path::Path,
             if matcher.is_none() {
                 let (mut tail, mut patterns) = (super::fileio::var(cx, "completion-regexp-list")?, vec![]);
                 while let Some((pattern, rest)) = cx.pair(tail) { patterns.push(pattern); tail = rest; }
-                matcher = Some(cx.completion_matcher(&patterns, fold, true)?);
+                matcher = Some(cx.completion_matcher(&patterns, fold, true, None)?);
             }
             let compiled = matcher.as_mut().unwrap();
             match compiled {

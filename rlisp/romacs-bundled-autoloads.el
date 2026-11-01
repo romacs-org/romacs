@@ -48,6 +48,42 @@
 (register-definition-prefixes "romacs-companion-receipts" '("romacs-companion-"))
 
 
+;;; Generated autoloads from romacs-complete.el
+
+(defvar romacs-complete-mode nil
+"Non-nil if Romacs-Complete mode is enabled.
+See the `romacs-complete-mode' command
+for a description of this minor mode.
+Setting this variable directly does not take effect;
+either customize it (see the info node `Easy Customization')
+or call the function `romacs-complete-mode'.")
+(custom-autoload 'romacs-complete-mode "romacs-complete" nil)
+(autoload 'romacs-complete-mode "romacs-complete"
+"Vertical minibuffer completion, with the minibuffer shown in a layer.
+
+The frame then reserves no minibuffer line: the prompt, the input and
+the candidates show in a child frame over the frame's windows, placed by
+`romacs-complete-position', and messages show briefly in a layer of
+their own.  Turning it on turns `fido-mode' and `fido-vertical-mode' off.
+
+This is a global minor mode.  If called interactively, toggle the
+`Romacs-Complete mode' mode.  If the prefix argument is positive, enable
+the mode, and if it is zero or negative, disable the mode.
+
+If called from Lisp, toggle the mode if ARG is `toggle'.  Enable the
+mode if ARG is nil, omitted, or is a positive number.  Disable the mode
+if ARG is a negative number.
+
+To check whether the minor mode is enabled in the current buffer,
+evaluate `(default-value \\='romacs-complete-mode)'.
+
+The mode's hook is called both when the mode is enabled and when it is
+disabled.
+
+(fn &optional ARG)" t)
+(register-definition-prefixes "romacs-complete" '("romacs-"))
+
+
 ;;; Generated autoloads from romacs-completion-candidates.el
 
 (register-definition-prefixes "romacs-completion-candidates" '("romacs-completion-"))

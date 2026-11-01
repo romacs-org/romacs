@@ -396,6 +396,17 @@ fn romacs_create_frame(cx, parms: Value) {
     Ok(frame)
 }}
 
+// The frame reserves no line for a minibuffer window a child frame hosts
+// (DIVERGENCES.md VM2-MINI-COMPLETION-LAYER); romacs-complete.el places it.
+defsubr! { name = "romacs--host-minibuffer", gnu = "romacs:frame", effect = Global,
+fn romacs_host_minibuffer(cx, frame: Value; optional edge: Value) {
+    cx.windows().host_minibuffer(frame, edge)
+}}
+defsubr! { name = "romacs--minibuffer-host", gnu = "romacs:frame", effect = Reads,
+fn romacs_minibuffer_host(cx) {
+    cx.windows().minibuffer_host()
+}}
+
 // frame.c Fdelete_frame: the hooks around delete_frame's deletion.
 // Descendants are deleted without running theirs (VM2-CHILD-FRAME).
 defsubr! { name = "delete-frame", gnu = "frame.c:3150", effect = Global,

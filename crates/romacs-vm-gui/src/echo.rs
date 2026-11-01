@@ -1,8 +1,17 @@
 //! Echo area: the message a command left, and its clearing when the next
 //! command starts (keyboard.c command_loop_1). A command's error reaches
 //! the echo area as GNU's does, through `command-error-function' in the
-//! Lisp command loop (rlisp/vm/keyboard.el).
+//! Lisp command loop (rlisp/vm/keyboard.el). Each change runs
+//! `romacs-echo-area-functions' with the message, or nil once cleared,
+//! where a layer shows messages (rlisp/romacs-complete.el).
 use romacs_vm::Vm;
+
+/// Lisp running `romacs-echo-area-functions' with MESSAGE, a Lisp form.
+/// A failing function leaves the echo area as it is.
+fn notify(message: &str) -> String {
+    format!("(and (boundp 'romacs-echo-area-functions) romacs-echo-area-functions
+                  (condition-case nil (run-hook-with-args 'romacs-echo-area-functions {message}) (error nil)))")
+}
 
 /// Show `text` in the echo area: the minibuffer window's buffer. Never selects
 /// the minibuffer window, and restores the current buffer and its point.
@@ -13,7 +22,8 @@ pub fn show(vm: &mut Vm, message: &str) -> Result<(), String> {
            (unwind-protect
                (progn (set-buffer (window-buffer (minibuffer-window)))
                       (erase-buffer) (insert {text}))
-             (set-buffer old-buffer) (goto-char old-point)))"
+             (set-buffer old-buffer) (goto-char old-point)))
+         {}", notify(&text)
     ))?;
     vm.set_echo_area_message(Some(message));
     Ok(())
@@ -49,12 +59,13 @@ fn current_message(vm: &mut Vm, clear_when_none: bool) -> Result<(), String> {
 
 /// Clear a message left by the previous command.
 pub fn clear(vm: &mut Vm) -> Result<(), String> {
-    vm.eval_source(
+    vm.eval_source(&format!(
         "(let ((old-buffer (current-buffer)) (old-point (point)) (inhibit-read-only t))
            (unwind-protect
                (progn (set-buffer (window-buffer (minibuffer-window))) (erase-buffer))
-             (set-buffer old-buffer) (goto-char old-point)))",
-    )?;
+             (set-buffer old-buffer) (goto-char old-point)))
+         {}", notify("nil")
+    ))?;
     vm.set_echo_area_message(None);
     Ok(())
 }

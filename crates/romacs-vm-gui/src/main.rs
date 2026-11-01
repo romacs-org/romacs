@@ -722,14 +722,10 @@ fn paint(
     let (snapshot, selected) = (&shown.snapshot, shown.selected);
     let cursor = selected.map(|selected| (selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
     let (mut frame, mut ends) = engine.layout_frame(snapshot, presentation, cursor)?;
-    let (children, child_ends) = engine.layout_children(snapshot, presentation, cursor)?;
+    let (mut children, child_ends) = engine.layout_children(snapshot, presentation, cursor)?;
     ends.extend(child_ends);
     if selected.is_some() {
-        let mut effects = romacs_display_protocol::EffectsConfig::default();
-        effects.cursor_color_cycle.enabled = false;
-        for window in &snapshot.windows {
-            frame.set_window_cursor_effects(romacs_display_protocol::DisplayWindowId::new(window.snapshot.id as i64), effects.clone());
-        }
+        steady_cursors(&mut frame, &mut children, snapshot);
     }
     let layout_ns = layout_start.elapsed().as_nanos();
     let diagnostic_start = Instant::now();
@@ -808,6 +804,22 @@ fn paint(
     }
     Ok(Shown { frame: shown, ends, presentation })
 }
+
+/// No cursor colour cycle in any window of SNAPSHOT, its child frames'
+/// too: a minibuffer a layer hosts has its cursor there.
+fn steady_cursors(frame: &mut romacs_display_protocol::FrameGlyphBuffer, children: &mut [romacs_display_protocol::FrameGlyphBuffer],
+                  snapshot: &romacs_layout_input::FrameSnapshot) {
+    let mut effects = romacs_display_protocol::EffectsConfig::default();
+    effects.cursor_color_cycle.enabled = false;
+    let steady = |buffer: &mut romacs_display_protocol::FrameGlyphBuffer, windows: &[romacs_layout_input::PlacedWindowSnapshot]| {
+        for window in windows {
+            buffer.set_window_cursor_effects(romacs_display_protocol::DisplayWindowId::new(window.snapshot.id as i64), effects.clone());
+        }
+    };
+    steady(frame, &snapshot.windows);
+    for (buffer, child) in children.iter_mut().zip(&snapshot.children) { steady(buffer, &child.windows); }
+}
+
 /// Lay out and submit a frame for a prompt waiting inside a command
 /// (prompt.rs). The same cursor policy as `paint`; no VM access, because the
 /// evaluator is suspended in Lisp and redisplay already ran in its own engine.
@@ -819,13 +831,9 @@ fn paint_prompt(
 ) -> Result<(usize, Vec<romacs_vm::WindowEnd>), String> {
     let cursor = Some((frame.selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
     let (mut glyphs, mut ends) = engine.layout_frame(&frame.frame, presentation, cursor)?;
-    let (children, child_ends) = engine.layout_children(&frame.frame, presentation, cursor)?;
+    let (mut children, child_ends) = engine.layout_children(&frame.frame, presentation, cursor)?;
     ends.extend(child_ends);
-    let mut effects = romacs_display_protocol::EffectsConfig::default();
-    effects.cursor_color_cycle.enabled = false;
-    for window in &frame.frame.windows {
-        glyphs.set_window_cursor_effects(romacs_display_protocol::DisplayWindowId::new(window.snapshot.id as i64), effects.clone());
-    }
+    steady_cursors(&mut glyphs, &mut children, &frame.frame);
     let count = glyphs.glyphs.len();
     let observed = SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed).then(|| {
         std::iter::once(&glyphs).chain(&children).flat_map(|frame| {
