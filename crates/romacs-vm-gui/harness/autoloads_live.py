@@ -155,7 +155,7 @@ def main():
 
                 def run(command, buffer, text):
                     keys('-M', 'alt', 'x', '-m', 'alt')
-                    fio.wait(lambda: rows()[:1] and rows()[0].startswith('M-x '), args.timeout, 'M-x prompt', process)
+                    fio.wait(lambda: ff.prompt_shown(rows(), 'M-x '), args.timeout, 'M-x prompt', process)
                     keys(command, '-k', 'Return')
                     try:
                         shown(buffer, text)
