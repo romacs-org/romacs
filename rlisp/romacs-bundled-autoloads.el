@@ -383,6 +383,11 @@ recompiling; signals an error if no frame shader is installed
 (register-definition-prefixes "romacs-unidata" '("romacs-unidata-"))
 
 
+;;; Generated autoloads from romacs-usage-log.el
+
+(register-definition-prefixes "romacs-usage-log" '("romacs-usage-log-"))
+
+
 ;;; Generated autoloads from romacs-video.el
 
 (autoload 'romacs-video-play-file "romacs-video"

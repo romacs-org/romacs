@@ -992,8 +992,9 @@ pub(super) struct RenderApp {
 
 /// Only terminal causes may authorize display teardown. A native close
 /// request is intentionally absent: live-frame close decisions belong to Lisp.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum RenderShutdownReason {
+/// The render loop's exit names the one that ended it (`RenderLoopExit`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderShutdownReason {
     EvaluatorShutdown,
     NativeWindowDestroyed,
     StartupCancelled,
@@ -1013,6 +1014,10 @@ impl RenderLifecycle {
 
     pub fn is_shutting_down(&self) -> bool {
         self.shutdown_reason.is_some()
+    }
+
+    pub fn shutdown_reason(&self) -> Option<RenderShutdownReason> {
+        self.shutdown_reason
     }
 
     pub fn new(poll_when_idle: bool) -> Self {

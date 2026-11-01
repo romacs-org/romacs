@@ -612,6 +612,11 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
+    // The session's command log, which each interactive process starts
+    // itself (`romacs-usage-log-start').
+    if launch == Launch::Loadup {
+        vm.eval_source(include_str!("../../../rlisp/romacs-usage-log.el"))?;
+    }
     // Layers are child frames, which GNU's frame.el makes.
     if launch == Launch::Loadup && vm.eval_source("(fboundp 'make-frame)")? != romacs_vm::Fixed::NIL {
         vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
