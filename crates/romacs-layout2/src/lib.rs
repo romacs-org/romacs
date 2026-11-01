@@ -4,13 +4,15 @@
 mod selection_order_tests;
 #[cfg(test)]
 mod alternative_state_tests;
+mod fringe;
+use fringe::RowMarks;
 use romacs_display_protocol::frame_glyphs::GlyphRowRole;
 use romacs_display_protocol::{
     Color, DisplayFrameId, DisplayWindowId, FaceId, FrameGlyphBuffer, ParentFrameRect,
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{ChildFrameSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
+use romacs_layout_input::{ChildFrameSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -24,7 +26,7 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, faces: vec![face.clone()],
+        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
     }
 }
 
@@ -150,7 +152,47 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         let owns = |&(id, _): &(u64, Color)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id;
         ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
+    if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(&mut frame, tab_bar, snapshot.width as f32, resolver)?; }
     Ok((frame, ends))
+}
+
+/// The frame's tab bar row across its top (xdisp.c display_tab_bar): FACE's
+/// background, then each character in its face, in faces published above
+/// the windows'. A click finds its character by these glyphs, which are
+/// the tab bar's only ones and in its text's order.
+fn paint_tab_bar(frame: &mut FrameGlyphBuffer, tab_bar: &TabBarSnapshot, width: f32, resolver: &mut FontResolver) -> Result<(), String> {
+    let text = &tab_bar.text;
+    validate_runs(text, tab_bar.faces.len())?;
+    let face = tab_bar.face.0 as usize;
+    if face >= tab_bar.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid tab bar".into()); }
+    let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
+    let face_text = face_text(tab_bar.faces.len(), &[(text, face)]);
+    let metrics = realize_faces(&tab_bar.faces, &face_text, |index| index == face, frame, resolver, face_base)?;
+    let bounds = Rect::new(0.0, 0.0, width, tab_bar.height as f32);
+    frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(tab_bar.faces[face].background));
+    frame.set_draw_context(DisplayWindowId::new(0), GlyphRowRole::TabBar, Some(bounds));
+    let mut x = 0.0;
+    for (byte, ch) in text.utf8.char_indices() {
+        let index = face_at(text, byte, face);
+        let id = FaceId::new(face_base + index as u32);
+        let (ascent, height, cell, _) = metrics[index];
+        let advance = advance(frame, id, ch, cell);
+        let background = color(tab_bar.faces[index].background);
+        if index != face { frame.add_background(x, 0.0, advance, bounds.height, background); }
+        frame.add_char(ch, x, 0.0, advance, height, ascent, false);
+        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing tab bar face")? = id;
+        x += advance;
+    }
+    Ok(())
+}
+
+/// The tab bar's characters as FRAME paints them: each one's left edge
+/// and width, in its text's order.
+pub fn tab_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
+    frame.glyphs.iter().filter_map(|glyph| match glyph {
+        romacs_display_protocol::FrameGlyph::Char { row_role: GlyphRowRole::TabBar, x, width, .. } => Some((*x, *width)),
+        _ => None,
+    }).collect()
 }
 
 /// CHILD of SNAPSHOT as a frame of its own: its windows inside its border,
@@ -160,7 +202,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
     if child.id == 1 || child.windows.is_empty() { return Err("invalid child frame".into()); }
     let frame_snapshot = FrameSnapshot {
         font_selection: snapshot.font_selection, font_alternatives: snapshot.font_alternatives.clone(),
-        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![],
+        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![], tab_bar: None,
     };
     let cursor = cursor.filter(|(id, _)| child.windows.iter().any(|w| w.snapshot.id == *id));
     let (mut frame, ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, resolver)?;
@@ -216,7 +258,8 @@ fn color(rgb: [u8; 3]) -> Color {
     Color::from_pixel((u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2]))
 }
 
-/// LTR rows, continued or truncated as GNU does without fringes; no cursor or policy evaluation.
+/// LTR rows, continued or truncated as GNU does, with the window's
+/// fringes and their indicators; no cursor or policy evaluation.
 /// Byte positions are relative to the owned UTF-8 text, not VM heap references.
 pub fn layout(snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyphBuffer, String> {
     let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;
@@ -280,8 +323,10 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         }
         for face in [numbers.face, numbers.current] { face_text[face.0 as usize].push_str("0123456789 "); }
     }
-    // A band's own face sets its height even where no character uses it.
-    let band_faces: Vec<usize> = bands.iter().filter(|(band, _)| band.is_some()).map(|(_, face)| face.0 as usize).collect();
+    // A band's own face sets its height even where no character uses it,
+    // as the faces of the fringes' bitmaps set their colours.
+    let band_faces: Vec<usize> = bands.iter().filter(|(band, _)| band.is_some()).map(|(_, face)| face.0 as usize)
+        .chain(fringe::bitmap_faces(&snapshot.chrome)).collect();
     let metrics = realize_faces(&snapshot.faces, &face_text, |index| band_faces.contains(&index), frame, resolver, face_base)?;
     if face_base == 0 { frame.char_height = metrics[0].1; frame.char_width = metrics[0].2; }
     // A band is as tall as its tallest face.
@@ -300,16 +345,18 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         GlyphRowRole::Text,
         Some(Rect::new(ox, oy, snapshot.width as f32, body_height)),
     );
-    // GNU on a frame without fringes: a row ends where its next glyph
-    // would pass the text area less the continuation (`\\') or
-    // truncation (`$') glyph, which it shows there (display_line,
-    // move_it_in_display_line_to). Rows are laid out from the start of
-    // the window start's line, so a window starting on a continuation
-    // line breaks its rows, and stops its TABs, as from the line start.
+    // GNU: a row ends where its next glyph would pass the text area,
+    // less the continuation (`\\') or truncation (`$') glyph it shows there
+    // on a window without a right fringe, whose indicators show the break
+    // instead (display_line, move_it_in_display_line_to, init_iterator).
+    // Rows are laid out from the start of the window start's line, so a
+    // window starting on a continuation line breaks its rows, and stops
+    // its TABs, as from the line start.
     let truncate = snapshot.wrap == LineWrap::Truncate;
     let special = if truncate { '$' } else { '\\' };
     let default_id = FaceId::new(face_base);
-    let last_x = snapshot.width as f32 - advance(frame, default_id, special, metrics[0].2);
+    let glyphs_mark = snapshot.chrome.right_fringe == 0;
+    let last_x = snapshot.width as f32 - if glyphs_mark { advance(frame, default_id, special, metrics[0].2) } else { 0.0 };
     let line_start = text[..snapshot.start_byte].rfind('\n').map_or(0, |at| at + 1);
     // Line numbers take each row's first glyphs, its line's label or as
     // many blanks, in cells of their face.
@@ -339,8 +386,12 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // within the text area (GNU's cursor_row_fully_visible_p).
     let (mut row_start, mut visible_end) = (snapshot.start_byte, snapshot.start_byte);
     let fully_visible = |y: f32, height: f32| y >= 0.0 && y + height <= body_height;
-    // Each drawn row as it ends; the last, as the text ends.
+    // Each drawn row as it ends; the last, as the text ends. Beside each,
+    // how it breaks, which the fringes indicate; whether the row being
+    // built continues a line a break or the window start split.
     let mut rows: Vec<Row> = vec![];
+    let mut marks: Vec<RowMarks> = vec![];
+    let mut continuation = line_start != snapshot.start_byte;
     for (byte, ch) in text[line_start..].char_indices().map(|(at, ch)| (line_start + at, ch)) {
         // The window start begins a row: at a line start, or where the row
         // before it breaks, which the character there decides below, so
@@ -360,8 +411,10 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte + 1; }
                 rows.push(Row { start: row_start, y, height: row_height });
+                marks.push(RowMarks { continued: false, continuation, truncated: hidden });
                 row_start = byte + 1;
             }
+            continuation = false;
             x0 = gutter(byte + 1).0;
             x = x0;
             y += row_height;
@@ -385,12 +438,14 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         };
         let mut advance_px = width(frame, x, x + continued, x0);
         if !truncate && hpos > 0 && x + advance_px > last_x {
-            if drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
+            if glyphs_mark && drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
                 rows.push(Row { start: row_start, y, height: row_height });
+                marks.push(RowMarks { continued: true, continuation, truncated: false });
                 row_start = byte;
             }
+            continuation = true;
             // A TAB that does not fit continues from the text area's edge.
             continued += if matches!(shown, Shown::Tab) { last_x } else { x };
             x0 = gutter(byte).0;
@@ -402,6 +457,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         if starting {
             // A start inside a row (the motion refuses one): the row
             // breaks there.
+            continuation = true;
             continued += x;
             x0 = gutter(byte).0;
             (drawing, x, y, row_height, hpos) = (true, x0, top, metrics[0].1, 0);
@@ -411,7 +467,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         row_height = row_height.max(height);
         let visible = drawing && body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32;
         if truncate && x + advance_px > last_x {
-            if visible { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
+            if visible && glyphs_mark { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             hidden = true;
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, ascent)); }
             continue;
@@ -450,7 +506,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     if end_byte == text.len() && visible_end == row_start && fully_visible(y, row_height) {
         visible_end = text.len() + 1;
     }
-    if end_byte == text.len() && y < body_height { rows.push(Row { start: row_start, y, height: row_height }); }
+    if end_byte == text.len() && y < body_height {
+        rows.push(Row { start: row_start, y, height: row_height });
+        marks.push(RowMarks { continued: false, continuation, truncated: hidden });
+    }
+    fringe::paint(frame, snapshot, &rows, &marks, fringe::Area { ox, oy, body_height, line: metrics[0].1, text_len: text.len(), reached_end: end_byte == text.len(), face_base })?;
     // A row starting a numbered line shows its label; any other, blanks,
     // in the face of line numbers.
     if let Some(numbers) = &snapshot.line_numbers {
@@ -471,9 +531,12 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     }
     if let (Some((active, color)), Some((x, y, width, height, ascent))) = (cursor, point_rect) {
         // No cursor may bleed into the mode line or another window.
-        if x >= 0.0 && x < snapshot.width as f32 && y >= 0.0 && y + height <= body_height {
+        // With a right fringe, a cursor after a row that fills the text
+        // area shows in the fringe (`overflow-newline-into-fringe').
+        let right = snapshot.width as f32 + snapshot.chrome.right_fringe as f32;
+        if x >= 0.0 && x < right && y >= 0.0 && y + height <= body_height {
             frame.add_cursor(DisplayWindowId::new(snapshot.id as i64), ox + x, oy + y,
-                width.min(snapshot.width as f32 - x), height,
+                width.min(right - x), height,
                 if active { romacs_display_protocol::CursorStyle::FilledBox } else { romacs_display_protocol::CursorStyle::Hollow }, color);
             let published = frame.window_cursors.last_mut().unwrap();
             published.active = active;
@@ -482,15 +545,19 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     }
     // Each band's faces are the next table after the window's, so the
     // next window's faces start after them.
+    // The header and mode lines span the whole window, margins and
+    // fringes included.
+    let (left, right) = snapshot.chrome.insets();
+    let (band_x, band_width) = (ox - left as f32, (left + snapshot.width + right) as f32);
     let mut copy = 0;
     if let Some(band) = &snapshot.header_line {
         copy += 1;
-        let bounds = Rect::new(ox, window_top, snapshot.width as f32, header_height);
+        let bounds = Rect::new(band_x, window_top, band_width, header_height);
         paint_band(frame, snapshot, band, snapshot.header_line_face, bounds, GlyphRowRole::HeaderLine, (face_base, copy), &metrics)?;
     }
     if let Some(band) = &snapshot.mode_line {
         copy += 1;
-        let bounds = Rect::new(ox, oy + body_height, snapshot.width as f32, snapshot.height as f32 - header_height - body_height);
+        let bounds = Rect::new(band_x, oy + body_height, band_width, snapshot.height as f32 - header_height - body_height);
         paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, GlyphRowRole::ModeLine, (face_base, copy), &metrics)?;
     }
     Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows })
@@ -525,7 +592,7 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
         let id = FaceId::new(face_base + offset + index as u32);
         let (ascent, height, cell, _) = metrics[index];
         let advance = advance(frame, id, ch, cell);
-        if x < snapshot.width as f32 {
+        if x < bounds.width {
             frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);
             *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing mode-line face")? = id;
         }

@@ -231,7 +231,10 @@ impl<'a> Walk<'a> {
             // A syntax table is a char-table whose purpose says so (GNU's
             // own) or the native one; both refuse, as the design states.
             Object::CharTable(t) => !self.symbol_named(t.purpose, "syntax-table"),
-            Object::HashTable(t) => t.weakness == hash::Weakness::None && !t.local_bindings,
+            // A table on a test `define-hash-table-test' named stays with
+            // its isolate, as the test's definition does.
+            Object::HashTable(t) => t.weakness == hash::Weakness::None && !t.local_bindings
+                && !matches!(t.test, hash::Test::Including(_)),
             Object::SyntaxTable(_) | Object::Window(_) | Object::Frame(_) | Object::Terminal(_) | Object::WindowConfiguration(_)
             | Object::Sqlite(_) | Object::Treesit(_) | Object::Process(_) | Object::Finalizer(_) | Object::SubCharTable(_) | Object::MapKeymapCursor(_)
             | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::ByteBuffer(_) | Object::Obarray(_) => false,
@@ -396,7 +399,7 @@ impl<'a> Walk<'a> {
             Object::BoolVector(b) => { w.u8(KIND_BOOL_VECTOR); w.u64(b.len as u64); w.bytes(&b.bytes); }
             Object::HashTable(t) => {
                 w.u8(KIND_HASH_TABLE);
-                w.u8(match t.test { hash::Test::Eq => 0, hash::Test::Eql => 1, hash::Test::Equal => 2 });
+                w.u8(match t.test { hash::Test::Eq => 0, hash::Test::Eql => 1, hash::Test::Equal | hash::Test::Including(_) => 2 });
                 w.u64(t.count() as u64);
                 for (_, k, v) in t.entries() {
                     w.u64(self.edge(k).word());

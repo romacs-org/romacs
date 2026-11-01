@@ -85,10 +85,16 @@ fn visit_startup_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<(), 
 fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result<(), String> {
     let mut position = None;
     let mut literal = false;
-    for file in files {
+    let mut files = files.iter();
+    while let Some(file) = files.next() {
         if !literal {
             if file == std::path::Path::new("--") {
                 literal = true;
+                continue;
+            }
+            if let Some(option) = file.to_str().and_then(StartupOption::parse) {
+                let value = files.next().and_then(|v| v.to_str()).ok_or_else(|| format!("{} needs a UTF-8 argument", file.display()))?;
+                vm.eval_source(&option.form(value)?)?;
                 continue;
             }
             if let Some(value) = file.to_str().and_then(|s| s.strip_prefix('+')) {
@@ -122,6 +128,48 @@ fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result
         visit_position(vm, position.take(), true)?;
     }
     Ok(())
+}
+
+/// The command-line options startup.el `command-line-1' runs in order
+/// with the file arguments (startup.el:2830-2905): `-l FILE', `-f
+/// FUNCTION' and `--eval EXPRESSION', in their GNU spellings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartupOption { Load, Funcall, Eval }
+
+impl StartupOption {
+    pub fn parse(arg: &str) -> Option<Self> {
+        match arg {
+            "-l" | "-load" | "--load" => Some(Self::Load),
+            "-f" | "-funcall" | "--funcall" | "-e" => Some(Self::Funcall),
+            "-eval" | "--eval" | "-execute" | "--execute" => Some(Self::Eval),
+            _ => None,
+        }
+    }
+
+    /// The form `command-line-1' evaluates for this option with VALUE:
+    /// `-l' loads the true name of FILE in the directory Romacs started in
+    /// when it is a regular file there, else lets `load' search
+    /// `load-path'; `-f' runs
+    /// a command as a command; `--eval' evaluates the expression its text
+    /// starts with.
+    fn form(self, value: &str) -> Result<String, String> {
+        let text = lisp_string(value);
+        Ok(match self {
+            Self::Load => {
+                let here = std::env::current_dir().map_err(|e| e.to_string())?.join(value);
+                let file = match here.canonicalize() {
+                    Ok(truename) if truename.is_file() => lisp_string(truename.to_str().ok_or("startup file name is not UTF-8")?),
+                    _ => text,
+                };
+                format!("(load {file} nil t)")
+            }
+            // Both say the startup screen is not wanted.
+            Self::Funcall => format!("(let ((f (intern {text}))) (setq inhibit-startup-screen t) (if (commandp f) (command-execute f) (funcall f)))"),
+            // GNU's check for text after the expression matches anywhere
+            // (startup.el:2877), so any is ignored.
+            Self::Eval => format!("(progn (setq inhibit-startup-screen t) (eval (car (read-from-string {text})) t))"),
+        })
+    }
 }
 
 /// Point to a `+LINE[:COLUMN]' POSITION in the visited buffer, and the
@@ -400,8 +448,18 @@ fn bind_journey_keys(vm: &mut Vm, after_loadup: bool) -> Result<Vec<Binding>, St
 /// split, on VM2's own runtime with NO GNU Lisp (`--no-gnu-lisp`). The host
 /// must set its frame geometry first. After command dispatch it should
 /// inspect `romacs-gui-quit-requested`: non-nil requests host shutdown.
+/// The command line (`romacs FILE...`, `-l`, `-f`, `--eval`) is kept in
+/// `Started::files` for [`finish_workspace`], after the user's init.
 pub fn initialize(vm: &mut Vm) -> Result<Started, String> {
-    initialize_files(vm, &take_queued())
+    let args = take_queued();
+    let started = set_up_workspace(vm, None, args.is_empty())?;
+    Ok(Started { files: args, ..started })
+}
+
+/// The command line [`initialize`] kept, run once the user's init has, as
+/// startup.el `command-line-1' runs it.
+pub fn finish_workspace(vm: &mut Vm, started: &Started) -> Result<(), String> {
+    visit_files(vm, &started.files)
 }
 
 /// [`initialize`] visiting FILES (`romacs FILE...`) instead of the queue.
@@ -426,6 +484,13 @@ fn policy(vm: &mut Vm, root: Option<&std::path::Path>, name: &str, embedded: &st
 }
 
 fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root: Option<&std::path::Path>) -> Result<Started, String> {
+    let started = set_up_workspace(vm, root, files.is_empty())?;
+    visit_files(vm, files)?;
+    Ok(started)
+}
+
+/// The workspace with its showcase when SHOWCASE, before any file is visited.
+fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool) -> Result<Started, String> {
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
     vm.install_lisp_prelude()?;
     policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
@@ -446,8 +511,7 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     crate::eval_last_sexp::define(vm)?;
     let bindings = bind_journey_keys(vm, false)?;
     let started = Started { launch: Launch::Workspace, loadup: None, bindings, gnu_mode_line: false, files: vec![] };
-    workspace(vm, &started, files.is_empty())?;
-    visit_files(vm, files)?;
+    workspace(vm, &started, showcase)?;
     load_gui_extensions(vm, &lisp_dir())?;
     Ok(started)
 }
@@ -1141,6 +1205,40 @@ mod tests {
             assert_eq!(printed(&mut vm, "(buffer-live-p fileio-kill-victim)"), "nil");
             assert_eq!(printed(&mut vm, "romacs-gui-pending"), "nil");
         }
+    }
+
+    /// startup.el `command-line-1': `-l', `-f' and `--eval' run where they
+    /// stand among the files, after the files before them are visited.
+    #[test]
+    fn command_line_options_run_in_order_with_the_files() {
+        let root = std::env::temp_dir().join(format!("romacs-startup-options-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let (lib, file) = (root.join("lib.el"), root.join("a.txt"));
+        std::fs::write(&lib, "(setq startup-order (list 'loaded)) (defun startup-mark () (setq startup-order (cons 'marked startup-order)))").unwrap();
+        std::fs::write(&file, "text\n").unwrap();
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        let args: Vec<std::path::PathBuf> = ["-l", lib.to_str().unwrap(), file.to_str().unwrap(),
+            "--eval", "(setq startup-order (cons (buffer-name) startup-order))", "-f", "startup-mark"].iter().map(Into::into).collect();
+        initialize_files(&mut vm, &args).unwrap();
+        assert_eq!(printed(&mut vm, "startup-order"), "(marked \"a.txt\" loaded)");
+        let trailing: Vec<std::path::PathBuf> = ["--eval", "(setq startup-x 1) junk"].iter().map(Into::into).collect();
+        visit_files(&mut vm, &trailing).unwrap();
+        assert_eq!(printed(&mut vm, "(list startup-x inhibit-startup-screen)"), "(1 t)");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A workspace launch runs its command line after the user's init, so
+    /// `-f' reaches a function the init defined.
+    #[test]
+    fn a_workspace_runs_its_command_line_after_the_init() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        let started = initialize(&mut vm).unwrap();
+        let started = Started { files: ["-f", "init-command"].iter().map(Into::into).collect(), ..started };
+        printed(&mut vm, "(defun init-command () (setq init-command-ran t))");
+        finish_workspace(&mut vm, &started).unwrap();
+        assert_eq!(printed(&mut vm, "init-command-ran"), "t");
     }
 
     #[test]

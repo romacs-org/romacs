@@ -153,6 +153,7 @@ source_cache/prepared.rs invoke_prepared_raw prepared_function 1 rooted  # ARGS 
 source_cache/prepared.rs prepare_source prepared_function 1 clean  # no caller Values
 source_cache/prepared.rs prepared_function cached_source_form 1 held  # an open compiler builder holds collection
 source_cache/prepared.rs prepared_function execute_raw 1 clean  # FORM's objects are rooted
+tab_bar.rs tab_bar_snapshot call_prepared_source_raw 1 clean  # no arguments; only the returned row is read after it, by reads that do not allocate
 terminal_host.rs declare_terminal_errors eval_source_raw 1 boundary  # a world build or host setup declaring a constant error: no caller Values
 threaded.rs autoload_then autoload_do_load 1 suspended  # inside call_suspended
 threaded.rs autoload_then nested_then 1 suspended  # FUNCTION and FUNDEF are rooted by the load

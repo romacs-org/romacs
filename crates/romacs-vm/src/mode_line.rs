@@ -322,7 +322,7 @@ impl Vm {
     }
 
     /// A `face' property's name: a symbol, or a face list's first symbol.
-    fn ml_face_name(&self, value: Value) -> Option<String> {
+    pub(crate) fn ml_face_name(&self, value: Value) -> Option<String> {
         let name = |v: Value| (v.tag() == 7 && v != Value::NIL).then(|| v.index(7).ok())
             .flatten().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned())
             .filter(|n| !n.starts_with(':'));

@@ -1101,4 +1101,112 @@ reads each expression in place of `read'.  lread.c Feval_region over
     (romacs--readevalloop (current-buffer) buffer-file-name printflag read-function start end)
     nil))
 
+;; GNU fringe.c's bitmap registry.  A bitmap symbol's `fringe' property is
+;; its number, as fringe.el gives the standard ones 1 to 24; a definition
+;; keeps (ROWS WIDTH ALIGN PERIODIC) in `romacs--fringe-bitmap', ROWS
+;; with each row's leftmost pixel in bit 15, which redisplay reads
+;; (fringe.rs) before the standard bitmap of its number.
+
+(defun define-fringe-bitmap (bitmap bits &optional height width align)
+  "Define fringe bitmap BITMAP from BITS of size HEIGHT x WIDTH.
+GNU fringe.c `Fdefine_fringe_bitmap'."
+  (unless (symbolp bitmap) (signal 'wrong-type-argument (list 'symbolp bitmap)))
+  (unless (or (vectorp bits) (stringp bits) (bool-vector-p bits))
+    (signal 'wrong-type-argument (list 'arrayp bits)))
+  (and height (not (integerp height)) (signal 'wrong-type-argument (list 'fixnump height)))
+  (and width (not (integerp width)) (signal 'wrong-type-argument (list 'fixnump width)))
+  (and width (or (< width 1) (> width 16))
+       (signal 'args-out-of-range (list width "Width must be from 1 to 16")))
+  (let* ((h (length bits))
+         (rows (if height (max 0 (min height 255)) h))
+         (fill (if (> rows h) (/ (- rows h) 2) 0))
+         (w (or width 8))
+         (periodic (and (consp align) (consp (cdr align)) (car (cdr align))))
+         (align (if (consp align) (car align) align))
+         (j rows)
+         (bitmap-rows nil))
+    (unless (memq align '(nil top center bottom)) (error "Bad align argument"))
+    (while (> j 0)
+      (setq j (1- j))
+      (let* ((i (- j fill))
+             (elt (and (>= i 0) (< i h) (aref bits i))))
+        (setq bitmap-rows (cons (if (integerp elt) (logand (ash elt (- 16 w)) #xffff) 0) bitmap-rows))))
+    (unless (get bitmap 'fringe)
+      (let ((n 25) (tail fringe-bitmaps))
+        ;; The least number above the standard ones no bitmap holds.
+        (while tail
+          (if (eq (get (car tail) 'fringe) n)
+              (setq n (1+ n) tail fringe-bitmaps)
+            (setq tail (cdr tail))))
+        (setq fringe-bitmaps (cons bitmap fringe-bitmaps))
+        (put bitmap 'fringe n)))
+    (put bitmap 'romacs--fringe-bitmap (list bitmap-rows w align periodic))
+    ;; Windows show the new bits on their next redisplay.
+    (force-window-update)
+    bitmap))
+
+(defun destroy-fringe-bitmap (bitmap)
+  "Destroy fringe bitmap BITMAP, restoring a standard one it overrode.
+GNU fringe.c `Fdestroy_fringe_bitmap'."
+  (unless (symbolp bitmap) (signal 'wrong-type-argument (list 'symbolp bitmap)))
+  (let ((n (get bitmap 'fringe)))
+    (when (integerp n)
+      (put bitmap 'romacs--fringe-bitmap nil)
+      (put bitmap 'romacs--fringe-face nil)
+      (when (> n 24)
+        (setq fringe-bitmaps (delq bitmap fringe-bitmaps))
+        (put bitmap 'fringe nil))
+      (force-window-update)))
+  nil)
+
+(defun set-fringe-bitmap-face (bitmap &optional face)
+  "Set face for fringe bitmap BITMAP to FACE; nil restores the `fringe' face.
+GNU fringe.c `Fset_fringe_bitmap_face'."
+  (unless (integerp (get bitmap 'fringe)) (error "Undefined fringe bitmap"))
+  (put bitmap 'romacs--fringe-face face)
+  (force-window-update)
+  nil)
+
+;; GNU xdisp.c's tab bar.  Its row is the captions of the menu items the
+;; [tab-bar] key binds in the active keymaps (tab_bar_items,
+;; build_desired_tab_bar_string), which tab-bar.el's keymap filter makes,
+;; and a click runs the binding of [tab-bar EVENT] with a position whose
+;; column `tab-bar--event-to-item' maps back to an item over the same walk.
+
+(defun romacs--tab-bar-items ()
+  "The tab bar's menu items, (KEY CAPTION BINDING), in their order."
+  (let ((map (lookup-key (cons 'keymap (nreverse (current-active-maps))) [tab-bar]))
+        (items nil))
+    (when (keymapp map)
+      (map-keymap
+       (lambda (key binding)
+         (when (and (eq (car-safe binding) 'menu-item)
+                    (let ((visible (plist-member (nthcdr 3 binding) :visible)))
+                      (or (not visible) (eval (car (cdr visible)) t))))
+           (let ((caption (nth 1 binding)))
+             (setq caption (if (stringp caption) caption (eval caption t)))
+             (when (stringp caption)
+               (setq items (cons (list key caption (nth 2 binding)) items))))))
+       map))
+    (nreverse items)))
+
+(defun romacs--tab-bar-string ()
+  "The tab bar's row: its items' captions, concatenated."
+  (apply #'concat (mapcar (lambda (item) (nth 1 item)) (romacs--tab-bar-items))))
+
+(defun romacs--tab-bar-click (column type)
+  "Run the tab bar's binding for a mouse event of TYPE at COLUMN of its row.
+The event's position has no window, as on a text terminal, so the tab bar's
+commands find the item by COLUMN; its key sequence is [tab-bar TYPE]."
+  (let* ((event (list type (list nil 'tab-bar (cons column 0) 0)))
+         (keys (vector 'tab-bar event))
+         (command (key-binding (vector 'tab-bar type) t)))
+    (when (commandp command)
+      (setq last-input-event event
+            last-nonmenu-event event
+            last-command-event event
+            this-command command)
+      (call-interactively command nil keys)
+      (setq last-command command))))
+
 ;;; prelude.el ends here

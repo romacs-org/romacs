@@ -488,13 +488,13 @@ fn redraw_frame(cx; optional frame: Value) {
     cx.windows().redraw_display()
 }}
 
-// window.c:8605 and :8857: Romacs draws no fringes or scroll bars, so a
-// request changes nothing (window-fringes, window-scroll-bars).
 defsubr! { name = "set-window-fringes", gnu = "window.c:8605", effect = Global,
-fn set_window_fringes(cx, window: Value, _left: Value; optional _right: Value, _outside_margins: Value, _persistent: Value) {
-    cx.windows().window_fringes(window)?;
-    Ok(Value::NIL)
+fn set_window_fringes(cx, window: Value, left: Value; optional right: Value, outside_margins: Value, persistent: Value) {
+    cx.windows().set_window_fringes(window, left, right, outside_margins, persistent)
 }}
+
+// window.c:8857: Romacs draws no scroll bars, so a request changes nothing
+// (window-scroll-bars).
 
 defsubr! { name = "set-window-scroll-bars", gnu = "window.c:8857", effect = Global,
 fn set_window_scroll_bars(cx, window: Value; optional _width: Value, _vertical_type: Value, _height: Value, _horizontal_type: Value, _persistent: Value) {

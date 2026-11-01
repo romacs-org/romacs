@@ -12,7 +12,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
         background_alpha: 1.0,
         width: 400,
         height: 300,
-        children: vec![], windows: vec![PlacedWindowSnapshot {
+        children: vec![], tab_bar: None, windows: vec![PlacedWindowSnapshot {
             x: 0,
             y: 0,
             snapshot: WindowSnapshot {
@@ -29,7 +29,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
                 },
                 mode_line: None,
                 mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-                vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None,
+                vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(),
                 faces: vec![Face {
                     foreground: [255; 3],
                     background: [0; 3],

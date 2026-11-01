@@ -113,6 +113,8 @@ mod lstring;
 mod let_forms;
 mod symkey;
 mod display;
+mod fringe;
+mod tab_bar;
 mod overlay_order;
 mod window;
 mod frame;

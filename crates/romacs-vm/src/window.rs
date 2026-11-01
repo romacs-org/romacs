@@ -29,6 +29,12 @@ pub(super) struct Window {
     pub new_pixel: u32,
     pub left_margin: u32,
     pub right_margin: u32,
+    /// GNU `w->left_fringe_width' and `w->right_fringe_width' in pixels,
+    /// None for the frame's (-1), `w->fringes_outside_margins' and
+    /// `w->fringes_persistent' (window.h), as `set-window-fringes' set them.
+    pub fringes: [Option<u32>; 2],
+    pub fringes_outside_margins: bool,
+    pub fringes_persistent: bool,
     /// Per-window vertical scroll in pixels. GNU keeps this on the window as
     /// `w->vscroll` and both `window-vscroll` and `set-window-vscroll` begin by
     /// decoding the WINDOW argument (`src/window.c:8947`, `:8978`). It lived on
@@ -70,7 +76,7 @@ pub(super) struct Window {
     pub end_valid: bool,
     pub force_start: bool,
 }
-romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, vscroll_px, pending_vscroll, hscroll, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
+romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, pending_vscroll, hscroll, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
 impl Window {
     fn new(id: u64, buffer: Value) -> Self {
         Self {
@@ -91,6 +97,9 @@ impl Window {
             height: 460,
             new_pixel: 0,
             left_margin: 0,
+            fringes: [None; 2],
+            fringes_outside_margins: false,
+            fringes_persistent: false,
             vscroll_px: 0,
             pending_vscroll: None,
             hscroll: 0,
@@ -417,6 +426,14 @@ impl Vm {
             let w = self.window_mut(v)?;
             w.left_margin = left;
             w.right_margin = right;
+            // ... and, unless its fringes are persistent, the buffer's
+            // fringe widths (window.c:4401).
+            if !self.window(v)?.fringes_persistent {
+                let value = |vm: &mut Self, name: &str| -> Result<Value> { let slot = vm.slot(name); vm.value_in_buffer(slot, buffer) };
+                let widths = [value(self, "left-fringe-width")?, value(self, "right-fringe-width")?];
+                let outside = value(self, "fringes-outside-margins")?;
+                self.set_window_fringes(v, widths, outside != Value::NIL && outside != Value::UNBOUND, None)?;
+            }
         }
         Ok(())
     }
@@ -695,9 +712,9 @@ impl Vm {
         } else {
             self.window_root(SELECTED)
         };
-        let (buffer, left_margin, right_margin) = {
+        let (buffer, left_margin, right_margin, fringes, outside) = {
             let reference = self.window(reference)?;
-            (reference.buffer, reference.left_margin, reference.right_margin)
+            (reference.buffer, reference.left_margin, reference.right_margin, reference.fringes, reference.fringes_outside_margins)
         };
         let new = self.allocate_window(buffer)?;
         {
@@ -709,6 +726,8 @@ impl Vm {
             n.new_pixel = pixels;
             n.left_margin = left_margin;
             n.right_margin = right_margin;
+            n.fringes = fringes;
+            n.fringes_outside_margins = outside;
         }
         if w.live() {
             let point = self.window_point_value(v)?;
@@ -871,6 +890,53 @@ impl Vm {
         self.display_state.height = height;
         outcome
     }
+    /// GNU WINDOW_LEFT_FRINGE_WIDTH and WINDOW_RIGHT_FRINGE_WIDTH
+    /// (window.h): V's own widths, else its frame's; none on a frame
+    /// without a window system.
+    /// The minibuffer window a child frame hosts has that frame's.
+    pub(crate) fn window_fringe_widths(&self, v: Value) -> Result<[u32; 2]> {
+        if !self.window_system_open() { return Ok([0, 0]); }
+        let w = self.window(v)?;
+        let shown_in = match self.minibuffer_host() { Some((host, _)) if w.mini => host, _ => w.frame };
+        let frame = self.frame(shown_in).map_or([0, 0], |f| f.fringes);
+        Ok([w.fringes[0].unwrap_or(frame[0]), w.fringes[1].unwrap_or(frame[1])])
+    }
+    /// set_window_fringes (window.c:8544): WIDTHS, each a pixel count or
+    /// nil for the frame's (extract_dimension), take effect when the text
+    /// area keeps MIN_SAFE_WINDOW_PIXEL_WIDTH; OUTSIDE always does; and
+    /// PERSISTENT, when given, unless the widths failed. True when V
+    /// changed. Nothing on a frame without a window system.
+    pub(crate) fn set_window_fringes(&mut self, v: Value, widths: [Value; 2], outside: bool, persistent: Option<bool>) -> Result<bool> {
+        if !self.window_system_open() { return Ok(false); }
+        let new = widths.map(|width| width.integer_value().and_then(|n| u32::try_from(n).ok()));
+        let frame = { let w = self.window(v)?; self.frame(w.frame).map_or([0, 0], |f| f.fringes) };
+        let column = self.window_state.column;
+        let w = self.window_mut(v)?;
+        let effective = |set: [Option<u32>; 2]| [set[0].unwrap_or(frame[0]), set[1].unwrap_or(frame[1])];
+        let old = effective(w.fringes);
+        let fits = i64::from(w.width) - i64::from((w.left_margin + w.right_margin) * column)
+            - i64::from(effective(new)[0] + effective(new)[1]) >= i64::from(2 * column);
+        let mut changed = false;
+        if fits {
+            w.fringes = new;
+            changed = effective(new) != old;
+            if let Some(persistent) = persistent { w.fringes_persistent = persistent; }
+        }
+        if outside != w.fringes_outside_margins {
+            w.fringes_outside_margins = outside;
+            changed = true;
+        }
+        if changed { w.end_valid = false; }
+        Ok(changed)
+    }
+    /// The pixels of V left and right of its text area: its margins and
+    /// fringes, GNU's window box less TEXT_AREA.
+    pub(crate) fn window_text_insets(&self, v: Value) -> Result<[u32; 2]> {
+        let fringes = self.window_fringe_widths(v)?;
+        let w = self.window(v)?;
+        let column = self.window_state.column;
+        Ok([w.left_margin * column + fringes[0], w.right_margin * column + fringes[1]])
+    }
     /// The live windows IDS name, frozen and placed in their frame. Lisp
     /// run by one window's redisplay may delete a later one, or its own.
     pub(super) fn snapshot_leaves(&mut self, ids: Vec<u64>) -> Result<Vec<(u32, u32, romacs_layout_input::WindowSnapshot)>> {
@@ -882,14 +948,9 @@ impl Vm {
             let w = self.window(v)?;
             // A hosting child frame's root window may have no lines.
             if w.height == 0 { continue; }
-            let (x, y, width, height) = (
-                w.x + w.left_margin * self.window_state.column,
-                w.y,
-                w.width.saturating_sub(
-                    (w.left_margin + w.right_margin) * self.window_state.column,
-                ),
-                w.height,
-            );
+            let [left, right] = self.window_text_insets(v)?;
+            let w = self.window(v)?;
+            let (x, y, width, height) = (w.x + left, w.y, w.width.saturating_sub(left + right), w.height);
             match self.snapshot_window(v, width, height) {
                 Ok(snapshot) => snapshots.push((x, y, snapshot)),
                 Err(_) if live(self, id).is_none() => {}
@@ -936,12 +997,13 @@ impl Vm {
         let root = self.window_root_peek(ROOT);
         let now = self.mini_growth()?;
         let reserved = if self.minibuffer_host().is_some() { 0 } else { line };
-        if self.plan_window_geometry(root, 0, 0, state.width, state.height - reserved, (now, 0), line, column, &mut geometry).is_err() {
+        let tab_bar = (self.tab_bar_lines() * line).min(state.height.saturating_sub(reserved + line));
+        if self.plan_window_geometry(root, 0, tab_bar, state.width, state.height - reserved - tab_bar, (now, 0), line, column, &mut geometry).is_err() {
             return Ok(None);
         }
         let Some(&(_, _, _, width, height)) = geometry.iter().find(|g| g.0 == window) else { return Ok(None) };
-        let w = self.window(window)?;
-        let width = width.saturating_sub((w.left_margin + w.right_margin) * column);
+        let [left, right] = self.window_text_insets(window)?;
+        let width = width.saturating_sub(left + right);
         let columns = (width / column).clamp(2, u32::from(u16::MAX)) as u16;
         let rows = (height / line).saturating_sub(1).clamp(1, u32::from(u16::MAX)) as u16;
         Ok(Some((columns, rows)))
@@ -971,6 +1033,27 @@ impl Vm {
         }
         Ok(())
     }
+    /// After a change to a frame's fringes or tab bar: every window's
+    /// layout is stale, and the host frame's windows are placed again at
+    /// once, as adjust_frame_size places them.
+    pub(crate) fn frame_changed(&mut self) -> Result<()> {
+        for v in self.leaf_windows()? {
+            self.window_mut(v)?.end_valid = false;
+        }
+        self.display_state.version += 1;
+        let state = &self.window_state;
+        let (width, height, line, column) = (state.width, state.height, state.line, state.column);
+        if line > 0 && column > 0 && height > 0 {
+            self.set_frame_geometry(width, height, line, column)?;
+        }
+        Ok(())
+    }
+    /// The host frame's tab bar lines, none on a frame without a window
+    /// system; each is the frame's line tall (pgtk_change_tab_bar_height).
+    pub(crate) fn tab_bar_lines(&self) -> u32 {
+        if !self.window_system_open() { return 0; }
+        self.frame(self.host_frame_peek()).map_or(0, |f| f.tab_bar_lines)
+    }
     /// Install canonical font metrics before startup Lisp observes window sizes.
     pub fn set_frame_geometry(
         &mut self,
@@ -996,11 +1079,14 @@ impl Vm {
         let mut geometry = vec![];
         let now = self.mini_growth()?;
         let wanted = if hosted { 0 } else { i64::from(line_height) - i64::from(mini_height) };
-        let planned = self.plan_window_geometry(root, 0, 0, width, height - mini_height, (now, wanted), line_height, column_width, &mut geometry);
+        // The tab bar takes the top of the frame (FRAME_TOP_MARGIN), as
+        // far as a line is left for the root window.
+        let tab_bar = (self.tab_bar_lines() * line_height).min(height.saturating_sub(mini_height + line_height));
+        let planned = self.plan_window_geometry(root, 0, tab_bar, width, height - mini_height - tab_bar, (now, wanted), line_height, column_width, &mut geometry);
         let mini_height = if planned.is_err() && mini_height > line_height {
             self.window_state.mini_lines = 1;
             geometry.clear();
-            self.plan_window_geometry(root, 0, 0, width, height - line_height, (now, 0), line_height, column_width, &mut geometry)?;
+            self.plan_window_geometry(root, 0, tab_bar, width, height - line_height - tab_bar, (now, 0), line_height, column_width, &mut geometry)?;
             line_height
         } else {
             planned?;
@@ -1362,8 +1448,9 @@ impl Vm {
                 };
                 let (l, r) = (dim(b)?, dim(c)?);
                 let col = self.window_state.column;
+                let fringes = self.window_fringe_widths(v)?;
                 let w = self.window_mut(v)?;
-                if (u64::from(l) + u64::from(r) + 2) * u64::from(col) > u64::from(w.width)
+                if (u64::from(l) + u64::from(r) + 2) * u64::from(col) + u64::from(fringes[0] + fringes[1]) > u64::from(w.width)
                     || (l, r) == (w.left_margin, w.right_margin)
                 {
                     Value::NIL
@@ -1411,6 +1498,9 @@ pub(crate) struct TextArea {
     /// pixel width and height and its vertical scroll.
     pub hosted: bool,
     pub body_width: i64,
+    /// The right fringe's pixels, where a window-system frame shows the
+    /// continuation and truncation indicators instead of glyphs.
+    pub right_fringe: i64,
     pub body_height: i64,
     pub vscroll: i64,
 }
@@ -1652,11 +1742,11 @@ impl<'a> Windows<'a> {
     }
     /// window_body_width / window_body_height (window.c): WINDOW's text
     /// area in canonical characters (PIXELWISE nil, or `remap' with no face
-    /// remapping) or pixels. The width loses the margins and, on a frame
-    /// that is not a window system's, the column of the vertical bar a
-    /// window left of another has; the height loses the mode line. VM2 has
-    /// no fringes, scroll bars, dividers or tab lines; the height also loses
-    /// the header line.
+    /// remapping) or pixels. The width loses the margins, the fringes on a
+    /// window system's frame and, on another frame, the column of the
+    /// vertical bar a window left of another has; the height loses the mode
+    /// line. VM2 has no scroll bars, dividers or tab lines; the height also
+    /// loses the header line.
     /// window_pixel_left / window_pixel_top: the window's frame-relative
     /// pixel edge.
     /// The refusal for a question about what a host has laid out, when no
@@ -1741,9 +1831,10 @@ impl<'a> Windows<'a> {
         let (column, line) = (i64::from(self.vm.window_state.column), i64::from(self.vm.window_state.line));
         let root = self.vm.root_of(w).map_err(internal)?;
         let (root_x, root_width) = self.vm.window(root).map_or((0, 0), |r| (i64::from(r.x), i64::from(r.width)));
+        let fringes = self.vm.window_fringe_widths(w).map_err(internal)?;
         let x = self.get(w)?;
         let (left, width) = (i64::from(x.x), i64::from(x.width));
-        let body_width = (width - i64::from(x.left_margin + x.right_margin) * column).max(0);
+        let body_width = (width - i64::from(x.left_margin + x.right_margin) * column - i64::from(fringes[0] + fringes[1])).max(0);
         let body_height = (i64::from(x.height) - mode_line - header_line).max(0);
         Ok(TextArea {
             window: w,
@@ -1761,6 +1852,7 @@ impl<'a> Windows<'a> {
             hosted,
             body_width,
             body_height,
+            right_fringe: i64::from(fringes[1]),
             vscroll: i64::from(x.vscroll_px),
         })
     }
@@ -1805,10 +1897,13 @@ impl<'a> Windows<'a> {
             };
             let root = self.vm.root_of(w).map_err(internal)?;
             let rightmost = self.vm.window(root).map_or(true, |r| right >= i64::from(r.x) + i64::from(r.width));
-            // Romacs's frame draws a one-column divider right of a window
-            // that is not rightmost, on every display.
-            let bar = if !rightmost { column } else { 0 };
-            let px = pixels - bar - margins;
+            // A frame without a window system draws a one-column bar right
+            // of a window that is not rightmost; a window system's draws
+            // the border in the fringe (window_body_width, window.c:1095).
+            let window_system = self.vm.window_system_open();
+            let bar = if !rightmost && !window_system { column } else { 0 };
+            let fringes = self.vm.window_fringe_widths(w).map_err(internal)?;
+            let px = pixels - bar - margins - i64::from(fringes[0] + fringes[1]);
             if chars { px / column } else { px }
         } else {
             let mode_line = self.window_mode_line_height(window)?.integer_value().unwrap_or(0);
@@ -1818,12 +1913,22 @@ impl<'a> Windows<'a> {
         };
         Self::int(size.max(0))
     }
-    /// window.c:8639: (LEFT RIGHT OUTSIDE-MARGINS PERSISTENT). VM2 draws no
-    /// fringes.
+    /// window.c:8639: (LEFT RIGHT OUTSIDE-MARGINS PERSISTENT), the widths
+    /// the window draws.
     pub(crate) fn window_fringes(&mut self, window: Value) -> Out {
-        self.live(window)?;
-        let zero = Value::integer(0).unwrap();
-        Ok(self.vm.list_value(&[zero, zero, Value::NIL, Value::NIL]))
+        let w = self.live(window)?;
+        let [left, right] = self.vm.window_fringe_widths(w).map_err(internal)?;
+        let x = self.get(w)?;
+        let flag = |b: bool| if b { Value::TRUE } else { Value::NIL };
+        let (outside, persistent) = (flag(x.fringes_outside_margins), flag(x.fringes_persistent));
+        Ok(self.vm.list_value(&[Value::integer(i64::from(left)).unwrap(), Value::integer(i64::from(right)).unwrap(), outside, persistent]))
+    }
+    /// set_window_fringes (window.c:8544) on a live WINDOW: nothing on a
+    /// frame without a window system; new widths only when the text area
+    /// keeps two columns; t when anything changed.
+    pub(crate) fn set_window_fringes(&mut self, window: Value, left: Value, right: Value, outside: Value, persistent: Value) -> Out {
+        let w = self.live(window)?;
+        Ok(if self.vm.set_window_fringes(w, [left, right], outside != Value::NIL, Some(persistent != Value::NIL)).map_err(internal)? { Value::TRUE } else { Value::NIL })
     }
     /// frame.c:4358/4376: VM2 reports backend LINE_HEIGHT / COLUMN_WIDTH,
     /// even though frame-live-p returns t (DIVERGENCES.md VM2-WIN5).
@@ -1888,9 +1993,17 @@ impl<'a> Windows<'a> {
         let border = self.vm.frame(frame).map_err(internal)?.border;
         Ok((width - 2 * border, height - 2 * border))
     }
+    /// FRAME_TEXT_WIDTH and FRAME_TEXT_HEIGHT: FRAME's text pixels less
+    /// its fringes on a window-system frame and the host frame's tab bar.
+    pub(crate) fn frame_text_area(&mut self, frame: Value) -> std::result::Result<(u32, u32), Fault> {
+        let (width, height) = self.frame_text_pixels(frame)?;
+        let height = if self.is_child_frame(frame)? { height } else { height.saturating_sub(self.vm.tab_bar_lines() * self.vm.window_state.line) };
+        let ([left, right], _) = self.frame_chrome(frame)?;
+        Ok((if self.vm.window_system_open() { width.saturating_sub(left + right) } else { width }, height))
+    }
     /// FRAME_COLS and FRAME_LINES of FRAME's text area.
     pub(crate) fn frame_text_size(&mut self, frame: Value) -> std::result::Result<(i64, i64), Fault> {
-        let (width, height) = self.frame_text_pixels(frame)?;
+        let (width, height) = self.frame_text_area(frame)?;
         let state = &self.vm.window_state;
         Ok((i64::from(width / state.column.max(1)), i64::from(height / state.line.max(1))))
     }
@@ -1905,6 +2018,41 @@ impl<'a> Windows<'a> {
             None => parameters.insert(0, (key, value)),
         }
         Ok(())
+    }
+    /// gui_set_left_fringe / gui_set_right_fringe (frame.c:5800): FRAME's
+    /// fringe on SIDE (0 left) becomes WIDTH pixels, and its windows
+    /// without widths of their own are laid out again.
+    /// A child frame keeps its text area and widens.
+    pub(crate) fn set_frame_fringe(&mut self, frame: Value, side: usize, width: u32) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        if self.vm.frame(frame).map_err(internal)?.fringes[side] == width { return Ok(()); }
+        let child = self.is_child_frame(frame)?.then(|| self.vm.child_geometry(frame)).transpose().map_err(internal)?;
+        self.vm.frame_mut(frame).map_err(internal)?.fringes[side] = width;
+        match child {
+            Some(geometry) => self.vm.set_child_geometry(frame, geometry).map_err(internal),
+            None => self.vm.frame_changed().map_err(internal),
+        }
+    }
+    /// pgtk_set_tab_bar_lines (pgtkfns.c:444): the host frame's tab bar
+    /// becomes LINES lines tall and its windows are laid out below it. A
+    /// child frame keeps the parameter only.
+    pub(crate) fn set_frame_tab_bar_lines(&mut self, frame: Value, lines: u32) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        if self.is_child_frame(frame)? { return Ok(()); }
+        let f = self.vm.frame_mut(frame).map_err(internal)?;
+        if f.tab_bar_lines == lines { return Ok(()); }
+        f.tab_bar_lines = lines;
+        self.vm.frame_changed().map_err(internal)
+    }
+    /// The host frame's tab bar lines as the display shows them.
+    pub(crate) fn tab_bar_lines(&mut self) -> u32 {
+        self.vm.tab_bar_lines()
+    }
+    /// FRAME's fringe widths and tab bar lines.
+    pub(crate) fn frame_chrome(&mut self, frame: Value) -> std::result::Result<([u32; 2], u32), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        let f = self.vm.frame(frame).map_err(internal)?;
+        Ok((f.fringes, f.tab_bar_lines))
     }
     /// FRAME's background opacity becomes ALPHA.
     pub(crate) fn set_frame_background_alpha(&mut self, frame: Value, alpha: f32) -> std::result::Result<(), Fault> {
