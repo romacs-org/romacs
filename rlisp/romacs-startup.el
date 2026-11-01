@@ -77,6 +77,13 @@
         (with-current-buffer (car (cdr pending))
           (use-local-map (car (cdr (cdr pending))))))))
   (romacs-gui-echo "Cancelled"))
+(defun romacs-gui--cancel-pending-unless (answer)
+  "Cancel a pending confirmation before a command runs.
+A confirmation belongs only to the next answer in the buffer that asked:
+keep it when ANSWER is non-nil and that buffer is current."
+  (when (and romacs-gui-pending
+             (not (and answer (eq (current-buffer) (car (cdr romacs-gui-pending))))))
+    (romacs-gui-answer-no)))
 (defun romacs-gui-answer-yes ()
   (interactive)
   (let ((pending romacs-gui-pending))

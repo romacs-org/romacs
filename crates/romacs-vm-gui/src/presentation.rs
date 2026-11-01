@@ -80,12 +80,12 @@ impl Presentation {
         // Unlike GNU's reprompt, other input cancels before ordinary dispatch;
         // clearing the echo area must never leave invisible discard consent.
         let answer = matches!(first, Some(romacs_vm::CommandEvent::Character(121 | 110 | 7))) && !in_prefix;
-        vm.eval_source(&format!(
-            "(when (and (boundp 'romacs-gui-pending) romacs-gui-pending
-                        (not (and {} (eq (current-buffer) (car (cdr romacs-gui-pending))))))
-               (romacs-gui-answer-no))",
-            if answer { "t" } else { "nil" },
-        ))?;
+        // Two fixed forms, so the VM's source cache compiles each once.
+        vm.eval_source(if answer {
+            "(and (fboundp 'romacs-gui--cancel-pending-unless) (romacs-gui--cancel-pending-unless t))"
+        } else {
+            "(and (fboundp 'romacs-gui--cancel-pending-unless) (romacs-gui--cancel-pending-unless nil))"
+        })?;
         // GNU's command loop clears the previous message when a new command
         // starts, not on each key of a prefix sequence.
         if !in_prefix { crate::echo::clear(vm)?; }
