@@ -120,7 +120,7 @@
 
 ;;; Generated autoloads from romacs-loadup-bootstrap.el
 
-(register-definition-prefixes "romacs-loadup-bootstrap" '("minibuffer--sort-by-" "romacs-"))
+(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "minibuffer--sort-by-" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-mail.el
