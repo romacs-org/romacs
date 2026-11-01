@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "0493d4371cc6983b921eef36575386cb151d79c40a6d374fa9720445aec526d5",
+  "source_fingerprint": "135678337007aae0d67d0c04249e86cfd34ed24148d61550bfeaf2c1ea918bb6",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1154,
-  "parsed_vm2_only": 1154
+  "parsed_total": 1156,
+  "parsed_vm2_only": 1156
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1366,12 +1366,12 @@
   "documentation": {
    "name": "documentation",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/doc.rs:105"
+   "registered_at": "crates/romacs-vm/src/prims/doc.rs:144"
   },
   "documentation-property": {
    "name": "documentation-property",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/doc.rs:78"
+   "registered_at": "crates/romacs-vm/src/prims/doc.rs:117"
   },
   "documentation-stringp": {
    "name": "documentation-stringp",
@@ -2477,7 +2477,7 @@
   "internal-subr-documentation": {
    "name": "internal-subr-documentation",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/doc.rs:54"
+   "registered_at": "crates/romacs-vm/src/prims/doc.rs:93"
   },
   "interpreted-function-p": {
    "name": "interpreted-function-p",
@@ -3965,6 +3965,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process.rs:486"
   },
+  "romacs--doc-variable-records": {
+   "name": "romacs--doc-variable-records",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/doc.rs:73"
+  },
   "romacs--frozen-regions": {
    "name": "romacs--frozen-regions",
    "implementation": "vm2",
@@ -4320,6 +4325,11 @@
    "name": "romacs--replace-runs",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/insdel.rs:423"
+  },
+  "romacs--resize-mini-window": {
+   "name": "romacs--resize-mini-window",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/minibuffer_depth.rs:23"
   },
   "romacs--restore-excursion": {
    "name": "romacs--restore-excursion",
@@ -5723,12 +5733,12 @@
   "window-configuration-frame": {
    "name": "window-configuration-frame",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:40"
+   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:56"
   },
   "window-configuration-p": {
    "name": "window-configuration-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:35"
+   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:51"
   },
   "window-dedicated-p": {
    "name": "window-dedicated-p",
