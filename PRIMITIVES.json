@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "de46a96bc03cfc68e773d9223bcff3d3809f91ff8f7ddf4e392837615a3898da",
+  "source_fingerprint": "9d013ab6e278ea7856710981aeb8b6ae67b0546244666f5c50c9910cdb19bda8",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -4003,11 +4003,6 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/reverse.rs:4"
   },
-  "romacs--armillary-frame": {
-   "name": "romacs--armillary-frame",
-   "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/armillary.rs:13"
-  },
   "romacs--auto-save-1": {
    "name": "romacs--auto-save-1",
    "implementation": "vm2",
@@ -4252,6 +4247,11 @@
    "name": "romacs--local-toplevel-cell",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/vars.rs:222"
+  },
+  "romacs--logo-frame": {
+   "name": "romacs--logo-frame",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/logo.rs:12"
   },
   "romacs--minibuffer-host": {
    "name": "romacs--minibuffer-host",

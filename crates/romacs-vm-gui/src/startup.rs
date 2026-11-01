@@ -635,12 +635,12 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         }
     }
     // The scheduler for animations drawn in buffer text, and the startup
-    // screen's armillary sphere, its first client, where the chain gave
+    // screen's logo, its first client, where the chain gave
     // them the GNU Lisp they use (simple.el, nadvice.el, timer.el).
     if launch == Launch::Loadup
         && vm.eval_source("(and (fboundp 'buffer-disable-undo) (fboundp 'add-function) (fboundp 'run-at-time) (fboundp 'make-composed-keymap))")? != romacs_vm::Fixed::NIL {
         vm.eval_source(include_str!("../../../rlisp/romacs-animate.el"))?;
-        vm.eval_source(include_str!("../../../rlisp/romacs-armillary.el"))?;
+        vm.eval_source(include_str!("../../../rlisp/romacs-landing.el"))?;
     }
     mark_phase("session-definitions");
     Ok(())
@@ -745,8 +745,8 @@ pub fn finish_loadup(vm: &mut Vm, started: &Started) -> Result<(), String> {
 /// in `command-line-default-directory' and takes GNU's
 /// `splash-screen-keymap': typing does nothing, SPC and DEL scroll, and q
 /// (`exit-splash-screen') kills it.  The full screen opens with the
-/// armillary sphere (rlisp/romacs-armillary.el), whose keys (arrows, + -,
-/// SPC, Home) come first.
+/// animated logo (rlisp/romacs-landing.el), whose keys (SPC, Home) come
+/// first.
 fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), String> {
     let name = lisp_string(STARTUP_SCREEN);
     if vm.eval_source(&format!("(get-buffer {name})"))? != romacs_vm::Fixed::NIL {
@@ -765,9 +765,9 @@ fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), S
              (current-buffer))
            {concise})",
         screen = screen_text(started, "\n"),
-        // The full screen opens with the turning sphere; the concise one,
+        // The full screen opens with the animated logo; the concise one,
         // fitted beside the visited files, stays text.
-        landing = if concise { "" } else { "(when (fboundp 'romacs-armillary-landing) (romacs-armillary-landing))" },
+        landing = if concise { "" } else { "(when (fboundp 'romacs-landing) (romacs-landing))" },
         concise = if concise { "t" } else { "nil" },
     ))?;
     Ok(())
@@ -2301,9 +2301,9 @@ mod tests {
                 let record = printed(&mut vm, &format!("(let ((print-escape-newlines t)) (prin1-to-string {record}))"));
                 let record: String = serde_json::from_str(&record).unwrap();
                 // *Romacs* is GNU's screen under another name, whose SPC
-                // pauses the sphere where GNU's scrolls (GUI-STARTUP1).
+                // pauses the logo where GNU's scrolls (GUI-STARTUP1).
                 let expected = expected.replace("\"*GNU Emacs*\"", &lisp_string(STARTUP_SCREEN))
-                    .replace("(undefined scroll-up-command ", "(undefined romacs-armillary-pause ");
+                    .replace("(undefined scroll-up-command ", "(undefined romacs-landing-pause ");
                 if record != expected { failures.push(format!("{name}:\n  romacs {record}\n  gnu    {expected}")); }
                 let _ = std::fs::remove_dir_all(&home);
             }
@@ -2332,7 +2332,7 @@ mod tests {
             let snapshot = vm.frame_snapshot(1200, 800).unwrap();
             let mode_line = snapshot.windows[0].snapshot.mode_line.is_some();
             // The session's bindings, read where no screen keymap shadows
-            // them (*Romacs*'s arrows turn its sphere).
+            // them (*Romacs* binds keys of its own).
             let keys: Vec<(bool, String)> = started.bindings.iter().map(|b| {
                 let v = vm.eval_source(&format!("(with-current-buffer \"*scratch*\" (key-binding {}))", b.key)).unwrap();
                 (b.gnu_defined, v.display().unwrap())

@@ -748,11 +748,11 @@ mod leaf {
             };
             Ok(self.vm.allocate_object(object))
         }
-        /// A unibyte string of ASCII TEXT whose `face` is each run's value
-        /// over its byte range, as `propertize' would give each piece.
-        pub fn faced_ascii(&mut self, text: Vec<u8>, runs: &[(std::ops::Range<usize>, Value)]) -> Value {
-            debug_assert!(text.is_ascii());
-            let mut string = data::LispString::from_bytes(text, false);
+        /// A string of TEXT whose `face` is each run's value over its byte
+        /// range (UTF-8 offsets), as `propertize' would give each piece.
+        pub fn faced_text(&mut self, text: String, runs: &[(std::ops::Range<usize>, Value)]) -> Value {
+            let multibyte = !text.is_ascii();
+            let mut string = data::LispString::from_bytes(text.into_bytes(), multibyte);
             for (range, face) in runs {
                 string.properties.put(coordinates::ByteOffset(range.start)..coordinates::ByteOffset(range.end), "face", *face);
             }

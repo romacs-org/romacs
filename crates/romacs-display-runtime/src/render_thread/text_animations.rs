@@ -23,7 +23,7 @@ struct Running {
     /// When the last moving frame was due; None after a stop.
     last: Option<Instant>,
     /// The cells for `moved`, computed once per frame reached.
-    cells: Option<(f64, Vec<u8>)>,
+    cells: Option<(f64, Vec<romacs_logo::Cell>)>,
 }
 
 #[derive(Default)]

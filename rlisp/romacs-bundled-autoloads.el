@@ -28,11 +28,6 @@
 (register-definition-prefixes "romacs-animate" '("romacs-animate-"))
 
 
-;;; Generated autoloads from romacs-armillary.el
-
-(register-definition-prefixes "romacs-armillary" '("romacs-armillary-"))
-
-
 ;;; Generated autoloads from romacs-buffer-switch.el
 
 (register-definition-prefixes "romacs-buffer-switch" '("romacs-" "switch-to-buffer"))
@@ -188,6 +183,11 @@ This function is part of the `fzf' completion style.
 ;;; Generated autoloads from romacs-keymap.el
 
 (register-definition-prefixes "romacs-keymap" '("current-active-maps" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
+
+
+;;; Generated autoloads from romacs-landing.el
+
+(register-definition-prefixes "romacs-landing" '("romacs-landing"))
 
 
 ;;; Generated autoloads from romacs-layer.el
