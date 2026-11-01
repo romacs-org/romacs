@@ -543,11 +543,146 @@ fn internal_set_lisp_face_attribute(cx, face: Value, attr: Value, value: Value; 
 }}
 
 defsubr! { name = "display-supports-face-attributes-p", gnu = "xfaces.c:5764", effect = Reads,
-fn display_supports_face_attributes_p(_cx, _attributes: Value; optional _display: Value) {
-    // GNU gives up in batch before examining either argument; VM2 frames
-    // are initial-terminal frames (VM2-WIN5), which support no attributes.
-    Ok(Value::NIL)
+fn display_supports_face_attributes_p(cx, attributes: Value; optional display: Value) {
+    // GNU gives up in batch before examining either argument; without a
+    // graphic display record a frame is an initial-terminal frame
+    // (VM2-WIN5), which supports no attribute.
+    let batch = cx.intern("noninteractive");
+    if cx.variable_value(batch)?.is_some_and(|v| v != Value::NIL) || !graphic_record(cx)? {
+        return Ok(Value::NIL);
+    }
+    // Romacs has one display: a DISPLAY that is not a frame names it.
+    let frame = cx.face_frame(if cx.kind(display) == Kind::Frame { display } else { Value::NIL }, true)?;
+    let unspecified = cx.intern("unspecified");
+    let mut attrs = vec![unspecified; LFACE_VECTOR_SIZE];
+    merge_face_ref(cx, attributes, frame, &mut attrs, 0)?;
+    let default = cx.intern("default");
+    let default = cx.face_lookup(default, frame)?;
+    Ok(if gui_supports(cx, &attrs, default)? { Value::TRUE } else { Value::NIL })
 }}
+
+/// The lface slot of the attribute named NAME.
+fn lface_slot(name: &str) -> usize {
+    LFACE_ATTRIBUTES.iter().position(|n| *n == name).expect("an lface attribute") + 1
+}
+
+/// The lface slot of the attribute KEYWORD.
+fn lface_index(cx: &Leaf<'_>, keyword: Value) -> Option<usize> {
+    LFACE_ATTRIBUTES.iter().position(|name| cx.symbol_name(keyword).is_ok_and(|n| n == *name)).map(|i| i + 1)
+}
+
+/// xfaces.c merge_face_ref into ATTRS: a face name, a property list,
+/// (foreground-color . COLOR), (background-color . COLOR), or a list of
+/// these whose first takes precedence. Invalid references merge nothing.
+fn merge_face_ref(cx: &mut Leaf<'_>, face: Value, frame: Value, attrs: &mut [Value], depth: usize)
+    -> std::result::Result<(), Fault> {
+    if face == Value::NIL || depth > 64 { return Ok(()); }
+    let Some((first, rest)) = cx.pair(face) else { return merge_named_face(cx, face, frame, attrs, depth) };
+    let (fg, bg) = (cx.intern("foreground-color"), cx.intern("background-color"));
+    if first == fg || first == bg {
+        if matches!(cx.kind(rest), Kind::String | Kind::Bytes) {
+            attrs[lface_slot(if first == fg { ":foreground" } else { ":background" })] = rest;
+        }
+        return Ok(());
+    }
+    if cx.kind(first) == Kind::Symbol && cx.symbol_name(first).is_ok_and(|n| n.starts_with(':')) {
+        let inherit = cx.intern(":inherit");
+        let mut tail = face;
+        while let Some((keyword, rest)) = cx.pair(tail) {
+            let Some((value, next)) = cx.pair(rest) else { break };
+            if keyword == inherit { merge_face_ref(cx, value, frame, attrs, depth + 1)?; }
+            else if let Some(index) = lface_index(cx, keyword) { attrs[index] = value; }
+            tail = next;
+        }
+        return Ok(());
+    }
+    merge_face_ref(cx, rest, frame, attrs, depth + 1)?;
+    merge_face_ref(cx, first, frame, attrs, depth + 1)
+}
+
+/// merge_named_face: FACE's attributes on FRAME over those it inherits.
+fn merge_named_face(cx: &mut Leaf<'_>, face: Value, frame: Value, attrs: &mut [Value], depth: usize)
+    -> std::result::Result<(), Fault> {
+    if cx.kind(face) != Kind::Symbol { return Ok(()); }
+    let Ok(face) = resolve(cx, face, false) else { return Ok(()) };
+    let lface = cx.face_lookup(face, frame)?;
+    if lface == Value::NIL { return Ok(()); }
+    let unspecified = cx.intern("unspecified");
+    let inherit = lface_slot(":inherit");
+    let parent = cx.vector_get(lface, Value::integer(inherit as i64).unwrap())?;
+    if parent != unspecified { merge_face_ref(cx, parent, frame, attrs, depth + 1)?; }
+    for index in 1..LFACE_VECTOR_SIZE {
+        let value = cx.vector_get(lface, Value::integer(index as i64).unwrap())?;
+        if value != unspecified && index != inherit { attrs[index] = value; }
+    }
+    Ok(())
+}
+
+/// gui_supports_face_attributes_p: each specified attribute differs from
+/// the default face's (`reset' meaning the default's own), and one that
+/// selects a font selects another font than the default face's.
+fn gui_supports(cx: &mut Leaf<'_>, attrs: &[Value], default: Value) -> std::result::Result<bool, Fault> {
+    let (unspecified, reset) = (cx.intern("unspecified"), cx.intern("reset"));
+    // realize_default_face makes these nil where the default leaves them
+    // unspecified.
+    let nil_by_default = [":extend", ":underline", ":overline", ":strike-through", ":box", ":inverse-video", ":stipple"]
+        .map(lface_slot);
+    let default_of = |cx: &mut Leaf<'_>, index: usize| {
+        let value = if default == Value::NIL { unspecified } else { cx.vector_get(default, Value::integer(index as i64).unwrap())? };
+        Ok::<_, Fault>(if value == unspecified && nil_by_default.contains(&index) { Value::NIL } else { value })
+    };
+    for keyword in [":underline", ":inverse-video", ":extend", ":foreground", ":distant-foreground",
+                    ":background", ":stipple", ":overline", ":strike-through", ":box"] {
+        let index = lface_slot(keyword);
+        let theirs = default_of(cx, index)?;
+        let value = if attrs[index] == reset { theirs } else { attrs[index] };
+        if value != unspecified && cx.equal(value, theirs).map_err(|_| Fault::Circular(value))? { return Ok(false); }
+    }
+    let font_keys = [":family", ":foundry", ":height", ":weight", ":slant", ":width"];
+    if font_keys.iter().all(|k| attrs[lface_slot(k)] == unspecified) {
+        // Of the underline styles, a window system draws `line' and `wave'.
+        let underline = attrs[lface_slot(":underline")];
+        let style = cx.pair(underline).filter(|&(key, _)| key == cx.intern(":style"))
+            .map(|(_, rest)| cx.pair(rest).map_or(Value::NIL, |(style, _)| style));
+        return Ok(style.is_none_or(|s| s == cx.intern("line") || s == cx.intern("wave")));
+    }
+    let mut merged = Vec::with_capacity(LFACE_VECTOR_SIZE);
+    for (index, &value) in attrs.iter().enumerate() {
+        merged.push(if value == unspecified || value == reset || index == 0 { default_of(cx, index)? } else { value });
+    }
+    let defaults = (0..LFACE_VECTOR_SIZE).map(|i| default_of(cx, i)).collect::<std::result::Result<Vec<_>, _>>()?;
+    let Ok((family, _)) = cx.face_font_request("default") else { return Ok(false) };
+    let wanted = match cx.string_view(merged[lface_slot(":family")]) {
+        Ok(name) => String::from_utf8_lossy(name.bytes()).into_owned(),
+        Err(_) => family.clone(),
+    };
+    // An unknown family falls back to any family, as font_find_for_lface's
+    // last alternative does. No font, or the default face's own: unsupported.
+    let font = closest_font(cx, Some(&wanted), &merged).or_else(|| closest_font(cx, None, &merged));
+    let Some(font) = font else { return Ok(false) };
+    if closest_font(cx, Some(&family), &defaults).as_ref() != Some(&font) { return Ok(true); }
+    // The same face: a different size is still another font.
+    let slot = lface_slot(":height");
+    let height = merged[slot];
+    let unscaled = cx.kind(height) == Kind::Float && cx.float_value(height).is_ok_and(|f| f == 1.0);
+    Ok(attrs[slot] != unspecified && attrs[slot] != reset && !unscaled
+        && !cx.equal(height, defaults[slot]).map_err(|_| Fault::Circular(height))?)
+}
+
+/// font_find_for_lface over Romacs's installed fonts: FAMILY's face (any
+/// family's for nil) nearest LFACE's width, weight and slant, compared in
+/// that order, the default `face-font-selection-order'.
+fn closest_font(cx: &mut Leaf<'_>, family: Option<&str>, lface: &[Value]) -> Option<crate::display_host::FontEntity> {
+    use super::font::{style_value, SLANT, WEIGHT, WIDTH};
+    let mut style = |keyword: &str, slot: usize, normal: i64| {
+        let name = cx.symbol_name(lface[lface_slot(keyword)]).ok();
+        name.and_then(|n| style_value(cx, slot, &n, false)).map_or(normal, |v| v >> 8)
+    };
+    let (width, weight, slant) = (style(":width", WIDTH, 100), style(":weight", WEIGHT, 80), style(":slant", SLANT, 100));
+    let query = crate::display_host::FontQuery { family: family.map(str::to_owned), ..Default::default() };
+    let fonts = cx.font_host()?.list_fonts(&query);
+    fonts.into_iter().min_by_key(|f| ((f.width - width).abs(), (f.weight - weight).abs(), (f.slant - slant).abs()))
+}
 
 defsubr! { name = "frame--face-hash-table", gnu = "xfaces.c:4619", effect = Global,
 fn frame_face_hash_table(cx; optional frame: Value) {

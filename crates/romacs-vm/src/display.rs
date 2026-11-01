@@ -1,5 +1,5 @@
 //! G1a's single VM-owned frame/window. Only owned data leaves this module.
-use crate::{coordinates::ByteOffset, data::Object, *};
+use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, *};
 #[cfg(test)]
 #[path = "display_tests.rs"]
 mod tests;
@@ -87,7 +87,8 @@ fn line_numbers(table: &FaceTable, text: &str, begv: usize, labels: &crate::prim
 struct ElementFaces {
     buffer: Value,
     face: Value,
-    overlays: Vec<(std::ops::Range<usize>, Value)>,
+    /// The face overlays over the span, each with its sort item and range.
+    overlays: Vec<(SortItem, usize, usize, Value)>,
     /// The text whose property runs bound RUN.
     end: usize,
     run: (usize, usize, FaceHandle, Vec<Value>),
@@ -111,16 +112,17 @@ impl ElementFaces {
         }
         let mut overlays = vec![];
         for (overlay, range) in covering {
+            // A face-less overlay still ranks the others (the comparator is
+            // not transitive); merging skips its nil face.
             let value = vm.overlay_get(overlay, face)?;
-            if value != Value::NIL && range.start < range.end && vm.overlay_applies_to(overlay, window) {
-                overlays.push((vm.overlay_order_key(overlay), range.start.0..range.end.0, value));
+            if range.start < range.end && vm.overlay_applies_to(overlay, window) {
+                overlays.push((vm.overlay_sort_item(overlay)?, range.start.0, range.end.0, value));
             }
         }
-        overlays.sort_by_key(|o| o.0);
         let aliases = vm.list_values(vm.annotation_variable("char-property-alias-alist"))?;
         let plain = vm.annotation_variable("default-text-properties") == Value::NIL
             && !aliases.into_iter().any(|entry| vm.cons_pair(entry).is_ok_and(|(key, _)| key == face));
-        Ok(ElementFaces { buffer, face, overlays: overlays.into_iter().map(|(_, range, value)| (range, value)).collect(), end,
+        Ok(ElementFaces { buffer, face, overlays, end,
             run: (0, 0, FaceHandle(0), vec![]), plain, cursor: (0, 0), merged: Default::default(), layered: Default::default() })
     }
 }
@@ -1912,7 +1914,9 @@ impl Vm {
             },
         };
         if !(sources.run.0..sources.run.1).contains(&at) {
-            let mut layers: Vec<Value> = sources.overlays.iter().rev().filter(|(range, _)| range.contains(&at)).map(|&(_, face)| face).collect();
+            // face_at_buffer_position sorts the overlays covering AT.
+            let covering = sources.overlays.iter().copied().filter(|&(_, start, end, _)| (start..end).contains(&at)).collect();
+            let mut layers: Vec<Value> = crate::overlay_order::sort_overlays(covering, |o| o.0).into_iter().rev().map(|(.., face)| face).filter(|&face| face != Value::NIL).collect();
             // The text's own face last, nil past the text; the mini-window
             // shows text outside a narrowing too.
             let text_face = match self.object(sources.buffer)? {

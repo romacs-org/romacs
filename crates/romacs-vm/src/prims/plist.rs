@@ -61,3 +61,55 @@ fn tested(cx: &mut Leaf<'_>, matched: Value, saved: &[Value]) -> Next {
     state[7] = Value::integer(steps).expect("walk count is a fixnum");
     scan(cx, &state)
 }
+
+defsubr! { name = "plist-get", gnu = "fns.c:2609", effect = Global,
+fn plist_get(cx, plist: Value, prop: Value; optional predicate: Value) -> Step {
+    get_scan(cx, &[prop, predicate, plist, plist, Value::integer(0).unwrap()])
+}}
+
+// GNU Fplist_get: FOR_EACH_TAIL_SAFE over PROP VALUE pairs, so a dotted
+// or circular PLIST ends the walk with nil instead of signalling. A
+// predicate's cursor lives in traced continuation registers.
+fn get_scan(cx: &mut Leaf<'_>, state: &[Value]) -> Next {
+    let [prop, predicate, mut tail, mut tortoise, count] =
+        *<&[Value; 5]>::try_from(state).expect("plist-get saves five registers");
+    let mut steps = count.integer_value().expect("saved walk count");
+    while let Some((key, rest)) = cx.pair(tail) {
+        let Some((value, _)) = cx.pair(rest) else { break };
+        if predicate != Value::NIL {
+            return Ok(Step::Call {
+                f: predicate,
+                args: vec![key, prop],
+                then: get_tested,
+                saved: vec![prop, predicate, tail, tortoise, Value::integer(steps).expect("walk count is a fixnum")],
+            });
+        }
+        if key == prop { return Ok(Step::Done(value)); }
+        match get_step(cx, rest, tortoise, steps) {
+            Some(next) => (tail, tortoise, steps) = next,
+            None => break,
+        }
+    }
+    Ok(Step::Done(Value::NIL))
+}
+
+fn get_tested(cx: &mut Leaf<'_>, matched: Value, saved: &[Value]) -> Next {
+    let mut state = <[Value; 5]>::try_from(saved).expect("plist-get saves five registers");
+    // GNU reads XCDR (tail) again after the call; a predicate that broke
+    // that pair leaves a malformed list, refused rather than read.
+    let rest = cx.pair(state[2]).ok_or(Fault::Wrong("plistp", state[2]))?.1;
+    let (value, _) = cx.pair(rest).ok_or(Fault::Wrong("plistp", rest))?;
+    if matched != Value::NIL { return Ok(Step::Done(value)); }
+    let Some((tail, tortoise, steps)) = get_step(cx, rest, state[3], state[4].integer_value().expect("saved walk count")) else {
+        return Ok(Step::Done(Value::NIL));
+    };
+    state[2] = tail;
+    state[3] = tortoise;
+    state[4] = Value::integer(steps).expect("walk count is a fixnum");
+    get_scan(cx, &state)
+}
+
+/// FOR_EACH_TAIL_SAFE's step past REST, or None where it found a cycle.
+fn get_step(cx: &Leaf<'_>, rest: Value, tortoise: Value, steps: i64) -> Option<(Value, Value, i64)> {
+    for_each_tail_step(cx, rest, tortoise, steps).ok()
+}

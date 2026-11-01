@@ -83,44 +83,25 @@ impl Vm {
                     self.cons_pair(tail)?.0
                 })
             }
-            Memq | Assq | PlistGet => {
-                let (key, mut tail) = if p == PlistGet { (y, x) } else { (x, y) };
+            Memq | Assq => {
+                let (key, mut tail) = (x, y);
                 // Single mutator: neither the arena length nor the mapped-image
                 // size can change during this kernel. Keep the circularity bound.
                 let limit = self.list_limit();
                 let mut steps = 0;
                 while tail != Value::NIL {
-                    if p == PlistGet && tail.tag() != 3 {
-                        return Ok(Value::NIL);
-                    }
                     let (item, next) = self.cons_pair(tail)?;
                     if p == Memq {
                         if item == key {
                             return Ok(tail);
                         }
-                        tail = next;
-                    } else if p == Assq {
-                        if item.tag() == 3 && self.cons_pair(item)?.0 == key {
-                            return Ok(item);
-                        }
-                        tail = next;
-                    } else {
-                        if next.tag() != 3 {
-                            return Ok(Value::NIL);
-                        }
-                        let (value, rest) = self.cons_pair(next)?;
-                        if item == key {
-                            return Ok(value);
-                        }
-                        tail = rest;
+                    } else if item.tag() == 3 && self.cons_pair(item)?.0 == key {
+                        return Ok(item);
                     }
+                    tail = next;
                     steps += 1;
                     if steps > limit {
-                        return if p == PlistGet {
-                            Ok(Value::NIL)
-                        } else {
-                            Err("circular list".into())
-                        };
+                        return Err("circular list".into());
                     }
                 }
                 Ok(Value::NIL)
@@ -192,42 +173,23 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
                 pair(vm, tail)?.0
             })
         }
-        Memq | Assq | PlistGet => {
-            let (key, mut tail) = if p == PlistGet { (y, x) } else { (x, y) };
+        Memq | Assq => {
+            let (key, mut tail) = (x, y);
             let limit = vm.list_limit();
             let mut steps = 0;
             while tail != Value::NIL {
-                if p == PlistGet && tail.tag() != 3 {
-                    return Some(Value::NIL);
-                }
                 let (item, next) = pair(vm, tail)?;
                 if p == Memq {
                     if item == key {
                         return Some(tail);
                     }
-                    tail = next;
-                } else if p == Assq {
-                    if item.tag() == 3 && pair(vm, item)?.0 == key {
-                        return Some(item);
-                    }
-                    tail = next;
-                } else {
-                    if next.tag() != 3 {
-                        return Some(Value::NIL);
-                    }
-                    let (value, rest) = pair(vm, next)?;
-                    if item == key {
-                        return Some(value);
-                    }
-                    tail = rest;
+                } else if item.tag() == 3 && pair(vm, item)?.0 == key {
+                    return Some(item);
                 }
+                tail = next;
                 steps += 1;
                 if steps > limit {
-                    return if p == PlistGet {
-                        Some(Value::NIL)
-                    } else {
-                        None
-                    };
+                    return None;
                 }
             }
             Some(Value::NIL)
@@ -258,7 +220,38 @@ handler!(null, Null);
 handler!(eq, Eq);
 handler!(memq, Memq);
 handler!(assq, Assq);
-handler!(plist_get, PlistGet);
+// GNU plist_get, the eq walk of a two-argument `plist-get'.
+pub(super) unsafe fn plist_get(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let Some(value) = plist_get_eq(e.vm, *r.add(i.d), *r.add(i.d + 1)) else {
+            return sealed_call(e, r, pc);
+        };
+        *r.add(i.a) = value;
+        advance(e, r, pc)
+    }
+}
+#[inline(always)]
+fn plist_get_eq(vm: &Vm, mut tail: Value, key: Value) -> Option<Value> {
+    let limit = vm.list_limit();
+    let mut steps = 0;
+    while tail.tag() == 3 {
+        let (item, next) = pair(vm, tail)?;
+        if next.tag() != 3 {
+            return Some(Value::NIL);
+        }
+        let (value, rest) = pair(vm, next)?;
+        if item == key {
+            return Some(value);
+        }
+        tail = rest;
+        steps += 1;
+        if steps > limit {
+            return Some(Value::NIL);
+        }
+    }
+    Some(Value::NIL)
+}
 handler!(nth, Nth);
 handler!(setcar, Setcar);
 handler!(setcdr, Setcdr);

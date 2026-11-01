@@ -18,6 +18,22 @@ impl Leaf<'_> {
         let Some(table) = self.vm.local_table(slot).map_err(Fault::Error)? else { return Ok(false) };
         Ok(self.vm.declaration_hash_get(table, buffer).map_err(Fault::Error)?.is_some())
     }
+    /// data.c Flocal_variable_if_set_p: a buffer-forwarded or automatically
+    /// local variable is local once set; any other localized one asks
+    /// `local-variable-p' of BUFFER.
+    pub(crate) fn local_if_set(&mut self, symbol: Value, buffer: Value) -> std::result::Result<bool, Fault> {
+        let Some(slot) = self.local_symbol(symbol)? else { return Ok(false) };
+        if slot == self.vm.multibyte_slot { return Ok(true); }
+        if let Some(fwd) = self.vm.forwarding(slot) { return Ok(matches!(fwd, Fwd::Buffer(_))); }
+        // truncate-lines and the case symbols are automatic locals whose
+        // table appears at their first lookup (variable_binding_slot).
+        if self.vm.local_table(slot).map_err(Fault::Error)?.is_none() {
+            return Ok(slot == self.vm.truncate_lines_slot || slot == self.vm.case_symbols_slot);
+        }
+        if !self.vm.slots[slot].explicit_local { return Ok(true); }
+        let buffer = self.decode_buffer(buffer)?;
+        self.has_buffer_local(symbol, buffer)
+    }
     pub(crate) fn kill_local(&mut self, symbol: Value) -> Out {
         let Some(slot) = self.local_symbol(symbol)? else { return Ok(symbol) };
         let buffer = self.decode_buffer(Value::NIL)?;
