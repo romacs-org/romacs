@@ -748,6 +748,16 @@ mod leaf {
             };
             Ok(self.vm.allocate_object(object))
         }
+        /// A unibyte string of ASCII TEXT whose `face` is each run's value
+        /// over its byte range, as `propertize' would give each piece.
+        pub fn faced_ascii(&mut self, text: Vec<u8>, runs: &[(std::ops::Range<usize>, Value)]) -> Value {
+            debug_assert!(text.is_ascii());
+            let mut string = data::LispString::from_bytes(text, false);
+            for (range, face) in runs {
+                string.properties.put(coordinates::ByteOffset(range.start)..coordinates::ByteOffset(range.end), "face", *face);
+            }
+            self.vm.allocate_object(if string.is_utf8() { data::Object::String(Box::new(string)) } else { data::Object::RawString(Box::new(string)) })
+        }
         pub fn vector_values(&self, v: Value) -> std::result::Result<Vec<Value>, Fault> {
             match self.vm.object_if(v) {
                 Some(data::Object::Vector(a)) => Ok(a.clone()),
@@ -1673,6 +1683,7 @@ mod leaf {
     mod file_attributes;
     mod terminal;
     mod process_jobs;
+    mod animate;
     mod clipboard;
     mod keyboard;
     mod filesave;

@@ -48,6 +48,7 @@ mod scroll_input;
 mod startup;
 mod state;
 mod surface_readback;
+mod text_animations;
 #[cfg(test)]
 #[path = "tests/core_free_paint_test.rs"]
 mod tests;

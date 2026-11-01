@@ -763,6 +763,8 @@ pub enum RenderCommand {
     Ui(UiCommand),
     Config(ConfigCommand),
     Clipboard(ClipboardCommand),
+    /// Install, change or (None) remove the primary frame's text animation ID.
+    TextAnimation { id: u64, animation: Option<romacs_display_protocol::text_animation::TextAnimation> },
 }
 
 /// Channel capacities

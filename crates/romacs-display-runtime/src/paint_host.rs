@@ -23,9 +23,23 @@ pub struct PaintDiagnostic {
 pub(crate) struct PaintDiagnostics {
     latest: std::sync::Mutex<Option<PaintDiagnostic>>,
     changed: std::sync::Condvar,
+    /// The adapter the window draws with: 0 not chosen yet, 1 a GPU, 2 a
+    /// software rasterizer (wgpu's `DeviceType::Cpu`).
+    adapter: std::sync::atomic::AtomicU8,
 }
 
 impl PaintDiagnostics {
+    pub(crate) fn publish_adapter(&self, software: bool) {
+        self.adapter.store(if software { 2 } else { 1 }, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn software_adapter(&self) -> Option<bool> {
+        match self.adapter.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => None,
+            kind => Some(kind == 2),
+        }
+    }
+
     pub(crate) fn publish(&self, diagnostic: PaintDiagnostic) {
         *self.latest.lock().unwrap() = Some(diagnostic);
         self.changed.notify_all();
@@ -241,6 +255,20 @@ fn latency_receipt_does_not_pair_a_discarded_native_event() {
 }
 
 impl PaintSender {
+    /// Install, change or (None) remove the primary frame's text animation
+    /// ID, which the render thread draws by itself from its next frame on.
+    pub fn set_text_animation(&self, id: u64, animation: Option<romacs_display_protocol::text_animation::TextAnimation>) -> Result<(), String> {
+        let result = self.comms.cmd_tx.try_send(RenderCommand::TextAnimation { id, animation }).map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result
+    }
+
+    /// Whether the window draws on a software rasterizer: None until the
+    /// render thread has chosen its adapter.
+    pub fn software_adapter(&self) -> Option<bool> {
+        self.diagnostics.software_adapter()
+    }
+
     /// Read CLIPBOARD text through the existing display-owned worker. Only the
     /// evaluator waits, for at most one second; native I/O never runs here or
     /// on the render thread. Absence of text is distinct from transport errors.

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "8107242ef5fab38111f89bbb35cc3f2053301573dbe2e20d5469bec51a00f2f0",
+  "source_fingerprint": "d19c62fbe1f6384687e1469ab07770c658a39dce4390815d87ed26aca34bc343",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1221,
-  "parsed_vm2_only": 1221
+  "parsed_total": 1224,
+  "parsed_vm2_only": 1224
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3900,6 +3900,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/reverse.rs:4"
   },
+  "romacs--armillary-frame": {
+   "name": "romacs--armillary-frame",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/armillary.rs:13"
+  },
   "romacs--auto-save-1": {
    "name": "romacs--auto-save-1",
    "implementation": "vm2",
@@ -3969,6 +3974,11 @@
    "name": "romacs--decode-output",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process.rs:486"
+  },
+  "romacs--display-animates": {
+   "name": "romacs--display-animates",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/animate.rs:9"
   },
   "romacs--doc-variable-records": {
    "name": "romacs--doc-variable-records",
@@ -4465,6 +4475,11 @@
    "name": "romacs--term-send",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/terminal.rs:8"
+  },
+  "romacs--text-animation": {
+   "name": "romacs--text-animation",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/animate.rs:21"
   },
   "romacs--timer-next": {
    "name": "romacs--timer-next",

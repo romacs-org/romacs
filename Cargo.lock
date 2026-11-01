@@ -4140,6 +4140,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-armillary"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "romacs-chars"
 version = "0.1.0"
 dependencies = [
@@ -4180,6 +4187,7 @@ dependencies = [
  "num_enum",
  "nutype",
  "proptest",
+ "romacs-armillary",
  "romacs-infra",
  "rustc-hash 2.1.3",
  "serde",
@@ -4211,6 +4219,7 @@ dependencies = [
  "pollster",
  "raw-window-handle",
  "resvg",
+ "romacs-armillary",
  "romacs-display-protocol",
  "romacs-infra",
  "romacs-renderer-wgpu",
@@ -4622,6 +4631,7 @@ dependencies = [
  "md-5",
  "num-bigint",
  "rayon",
+ "romacs-armillary",
  "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",
@@ -4651,6 +4661,7 @@ version = "0.0.19"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
+ "romacs-armillary",
  "romacs-display-protocol",
  "romacs-display-runtime",
  "romacs-face",

@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "2b8d6d241328957181cbc11761727718c1c75063c372688d572e5d1c67a0fc4a",
+    "input_hash": "cc590da0a5d48b500172b9a28395dc57bc0c1212b287e8d0c4a7ef9d80acda40",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 5685
+    "vm2_universe": 5692
   },
   "schema": 2,
   "vm2": {
-    "count": 1229,
+    "count": 1232,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -764,6 +764,7 @@
       "require",
       "restore-buffer-modified-p",
       "reverse",
+      "romacs--armillary-frame",
       "romacs--auto-save-1",
       "romacs--auto-save-done",
       "romacs--auto-save-failure-time",
@@ -778,6 +779,7 @@
       "romacs--concat-list",
       "romacs--create-frame",
       "romacs--decode-output",
+      "romacs--display-animates",
       "romacs--doc-variable-records",
       "romacs--frozen-regions",
       "romacs--fzf-filter",
@@ -876,6 +878,7 @@
       "romacs--term-follow",
       "romacs--term-running-p",
       "romacs--term-send",
+      "romacs--text-animation",
       "romacs--timer-next",
       "romacs--timer-time",
       "romacs--treesit-detach",
