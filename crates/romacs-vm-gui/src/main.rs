@@ -964,6 +964,10 @@ fn evaluate(
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
         startup::mark_phase("session-lisp");
+        // This process's command log, from before the init (rlisp/romacs-usage-log.el).
+        if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
+            eprintln!("romacs: usage log: {error}");
+        }
         if quick && launch == startup::Launch::Loadup {
             vm.eval_source(startup::QUICK_START)?;
         }
