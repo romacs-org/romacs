@@ -52,7 +52,7 @@ crossbeam-channel.workspace = true
 libc.workspace = true
 
 romacs-display-protocol.workspace = true
-romacs-armillary.workspace = true
+romacs-logo.workspace = true
 romacs-video-model.workspace = true
 romacs-renderer-wgpu.workspace = true
 romacs-video = { workspace = true, optional = true }

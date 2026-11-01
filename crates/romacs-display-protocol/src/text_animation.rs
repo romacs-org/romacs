@@ -4,8 +4,9 @@
 //! parameters (rlisp/romacs-animate.el) and changes it only when they
 //! change; the render thread keeps the clock, the motion time and the
 //! frames.
+use crate::face::Face;
 use crate::frame_glyphs::{DisplaySlotId, FrameGlyph, FrameGlyphBuffer, GlyphRowRole};
-use crate::types::FaceId;
+use crate::types::{Color, FaceId};
 
 /// One animation over window WINDOW's text: its ROWS by COLS cells,
 /// whose first row is the window's visual row TOP (negative when scrolled
@@ -20,110 +21,121 @@ pub struct TextAnimation {
     pub fps: u32,
     /// Whether it moves; else it shows the frame it reached.
     pub moving: bool,
-    /// How many shades its cells take, dark to light
-    /// ([`romacs_armillary::shade_of`]): the evaluator's frame of the block
-    /// shows each in its face.
-    pub shades: u32,
     pub kind: TextAnimationKind,
 }
 
 /// What draws the cells.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextAnimationKind {
-    /// The armillary sphere (romacs-armillary), turned to PITCH, YAW and
-    /// ZOOM, then by the site's motion: yaw 0.16 and phase 0.2 a second of
-    /// motion.  A new EPOCH starts the motion over.
-    Armillary { pitch: f64, yaw: f64, zoom: f64, cell_aspect: f64, epoch: u64 },
+    /// The Romacs mark and wordmark (romacs-logo) in cells CELL_ASPECT as
+    /// wide as high, a sweep of light crossing them.  A new EPOCH starts
+    /// the motion over.
+    Logo { cell_aspect: f64, epoch: u64 },
 }
 
 impl TextAnimation {
     /// Whether NEXT continues this one's motion rather than restarting it.
     pub fn continues(&self, next: &Self) -> bool {
         match (&self.kind, &next.kind) {
-            (TextAnimationKind::Armillary { epoch: a, .. }, TextAnimationKind::Armillary { epoch: b, .. }) => a == b,
+            (TextAnimationKind::Logo { epoch: a, .. }, TextAnimationKind::Logo { epoch: b, .. }) => a == b,
         }
     }
 
-    /// The cells after MOVED seconds of motion: bytes, each a character
-    /// and through [`romacs_armillary::shade_runs`] a shade.
-    pub fn cells(&self, moved: f64) -> Vec<u8> {
+    /// The cells after MOVED seconds of motion, each a character and its
+    /// colour (none for an empty cell).
+    pub fn cells(&self, moved: f64) -> Vec<romacs_logo::Cell> {
         match self.kind {
-            TextAnimationKind::Armillary { pitch, yaw, zoom, cell_aspect, .. } => {
-                let phase = moved * 0.2;
-                let view = romacs_armillary::View {
-                    cols: self.cols as usize, rows: self.rows as usize,
-                    pitch: pitch + (phase * 0.47).sin() * 0.12, yaw: yaw + moved * 0.16,
-                    roll: -0.15 + (phase * 0.3).sin() * 0.1, zoom, cell_aspect, stars: true,
-                };
-                if view.valid() { romacs_armillary::cells(&view) } else { vec![] }
+            TextAnimationKind::Logo { cell_aspect, .. } => {
+                let view = romacs_logo::View { cols: self.cols as usize, rows: self.rows as usize, cell_aspect };
+                if view.valid() { romacs_logo::frame(view, moved) } else { vec![] }
             }
         }
     }
 }
 
 /// Put CELLS (rows of ANIMATION's columns) over FRAME's glyphs for
-/// ANIMATION's block: each cell's character in its shade's face.  The
-/// faces are the evaluator's: its frame of the block draws each character
-/// in its shade's face, so the block's glyphs name them, as the theme has
-/// them now; a shade it showed none of takes the nearest it did.  A cell
-/// the evaluator laid out no glyph for gets one like its row's others.
-pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[u8]) {
+/// ANIMATION's block: each cell's character in its colour, a new face like
+/// the one the evaluator laid the block out in with that foreground; an
+/// empty cell in that face.  A character takes, in its new face, the
+/// font and glyph layout resolved for it in the evaluator's frame (a
+/// fallback font where the face's own lacks it).  A cell the evaluator
+/// laid out no glyph for gets one like its row's others.
+///
+/// Slots count rows and columns from the frame's corner, so the block is
+/// placed from the window's first text row and column: those of its text
+/// glyphs, which the evaluator lays out for every cell of the block.
+pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[romacs_logo::Cell]) {
     let (cols, rows) = (animation.cols as usize, animation.rows as usize);
     if cols == 0 || cells.len() != cols * rows { return; }
+    let in_window = |glyph: &FrameGlyph| match glyph {
+        FrameGlyph::Char { slot_id, row_role: GlyphRowRole::Text, composed: None, .. }
+            if slot_id.window_id.get() as u64 == animation.window => Some(*slot_id),
+        _ => None,
+    };
+    let Some((first_row, first_col)) = frame.glyphs.iter().filter_map(in_window)
+        .fold(None, |origin: Option<(u32, u16)>, slot| Some(origin.map_or((slot.row, slot.col), |(r, c)| (r.min(slot.row), c.min(slot.col)))))
+    else { return };
     let block = |slot: &DisplaySlotId| -> Option<usize> {
-        let row = i64::from(slot.row) - i64::from(animation.top);
-        (slot.window_id.get() as u64 == animation.window && (0..rows as i64).contains(&row) && usize::from(slot.col) < cols)
-            .then(|| row as usize * cols + usize::from(slot.col))
+        let row = i64::from(slot.row) - i64::from(first_row) - i64::from(animation.top);
+        let col = usize::from(slot.col).checked_sub(usize::from(first_col))?;
+        ((0..rows as i64).contains(&row) && col < cols).then(|| row as usize * cols + col)
     };
     // Each cell's glyph, and one glyph per row to model missing cells on.
     let mut at: Vec<Option<usize>> = vec![None; cells.len()];
     let mut model: Vec<Option<usize>> = vec![None; rows];
     for (i, glyph) in frame.glyphs.iter().enumerate() {
-        if let FrameGlyph::Char { slot_id, row_role: GlyphRowRole::Text, composed: None, .. } = glyph
-            && let Some(cell) = block(slot_id) {
+        if let Some(slot_id) = in_window(glyph)
+            && let Some(cell) = block(&slot_id) {
             at[cell] = Some(i);
             model[cell / cols].get_or_insert(i);
         }
     }
     let Some(base) = model.iter().flatten().next().and_then(|&i| face_of(&frame.glyphs[i])) else { return };
-    let shades = shade_faces(frame, &at, animation.shades as usize);
+    let Some(face) = frame.faces.get(&base).cloned() else { return };
+    let mut next = frame.faces.keys().map(|id| id.get()).max().unwrap_or(0).max(crate::face::BasicFaceId::SENTINEL) + 1;
+    let mut coloured: Vec<(u32, FaceId)> = vec![];
+    // Every character's font and glyph as the evaluator's frame resolved it.
+    let mut resolved: std::collections::HashMap<char, crate::font::ResolvedCharGlyph> = std::collections::HashMap::new();
+    for glyphs in frame.char_fonts.values() {
+        for (&c, &glyph) in glyphs { resolved.entry(c).or_insert(glyph); }
+    }
     let char_width = frame.char_width;
-    for (cell, &byte) in cells.iter().enumerate() {
+    for (cell, &(ch, colour)) in cells.iter().enumerate() {
         let index = match at[cell] {
             Some(index) => index,
             None => {
                 let Some(model) = model[cell / cols] else { continue };
                 let mut glyph = frame.glyphs[model].clone();
                 if let FrameGlyph::Char { x, slot_id, .. } = &mut glyph {
-                    *x += (cell % cols) as f32 * char_width - f32::from(slot_id.col) * char_width;
-                    slot_id.col = (cell % cols) as u16;
+                    let col = first_col + (cell % cols) as u16;
+                    *x += (f32::from(col) - f32::from(slot_id.col)) * char_width;
+                    slot_id.col = col;
                 }
                 frame.glyphs.push(glyph);
                 frame.glyphs.len() - 1
             }
         };
-        if let FrameGlyph::Char { char, face_id, .. } = &mut frame.glyphs[index] {
-            *char = char::from(byte);
-            *face_id = romacs_armillary::shade_of(byte, shades.len().max(1))
-                .and_then(|shade| shades.get(shade).copied().flatten()).unwrap_or(base);
+        let face_id = match colour {
+            None => base,
+            Some(rgb) => match coloured.iter().find(|(c, _)| *c == rgb) {
+                Some(&(_, id)) => id,
+                None => {
+                    let id = FaceId::new(next);
+                    next += 1;
+                    frame.faces.insert(id, Face { id, foreground: Color::from_pixel(rgb), ..face.clone() });
+                    coloured.push((rgb, id));
+                    id
+                }
+            },
+        };
+        if let FrameGlyph::Char { char, face_id: glyph_face, .. } = &mut frame.glyphs[index] {
+            *char = ch;
+            *glyph_face = face_id;
+        }
+        if face_id != base && let Some(&glyph) = resolved.get(&ch) {
+            frame.char_fonts.entry(face_id).or_default().insert(ch, glyph);
         }
     }
-}
-
-/// The face the evaluator drew each of SHADES shades in, from the glyphs AT
-/// the block's cells; one it drew none of takes the nearest it did.
-fn shade_faces(frame: &FrameGlyphBuffer, at: &[Option<usize>], shades: usize) -> Vec<Option<FaceId>> {
-    let mut faces = vec![None; shades];
-    if shades == 0 { return faces; }
-    for &index in at.iter().flatten() {
-        if let FrameGlyph::Char { char, face_id, .. } = &frame.glyphs[index]
-            && let Ok(byte) = u8::try_from(*char)
-            && let Some(shade) = romacs_armillary::shade_of(byte, shades) {
-            faces[shade].get_or_insert(*face_id);
-        }
-    }
-    (0..shades).map(|shade| (0..shades).flat_map(|d| [shade.checked_sub(d), Some(shade + d)])
-        .flatten().find_map(|near| faces.get(near).copied().flatten())).collect()
 }
 
 fn face_of(glyph: &FrameGlyph) -> Option<FaceId> {

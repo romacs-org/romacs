@@ -8,10 +8,10 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "dd2f03e94a1fcadd31c19517faea6254f631ea43ad261cfe4d6c0679efe90598",
+    "input_hash": "2cf61c0cfa808cb8108b422bcec47ec25d843529df87424f159542205f9f9f78",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7660
+    "vm2_universe": 7662
   },
   "schema": 2,
   "vm2": {
@@ -785,7 +785,6 @@
       "require",
       "restore-buffer-modified-p",
       "reverse",
-      "romacs--armillary-frame",
       "romacs--auto-save-1",
       "romacs--auto-save-done",
       "romacs--auto-save-failure-time",
@@ -835,6 +834,7 @@
       "romacs--keymap-generation",
       "romacs--kill-buffer-finish",
       "romacs--local-toplevel-cell",
+      "romacs--logo-frame",
       "romacs--minibuffer-host",
       "romacs--nconc-list",
       "romacs--note-command-point",

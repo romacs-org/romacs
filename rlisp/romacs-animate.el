@@ -15,10 +15,11 @@
 ;; With ELEMENT-FN the display draws the motion itself, frame after frame,
 ;; over the text FRAME-FN left: no Lisp runs per frame.  ELEMENT-FN runs
 ;; with BUFFER current and the window showing it, and returns what the
-;; display draws there, a plist of :top, :cols, :rows, :shades and :kind,
-;; or nil for nothing.  The scheduler keeps it in `romacs-animate--elements',
+;; display draws there, a plist of :top, :cols, :rows and :kind, or nil
+;; for nothing.  The scheduler keeps it in `romacs-animate--elements',
 ;; which every frame the evaluator freezes carries to the display while
-;; the window shows BUFFER, and FRAME-FN draws only still frames.  Without ELEMENT-FN, or where the display draws no
+;; the window shows BUFFER, and FRAME-FN draws only still frames.
+;; Without ELEMENT-FN, or where the display draws no
 ;; animation, FRAME-FN draws every frame from one Lisp frame clock: a
 ;; repeating timer at the fastest rate a moving animation asks for.
 ;;
@@ -32,7 +33,7 @@
 ;; visible or its window resizes.
 ;;
 ;; `romacs-animate-statistics' reports the evaluator time FRAME-FNs take.
-;; rlisp/romacs-armillary.el, the *Romacs* landing, is the first client.
+;; rlisp/romacs-landing.el, the *Romacs* landing, is the first client.
 
 ;;; Code:
 
@@ -67,10 +68,11 @@
 
 (defvar romacs-animate--elements nil
   "The text animations the display draws by itself, a list of (KEY WINDOW
-BUFFER TOP COLS ROWS FPS MOVING SHADES KIND), as `romacs-animate--sync'
-keeps it.  Each frame the evaluator freezes carries those whose WINDOW
-still shows BUFFER (`Vm::text_animations' in the VM), so the display
-draws exactly the animations of the frame it shows.")
+BUFFER TOP COLS ROWS FPS MOVING KIND), one for each window that
+shows an animation, as `romacs-animate--sync' keeps it.  Each frame the
+evaluator freezes carries those whose WINDOW still shows BUFFER
+\(`Vm::text_animations' in the VM), so the display draws exactly the
+animations of the frame it shows.")
 
 (defvar romacs-animate--statistics (vector 0 0.0 0.0)
   "Frames FRAME-FNs drew, their total and their longest evaluator seconds.")
@@ -98,10 +100,11 @@ default, t."
     (dolist (animation romacs-animate--animations found)
       (when (equal (romacs-animate--slot animation :id) id) (setq found animation)))))
 
-(defun romacs-animate--window (animation)
-  "ANIMATION's buffer's window in the selected frame, if it is shown there."
+(defun romacs-animate--windows (animation)
+  "The windows of the selected frame that show ANIMATION's buffer: each
+shows its own animation, whichever window is selected."
   (let ((buffer (romacs-animate--slot animation :buffer)))
-    (and (buffer-live-p buffer) (get-buffer-window buffer (selected-frame)))))
+    (and (buffer-live-p buffer) (get-buffer-window-list buffer 'nomini (selected-frame)))))
 
 (defun romacs-animate--focused-p ()
   "Whether the selected frame has focus, or no focus change reached it yet."
@@ -109,9 +112,11 @@ default, t."
     (or (null update) (cdr update))))
 
 (defun romacs-animate--moving-p (animation motion)
-  "Whether ANIMATION moves: MOTION allowed, not paused, visible, focused."
+  "Whether ANIMATION moves: MOTION allowed, not paused, shown in the
+selected frame, and that frame focused.  Which window is selected does
+not matter."
   (and motion (not (romacs-animate--slot animation :paused))
-       (romacs-animate--window animation) (romacs-animate--focused-p)))
+       (romacs-animate--windows animation) (romacs-animate--focused-p)))
 
 (defun romacs-animate--failed (animation err)
   (romacs-animate-stop (romacs-animate--slot animation :id))
@@ -130,16 +135,19 @@ default, t."
       (aset stats 1 (+ (aref stats 1) seconds))
       (aset stats 2 (max (aref stats 2) seconds)))))
 
-(defun romacs-animate--size (window)
-  (cons (window-body-width window) (window-body-height window)))
+(defun romacs-animate--size (animation)
+  "The sizes of the windows that show ANIMATION's buffer, smallest first:
+whichever of them is selected, the same list."
+  (sort (mapcar (lambda (window) (cons (window-body-width window) (window-body-height window)))
+                (romacs-animate--windows animation))
+        (lambda (a b) (or (< (car a) (car b)) (and (= (car a) (car b)) (< (cdr a) (cdr b)))))))
 
 (defun romacs-animate--still (animation)
-  "Give ANIMATION a still frame if it is visible and its window's size
-is not the one its last frame was drawn for."
-  (let ((window (romacs-animate--window animation)))
-    (when (and window (not (equal (romacs-animate--size window)
-                                  (romacs-animate--slot animation :size))))
-      (romacs-animate--set animation :size (romacs-animate--size window))
+  "Give ANIMATION a still frame if it is visible and its windows' sizes
+are not the ones its last frame was drawn for."
+  (let ((size (romacs-animate--size animation)))
+    (when (and size (not (equal size (romacs-animate--slot animation :size))))
+      (romacs-animate--set animation :size size)
       (romacs-animate--draw animation 0))))
 
 (defun romacs-animate--hosted-p (animation motion)
@@ -148,22 +156,23 @@ MOTION is allowed."
   (and motion (romacs-animate--slot animation :element)))
 
 (defun romacs-animate--sync (animation motion)
-  "Make ANIMATION's entry in `romacs-animate--elements' its element as it
-now is: where it is shown and the display draws it, else none."
+  "Make ANIMATION's entries in `romacs-animate--elements' its elements as
+they now are: one for each window that shows it where the display draws
+it, else none."
   (let* ((key (romacs-animate--slot animation :key))
          (buffer (romacs-animate--slot animation :buffer))
-         (window (and (romacs-animate--hosted-p animation motion) (romacs-animate--window animation)))
-         (element (and window (with-current-buffer buffer
-                                (funcall (romacs-animate--slot animation :element) window))))
-         (others (romacs-animate--without key)))
-    (setq romacs-animate--elements
-          (if element
-              (cons (list key window buffer (plist-get element :top) (plist-get element :cols)
-                          (plist-get element :rows) (romacs-animate--slot animation :fps)
-                          (and (romacs-animate--moving-p animation motion) t)
-                          (plist-get element :shades) (plist-get element :kind))
-                    others)
-            others))))
+         (moving (and (romacs-animate--moving-p animation motion) t))
+         (entries nil))
+    (when (romacs-animate--hosted-p animation motion)
+      (dolist (window (romacs-animate--windows animation))
+        (let ((element (with-current-buffer buffer
+                         (funcall (romacs-animate--slot animation :element) window))))
+          (when element
+            (push (list key window buffer (plist-get element :top) (plist-get element :cols)
+                        (plist-get element :rows) (romacs-animate--slot animation :fps) moving
+                        (plist-get element :kind))
+                  entries)))))
+    (setq romacs-animate--elements (nconc (nreverse entries) (romacs-animate--without key)))))
 
 (defun romacs-animate--without (key)
   "`romacs-animate--elements' without KEY's entry."
@@ -188,8 +197,7 @@ draw whose period has passed; stop the clock when none moves."
           ;; A tick a little early for a slower animation still counts.
           (when (or (null elapsed) (>= elapsed (* 0.9 period)))
             (romacs-animate--set animation :last now)
-            (romacs-animate--set animation :size
-                  (romacs-animate--size (romacs-animate--window animation)))
+            (romacs-animate--set animation :size (romacs-animate--size animation))
             (romacs-animate--draw animation (if elapsed (min elapsed romacs-animate-max-dt) 0))))))
     (unless moving (romacs-animate--clock nil))))
 
@@ -238,7 +246,7 @@ FRAME-FN is called with BUFFER current and the seconds of motion since
 its last frame, 0 for a still frame.  With ELEMENT-FN the display draws
 the motion over FRAME-FN's still frames: called with BUFFER current and
 the window showing it, it returns the display's element, a plist of
-:top, :cols, :rows, :shades and :kind (see `romacs-animate--elements'),
+:top, :cols, :rows and :kind (see `romacs-animate--elements'),
 or nil.  A running ID is replaced.  The first frame comes once BUFFER is
 shown; ID stops when BUFFER is killed."
   (romacs-animate-stop id)
@@ -284,7 +292,7 @@ shown; ID stops when BUFFER is killed."
   "Draw a still frame of animation ID now, if it is shown, and give the
 display its element as it now is."
   (let ((animation (romacs-animate--get id)))
-    (when (and animation (romacs-animate--window animation))
+    (when (and animation (romacs-animate--windows animation))
       (romacs-animate--draw animation 0)
       (romacs-animate--sync animation (romacs-animate-motion-p)))))
 

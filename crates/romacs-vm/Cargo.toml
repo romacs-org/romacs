@@ -12,7 +12,7 @@ romacs-display-protocol = { path = "../romacs-display-protocol" }
 romacs-face = { path = "../romacs-face" }
 romacs-regex-engine = { path = "../romacs-regex-engine" }
 romacs-snapshot = { path = "../romacs-snapshot" }
-romacs-armillary = { path = "../romacs-armillary" }
+romacs-logo = { path = "../romacs-logo" }
 str_indices = "=0.4.4"
 serde_json = "1"
 num-bigint = "0.4"

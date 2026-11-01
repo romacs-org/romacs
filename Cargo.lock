@@ -4140,13 +4140,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-armillary"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
 name = "romacs-chars"
 version = "0.1.0"
 dependencies = [
@@ -4187,8 +4180,8 @@ dependencies = [
  "num_enum",
  "nutype",
  "proptest",
- "romacs-armillary",
  "romacs-infra",
+ "romacs-logo",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
@@ -4219,9 +4212,9 @@ dependencies = [
  "pollster",
  "raw-window-handle",
  "resvg",
- "romacs-armillary",
  "romacs-display-protocol",
  "romacs-infra",
+ "romacs-logo",
  "romacs-renderer-wgpu",
  "romacs-video",
  "romacs-video-model",
@@ -4390,6 +4383,10 @@ dependencies = [
  "romacs-layout-input",
  "romacs-vm",
 ]
+
+[[package]]
+name = "romacs-logo"
+version = "0.1.0"
 
 [[package]]
 name = "romacs-mcp"
@@ -4631,12 +4628,12 @@ dependencies = [
  "md-5",
  "num-bigint",
  "rayon",
- "romacs-armillary",
  "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",
  "romacs-layout-input",
  "romacs-layout2",
+ "romacs-logo",
  "romacs-regex-engine",
  "romacs-snapshot",
  "romacs-vm",
@@ -4663,13 +4660,13 @@ version = "0.0.19"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
- "romacs-armillary",
  "romacs-display-protocol",
  "romacs-display-runtime",
  "romacs-face",
  "romacs-font",
  "romacs-layout-input",
  "romacs-layout2",
+ "romacs-logo",
  "romacs-renderer-wgpu",
  "romacs-snapshot",
  "romacs-test-fonts",

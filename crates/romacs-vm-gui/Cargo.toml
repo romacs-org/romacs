@@ -10,7 +10,7 @@ romacs-snapshot = { path = "../romacs-snapshot" }
 romacs-layout-input = { path = "../romacs-layout-input" }
 romacs-layout2 = { path = "../romacs-layout2" }
 romacs-display-protocol.workspace = true
-romacs-armillary.workspace = true
+romacs-logo.workspace = true
 romacs-font.workspace = true
 romacs-face.workspace = true
 romacs-renderer-wgpu.workspace = true
