@@ -536,8 +536,8 @@ def baseline_provenance_problem(rel: str, record: dict, expected: str) -> str | 
 
     Fail-closed: a baseline that names no binary, or any binary whose digest
     is not the pin's, is refused. All 565 baselines committed before this
-    check were recorded by /usr/bin/emacs-32.0.50; they are refused until the
-    owner authorises the re-record (it moves the reduced-harness count).
+    check were recorded by /usr/bin/emacs-32.0.50; they are refused until they
+    are deliberately re-recorded (it moves the reduced-harness count).
     """
     gnu = record.get('gnu') or {}
     recorded = gnu.get('sha256')
@@ -546,7 +546,7 @@ def baseline_provenance_problem(rel: str, record: dict, expected: str) -> str | 
     return (f'GNU baseline gnu-tests/baseline/{rel}.json was recorded by {gnu.get("emacs") or "<no binary named>"} '
             f'(sha256 {recorded or "<none>"}), not by the pinned GNU (expected sha256 {expected}, '
             f'parity-reference.toml executable_sha256). A baseline from another binary is not GNU\'s answer at '
-            f'the pin, so it is refused, never used. Re-recording is its own explicit, owner-authorised step '
+            f'the pin, so it is refused, never used. Re-recording is its own explicit, deliberate step '
             f'(it changes what the suite counts): {RERECORD_COMMAND}')
 
 

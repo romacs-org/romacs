@@ -1,6 +1,6 @@
 //! Semantic palettes: named colours and mappings resolved once.
 //!
-//! The owner's daily theme (`rum`) is built on modus, whose model is already
+//! The `rum` theme is built on modus, whose model is already
 //! "generate a palette, override it semantically, apply it as a unit". A
 //! palette entry is either a colour, `unspecified`, or the name of another
 //! entry (a mapping such as `(comment fg-dim)`); the effective palette is

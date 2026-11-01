@@ -170,7 +170,7 @@ class Honesty(unittest.TestCase):
 
     def test_the_committed_distro_baseline_is_refused_by_load_baseline(self):
         recorded = json.loads(run.baseline_path('src/fns-tests.el').read_text())['gnu']['sha256']
-        if recorded == PIN_SHA:  # after the owner's re-record the refusal has nothing to refuse
+        if recorded == PIN_SHA:  # after a pinned re-record the refusal has nothing to refuse
             run.load_baseline('src/fns-tests.el')
             return
         with self.assertRaises(run.Refusal, msg='load_baseline used a baseline recorded by a non-pinned GNU') as cm:
@@ -712,7 +712,7 @@ class EndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='gts-e2e-') as tmp:
             status = run.main(['run', 'src/fns-tests.el', '--bin', BIN, '--out', tmp, '--jobs', '1'])
             if json.loads(run.baseline_path('src/fns-tests.el').read_text())['gnu']['sha256'] != PIN_SHA:
-                # Every committed baseline is distro-recorded until the owner's
+                # Every committed baseline is distro-recorded until a pinned
                 # re-record: nothing may be measured against it.
                 self.assertEqual(status, 3, 'a run against a distro-recorded baseline was not refused')
                 return

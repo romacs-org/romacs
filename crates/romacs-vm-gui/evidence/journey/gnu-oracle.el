@@ -1,6 +1,6 @@
 ;;; gnu-oracle.el --- GNU's answer for each motion/edit key of the ladder -*- lexical-binding: t -*-
 ;; emacs -Q --batch -l gnu-oracle.el FIXTURE KEYS-FILE OUT
-;; Visits a copy of FIXTURE with find-file (so org-mode, as the owner gets),
+;; Visits a copy of FIXTURE with find-file (so org-mode, as a user gets),
 ;; then for each line of KEYS-FILE (a `kbd' string) runs it as a keyboard
 ;; macro and records the command it ran and the state after it.
 (require 'cl-lib)

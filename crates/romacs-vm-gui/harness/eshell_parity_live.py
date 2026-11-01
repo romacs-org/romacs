@@ -6,7 +6,7 @@ Emacs (pgtk) and `romacs-vm-gui --loadup', each in its own private headless
 labwc with a private HOME/XDG/TMPDIR, both started in the same small work
 directory (two files, a directory and a 300-line file).  Eshell keeps its
 history and state under `eshell-directory-name', set to the private tree in
-both, so neither reads or writes the owner's.
+both, so neither reads or writes the user's.
 
 The journey: `M-x eshell' from *scratch*, Eshell's own `ls', `echo', `cd'
 and `pwd', `cat' of a file several screens long, external `printf', an

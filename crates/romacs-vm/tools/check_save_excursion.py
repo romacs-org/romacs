@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Focused excursion evidence; run mutations in an owned isolated checkout.
 
-No GNU lookup/fallback: --record-gnu uses only the owner's pinned binary.
+No GNU lookup/fallback: --record-gnu uses only the pinned GNU binary.
 Mutations are killed only by their named behavioral assertion (not build faults).
 """
 import os as _portable_os

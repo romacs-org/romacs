@@ -3,8 +3,8 @@
 
 ;;; Commentary:
 ;; With ROMACS_USAGE_LOG naming a file, an interactive session appends JSON
-;; lines to it (the Omarchy launcher sets it per session; romacs-sessions
-;; reads it):
+;; lines to it (a launcher can set it per session and a summariser
+;; read it):
 ;;
 ;;   {"kind":"command","command":C,"mode":M,"n":N}
 ;;       how often command C ran in major mode M, written every

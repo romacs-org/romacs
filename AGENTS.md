@@ -47,8 +47,8 @@ possible; say so where you do.
   when both are new.
 - When a mechanism moves to Rust, keep the policy users customize reachable from
   Lisp.
-- Back structural and performance claims with measurements on the owner's
-  hardware.
+- Back structural and performance claims with measurements on the development
+  machine.
 - Judge the machine as a whole. Measure runtime and representation work on
   corpus workloads (loading GNU's Lisp and `rlisp/`, the GNU ERT suites) and on
   general use (find-file and the minibuffer, project commands, dired, vc,
@@ -81,7 +81,7 @@ possible; say so where you do.
 ## Existing commands
 
 Run commands directly from the repository root in the prepared project
-environment. Keep the owner's HOME and Cargo environment. The acceptance gate
+environment. Keep your HOME and Cargo environment. The acceptance gate
 owns its isolated test homes and heavy-job scheduling. Use worktrees when parallel
 writers need isolation; ordinary development does not need a lane registry.
 
@@ -109,7 +109,7 @@ the pinned oracle.
   from this repository and are frozen alongside the gate for each invocation.
   Add `--staged` to verify the index snapshot while preserving unrelated
   unstaged and untracked work. The gate binds evidence to its frozen Git tree;
-  a temporary commit or a clean owner checkout is not needed.
+  a temporary commit or a clean checkout is not needed.
 
 `PACKAGE`, `TARGET`, `TEST_NAME`, `NAME`, `BINARY`, `OUTPUT`, `FILE`, and `EXPR` are placeholders.
 Inspect the current commands and relevant tests rather than inventing another
@@ -148,7 +148,7 @@ standalone Cargo execution without it.
 - Keep one writer per checkout. Give independent writers isolated worktrees and
   reviewers an exact candidate with read-only authority.
 - Preserve unrelated edits, live sessions, and personal data. Use isolated test
-  environments; restore the owner's environment before signing commits.
+  environments; restore your environment before signing commits.
 - Keep plans, logs, receipts, and temporary experiments outside the source tree.
 - Finish verified, reviewed work with focused signed local commits. Stage only
   owned paths. Push, publication, activation, service restarts, and real mail

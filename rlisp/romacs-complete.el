@@ -108,7 +108,7 @@ The value should lie between 0 and romacs-complete-count/2."
   "Override sort function which overrides the `display-sort-function'."
   :type '(choice (const nil) function))
 
-;; Romacs: where the layer goes (owner decision: a strip at the frame's
+;; Romacs: where the layer goes (a deliberate choice: a strip at the frame's
 ;; bottom, or a centred box as vertico-posframe draws it).
 (defcustom romacs-complete-position 'bottom
   "Where the minibuffer's layer shows.
