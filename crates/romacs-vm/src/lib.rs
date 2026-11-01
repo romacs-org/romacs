@@ -342,7 +342,6 @@ enum Primitive {
     Aset,
     CopySequence,
     Assq,
-    PlistGet,
     Setcar,
     Setcdr,
     Remainder,
@@ -533,7 +532,6 @@ enum Primitive {
     SymbolValue,
     SpecialVariableP,
     MakeVariableBufferLocal,
-    LocalVariableIfSetP,
     CustomVariableP,
     DefvarBoundp,
     DefvarSetDefault,
@@ -589,7 +587,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("aset", Primitive::Aset),
     ("copy-sequence", Primitive::CopySequence),
     ("assq", Primitive::Assq),
-    ("plist-get", Primitive::PlistGet),
     ("setcar", Primitive::Setcar),
     ("setcdr", Primitive::Setcdr),
     ("%", Primitive::Remainder),
@@ -799,7 +796,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("symbol-value", Primitive::SymbolValue),
     ("special-variable-p", Primitive::SpecialVariableP),
     ("make-variable-buffer-local", Primitive::MakeVariableBufferLocal),
-    ("local-variable-if-set-p", Primitive::LocalVariableIfSetP),
     ("custom-variable-p", Primitive::CustomVariableP),
     ("#:vm2-defvar-boundp", Primitive::DefvarBoundp),
     ("#:vm2-defvar-set-default", Primitive::DefvarSetDefault),
@@ -3127,7 +3123,7 @@ impl Vm {
         }
         if matches!(
             p,
-            Car | Cdr | Null | Eq | Memq | Assq | PlistGet | Nth | Setcar | Setcdr
+            Car | Cdr | Null | Eq | Memq | Assq | Nth | Setcar | Setcdr
         ) {
             return self.traversal_primitive(p, start, n);
         }
@@ -3182,7 +3178,7 @@ impl Vm {
         }
         if matches!(
             p,
-            Vector | Aref | Aset | CopySequence | Assq | PlistGet | Setcar | Setcdr
+            Vector | Aref | Aset | CopySequence | Assq | Setcar | Setcdr
         ) {
             return self.data_primitive(p, start, n);
         }

@@ -591,6 +591,17 @@ GNU: (3 0 1 4 2)
 Romacs: (3 4 1 0 2)
 ```
 
+`overlays-at` with SORTED, character properties and overlay faces order
+overlays by GNU's `compare_overlays` (buffer.c), which is not transitive, so
+its input is GNU's too: ascending start, equal starts latest inserted first
+(itree_insert_node; `move-overlay` reinserts when the start moves), merged
+as glibc's qsort does (`src/overlay_order.rs`). An edit that brings two
+overlay starts together keeps Romacs's insertion order where GNU keeps its
+tree's. Where two overlays tie on priority, secondary priority and range,
+GNU orders them by object address and Romacs by heap index; both follow
+creation order for overlays made in sequence
+(`crates/romacs-vm-gui/tests/gnu_arity_fixes.rs` against pinned GNU).
+
 ## Reversed overlays-in bounds are swapped
 
 GNU returns no overlays for reversed arguments; Romacs swaps the endpoints. The last two vector entries below expose this existing difference. Live isolated GNU Emacs 32.0.50 transcript:

@@ -6597,10 +6597,6 @@
  ],
  "pinned": {
   "per-buffer/049": "SIGNAL-VS-VALUE",
-  "local-variable-if-set-p/012": "SIGNAL-VS-VALUE",
-  "local-variable-if-set-p/013": "SIGNAL-VS-VALUE",
-  "local-variable-if-set-p/014": "SIGNAL-VS-VALUE",
-  "local-variable-if-set-p/015": "SIGNAL-VS-VALUE",
   "defvar/036": "VALUE",
   "defvar/038": "VALUE"
  }

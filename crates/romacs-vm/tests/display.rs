@@ -100,3 +100,34 @@ fn one_window_frame_owns_buffer_independent_of_current_buffer() {
         "Ωμέγα Hello\n"
     );
 }
+
+/// xfaces.c face_at_buffer_position sorts the overlays covering each
+/// position: A [1,8) with secondary priority 1 wins over C [3,9) at 7,
+/// though B [2,6), which A loses to, covers neither 7 nor C's end.
+#[test]
+fn overlay_faces_rank_the_overlays_covering_each_position() {
+    let mut vm = Vm::new();
+    vm.eval_source("(progn (set-buffer (get-buffer-create \"o\")) (insert \"0123456789\")
+        (set-window-buffer (selected-window) (current-buffer))
+        (overlay-put (make-overlay 2 6) 'face '(:foreground \"#ff0000\")) (overlay-put (car (overlays-at 2)) 'priority '(0 . 0))
+        (let ((c (make-overlay 3 9))) (overlay-put c 'face '(:foreground \"#00ff00\")) (overlay-put c 'priority '(0 . 0)))
+        (let ((a (make-overlay 1 8))) (overlay-put a 'face '(:foreground \"#0000ff\")) (overlay-put a 'priority '(0 . 1))))").unwrap();
+    let s = vm.display_snapshot(640, 480).unwrap();
+    let at = |byte: usize| s.text.face_runs.iter().find(|r| r.bytes.contains(&byte)).map(|r| s.faces[r.face.0 as usize].foreground);
+    assert_eq!(at(6), Some([0, 0, 255]), "position 7");
+}
+
+/// An overlay without a face still takes part in the ranking: B [2,6)
+/// lifts C [3,9) over A [1,8) at 4, as GNU's sort of all three does.
+#[test]
+fn a_faceless_overlay_still_ranks_the_overlay_faces() {
+    let mut vm = Vm::new();
+    vm.eval_source("(progn (set-buffer (get-buffer-create \"o\")) (insert \"0123456789\")
+        (set-window-buffer (selected-window) (current-buffer))
+        (let ((a (make-overlay 1 8))) (overlay-put a 'face '(:foreground \"#0000ff\")) (overlay-put a 'priority '(0 . 1)))
+        (let ((b (make-overlay 2 6))) (overlay-put b 'priority '(0 . 0)))
+        (let ((c (make-overlay 3 9))) (overlay-put c 'face '(:foreground \"#00ff00\")) (overlay-put c 'priority '(0 . 0))))").unwrap();
+    let s = vm.display_snapshot(640, 480).unwrap();
+    let at = |byte: usize| s.text.face_runs.iter().find(|r| r.bytes.contains(&byte)).map(|r| s.faces[r.face.0 as usize].foreground);
+    assert_eq!(at(3), Some([0, 255, 0]), "position 4");
+}

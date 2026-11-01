@@ -1664,6 +1664,7 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
             ("numberp", 1) => Some(numberp),
             ("cdr-safe", 1) => Some(cdr_safe),
             ("nconc", 2) => Some(nconc2),
+            ("plist-get", 2) => Some(traversal::plist_get),
             ("symbol-function", 1) => Some(symbol_function),
             _ => None,
         };
@@ -1675,7 +1676,6 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
         (Primitive::Eq, 2) => traversal::eq,
         (Primitive::Memq, 2) => traversal::memq,
         (Primitive::Assq, 2) => traversal::assq,
-        (Primitive::PlistGet, 2) => traversal::plist_get,
         (Primitive::Nth, 2) => traversal::nth,
         (Primitive::Setcar, 2) => traversal::setcar,
         (Primitive::Setcdr, 2) => traversal::setcdr,
@@ -3203,7 +3203,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         ProcessLines => |vm, _, start, n| vm.process_lines(start, n),
         Format => |vm, _, start, n| vm.format_string(start, n),
         // Traversal and Message retain their ordinary arity/error adapter.
-        Car | Cdr | Null | Eq | Memq | Assq | PlistGet | Nth | Setcar | Setcdr => {
+        Car | Cdr | Null | Eq | Memq | Assq | Nth | Setcar | Setcdr => {
             Vm::traversal_primitive
         }
         Message => Vm::primitive,
