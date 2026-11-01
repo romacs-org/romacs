@@ -1,5 +1,6 @@
 ;;; romacs-armillary.el --- The *Romacs* landing's armillary sphere  -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

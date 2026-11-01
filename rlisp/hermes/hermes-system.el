@@ -1,4 +1,5 @@
 ;;; hermes-system.el --- Gateway status and logs for Hermes  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 ;; Author: Thanos Apollo <public@thanosapollo.org>

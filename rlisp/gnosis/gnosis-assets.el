@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Free Software Foundation, Inc.
 ;; Author: Thanos Apollo <public@thanosapollo.org>
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Store explicit sets of files beside the connected database.  Domain modules

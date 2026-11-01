@@ -1,9 +1,10 @@
 ;;; romacs-orderless.el --- The orderless completion style, matched natively  -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Copyright (C) 2021-2026 Free Software Foundation, Inc.
+;; Portions Copyright (C) 2021-2026 Free Software Foundation, Inc.,
+;; from orderless.el by Omar Antolín Camarena and Daniel Mendler, kept as the GPL requires.
 
-;; Maintainer: the Romacs project
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 ;; Keywords: matching, completion
 
 ;; Romacs: derived from orderless.el by Omar Antolín Camarena and Daniel

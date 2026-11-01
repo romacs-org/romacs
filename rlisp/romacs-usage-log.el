@@ -1,5 +1,6 @@
 ;;; romacs-usage-log.el --- Which commands a session runs, in a local log  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; With ROMACS_USAGE_LOG naming a file, an interactive session appends JSON

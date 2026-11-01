@@ -1,5 +1,6 @@
 ;;; romacs-cl-print.el --- Private closure printing for GNU cl-print
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; GNU's interpreted-function method reads its array representation.  Romacs

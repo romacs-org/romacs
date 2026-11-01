@@ -2,6 +2,7 @@
 
 ;; Copyright (C) 2026 Free Software Foundation, Inc.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; A backend is a plist of five functions plus optional :reveal, not a

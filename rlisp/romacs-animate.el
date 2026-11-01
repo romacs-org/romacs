@@ -1,5 +1,6 @@
 ;;; romacs-animate.el --- Frame-by-frame animation in buffers  -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

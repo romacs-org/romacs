@@ -1,4 +1,5 @@
 ;;; gnosis-answer.el --- Explicit typed answers -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Free Software Foundation, Inc.
 ;; Author: Thanos Apollo <public@thanosapollo.org>

@@ -1,6 +1,7 @@
 ;;; romacs-companion.el --- Trusted-local companion -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Support cooperative owner-controlled companion editing, not a sandbox.

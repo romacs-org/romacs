@@ -1,5 +1,6 @@
 ;;; romacs-function-documentation.el --- Private closure documentation bridge
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; GNU's generic function remains responsible for non-closure documentation.

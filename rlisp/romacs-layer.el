@@ -1,5 +1,6 @@
 ;;; romacs-layer.el --- Buffers shown in a layer over the frame  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; A layer is a child frame (GNU's `parent-frame') showing one buffer over

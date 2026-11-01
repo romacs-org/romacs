@@ -1,5 +1,6 @@
 ;;; romacs-completion-defaults.el --- Romacs's minibuffer completion defaults  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; --loadup's minibuffer completion is GNU's: `completing-read',

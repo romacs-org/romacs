@@ -1,4 +1,5 @@
 ;;; hermes-dashboard-rpc.el --- Typed JSON-RPC wrappers for the Hermes dashboard  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

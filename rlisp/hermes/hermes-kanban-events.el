@@ -1,4 +1,5 @@
 ;;; hermes-kanban-events.el --- Live-events tail for Hermes Kanban  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

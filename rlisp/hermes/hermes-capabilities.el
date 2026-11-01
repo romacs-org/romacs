@@ -1,4 +1,5 @@
 ;;; hermes-capabilities.el --- Native capability provider for Hermes  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

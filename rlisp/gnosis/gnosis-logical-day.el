@@ -1,4 +1,5 @@
 ;;; gnosis-logical-day.el --- Logical review-day calculations  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Free Software Foundation, Inc.
 

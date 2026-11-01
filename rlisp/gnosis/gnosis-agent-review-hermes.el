@@ -1,4 +1,5 @@
 ;;; gnosis-agent-review-hermes.el --- Optional contextual tutor -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026 Free Software Foundation, Inc.
 ;; Author: Thanos Apollo <public@thanosapollo.org>

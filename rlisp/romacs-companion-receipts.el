@@ -1,6 +1,7 @@
 ;;; romacs-companion-receipts.el --- Companion edit receipts -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Add operation readback to the accepted companion, not another ownership
