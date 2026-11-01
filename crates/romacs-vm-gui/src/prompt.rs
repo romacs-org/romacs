@@ -208,7 +208,7 @@ impl HostInput for GuiHost {
             shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone()));
             drawn
         };
-        eprintln!(
+        if crate::diagnostics() { eprintln!(
             "{}",
             serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
                 "selected":frame.selected,"drawn":drawn,
@@ -218,7 +218,7 @@ impl HostInput for GuiHost {
                 "layers":frame.frame.children.iter().map(|c| c.windows.iter().filter(|w| w.snapshot.id != frame.minibuffer)
                     .map(|w| w.snapshot.text.utf8.clone()).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "glyphs":glyphs})
-        );
+        ); }
         // The key's command and hooks ran before this redisplay began.
         if let Some(read) = self.shared.borrow_mut().key_read.take() {
             let now = std::time::Instant::now();

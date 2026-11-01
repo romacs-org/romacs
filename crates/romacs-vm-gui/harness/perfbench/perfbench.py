@@ -273,7 +273,7 @@ def private_env(base, name, extra):
     home = Path(tempfile.mkdtemp(prefix=f'{name}-', dir=base))
     for directory in ('.config', '.cache', '.local/share', '.local/state', 'tmp'):
         (home / directory).mkdir(parents=True)
-    return {'PATH': os.environ['PATH'], 'HOME': str(home), 'LANG': 'C.UTF-8', 'TMPDIR': str(home / 'tmp'),
+    return {'PATH': os.environ['PATH'], 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1', 'TMPDIR': str(home / 'tmp'),
             'XDG_CONFIG_HOME': str(home / '.config'), 'XDG_CACHE_HOME': str(home / '.cache'),
             'XDG_DATA_HOME': str(home / '.local/share'), 'XDG_STATE_HOME': str(home / '.local/state'),
             **extra}

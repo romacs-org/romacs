@@ -26,6 +26,7 @@ out.mkdir(parents=True, exist_ok=True)
 (out / "home").mkdir(exist_ok=True)
 env = os.environ.copy()
 env.pop('LD_LIBRARY_PATH', None)
+env['ROMACS_DIAGNOSTICS'] = '1'  # the per-paint lines read here
 for required in ('XDG_RUNTIME_DIR', 'WAYLAND_DISPLAY', 'HYPRLAND_INSTANCE_SIGNATURE'):
     if not env.get(required):
         raise RuntimeError(f'{required} must select the intended live session')

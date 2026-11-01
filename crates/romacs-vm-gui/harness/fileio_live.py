@@ -132,7 +132,7 @@ def main():
         work.mkdir()
         notes = work / "-notes.org"
         notes.write_bytes(ORIGINAL)
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home), "LANG": "C.UTF-8",
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home), "LANG": "C.UTF-8", "ROMACS_DIAGNOSTICS": "1",
                "XDG_RUNTIME_DIR": str(runtime), "XDG_CONFIG_HOME": str(home / "config"),
                "XDG_CACHE_HOME": str(home / "cache"), "XDG_DATA_HOME": str(home / "data"),
                "XDG_STATE_HOME": str(home / "state"), "TMPDIR": str(runtime), "WLR_BACKENDS": "headless",

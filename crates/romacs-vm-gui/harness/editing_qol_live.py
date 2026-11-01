@@ -43,7 +43,7 @@ def private_env(root: Path) -> dict:
     """Allowlist the child environment, omitting every ambient display/socket."""
     home = root / 'home'
     home.mkdir()
-    env = {'PATH': TOOLS + ':/usr/bin:/bin', 'HOME': str(home), 'LANG': 'C.UTF-8',
+    env = {'PATH': TOOLS + ':/usr/bin:/bin', 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
            'XDG_RUNTIME_DIR': str(root), 'TMPDIR': str(root),
            'XDG_CONFIG_DIRS': str(home / 'config'), 'XDG_DATA_DIRS': '/usr/local/share:/usr/share',
            'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',

@@ -8,6 +8,13 @@ use std::time::Instant;
 static TRACE_LATENCY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static SCENE_DUMPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 fn tracing() -> bool { TRACE_LATENCY.load(std::sync::atomic::Ordering::Relaxed) }
+static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// Per-paint lines (`paint', `paint-submitted', `cursor-publication',
+/// `prompt-paint'), echo-area messages and the loadup tables on stderr:
+/// what harnesses read, never a daily session's log (a message or a prompt
+/// can hold what the user typed). On under ROMACS_DIAGNOSTICS=1, the trace
+/// flags, and the --wayland oracle transport.
+fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
 
 mod native;
 mod loadup;
@@ -473,6 +480,7 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   --batch ARG...        GNU's `emacs --batch ARG...', from a batch world of its own
                         once one is prepared in an existing store
   ROMACS_WORLD=off      boot from source, without a world
+  ROMACS_DIAGNOSTICS=1  print each paint, message and the loadup tables on stderr (harnesses)
   ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
                         stalled (default 2000): editing goes on, once told
 ";
@@ -558,6 +566,10 @@ fn run() -> Result<(), String> {
     }
     TRACE_LATENCY.store(trace_latency, std::sync::atomic::Ordering::Relaxed);
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
+    DIAGNOSTICS.store(!live || trace_scene || trace_latency || std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1"),
+                      std::sync::atomic::Ordering::Relaxed);
+    // Batch and the isolates keep GNU's `noninteractive' messages on stderr.
+    romacs_vm::host::set_messages_to_stderr(diagnostics());
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
     // Startup phases, on the clock of this process's exec, under the trace.
     let mut phases = trace_latency.then(startup::Phases::from_exec);
@@ -769,10 +781,10 @@ fn paint(
             channel(color.b)
         )
     };
-    eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
+    if diagnostics() { eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
         // Point as a buffer byte: a window publishes its text from a base byte.
-        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_buffer_byte(w.snapshot.id, w.snapshot.point_byte)})).collect::<Vec<_>>() }));
+        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_buffer_byte(w.snapshot.id, w.snapshot.point_byte)})).collect::<Vec<_>>() })); }
     let glyphs: Vec<_> = std::iter::once(&frame).chain(&children).filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).flat_map(|frame| {
         let (id, origin) = (frame.frame_placement.frame().get(), frame.frame_placement.outer_in_parent());
         frame.glyphs.iter().filter_map(move |glyph| {
@@ -796,12 +808,12 @@ fn paint(
     } else { None };
     let wait_render_ns = wait_start.elapsed().as_nanos();
     let diagnostic_write_start = Instant::now();
-    eprintln!(
+    if diagnostics() { eprintln!(
         "{}",
         json!({"diagnostic":if synchronous { "paint" } else { "paint-submitted" },"presentation":presentation,
         "buffer_versions":snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),"resolved_fonts":resolved_fonts,
         "unresolved_face_text_total":diagnostic.map(|sample| sample.unresolved_face_text_total)})
-    );
+    ); }
     if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { eprintln!(
         "{}",
         json!({"diagnostic":"submitted-scene", "presentation":presentation,
@@ -993,12 +1005,12 @@ fn evaluate(
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
-        if let Some(loadup) = &started.loadup {
+        if let Some(loadup) = started.loadup.as_ref().filter(|_| diagnostics()) {
             for line in loadup.table().lines() { eprintln!("romacs-loadup: {line}"); }
         }
         // Per journey key: whose command it runs. The journey judge reads these
         // so a reply can never pass a stand-in off as GNU's command.
-        for (key, gnu, romacs) in startup::STAND_INS {
+        for (key, gnu, romacs) in startup::STAND_INS.into_iter().filter(|_| diagnostics()) {
             if let Some(b) = started.bindings.iter().find(|b| b.key == key) {
                 eprintln!("romacs-binding: {key}\t{gnu}\t{}", if b.gnu_defined { gnu } else { romacs });
             }
@@ -1178,11 +1190,16 @@ fn evaluate(
                 match outcome {
                     Ok(Some(outcome)) => {
                         if outcome.bell { eprint!("\x07"); }
-                        if let Some(message) = &outcome.message { eprintln!("{message}"); }
-                        let reply_start = diagnostic_start.map(|_| Instant::now());
-                        reply(json!({"native_command":outcome.command,"signal":outcome.signal.map(|s|json!({"condition":s.condition,"data":s.data})),
-                            "bell":outcome.bell,"message":outcome.message,"presentation":last_presentation()}))?;
-                        reply_ns = reply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
+                        // Each command's reply is a harness protocol: a daily
+                        // session's log keeps no record of its commands,
+                        // signals or messages.
+                        if diagnostics() {
+                            if let Some(message) = &outcome.message { eprintln!("{message}"); }
+                            let reply_start = diagnostic_start.map(|_| Instant::now());
+                            reply(json!({"native_command":outcome.command,"signal":outcome.signal.map(|s|json!({"condition":s.condition,"data":s.data})),
+                                "bell":outcome.bell,"message":outcome.message,"presentation":last_presentation()}))?;
+                            reply_ns = reply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
+                        }
                     }
                     Ok(None) => {},
                     Err(error) => {
@@ -1206,9 +1223,9 @@ fn evaluate(
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
                 if let Ok(diagnostic) = sender.wait_for_render(in_flight, std::time::Duration::ZERO) {
                     live_presentation.completed(in_flight, Instant::now());
-                    eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
+                    if diagnostics() { eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
-                        "unresolved_face_text_total":diagnostic.unresolved_face_text_total}));
+                        "unresolved_face_text_total":diagnostic.unresolved_face_text_total})); }
                     if tracing() {
                         eprintln!("{}", json!({"diagnostic":"latency-render","presentation":in_flight,
                             "units":"ns","submit_to_render_observed_ns":submitted.elapsed().as_nanos(),

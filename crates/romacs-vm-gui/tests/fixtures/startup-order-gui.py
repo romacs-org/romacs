@@ -122,7 +122,7 @@ def record(emacs, args, init, keys):
         (home / 'sub/visited.txt').write_text('visited\n')
         (home / 'chosen.txt').write_text('chosen\n')
         # The harness's headless compositor environment.
-        env = {'PATH': f'{TOOLS}:{os.environ["PATH"]}', 'HOME': str(home), 'LANG': 'C.UTF-8', 'XDG_RUNTIME_DIR': str(root),
+        env = {'PATH': f'{TOOLS}:{os.environ["PATH"]}', 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1', 'XDG_RUNTIME_DIR': str(root),
                'XDG_CONFIG_HOME': str(home / 'c'), 'XDG_CACHE_HOME': str(home / 'k'), 'XDG_DATA_HOME': str(home / 'd'),
                'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
                'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop', 'GSETTINGS_BACKEND': 'memory',

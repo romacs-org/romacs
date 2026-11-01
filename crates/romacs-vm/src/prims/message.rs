@@ -95,8 +95,11 @@ fn logged(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let text = saved[0];
     if !inhibited(cx)? {
         show(cx, text)?;
-        let mut err = std::io::stderr().lock();
-        let _ = err.write_all(&cx.string_bytes(text)?).and_then(|()| err.write_all(b"\n"));
+        let noninteractive = cx.intern("noninteractive");
+        if crate::host::messages_to_stderr() || cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) != Value::NIL {
+            let mut err = std::io::stderr().lock();
+            let _ = err.write_all(&cx.string_bytes(text)?).and_then(|()| err.write_all(b"\n"));
+        }
     }
     Ok(Step::Done(text))
 }

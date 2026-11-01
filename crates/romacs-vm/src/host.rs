@@ -2073,6 +2073,20 @@ pub fn termination_signal(pending: bool) -> Option<i32> {
     (signal != 0).then_some(signal)
 }
 
+static MESSAGES_TO_STDERR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether `message' also writes to stderr while `noninteractive' is nil.
+/// GNU's xdisp.c message_to_stderr writes only in batch; a bare VM's tools
+/// and test runners report through stderr, so that is the default, and an
+/// interactive embedder (the GUI) turns it off: its echo area is no log.
+pub fn set_messages_to_stderr(on: bool) {
+    MESSAGES_TO_STDERR.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn messages_to_stderr() -> bool {
+    MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
 pub fn eventfd() -> io::Result<OwnedFd> {
     effect(|| "eventfd".into())?;

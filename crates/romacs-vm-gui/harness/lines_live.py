@@ -91,7 +91,7 @@ def session(binary, args, output, tools, init, files=()):
         (config / 'rc.xml').write_text(live.RC_XML)
         path = os.environ.get('PATH', '/usr/bin:/bin')
         env = {'PATH': f'{tools}:{path}' if tools else path,
-               'HOME': str(home), 'LANG': 'C.UTF-8',
+               'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
                'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
@@ -213,7 +213,7 @@ def gnu_points(emacs, file, columns, rows, keys):
         program = (f'(progn (funcall {record} (list (quote geometry) (window-body-width) {probe}))'
                    " (add-hook 'post-command-hook (lambda () (when (memq this-command '(forward-char next-line previous-line))"
                    f" (funcall {record} (list this-command (point)))))))")
-        env = {'PATH': '/usr/bin:/bin', 'HOME': str(home), 'TERM': 'xterm-256color', 'LANG': 'C.UTF-8',
+        env = {'PATH': '/usr/bin:/bin', 'HOME': str(home), 'TERM': 'xterm-256color', 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                'XDG_CONFIG_HOME': str(home / 'c'), 'XDG_CACHE_HOME': str(home / 'k'), 'XDG_DATA_HOME': str(home / 'd')}
         pid, fd = pty.fork()
         if pid == 0:
