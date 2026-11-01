@@ -4514,6 +4514,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-scene"
+version = "0.0.19"
+dependencies = [
+ "kurbo",
+]
+
+[[package]]
 name = "romacs-snapshot"
 version = "0.0.19"
 dependencies = [

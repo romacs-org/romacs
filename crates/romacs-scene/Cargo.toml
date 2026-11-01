@@ -1,0 +1,14 @@
+[package]
+name = "romacs-scene"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Retained scene graph for Romacs: nodes, diffs, layout, motion and the draw list"
+
+[dependencies]
+kurbo.workspace = true
+
+[lints]
+workspace = true
