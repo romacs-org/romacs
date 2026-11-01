@@ -398,6 +398,7 @@ fn romacs_create_frame(cx, parms: Value) {
         stored.insert(0, (name_key, name));
     }
     let frame = cx.windows().create_child_frame(parent, geometry, stored)?;
+    cx.face_copy_frame(parent, frame)?;
     // gui_default_parameter (pgtkfns.c:1599) on the frame already listed:
     // a refused value leaves it, not yet visible, as x_create_frame does.
     for name in ["alpha", "alpha-background", "left-fringe", "right-fringe"] {

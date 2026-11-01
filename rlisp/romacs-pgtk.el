@@ -137,9 +137,9 @@ Romacs's window reads text through its own input method, which stays in use."
   nil)
 
 ;; frame.el's frame creation (`make-frame'): Romacs's display makes
-;; child frames, painted over their parent (VM2-CHILD-FRAME).  Faces are
-;; the session's, not a frame's, so `x-create-frame-with-faces' would have
-;; no frame faces to set up.
+;; child frames, painted over their parent (VM2-CHILD-FRAME).  The frame
+;; starts with copies of its parent's faces, what `x-create-frame-with-faces'
+;; would compute for a frame on the same display.
 
 (cl-defmethod frame-creation-function (params &context (window-system pgtk))
   (romacs--create-frame params))

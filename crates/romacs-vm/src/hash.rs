@@ -875,6 +875,10 @@ impl Vm {
         })?;
         Ok(found.and_then(|slot| self.table(table).ok()?.entry(slot)))
     }
+    pub(super) fn declaration_hash_entries(&self, table: Value) -> Result<Vec<(Value, Value)>> {
+        let table = self.table(table).map_err(|_| "hash table required")?;
+        Ok(table.entries().map(|(_, key, value)| (key, value)).collect())
+    }
     pub(super) fn declaration_hash_remove(&mut self, table: Value, key: Value) -> Result<()> {
         // Local-binding tables are declaration tables (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
