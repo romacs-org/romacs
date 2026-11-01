@@ -19,7 +19,7 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 31] = [
+        let checks: [(&str, bool); 32] = [
             ("stack", self.stack.is_empty()),
             ("dynamic", self.dynamic.is_empty()),
             ("eval_depth", self.eval_depth == 0),
@@ -46,6 +46,7 @@ impl Vm {
             ("spare_programs", self.spare_programs.is_empty()),
             ("regexp_cache", self.regexp_cache.is_empty()),
             ("idle_since", self.idle_since.is_none()),
+            ("profiler", self.profiler.is_idle()),
             ("suspended_code", self.suspended_code.is_empty()),
             // The collector's reentry state: no engine running or suspended,
             // no frame holding Values out of its sight.

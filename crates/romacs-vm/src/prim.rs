@@ -1707,6 +1707,7 @@ mod leaf {
     mod completion;
     pub(crate) use completion::{OrderlessPass, OrderlessSpec};
     mod backtrace;
+    mod profiler;
     mod text_properties;
     pub(crate) use text_properties::{PropertyBegin, Retry};
     mod undo;

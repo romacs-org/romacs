@@ -617,6 +617,7 @@ impl Vm {
             handler.visit_values(&mut |v| pending.push(*v));
         }
         self.backtrace.visit_values(&mut |v| pending.push(*v));
+        self.profiler.visit_values(&mut |v| pending.push(*v));
         let mut local_live = HashSet::default();
         let mut obarray_symbols_live = HashSet::default();
         // Membership by slot, tested for every symbol and slot visited below.
@@ -996,6 +997,7 @@ impl Vm {
             handler.visit_values(&mut |v| rewrite(v));
         }
         self.backtrace.visit_values(&mut |v| rewrite(v));
+        self.profiler.visit_values(&mut |v| rewrite(v));
         for (&slot, name) in &mut self.obarray_symbol_names {
             if obarray_symbols_live.contains(&slot) { rewrite(name); }
             else {
