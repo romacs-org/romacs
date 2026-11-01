@@ -17,3 +17,10 @@ fn recursion_depth(cx) {
     }
     Ok(Value::integer(depth).unwrap())
 }}
+
+// Internal: read_minibuf_unwind's resize of the mini-window once the
+// outermost minibuffer is left (rlisp/vm/minibuf.el).
+defsubr! { name = "romacs--resize-mini-window", gnu = "minibuf.c:1197", effect = Global,
+fn resize_mini_window(cx) {
+    cx.windows().resize_mini_window_now()
+}}

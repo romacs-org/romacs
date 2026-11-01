@@ -31,6 +31,12 @@ fn message(cx, format_string: Value; rest args) -> Step {
             let noninteractive = cx.intern("noninteractive");
             if cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) != Value::NIL { eprintln!(); }
         }
+        // message3 first ends a part line printing left in the log; only
+        // the installed Lisp half can have left one.
+        let end_line = cx.intern("romacs--message-log-end-line");
+        if cx.symbol_function(end_line)? != Value::NIL {
+            return Ok(Step::Call { f: end_line, args: vec![], then: value, saved: vec![format_string] });
+        }
         return Ok(Step::Done(format_string));
     }
     let mut all = vec![format_string];
@@ -40,20 +46,49 @@ fn message(cx, format_string: Value; rest args) -> Step {
 }}
 
 fn formatted(cx: &mut Leaf<'_>, text: Value, _: &[Value]) -> Next {
-    let limit = cx.intern("message-log-max");
-    if cx.variable_value(limit)?.unwrap_or(Value::NIL) == Value::NIL { return logged(cx, Value::NIL, &[text]); }
-    let dolog = cx.intern(DOLOG);
-    if cx.symbol_function(dolog)? == Value::NIL {
-        let source = cx.string(LISP_HALF);
-        let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-        let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
-        return Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: installed, saved: vec![text] });
-    }
-    Ok(Step::Call { f: dolog, args: vec![text], then: logged, saved: vec![text] })
+    if !logging(cx)? { return logged(cx, Value::NIL, &[text]); }
+    if half_missing(cx)? { return install_half(cx, installed, vec![text]); }
+    installed(cx, Value::NIL, &[text])
 }
 
 fn installed(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     Ok(Step::Call { f: cx.intern(DOLOG), args: vec![saved[0]], then: logged, saved: vec![saved[0]] })
+}
+
+/// print.c strout into the echo area: TEXT is logged as part of a line,
+/// continuing the one printing left when EXTENDED (message_buf_print);
+/// then RESULT.
+pub(super) fn log_printed(cx: &mut Leaf<'_>, text: Value, extended: bool, result: Value) -> Next {
+    if !logging(cx)? { return Ok(Step::Done(result)); }
+    let part = if extended { cx.intern("extend") } else { Value::TRUE };
+    let saved = vec![text, part, result];
+    if half_missing(cx)? { return install_half(cx, printed, saved); }
+    printed(cx, Value::NIL, &saved)
+}
+
+fn printed(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: cx.intern(DOLOG), args: vec![saved[0], saved[1]], then: value, saved: vec![saved[2]] })
+}
+
+fn value(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
+
+/// message_dolog logs nothing while `message-log-max' is nil.
+fn logging(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
+    let limit = cx.intern("message-log-max");
+    Ok(cx.variable_value(limit)?.unwrap_or(Value::NIL) != Value::NIL)
+}
+
+fn half_missing(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
+    let dolog = cx.intern(DOLOG);
+    Ok(cx.symbol_function(dolog)? == Value::NIL)
+}
+
+/// Install the Lisp half, then continue with THEN and SAVED.
+fn install_half(cx: &mut Leaf<'_>, then: Then, saved: Vec<Value>) -> Next {
+    let source = cx.string(LISP_HALF);
+    let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
+    let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+    Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then, saved })
 }
 
 fn logged(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {

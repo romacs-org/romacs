@@ -274,14 +274,31 @@ reports it, raised from the innermost recursive edit when there is one."
       ;; `auto-save-interval' events, and while idle.
       (when (and romacs--reading-command-keys (romacs--auto-save-due-p) (not (romacs--unread-p)) (not (input-pending-p)))
         (romacs--auto-save))
-      (setq c (romacs--keyboard-translate
-               (romacs--read-host-char seconds (and romacs--reading-command-keys (null seconds)
-                                                    (romacs--auto-save-delay)))))
-      (cond (c (unless executing-kbd-macro
-                 (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))))
-            ;; A timer queued input while the host waited: read it as GNU's
-            ;; wait returns on requeued_command_events_pending_p.
-            ((romacs--unread-p) (setq again t))))
+      (let ((sit (and romacs--reading-command-keys (null seconds) (romacs--auto-save-delay))))
+        (setq c (romacs--read-host-char seconds sit))
+        ;; An event a timer or filter queued in `unread-command-events'
+        ;; while the host waited: when the wait was read_char's auto-save
+        ;; `sit_for', it is read next as a requeued event (keyboard.c:2999);
+        ;; otherwise it is the wait's own input, read as the keyboard's is
+        ;; (kbd_buffer_get_event, keyboard.c:4169).  Any other requeued
+        ;; event is read next, as GNU's wait returns on
+        ;; requeued_command_events_pending_p.
+        (when (and (null c) (not sit) (consp unread-command-events))
+          (setq c (car unread-command-events)
+                unread-command-events (cdr unread-command-events))
+          (cond ((and (consp c) (eq (car c) t)) (setq c (cdr c)))
+                ((and (consp c) (eq (car c) 'no-record)) (setq c (cdr c) recorded t)))))
+      (setq c (and c (romacs--keyboard-translate c)))
+      (if (null c)
+          (when (romacs--unread-p) (setq again t))
+        ;; read_char wipes the echo area for each event from the keyboard,
+        ;; other than help, frame and window selection events
+        ;; (keyboard.c:3231): a prompt `read-event' showed goes once its
+        ;; event comes.
+        (when (and (current-message)
+                   (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
+          (when (boundp 'echo-area-clear-hook) (romacs--safe-run-hooks 'echo-area-clear-hook))
+          (message nil))))
      (seconds)
      ;; Batch GNU blocks for the terminal here. With no input left, VM2
      ;; leaves the innermost recursive edit or minibuffer instead, so a
@@ -291,10 +308,13 @@ reports it, raised from the innermost recursive edit when there is one."
      (t (signal 'end-of-file '("Error reading from stdin")))))
     (when c
       ;; record_char: recent-keys and the macro being defined leave out
-      ;; keyboard-macro input.
+      ;; keyboard-macro input.  It counts the event too, whichever input it
+      ;; came from (keyboard.c:3583), for `auto-save-interval' and the idle
+      ;; auto-save.
       (unless (or recorded executing-kbd-macro
                   (and (boundp 'inhibit--record-char) inhibit--record-char))
         (romacs--record-input c)
+        (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))
         (when defining-kbd-macro (romacs--store-kbd-macro-char c)))
       ;; A read with SECONDS leaves its event out of the command's keys.
       (when (and (null seconds)
@@ -307,7 +327,8 @@ reports it, raised from the innermost recursive edit when there is one."
 ;; read-char-exclusive (Fread_char's modifier resolution is Rust).
 (defun romacs--read-filtered-event (prompt seconds ascii-required error-nonascii)
   (when inhibit-interaction (signal 'inhibited-interaction nil))
-  (when prompt (message "%s" prompt))
+  ;; message_with_string's echo, which is not logged (keyboard.c:10776).
+  (when prompt (let ((message-log-max nil)) (message "%s" prompt)))
   (let ((seconds (and (numberp seconds) seconds)) val)
     (while (progn
              (setq val (romacs--read-char seconds))

@@ -52,6 +52,15 @@ const CASES: &[&str] = &[
     (setq real-this-command 'outer this-command nil)
     (execute-kbd-macro "aa"))
   (list (nreverse log) executing-kbd-macro executing-kbd-macro-index real-this-command last-command this-command))"#,
+    // record_char counts every recorded event outside a macro, an unread
+    // one too (auto-save-interval reads the count); `no-record' events,
+    // inhibit--record-char and macro input are not counted.
+    r#"(let ((before num-nonmacro-input-events))
+  (list (let ((unread-command-events (list ?a ?b (cons 'no-record ?c)))) (list (read-event) (read-event) (read-event)))
+        (- num-nonmacro-input-events before)
+        (let ((inhibit--record-char t) (unread-command-events (list ?d))) (read-event))
+        (- num-nonmacro-input-events before)
+        (progn (global-set-key "x" 'ignore) (execute-kbd-macro "xx") (- num-nonmacro-input-events before))))"#,
     // A command's error leaves the macro and reaches the caller; state is restored.
     r#"(progn (global-set-key "e" (lambda () (interactive) (error "Boom %d" executing-kbd-macro-index)))
   (list (condition-case e (execute-kbd-macro "aeaa") (error e)) executing-kbd-macro executing-kbd-macro-index

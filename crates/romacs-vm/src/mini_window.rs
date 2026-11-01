@@ -227,21 +227,24 @@ impl Vm {
             _ => limit.integer_value().map_or(i64::from(total / 4), |n| n.saturating_mul(i64::from(unit))),
         }.clamp(i64::from(unit), i64::from(total.max(unit)));
         let max_lines = (max / i64::from(unit)) as usize;
-        let lines = spliced.text.split('\n').count();
         // A continued row ends a column short, for the `\\' glyph (layout2).
         let column = self.window_state.column.max(1);
         let row = (width.saturating_sub(column) / column).max(1) as usize;
         let wrapped = self.window_line_wrap(mini, buffer)? != romacs_layout_input::LineWrap::Truncate;
-        let rows: usize = if wrapped { spliced.text.split('\n').map(|line| rows(line, row)).sum() } else { lines };
+        let rows: Vec<usize> = spliced.text.split('\n').map(|line| if wrapped { rows(line, row) } else { 1 }).collect();
+        let lines: usize = rows.iter().sum();
         if lines > max_lines && adhoc {
-            // Start at the display line that shows the last MAX_LINES.
-            let line_start = spliced.text.match_indices('\n').nth(lines - max_lines - 1).map_or(0, |(i, _)| i + 1);
+            // Start at the text line from which the rest takes at most
+            // MAX_LINES display lines (the last one when it alone takes more).
+            let mut shown = 0;
+            let first = (0..rows.len()).rev().find(|&i| { shown += rows[i]; shown > max_lines }).map_or(0, |i| (i + 1).min(rows.len() - 1));
+            let line_start = if first == 0 { 0 } else { spliced.text.match_indices('\n').nth(first - 1).map_or(0, |(i, _)| i + 1) };
             let byte = buffer_of(&spliced.segments, line_start, text.len());
             let Object::Buffer(b) = self.object(buffer)? else { return Err("text buffer required".into()) };
             let start = b.char_of_byte(coordinates::ByteOffset(byte))?.0 as i64 + 1;
             self.set_window_start_if_moved(marker, buffer, start)?;
         }
-        let height = rows.min(max_lines).max(1) as u32;
+        let height = lines.min(max_lines).max(1) as u32;
         let old = self.window_state.mini_lines;
         // grow-only's shrink to one line, then the next cycle's growth
         // (window.c shrink_mini_window), in one step.

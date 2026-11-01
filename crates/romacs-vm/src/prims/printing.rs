@@ -142,15 +142,15 @@ fn echo_area_shown(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
 }
 /// print.c `printchar_to_stream` into the echo area: a print extends the
 /// message printing made (`message_buf_print`); after any other message,
-/// it starts a new one.
+/// it starts a new one. Either way the text is logged, as part of a line.
 fn echo_print(cx: &mut Leaf<'_>, result: Value, text: Value) -> Next {
     let shown = cx.hidden_value(crate::prim::ECHO_AREA_MESSAGE);
     let extended = shown != Value::NIL && shown == cx.hidden_value(crate::prim::ECHO_AREA_PRINTED);
     let prefix = if extended { cx.string_text(shown)? } else { String::new() };
-    let text = cx.string(&(prefix + &cx.string_text(text)?));
-    cx.set_hidden_value(crate::prim::ECHO_AREA_MESSAGE, text);
-    cx.set_hidden_value(crate::prim::ECHO_AREA_PRINTED, text);
-    Ok(Step::Done(result))
+    let echoed = cx.string(&(prefix + &cx.string_text(text)?));
+    cx.set_hidden_value(crate::prim::ECHO_AREA_MESSAGE, echoed);
+    cx.set_hidden_value(crate::prim::ECHO_AREA_PRINTED, echoed);
+    super::message::log_printed(cx, text, extended, result)
 }
 fn next_char(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
     let at = saved[3].integer_value().unwrap() as usize;

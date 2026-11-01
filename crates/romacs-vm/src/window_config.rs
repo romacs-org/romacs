@@ -49,6 +49,16 @@ pub(crate) struct WindowConfiguration {
 }
 romacs_snapshot::snapshot_struct!(WindowConfiguration { frame, selected_frame, current_window, current_buffer, root, windows });
 
+/// What Fset_window_configuration restores after its record_buffer: the
+/// buffer recorded, the frame to select again, and the buffer current at
+/// saving with its point (`finish_window_configuration').
+pub(crate) struct RestoredConfiguration {
+    pub recorded: Option<Value>,
+    pub reselect: Value,
+    pub new_current: Value,
+    pub old_point: Value,
+}
+
 impl WindowConfiguration {
     pub(crate) fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         for v in [&mut self.frame, &mut self.selected_frame, &mut self.current_window, &mut self.current_buffer, &mut self.root] {
@@ -205,8 +215,11 @@ impl Vm {
         w.point = point_marker;
         Ok(())
     }
-    /// Fset_window_configuration.
-    pub(super) fn set_window_configuration(&mut self, config: Value, dont_set_frame: Value, dont_set_miniwindow: Value) -> Result<Value> {
+    /// Fset_window_configuration up to its record_buffer: None when the
+    /// configuration's frame is dead (the value is nil); else the buffer it
+    /// recorded, whose `buffer-list-update-hook' the caller runs there, and
+    /// what `finish_window_configuration' restores after it.
+    pub(super) fn set_window_configuration(&mut self, config: Value, dont_set_frame: Value, dont_set_miniwindow: Value) -> Result<Option<RestoredConfiguration>> {
         self.ensure_windows()?;
         let entry_frame = self.frame_value_peek();
         let Some(Object::WindowConfiguration(data)) = self.object_if(config) else {
@@ -237,7 +250,7 @@ impl Vm {
         // delete_all_child_windows: every window of the current tree is
         // deleted; a leaf remembers its buffer in case it is restored.
         let frame = data.frame;
-        if !self.frame(frame)?.live { return Ok(Value::NIL); }
+        if !self.frame(frame)?.live { return Ok(None); }
         let mut tree = vec![self.frame(frame)?.root];
         let mut kept = HashMap::default();
         let mut at = 0;
@@ -322,9 +335,11 @@ impl Vm {
             let (marker, buffer) = (self.window(data.current_window)?.point, new_current);
             self.set_marker_object(marker, old_point, buffer)?;
         }
-        // select_window, recording the use, without swapping out the point
-        // of the old selected window, which was saved above.
+        // select_window, recording the use and the buffer (window.c:8068,
+        // Bug#16207), without swapping out the point of the old selected
+        // window, which was saved above.
         let window = data.current_window;
+        let mut recorded = None;
         if self.window(window)?.live() {
             self.frame_mut(frame)?.selected = window;
             let slot = self.slot(crate::frame::SELECTED_FRAME);
@@ -334,16 +349,25 @@ impl Vm {
             self.window_state.select_count += 1;
             let count = self.window_state.select_count;
             self.window_mut(window)?.use_time = count;
-            self.slots[self.buffer_slot].value = self.window(window)?.buffer;
+            let buffer = self.window(window)?.buffer;
+            self.slots[self.buffer_slot].value = buffer;
+            self.record_buffer_model(buffer);
+            recorded = Some(buffer);
         }
-        // select_window made FRAME the selected frame; the frame selected
-        // at saving, or with DONT-SET-FRAME at entry, is selected again
-        // (window.c:8075).
+        self.display_state.version += 1;
         let reselect = if dont_set_frame == Value::NIL { data.selected_frame } else { entry_frame };
+        Ok(Some(RestoredConfiguration { recorded, reselect, new_current, old_point }))
+    }
+    /// Fset_window_configuration after its record_buffer: select_window made
+    /// the configuration's frame the selected one; RESELECT, the frame
+    /// selected at saving or with DONT-SET-FRAME at entry, is selected again
+    /// (window.c:8075), and NEW-CURRENT, the buffer current at saving, is
+    /// current again, at OLD-POINT unless the selected window shows it.
+    pub(super) fn finish_window_configuration(&mut self, reselect: Value, new_current: Value, old_point: Value) -> Result<Value> {
         if reselect != self.frame_value_peek() && self.frame(reselect)?.live {
             self.select_frame_value(reselect, false)?;
         }
-        if new_current != Value::NIL {
+        if new_current != Value::NIL && self.config_buffer_live(new_current) {
             self.slots[self.buffer_slot].value = new_current;
             let selected = self.window_root(SELECTED);
             if self.window(selected)?.buffer != new_current {
@@ -390,9 +414,12 @@ impl Windows<'_> {
         self.live_frame(frame)?;
         self.vm.current_window_configuration(frame).map_err(internal)
     }
-    pub(crate) fn set_window_configuration(&mut self, config: Value, dont_set_frame: Value, dont_set_miniwindow: Value) -> Out {
+    pub(crate) fn set_window_configuration(&mut self, config: Value, dont_set_frame: Value, dont_set_miniwindow: Value) -> std::result::Result<Option<RestoredConfiguration>, Fault> {
         self.configuration(config)?;
         self.vm.set_window_configuration(config, dont_set_frame, dont_set_miniwindow).map_err(internal)
+    }
+    pub(crate) fn finish_window_configuration(&mut self, reselect: Value, new_current: Value, old_point: Value) -> Out {
+        self.vm.finish_window_configuration(reselect, new_current, old_point).map_err(internal)
     }
     pub(crate) fn window_configuration_records(&mut self, config: Value) -> std::result::Result<Vec<Value>, Fault> {
         self.configuration(config)?;

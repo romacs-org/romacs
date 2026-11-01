@@ -178,6 +178,23 @@
 (load "international/iso-transl.el" nil t t)
 (load "emacs-lisp/rmc.el" nil t t)
 (load "leim/leim-list.el" nil t t)
+;; loadup.el:476: Snarf-documentation (doc.c:500), as loadup runs it when
+;; it does not dump: the C variables' docstrings, from DOC, for the help
+;; commands.  DOC's functions need nothing here: a primitive finds its own
+;; record when asked (`internal-subr-documentation').
+(defun Snarf-documentation (filename)
+  "Scan the DOC file FILENAME, in `doc-directory', for variable docstrings.
+Each variable it documents that is bound, or whose initialization
+Custom delayed, gets its record's position as `variable-documentation'."
+  (let ((delayed (and (consp custom-delayed-init-variables) custom-delayed-init-variables)))
+    (setq internal-doc-file-name filename)
+    (dolist (record (romacs--doc-variable-records filename))
+      (let ((symbol (intern-soft (car record))))
+        (when (and symbol (or (boundp symbol) (memq symbol delayed)))
+          (put symbol 'variable-documentation (cdr record)))))))
+(condition-case nil
+    (Snarf-documentation "DOC")
+  (error nil))
 ;; loadup.el:569: with the preloaded files in, `debug-early' gives way to
 ;; the full debugger.
 (setq debugger #'debug)

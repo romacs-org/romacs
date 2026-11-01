@@ -187,6 +187,38 @@ fn a_ready_worker_that_will_not_take_the_job_gives_way_to_the_original() {
 }
 
 #[test]
+fn a_worker_search_leaves_its_xref_window_selected_as_gnus_does() {
+    // GNU's synchronous `project-find-regexp' ends in `pop-to-buffer': the
+    // xref window is selected and *xref* heads the buffer list, ahead of
+    // the buffer searched from, and *xref* is current, so the keys read
+    // next are its. The worker's continuation ends the same way.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let (scratch, project) = fixture_project("xref");
+    let script = format!("(progn {PREAMBLE} (require 'project) (load {module:?}) (setq romacs-project-isolate 'source)
+      (setq project-list-file (expand-file-name \"projects.eld\" (getenv \"HOME\")))
+      (let* ((pr (project-current nil {dir:?}))
+             (worker (romacs-project--warm pr))
+             (origin (find-file-noselect (expand-file-name \"subr.el\" {dir:?})))
+             (tries 600))
+        (isolate-await (isolate-spawn '(lambda () t) :isolate worker))
+        (switch-to-buffer origin)
+        (let ((window (selected-window)))
+          (prin1 (list 'returned (romacs-project-find-regexp (lambda (_) 'original) \"defcustom project-\")))
+          (while (and (not (get-buffer \"*xref*\")) (> tries 0))
+            (romacs--isolate-pump 0.1)
+            (setq tries (1- tries)))
+          (let ((xref (get-buffer \"*xref*\")))
+            (prin1 (list 'selected (eq (window-buffer (selected-window)) xref) (eq (current-buffer) xref)
+                         'moved (not (eq (selected-window) window))
+                         'order (eq (nth 0 (buffer-list)) xref) (eq (nth 1 (buffer-list)) origin)))))
+        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("rlisp/romacs-project.el").display().to_string());
+    let (ok, out, err) = batch(&script, &project);
+    assert!(ok, "batch failed: {err}");
+    assert_eq!(out.trim(), "(returned nil)(selected t t moved t order t t)", "{err}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
 fn a_snapshot_carries_the_text_and_its_worker_buffer_refuses_text_edits() {
     // Design §3.6: the accessible text (raw bytes included), its start, point,
     // the mode and the recorded locals; the worker's buffer is read-only as

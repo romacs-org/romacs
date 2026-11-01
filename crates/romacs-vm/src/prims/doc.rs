@@ -51,6 +51,45 @@ fn doc_string(cx: &mut Leaf<'_>, position: i64) -> Out {
     Ok(cx.make_string(text, multibyte))
 }
 
+/// Snarf-documentation's variable records (doc.c:606): each "\037VNAME\n"
+/// record's name and the position of its text, unless the text is a SKIP
+/// placeholder.
+fn variable_records(bytes: &[u8]) -> Vec<(&[u8], usize)> {
+    let mut records = vec![];
+    let mut at = 0;
+    while let Some(found) = bytes[at..].windows(2).position(|w| w == b"\x1fV") {
+        let name = at + found + 2;
+        let Some(newline) = bytes[name..].iter().position(|&b| b == b'\n') else { break };
+        let text = name + newline + 1;
+        if !bytes[text..].starts_with(b"SKIP") { records.push((&bytes[name..name + newline], text)); }
+        at = text;
+    }
+    records
+}
+
+// Internal: the scan half of Snarf-documentation (doc.c:500), which
+// rlisp/romacs-loadup-bootstrap.el finishes in Lisp. FILENAME is in
+// `doc-directory'; the value lists each variable record as (NAME . POSITION).
+defsubr! { name = "romacs--doc-variable-records", gnu = "doc.c:500", effect = Reads,
+fn doc_variable_records(cx, filename: Value) {
+    let directory = cx.intern("doc-directory");
+    let directory = cx.variable_value(directory)?.unwrap_or(Value::NIL);
+    if !matches!(cx.kind(directory), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", directory)); }
+    if !matches!(cx.kind(filename), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", filename)); }
+    let path = std::path::Path::new(&cx.string_text(directory)?).join(cx.string_text(filename)?);
+    let Some(bytes) = cx.doc_file_bytes(&path) else {
+        return Err(Fault::Error(format!("Opening doc string file: No such file or directory, {}", path.display())));
+    };
+    let mut list = Value::NIL;
+    for (name, position) in variable_records(&bytes).into_iter().rev() {
+        let name = cx.make_string(name.to_vec(), crate::environment::multibyte(name));
+        let position = Value::integer(position as i64).map_err(Fault::Error)?;
+        let record = cx.cons(name, position);
+        list = cx.cons(record, list);
+    }
+    Ok(list)
+}}
+
 defsubr! { name = "internal-subr-documentation", gnu = "doc.c:383", effect = Reads,
 fn internal_subr_documentation(cx, function: Value) {
     if cx.kind(function) != Kind::Subr { return Ok(Value::TRUE); }

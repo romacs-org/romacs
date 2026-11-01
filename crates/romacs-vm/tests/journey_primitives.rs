@@ -223,6 +223,23 @@ fn help_describes_a_function_a_variable_and_a_mode() {
     ]);
 }
 
+/// loadup's Snarf-documentation gives the C variables their DOC
+/// docstrings: `documentation-property' reads them, help knows they are
+/// C source's, and C-h v describes one as GNU does.
+#[test]
+fn c_variables_carry_their_doc_strings() {
+    let help = |body: &str| format!(
+        "(progn (let ((inhibit-message t)) (save-window-excursion {body}))
+                (with-current-buffer (help-buffer) (buffer-substring-no-properties (point-min) (point-max))))");
+    assert_matches("(require 'help-fns)", &[
+        "(documentation-property 'fill-column 'variable-documentation t)",
+        "(documentation-property 'case-fold-search 'variable-documentation)",
+        "(integerp (get 'gc-cons-threshold 'variable-documentation))",
+        "(find-lisp-object-file-name 'fill-column 'defvar)",
+        &help("(describe-variable 'fill-column)"),
+    ]);
+}
+
 /// icomplete's file-name completion of a `~USER' prefix lists
 /// `system-users', and a `~/' typed in the middle of a path loads neither
 /// tramp nor ange-ftp, as in GNU.

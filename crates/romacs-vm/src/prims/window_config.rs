@@ -29,7 +29,23 @@ fn record_next(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     if let Some((window, rest)) = cx.pair(windows) && cx.fboundp(record) {
         return Ok(Step::Call { f: record, args: vec![window], then: record_next, saved: vec![configuration, dont_set_miniwindow, rest, dont_set_frame] });
     }
-    Ok(Step::Done(cx.windows().set_window_configuration(configuration, dont_set_frame, dont_set_miniwindow)?))
+    let Some(restored) = cx.windows().set_window_configuration(configuration, dont_set_frame, dont_set_miniwindow)? else {
+        return Ok(Step::Done(Value::NIL));
+    };
+    let saved = vec![restored.reselect, restored.new_current, restored.old_point];
+    // The restored selected window's buffer was recorded (record_buffer,
+    // buffer.c:2218): buffer-list-update-hook runs there, in that buffer,
+    // unless it inhibits hooks; the saved frame and buffer come back after.
+    match restored.recorded {
+        Some(buffer) if cx.buffer_state(buffer).is_some_and(|s| !s.inhibit_buffer_hooks) => {
+            let hook = cx.intern("buffer-list-update-hook");
+            Ok(Step::Call { f: cx.intern("run-hooks"), args: vec![hook], then: finish, saved })
+        }
+        _ => finish(cx, Value::NIL, &saved),
+    }
+}
+fn finish(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Done(cx.windows().finish_window_configuration(saved[0], saved[1], saved[2])?))
 }
 
 defsubr! { name = "window-configuration-p", gnu = "window.c:7640", effect = Pure,
