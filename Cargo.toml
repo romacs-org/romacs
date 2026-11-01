@@ -303,6 +303,8 @@ resvg = "0.47"
 # 2D geometry (already linked by usvg) and path tessellation for scenes.
 kurbo = "0.13.1"
 lyon = "1.0.16"
+# Flex layout of scene groups (crates/romacs-scene).
+taffy = { version = "0.13", default-features = false, features = ["std", "taffy_tree", "flexbox"] }
 # Same version resvg 0.47 links, so COLR paint graphs rasterize with the
 # rasterizer already in the tree rather than a second copy of it.
 tiny-skia = "0.12"

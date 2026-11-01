@@ -9,6 +9,11 @@ description = "Retained scene graph for Romacs: nodes, diffs, layout, motion and
 
 [dependencies]
 kurbo.workspace = true
+romacs-display-protocol.workspace = true
+taffy.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true
