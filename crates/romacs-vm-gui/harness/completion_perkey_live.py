@@ -145,7 +145,8 @@ def main():
                    'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
                    'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
                    'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': args.font_size, 'SHELL': '/bin/bash'}
-            for k in ('CARGO_HOME', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_WORLD'):
+            for k in ('CARGO_HOME', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_WORLD',
+                      'ROMACS_PRESENT_TRACE', 'ROMACS_DISABLE_RETAINED_ROOT'):
                 if k in os.environ:
                     env[k] = os.environ[k]
             log_path = out / 'binary.stderr'

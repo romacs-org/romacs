@@ -4,8 +4,16 @@
 The session launches with no font override, in a work directory holding
 sub/notes.txt.  A private init.el records, when init runs, the completion
 options Romacs's defaults gave it (rlisp/romacs-completion-defaults.el) and
-defines a probe command that records when it runs.  Real keys then drive
-GNU's readers through icomplete's fido-vertical display:
+defines a probe command that records when it runs.  The defaults display
+GNU's readers with `romacs-complete-mode' (rlisp/romacs-complete.el): real
+keys drive vertico's UI, whose candidates show in the layer that hosts the
+minibuffer, TAB inserts the selected candidate and Return exits with it.
+Every prompt's first command records the root window's height, which must
+be the frame's whole height before, during and after each prompt: no row
+is kept for the minibuffer.
+
+With --fido the init turns the mode off and `fido-vertical-mode' on, as a
+user's init may, and the same keys drive icomplete's fido-vertical display:
 
 - M-x with a few letters shows the vertical candidate list in a grown
   mini-window, TAB force-completes the selected command, Return runs it;
@@ -16,13 +24,6 @@ GNU's readers through icomplete's fido-vertical display:
 
 Each state is captured as a screenshot and as the prompt's minibuffer text.
 labwc, wlr-randr, wtype and grim come from PATH (the gate's headless tools).
-
-With --romacs-complete the init then enables `romacs-complete-mode'
-(rlisp/romacs-complete.el): the same keys drive vertico's UI, whose
-candidates show in the layer that hosts the minibuffer, TAB inserts the
-selected candidate and Return exits with it.  Every prompt's first command
-records the root window's height, which must be the frame's whole height
-before, during and after each prompt: no row is kept for the minibuffer.
 """
 import argparse
 import hashlib
@@ -43,7 +44,7 @@ INIT = '''(write-region
   (list completion-styles completion-auto-select completion-auto-help completions-format
         completions-sort completions-max-height completion-ignore-case
         icomplete-compute-delay icomplete-delay-completions-threshold
-        completion-category-overrides fido-vertical-mode
+        completion-category-overrides fido-vertical-mode romacs-complete-mode
         (lookup-key icomplete-fido-mode-map (kbd "TAB"))))
  nil {defaults})
 (defun romacs-live-completion-probe ()
@@ -51,10 +52,9 @@ INIT = '''(write-region
   (interactive)
   (write-region "ran" nil {probe}))
 '''
-# Appended for --romacs-complete: the mode, and the root window's height
-# against the frame's, recorded at init and in each prompt.
-LAYER_INIT = '''(romacs-complete-mode 1)
-(defun romacs-live-root-height (where)
+# Appended unless --fido: the root window's height against the frame's,
+# recorded at init and in each prompt.
+LAYER_INIT = '''(defun romacs-live-root-height (where)
   (let ((frame (window-frame (minibuffer-selected-window))))
     (write-region (format "%S\n" (list where (window-pixel-height (frame-root-window frame))
                                         (frame-text-height frame) (frame-visible-p (romacs--minibuffer-host))))
@@ -66,7 +66,9 @@ LAYER_INIT = '''(romacs-complete-mode 1)
 
 EXPECTED_DEFAULTS = ('((fzf basic partial-completion emacs22) t visible one-column historical 20 t 0.15 400 '
                      '((file (styles fzf partial-completion)) (project-file (styles fzf substring))) '
-                     't icomplete-force-complete)')
+                     'nil t icomplete-force-complete)')
+# Appended for --fido: GNU's fido-vertical display instead of the layer.
+FIDO_INIT = '(romacs-complete-mode -1)\n(fido-vertical-mode 1)\n'
 
 
 def parse(line):
@@ -136,8 +138,9 @@ def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', '-M', 'ctrl', 'f', '-m', 'ctrl')
     fio.wait(lambda: 'Find file: ' in layer()[0], timeout, 'find-file prompt', process)
     keys('s/n')
+    # A file candidate's row is its name, then its directory.
     shown('ff-list', 'partial completion of s/n in the layer',
-          lambda m, rows: m.endswith(f'Find file: {work}/s/n') and 'sub/notes.txt' in rows)
+          lambda m, rows: m.endswith(f'Find file: {work}/s/n') and 'notes.txt  sub/' in rows)
     keys('-k', 'Tab')
     shown('ff-tab', 'find-file candidate inserted', lambda m, rows: m.endswith(f'Find file: {work}/sub/notes.txt'))
     keys('-k', 'Return')
@@ -172,7 +175,7 @@ def main():
     parser.add_argument('--binary', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--timeout', type=float, default=120)
-    parser.add_argument('--romacs-complete', action='store_true')
+    parser.add_argument('--fido', action='store_true')
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
@@ -192,7 +195,7 @@ def main():
             (home / 'config/romacs').mkdir(parents=True)
             (home / 'config/romacs/init.el').write_text(INIT.format(
                 defaults=json.dumps(str(defaults)), probe=json.dumps(str(probe)))
-                + (LAYER_INIT.format(heights=json.dumps(str(heights))) if args.romacs_complete else ''))
+                + (FIDO_INIT if args.fido else LAYER_INIT.format(heights=json.dumps(str(heights)))))
             (config / 'rc.xml').write_text(live.RC_XML)
             env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
@@ -269,7 +272,7 @@ def main():
                     raise AssertionError(f'defaults at init: {at_init}, expected {EXPECTED_DEFAULTS}')
                 fio.wait(lambda: ff.current_rows(log_path.read_text(errors='replace')), args.timeout, 'first frame', process)
                 time.sleep(1)
-                if args.romacs_complete:
+                if not args.fido:
                     romacs_complete(report, keys, layer, selected, probe, heights, work, args.timeout, process, output, env)
                 else:
                     default_ui(report, keys, minibuffer, shown, selected, probe, work, args.timeout, process)

@@ -315,6 +315,12 @@ def main():
                                             stdout=log, stderr=log)
                 time.sleep(.3)
                 flags = ['--loadup'] if args.prompt_grow else []
+                if args.prompt_grow:
+                    # The minibuffer must grow over the terminal: fido-vertical's
+                    # display, not the default layer (VM2-COMPLETE-DEFAULT).
+                    (home / 'config' / 'romacs').mkdir(parents=True, exist_ok=True)
+                    (home / 'config' / 'romacs' / 'init.el').write_text(
+                        "(romacs-complete-mode -1)\n(fido-vertical-mode 1)\n")
                 process = subprocess.Popen([str(binary), *flags, '--trace-scene', str(original)], env=env, cwd=work,
                                            stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 

@@ -67,6 +67,9 @@ pub enum UnpooledTexture {
     /// frames. Its owning struct still holds a raw texture, so its size is
     /// reported rather than leased.
     RetainedStaticScene,
+    /// The root glyph pass's retained picture one frame window blits when a
+    /// scene commit repeats its root (a key typed into a layer).
+    RetainedRootScene,
     /// Every resident glyph-atlas page of one frame window.
     ///
     /// This is also how filled-box cursor cells reach the budget. A retained

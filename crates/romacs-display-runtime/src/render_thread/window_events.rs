@@ -409,6 +409,11 @@ impl RenderApp {
                 // only place winit distinguishes left from right, and they
                 // must be recorded before anything consumes the aggregate.
                 self.track_modifier_key(physical_key, state == ElementState::Pressed);
+                // Input never waits for a layer: a key ends every layer
+                // animation where Lisp already put the layer.
+                if state == ElementState::Pressed {
+                    self.frame_windows.finish_top_level_child_frame_animations();
+                }
                 #[cfg(feature = "webview")]
                 if let Some(target) = self.focused_webview {
                     use winit::platform::scancode::PhysicalKeyExtScancode;

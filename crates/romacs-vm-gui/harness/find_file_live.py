@@ -26,10 +26,19 @@ def current_rows(text):
         except json.JSONDecodeError:
             continue
         if record.get("diagnostic") == "prompt-paint":
-            result = [record["minibuffer"]]
+            # The minibuffer's text (none while the layer hosting it is
+            # hidden), then each layer's lines: candidates, messages.
+            result = [record["minibuffer"]] if record.get("minibuffer") is not None else []
+            result += [line for layer in record.get("layers") or [] for text in layer for line in text.split("\n")]
         elif record.get("diagnostic") == "submitted-scene":
             result = fio.scene_rows(record)
     return result
+
+
+def prompt_shown(rows, prompt):
+    """Whether ROWS show PROMPT on the first or last row: the minibuffer's
+    text, which romacs-complete's candidate count may precede."""
+    return any(row.endswith(prompt) for row in rows[:1] + rows[-1:])
 
 
 def check_prompt_close(proc, keys, control, wait_visible, capture, trace, work, timeout, report):

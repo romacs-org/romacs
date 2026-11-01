@@ -141,11 +141,10 @@ fn obsolete_native_owner_retires_before_required_child_under_same_pressure() {
         let before = pixels(&renderer, &out);
         let super::super::super::composition_targets::FrameTargets {
             picture,
-            resize,
             native,
         } = prepare_frame_targets(&mut renderer, &mut render, surface, &full_plan())
             .expect("obsolete native owner must retire BEFORE mandatory child reservation");
-        assert!(native.is_none() && render.native_content_src.is_none() && resize.is_none());
+        assert!(native.is_none() && render.native_content_src.is_none());
         let picture = picture.expect("fractional child must never be omitted");
         assert_eq!(
             picture.id(),

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "9d013ab6e278ea7856710981aeb8b6ae67b0546244666f5c50c9910cdb19bda8",
+  "source_fingerprint": "dffb5b02f2e4cf5304ec792db94f26ed196093dbf855776a8cd431cda6dc4c12",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1245,
-  "parsed_vm2_only": 1245
+  "parsed_total": 1246,
+  "parsed_vm2_only": 1246
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2833,6 +2833,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/keymap.rs:130"
   },
+  "lossage-size": {
+   "name": "lossage-size",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keymap.rs:163"
+  },
   "lower-frame": {
    "name": "lower-frame",
    "implementation": "vm2",
@@ -4236,7 +4241,7 @@
   "romacs--keymap-generation": {
    "name": "romacs--keymap-generation",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keymap.rs:163"
+   "registered_at": "crates/romacs-vm/src/prims/keymap.rs:188"
   },
   "romacs--kill-buffer-finish": {
    "name": "romacs--kill-buffer-finish",

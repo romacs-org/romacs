@@ -31,10 +31,17 @@ impl GuiFrameRenderState {
         // tick matches where the removal lands: the pixels are already gone
         // from Emacs's model, and the fade is a retainer for what was on
         // screen, not a promise about a future frame.
-        let motion = self.compositor.child_frame_motion;
+        let layer = self
+            .compositor
+            .child_frames
+            .frames
+            .get(&frame_id)
+            .map_or_else(Default::default, |entry| entry.frame.layer);
+        let motion = self.compositor.child_frame_motion.for_layer(layer.animation);
+        let close_slide = edge_slide(layer.edge, motion.close_slide);
         let (close_spec, close_slide, animates) = match motion.close {
             MotionSpec::Instant => (MotionSpec::Instant, 0.0, false),
-            close => (close, motion.close_slide, true),
+            close => (close, close_slide, true),
         };
         tracing::debug!(
             frame_id,
@@ -160,6 +167,15 @@ impl GuiFrameRenderState {
             .frames
             .get(&frame_id)
             .map(|entry| (entry.abs_x, entry.abs_y));
+        // Where the previous payload was being drawn now: a tween or glide
+        // the update interrupts retargets from there.
+        let now = observe_platform_now();
+        let sample = romacs_display_protocol::frame_time::FrameSample::new(now, std::time::Duration::ZERO);
+        let previous_drawn = self.compositor.child_frames.frames.get(&frame_id).map(|entry| {
+            (entry.drawn_rect(sample), entry.reshape.is_some(), entry.drawn_selection_y(sample))
+        });
+        let motion = self.compositor.child_frame_motion.for_layer(frame.layer.animation);
+        let edge = frame.layer.edge;
         let next_presentation = frame.presentation_id;
         let changed = self.compositor.child_frames.update_frame(frame);
         if changed {
@@ -172,7 +188,6 @@ impl GuiFrameRenderState {
             // mid-flight: a payload update carries the previous animation
             // forward instead.
             if is_fresh_install {
-                let motion = self.compositor.child_frame_motion;
                 if !motion.open.is_instant() {
                     tracing::debug!(
                         frame_id,
@@ -184,42 +199,14 @@ impl GuiFrameRenderState {
                         frame_id,
                         motion.open,
                         observe_platform_now(),
-                        motion.open_slide,
+                        edge_slide(edge, motion.open_slide),
                         motion.open_scale_from,
                     );
                     self.compositor.dirty = true;
                 }
             }
-            // A re-anchor is the movement trigger: the payload's placed
-            // position moved on an entry that already exists. It fires on
-            // the placement delta, not on content refreshes at the same
-            // anchor. A drift already in flight retargets from the position
-            // the last pass painted, at the speed it had; a fresh one
-            // departs from the placement the popup held until now.
-            if !is_fresh_install
-                && let Some((previous_x, previous_y)) = previous_placement
-                && let Some(entry) = self.compositor.child_frames.frames.get(&frame_id)
-                && ((entry.abs_x - previous_x).abs() > f32::EPSILON
-                    || (entry.abs_y - previous_y).abs() > f32::EPSILON)
-            {
-                let motion = self.compositor.child_frame_motion;
-                if !motion.movement.is_instant() {
-                    let retargeted = self.compositor.child_frames.retarget_drift(
-                        frame_id,
-                        motion.movement,
-                        observe_platform_now(),
-                    );
-                    if !retargeted {
-                        self.compositor.child_frames.begin_drift(
-                            frame_id,
-                            previous_x,
-                            previous_y,
-                            motion.movement,
-                            observe_platform_now(),
-                        );
-                    }
-                    self.compositor.dirty = true;
-                }
+            if let Some((from, reshaping, from_y)) = previous_drawn {
+                self.retarget_layer_motion(frame_id, motion, from, reshaping, from_y, previous_placement, now);
             }
             if let Some(previous) = previous_presentation
                 && previous != next_presentation
@@ -229,5 +216,61 @@ impl GuiFrameRenderState {
             }
         }
         changed
+    }
+
+    /// After an update replaced FRAME_ID's payload, which was drawn in rect
+    /// FROM (mid-tween when RESHAPING) with its selection band at FROM_Y:
+    /// tween its rect when its size changed, or a tween was running, glide
+    /// its band when the selected row moved, drift it when it only moved.
+    #[allow(clippy::too_many_arguments)]
+    fn retarget_layer_motion(
+        &mut self,
+        frame_id: u64,
+        motion: crate::render_thread::render_quality::ChildFrameMotionSpecs,
+        from: [f32; 4],
+        reshaping: bool,
+        from_y: Option<f32>,
+        previous_placement: Option<(f32, f32)>,
+        now: romacs_display_protocol::frame_time::EventTime,
+    ) {
+        let children = &mut self.compositor.child_frames;
+        let Some(entry) = children.frames.get_mut(&frame_id) else { return };
+        let to = [entry.abs_x, entry.abs_y, entry.frame.width, entry.frame.height];
+        let resized = (from[2] - to[2]).abs() > f32::EPSILON || (from[3] - to[3]).abs() > f32::EPSILON;
+        let to_y = entry.frame.layer.selection.map(|band| band.y);
+        // The carried tween and glide hold the replaced payload's pictures.
+        entry.reshape = None;
+        entry.glide = None;
+        if (resized || reshaping) && from != to && !motion.resize.is_instant() {
+            children.begin_reshape(frame_id, from, motion.resize, now);
+            self.compositor.dirty = true;
+        } else if let Some((previous_x, previous_y)) = previous_placement
+            && ((to[0] - previous_x).abs() > f32::EPSILON || (to[1] - previous_y).abs() > f32::EPSILON)
+            && !motion.movement.is_instant()
+        {
+            // A drift already in flight retargets from the position the
+            // last pass painted, at the speed it had; a fresh one departs
+            // from the placement the popup held until now.
+            if !children.retarget_drift(frame_id, motion.movement, now) {
+                children.begin_drift(frame_id, previous_x, previous_y, motion.movement, now);
+            }
+            self.compositor.dirty = true;
+        }
+        if let (Some(from_y), Some(to_y)) = (from_y, to_y)
+            && (from_y - to_y).abs() > f32::EPSILON
+            && !motion.selection.is_instant()
+        {
+            self.compositor.child_frames.begin_glide(frame_id, from_y, motion.selection, now);
+            self.compositor.dirty = true;
+        }
+    }
+}
+
+/// A slide of PIXELS from EDGE: a bottom-anchored layer rises from below,
+/// a top-anchored one drops from above.
+fn edge_slide(edge: romacs_display_protocol::LayerEdge, pixels: f32) -> f32 {
+    match edge {
+        romacs_display_protocol::LayerEdge::Bottom => pixels,
+        romacs_display_protocol::LayerEdge::Top => -pixels,
     }
 }

@@ -230,6 +230,8 @@ mod leaf {
         pub(crate) fn recent_keys(&mut self, include_commands: bool) -> Value { self.vm.recent_keys_value(include_commands) }
         pub(crate) fn record_recent_key(&mut self, value: Value, command: bool) { self.vm.record_recent_value(value, command) }
         pub(crate) fn clear_recent_keys(&mut self) { self.vm.recent_keys.clear() }
+        pub(crate) fn lossage_limit(&self) -> usize { self.vm.lossage_limit() }
+        pub(crate) fn set_lossage_limit(&mut self, limit: usize) { self.vm.set_lossage_limit(limit) }
         pub(crate) fn set_local_zone(&mut self, zone: crate::LocalZone) { self.vm.local_zone = zone; }
         pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
             self.symbol_slot(v)

@@ -15,7 +15,9 @@ pub struct Idle {
     /// A timer ran or process output was handled: redisplay, then check
     /// again before blocking.
     pub ran: bool,
-    /// The timers left a new message for the echo area.
+    /// The echo area holds a message the display has not shown: one the
+    /// timers left, here or in a wait elsewhere (`romacs--echo-shown',
+    /// echo.rs).
     pub message: bool,
     /// How long to block before the next timer is due; None when none is.
     pub delay: Option<Duration>,
@@ -29,14 +31,14 @@ pub struct Idle {
 /// auto-saves after redisplay.
 pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
     let (ran, rest) = vm.eval_source(if auto_save {
-        "(let* ((message (current-message)) (output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle))
+        "(let* ((output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle))
                 (save (and (fboundp 'romacs--idle-auto-save) (romacs--idle-auto-save)))
                 (delay (if (numberp save) (if (cdr check) (min save (cdr check)) save) (cdr check))))
-           (list (or output (car check) (eq save t)) (not (eq message (current-message)))
+           (list (or output (car check) (eq save t)) (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown)))
                  (and delay (ceiling (* delay 1e6)))))"
     } else {
-        "(let* ((message (current-message)) (output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle)))
-           (list (or output (car check)) (not (eq message (current-message)))
+        "(let* ((output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle)))
+           (list (or output (car check)) (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown)))
                  (and (cdr check) (ceiling (* (cdr check) 1e6)))))"
     })?.cons_pair()?;
     let ran = !ran.is_nil();
@@ -84,7 +86,7 @@ mod tests {
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
-        printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil)");
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil) (message nil)");
         assert_eq!(idle(&mut vm, true).unwrap(), Idle { ran: false, message: false, delay: None });
         vm.timer_stop_idle();
         // Ordinary timers: the ripe one runs once; the next delay is the far one's.
@@ -136,6 +138,14 @@ mod tests {
         let start = std::time::Instant::now();
         assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.05) probe (current-idle-time))"), "(nil (ordinary) nil)");
         assert!(start.elapsed() >= Duration::from_millis(50));
+        // A timer's message during the read reaches the echo area before
+        // the read ends, as GNU's `message' redisplays it at once.
+        crate::echo::clear(&mut vm).unwrap();
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil
+              romacs-echo-area-functions (list (lambda (text) (push (and text (string-to-multibyte text)) probe))))
+            (run-with-timer 0.01 nil (lambda () (message \"during\")))");
+        assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.1) probe)"), "(nil (\"during\"))");
         // A timer that adds a timer: the wait checks again before blocking,
         // so the new one runs when due, not when the limit ends the block.
         // Pinned GNU 45b0f7699df, batch, stdin open: (nil (a (b t))).

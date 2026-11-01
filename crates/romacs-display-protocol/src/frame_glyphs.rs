@@ -1200,6 +1200,17 @@ pub struct FrameGlyphBuffer {
     pub frame_alpha: [f32; 2],
     /// Whether this frame should not accept keyboard focus
     pub no_accept_focus: bool,
+    /// How a child frame shown as a layer animates.
+    pub layer: crate::child_frame_animation::Layer,
+    /// The producer's identity for this frame's glyphs: two buffers with
+    /// the same nonzero identity carry the same glyphs, faces and fonts,
+    /// so one paints as the other but for their cursors and opacity. Zero
+    /// promises nothing.
+    pub layout_identity: u64,
+    /// Draw text source-over onto whatever background lies under it,
+    /// instead of as opaque patches pre-mixed with its own face's
+    /// background: a layer's gliding selection band moves under text.
+    pub text_over_backgrounds: bool,
 
     /// All glyphs to render this frame
     pub glyphs: Vec<FrameGlyph>,
@@ -1578,6 +1589,9 @@ impl FrameGlyphBuffer {
             background_alpha: 1.0,
             frame_alpha: [-1.0; 2],
             no_accept_focus: false,
+            layer: crate::child_frame_animation::Layer::default(),
+            layout_identity: 0,
+            text_over_backgrounds: false,
             glyphs: Vec::with_capacity(10000),
             frame_chrome: crate::frame_chrome::FrameChrome::default(),
             presented_pointer: crate::presented_pointer::PresentedPointerMap::empty(),

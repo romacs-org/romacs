@@ -51,7 +51,8 @@ impl LayoutEngine {
     pub fn layout_frame(&mut self, snapshot: &FrameSnapshot, presentation: u64, cursor: Option<(u64, Color)>) -> Result<(FrameGlyphBuffer, Vec<WindowEnd>), String> {
         let reusable = self.last.as_ref().is_some_and(|last| last.cursor == cursor && last.snapshot.lays_out_like(snapshot));
         if !reusable {
-            let (frame, ends) = layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)?;
+            let (mut frame, ends) = layout_frame_inner(snapshot, presentation, cursor, &mut self.resolver)?;
+            frame.layout_identity = next_layout_identity();
             self.last = Some(Laid { snapshot: snapshot.clone(), cursor, frame, ends });
         }
         let last = self.last.as_ref().expect("laid out above");
@@ -98,6 +99,13 @@ impl LayoutEngine {
         append_window(snapshot, &mut frame, &mut self.resolver, 0.0, 0.0, None)?;
         Ok(frame)
     }
+}
+
+/// A fresh `FrameGlyphBuffer::layout_identity`: every new layout gets
+/// one, and a frame reused from the last layout keeps it.
+fn next_layout_identity() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Stateless convenience for fixtures; interactive hosts retain a LayoutEngine.
@@ -217,7 +225,64 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
         ParentFrameRect::new(child.x as f32, child.y as f32, frame.width, frame.height).map_err(|e| e.to_string())?, z,
     );
     hide_cursors_off(&mut frame, &frame_snapshot);
+    frame.layer = layer_motion(child, &ends);
+    // A rounded layer is light, not chrome: its border is padding, unpainted,
+    // and a hairline parts its stacked windows (a picker's input from its list).
+    if child.radius > 0 {
+        frame.border_width = 0.0;
+        separate_windows(child, &mut frame);
+    }
     Ok((frame, ends))
+}
+
+/// How CHILD animates and looks, with its selection band where ENDS laid
+/// its rows.
+fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_display_protocol::Layer {
+    use romacs_display_protocol::{LayerAnimation, LayerEdge, Layer};
+    Layer {
+        animation: match child.animation {
+            romacs_layout_input::LayerAnimation::Off => LayerAnimation::Off,
+            romacs_layout_input::LayerAnimation::Reduced => LayerAnimation::Reduced,
+            romacs_layout_input::LayerAnimation::Full => LayerAnimation::Full,
+        },
+        edge: match child.edge {
+            romacs_layout_input::LayerEdge::Bottom => LayerEdge::Bottom,
+            romacs_layout_input::LayerEdge::Top => LayerEdge::Top,
+        },
+        selection: child.selection.and_then(|row| selection_band(child, ends.first()?, row)),
+        radius: child.radius as f32,
+        glow: child.glow.map(color),
+        shadow: child.shadow,
+    }
+}
+
+/// A 1px line across CHILD above each of its windows but the topmost, in
+/// its background lifted 15% toward the default foreground.
+fn separate_windows(child: &ChildFrameSnapshot, frame: &mut FrameGlyphBuffer) {
+    let Some(top) = child.windows.iter().map(|w| w.y).min() else { return };
+    let Some(fg) = child.windows.first().and_then(|w| w.snapshot.faces.first()).map(|f| f.foreground) else { return };
+    let line = color(std::array::from_fn(|i| (f32::from(child.background[i]) * 0.85 + f32::from(fg[i]) * 0.15).round() as u8));
+    for placed in child.windows.iter().filter(|w| w.y > top && w.snapshot.height > 0) {
+        frame.add_background(0.0, placed.y as f32 - 1.0, child.width as f32, 1.0, line);
+    }
+}
+
+/// The band row ROW of CHILD's first window shows its selection in, laid
+/// out as END: a picker's selected row (Zed's inset `ListItem`, ideas and
+/// values only): the window's width and up to 4px of the padding either
+/// side, the row's height, corners of 4px, in the background of the face
+/// at the row's start; none past the rows shown or under a header line.
+fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32) -> Option<romacs_display_protocol::SelectionBand> {
+    let placed = child.windows.first()?;
+    let window = &placed.snapshot;
+    let row = end.rows.get(row as usize).filter(|_| window.header_line.is_none())?;
+    let face = window.text.face_runs.iter().find(|run| run.bytes.contains(&row.start)).map_or(0, |run| run.face.0 as usize);
+    let inset = (placed.x as f32).min(4.0);
+    Some(romacs_display_protocol::SelectionBand {
+        x: placed.x as f32 - inset, y: placed.y as f32 + row.y, width: window.width as f32 + 2.0 * inset, height: row.height,
+        radius: 4.0,
+        color: color(window.faces.get(face)?.background), base: color(window.faces.first()?.background),
+    })
 }
 
 fn new_frame(width: u32, height: u32, presentation: u64) -> Result<FrameGlyphBuffer, String> {

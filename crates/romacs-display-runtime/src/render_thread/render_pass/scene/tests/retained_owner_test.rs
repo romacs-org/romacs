@@ -161,7 +161,6 @@ fn present(
     let destination = result.native.as_ref().map_or(&view, |native| native.view());
     draw_root(renderer, render, destination, root);
     render.child_opacity_src = result.picture;
-    render.child_resize_src = result.resize;
     let style = ChildFrameStyle {
         corner_radius: 0.0,
         shadow_enabled: false,
@@ -204,7 +203,6 @@ fn present(
         "live required child must really draw: {p:?}"
     );
     render.child_opacity_src = None;
-    render.child_resize_src = None;
 }
 fn post(shrink: bool) {
     let (mut renderer, mut render, root) = setup();

@@ -218,6 +218,24 @@ fn recent_keys_record_events_and_their_commands() {
     assert_eq!(text(&mut vm, "(let ((k (recent-keys t))) (list (aref k (- (length k) 3)) (aref k (- (length k) 2)) (aref k (- (length k) 1))))"), "(24 6 (nil . ignore))");
 }
 
+/// keyboard.c Flossage_size against pinned GNU (`emacs -Q --batch`): the
+/// limit, its bounds as `user-error's, and a smaller limit dropping the
+/// oldest keys. help.el calls it at load, which completing M-x reaches.
+#[test]
+fn lossage_size_reads_and_sets_the_recent_keys_limit_as_gnu() {
+    let mut vm = Vm::new();
+    assert_eq!(text(&mut vm, "(list (lossage-size) (condition-case e (lossage-size 50) (error e)) \
+        (condition-case e (lossage-size -1) (error e)) (condition-case e (lossage-size 'a) (error e)) \
+        (condition-case e (lossage-size 40000000) (error e)) (interactive-form 'lossage-size))"),
+        "(300 (user-error \"Value must be >= 100\") (user-error \"Value must be a positive integer\") \
+(user-error \"Value must be a positive integer\") (user-error \"Value must be <= 33554431\") \
+(interactive (list (read-number \"Set maximum keystrokes to: \" (lossage-size)))))");
+    for _ in 0..200 {
+        vm.command_event(CommandEvent::Character('b' as i64)).unwrap();
+    }
+    assert_eq!(text(&mut vm, "(list (lossage-size 120) (lossage-size) (length (recent-keys t)))"), "(120 120 120)");
+}
+
 /// keyboard.c command_loop_1 runs whatever the key is bound to: a closure
 /// (keymap-popup binds them) runs and becomes `this-command' and then
 /// `last-command' itself, as in pinned GNU.

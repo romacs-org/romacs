@@ -43,3 +43,15 @@ fn a_frame_keeps_motion_unless_it_starts_a_new_epoch_and_drops_what_it_omits() {
     animations.replace(vec![]);
     assert!(animations.is_empty());
 }
+
+#[test]
+fn an_animated_frame_promises_no_layout_identity() {
+    let mut animations = TextAnimations::default();
+    let mut frame = FrameGlyphBuffer::new();
+    frame.layout_identity = 7;
+    animations.paint(&mut frame);
+    assert_eq!(frame.layout_identity, 7, "nothing painted over it");
+    animations.replace(vec![(1, sphere(true, 0))]);
+    animations.paint(&mut frame);
+    assert_eq!(frame.layout_identity, 0, "a retained root must not stand in for it");
+}

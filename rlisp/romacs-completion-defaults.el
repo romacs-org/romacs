@@ -4,9 +4,14 @@
 
 ;;; Commentary:
 ;; --loadup's minibuffer completion is GNU's: `completing-read',
-;; `read-file-name' and `read-buffer', displayed by icomplete's
-;; `fido-vertical-mode'.  M-x, C-x C-f and C-x b reach it through GNU's
-;; `execute-extended-command' and the two readers.
+;; `read-file-name' and `read-buffer', displayed by `romacs-complete-mode'
+;; (rlisp/romacs-complete.el): the minibuffer and its candidates in a
+;; layer over the frame, so no window or terminal resizes for a prompt
+;; (DIVERGENCES.md VM2-COMPLETE-DEFAULT).  Without a window system, or
+;; where that mode is absent (GNU loading this file for a parity harness),
+;; icomplete's
+;; `fido-vertical-mode' displays it.  M-x, C-x C-f and C-x b reach it
+;; through GNU's `execute-extended-command' and the two readers.
 ;;
 ;; This file makes Romacs's choices of the completion options their
 ;; standard values.  --loadup loads it after romacs-gui-loadup.el and
@@ -53,7 +58,8 @@
       ,@(and (assq 'fzf completion-styles-alist)
              ;; GNU's `completion-category-defaults' entry, fzf first.
              '((project-file (styles fzf substring))))))
-    (fido-vertical-mode t))
+    ;; A layer is a child frame, which only a window system makes.
+    ,(if (and window-system (fboundp 'romacs-complete-mode)) '(romacs-complete-mode t) '(fido-vertical-mode t)))
   "Romacs's standard value for each completion option, in the order set.")
 
 (defun romacs-completion-defaults-apply (defaults)

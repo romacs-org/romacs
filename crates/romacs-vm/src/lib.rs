@@ -1366,6 +1366,8 @@ pub struct Vm {
     /// keyboard.c recent_keys: the last input events and the commands they
     /// ran, as names (the heap may compact under the command loop).
     recent_keys: std::collections::VecDeque<RecentKey>,
+    /// keyboard.c lossage_limit: how many RECENT_KEYS entries are kept.
+    lossage_limit: usize,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
     /// The objects that name a buffer: each buffer's markers and overlays
@@ -1509,6 +1511,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     tz_rule_dstoff,
     local_zone,
     recent_keys,
+    lossage_limit,
     conses,
     objects,
     referrers,
@@ -1686,6 +1689,7 @@ impl Vm {
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,
             recent_keys: std::collections::VecDeque::new(),
+            lossage_limit: RECENT_KEYS,
             conses: vec![],
             objects: vec![],
             referrers: None,

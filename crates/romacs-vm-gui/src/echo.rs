@@ -6,68 +6,76 @@
 //! where a layer shows messages (rlisp/romacs-complete.el).
 use romacs_vm::Vm;
 
-/// Lisp running `romacs-echo-area-functions' with MESSAGE, a Lisp form.
-/// A failing function leaves the echo area as it is.
-fn notify(message: &str) -> String {
-    format!("(and (boundp 'romacs-echo-area-functions) romacs-echo-area-functions
-                  (condition-case nil (run-hook-with-args 'romacs-echo-area-functions {message}) (error nil)))")
+/// The echo area's Lisp, defined once per VM by the first form that runs
+/// it. `romacs--echo-display' shows a text, or nothing, in the minibuffer
+/// window's buffer, never selecting that window and restoring the current
+/// buffer and its point; then it runs `romacs-echo-area-functions' with the
+/// text (a failing function leaves the echo area as it is).
+/// `romacs--echo-shown' is the message it was current for, so a later one
+/// is new to the display whoever left it: `romacs--echo-sync' shows it, as
+/// the outer loop does after timers and the evaluator's own waits do before
+/// they redisplay (romacs_vm host_input.rs), as GNU's `message' redisplays
+/// the echo area at once (xdisp.c message3_nolog). Not while a minibuffer
+/// is active: its window shows the minibuffer, and the message waits for
+/// the prompt to end.
+///
+/// As GNU's echo area, a multibyte buffer, holds it: ASCII messages
+/// (`format''s and `set_echo_area_message''s) are unibyte strings; a raw
+/// byte shows as GNU's \ooo escape, so the text is always printable.
+const LISP: &str = r#"(progn
+  (defvar romacs--echo-shown nil)
+  (defun romacs--echo-display (text)
+    (let ((old-buffer (current-buffer)) (old-point (point)) (inhibit-read-only t))
+      (unwind-protect
+          (progn (set-buffer (window-buffer (minibuffer-window)))
+                 (erase-buffer) (and text (insert text)))
+        (set-buffer old-buffer) (goto-char old-point)))
+    (setq romacs--echo-shown (current-message))
+    (and (boundp 'romacs-echo-area-functions) romacs-echo-area-functions
+         (condition-case nil (run-hook-with-args 'romacs-echo-area-functions text) (error nil))))
+  (defun romacs--echo-printable (message)
+    (string-to-multibyte
+     (mapconcat (lambda (c) (if (> c #x10ffff) (format "\\%o" (logand c 255)) (string c)))
+                (string-to-multibyte (substring-no-properties message)) "")))
+  (defun romacs--echo-sync ()
+    (let ((message (current-message)))
+      (unless (or (eq message romacs--echo-shown) (> (minibuffer-depth) 0))
+        (romacs--echo-display (and message (romacs--echo-printable message)))))))"#;
+
+/// FORM, after LISP the first time. LISP holds strings, which keep a form
+/// from the source cache (source_cache.rs): it is read once per VM, and a
+/// key's clearing, with no string, is compiled once.
+fn display(vm: &mut Vm, form: &str) -> Result<(), String> {
+    if vm.eval_source(&format!("(and (fboundp 'romacs--echo-sync) (progn {form} t))"))?.is_nil() {
+        vm.eval_source(LISP)?;
+        vm.eval_source(form)?;
+    }
+    Ok(())
 }
 
-/// Show `text` in the echo area: the minibuffer window's buffer. Never selects
-/// the minibuffer window, and restores the current buffer and its point.
+/// Show `text` in the echo area.
 pub fn show(vm: &mut Vm, message: &str) -> Result<(), String> {
     let text = serde_json::to_string(message).map_err(|error| error.to_string())?;
-    vm.eval_source(&format!(
-        "(let ((old-buffer (current-buffer)) (old-point (point)) (inhibit-read-only t))
-           (unwind-protect
-               (progn (set-buffer (window-buffer (minibuffer-window)))
-                      (erase-buffer) (insert {text}))
-             (set-buffer old-buffer) (goto-char old-point)))
-         {}", notify(&text)
-    ))?;
     vm.set_echo_area_message(Some(message));
-    Ok(())
+    display(vm, &format!("(romacs--echo-display {text})"))
 }
 
 /// Show the message the command left (`message`, or printing to `t`), as
 /// GNU's echo area shows it once the command returns. Nothing when it left none.
 pub fn show_current_message(vm: &mut Vm) -> Result<(), String> {
-    current_message(vm, false)
+    display(vm, "(let ((message (current-message))) (and message (romacs--echo-display (romacs--echo-printable message))))")
 }
 
 /// The echo area after timers changed the message: shown, or cleared by
 /// `(message nil)`.
 pub fn sync_current_message(vm: &mut Vm) -> Result<(), String> {
-    current_message(vm, true)
-}
-
-fn current_message(vm: &mut Vm, clear_when_none: bool) -> Result<(), String> {
-    // As GNU's echo area, a multibyte buffer, holds it: ASCII messages
-    // (`format''s and `set_echo_area_message''s) are unibyte strings, which
-    // the VM prints as byte vectors; a raw byte shows as GNU's \ooo escape,
-    // so the text is always printable.
-    let value = vm.eval_source(r#"(let ((message (current-message)))
-                                    (and message
-                                         (string-to-multibyte
-                                          (mapconcat (lambda (c) (if (> c #x10ffff) (format "\\%o" (logand c 255)) (string c)))
-                                                     (string-to-multibyte (substring-no-properties message)) ""))))"#)?;
-    if value.is_nil() { return if clear_when_none { clear(vm) } else { Ok(()) }; }
-    let printed = value.display()?;
-    let message: String = serde_json::from_str(&printed).unwrap_or(printed);
-    show(vm, &message)
+    display(vm, "(romacs--echo-sync)")
 }
 
 /// Clear a message left by the previous command.
 pub fn clear(vm: &mut Vm) -> Result<(), String> {
-    vm.eval_source(&format!(
-        "(let ((old-buffer (current-buffer)) (old-point (point)) (inhibit-read-only t))
-           (unwind-protect
-               (progn (set-buffer (window-buffer (minibuffer-window))) (erase-buffer))
-             (set-buffer old-buffer) (goto-char old-point)))
-         {}", notify("nil")
-    ))?;
     vm.set_echo_area_message(None);
-    Ok(())
+    display(vm, "(romacs--echo-display nil)")
 }
 
 /// The echo area's current text.
