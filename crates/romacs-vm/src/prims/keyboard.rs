@@ -13,10 +13,13 @@ use super::*;
 use crate::prim::leaf::Kind;
 
 /// The Lisp half, evaluated once per VM on first use, with minibuf.c's
-/// (prims/minibuf.rs), whose recursive edit is this command loop.
-const LISP_HALF: [&str; 2] = [
+/// (prims/minibuf.rs), whose recursive edit is this command loop, and
+/// window.c's window change functions, which the loop's redisplays run
+/// (host_input.rs).
+const LISP_HALF: [&str; 3] = [
     include_str!("../../../../rlisp/vm/keyboard.el"),
     include_str!("../../../../rlisp/vm/minibuf.el"),
+    include_str!("../../../../rlisp/vm/window-change.el"),
 ];
 
 /// keyboard.c `this_command_keys' (a vector of the events read for this
