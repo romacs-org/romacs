@@ -332,6 +332,11 @@ impl Vm {
     /// Every collection, automatic or explicit, enters here. Live `Rooted`
     /// slots are appended to the caller's roots and written back forwarded.
     pub(crate) fn collect(&mut self, roots: &mut [Value]) {
+        self.profile_collection_begin();
+        self.collect_rooted(roots);
+        self.profile_collection_end();
+    }
+    fn collect_rooted(&mut self, roots: &mut [Value]) {
         let live: Vec<Arc<AtomicU64>> = {
             let slots = self.rooted.slots.get_mut();
             slots.retain(|w| w.strong_count() > 0);

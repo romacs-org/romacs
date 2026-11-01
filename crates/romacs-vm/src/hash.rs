@@ -30,11 +30,26 @@ pub(super) enum Test {
     Eq,
     Eql,
     Equal,
+    /// A `define-hash-table-test' NAME whose test is `function-equal'
+    /// (profiler.el's): that predicate natively, with its own hash.
+    FunctionEqual(Value),
+}
+impl Test {
+    /// The test as one byte, for content hashes.
+    pub(super) fn code(self) -> u8 {
+        match self {
+            Test::Eq => 0,
+            Test::Eql => 1,
+            Test::Equal => 2,
+            Test::FunctionEqual(_) => 3,
+        }
+    }
 }
 romacs_snapshot::snapshot_enum!(Test {
     Test::Eq => (),
     Test::Eql => (),
     Test::Equal => (),
+    Test::FunctionEqual(name) => (name),
 });
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Weakness {
@@ -485,6 +500,17 @@ impl Vm {
         let mut moving = false;
         let hash = match (test, self.shape(key)) {
             (Test::Equal, _) => self.sxhash(key, 0, &mut moving),
+            (Test::FunctionEqual(_), _) => match crate::profiler::code_identity(&self.closures, key) {
+                // A closure's compiled function is a stable index.
+                Some(crate::profiler::Identity::Code(function)) => combine(function as u64, 4),
+                // An explicit closure's body can move while the closure
+                // does not, which `forward' would not notice: one bucket.
+                Some(crate::profiler::Identity::Body(_)) => combine(0, 5),
+                _ => {
+                    moving = Self::moving_reference(key);
+                    key.0
+                }
+            },
             (Test::Eql, Shape::Float(bits)) => bits,
             (Test::Eql, Shape::Bignum(n)) => hash_bytes(&n.to_signed_bytes_le()),
             _ => {
@@ -508,6 +534,7 @@ impl Vm {
             Test::Eq => a == b,
             Test::Eql => self.eql(a, b),
             Test::Equal => self.equal(a, b)?,
+            Test::FunctionEqual(_) => self.function_equal(a, b),
         })
     }
     /// GNU `internal_equal` (plain `equal`): cycle-aware and depth-limited.
@@ -923,6 +950,7 @@ impl Vm {
                     Test::Eq => "eq",
                     Test::Eql => "eql",
                     Test::Equal => "equal",
+                    Test::FunctionEqual(name) => return Ok(name),
                 };
                 Ok(self.intern(name))
             }
@@ -1125,14 +1153,19 @@ impl Vm {
             let property = self.intern("hash-table-test");
             let user = self.symbol_property(test, property).unwrap_or(Value::NIL);
             let defined = self.cons_pair(user).is_ok_and(|(_, tail)| tail.tag() == 3);
-            return Err(HashFault::Error(
-                if defined {
-                    "VM2 does not support user-defined hash table tests"
-                } else {
-                    "Invalid hash table test"
-                },
-                Some(test),
-            ));
+            let function_equal = self.intern("function-equal");
+            if defined && self.cons_pair(user).is_ok_and(|(predicate, _)| predicate == function_equal) {
+                Test::FunctionEqual(test)
+            } else {
+                return Err(HashFault::Error(
+                    if defined {
+                        "VM2 does not support user-defined hash table tests"
+                    } else {
+                        "Invalid hash table test"
+                    },
+                    Some(test),
+                ));
+            }
         };
         let size = if size == Value::NIL {
             0
@@ -1187,6 +1220,10 @@ impl Vm {
         match t.test {
             Test::Eq => out.push_str(" test eq"),
             Test::Equal => out.push_str(" test equal"),
+            Test::FunctionEqual(name) => {
+                out.push_str(" test ");
+                out.push_str(&String::from_utf8_lossy(&element(self, name)?));
+            }
             Test::Eql => {}
         }
         if t.weakness != Weakness::None {

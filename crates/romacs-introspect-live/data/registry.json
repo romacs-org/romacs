@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "335c9c8400635723294ace15316fe00d05d5471f9b372447de4e913b312ed5a8",
+    "input_hash": "c24f2c49d2336511fe1ab15f17eef79cd84712c45ecaac56b5f4c23eea0a40bc",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 5670
+    "vm2_universe": 5700
   },
   "schema": 2,
   "vm2": {
-    "count": 1227,
+    "count": 1236,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -412,6 +412,7 @@
       "funcall",
       "funcall-interactively",
       "function",
+      "function-equal",
       "functionp",
       "garbage-collect",
       "generate-new-buffer-name",
@@ -710,6 +711,14 @@
       "process-tty-name",
       "process-type",
       "processp",
+      "profiler-cpu-log",
+      "profiler-cpu-running-p",
+      "profiler-cpu-start",
+      "profiler-cpu-stop",
+      "profiler-memory-log",
+      "profiler-memory-running-p",
+      "profiler-memory-start",
+      "profiler-memory-stop",
       "prog1",
       "progn",
       "proper-list-p",

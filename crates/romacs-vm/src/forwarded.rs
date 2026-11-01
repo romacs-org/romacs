@@ -722,6 +722,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "eol-mnemonic-unix", gnu: "coding.c:12091", kind: Kind::Lisp(Init::Str(":")) },
     CVariable { name: "overlay-arrow-string", gnu: "xdisp.c:38711", kind: Kind::Lisp(Init::Str("=>")) },
     CVariable { name: "yes-or-no-prompt", gnu: "fns.c:6874", kind: Kind::Lisp(Init::Str("(yes or no) ")) },
+    // Read when a profiler log is made (`profiler.rs').
+    CVariable { name: "profiler-max-stack-depth", gnu: "profiler.c:708", kind: Kind::Int(16) },
+    CVariable { name: "profiler-log-size", gnu: "profiler.c:711", kind: Kind::Int(10000) },
 ];
 
 /// C_SPECIALS that GNU leaves bound but not special: lread.c:5559 clears

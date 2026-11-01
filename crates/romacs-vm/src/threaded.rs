@@ -933,7 +933,7 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
     }
     leave_native(e);
     e.apply_function = None;
-    if let Some(mark) = e.apply_mark.take() { e.vm.backtrace.leave(mark); }
+    if let Some(mark) = e.apply_mark.take() { e.vm.trace_leave(mark); }
     loop {
         while e.controls.len() > e.controls_base {
             // Unwind while each intervening handler is still live: restoring
@@ -1471,7 +1471,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // A normal return has already unbound through return_unbind.
     engine.vm.unwind(engine.vm.dynamic.len() - mark);
     engine.vm.signal_handlers.truncate(handler_mark);
-    engine.vm.backtrace.leave(backtrace_mark);
+    engine.vm.trace_leave(backtrace_mark);
     // Only entered frames can have written values. Clear that prefix, not all
     // reserved frames; retaining zeroed storage avoids reinitializing it.
     engine.vm.stack[..engine.stack_used].fill(Value::NIL);
@@ -2070,11 +2070,11 @@ unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
 // non-LTO builds can tail-dispatch after the operation completes.
 #[inline(never)]
 fn leave_native(e: &mut Engine<'_>) {
-    if let Some(mark) = e.native_mark.take() { e.vm.backtrace.leave(mark); }
+    if let Some(mark) = e.native_mark.take() { e.vm.trace_leave(mark); }
 }
 #[inline(never)]
 fn leave_call(e: &mut Engine<'_>, mark: usize) {
-    if mark != NO_MARK { e.vm.backtrace.leave(mark); }
+    if mark != NO_MARK { e.vm.trace_leave(mark); }
 }
 #[inline(never)]
 unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
@@ -2105,7 +2105,7 @@ unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
                 count: argc,
             }
         };
-        e.vm.backtrace.enter(function, resolved, args, e.vm.dynamic.len())
+        e.vm.trace_enter(function, resolved, args, e.vm.dynamic.len())
     }
 }
 #[inline(never)]

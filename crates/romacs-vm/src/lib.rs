@@ -121,6 +121,7 @@ mod intervals;
 mod properties;
 pub mod text;
 mod backtrace;
+mod profiler;
 mod threaded;
 
 mod expand;
@@ -1228,6 +1229,8 @@ pub struct Vm {
     propagated_escape: Option<threaded::Escape>,
     signal_handlers: Vec<threaded::SignalHandler>,
     backtrace: backtrace::Backtrace,
+    /// profiler.c's CPU and memory profilers (`profiler.rs`).
+    profiler: profiler::Profiler,
     propagated_escape_hooked: bool,
     propagated_eval_depth: Option<usize>,
     /// Set immediately before executing an `eval` form; consumed by the engine.
@@ -1535,6 +1538,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     execution,
     spare_programs,
     idle_since,
+    profiler,
 });
 
 impl Default for Vm {
@@ -1598,6 +1602,7 @@ impl Vm {
             propagated_escape: None,
             signal_handlers: Vec::new(),
             backtrace: backtrace::Backtrace::default(),
+            profiler: profiler::Profiler::default(),
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
