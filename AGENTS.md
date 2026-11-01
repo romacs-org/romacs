@@ -12,6 +12,14 @@ commands, policy, composition, and customization wherever practical. Broad GNU
 Elisp compatibility provides useful programs and semantics; it does not require
 copying GNU Emacs's internal architecture.
 
+Romacs is a GPU-rendered GUI program, plus `--batch` for noninteractive runs.
+It has no TTY frontend: `romacs -nw` and GNU's `emacs -nw` or `--terminal`
+display are not supported and are not planned. Don't design, test, or
+measure for a text-terminal display. Romacs *contains* a terminal emulator
+(`romacs-term`, which keeps Alacritty's behaviour); it is not itself a terminal
+program. Pinned GNU may be run `-nw` as an oracle when no GUI comparison is
+possible; say so where you do.
+
 ## Development
 
 - Optimize for useful capabilities, easy modification, and a short feedback loop.
