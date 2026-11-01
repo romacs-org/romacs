@@ -102,13 +102,16 @@ they were relative to the text after it."
     (set-buffer-modified-p nil)))
 
 (defun romacs-armillary--frame (dt)
-  "Draw the sphere DT seconds on, sized to its window (romacs-animate)."
-  (let ((window (get-buffer-window (current-buffer) (selected-frame))))
-    (when window
+  "Draw the sphere DT seconds on, sized to fit every window of the
+selected frame that shows it (romacs-animate)."
+  (let ((windows (get-buffer-window-list (current-buffer) 'nomini (selected-frame))))
+    (when windows
       (setq romacs-armillary--view (romacs-armillary--advance romacs-armillary--view dt))
-      (let ((cols (max 1 (min 200 (1- (window-body-width window)))))
+      (let ((cols (max 1 (min 200 (1- (apply #'min (mapcar #'window-body-width windows))))))
             ;; Whole lines only: the controls line must show in full.
-            (rows (max 1 (min 100 (- (floor (window-body-height window t) (default-line-height)) 2))))
+            (rows (max 1 (min 100 (- (apply #'min (mapcar (lambda (w) (floor (window-body-height w t) (default-line-height)))
+                                                          windows))
+                                     2))))
             (aspect (max 0.05 (min 2.0 (/ (float (frame-char-width)) (frame-char-height))))))
         (setq romacs-armillary--drawn (list cols rows aspect))
         (romacs-armillary--replace (romacs-armillary--text romacs-armillary--view cols rows aspect))))))

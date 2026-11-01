@@ -435,12 +435,12 @@ impl LispGraph for Graph<'_> {
     }
 }
 impl Vm {
-    /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
     /// The text animations the display draws over the frame being frozen
     /// (romacs_display_protocol::text_animation): `romacs-animate--elements',
     /// which rlisp/romacs-animate.el keeps, a list of (KEY WINDOW BUFFER
     /// TOP COLS ROWS FPS MOVING SHADES KIND), each while WINDOW is live and
-    /// shows BUFFER.  KIND is (armillary PITCH YAW ZOOM CELL-ASPECT EPOCH).
+    /// shows BUFFER, keyed by KEY and WINDOW.  KIND is (armillary PITCH YAW
+    /// ZOOM CELL-ASPECT EPOCH).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
     pub fn text_animations(&mut self) -> Result<Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>> {
@@ -473,13 +473,17 @@ impl Vm {
                 _ => return Err("bad text animation kind".into()),
             };
             let top = top.integer_value().and_then(|n| i32::try_from(n).ok()).ok_or("text animation top")?;
-            animations.push((natural(key)?, TextAnimation {
-                window: self.window(window)?.id, top, cols: natural(cols)? as u32, rows: natural(rows)? as u32,
+            // Keyed by animation and window: each window showing one has its
+            // own motion.
+            let window = self.window(window)?.id;
+            animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
+                window, top, cols: natural(cols)? as u32, rows: natural(rows)? as u32,
                 fps: natural(fps)? as u32, moving: moving != Value::NIL, shades: natural(shades)? as u32, kind,
             }));
         }
         Ok(animations)
     }
+    /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
     pub fn frame_snapshot(&mut self, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
         // redisplay_internal runs the window change functions first.
         if !self.redisplay_inhibited()? { self.run_window_change_functions()?; }

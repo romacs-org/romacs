@@ -67,20 +67,32 @@ impl TextAnimation {
 /// in its shade's face, so the block's glyphs name them, as the theme has
 /// them now; a shade it showed none of takes the nearest it did.  A cell
 /// the evaluator laid out no glyph for gets one like its row's others.
+///
+/// Slots count rows and columns from the frame's corner, so the block is
+/// placed from the window's first text row and column: those of its text
+/// glyphs, which the evaluator lays out for every cell of the block.
 pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[u8]) {
     let (cols, rows) = (animation.cols as usize, animation.rows as usize);
     if cols == 0 || cells.len() != cols * rows { return; }
+    let in_window = |glyph: &FrameGlyph| match glyph {
+        FrameGlyph::Char { slot_id, row_role: GlyphRowRole::Text, composed: None, .. }
+            if slot_id.window_id.get() as u64 == animation.window => Some(*slot_id),
+        _ => None,
+    };
+    let Some((first_row, first_col)) = frame.glyphs.iter().filter_map(in_window)
+        .fold(None, |origin: Option<(u32, u16)>, slot| Some(origin.map_or((slot.row, slot.col), |(r, c)| (r.min(slot.row), c.min(slot.col)))))
+    else { return };
     let block = |slot: &DisplaySlotId| -> Option<usize> {
-        let row = i64::from(slot.row) - i64::from(animation.top);
-        (slot.window_id.get() as u64 == animation.window && (0..rows as i64).contains(&row) && usize::from(slot.col) < cols)
-            .then(|| row as usize * cols + usize::from(slot.col))
+        let row = i64::from(slot.row) - i64::from(first_row) - i64::from(animation.top);
+        let col = usize::from(slot.col).checked_sub(usize::from(first_col))?;
+        ((0..rows as i64).contains(&row) && col < cols).then(|| row as usize * cols + col)
     };
     // Each cell's glyph, and one glyph per row to model missing cells on.
     let mut at: Vec<Option<usize>> = vec![None; cells.len()];
     let mut model: Vec<Option<usize>> = vec![None; rows];
     for (i, glyph) in frame.glyphs.iter().enumerate() {
-        if let FrameGlyph::Char { slot_id, row_role: GlyphRowRole::Text, composed: None, .. } = glyph
-            && let Some(cell) = block(slot_id) {
+        if let Some(slot_id) = in_window(glyph)
+            && let Some(cell) = block(&slot_id) {
             at[cell] = Some(i);
             model[cell / cols].get_or_insert(i);
         }
@@ -95,8 +107,9 @@ pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[u
                 let Some(model) = model[cell / cols] else { continue };
                 let mut glyph = frame.glyphs[model].clone();
                 if let FrameGlyph::Char { x, slot_id, .. } = &mut glyph {
-                    *x += (cell % cols) as f32 * char_width - f32::from(slot_id.col) * char_width;
-                    slot_id.col = (cell % cols) as u16;
+                    let col = first_col + (cell % cols) as u16;
+                    *x += (f32::from(col) - f32::from(slot_id.col)) * char_width;
+                    slot_id.col = col;
                 }
                 frame.glyphs.push(glyph);
                 frame.glyphs.len() - 1

@@ -78,3 +78,30 @@ fn a_block_scrolled_above_the_window_shows_its_lower_rows() {
     assert_eq!(shown(&frame, 0), "@@@@");
     assert_eq!(shown(&frame, 1), "yyyy");
 }
+
+#[test]
+fn a_window_below_and_right_of_the_frame_corner_shows_its_block() {
+    // A window placed down and to the right: its slots count from the
+    // frame's corner, the block from the window's.
+    let mut snapshot = window("xxxx\nyyyy\nzzzz", vec![]);
+    snapshot.id = 9;
+    let frame_snapshot = romacs_layout_input::FrameSnapshot {
+        font_selection: Default::default(), font_alternatives: Default::default(), width: 1200, height: 900,
+        background_alpha: 1.0, children: vec![], tab_bar: None,
+        windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 300, y: 400, snapshot }],
+    };
+    let (mut frame, _) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&frame_snapshot, 1, None).unwrap();
+    let mut animation = sphere(0, 4, 2, 4);
+    animation.window = 9;
+    paint(&mut frame, &animation, b"@@@@::::");
+    let rows: Vec<String> = {
+        let mut cells: Vec<(u32, u16, char)> = frame.glyphs.iter().filter_map(|g| match g {
+            FrameGlyph::Char { slot_id, char, .. } if slot_id.window_id.get() == 9 => Some((slot_id.row, slot_id.col, *char)),
+            _ => None,
+        }).collect();
+        cells.sort();
+        let first = cells[0].0;
+        (0..3).map(|r| cells.iter().filter(|c| c.0 == first + r).map(|c| c.2).collect()).collect()
+    };
+    assert_eq!(rows, ["@@@@", "::::", "zzzz"]);
+}

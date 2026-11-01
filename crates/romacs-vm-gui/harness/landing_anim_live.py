@@ -6,6 +6,9 @@ evaluator's frames (rlisp/romacs-animate.el, render_thread/text_animations.rs).
 A software rasterizer draws none, so every other harness sees a still frame;
 this one sets ROMACS_LAYER_ANIMATION=1 to run the path a GPU runs.
 
+split: C-x 2 shows the landing in two windows, both of which must turn,
+and keep turning after C-x o and after moving the cursor; C-x 1 again.
+
 away: on the landing, + + and - zoom the sphere, which must keep turning;
 then C-x b *scratch* RET and typing "hello".  The scene the evaluator
 submitted must show it, and so must the pixels: an animation left over from
@@ -19,7 +22,8 @@ No pointer hit may be rejected as incoherent with the presented frame.
 
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY; DISPLAY is never set.  labwc, wlr-randr, wtype, grim and
-magick come from --tools or PATH.
+magick come from --tools or PATH.  ROMACS_HARNESS_WLR_ENV (KEY=VALUE ...)
+is passed to the compositor alone, to run it on a real GPU.
 
 usage: landing_anim_live.py --binary PATH --output DIR [--tools DIR]
 """
@@ -70,11 +74,14 @@ def main():
                'LIBSEAT_BACKEND': 'noop', 'ROMACS_LAYER_ANIMATION': '1'}
         if a.tools:
             env['PATH'] = f"{a.tools}:{env['PATH']}"
+        # The compositor's own renderer on a real GPU (gles2), when asked:
+        # Romacs then draws with the host's GPU instead of a software one.
+        wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
         stderr_path = a.output / 'binary.stderr'
         comp = keyboard = proc = None
         try:
             with (a.output / 'compositor.log').open('w') as clog, stderr_path.open('w') as blog:
-                comp = subprocess.Popen([tool('labwc'), '-C', str(config)], env=env, stdout=clog, stderr=clog)
+                comp = subprocess.Popen([tool('labwc'), '-C', str(config)], env=env | wlr, stdout=clog, stderr=clog)
                 fio.wait(lambda: any(s.is_socket() for s in runtime.glob('wayland-*')), a.timeout, 'compositor', comp)
                 env['WAYLAND_DISPLAY'] = next(s for s in runtime.glob('wayland-*') if s.is_socket()).name
                 subprocess.run([tool('wlr-randr'), '--output', 'HEADLESS-1', '--custom-mode', f'{WIDTH}x{HEIGHT}'], env=env, check=True)
@@ -119,6 +126,27 @@ def main():
                 keys('++')
                 keys('-k', 'minus')
                 check('the landing turns after zooming', turning('zoomed', whole) > 1000)
+
+                # split: every window showing the landing turns, whichever is
+                # selected and wherever its cursor goes.
+                top, bottom = f'{WIDTH}x{HEIGHT // 2 - 60}+0+0', f'{WIDTH}x{HEIGHT // 2 - 60}+0+{HEIGHT // 2}'
+                keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+                keys('2')
+                time.sleep(1.0)
+                turned = (turning('split', top), differ(a.output / 'split-a.png', a.output / 'split-b.png', bottom))
+                check('both landing windows turn after C-x 2', min(turned) > 1000, turned)
+                keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+                keys('o')
+                turned = (turning('other', top), differ(a.output / 'other-a.png', a.output / 'other-b.png', bottom))
+                check('both landing windows turn after C-x o', min(turned) > 1000, turned)
+                keys('-M', 'ctrl', 'n', '-m', 'ctrl')
+                keys('-M', 'ctrl', 'n', '-m', 'ctrl')
+                turned = (turning('moved', top), differ(a.output / 'moved-a.png', a.output / 'moved-b.png', bottom))
+                check('both landing windows turn after moving the cursor', min(turned) > 1000, turned)
+                keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+                keys('1')
+                time.sleep(1.0)
+                check('the landing turns again in one window', turning('one', whole) > 1000)
 
                 # away
                 keys('-M', 'ctrl', 'x', '-m', 'ctrl')
