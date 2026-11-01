@@ -9,17 +9,39 @@
 ;; logs.  GNU's xdisp.c message_dolog and message_log_check_duplicate:
 ;; append the text to `messages-buffer-name', combining a repeated line
 ;; as " [N times]" and trimming to `message-log-max' lines, without undo,
-;; read-only checks or modification hooks.
+;; read-only checks or modification hooks.  Printing to the echo area logs
+;; part lines, which the next message ends (message_log_maybe_newline).
 
 ;;; Code:
 
-(defun romacs--message-dolog (text)
-  "Append TEXT and a newline to the buffer named `messages-buffer-name'.
+(defvar romacs--message-log-need-newline nil
+  "Non-nil while the log's last line is a part line that printing to the
+echo area wrote (xdisp.c message_log_need_newline).")
+
+(defun romacs--message-log-end-line ()
+  "End the part line printing left in the log, if any
+\(message_log_maybe_newline)."
+  (if (and romacs--message-log-need-newline message-log-max)
+      (romacs--message-dolog-1 "" nil)))
+
+(defun romacs--message-dolog (text &optional part)
+  "Log TEXT, a message, as message_dolog does.
+With PART nil, TEXT is a whole line, which ends a part line before it.
+With PART non-nil it is a part line that printing to the echo area wrote
+\(print.c strout): `extend' continues the part line before it, anything
+else first ends that line."
+  (if (not (eq part 'extend))
+      (romacs--message-log-end-line))
+  (romacs--message-dolog-1 text part))
+
+(defun romacs--message-dolog-1 (text part)
+  "Append TEXT to the buffer named `messages-buffer-name', and with PART nil
+a newline.
 A new buffer starts in `messages-buffer-mode' when that is defined.  Point
 at the end of the buffer follows the new text; elsewhere it stays put, as
-does a narrowing.  A line that repeats the previous one replaces it, as
-\" [N times]\" when N > 1; past an integer `message-log-max', the oldest
-lines are deleted."
+does a narrowing.  A whole line that repeats the previous one replaces it,
+as \" [N times]\" when N > 1; past an integer `message-log-max', the
+oldest lines are deleted."
   (if (not (stringp messages-buffer-name))
       (setq messages-buffer-name "*Messages*"))
   (let ((deactivate deactivate-mark))
@@ -40,24 +62,27 @@ lines are deleted."
              (opoint (copy-marker (point))))
         (widen)
         (goto-char (point-max))
-        (insert (substring-no-properties text) "\n")
-        (forward-line -1)
-        (let ((this-bol (point)))
-          (if (> this-bol (point-min))
-              (let* ((prev-bol (progn (forward-line -1) (point)))
-                     (dups (romacs--message-log-duplicate prev-bol this-bol)))
-                (if (> dups 0)
-                    (progn
-                      (delete-region prev-bol this-bol)
-                      (if (> dups 1)
-                          (progn
-                            (goto-char (1- (point-max)))
-                            (insert-before-markers (format " [%d times]" dups)))))))))
-        (if (and (integerp message-log-max) (>= message-log-max 0))
+        (insert (substring-no-properties text))
+        (if (not part)
             (progn
-              (goto-char (point-max))
-              (forward-line (- message-log-max))
-              (delete-region (point-min) (point))))
+              (insert "\n")
+              (forward-line -1)
+              (let ((this-bol (point)))
+                (if (> this-bol (point-min))
+                    (let* ((prev-bol (progn (forward-line -1) (point)))
+                           (dups (romacs--message-log-duplicate prev-bol this-bol)))
+                      (if (> dups 0)
+                          (progn
+                            (delete-region prev-bol this-bol)
+                            (if (> dups 1)
+                                (progn
+                                  (goto-char (1- (point-max)))
+                                  (insert-before-markers (format " [%d times]" dups)))))))))
+              (if (and (integerp message-log-max) (>= message-log-max 0))
+                  (progn
+                    (goto-char (point-max))
+                    (forward-line (- message-log-max))
+                    (delete-region (point-min) (point))))))
         (if (or (> begv (point-min)) (not zv-at-end))
             (narrow-to-region begv (if zv-at-end (point-max) zv)))
         (goto-char (if point-at-end (point-max) opoint))
@@ -65,6 +90,7 @@ lines are deleted."
         (set-marker zv nil)
         (set-marker opoint nil)))
     (setq deactivate-mark deactivate)
+    (setq romacs--message-log-need-newline (and part t))
     nil))
 
 (defun romacs--message-log-duplicate (prev-bol this-bol)

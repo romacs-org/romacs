@@ -97,8 +97,9 @@
     (setq quit-flag oquit)
     (when (and auto-saved (not no-message))
       (if old-message
-          ;; Give time to read ours before the old message comes back.
-          (progn (sit-for 1) (message "%s" old-message))
+          ;; Give time to read ours before the old message comes back,
+          ;; unlogged (restore_message's message3_nolog).
+          (progn (sit-for 1) (let ((message-log-max nil)) (message "%s" old-message)))
         (unless error-occurred (message "Auto-saving...done"))))
     nil))
 )
