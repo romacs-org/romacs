@@ -290,7 +290,7 @@ def private_tree(engine, base, tools, prefix=None):
     for directory in ('home', 'work', 'probe', 'tmp', 'home/.config', 'home/.cache', 'home/.local/share',
                       'home/.local/state'):
         (root / directory).mkdir(parents=True)
-    env = {'PATH': f'{tools}:{os.environ["PATH"]}', 'HOME': str(home), 'LANG': 'C.UTF-8',
+    env = {'PATH': f'{tools}:{os.environ["PATH"]}', 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
            'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / '.config'),
            'XDG_CACHE_HOME': str(home / '.cache'), 'XDG_DATA_HOME': str(home / '.local/share'),
            'XDG_STATE_HOME': str(home / '.local/state'), 'TMPDIR': str(root / 'tmp'),
@@ -327,7 +327,7 @@ def lisp_copy(base, name, sources, compile_):
 
 
 def gnu_engine(root, home, env, init, lisp, timeout, tools, cls=None):
-    """Pinned GNU pgtk on INIT, as the owner's ~/.config/emacs/init.el;
+    """Pinned GNU pgtk on INIT, as a user's ~/.config/emacs/init.el;
     LISP is the package directory its paths are normalised from.  GNU's
     native compiler, which Romacs lacks, compiles nothing: neither the
     packages (the harness byte-compiles them) nor the trampolines advising

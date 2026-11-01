@@ -125,7 +125,7 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
-        // The session's user directory is a private one, never the owner's.
+        // The session's user directory is a private one, never the user's own.
         vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
             quoted(&format!("HOME={}", home.display())),
             quoted(&format!("XDG_CONFIG_HOME={}", home.join("config").display())))).unwrap();

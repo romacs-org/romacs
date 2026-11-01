@@ -1,6 +1,7 @@
 ;;; romacs-gradients.el --- Gradient background faces for Romacs
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

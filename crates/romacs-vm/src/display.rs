@@ -436,6 +436,50 @@ impl LispGraph for Graph<'_> {
 }
 impl Vm {
     /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
+    /// The text animations the display draws over the frame being frozen
+    /// (romacs_display_protocol::text_animation): `romacs-animate--elements',
+    /// which rlisp/romacs-animate.el keeps, a list of (KEY WINDOW BUFFER
+    /// TOP COLS ROWS FPS MOVING SHADES KIND), each while WINDOW is live and
+    /// shows BUFFER.  KIND is (armillary PITCH YAW ZOOM CELL-ASPECT EPOCH).
+    /// They travel with the frame, so each frame the display shows says
+    /// which animations it has: none once the buffer is no longer shown.
+    pub fn text_animations(&mut self) -> Result<Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>> {
+        use romacs_display_protocol::text_animation::{TextAnimation, TextAnimationKind};
+        let slot = self.slot("romacs-animate--elements");
+        let list = self.variable_value(slot).unwrap_or(Value::NIL);
+        if list == Value::NIL || list == Value::UNBOUND { return Ok(vec![]); }
+        let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
+        let mut animations = vec![];
+        for entry in self.list_values(list)? {
+            let fields = self.list_values(entry)?;
+            let [key, window, buffer, top, cols, rows, fps, moving, shades, kind] = fields[..] else { return Err("bad text animation entry".into()) };
+            let shown = match self.object_if(window) {
+                Some(Object::Window(w)) => w.buffer == buffer,
+                _ => false,
+            };
+            if !shown { continue; }
+            let kind = self.list_values(kind)?;
+            let number = |vm: &Self, v: Value| match (v.integer_value(), vm.object_if(v)) {
+                (Some(n), _) => Ok(n as f64),
+                (None, Some(Object::Float(f))) => Ok(*f),
+                _ => Err("number required"),
+            };
+            let armillary = self.intern("armillary");
+            let kind = match kind[..] {
+                [head, pitch, yaw, zoom, cell_aspect, epoch] if head == armillary => TextAnimationKind::Armillary {
+                    pitch: number(self, pitch)?, yaw: number(self, yaw)?, zoom: number(self, zoom)?,
+                    cell_aspect: number(self, cell_aspect)?, epoch: natural(epoch)?,
+                },
+                _ => return Err("bad text animation kind".into()),
+            };
+            let top = top.integer_value().and_then(|n| i32::try_from(n).ok()).ok_or("text animation top")?;
+            animations.push((natural(key)?, TextAnimation {
+                window: self.window(window)?.id, top, cols: natural(cols)? as u32, rows: natural(rows)? as u32,
+                fps: natural(fps)? as u32, moving: moving != Value::NIL, shades: natural(shades)? as u32, kind,
+            }));
+        }
+        Ok(animations)
+    }
     pub fn frame_snapshot(&mut self, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
         // redisplay_internal runs the window change functions first.
         if !self.redisplay_inhibited()? { self.run_window_change_functions()?; }

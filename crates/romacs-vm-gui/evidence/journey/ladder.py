@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The owner's first session as an executable ladder, measured on the real GUI.
+"""A first session as an executable ladder, measured on the real GUI.
 
     ladder.py OUT_DIR [--mode default|gnu-lisp|loadup] [--binary PATH]
 

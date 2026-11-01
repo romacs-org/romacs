@@ -23,6 +23,16 @@
 (register-definition-prefixes "ob-wgsl" '("ob-wgsl-" "org-babel-"))
 
 
+;;; Generated autoloads from romacs-animate.el
+
+(register-definition-prefixes "romacs-animate" '("romacs-animate-"))
+
+
+;;; Generated autoloads from romacs-armillary.el
+
+(register-definition-prefixes "romacs-armillary" '("romacs-armillary-"))
+
+
 ;;; Generated autoloads from romacs-buffer-switch.el
 
 (register-definition-prefixes "romacs-buffer-switch" '("romacs-" "switch-to-buffer"))

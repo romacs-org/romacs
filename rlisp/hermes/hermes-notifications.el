@@ -1,4 +1,5 @@
 ;;; hermes-notifications.el --- Desktop notifications for Hermes  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

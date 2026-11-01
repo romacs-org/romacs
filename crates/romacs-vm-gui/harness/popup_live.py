@@ -349,7 +349,7 @@ def main():
             init = WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame else INIT
             (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state))))
             (config / 'rc.xml').write_text(live.RC_XML)
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
+            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
                    'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
@@ -368,7 +368,7 @@ def main():
                 fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'private compositor', compositor)
                 env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
                 # Every client below connects to XDG_RUNTIME_DIR/WAYLAND_DISPLAY:
-                # the private compositor's socket, never the owner's display.
+                # the private compositor's socket, never the user's display.
                 socket = Path(env['XDG_RUNTIME_DIR']) / env['WAYLAND_DISPLAY']
                 assert socket.is_socket() and socket.parent == root, socket
                 assert 'DISPLAY' not in env

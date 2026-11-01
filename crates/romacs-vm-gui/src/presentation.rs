@@ -115,9 +115,12 @@ impl Presentation {
 
     pub fn in_flight(&self) -> Option<(u64, Instant)> { self.in_flight }
 
-    /// A prompt's paint left in flight in place of this one (main.rs `Lent').
+    /// A prompt's paint left in flight (main.rs `Lent'): it becomes this
+    /// loop's when none of its own is; an undrawn one of its own stays, since
+    /// the prompt's later presentation drawn settles it (and the latency
+    /// trace retires it by its own id).
     pub fn lent_back(&mut self, in_flight: Option<(u64, Instant)>) {
-        if in_flight.is_some() { self.in_flight = in_flight; }
+        if self.in_flight.is_none() { self.in_flight = in_flight; }
     }
 
     /// The in-flight paint has waited past STALL for its render.

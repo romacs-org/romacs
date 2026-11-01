@@ -1,4 +1,5 @@
 ;;; hermes-chat-draft.el --- Literal draft highlighting -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026 Thanos Apollo
 

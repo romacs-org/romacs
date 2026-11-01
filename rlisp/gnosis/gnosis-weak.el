@@ -1,4 +1,5 @@
 ;;; gnosis-weak.el --- Weak-spot signals in note buffers  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Free Software Foundation, Inc.
 

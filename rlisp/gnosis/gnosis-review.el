@@ -1,4 +1,5 @@
 ;;; gnosis-review.el --- Review system for gnosis  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Free Software Foundation, Inc.
 

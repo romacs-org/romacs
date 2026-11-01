@@ -1788,7 +1788,7 @@ impl RenderApp {
                 )
             });
             // Wheel over a model zooms it instead of scrolling (design §5.1;
-            // the default awaits Thanos's decision).
+            // the default is not decided yet).
             if self.modifiers == 0
                 && !self.models.is_empty()
                 && let Some((surface_id, _, _)) = Self::surface_target_for_frame_window(

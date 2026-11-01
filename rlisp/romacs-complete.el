@@ -1,14 +1,14 @@
 ;;; romacs-complete.el --- Vertical minibuffer completion in a layer  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Copyright (C) 2021-2026 Free Software Foundation, Inc.
+;; Portions Copyright (C) 2021-2026 Free Software Foundation, Inc.,
+;; from vertico.el by Daniel Mendler, kept as the GPL requires.
 
-;; Author: Daniel Mendler <mail@daniel-mendler.de>
-;; Maintainer: Daniel Mendler <mail@daniel-mendler.de>
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 ;; Keywords: convenience, files, matching, completion
-;; URL: https://github.com/minad/vertico
 
-;; Romacs: derived from vertico.el, vertico commit c60d802 ("README:
+;; Romacs: derived from vertico.el by Daniel Mendler
+;; (https://github.com/minad/vertico), vertico commit c60d802 ("README:
 ;; Remove old section about Tramp"), version 2.15, with the sorting of
 ;; extensions/vertico-sort.el and the commands of
 ;; extensions/vertico-directory.el from the same commit.  What changed
@@ -39,7 +39,7 @@
 ;; stays GNU's buffer and window, with its contents, prompt, point, hooks,
 ;; history and recursion; only where it is drawn changes.  Messages show
 ;; as toasts in the frame's top-right corner and stay in *Messages*
-;; (DIVERGENCES.md VM2-MINI-COMPLETION-LAYER, VM2-MESSAGE-TOAST).
+;; (DIVERGENCES.md VM2-MINI-COMPLETION-LAYER, VM2-ECHO-LAYER).
 ;;
 ;; Candidates come from `completion-all-completions' over the table and
 ;; predicate the reader was given, with `completion-styles' (orderless

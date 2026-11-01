@@ -998,6 +998,8 @@ pub enum RenderShutdownReason {
     EvaluatorShutdown,
     NativeWindowDestroyed,
     StartupCancelled,
+    /// The GPU device was lost and rebuilding it kept failing.
+    GpuLost,
 }
 
 pub(super) struct RenderLifecycle {

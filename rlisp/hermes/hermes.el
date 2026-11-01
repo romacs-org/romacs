@@ -1,4 +1,5 @@
 ;;; hermes.el --- Emacs frontend for Hermes Agent  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

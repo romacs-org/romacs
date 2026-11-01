@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Real-compositor walk of the romacs GUI on the owner's Hyprland session.
+"""Real-compositor walk of the romacs GUI on a real Hyprland session.
 
-Launches the owner's command (scripts/romacs) on workspace 2 (HDMI-A-1, never
-DP-1) without stealing the workspace, drives it with real Wayland key events
+Launches the command (scripts/romacs) on $ROMACS_LIVE_WORKSPACE of
+$ROMACS_LIVE_MONITOR without stealing the workspace, drives it with real Wayland key events
 (wtype), and captures compositor pixels (grim) plus the GUI's own painted-glyph
-dump (--trace-scene) for every step. Focus is returned to the owner's window
+dump (--trace-scene) for every step. Focus is returned to the user's window
 at the end, and the GUI is terminated.
 
     run.py OUT_DIR [--gnu-lisp]
@@ -46,7 +46,7 @@ def clients():
 original = active()['address']
 before = {c['pid'] for c in clients()}
 args = ' --gnu-lisp' if gnu else ''
-# The owner's command, exactly; the state dir only moves the log here.
+# The command, exactly; the state dir only moves the log here.
 cmd = __import__('shlex').join(['env', f'HOME={out}/home', f'XDG_STATE_HOME={out}/state', str(ROOT / 'scripts/romacs'), '--trace-scene', *(['--gnu-lisp'] if gnu else [])])
 hy('eval', f'hl.exec_cmd({json.dumps(cmd)}, {{workspace="{WORKSPACE} silent"}})')
 records, pid = [], None
@@ -175,7 +175,7 @@ finally:
     (out / 'results.json').write_text(json.dumps(records, indent=2, ensure_ascii=False))
     try:
         hy('dispatch', f'hl.dsp.focus({{window="address:{original}"}})')
-    except Exception as e:  # never leave the owner without focus silently
+    except Exception as e:  # never leave the user without focus silently
         print('focus restore failed', e)
     if pid:
         os.kill(pid, 15)

@@ -4,6 +4,7 @@
 ;; Copyright (C) 1985-1989, 1993-1997, 1999-2026 Free Software Foundation,
 ;; Inc.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Which keymaps are active is policy over Lisp-visible state: the

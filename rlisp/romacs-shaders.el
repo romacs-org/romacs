@@ -1,6 +1,7 @@
 ;;; romacs-shaders.el --- Shader showcase: gallery and frame effects -*- lexical-binding: t -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

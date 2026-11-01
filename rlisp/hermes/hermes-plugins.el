@@ -1,4 +1,5 @@
 ;;; hermes-plugins.el --- Native agent plugin management -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026 Thanos Apollo
 ;; Author: Thanos Apollo <public@thanosapollo.org>

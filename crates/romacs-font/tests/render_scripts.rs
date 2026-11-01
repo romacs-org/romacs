@@ -126,7 +126,7 @@ const GNU_EMOJI_SCRIPT: &[(u32, u32)] = &[
     (0x1FAEF, 0x1FAF8),
 ];
 
-/// The owner's init.el: `(set-fontset-font t 'emoji "Noto Color Emoji" nil
+/// A user's init.el: `(set-fontset-font t 'emoji "Noto Color Emoji" nil
 /// 'prepend)` and `(set-fontset-font t #x1f5dc "Noto Color Emoji" nil
 /// 'prepend)`, as plain data.
 fn owner_policy() -> FontsetPolicy {

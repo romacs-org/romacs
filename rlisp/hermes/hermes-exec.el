@@ -1,4 +1,5 @@
 ;;; hermes-exec.el --- HTTP-JSON eval endpoint for the Hermes bridge  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

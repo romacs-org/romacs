@@ -1,5 +1,6 @@
 ;;; romacs-layer.el --- Buffers shown in a layer over the frame  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; A layer is a child frame (GNU's `parent-frame') showing one buffer over
@@ -236,7 +237,7 @@ columns and lines."
 ;; Messages as toasts: a stack in the frame's top-right corner, which
 ;; covers no mode line and no minibuffer.  The echo area's semantics are
 ;; GNU's (`message', `current-message', *Messages*); only where a message
-;; shows is ours (DIVERGENCES.md VM2-MESSAGE-TOAST).
+;; shows is ours (DIVERGENCES.md VM2-ECHO-LAYER).
 
 (defcustom romacs-layer-toast-timeout 4
   "Seconds a message toast shows before it fades."

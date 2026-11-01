@@ -35,9 +35,10 @@ pub struct Shared {
     pub closed: bool,
     /// Under --trace-latency, when the prompt last read a key.
     pub key_read: Option<std::time::Instant>,
-    /// The prompt's last painted frame, its selected window, presentation
-    /// and window ends: an unchanged redisplay answers these again.
-    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>)>,
+    /// The prompt's last painted frame, its selected window, presentation,
+    /// window ends and text animations: an unchanged redisplay answers
+    /// these again.
+    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>, Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>)>,
 }
 
 pub struct GuiHost {
@@ -152,6 +153,15 @@ impl GuiHost {
 
 }
 
+/// Whether SENDER's window shows animation drawn frame by frame: on a GPU,
+/// and on a software rasterizer, every headless harness's, only when
+/// ROMACS_LAYER_ANIMATION is 1 or more, as for layers.  None until the
+/// window has chosen its adapter.
+pub(crate) fn display_animates(sender: &PaintSender) -> Option<bool> {
+    let forced = || std::env::var("ROMACS_LAYER_ANIMATION").ok().and_then(|v| v.parse::<f32>().ok()).is_some_and(|n| n >= 1.0);
+    sender.software_adapter().map(|software| !software || forced())
+}
+
 impl HostInput for GuiHost {
     fn clipboard_text(&mut self) -> Result<Option<String>, String> {
         self.sender.clipboard_text()
@@ -159,6 +169,10 @@ impl HostInput for GuiHost {
 
     fn set_clipboard_text(&mut self, text: &str) -> Result<(), String> {
         self.sender.set_clipboard_text(text)
+    }
+
+    fn display_animates(&mut self) -> Option<bool> {
+        display_animates(&self.sender)
     }
 
     fn input_pending(&mut self) -> bool {
@@ -172,10 +186,11 @@ impl HostInput for GuiHost {
         // As the loop's changed_frame: a timer run in a prompt that left the
         // frame as this prompt last painted it, with nothing presented
         // since, submits no frame and answers that paint's window ends.
-        if let Some((painted, selected, presentation, ends)) = &self.shared.borrow().painted {
+        if let Some((painted, selected, presentation, ends, animations)) = &self.shared.borrow().painted {
             let shared = self.shared.borrow();
             if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
-                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame) {
+                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame)
+                && *animations == frame.text_animations {
                 return Ok(ends.clone());
             }
         }
@@ -205,10 +220,10 @@ impl HostInput for GuiHost {
             let drawn = self.sender.wait_for_render(presentation, deadline.saturating_duration_since(submitted)).is_ok();
             shared.in_flight = (!drawn).then_some((presentation, since));
             if drawn { shared.settled = Some((presentation, std::time::Instant::now())); }
-            shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone()));
+            shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
             drawn
         };
-        eprintln!(
+        if crate::diagnostics() { eprintln!(
             "{}",
             serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
                 "selected":frame.selected,"drawn":drawn,
@@ -218,7 +233,7 @@ impl HostInput for GuiHost {
                 "layers":frame.frame.children.iter().map(|c| c.windows.iter().filter(|w| w.snapshot.id != frame.minibuffer)
                     .map(|w| w.snapshot.text.utf8.clone()).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "glyphs":glyphs})
-        );
+        ); }
         // The key's command and hooks ran before this redisplay began.
         if let Some(read) = self.shared.borrow_mut().key_read.take() {
             let now = std::time::Instant::now();

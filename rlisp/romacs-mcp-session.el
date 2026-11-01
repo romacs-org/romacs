@@ -1,6 +1,7 @@
 ;;; romacs-mcp-session.el --- Drive and observe the session over MCP -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Optional input and observation tools for agents that use the editor as a

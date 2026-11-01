@@ -1,6 +1,6 @@
 ;;; gnu-trace.el --- which VM2-missing C primitives GNU calls per journey step -*- lexical-binding: t -*-
 ;; Run INTERACTIVELY (emacs -Q -nw in a pty, see journey-check.sh): the
-;; minibuffer, redisplay and jit-lock run as they do for the owner.
+;; minibuffer, redisplay and jit-lock run as they do for a user.
 ;;   emacs -Q -nw -l gnu-trace.el --eval '(journey-trace "FIXTURE" "MISSING" "OUT")'
 ;;
 ;; Method and its known blind spot: every C primitive VM2 lacks (MISSING, one

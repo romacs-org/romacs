@@ -188,7 +188,7 @@ fn core_free_paint_scene_installs_moves_and_removes_child_frames() {
         }))
         .unwrap();
     let scene = |revision: u64, children: Vec<FrameGlyphBuffer>| {
-        Box::new(crate::thread_comm::PaintScene { root: paint(revision, Color::RED), children })
+        Box::new(crate::thread_comm::PaintScene { root: paint(revision, Color::RED), children, text_animations: Vec::new() })
     };
     let placed = |app: &RenderApp| -> Vec<(u64, f32)> {
         let frames = &app.frame_windows.primary_window().unwrap().render.compositor.child_frames.frames;

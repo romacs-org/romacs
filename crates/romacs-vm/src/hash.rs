@@ -30,16 +30,40 @@ pub(super) enum Test {
     Eq,
     Eql,
     Equal,
-    /// A test `define-hash-table-test' named, its symbol here, from GNU's
-    /// `equal-including-properties' and `sxhash-equal-including-properties'
-    /// (tab-bar.el's): hashed as `equal' hashes, which agrees with it.
-    Including(Value),
+    /// A `define-hash-table-test' NAME whose predicate VM2 has natively
+    /// (`native_test'): that predicate, with a hash that agrees with it.
+    User(Value, Native),
+}
+/// The predicates a user-defined test may name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Native {
+    /// profiler.el's `profiler-function-equal': closures by their code.
+    FunctionEqual,
+    /// tab-bar.el's `equal-including-properties' test, hashed as `equal'
+    /// hashes, which agrees with it.
+    EqualIncludingProperties,
+}
+romacs_snapshot::snapshot_enum!(Native {
+    Native::FunctionEqual => (),
+    Native::EqualIncludingProperties => (),
+});
+impl Test {
+    /// The test as one byte, for content hashes.
+    pub(super) fn code(self) -> u8 {
+        match self {
+            Test::Eq => 0,
+            Test::Eql => 1,
+            Test::Equal => 2,
+            Test::User(_, Native::EqualIncludingProperties) => 3,
+            Test::User(_, Native::FunctionEqual) => 4,
+        }
+    }
 }
 romacs_snapshot::snapshot_enum!(Test {
     Test::Eq => (),
     Test::Eql => (),
     Test::Equal => (),
-    Test::Including(name) => (name),
+    Test::User(name, native) => (name, native),
 });
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Weakness {
@@ -489,7 +513,18 @@ impl Vm {
     fn hash_key(&self, test: Test, key: Value) -> (u64, bool) {
         let mut moving = false;
         let hash = match (test, self.shape(key)) {
-            (Test::Equal | Test::Including(_), _) => self.sxhash(key, 0, &mut moving),
+            (Test::Equal | Test::User(_, Native::EqualIncludingProperties), _) => self.sxhash(key, 0, &mut moving),
+            (Test::User(_, Native::FunctionEqual), _) => match crate::profiler::code_identity(&self.closures, key) {
+                // A closure's compiled function is a stable index.
+                Some(crate::profiler::Identity::Code(function)) => combine(function as u64, 4),
+                // An explicit closure's body can move while the closure
+                // does not, which `forward' would not notice: one bucket.
+                Some(crate::profiler::Identity::Body(_)) => combine(0, 5),
+                _ => {
+                    moving = Self::moving_reference(key);
+                    key.0
+                }
+            },
             (Test::Eql, Shape::Float(bits)) => bits,
             (Test::Eql, Shape::Bignum(n)) => hash_bytes(&n.to_signed_bytes_le()),
             _ => {
@@ -513,7 +548,8 @@ impl Vm {
             Test::Eq => a == b,
             Test::Eql => self.eql(a, b),
             Test::Equal => self.equal(a, b)?,
-            Test::Including(_) => self.equal_including_properties(a, b)?,
+            Test::User(_, Native::FunctionEqual) => self.function_equal(a, b),
+            Test::User(_, Native::EqualIncludingProperties) => self.equal_including_properties(a, b)?,
         })
     }
     /// GNU `internal_equal` (plain `equal`): cycle-aware and depth-limited.
@@ -929,7 +965,7 @@ impl Vm {
                     Test::Eq => "eq",
                     Test::Eql => "eql",
                     Test::Equal => "equal",
-                    Test::Including(name) => return Ok(name),
+                    Test::User(name, _) => return Ok(name),
                 };
                 Ok(self.intern(name))
             }
@@ -1097,6 +1133,23 @@ impl Vm {
         let data = self.list_value(&data);
         Ok((condition, symbol, data))
     }
+    /// The predicate VM2 has natively that the `define-hash-table-test'
+    /// definition USER, the (TEST HASH) of the symbol NAME, names:
+    /// `function-equal' with any hash (no hash that agrees with it can be
+    /// told from the native one), `equal-including-properties' with
+    /// `sxhash-equal-including-properties'.
+    fn native_test(&mut self, name: Value, user: Value) -> Option<Native> {
+        let (predicate, tail) = self.cons_pair(user).ok()?;
+        let hash = self.cons_pair(tail).ok()?.0;
+        if name.tag() != 7 {
+            return None;
+        }
+        if predicate == self.intern("function-equal") {
+            return Some(Native::FunctionEqual);
+        }
+        let including = (self.intern("equal-including-properties"), self.intern("sxhash-equal-including-properties"));
+        ((predicate, hash) == including).then_some(Native::EqualIncludingProperties)
+    }
     /// GNU `Fmake_hash_table`: pairs are consumed from the end, so the first
     /// occurrence of a keyword wins and the last invalid keyword is reported.
     fn make_hash_table(&mut self, args: &[Value]) -> Hashed<Value> {
@@ -1132,20 +1185,18 @@ impl Vm {
             let property = self.intern("hash-table-test");
             let user = self.symbol_property(test, property).unwrap_or(Value::NIL);
             let defined = self.cons_pair(user).is_ok_and(|(_, tail)| tail.tag() == 3);
-            let functions = self.cons_pair(user).and_then(|(equal, tail)| Ok((equal, self.cons_pair(tail)?.0)));
-            if test.tag() == 7 && functions.is_ok_and(|(equal, hash)| {
-                (equal, hash) == (self.intern("equal-including-properties"), self.intern("sxhash-equal-including-properties"))
-            }) {
-                Test::Including(test)
-            } else {
-            return Err(HashFault::Error(
-                if defined {
-                    "VM2 does not support user-defined hash table tests"
-                } else {
-                    "Invalid hash table test"
-                },
-                Some(test),
-            ));
+            match self.native_test(test, user) {
+                Some(native) => Test::User(test, native),
+                None => {
+                    return Err(HashFault::Error(
+                        if defined {
+                            "VM2 does not support user-defined hash table tests"
+                        } else {
+                            "Invalid hash table test"
+                        },
+                        Some(test),
+                    ));
+                }
             }
         };
         let size = if size == Value::NIL {
@@ -1201,9 +1252,9 @@ impl Vm {
         match t.test {
             Test::Eq => out.push_str(" test eq"),
             Test::Equal => out.push_str(" test equal"),
-            Test::Including(name) => {
+            Test::User(name, _) => {
                 out.push_str(" test ");
-                out.push_str(self.symbol_names.get((name.0 >> 3) as usize - 1).map_or("", String::as_str));
+                out.push_str(&String::from_utf8_lossy(&element(self, name)?));
             }
             Test::Eql => {}
         }

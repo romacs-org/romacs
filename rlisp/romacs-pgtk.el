@@ -1,5 +1,6 @@
 ;;; romacs-pgtk.el --- GNU pgtk's C entry points on Romacs's display  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; A frame on Romacs's GUI display is a `pgtk' frame (VM2-WIN5), so the

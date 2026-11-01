@@ -1,6 +1,7 @@
 ;;; buffer_lifecycle.el --- Buffer lifecycle policy
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

@@ -4,7 +4,7 @@
 `build(root, anchor)' writes ROOT/mail, a maildir of about 200 generated
 messages (threads, attachments, HTML, UTF-8 and RFC 2047 headers) dated
 relative to ANCHOR (epoch seconds), ROOT/notmuch-config naming it, and its
-notmuch database, then tags it as an owner's mailbox looks after a sync.
+notmuch database, then tags it as a user's mailbox looks after a sync.
 The same SEED and ANCHOR give the same messages, files and thread order,
 so two engines on two copies see the same store.  Nothing here reads the
 caller's mail, ~/.notmuch-config or the network.
@@ -161,7 +161,7 @@ def build(root, anchor):
         os.utime(path, (stamp, stamp))
     env = dict(os.environ, HOME=str(root), **environment(root))
     notmuch(env, 'new', '--quiet')
-    # As after the owner's sync: his sent mail is tagged sent and out of the
+    # As after a user's sync: their sent mail is tagged sent and out of the
     # inbox, a few threads archived, one list's mail tagged.
     batch = ('-inbox -unread +sent -- folder:sent\n'
              '-inbox +archived -- date:..21d\n'

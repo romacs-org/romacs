@@ -61,6 +61,8 @@ pub fn session(host: Result<RenderLoopExit, RenderLoopError>, verdict: Verdict) 
         Err(RenderLoopError::Preparation(error)) => evaluator(Exit::new("display-preparation-failed", error, 1)),
         Ok(RenderLoopExit::Finished(Some(RenderShutdownReason::NativeWindowDestroyed))) =>
             Exit::new("window-destroyed", with_last_error("the native window was destroyed".into()), 1),
+        Ok(RenderLoopExit::Finished(Some(RenderShutdownReason::GpuLost))) =>
+            Exit::new("gpu-lost", with_last_error("the GPU device was lost and could not be rebuilt".into()), 1),
         Ok(RenderLoopExit::Finished(Some(RenderShutdownReason::StartupCancelled)) | RenderLoopExit::GpuStartupCancelled) =>
             evaluator(Exit::new("window-closed-during-startup", "", 0)),
         Ok(RenderLoopExit::Finished(Some(RenderShutdownReason::EvaluatorShutdown) | None)) =>
@@ -196,6 +198,8 @@ mod tests {
         assert!(end.detail.starts_with("Exit Failure: 71"), "{}", end.detail);
         let end = session(Ok(RenderLoopExit::Finished(Some(RenderShutdownReason::NativeWindowDestroyed))), ended("kill-emacs", 0));
         assert_eq!((end.reason, end.status), ("window-destroyed", 1));
+        let end = session(Ok(RenderLoopExit::Finished(Some(RenderShutdownReason::GpuLost))), ended("kill-emacs", 0));
+        assert_eq!((end.reason, end.status), ("gpu-lost", 1));
     }
 
     #[test]

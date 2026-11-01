@@ -1402,6 +1402,7 @@ impl GuiFrameRenderState {
         let current_frame = self.compositor.current_frame.as_mut()?;
         let mut frame = Self::take_frame_for_render(current_frame);
         self.compositor.input_scroll.paint(&mut frame);
+        self.compositor.text_animations.paint(&mut frame);
         Some(frame)
     }
 
