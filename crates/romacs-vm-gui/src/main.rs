@@ -1159,9 +1159,8 @@ fn evaluate(
                         width = w; height = h;
                         let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
                         vm.set_frame_geometry(width, height, lh, cw)?;
-                        // GNU's redisplay runs `window-size-change-functions' then.
-                        let resized = "(when (fboundp 'romacs-gui-loadup-frame-resized) (romacs-gui-loadup-frame-resized (selected-frame)))";
-                        if let Err(error) = vm.eval_source(resized) { echo::show(&mut vm, &error)?; }
+                        // The repaint's redisplay runs `window-size-change-functions'
+                        // (`frame_snapshot'), as GNU's does.
                         live_presentation.changed();
                     }
                     continue;

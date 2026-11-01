@@ -241,20 +241,5 @@ skips them when it failed to make a window-system initial frame."
   (unless inhibit-startup-hooks
     (run-hooks 'window-setup-hook)))
 
-(defun romacs-gui-loadup-frame-resized (frame)
-  "Run the default value of `window-size-change-functions' with FRAME, as
-GNU's redisplay does once FRAME's size changed (window.c
-`run_window_change_functions_globally'), each function's error reported
-and not propagated (`safe_calln').  The GUI calls it when its window
-resizes, the one size change Romacs reports to that hook yet."
-  (let ((functions (default-value 'window-size-change-functions)))
-    (while (consp functions)
-      (unless (eq (car functions) t)
-        (condition-case err
-            (funcall (car functions) frame)
-          (error (message "Error during redisplay: %S signaled %S"
-                          (list (car functions) frame) err))))
-      (setq functions (cdr functions)))))
-
 (provide 'romacs-gui-loadup)
 ;;; romacs-gui-loadup.el ends here
