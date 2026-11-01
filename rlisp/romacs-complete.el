@@ -3,12 +3,11 @@
 
 ;; Copyright (C) 2021-2026 Free Software Foundation, Inc.
 
-;; Author: Daniel Mendler <mail@daniel-mendler.de>
-;; Maintainer: Daniel Mendler <mail@daniel-mendler.de>
+;; Maintainer: the Romacs project
 ;; Keywords: convenience, files, matching, completion
-;; URL: https://github.com/minad/vertico
 
-;; Romacs: derived from vertico.el, vertico commit c60d802 ("README:
+;; Romacs: derived from vertico.el by Daniel Mendler
+;; (https://github.com/minad/vertico), vertico commit c60d802 ("README:
 ;; Remove old section about Tramp"), version 2.15, with the sorting of
 ;; extensions/vertico-sort.el and the commands of
 ;; extensions/vertico-directory.el from the same commit.  What changed

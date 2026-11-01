@@ -90,12 +90,14 @@ class LispLayoutTests(unittest.TestCase):
                     # Derived from orderless.el (GNU ELPA, FSF copyright),
                     # outside gnu-lisp/; retains its notice and names the commit.
                     self.assertIn(';; Copyright (C) 2021-2026 Free Software Foundation, Inc.', source)
-                    self.assertIn('derived from orderless.el, orderless commit e271a8e', source)
+                    self.assertIn('derived from orderless.el by', source)
+                    self.assertIn('orderless commit e271a8e', source)
                 elif file == ROOT / 'rlisp/romacs-complete.el':
                     # Derived from vertico.el and two of its extensions (GNU
                     # ELPA, FSF copyright); retains its notice and names the commit.
                     self.assertIn(';; Copyright (C) 2021-2026 Free Software Foundation, Inc.', source)
-                    self.assertIn('derived from vertico.el, vertico commit c60d802', source)
+                    self.assertIn('derived from vertico.el by', source)
+                    self.assertIn('vertico commit c60d802', source)
                 else:
                     self.assertNotRegex(source, copyright_pattern)
                 self.assertNotIn('This file is part of GNU Emacs.', source)
