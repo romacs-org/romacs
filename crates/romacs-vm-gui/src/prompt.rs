@@ -35,9 +35,10 @@ pub struct Shared {
     pub closed: bool,
     /// Under --trace-latency, when the prompt last read a key.
     pub key_read: Option<std::time::Instant>,
-    /// The prompt's last painted frame, its selected window, presentation
-    /// and window ends: an unchanged redisplay answers these again.
-    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>)>,
+    /// The prompt's last painted frame, its selected window, presentation,
+    /// window ends and text animations: an unchanged redisplay answers
+    /// these again.
+    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>, Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>)>,
 }
 
 pub struct GuiHost {
@@ -174,10 +175,6 @@ impl HostInput for GuiHost {
         display_animates(&self.sender)
     }
 
-    fn text_animation(&mut self, id: u64, animation: Option<romacs_display_protocol::text_animation::TextAnimation>) -> Result<(), String> {
-        self.sender.set_text_animation(id, animation)
-    }
-
     fn input_pending(&mut self) -> bool {
         self.drain();
         let shared = self.shared.borrow();
@@ -189,10 +186,11 @@ impl HostInput for GuiHost {
         // As the loop's changed_frame: a timer run in a prompt that left the
         // frame as this prompt last painted it, with nothing presented
         // since, submits no frame and answers that paint's window ends.
-        if let Some((painted, selected, presentation, ends)) = &self.shared.borrow().painted {
+        if let Some((painted, selected, presentation, ends, animations)) = &self.shared.borrow().painted {
             let shared = self.shared.borrow();
             if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
-                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame) {
+                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame)
+                && *animations == frame.text_animations {
                 return Ok(ends.clone());
             }
         }
@@ -222,7 +220,7 @@ impl HostInput for GuiHost {
             let drawn = self.sender.wait_for_render(presentation, deadline.saturating_duration_since(submitted)).is_ok();
             shared.in_flight = (!drawn).then_some((presentation, since));
             if drawn { shared.settled = Some((presentation, std::time::Instant::now())); }
-            shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone()));
+            shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
             drawn
         };
         if crate::diagnostics() { eprintln!(

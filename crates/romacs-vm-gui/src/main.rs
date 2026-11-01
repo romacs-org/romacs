@@ -396,6 +396,8 @@ mod frame_tests {
 struct Frame {
     snapshot: romacs_layout_input::FrameSnapshot,
     selected: Option<u64>,
+    /// The text animations drawn over it (`Vm::text_animations').
+    animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
 
 /// Equal frames paint identically, so an equal one needs no repaint.
@@ -405,6 +407,7 @@ struct Frame {
 impl PartialEq for Frame {
     fn eq(&self, other: &Self) -> bool {
         self.selected == other.selected && frames_alike(&self.snapshot, &other.snapshot)
+            && self.animations == other.animations
     }
 }
 
@@ -451,7 +454,8 @@ fn changed_frame(vm: &mut Vm, shown: &Shown, next: Frame, presentation: u64) -> 
 fn frame(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<Frame, String> {
     let snapshot = snapshot(vm, g1, width, height)?;
     let selected = selected_window(vm, &snapshot)?;
-    Ok(Frame { snapshot, selected })
+    let animations = if g1 { vec![] } else { vm.text_animations()? };
+    Ok(Frame { snapshot, selected, animations })
 }
 
 /// The selected window's id, once the GUI's own Lisp lays out windows: a
@@ -859,7 +863,7 @@ fn paint(
     let diagnostics_prepare_ns = diagnostic_start.elapsed().as_nanos();
     let tab_bar = romacs_layout2::tab_bar_extents(&frame);
     let submit_start = Instant::now();
-    sender.submit_scene(frame, children)?;
+    sender.submit_scene(frame, children, shown.animations.clone())?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
     if wait != Wait::No { activate(sender, presentation, pending)?; }
@@ -966,7 +970,7 @@ fn paint_prompt(
             })
         }).collect::<Vec<_>>()
     });
-    sender.submit_scene(glyphs, children)?;
+    sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
     if let Some(observed) = observed {
         eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }

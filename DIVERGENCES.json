@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "f1ebd430f2bd551a08020ff5b09bb91ac0fdcb35f8ad9c0d437d08574fdea129",
+  "input_hash": "c5980ba98122364ad06688c5cd74b00de7799e7038fec6b8aff98de4dae3da53",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -2401,7 +2401,7 @@
   "romacs--replace-range": [
    53
   ],
-  "romacs--text-animation romacs--display-animates romacs--armillary-frame romacs-animate-start": [
+  "romacs-animate--elements romacs--display-animates romacs--armillary-frame romacs-animate-start": [
    233
   ],
   "romacs-complete-mode": [
@@ -7358,10 +7358,10 @@
    "planned": false,
    "mechanism": "The display animates a block of buffer text itself",
    "gnu": "GNU shows a buffer's text as it is; an animation rewrites the text from a Lisp timer, one redisplay per frame",
-   "romacs": "`romacs--text-animation` registers a block of a window's cells (rows by columns from a visual row) with the render thread, which keeps the clock, the motion time and the frames and draws them over its copy of the evaluator's frame at every draw (`romacs_display_protocol::text_animation`, `render_thread/text_animations.rs`): no Lisp runs and no redisplay happens per frame. The buffer holds a still frame, which Lisp redraws only when the view or the window's size changes; each cell takes the face the still frame shows its shade in, so theme faces apply. The block moves only while Lisp says it may (`rlisp/romacs-animate.el`: shown in the selected frame, focused, not paused, `romacs-animate-motion-p`) and the window has focus and is not hidden; it stops at once and resumes without catching up. A display on a software rasterizer (every headless harness and GUI test) draws none unless `ROMACS_LAYER_ANIMATION` is 1 (`romacs--display-animates`), so screenshots and parity do not depend on frame timing. The armillary sphere (`crates/romacs-armillary`, `romacs--armillary-frame`, byte-identical to the site's script) is the one kind; the *Romacs* landing (GUI-STARTUP1) its first user. `crates/romacs-layout2/tests/text_animation.rs`, `render_thread::text_animations` tests, `crates/romacs-armillary/tests/armillary_site.rs`",
+   "romacs": "`rlisp/romacs-animate.el` keeps each animation's block of a window's cells (rows by columns from a visual row) in `romacs-animate--elements`; every frame the evaluator freezes carries the entries whose window still shows their buffer (`Vm::text_animations`), and the render thread draws exactly the frame's animations, keeping the clock, the motion time and the frames, over its copy of that frame at every draw (`romacs_display_protocol::text_animation`, `render_thread/text_animations.rs`): no Lisp runs and no redisplay happens per frame, and a frame that no longer shows the buffer draws none. The buffer holds a still frame, which Lisp redraws only when the view or the window's size changes; each cell takes the face the still frame shows its shade in, so theme faces apply. The block moves only while Lisp says it may (`rlisp/romacs-animate.el`: shown in the selected frame, focused, not paused, `romacs-animate-motion-p`) and the window has focus and is not hidden; it stops at once and resumes without catching up. A display on a software rasterizer (every headless harness and GUI test) draws none unless `ROMACS_LAYER_ANIMATION` is 1 (`romacs--display-animates`), so screenshots and parity do not depend on frame timing. The armillary sphere (`crates/romacs-armillary`, `romacs--armillary-frame`, byte-identical to the site's script) is the one kind; the *Romacs* landing (GUI-STARTUP1) its first user. `crates/romacs-layout2/tests/text_animation.rs`, `render_thread::text_animations` tests, `crates/romacs-armillary/tests/armillary_site.rs`, `harness/landing_anim_live.py` (the path forced on a software rasterizer)",
    "why": "**User-observable** only: the block's pixels show frames its buffer text does not hold; Lisp reading the buffer sees the still frame",
    "symbols": [
-    "romacs--text-animation romacs--display-animates romacs--armillary-frame romacs-animate-start"
+    "romacs-animate--elements romacs--display-animates romacs--armillary-frame romacs-animate-start"
    ],
    "symbols_derived": false
   },
