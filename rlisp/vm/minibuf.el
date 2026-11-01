@@ -200,6 +200,11 @@ innermost-loop checks, which need recursive minibuffers)."
         (erase-buffer)
         (setq deactivate-mark old-deactivate-mark))
       (set-window-buffer mini mini-buffer)
+      ;; minibuf.c:1197: leaving the outermost minibuffer resizes the
+      ;; mini-window back to its display now, so a prompt the command
+      ;; reads next grows from one line.
+      (when (= romacs--minibuf-level 0)
+        (romacs--resize-mini-window))
       (when (window-live-p calling-window)
         (select-window calling-window))
       (condition-case nil (set-buffer calling-buffer) (error nil)))

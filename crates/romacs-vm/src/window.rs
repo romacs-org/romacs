@@ -814,6 +814,20 @@ impl Vm {
         }
         Ok(())
     }
+    /// read_minibuf_unwind (minibuf.c:1197): leaving the outermost
+    /// minibuffer gives the mini-window back the height its display takes
+    /// now, before the command goes on (a prompt it reads next starts from
+    /// there, not from the height the last one grew to). True when the
+    /// height changed and the frame was laid out again.
+    pub(crate) fn resize_mini_window_now(&mut self) -> Result<bool> {
+        let mini = self.window_root(MINI);
+        if !self.resize_mini_window(mini)? { return Ok(false); }
+        let state = &self.window_state;
+        let (width, height, line, column) = (state.width, state.height, state.line, state.column);
+        self.set_frame_geometry(width, height, line, column)?;
+        Ok(true)
+    }
+
     /// Freeze leaf publications using stable scalar IDs across collecting mode-line eval.
     pub(super) fn frame_window_snapshots(
         &mut self,
@@ -2192,6 +2206,14 @@ impl<'a> Windows<'a> {
     fn minibuf_level(&mut self) -> i64 {
         let slot = self.vm.slot("romacs--minibuf-level");
         self.vm.variable_value(slot).ok().and_then(|v| v.integer_value()).unwrap_or(0)
+    }
+    /// read_minibuf_unwind's resize_mini_window (minibuf.c:1197): t when
+    /// the mini-window's height changed.
+    pub(crate) fn resize_mini_window_now(&mut self) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        let changed = self.vm.resize_mini_window_now().map_err(internal)?;
+        if changed { self.vm.display_state.version += 1; }
+        Ok(if changed { Value::TRUE } else { Value::NIL })
     }
     /// minibuf.c:215: the minibuffer window while a minibuffer is active.
     pub(crate) fn active_minibuffer_window(&mut self) -> Out {

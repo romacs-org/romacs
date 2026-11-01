@@ -125,3 +125,40 @@ impl FaceAt for romacs_layout_input::WindowSnapshot {
         self.text.face_runs.iter().find(|r| r.bytes.contains(&byte)).map_or(0, |r| r.face.0)
     }
 }
+
+/// xdisp.c resize_mini_window counts display lines: a line wider than a
+/// row continues on the next one, as a long prompt does. Without fringes a
+/// row of the 80-column window holds 79 columns, its last showing the
+/// continuation glyph. Ad hoc scrolling then starts at the text line from
+/// which the rest fits.
+#[test]
+fn a_line_wider_than_the_window_takes_its_continuation_lines() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq resize-mini-windows 'grow-only)");
+    show(&mut vm, &"x".repeat(150));
+    assert_eq!(mini(&mut vm).1, 2 * LINE, "150 columns in rows of 79 take two lines");
+    show(&mut vm, "");
+    show(&mut vm, &"y".repeat(79));
+    assert_eq!(mini(&mut vm).1, LINE, "a row's width is one line");
+    show(&mut vm, &"y".repeat(80));
+    assert_eq!(mini(&mut vm).1, 2 * LINE, "the window's width continues");
+    let long = format!("a\nb\n{}\nc", "z".repeat(170));
+    show(&mut vm, &long);
+    let (text, height, _, start, _) = mini(&mut vm);
+    assert_eq!((height, &text[start..]), (5 * LINE, &long[2..]), "b, the three-line text line and c fit");
+}
+
+/// read_minibuf_unwind (minibuf.c:1197): leaving the outermost minibuffer
+/// resizes the mini-window at once, so the command's next prompt grows
+/// from one line rather than keeping the height the last prompt grew to.
+#[test]
+fn leaving_the_minibuffer_shrinks_the_mini_window_at_once() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq resize-mini-windows 'grow-only romacs--minibuf-level 1)");
+    show(&mut vm, "a\nb\nc");
+    assert_eq!(mini(&mut vm).1, 3 * LINE);
+    show(&mut vm, "");
+    let line = LINE.to_string();
+    assert_eq!(eval(&mut vm, "(setq romacs--minibuf-level 0) (list (romacs--resize-mini-window) (window-pixel-height (minibuffer-window)) (romacs--resize-mini-window))"),
+               format!("(t {line} nil)"));
+}

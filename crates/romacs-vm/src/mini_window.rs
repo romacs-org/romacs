@@ -87,6 +87,18 @@ pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings:
     merged
 }
 
+/// The display lines LINE takes in a window COLUMNS wide, as the layout
+/// draws them on a frame without fringes: a row holds a column less than
+/// the window, whose last column shows the continuation glyph
+/// (romacs-layout2), so each COLUMNS - 1 columns take one row.
+fn display_lines(line: &str, columns: usize) -> usize {
+    let width = line.chars().fold(0, |width, c| match c {
+        '\t' => width + 8 - width % 8,
+        _ => width + unicode_width::UnicodeWidthChar::width(c).unwrap_or(0),
+    });
+    width.div_ceil(columns.saturating_sub(1).max(1)).max(1)
+}
+
 /// How a string character displays with `ctl-arrow' at COLUMN: a tab as
 /// spaces to the next tab stop, other controls as ^X, a raw byte as \OOO.
 fn displayed(c: u32, column: usize, out: &mut String) {
@@ -208,10 +220,15 @@ impl Vm {
             _ => limit.integer_value().map_or(i64::from(total / 4), |n| n.saturating_mul(i64::from(unit))),
         }.clamp(i64::from(unit), i64::from(total.max(unit)));
         let max_lines = (max / i64::from(unit)) as usize;
-        let lines = spliced.text.split('\n').count();
+        let columns = (self.window_state.width / self.window_state.column.max(1)).max(1) as usize;
+        let rows: Vec<usize> = spliced.text.split('\n').map(|line| display_lines(line, columns)).collect();
+        let lines: usize = rows.iter().sum();
         if lines > max_lines && adhoc {
-            // Start at the display line that shows the last MAX_LINES.
-            let line_start = spliced.text.match_indices('\n').nth(lines - max_lines - 1).map_or(0, |(i, _)| i + 1);
+            // Start at the text line from which the rest takes at most
+            // MAX_LINES display lines (the last one when it alone takes more).
+            let mut shown = 0;
+            let first = (0..rows.len()).rev().find(|&i| { shown += rows[i]; shown > max_lines }).map_or(0, |i| (i + 1).min(rows.len() - 1));
+            let line_start = if first == 0 { 0 } else { spliced.text.match_indices('\n').nth(first - 1).map_or(0, |(i, _)| i + 1) };
             let byte = buffer_of(&spliced.segments, line_start, text.len());
             let Object::Buffer(b) = self.object(buffer)? else { return Err("text buffer required".into()) };
             let start = b.char_of_byte(coordinates::ByteOffset(byte))?.0 as i64 + 1;
