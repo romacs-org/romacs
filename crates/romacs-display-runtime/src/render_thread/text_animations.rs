@@ -88,8 +88,12 @@ impl TextAnimations {
         advanced
     }
 
-    /// Paint every animation over FRAME, the copy about to be drawn.
+    /// Paint every animation over FRAME, the copy about to be drawn. Its
+    /// glyphs then differ from the producer's, so it no longer promises to
+    /// paint as another frame of its layout identity does (a retained root
+    /// picture would show a still animation).
     pub(crate) fn paint(&mut self, frame: &mut FrameGlyphBuffer) {
+        if !self.running.is_empty() { frame.layout_identity = 0; }
         for running in self.running.values_mut() {
             let moved = running.moved;
             if running.cells.as_ref().is_none_or(|(at, _)| *at != moved) {
