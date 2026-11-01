@@ -469,10 +469,12 @@ fn main() {
         run_real(&mut vm, &args, &file);
     }
 
-    // GNU `load` binds these while the file's forms run (lread.c); ERT runs
+    // GNU `load` binds these while the file's forms run (lread.c; the
+    // load history's `current-load-list' starts as (FILE), which
+    // `macroexp-file-name' and so `ert-resource-directory' read); ERT runs
     // the tests later, after `load` has returned and unbound them.
     let bind = format!(
-        "(setq load-file-name {} load-in-progress t)",
+        "(setq load-file-name {0} load-true-file-name {0} current-load-list (list {0}) load-in-progress t)",
         lisp_string(&file)
     );
     if let Err((_, e)) = eval(&mut vm, &bind) {
@@ -502,7 +504,7 @@ fn main() {
             ),
         }
     }
-    if let Err((_, e)) = eval(&mut vm, "(setq load-file-name nil load-in-progress nil)") {
+    if let Err((_, e)) = eval(&mut vm, "(setq load-file-name nil load-true-file-name nil current-load-list nil load-in-progress nil)") {
         emit(json!({"event": "setup", "ok": false, "phase": "unbind-load-file-name", "error": e}));
     }
 
