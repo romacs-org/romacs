@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "93831761b75f1de18f062deb1da2e483484b57026415e777ac5fdbc89b4d26ac",
+  "source_fingerprint": "94cf90ed277d98e3b7b96a6cad038c2d2f553d0bb2be971017b3ecb941602f62",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",

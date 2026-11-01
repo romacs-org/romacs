@@ -308,7 +308,8 @@ impl RenderApp {
             self.menus.cancel();
             self.menus.shutdown();
             let recovered = self.recover_from_device_loss(event_loop);
-            if self.device_lost.record_recovery(recovered, std::time::Instant::now()) {
+            let now = std::time::Instant::now();
+            if self.device_lost.record_recovery(recovered, now) {
                 tracing::error!(
                     "GPU device unrecoverable: {} rebuilds in a row failed",
                     super::device_loss::MAX_FAILED_RECOVERIES
@@ -320,7 +321,9 @@ impl RenderApp {
                 return;
             }
             if !recovered {
-                // The latch stays set: retry_wait holds the next try a second off.
+                // Retry in a second even if nothing else wakes the loop;
+                // retry_wait holds earlier wakes off.
+                event_loop.set_control_flow(ControlFlow::WaitUntil(now + std::time::Duration::from_secs(1)));
                 return;
             }
         }
