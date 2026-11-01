@@ -440,6 +440,10 @@ fn coding_decode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> 
 /// detected unless INHIBIT_EOL) as coding_convert_string does, without a
 /// coding-system lookup: the internal bytes of the multibyte result.
 pub(super) fn decode_utf8_detecting_eol(bytes: &[u8], inhibit_eol: bool) -> Vec<u8> {
+    // Valid UTF-8 whose line ends stay as they are is its own internal form.
+    if (inhibit_eol || !bytes.contains(&b'\r')) && std::str::from_utf8(bytes).is_ok() {
+        return bytes.to_vec();
+    }
     let tokens: Vec<CodingToken> = bytes.iter().map(|&b| CodingToken::Byte(b)).collect();
     let mode = if inhibit_eol { 0 } else { coding_eol(&tokens).unwrap_or(0) };
     let tokens = coding_decode_utf8(&tokens, false, false).into_iter()

@@ -64,7 +64,46 @@ struct Reader<'a, 'v> {
     #[cfg(test)]
     collect_subforms: bool,
 }
+/// The character at the start of BYTES of a Lisp string read as a stream,
+/// and its width: a unibyte string's bytes above 127 are raw bytes.
+fn string_input_char(bytes: &[u8], multibyte: bool) -> Result<(u32, usize)> {
+    if !multibyte {
+        let c = bytes[0] as u32;
+        return Ok((if c >= 128 { c + 0x3fff00 } else { c }, 1));
+    }
+    let width = match bytes[0] {
+        0..=0x7f => 1,
+        0xc0..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf7 => 4,
+        0xf8 => 5,
+        _ => return Err("invalid string character".into()),
+    };
+    let bytes = bytes.get(..width).ok_or("truncated string character")?;
+    Ok(crate::lstring::string_char(bytes))
+}
+
 impl Reader<'_, '_> {
+    /// Inside a string literal read from a Lisp string, the characters up
+    /// to the next quote or backslash, taken in one pass over the string's bytes
+    /// instead of one stream read each: pushed onto S.  Whether any is a
+    /// non-ASCII character.  Stops early, leaving the rest to `next', at
+    /// anything unusual (a lookahead, an error, a malformed character).
+    fn string_literal_run(&mut self, s: &mut Vec<u32>) -> bool {
+        let Self { input, at, lookahead: None, error: None, vm, .. } = self else { return false };
+        let Input::String { root, byte, character, end } = input else { return false };
+        let Some(view) = vm.str_view(vm.external_roots[*root]) else { return false };
+        let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
+        let mut unicode = false;
+        while *character < *end {
+            let Some(rest) = bytes.get(*byte..).filter(|rest| !matches!(rest.first(), None | Some(b'"' | b'\\'))) else { break };
+            let Ok((c, width)) = string_input_char(rest, multibyte) else { break };
+            unicode |= (128..0x3fff80).contains(&c);
+            s.push(c);
+            (*character, *byte, *at) = (*character + 1, *byte + width, *at + 1);
+        }
+        unicode
+    }
     fn get(&mut self) -> Result<Option<u32>> {
         match &mut self.input {
             Input::Host { text, byte } => {
@@ -93,21 +132,7 @@ impl Reader<'_, '_> {
                     .get(*byte..)
                     .filter(|b| !b.is_empty())
                     .ok_or("string stream changed length")?;
-                let (c, width) = if view.is_multibyte() {
-                    let width = match bytes[0] {
-                        0..=0x7f => 1,
-                        0xc0..=0xdf => 2,
-                        0xe0..=0xef => 3,
-                        0xf0..=0xf7 => 4,
-                        0xf8 => 5,
-                        _ => return Err("invalid string character".into()),
-                    };
-                    let bytes = bytes.get(..width).ok_or("truncated string character")?;
-                    crate::lstring::string_char(bytes)
-                } else {
-                    let c = bytes[0] as u32;
-                    (if c >= 128 { c + 0x3fff00 } else { c }, 1)
-                };
+                let (c, width) = string_input_char(bytes, view.is_multibyte())?;
                 *character += 1;
                 *byte += width;
                 Ok(Some(c))
@@ -956,6 +981,7 @@ impl Reader<'_, '_> {
 
                 let mut unicode = false;
                 loop {
+                    unicode |= self.string_literal_run(&mut s);
                     match self.next()? {
                         34 => break,
                         92 if matches!(self.peek(), Some(10 | 32)) => {
