@@ -194,7 +194,7 @@ def main():
                 defaults=json.dumps(str(defaults)), probe=json.dumps(str(probe)))
                 + (LAYER_INIT.format(heights=json.dumps(str(heights))) if args.romacs_complete else ''))
             (config / 'rc.xml').write_text(live.RC_XML)
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
+            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
                    'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),

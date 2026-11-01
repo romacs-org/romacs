@@ -293,6 +293,10 @@ impl RenderApp {
         // consecutive surface-Lost acquisitions, or by the debug simulation
         // command. Rebuild the whole GPU stack before doing anything else
         // with it.
+        if let Some(at) = self.device_lost.retry_wait(now) {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(at.into_instant()));
+            return;
+        }
         if self.device_lost.take() {
             if self.process_startup_commands() {
                 self.handle_exiting();
@@ -303,10 +307,35 @@ impl RenderApp {
             self.tooltips.shutdown();
             self.menus.cancel();
             self.menus.shutdown();
-            if !self.recover_from_device_loss(event_loop) {
-                event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+            let recovered = self.recover_from_device_loss(event_loop);
+            // A rebuild can take a while: observe again.
+            let now = romacs_display_protocol::frame_time::observe_platform_now();
+            if self.device_lost.record_recovery(recovered, now) {
+                tracing::error!(
+                    "GPU device unrecoverable: {} rebuilds in a row failed",
+                    super::device_loss::MAX_FAILED_RECOVERIES
+                );
+                self.lifecycle_flags
+                    .request_shutdown(super::state::RenderShutdownReason::GpuLost);
+                self.handle_exiting();
+                event_loop.exit();
                 return;
             }
+            if !recovered {
+                // Retry in a second even if nothing else wakes the loop;
+                // retry_wait holds earlier wakes off.
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    now.plus(std::time::Duration::from_secs(1)).into_instant(),
+                ));
+                return;
+            }
+        }
+        // A newly seen validation error may have spoiled a frame: draw
+        // every window again from its kept CPU frame.
+        if self.device_lost.take_repaint() {
+            self.frame_windows.mark_top_level_dirty();
+            self.frame_windows
+                .for_each_top_level_window(|window_state| window_state.request_redraw());
         }
         if self.gpu.is_none() {
             if self.process_startup_commands() {

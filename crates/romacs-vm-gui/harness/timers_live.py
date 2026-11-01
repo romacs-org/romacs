@@ -98,7 +98,7 @@ def session_env(root, args):
     (config / 'rc.xml').write_text(live.RC_XML)
     path = os.environ.get('PATH', '/usr/bin:/bin')
     env = {'PATH': f'{args.tools}:{path}' if args.tools else path,
-           'HOME': str(home), 'LANG': 'C.UTF-8',
+           'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
            'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
            'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
            'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),

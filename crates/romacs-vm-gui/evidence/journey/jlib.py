@@ -23,6 +23,7 @@ ENV = os.environ.copy()
 ENV.pop('LD_LIBRARY_PATH', None)
 ENV.pop('RUST_MIN_STACK', None)
 ENV['XDG_RUNTIME_DIR'] = '/run/user/1000'
+ENV['ROMACS_DIAGNOSTICS'] = '1'  # the per-paint lines read here
 ENV.setdefault('WAYLAND_DISPLAY', 'wayland-1')
 ENV['HYPRLAND_INSTANCE_SIGNATURE'] = sorted(os.listdir('/run/user/1000/hypr'))[0]
 
