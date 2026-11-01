@@ -113,9 +113,9 @@ mod lent_tests {
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
         let (seen, closed) = lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
-            let seen = (shared.presentation, shared.in_flight, shared.pending.len());
-            // What a prompt's redisplay does: settle the loop's frame, submit its own.
-            shared.settled = shared.in_flight.take().map(|p| (p, Instant::now()));
+            let seen = (shared.presentation, shared.in_flight.map(|(p, _)| p), shared.pending.len());
+            // What a prompt's drawn redisplay does: settle the loop's frame, submit its own.
+            shared.settled = shared.in_flight.take().map(|(p, _)| (p, Instant::now()));
             shared.presentation += 1;
             shared.size = Some((30, 40));
             shared.closed = true;
@@ -149,7 +149,7 @@ mod lent_tests {
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
         lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
-            shared.settled = shared.in_flight.take().map(|p| (p, now));
+            shared.settled = shared.in_flight.take().map(|(p, _)| (p, now));
             shared.presentation += 1;
         });
         let (presentation, observed) = live.take_retired().expect("the settled presentation retired");
@@ -160,6 +160,30 @@ mod lent_tests {
         live.submitted(9, now);
         trace.submitted(9, paint(), now, 0);
         assert_eq!(trace.completed(9, now).len(), 1);
+    }
+
+    /// A prompt that painted into a window the compositor does not draw
+    /// leaves its paint in flight in place of the loop's, still dated from
+    /// the loop's undrawn one: the stall goes on counting, and its render
+    /// when the window shows settles both.
+    #[test]
+    fn an_undrawn_prompt_paint_goes_back_in_flight() {
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        let since = Instant::now();
+        let mut live = presentation::Presentation::new();
+        host.borrow_mut().presentation = 7;
+        live.submitted(7, since);
+        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
+        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        lent.run(&host, |_| {
+            let mut shared = host.borrow_mut();
+            shared.presentation += 1;
+            shared.in_flight = Some((shared.presentation, shared.in_flight.unwrap().1));
+        });
+        assert_eq!(live.in_flight(), Some((8, since)));
+        live.completed(8, Instant::now());
+        assert_eq!(live.take_retired().map(|(p, _)| p), Some(8));
+        assert!(live.ready(), "the prompt's paint leaves the frame to repaint");
     }
 
     /// A prompt read inside any Lisp the loop runs (a timer, a background
@@ -449,6 +473,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   --batch ARG...        GNU's `emacs --batch ARG...', from a batch world of its own
                         once one is prepared in an existing store
   ROMACS_WORLD=off      boot from source, without a world
+  ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
+                        stalled (default 2000): editing goes on, once told
 ";
 
 fn main() {
@@ -1000,9 +1026,15 @@ fn evaluate(
     let mut pending = std::collections::VecDeque::new();
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
-    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending, true, &mut paint_timings)?;
-    startup::mark_phase("first-paint");
+    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending, !live, &mut paint_timings)?;
     let mut live_presentation = presentation::Presentation::new();
+    if live {
+        // The first frame on screen before the session is ready, unless the
+        // window is not drawn (hidden as it starts): the loop waits for it then.
+        live_presentation.submitted(previous.presentation, Instant::now());
+        let _ = sender.wait_for_render(previous.presentation, presentation::render_stall());
+    }
+    startup::mark_phase("first-paint");
     let mut terminal_modal = false;
     reply(json!({"ready":true,"presentation":last_presentation()}))?;
     if let Some(after) = after_first_frame { after(); }
@@ -1183,8 +1215,12 @@ fn evaluate(
                             "render_semantics":"renderer-successful-submit-not-compositor-present"}));
                     }
                     retired = true;
-                } else if submitted.elapsed() >= std::time::Duration::from_secs(30) {
-                    return Err(format!("no rendered atlas diagnostic for presentation {in_flight}"));
+                } else if let Some((undrawn, waited)) = live_presentation.stall_warning(presentation::render_stall()) {
+                    // A window the compositor does not draw (another workspace,
+                    // minimized) gets no frame callbacks; its paint renders when
+                    // it shows. Editing goes on, its paints coalesced meanwhile.
+                    eprintln!("romacs: render stalled: presentation {undrawn} undrawn for {:.1}s \
+                               (window hidden?); editing continues and repaints when it shows", waited.as_secs_f64());
                 }
             }
             // Here, or in a prompt that settled it first (`Lent').
@@ -1224,7 +1260,8 @@ fn evaluate(
                 // after any ran, redisplay and check again before blocking.
                 // A timer may read input (`read-event' with a timeout, a
                 // prompt) as a command may, so it gets the same handoff.
-                let auto_save = retired || live_presentation.in_flight().is_none();
+                let auto_save = retired || live_presentation.in_flight().is_none()
+                    || live_presentation.stalled(presentation::render_stall());
                 let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
                 let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm, auto_save));
                 if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
@@ -1244,7 +1281,7 @@ fn evaluate(
                 let processes = vm.process_wait_fds();
                 // A termination signal whose wake other work took: back to the top.
                 if romacs_vm::host::termination_signal(true).is_some() { continue; }
-                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay), &processes) {
+                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(presentation::render_stall()), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(()),
                     terminal_wait::Wake::Terminal | terminal_wait::Wake::Process | terminal_wait::Wake::Timeout => {},
@@ -1325,7 +1362,7 @@ impl Lent<'_> {
         let before = {
             let mut shared = host.borrow_mut();
             shared.pending = std::mem::take(self.queue);
-            shared.in_flight = self.live.in_flight().map(|(p, _)| p);
+            shared.in_flight = self.live.in_flight();
             shared.presentation
         };
         let value = run(self.live);
@@ -1333,7 +1370,7 @@ impl Lent<'_> {
         *self.queue = std::mem::take(&mut shared.pending);
         if shared.presentation != before { self.live.changed(); }
         if let Some((settled, at)) = shared.settled.take() { self.live.completed(settled, at); }
-        shared.in_flight = None;
+        self.live.lent_back(shared.in_flight.take());
         if let Some((w, h)) = shared.size.take() { (*self.width, *self.height) = (w, h); }
         (value, std::mem::take(&mut shared.closed))
     }
