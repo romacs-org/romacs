@@ -18,6 +18,8 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
+;; The chrome colours: the accent and the glass mix.
+(require 'romacs-chrome)
 
 (defgroup romacs-layer nil
   "Buffers shown in a layer over the frame."

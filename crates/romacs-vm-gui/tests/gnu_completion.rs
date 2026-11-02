@@ -411,6 +411,10 @@ fn a_theme_switch_recomputes_the_background_mode() {
               (list custom-enabled-themes (frame-parameter nil 'background-mode)
                     (romacs-chrome--hex (face-foreground 'shadow nil t)) (romacs--frame-shares-faces-p toast))))").unwrap();
         let mut report = vec![printed(&mut vm, "(bm-probe)")];
+        // A terminal's "unspecified-bg", which an alist read on the initial
+        // terminal carries, names no colour: the default face keeps its own.
+        report.push(printed(&mut vm, "(progn (modify-frame-parameters nil '((background-color . \"unspecified-bg\") (foreground-color . \"unspecified-fg\")))
+            (list (face-background 'default nil t) (face-foreground 'default nil t)))"));
         // A plain child frame shares the root's default colours, asked about
         // by name or as the selected frame.
         report.push(printed(&mut vm, "(let* ((after-make-frame-functions nil) (c (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil)))))
@@ -427,6 +431,7 @@ fn a_theme_switch_recomputes_the_background_mode() {
     assert_eq!(report, [
         // The built-in palette is dark (GNU's stock frame is light: `light' "grey50").
         r##"(nil dark "#b3b3b3" t)"##,
+        r##"("#000000" "#d4c5a0")"##,
         "(t t t)",
         r##"((modus-operandi) light "#595959" t)"##,
         r##"((tango-dark) dark "#b3b3b3" t)"##,
