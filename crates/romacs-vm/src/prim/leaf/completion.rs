@@ -78,6 +78,12 @@ impl Leaf<'_> {
         })
     }
 
+    /// The current buffer's case-canon translation (`case_canon_table'),
+    /// as minibuf.c folds case with it.
+    pub(crate) fn case_canon_translation(&mut self) -> std::result::Result<CaseTranslation, Fault> {
+        Ok(self.completion_translation(true, false, None)?.1.expect("folding translates"))
+    }
+
     /// A new `all-completions' walk's identity.
     pub(crate) fn next_completion_walk(&mut self) -> u64 {
         self.vm.completion_walks += 1;

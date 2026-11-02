@@ -101,6 +101,47 @@ impl Leaf<'_> {
         let text: &crate::text::Text = b;
         Ok(TextSpan { bytes: text.internal(from..to).map_err(Fault::Error)?.to_vec(), chars: (e - s) as usize, multibyte: true })
     }
+    /// One side of compare-buffer-substrings (editfns.c:1752): BUFFER (nil,
+    /// a buffer or its name) from START to END, each nil for that end of its
+    /// accessible text and in either order, as character codes; a unibyte
+    /// buffer's bytes above 127 are raw-byte characters (make_char_multibyte).
+    pub(crate) fn buffer_substring_codes(&mut self, buffer: Value, start: Value, end: Value) -> std::result::Result<Vec<u32>, Fault> {
+        let buffer = if buffer == Value::NIL { self.current_buffer()? } else {
+            let found = self.lifecycle_get(buffer)?;
+            if found == Value::NIL {
+                return Err(Fault::Error(match self.vm.str_view(buffer) {
+                    Some(_) => format!("No buffer named {}", self.string_text(buffer)?),
+                    None => "Invalid buffer argument".into(),
+                }));
+            }
+            if !self.lifecycle_live_p(found) { return Err(Fault::Error("Selecting deleted buffer".into())); }
+            found
+        };
+        let position = |leaf: &Self, v: Value, default: i64| if v == Value::NIL { Ok(default) } else { leaf.fix_position(v) };
+        match self.vm.object_if(buffer) {
+            Some(Object::Buffer(b)) => {
+                let r = b.accessible();
+                let char_pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
+                let (begv, zv) = (char_pos(r.start)?, char_pos(r.end)?);
+                let (s, e) = (position(self, start, begv)?, position(self, end, zv)?);
+                let (s, e) = (s.min(e), s.max(e));
+                if !(begv <= s && e <= zv) { return Err(Fault::Range(start, end)); }
+                let byte = |c: i64| b.byte_of_char(CharOffset(c as usize - 1)).map_err(Fault::Error);
+                let text: &crate::text::Text = b;
+                let bytes = text.internal(byte(s)?..byte(e)?).map_err(Fault::Error)?;
+                Ok(crate::lstring::StrView { bytes: &bytes, chars: (e - s) as usize, multibyte: true }.chars().collect())
+            }
+            Some(Object::ByteBuffer(b)) => {
+                let (begv, zv) = (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1);
+                let (s, e) = (position(self, start, begv)?, position(self, end, zv)?);
+                let (s, e) = (s.min(e), s.max(e));
+                if !(begv <= s && e <= zv) { return Err(Fault::Range(start, end)); }
+                Ok(b.bytes[s as usize - 1..e as usize - 1].iter()
+                    .map(|&c| if c < 0x80 { u32::from(c) } else { u32::from(c) + crate::lstring::BYTE8_OFFSET }).collect())
+            }
+            _ => unreachable!("a live buffer"),
+        }
+    }
     /// Ffind_coding_systems_region_internal: t when the text needs no
     /// encoding (unibyte or ASCII), else the base coding systems of
     /// `coding-system-list', less EXCLUDE, that encode every character,

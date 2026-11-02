@@ -54,3 +54,13 @@ fn obarray_clear_matches_pinned_gnu() {
 (condition-case e (obarray-clear nil) (error e))
 "###);
 }
+
+#[test]
+fn compare_buffer_substrings_matches_pinned_gnu() {
+    matches_pinned_gnu(r###"
+(with-temp-buffer (insert "abcXYZ") (let ((b (current-buffer))) (with-temp-buffer (insert "abcxyz") (list (compare-buffer-substrings b 1 7 nil 1 7) (let ((case-fold-search nil)) (compare-buffer-substrings b 1 7 nil 1 7)) (compare-buffer-substrings b 1 3 nil 1 7) (compare-buffer-substrings nil 1 7 b 1 3) (compare-buffer-substrings b 7 1 nil nil nil) (compare-buffer-substrings b (copy-marker 2) 4 (current-buffer) 2 4)))))
+(with-temp-buffer (insert "héllo") (let ((b (current-buffer))) (with-temp-buffer (insert "hÉllo") (list (compare-buffer-substrings b nil nil nil nil nil) (let ((case-fold-search nil)) (compare-buffer-substrings b nil nil nil nil nil)) (progn (narrow-to-region 2 4) (compare-buffer-substrings nil nil nil b 2 4))))))
+(with-temp-buffer (set-buffer-multibyte nil) (insert "a\377b") (let ((b (current-buffer))) (with-temp-buffer (insert "a" (unibyte-string 255) "c") (list (compare-buffer-substrings b nil nil nil nil nil) (compare-buffer-substrings b 1 3 nil 1 3)))))
+(with-temp-buffer (insert "abc") (list (condition-case e (compare-buffer-substrings nil 0 3 nil 1 2) (error e)) (condition-case e (compare-buffer-substrings "no such" 1 3 nil 1 2) (error e)) (condition-case e (compare-buffer-substrings 'x 1 3 nil 1 2) (error e)) (condition-case e (compare-buffer-substrings nil 1 9 nil 1 2) (error e)) (let ((b (generate-new-buffer "dead"))) (kill-buffer b) (condition-case e (compare-buffer-substrings b 1 1 nil 1 2) (error e)))))
+"###);
+}
