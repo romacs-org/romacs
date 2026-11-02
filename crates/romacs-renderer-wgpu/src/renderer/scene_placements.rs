@@ -2,6 +2,9 @@
 //! [`ScenePass`] and installed in the shader-surface cache as a
 //! pipeline-less surface, so a frame shows it as an ordinary surface glyph
 //! (both composite paths, the LRU touch and `mark_drawn`), as a model view is.
+//! Its target holds premultiplied colour over a transparent clear, so the
+//! frame composites it premultiplied: what the scene leaves undrawn shows the
+//! frame beneath at the frame's own opacity.
 //! Its targets are charged to media_budget's Surface accounting under the
 //! placement's id, never evictable.
 
@@ -63,7 +66,8 @@ impl WgpuRenderer {
                 pass.view(root).ok_or("scene placement drew no root")?.clone(),
                 (target.width.round() as u32, target.height.round() as u32),
                 (size[0], size[1]),
-            )?;
+            )?
+            .premultiplied();
             self.caches.surface.install_prepared(id, prepared);
             *installed = Some(size);
             let bytes = pass.resident_bytes() as usize;
