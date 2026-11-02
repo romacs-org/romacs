@@ -1400,7 +1400,9 @@ impl Vm {
     }
     fn datum_form(&self, value: Value, depth: usize, mode: Datum) -> Result<Form> {
         let objects = mode != Datum::Source;
-        if depth > 256 {
+        // GNU's eval has no nesting limit of its own, only the C stack: a
+        // macro's expansion may nest deeper than any source does.
+        if depth > 256 && !crate::eval_depth::native_stack_room() {
             return Err("source nesting limit exceeded".into());
         }
         if value == Value::NIL {

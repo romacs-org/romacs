@@ -939,6 +939,8 @@ pub(super) struct RenderApp {
     /// from the physical modifier keys' own key events.
     pub(super) modifier_sides: super::modifier_sides::ModifierSides,
     pub(super) key_repeats: super::key_repeat::KeyRepeats,
+    /// The evaluator's busy indicator (busy_toast.rs).
+    pub(super) busy_toast: super::busy_toast::BusyToast,
     pub(super) pending_file_drops: std::collections::HashSet<winit::event_loop::AsyncRequestSerial>,
 
     pub(super) image_metadata: SharedImageRenderState,
@@ -1162,6 +1164,7 @@ impl RenderApp {
             modifier_state: winit::keyboard::ModifiersState::empty(),
             modifier_sides: super::modifier_sides::ModifierSides::default(),
             key_repeats: super::key_repeat::KeyRepeats::default(),
+            busy_toast: super::busy_toast::BusyToast::default(),
             pending_file_drops: Default::default(),
             image_metadata,
             cursor_defaults: CursorState::new(

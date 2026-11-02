@@ -147,7 +147,9 @@ impl Vm {
     }
 
     fn print_render_as(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, unreadable: Unreadable) -> Result<(String, Unreadable)> {
-        for name in ["float-output-format", "print-integers-as-characters", "print-charset-text-property", "print-symbols-bare"] {
+        // `print-symbols-bare' only changes how a positioned symbol prints,
+        // and Romacs makes none (DIVERGENCES.md VM2-SYMPOS1).
+        for name in ["float-output-format", "print-integers-as-characters", "print-charset-text-property"] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;
             // Text properties print unpruned, which is GNU's `t'.

@@ -437,6 +437,13 @@ fn set_idle(cx, idle: Value) {
     Ok(Value::NIL)
 }}
 
+// kbd_buffer_get_event's USER_SIGNAL_EVENT: a pending SIGUSR1 or SIGUSR2
+// as the event read_char reads next, or nil.
+defsubr! { name = "romacs--take-user-signal", gnu = "keyboard.c:8561", effect = Global,
+fn take_user_signal(cx) {
+    Ok(crate::host::take_user_signal().map_or(Value::NIL, |event| cx.intern(event)))
+}}
+
 defsubr! { name = "input-pending-p", gnu = "keyboard.c:12076", effect = Reads,
 fn input_pending_p(cx; optional check_timers: Value) {
     // requeued_events_pending_p, then the host keyboard's readable events.

@@ -448,7 +448,10 @@ impl Vm {
             let mut compiled = compiled.borrow_mut();
             let syntax = syntax::VmSyntax::new(vm, source);
             compiled.set_target_multibyte(input.multibyte);
+            let armed = vm.arm_regexp_quit();
             let found = regex::re_search(&compiled, &input.bytes, 0, input.bytes.len() as isize, &syntax, usize::MAX);
+            drop((syntax, compiled));
+            vm.regexp_quit(armed)?;
             if regex::take_matcher_overflow() {
                 return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
             }
@@ -917,6 +920,7 @@ impl Vm {
             let compiled = compiled.borrow();
             let syntax = syntax::VmSyntax::new(self, source);
             let byte = input.byte(pos as usize);
+            let armed = self.arm_regexp_quit();
             let found = regex::re_search(
                 &compiled,
                 &input.bytes,
@@ -927,6 +931,8 @@ impl Vm {
                 // a standalone string cannot contain that buffer address.
                 usize::MAX,
             );
+            drop((syntax, compiled));
+            self.regexp_quit(armed)?;
             if regex::take_matcher_overflow() {
                 return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
             }
@@ -1034,6 +1040,7 @@ impl Vm {
         let limit = limit_byte - window.start;
         let mut point = original;
         let mut failed = false;
+        let armed = self.arm_regexp_quit();
         for _ in 0..count.unsigned_abs() {
             let found = if p == LookingAt {
                 regex::re_match(&compiled, text.bytes, point, text.bytes.len(), &syntax, original)
@@ -1061,6 +1068,7 @@ impl Vm {
         }
         let point_char = text.character(point)? + base_char;
         drop((syntax, text));
+        self.regexp_quit(armed)?;
         if let Some(groups) = groups {
             if !self.regexp_preserve() && (p != LookingAt || args[1] == Value::NIL) {
                 self.regexp_save(groups, true);
@@ -1135,5 +1143,57 @@ impl Vm {
         let (mut error, mut signal) = (None, None);
         self.regexp_call(p, start, n, &mut error, &mut signal)
             .ok_or_else(|| error.unwrap_or_else(|| "regexp error".into()))
+    }
+}
+
+thread_local! {
+    /// The quit signal of the VM whose search runs on this thread, while
+    /// its matcher may quit (`Vm::arm_regexp_quit`).
+    static REGEXP_QUIT: std::cell::Cell<*const crate::QuitSignal> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+/// The matcher's quit probe (romacs_regex_engine::host): a C-g the host
+/// counted for the searching VM.
+fn regexp_quit_probe() -> bool {
+    // SAFETY: set only for the extent of one search by the VM that owns the
+    // signal (`ArmedQuit`), which outlives the search.
+    REGEXP_QUIT.with(|signal| { let signal = signal.get(); !signal.is_null() && unsafe { (*signal).pressed() } })
+}
+
+/// A search's armed quit probe, disarmed when dropped.
+pub(crate) struct ArmedQuit(bool);
+impl Drop for ArmedQuit {
+    fn drop(&mut self) {
+        if self.0 { REGEXP_QUIT.with(|signal| signal.set(std::ptr::null())); }
+    }
+}
+
+impl Vm {
+    /// Let the matcher poll the host's C-g during one search, as GNU's
+    /// polls maybe_quit at its backtrack sites: only where the quit would be
+    /// acted on, so an aborted search always ends in `quit'.
+    fn arm_regexp_quit(&self) -> ArmedQuit {
+        let armed = std::sync::Arc::strong_count(&self.quit) > 1 && self.quit.busy()
+            && self.quit_variables()[1] == Value::NIL
+            && self.compile_depth == 0 && self.expanding.is_empty();
+        if armed {
+            REGEXP_QUIT.with(|signal| signal.set(std::sync::Arc::as_ptr(&self.quit)));
+            regex::host::set_quit_probe(Some(regexp_quit_probe));
+        }
+        ArmedQuit(armed)
+    }
+    /// After an ARMED search: the host's C-g, if the matcher may have
+    /// stopped for it, as `quit'.
+    fn regexp_quit(&mut self, armed: ArmedQuit) -> std::result::Result<(), Fault> {
+        let polled = armed.0;
+        drop(armed);
+        if !polled || !self.quit.pressed() {
+            return Ok(());
+        }
+        match self.maybe_quit() {
+            Some(crate::threaded::Escape::Signal(..)) => Err(Fault::Signal("quit", Vec::new())),
+            // Unreachable while `inhibit-quit' stays nil; the next safepoint has it.
+            _ => Ok(()),
+        }
     }
 }

@@ -5,6 +5,7 @@
 mod app_handler;
 mod asset_commands;
 mod bootstrap;
+pub(crate) mod busy_toast;
 pub(crate) mod child_frames;
 mod command_processing;
 mod cursor;

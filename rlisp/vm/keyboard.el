@@ -140,14 +140,19 @@ runs no timers."
               (let* ((ran (if timers romacs--timers-run 0))
                      (delay (and timers (romacs--timer-delay)))
                      (delay (if save-at (min (or delay save-at) (max 0 (- save-at (float-time)))) delay)))
-                (setq c (romacs--host-event
-                         (if (and delay left) (min delay left) (or delay left))
-                         (and shown (not dispatched) (= shown ran)))
+                ;; A user signal (SIGUSR1, SIGUSR2) is an event before the
+                ;; host's (kbd_buffer_get_event).
+                (setq c (or (romacs--take-user-signal)
+                            (romacs--host-event
+                             (if (and delay left) (min delay left) (or delay left))
+                             (and shown (not dispatched) (= shown ran))))
                       shown ran)
-                ;; read_char: an event `special-event-map' binds (focus) runs
-                ;; its binding at once and is never input; the read goes on,
-                ;; and redisplays first what the binding changed.
-                (when (and (consp c) (lookup-key special-event-map (vector (car c))))
+                ;; read_char: an event `special-event-map' binds (focus, a
+                ;; user signal) runs its binding at once and is never input;
+                ;; the read goes on, and redisplays first what the binding
+                ;; changed.
+                (when (and (or (consp c) (and c (symbolp c)))
+                           (lookup-key special-event-map (vector (if (consp c) (car c) c))))
                   (romacs--special-event c)
                   (setq c nil shown nil))
                 (setq waiting (null c))))))
@@ -257,6 +262,11 @@ A nil entry, or a C beyond a string or vector table, is no translation."
              (aref table c))
         c)))
 
+(defvar romacs--keyboard-quit nil
+  "Whether `romacs--read-char''s last event was the quit character typed on
+the host keyboard, before `keyboard-translate-table': keyboard.c
+handle_interrupt's `C-g', which sets `quit-flag' (quit.rs).")
+
 (defun romacs--read-char (&optional seconds)
   "keyboard.c read_char: the next event, recorded as input.
 It comes from `unread-post-input-method-events', `unread-command-events'
@@ -267,6 +277,7 @@ waiting at most SECONDS when given (then nil).  No input method runs:
 SECONDS gives nil and its absence `end-of-file', as batch GNU's minibuffer
 reports it, raised from the innermost recursive edit when there is one."
   (let ((reread nil) (recorded nil) c (again t))
+   (setq romacs--keyboard-quit nil)
    (while again
     (setq again nil)
     (cond
@@ -302,7 +313,8 @@ reports it, raised from the innermost recursive edit when there is one."
       (when (and romacs--reading-command-keys (romacs--auto-save-due-p) (not (romacs--unread-p)) (not (input-pending-p)))
         (romacs--auto-save))
       (let ((sit (and romacs--reading-command-keys (null seconds) (romacs--auto-save-delay))))
-        (setq c (romacs--read-host-char seconds sit))
+        (setq c (romacs--read-host-char seconds sit)
+              romacs--keyboard-quit (eq c ?\C-g))
         ;; An event a timer or filter queued in `unread-command-events'
         ;; while the host waited: when the wait was read_char's auto-save
         ;; `sit_for', it is read next as a requeued event (keyboard.c:2999);
@@ -326,6 +338,11 @@ reports it, raised from the innermost recursive edit when there is one."
                    (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
           (when (boundp 'echo-area-clear-hook) (romacs--safe-run-hooks 'echo-area-clear-hook))
           (message nil))))
+     ;; Without a host keyboard a user signal is still an event
+     ;; (kbd_buffer_get_event); a special one runs its binding and the read
+     ;; goes on, as read_char's do.
+     ((setq c (romacs--take-user-signal))
+      (when (romacs--special-event c) (setq c nil again t)))
      (seconds)
      ;; Batch GNU blocks for the terminal here. With no input left, VM2
      ;; leaves the innermost recursive edit or minibuffer instead, so a
@@ -359,6 +376,10 @@ reports it, raised from the innermost recursive edit when there is one."
   (let ((seconds (and (numberp seconds) seconds)) val)
     (while (progn
              (setq val (romacs--read-char seconds))
+             ;; read_char's quit: a C-g from the keyboard set `quit-flag',
+             ;; or cleared it under `inhibit-quit' and is read as a key;
+             ;; maybe_quit acts on it before the event is returned.
+             (and romacs--keyboard-quit (not inhibit-quit) (signal 'quit nil))
              (and ascii-required (not (and seconds (null val)))
                   (progn
                     ;; A function key with an ASCII equivalent is that
@@ -525,7 +546,10 @@ unbound upper-case or shifted key is looked up without its shift, and
                     ((and executing-kbd-macro (romacs--at-end-of-macro-p)
                           (not unread-command-events))
                      (setq state 'end))
+                    ;; A C-g read here is a key: read_key_sequence clears
+                    ;; the `quit-flag' it set (keyboard.c:11352).
                     (t (setq key (romacs--read-char)
+                             quit-flag nil
                              raw (vconcat raw (list key))
                              keys (vconcat keys (list key)))))
               ;; A click in a mode line, header line or margin is looked
@@ -702,7 +726,7 @@ Return nil at the end of an executing keyboard macro."
 its `special-event-map' binding at once, outside any key sequence, with
 EVENT as its keys.  Value: whether EVENT ran a command.  A VM without
 GNU's preloaded Lisp has the bindings but not frame.el's handlers."
-  (let ((command (lookup-key special-event-map (vector (car-safe event)))))
+  (let ((command (lookup-key special-event-map (vector (if (consp event) (car event) event)))))
     (when (commandp command)
       (setq last-input-event event)
       (command-execute command nil (vector event) t)

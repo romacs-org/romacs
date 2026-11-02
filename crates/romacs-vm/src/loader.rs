@@ -531,6 +531,10 @@ impl Vm {
             // from the start for each form made a file's load quadratic.
             let (mut line, mut counted) = (1, 0);
             loop {
+                // readevalloop's maybe_quit between forms: a form that
+                // reaches no safepoint of its own still lets C-g end the load,
+                // the forms before it kept.
+                self.poll_quit()?;
                 let read = self.read_internal_span(&source[at..]);
                 let Some((value, begin, used)) = read.map_err(|e| {
                     format!(
@@ -673,6 +677,7 @@ impl Vm {
         self.loader.in_artifact += 1;
         let result = (|| {
             for (index, &(ordinal, byte, end, line)) in units.iter().enumerate() {
+                self.poll_quit()?;
                 let step = self.loader.steps.len();
                 self.loader.steps.push(Step { file: step_file, ordinal, byte, line, status: StepStatus::Entered, error: None, source: None });
                 let evaluated = self.install_compiled_unit(&compiled, &slots, index).and_then(|entry| {
