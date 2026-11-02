@@ -110,6 +110,18 @@ fn real_mode_evaluates_off_the_invoking_shells_stack() {
     );
     assert_eq!(output.status.code(), Some(0), "STACK: {}", stdout(&output));
 }
+// A macro's expansion may nest deeper than source does; GNU loads this one
+// (400 levels, within its `max-lisp-eval-depth').
+#[test]
+fn real_mode_evaluates_deeply_nested_expansions() {
+    let f = Fixture::new();
+    let output = f.run(
+        "(defun ert-run-tests-batch (_) (if (= rt-value 400) 0 1))",
+        ";;; -*- lexical-binding: t -*-\n(defmacro rt-deep (n) (let ((form 0)) (dotimes (_ n) (setq form (list '1+ form))) form))\n(setq rt-value (rt-deep 400))",
+        "(ert-run-tests-batch t)",
+    );
+    assert_eq!(output.status.code(), Some(0), "NESTING: {}", stdout(&output));
+}
 #[test]
 fn real_mode_stops_on_target_load_error() {
     let f = Fixture::new();
