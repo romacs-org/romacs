@@ -250,7 +250,7 @@ impl Leaf<'_> {
         let mut target = args[index + 1];
         let string = |leaf: &Self, v: Value| leaf.vm.str_view(v).is_some();
         let valid = string(self, target)
-            || (operation == insert && self.pair(target).is_some_and(|(file, buffer)| string(self, file) && self.kind(buffer) == Kind::Buffer))
+            || (operation == insert && self.pair(target).is_some_and(|(file, buffer)| string(self, file) && matches!(self.kind(buffer), Kind::Buffer | Kind::ByteBuffer)))
             || (operation == network && (target.integer_value().is_some() || target == Value::TRUE));
         if !valid { return Err(Fault::Error(format!("Invalid argument {} of operation ‘{name}’", index + 1))); }
         if let Some((file, _)) = self.pair(target) { target = file; }
