@@ -530,3 +530,10 @@ fn internal_event_symbol_parse_modifiers(cx, symbol: Value) {
     }
     cx.symbol_property(symbol, elements_key)
 }}
+
+// A deadline on one call the host admits, an agent's evaluation
+// (rlisp/romacs-agent-tools.el): MILLISECONDS after it is armed the call is
+// quit at its next safepoint, as by C-g, unless it ended first. GENERATION
+// names the call; nil disarms.
+defsubr! { name = "romacs--call-deadline", gnu = "romacs:keyboard", effect = Global,
+fn call_deadline(cx, generation: Value; optional milliseconds: Value) { cx.call_deadline(generation, milliseconds) }}

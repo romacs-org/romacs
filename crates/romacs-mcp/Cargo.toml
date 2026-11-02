@@ -3,11 +3,18 @@ name = "romacs-mcp"
 version = "0.0.19"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "Protocol-blind stdio to explicitly selected Unix socket relay"
+description = "Stdio to Unix socket relay for MCP, and the agent session supervisor"
 
 [[bin]]
 name = "romacs-mcp"
 path = "src/main.rs"
+
+[[bin]]
+name = "romacs-agent-host"
+path = "src/host.rs"
+
+[dependencies]
+serde_json.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

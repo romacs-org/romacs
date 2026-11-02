@@ -122,13 +122,13 @@ fn start(request: &Request) -> Result<(), String> {
         option.push(slice);
         command.arg(option);
     }
-    for (key, value) in std::env::vars_os() {
+    // By name: systemd-run takes each value from its own environment, so
+    // none (an API key, say) shows on a command line other users can read.
+    for (key, _) in std::env::vars_os() {
         let key_text = key.to_string_lossy();
-        if LOCAL_ENV.contains(&key_text.as_ref()) || key_text.starts_with("LISTEN_") { continue; }
+        if LOCAL_ENV.contains(&key_text.as_ref()) || key_text.starts_with("LISTEN_") || key_text.contains('=') { continue; }
         let mut setting = std::ffi::OsString::from("--setenv=");
         setting.push(&key);
-        setting.push("=");
-        setting.push(&value);
         command.arg(setting);
     }
     let mut launch = server_launch(&request.launch);

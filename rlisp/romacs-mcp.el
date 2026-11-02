@@ -39,7 +39,8 @@ listed nor callable.  Other tools are not affected."
 Replies echo the ID, so bounding it keeps every error reply bounded.")
 (defconst romacs-mcp--queue-limit 64)
 (defconst romacs-mcp--peer-queue-limit 16)
-(defconst romacs-mcp--peer-limit 8)
+(defconst romacs-mcp--peer-limit 32
+  "Connections at once: clients, and one relay per agent session.")
 (defconst romacs-mcp--scan-limit 8)
 (defconst romacs-mcp--modern "2026-07-28")
 (defconst romacs-mcp--legacy "2025-11-25")
@@ -56,6 +57,16 @@ Replies echo the ID, so bounding it keeps every error reply bounded.")
   "The line a loopback peer must send first, or nil for a local socket.")
 (defvar romacs-mcp--peers nil)
 (defvar romacs-mcp--queue nil)
+(defvar romacs-mcp--queued (make-hash-table :test #'equal)
+  "Each queued request with an id, by (PEER . ID): a relay withdraws one
+without a scan.")
+
+(defun romacs-mcp--unqueue (request)
+  "REQUEST leaves the queue: forget it in the index."
+  (when-let* ((message (plist-get request :message))
+              ((hash-table-p message))
+              (id (gethash "id" message nil)))
+    (remhash (cons (plist-get request :peer) id) romacs-mcp--queued)))
 (defvar romacs-mcp--active nil)
 (defvar romacs-mcp--timer nil)
 (defvar romacs-mcp--deferred nil
@@ -73,6 +84,10 @@ no listChanged capability or subscriptions are advertised.")
 the params object returning the result, or `romacs-mcp-hold''s handle's
 promise to answer later.  They need no MCP initialization: clients of the
 native endpoint (`romacs-server') call them directly.")
+(defvar romacs-mcp-call-function (lambda (_peer _id _name run) (funcall run))
+  "How a tool call runs: a function of the peer, the request id, the tool's
+name and a function of no arguments that runs it and returns its value.
+romacs-agent-tools.el records each session's calls through it.")
 (defvar romacs-mcp-peer-close-functions nil
   "Functions called with a peer whose connection is retired.")
 
@@ -248,7 +263,14 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
     (romacs-mcp--arguments (plist-get tool :schema) arguments)
     (let* ((failed nil)
            (value (condition-case failure
-                      (with-local-quit (funcall (plist-get tool :handler) arguments))
+                      ;; Quit is the call's error (`with-local-quit' would
+                      ;; return nil for it): C-g or a deadline tells the caller.
+                      (let ((inhibit-quit nil))
+                        (funcall romacs-mcp-call-function
+                                 (plist-get romacs-mcp--active :peer)
+                                 (gethash "id" (plist-get romacs-mcp--active :message) nil)
+                                 (gethash "name" params)
+                                 (lambda () (funcall (plist-get tool :handler) arguments))))
                     ((error quit)
                      (setq failed t)
                      (error-message-string failure)))))
@@ -349,6 +371,8 @@ peer again does not run them twice.")
 
 (defun romacs-mcp--close (peer)
   "Retire only PEER, its queue entries and owned send timer."
+  (dolist (request romacs-mcp--queue)
+    (when (eq peer (plist-get request :peer)) (romacs-mcp--unqueue request)))
   (setq romacs-mcp--peers (delq peer romacs-mcp--peers)
         romacs-mcp--queue
         (cl-remove peer romacs-mcp--queue :key (lambda (request) (plist-get request :peer))))
@@ -473,10 +497,10 @@ This is cooperative admission, not a handler, serialization or send deadline."
                               (not (romacs-mcp--live-p
                                     (plist-get request :peer)
                                     (plist-get request :generation))))))
-              (pop romacs-mcp--queue)
+              (romacs-mcp--unqueue (pop romacs-mcp--queue))
               (cl-incf scanned))
             (when (and romacs-mcp--queue (< scanned romacs-mcp--scan-limit))
-              (let* ((request (pop romacs-mcp--queue))
+              (let* ((request (romacs-mcp--admit (pop romacs-mcp--queue)))
                      (peer (plist-get request :peer))
                      (message (plist-get request :message))
                      (id (and message (gethash "id" message :notification)))
@@ -513,11 +537,17 @@ This is cooperative admission, not a handler, serialization or send deadline."
           (>= (cl-count peer romacs-mcp--queue :key (lambda (r) (plist-get r :peer)))
               romacs-mcp--peer-queue-limit))
       (romacs-mcp--close peer)
-    (setq romacs-mcp--queue
-          (nconc romacs-mcp--queue
-                 (list (list :peer peer :generation romacs-mcp--generation
-                             :message message :error failure :cancelled nil :held nil))))
+    (let ((request (list :peer peer :generation romacs-mcp--generation
+                         :message message :error failure :cancelled nil :held nil)))
+      (setq romacs-mcp--queue (nconc romacs-mcp--queue (list request)))
+      (when-let* (((hash-table-p message)) (id (gethash "id" message nil)))
+        (puthash (cons peer id) request romacs-mcp--queued)))
     (romacs-mcp--schedule)))
+
+(defun romacs-mcp--admit (request)
+  "REQUEST leaves the queue to run; return it."
+  (romacs-mcp--unqueue request)
+  request)
 
 (defun romacs-mcp--cancel (peer id)
   "Mark queued, active or deferred requests matching PEER and ID abandoned."
@@ -527,6 +557,17 @@ This is cooperative admission, not a handler, serialization or send deadline."
                (hash-table-p (plist-get request :message))
                (equal id (gethash "id" (plist-get request :message) :absent)))
       (setf (plist-get request :cancelled) t))))
+
+(defun romacs-mcp--withdraw (peer id target)
+  "Answer PEER's request ID: withdraw its queued request TARGET if it has
+not started, and say whether it was."
+  (let ((request (gethash (cons peer target) romacs-mcp--queued)))
+    (when request
+      (setf (plist-get request :cancelled) t)
+      (romacs-mcp--unqueue request))
+    (romacs-mcp--send (list :peer peer :generation romacs-mcp--generation :cancelled nil)
+                      (romacs-mcp--object "jsonrpc" "2.0" "id" id
+                                          "result" (romacs-mcp--object "cancelled" (if request t :false))))))
 
 (defun romacs-mcp--frame (peer line)
   "Validate LINE from PEER, then enqueue or mark cancellation without eval."
@@ -551,6 +592,10 @@ This is cooperative admission, not a handler, serialization or send deadline."
           (romacs-mcp--enqueue peer nil '(-32600 "Request ID is too long")))
          ((and (eq id :absent) (equal method "notifications/cancelled"))
           (romacs-mcp--cancel peer (gethash "requestId" params :absent)))
+         ;; A relay withdrawing a call it waited on too long, answered here,
+         ;; not queued: whether it was still queued (and now never runs).
+         ((and (not (eq id :absent)) (equal method "romacs/cancel"))
+          (romacs-mcp--withdraw peer id (gethash "id" params :absent)))
          ((and (eq id :absent) (not (equal method "notifications/initialized")))
           nil)
          ((and (not (eq id :absent)) (string-prefix-p "notifications/" method))
@@ -724,6 +769,7 @@ Keep boot identity and companion receipts until the editor process exits."
   (when romacs-mcp--deferred-timer (cancel-timer romacs-mcp--deferred-timer))
   (setq romacs-mcp--timer nil romacs-mcp--queue nil
         romacs-mcp--deferred nil romacs-mcp--deferred-timer nil)
+  (clrhash romacs-mcp--queued)
   (mapc #'romacs-mcp--close (copy-sequence romacs-mcp--peers))
   (when (process-live-p romacs-mcp--listener) (delete-process romacs-mcp--listener))
   (when (and romacs-mcp--socket

@@ -28,8 +28,10 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 import parity_live
@@ -46,6 +48,11 @@ class Server:
     def __init__(self, args, base, name, env_extra=None):
         self.args, self.name = args, name
         self.root, self.home, self.env = private_tree('romacs', base, args.tools, prefix=f'server-{name}-')
+        # Sockets need short paths (108 bytes): a runtime directory of their
+        # own on the host's, while the tree (worlds, journals) stays on disk.
+        host_runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}')
+        self.runtime = Path(tempfile.mkdtemp(prefix='rs-', dir=host_runtime))
+        self.env['XDG_RUNTIME_DIR'] = str(self.runtime)
         (self.home / '.config/romacs').mkdir()
         (self.home / '.config/romacs/init.el').write_text(INIT)
         self.env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14', **(env_extra or {}))
@@ -57,7 +64,7 @@ class Server:
         log = (self.root / 'compositor.log').open('w')
         self.compositor = subprocess.Popen([f'{args.tools}/labwc', '-C', str(self.root / 'labwc')],
                                            env=self.env, stdout=log, stderr=log)
-        socket = wait(lambda: next((p for p in self.root.glob('wayland-*') if p.is_socket()), None),
+        socket = wait(lambda: next((p for p in self.runtime.glob('wayland-*') if p.is_socket()), None),
                       15, 'compositor', self.compositor)
         self.env['WAYLAND_DISPLAY'] = socket.name
         subprocess.run([f'{args.tools}/wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x900'],
@@ -127,6 +134,8 @@ class Server:
                 pass
         self.keyboard.kill()
         self.compositor.kill()
+        self.compositor.wait()
+        shutil.rmtree(self.runtime, ignore_errors=True)
 
 
 def until(predicate, seconds, what):
@@ -198,7 +207,7 @@ def lifecycle(args, base):
         reshown = s.eval("(romacs--native-window 'query)")
         until(lambda: s.log().count('"diagnostic":"paint') > paints_before, 10, 'a paint after the window shows again')
         s.client('--stop=none')
-        until(lambda: not (s.root / 'romacs/lc/server.sock').exists(), 15, 'server socket gone')
+        until(lambda: not (s.runtime / 'romacs/lc/server.sock').exists(), 15, 'server socket gone')
         until(lambda: not Path(f'/proc/{s.pid}').exists(), 15, 'server process gone')
         result = {'world_seconds': s.world_seconds, 'standalone_ready_s': standalone, 'cold_client_s': round(cold, 3), 'pairs': pairs, 'warm_client_s': round(warm, 3),
                   'shown': shown, 'current': current, 'emacsclient_eval': value, 'position': position,
@@ -279,7 +288,7 @@ def unit(args, base):
     s = Server(args, base, name, {'DBUS_SESSION_BUS_ADDRESS': bus, 'ROMACS_SERVER_SLICE': 'romacs-build.slice'})
     # systemd-run reaches the user manager through the real runtime
     # directory; the server's sockets go there too, under this test's name.
-    s.env['WAYLAND_DISPLAY'] = str(s.root / s.env['WAYLAND_DISPLAY'])
+    s.env['WAYLAND_DISPLAY'] = str(s.runtime / s.env['WAYLAND_DISPLAY'])
     s.env['XDG_RUNTIME_DIR'] = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
     unit_name = s.unit = f'romacs-server-{name}'
     state = lambda: subprocess.run(['systemctl', '--user', 'is-active', unit_name], capture_output=True,

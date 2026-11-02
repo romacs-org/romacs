@@ -2477,3 +2477,77 @@ mod tests {
         assert_eq!((entry.name, entry.gecos, entry.dir), (None, b"Full Name".to_vec(), None));
     }
 }
+
+/// A deadline on one call the host admits (quit.rs `DEADLINE') (an agent's evaluation): out of
+/// band, as the host's C-g, since a Lisp timer cannot reach a CPU loop.
+/// One thread waits for the armed deadline; at expiry it marks the shared
+/// word (`DEADLINE') with the call's generation recorded, whatever the
+/// evaluator's state. The evaluator takes it at a safepoint while busy, as
+/// a quit, only while that generation is still the current call: a call
+/// that ended first (`disarm') retired its generation, so its deadline can
+/// never reach a later command. A deadline that passes while the call waits
+/// for input is kept until the call runs again. Cooperative like C-g:
+/// `inhibit-quit', a long primitive or a compile defer it.
+pub mod call_deadline {
+    use crate::QuitSignal;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Condvar, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    /// The current call's generation, 0 for none, and the one whose
+    /// deadline passed.
+    static CURRENT: AtomicU64 = AtomicU64::new(0);
+    static EXPIRED: AtomicU64 = AtomicU64::new(0);
+
+    struct Armed { generation: u64, at: Instant, signal: Arc<QuitSignal> }
+    struct Waiter { armed: Mutex<Option<Armed>>, changed: Condvar }
+
+    static WAITER: OnceLock<&'static Waiter> = OnceLock::new();
+
+    fn waiter() -> &'static Waiter {
+        WAITER.get_or_init(|| {
+            let waiter: &'static Waiter = Box::leak(Box::new(Waiter { armed: Mutex::new(None), changed: Condvar::new() }));
+            std::thread::Builder::new().name("call-deadline".into()).spawn(move || run(waiter)).expect("deadline thread");
+            waiter
+        })
+    }
+
+    fn run(waiter: &'static Waiter) {
+        let mut armed = waiter.armed.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            armed = match armed.as_ref().map(|a| a.at.saturating_duration_since(Instant::now())) {
+                None => waiter.changed.wait(armed).unwrap_or_else(|e| e.into_inner()),
+                Some(left) if left > Duration::ZERO => waiter.changed.wait_timeout(armed, left).unwrap_or_else(|e| e.into_inner()).0,
+                Some(_) => {
+                    let Armed { generation, signal, .. } = armed.take().expect("armed");
+                    EXPIRED.store(generation, Ordering::Release);
+                    signal.set_deadline(true);
+                    armed
+                }
+            };
+        }
+    }
+
+    /// Call GENERATION (nonzero) starts with BUDGET before its quit.
+    pub fn arm(signal: Arc<QuitSignal>, generation: u64, budget: Duration) {
+        CURRENT.store(generation, Ordering::Release);
+        let waiter = waiter();
+        *waiter.armed.lock().unwrap_or_else(|e| e.into_inner()) = Some(Armed { generation, at: Instant::now() + budget, signal });
+        waiter.changed.notify_one();
+    }
+
+    /// The call ended: its deadline, passed or not, reaches nothing more.
+    pub fn disarm(signal: &QuitSignal) {
+        CURRENT.store(0, Ordering::Release);
+        if let Some(waiter) = WAITER.get() {
+            *waiter.armed.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            waiter.changed.notify_one();
+        }
+        signal.set_deadline(false);
+    }
+
+    pub(crate) fn expired_is_current() -> bool {
+        let current = CURRENT.load(Ordering::Acquire);
+        current != 0 && EXPIRED.load(Ordering::Acquire) == current
+    }
+}

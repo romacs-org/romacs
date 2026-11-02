@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "d3e9c81abc7372441c5fc677338264eccb1e1c363312b503b3236489983adbf2",
+  "source_fingerprint": "039167e22afa3a9f3fd1a5e4311a315949648ca1fb9ae3d4ea548607d28c43ea",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1252,
-  "parsed_vm2_only": 1252
+  "parsed_total": 1253,
+  "parsed_vm2_only": 1253
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4042,6 +4042,11 @@
    "name": "romacs--auto-saved-tick",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/autosave.rs:107"
+  },
+  "romacs--call-deadline": {
+   "name": "romacs--call-deadline",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:538"
   },
   "romacs--call-process-run": {
    "name": "romacs--call-process-run",

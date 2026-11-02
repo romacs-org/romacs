@@ -333,6 +333,10 @@ close the window; the session goes on (`romacs --stop' ends it)."
     (when romacs-server-gnu-socket
       (setq server-name name)
       (server-start))
+    ;; Agent sessions outlive servers: attach to the ones still running.
+    (when (file-directory-p (expand-file-name "romacs/agents/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+      (require 'romacs-agent)
+      (romacs-agent-restore))
     name))
 
 (provide 'romacs-server)

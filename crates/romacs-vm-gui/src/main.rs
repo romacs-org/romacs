@@ -1454,7 +1454,14 @@ fn evaluate(
                 let auto_save = retired || live_presentation.in_flight().is_none()
                     || live_presentation.stalled(presentation::render_stall());
                 let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
-                let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm, auto_save));
+                // Timers run Lisp as commands do (an agent's tool call is one):
+                // busy, so C-g and a call's deadline reach it.
+                let (idle, closed) = lent.run(&host, |_| {
+                    vm.enter_busy();
+                    let idle = timers::idle(&mut vm, auto_save);
+                    vm.leave_busy();
+                    idle
+                });
                 if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                     return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                 }

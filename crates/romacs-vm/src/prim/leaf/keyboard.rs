@@ -10,3 +10,22 @@ impl Leaf<'_> {
         self.vm.quit_input_pending() || self.vm.host_input_pending()
     }
 }
+
+impl Leaf<'_> {
+    /// `romacs--call-deadline': arm GENERATION's deadline MILLISECONDS from
+    /// now, or with GENERATION nil disarm the current one (quit.rs
+    /// `deadline').
+    pub(crate) fn call_deadline(&mut self, generation: Value, milliseconds: Value) -> crate::prim::Out {
+        if generation == Value::NIL {
+            crate::host::call_deadline::disarm(&self.vm.quit);
+            return Ok(Value::NIL);
+        }
+        let generation = generation.integer_value().filter(|&g| g > 0)
+            .ok_or(crate::prim::Fault::Wrong("natnump", generation))?;
+        let milliseconds = milliseconds.integer_value().filter(|&m| m >= 0)
+            .ok_or(crate::prim::Fault::Wrong("natnump", milliseconds))?;
+        crate::host::call_deadline::arm(self.vm.quit.clone(), generation as u64,
+                                   std::time::Duration::from_millis(milliseconds as u64));
+        Ok(Value::TRUE)
+    }
+}
