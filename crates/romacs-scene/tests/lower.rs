@@ -409,6 +409,38 @@ fn a_shader_binds_its_channels_in_order() {
 }
 
 #[test]
+fn a_channel_to_a_hidden_target_is_unbound() {
+    let (_, diff) = fixtures::per_kind()
+        .into_iter()
+        .find(|(n, _)| *n == "target")
+        .unwrap();
+    let s = scene(&diff);
+    let s = s
+        .apply(
+            &Diff {
+                base: s.rev(),
+                ops: vec![Op::Set {
+                    id: NodeId(21),
+                    prop: Prop::Visible,
+                    value: Some(Value::Bool(false)),
+                    animate: None,
+                }],
+            },
+            Policy::On,
+        )
+        .unwrap();
+    let solved = layout::solve(&s, PLACEMENT, &BTreeMap::new(), &mut FixedMeasure);
+    let list = lower::lower(&s, &solved, &mut FixtureResources);
+    check_contract(&list);
+    assert_eq!(list.targets.len(), 1, "the hidden group renders no target");
+    let shader = list.targets[0].items.iter().find(|i| i.node == 20).unwrap();
+    let Paint::Sample(sample) = &shader.paint else {
+        panic!("{:?}", shader.paint)
+    };
+    assert_eq!(&*sample.channels, &[None]);
+}
+
+#[test]
 fn a_200_node_dashboard_applies_and_lays_out_within_budget() {
     let diff = fixtures::dashboard(6, 32);
     let best = |f: &mut dyn FnMut()| {

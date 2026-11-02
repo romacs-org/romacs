@@ -4,7 +4,7 @@
 //! its target, and the targets are ordered by the dependency graph with the
 //! placement root last, as `draw.rs`'s contract requires.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -72,19 +72,42 @@ pub fn lower(scene: &Scene, solved: &Solved, resolve: &mut dyn Resolve) -> DrawL
         );
     });
     let order = graph::order(&graph::units(scene), &graph::edges(scene)).unwrap_or_default();
+    let mut rendered = BTreeSet::new();
     let targets = order
         .into_iter()
         .map(|(_, id)| id)
         .filter(|id| *id != NodeId::ROOT && sizes.contains_key(id))
         .chain([NodeId::ROOT])
-        .map(|id| Target {
-            id: TargetId(id.0),
-            size: sizes[&id],
-            clear: Color::TRANSPARENT,
-            items: items.remove(&id).unwrap_or_default(),
+        .map(|id| {
+            let items = items.remove(&id).unwrap_or_default();
+            let target = Target {
+                id: TargetId(id.0),
+                size: sizes[&id],
+                clear: Color::TRANSPARENT,
+                items: items
+                    .into_iter()
+                    .map(|item| unbind_unrendered(item, &rendered))
+                    .collect(),
+            };
+            rendered.insert(target.id);
+            target
         })
         .collect();
     DrawList { targets }
+}
+
+/// Unbind the channels of `item` that name a target not rendered before
+/// it, such as a hidden group: the shader samples them as unbound rather
+/// than the renderer refusing the list.
+fn unbind_unrendered(mut item: Item, rendered: &BTreeSet<TargetId>) -> Item {
+    if let Paint::Sample(sample) = &mut item.paint {
+        sample.channels = sample
+            .channels
+            .iter()
+            .map(|c| c.filter(|s| !matches!(s, Source::Target(id) if !rendered.contains(id))))
+            .collect();
+    }
+    item
 }
 
 /// A node's paints, each with a clip override when it needs one.
