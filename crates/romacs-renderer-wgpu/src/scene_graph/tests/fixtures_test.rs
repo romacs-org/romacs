@@ -1261,7 +1261,8 @@ fn a_joining_script_is_shaped_as_a_line() {
     );
 }
 
-/// A shaped line wider than an atlas page still draws: word by word.
+/// A shaped line wider than an atlas page still draws: word by word, and a
+/// word wider than a page cluster by cluster.
 #[test]
 fn a_shaped_line_too_long_for_one_raster_still_draws() {
     let Some(mut gpu) = software_gpu() else {
@@ -1271,7 +1272,20 @@ fn a_shaped_line_too_long_for_one_raster_still_draws() {
         eprintln!("SKIP: no Noto Sans Arabic on this system");
         return;
     }
-    let line: String = std::iter::repeat_n("سلام", 60).collect::<Vec<_>>().join(" ");
+    for separator in [" ", ""] {
+        let line = std::iter::repeat_n("سلام", 60)
+            .collect::<Vec<_>>()
+            .join(separator);
+        let [x0, x1] = long_line_ink(&mut gpu, line);
+        assert!(
+            x1 - x0 > 2048,
+            "{separator:?}: the line spans past one atlas page: {x0}..{x1}"
+        );
+    }
+}
+
+/// Horizontal ink extent of `line` drawn at device scale 2.
+fn long_line_ink(gpu: &mut Gpu, line: String) -> [u32; 2] {
     let list = DrawList {
         targets: vec![Target {
             id: TargetId(0),
@@ -1293,12 +1307,9 @@ fn a_shaped_line_too_long_for_one_raster_still_draws() {
             )],
         }],
     };
-    let image = render(&mut gpu, &list, 2.0, &());
+    let image = render(gpu, &list, 2.0, &());
     let [x0, _, x1, _] = ink_bounds(&image, [0, 0, image.width, image.height]).expect("ink");
-    assert!(
-        x1 - x0 > 2048,
-        "the line spans past one atlas page: {x0}..{x1}"
-    );
+    [x0, x1]
 }
 
 /// Filtering a straight-alpha source premultiplies first: halfway between
