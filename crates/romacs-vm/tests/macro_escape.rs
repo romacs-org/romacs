@@ -34,11 +34,13 @@ const EVALUATED: [&str; 9] = [
 /// Forms evaluated as they are, each around an `eval' of its own: what the
 /// eval'd form's own handlers catch, no handler around the `eval' sees, and
 /// a deferred call's expansion defers the calls inside it in turn.
-const AROUND: [&str; 5] = [
+const AROUND: [&str; 6] = [
     r#"(catch 'rt-tag (list 'outer (eval '(catch 'rt-tag (rt-t)) t)))"#,
     r#"(progn (setq rt-log nil) (list (catch 'rt-tag (eval '(unwind-protect (rt-t) (push 'cleanup rt-log)) t)) rt-log))"#,
     r#"(progn (setq rt-log nil) (list (handler-bind ((error (lambda (e) (push e rt-log)))) (eval '(condition-case nil (rt-m) (error 'inner)) t)) rt-log))"#,
     r#"(eval '(progn (defmacro rt-new () '(condition-case nil (rt-m) (error 'inner))) (rt-new)) t)"#,
+    // No `signal-hook-function' call for a throw the form's catch takes.
+    r#"(progn (setq rt-log nil) (list (let ((signal-hook-function (lambda (c _) (push c rt-log)))) (eval '(catch 'rt-tag (rt-t)) t)) rt-log))"#,
     // No debugger for an error the form's own handler catches.
     r#"(progn (setq rt-log nil) (list (let ((debug-on-error t) (debugger (lambda (&rest _) (push 'debugged rt-log) nil))) (eval '(condition-case nil (rt-m) (error 'caught)) t)) rt-log))"#,
 ];

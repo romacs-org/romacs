@@ -929,8 +929,8 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
         let slot = e.vm.slot("no-catch");
         let data = e.vm.list_value(&[tag, value]);
         e.escape = Some(Escape::Signal(Value::reference(slot + 1, 7), data));
-        prepare_signal(e, false, None);
-        e.vm.thrown_no_catch = true;
+        // Marked a throw only if no signal-hook or handler-bind replaced it.
+        e.vm.thrown_no_catch = !prepare_signal(e, false, None);
         escape = e.escape.take().unwrap();
     }
     leave_native(e);

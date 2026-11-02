@@ -66,10 +66,14 @@ pub(super) fn release_control(e: &mut Engine<'_>, control: &Control) {
 /// A normalized error has already completed its non-unwinding search.  Carry
 /// its selected condition target through eval/load and cleanup unchanged.
 pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Option<usize>) -> bool {
-    e.vm.thrown_no_catch = false;
     let mut replaced = false;
-    if !hooked && let Some(Escape::Signal(condition, data)) = e.escape.as_ref()
-        && let Some(replacement) = signal_hook(e, *condition, *data, failed_depth)
+    if let Some(Escape::Signal(..)) = e.escape.as_ref() {
+        // A new signal; an error carried through cleanup keeps its origin.
+        e.vm.thrown_no_catch = false;
+    }
+    if !hooked && let Some(&Escape::Signal(condition, data)) = e.escape.as_ref()
+        && !speculative(e, condition)
+        && let Some(replacement) = signal_hook(e, condition, data, failed_depth)
     {
         e.escape = Some(replacement);
         replaced = true;
@@ -92,6 +96,27 @@ pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Opt
         }
     }
     replaced
+}
+
+/// Whether CONDITION's handler search ends at a compile-time expansion's
+/// `Boundary': GNU signals it only at the form's reach, where
+/// `signal-hook-function' hears of it, so it hears nothing now.
+fn speculative(e: &mut Engine<'_>, condition: Value) -> bool {
+    if !e.vm.signal_handlers.iter().any(|h| matches!(h, SignalHandler::Boundary)) {
+        return false;
+    }
+    let conditions = e.vm.signal_conditions(condition);
+    let mut at = e.vm.signal_handlers.len();
+    while at != 0 {
+        at -= 1;
+        match e.vm.signal_handlers[at] {
+            SignalHandler::Mask(skip) => at = skip,
+            SignalHandler::Boundary => return true,
+            SignalHandler::Condition(choices) if matches(e.vm, conditions, choices) => return false,
+            _ => {}
+        }
+    }
+    false
 }
 
 /// GNU signal_or_quit after its handler search: whether the debugger is

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "c960660f26205fce859502b5c83bc2660b8036dd2c438b08183e418c09450c57",
+  "input_hash": "0de2b09ce7df58e6ffef566cfe491090c7ea9f75c627eb0800d2a0e3138a36e3",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -3907,7 +3907,7 @@
    "planned": false,
    "mechanism": "When the macro calls `eval` runs expand",
    "gnu": "GNU's `eval` interprets: each macro call expands when evaluation reaches it, again at each reach (`src/eval.c` eval_sub), inside the handlers around it; `load` expands each top-level form first (`internal-macroexpand-for-load`)",
-   "romacs": "Romacs compiles what `eval` runs. A macro call expands as the form compiles, once, and its expansion is kept. It expands alone: no handler or catch around the compilation sees what it signals or throws. One whose expansion signals or throws is compiled to expand at its reach instead, so the form's own handlers see what the macro raises, and the calls inside a deferred call's expansion defer in turn, and so is a call whose function is not yet defined, which a form run before it may define; a `lambda` with nothing to capture compiles at its first call. Different: a successful expansion runs before the form runs and only once; a failing one runs while compiling and again at its reach, so its side effects happen twice, the first before the form's own (pinned GNU `(handled (body cleanup (caught (error \"uw\"))))`, Romacs `(handled (cleanup body cleanup (caught (error \"uw\"))))`); C-g during the compile-time expansion raises what left the expansion (the quit, or what a cleanup replaced it with) at the form's reach, without running the macro again",
+   "romacs": "Romacs compiles what `eval` runs. A macro call expands as the form compiles, once, and its expansion is kept. It expands alone: no handler or catch around the compilation sees what it signals or throws. One whose expansion signals or throws is compiled to expand at its reach instead, so the form's own handlers see what the macro raises, and the calls inside a deferred call's expansion defer in turn, and so is a call whose function is not yet defined, which a form run before it may define; a `lambda` with nothing to capture compiles at its first call. Different: a successful expansion runs before the form runs and only once; a failing one runs while compiling and again at its reach, so its side effects happen twice, the first before the form's own (pinned GNU `(handled (body cleanup (caught (error \"uw\"))))`, Romacs `(handled (cleanup body cleanup (caught (error \"uw\"))))`); C-g during the compile-time expansion raises what left the expansion (the quit, or what a cleanup replaced it with) at the form's reach, without running the macro again. Whether a quit is still unwinding is one mark per VM, not carried on each escape: a quit expansion compiled into a branch never taken, or a cleanup that catches while a quit unwinds, can make an expansion's escape raise as it left where GNU would expand again, or expand again (asking for another C-g) where GNU would raise it",
    "why": "**Observable** only through a macro's own side effects or the dynamic state it reads while expanding; what an expansion signals, throws or quits reaches GNU's handlers. Tests: `crates/romacs-vm/tests/macro_escape.rs` (against pinned GNU), `crates/romacs-vm/tests/quit_async.rs`",
    "symbols": [
     "eval",
