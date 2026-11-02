@@ -4,7 +4,8 @@
 //! `GEN/KEY/INPUTS.rlc`. Writes are a private temporary file renamed into
 //! place, so a reader sees a whole artifact or none.
 //!
-//! An artifact is `MAGIC`, the SHA-256 of its body, then the body: the
+//! An artifact is `MAGIC`, the xxh3-128 of its body (a check against
+//! damage, read on every load, so a fast one), then the body: the
 //! status (compiled, or why the file loads as source), the source's
 //! resolved path, the observed inputs (host records, `host::replay`'s
 //! kind, and the files the compile loaded), the name table and the units.
@@ -14,9 +15,9 @@ use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const MAGIC: &[u8] = b"RLC1\n";
+const MAGIC: &[u8] = b"RLC2\n";
 /// What a key binds besides its inputs: this format and the compiler.
-const FORMAT: &str = concat!("romacs-compiled-lisp 1\n", env!("VM2_COMPILER_ID"));
+const FORMAT: &str = concat!("romacs-compiled-lisp 2\n", env!("VM2_COMPILER_ID"));
 /// The default cap on the store's artifacts, in bytes.
 pub(super) const BUDGET: u64 = 256 << 20;
 
@@ -108,18 +109,22 @@ pub(super) fn encode(status: &Status, source: &Path, inputs: &[Json], names: &[S
     }
     let mut out = Writer::default();
     out.raw(MAGIC);
-    out.raw(&Sha256::digest(&body.bytes));
+    out.raw(&checksum(&body.bytes));
     out.raw(&body.bytes);
     (out.bytes, inputs_hash.finalize().into())
 }
 
+fn checksum(body: &[u8]) -> [u8; 16] {
+    twox_hash::XxHash3_128::oneshot(body).to_le_bytes()
+}
+
 /// The artifact BYTES hold, when they are whole.
 pub(super) fn decode(bytes: Vec<u8>) -> crate::Result<Artifact> {
-    let body_at = MAGIC.len() + 32;
+    let body_at = MAGIC.len() + 16;
     if bytes.len() < body_at || &bytes[..MAGIC.len()] != MAGIC {
         return Err("not a compiled Lisp artifact".into());
     }
-    if Sha256::digest(&bytes[body_at..])[..] != bytes[MAGIC.len()..body_at] {
+    if checksum(&bytes[body_at..])[..] != bytes[MAGIC.len()..body_at] {
         return Err("compiled Lisp artifact corrupt".into());
     }
     let mut r = Reader::new(&bytes[body_at..]);
@@ -162,7 +167,8 @@ fn read(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// The first artifact for KEY whose inputs VALID accepts.
+/// The first artifact for KEY whose inputs VALID accepts. A damaged one
+/// is deleted: its generation fixes its format, so it can never load.
 pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&[String]) -> bool) -> Option<(PathBuf, Artifact)> {
     let dir = generation(store).join(hex(key));
     let mut candidates: Vec<PathBuf> = host::read_dir(&dir).ok()?
@@ -171,7 +177,10 @@ pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&[Strin
         .collect();
     candidates.sort();
     candidates.into_iter().find_map(|path| {
-        let artifact = decode(read(&path).ok()?).ok()?;
+        let Ok(artifact) = decode(read(&path).ok()?) else {
+            let _ = host::remove_file(&path);
+            return None;
+        };
         valid(&artifact.inputs).then_some((path, artifact))
     })
 }

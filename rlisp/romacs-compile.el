@@ -241,13 +241,16 @@ holds before the form being compiled: they come first here too."
   "The compile-time effect of defining NAME as DEFINITION.
 A macro becomes callable for the rest of the file
 (`byte-compile-macro-environment'); an inline-eligible function's
-definition becomes the one later callers inline."
+definition becomes the one later callers inline.  Any other definition
+is recorded as t, as `byte-compile-file-form-defalias' records it
+(bytecomp.el:5162): later calls are not inlined."
   (pcase definition
     ((or `(cons 'macro ,fun) `'(macro . ,(app macroexp-quote fun)))
      (push (cons name (eval fun (romacs-compile--lexenv))) byte-compile-macro-environment))
     ((or `(function (lambda . ,_)) `(quote (lambda . ,_)))
      (when (romacs-compile--eligible-p name)
-       (push (cons name (eval definition (romacs-compile--lexenv))) romacs-compile--functions)))))
+       (push (cons name (eval definition (romacs-compile--lexenv))) romacs-compile--functions)))
+    (_ (push (cons name t) romacs-compile--functions))))
 
 (defun romacs-compile--eligible-p (name)
   "Whether calls to NAME are inlined: `defsubst' marked it."
@@ -259,8 +262,8 @@ definition becomes the one later callers inline."
 `byte-compile-inline-expand' (byte-opt.el:144): this file's latest
 definition, else the function cell's, an alias followed and an autoload
 loaded."
-  (let ((fn (or (cdr (assq name romacs-compile--functions))
-                (symbol-function name))))
+  (let ((fn (let ((local (assq name romacs-compile--functions)))
+              (if local (cdr local) (symbol-function name)))))
     (when (autoloadp fn)
       (autoload-do-load fn name)
       (setq fn (symbol-function name)))
@@ -307,7 +310,8 @@ lambda gets GNU's compiled docstring (bytecomp.el:3115)."
           (let ((fn (romacs-compile--definition head)))
             (if fn
                 `(funcall ',fn ,@args)
-              (unless (memq head romacs-compile--not-inlined)
+              (unless (or (memq head romacs-compile--not-inlined)
+                          (eq (cdr (assq head romacs-compile--functions)) t))
                 (push head romacs-compile--not-inlined))
               (cons head args)))
         (cons (if (consp head) (romacs-compile--inline head) head) args))))))

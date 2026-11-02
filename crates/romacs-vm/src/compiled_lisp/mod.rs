@@ -21,7 +21,7 @@ mod codec;
 pub(crate) mod store;
 mod unit;
 #[cfg(test)]
-mod tests;
+mod compiled_lisp_tests;
 
 use crate::*;
 use serde_json::{Value as Json, json};
@@ -104,6 +104,18 @@ pub(crate) struct Compiled {
 impl Compiled {
     pub(crate) fn units(&self) -> impl Iterator<Item = (usize, usize, usize, usize)> + '_ {
         self.artifact_data.units.iter().map(|u| (u.ordinal, u.byte, u.end, u.line))
+    }
+    /// In a compile process, record what this artifact's own compile
+    /// observed: the compile loading it uses what that compile-time code
+    /// read (a macro's expansion, say), so it holds only while that does.
+    pub(crate) fn inherit_inputs(&self) {
+        for text in &self.artifact_data.inputs {
+            if let Ok(Json::Object(mut record)) = serde_json::from_str::<Json>(text)
+                && let Some(Json::String(kind)) = record.remove("kind")
+            {
+                host::record(&kind, Json::Object(record));
+            }
+        }
     }
 }
 

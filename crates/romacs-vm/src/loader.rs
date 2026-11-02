@@ -16,8 +16,10 @@ pub(super) struct Loader {
     /// Each compiled load's file (an index in `files`) and the artifact
     /// it ran (`compiled_lisp`), in load order.
     compiled: Vec<(usize, PathBuf)>,
+    /// How many compiled loads are running their units.
+    in_artifact: usize,
 }
-romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms, recording, compiled });
+romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms, recording, compiled, in_artifact });
 impl Loader {
     /// How many source loads are in progress.
     pub(super) fn active_depth(&self) -> usize {
@@ -452,6 +454,7 @@ impl Vm {
         if compiled && let Some(compiled) = self.compiled_load(&path)? {
             if crate::host::mode() == crate::host::Mode::Record {
                 self.note_loaded(&path);
+                compiled.inherit_inputs();
             }
             return self.load_artifact(named, path, compiled);
         }
@@ -465,9 +468,9 @@ impl Vm {
             None => self.detected_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))?,
         };
         // Each public variable binds as a `let' does, in pinned GNU's order:
-        // Fload's `lexical-binding' (lread.c:1323), t in every source load
-        // as VM2 reads it everywhere (VM2-LEXBIND1), so a source load
-        // inside a compiled one, which binds it nil, still reads t; then
+        // Fload's `lexical-binding' (lread.c:1323), bound t only in a source
+        // load inside a compiled one, which binds it nil: VM2 reads every
+        // file lexically (VM2-LEXBIND1), elsewhere under its default t; then
         // its lread--unescaped-character-literals, then
         // load-with-code-conversion's load-in-progress (held over the
         // after-load forms) and file names, then readevalloop's. GNU's
@@ -480,8 +483,9 @@ impl Vm {
         let file = self.literal(&Form::String(named.clone()))?;
         let history_slot = self.slot("current-load-list");
         let outer = self.dynamic.len();
-        let bound = self.bind_named(&[("lexical-binding", Value::TRUE), ("lread--unescaped-character-literals", Value::NIL),
-                                      ("load-in-progress", Value::TRUE)]);
+        let lexical: &[(&str, Value)] = if self.loader.in_artifact > 0 { &[("lexical-binding", Value::TRUE)] } else { &[] };
+        let bound = self.bind_named(lexical)
+            .and_then(|()| self.bind_named(&[("lread--unescaped-character-literals", Value::NIL), ("load-in-progress", Value::TRUE)]));
         let inner = self.dynamic.len();
         // loadhist_initialize (lread.c:1031): `load' binds current-load-list
         // to (FILE), so LOADHIST_ATTACH conses this file's definitions before
@@ -666,6 +670,7 @@ impl Vm {
         self.loader.compiled.push((step_file, compiled.artifact.clone()));
         let slots = self.compiled_slots(&compiled);
         let units: Vec<_> = compiled.units().collect();
+        self.loader.in_artifact += 1;
         let result = (|| {
             for (index, &(ordinal, byte, end, line)) in units.iter().enumerate() {
                 let step = self.loader.steps.len();
@@ -700,6 +705,7 @@ impl Vm {
             self.loader.completed_files += 1;
             self.build_load_history(history_slot)
         })();
+        self.loader.in_artifact -= 1;
         let [value] = self.release_frame(last);
         self.file_specials = saved_file_specials;
         let result = self.unbind_after(self.dynamic.len() - outer, result.map(|()| value));

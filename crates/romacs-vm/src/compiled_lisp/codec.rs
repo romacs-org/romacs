@@ -51,12 +51,21 @@ impl<'a> Reader<'a> {
     pub(super) fn done(&self) -> bool {
         self.at == self.data.len()
     }
+    #[inline]
     pub(super) fn byte(&mut self) -> Result<u8> {
         let b = *self.data.get(self.at).ok_or("compiled Lisp artifact truncated")?;
         self.at += 1;
         Ok(b)
     }
+    #[inline]
     pub(super) fn u(&mut self) -> Result<u64> {
+        // Most operands are register numbers and small indices: one byte.
+        if let Some(&b) = self.data.get(self.at)
+            && b < 0x80
+        {
+            self.at += 1;
+            return Ok(u64::from(b));
+        }
         let mut n = 0u64;
         for shift in (0..64).step_by(7) {
             let b = self.byte()?;
@@ -67,6 +76,7 @@ impl<'a> Reader<'a> {
         }
         Err("compiled Lisp artifact integer overflow".into())
     }
+    #[inline]
     pub(super) fn n(&mut self) -> Result<usize> {
         usize::try_from(self.u()?).map_err(|_| "compiled Lisp artifact integer overflow".into())
     }

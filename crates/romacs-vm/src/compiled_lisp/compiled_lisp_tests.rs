@@ -37,3 +37,21 @@ fn units_round_trip() {
         assert_eq!(through_unit(&mut vm, form), expected, "{form}");
     }
 }
+
+#[test]
+fn damaged_artifacts_are_deleted_on_lookup() {
+    let base = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
+        || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"), std::path::PathBuf::from);
+    let store = base.join(format!("compiled-lisp-unit-{}", std::process::id()));
+    std::fs::create_dir_all(&store).unwrap();
+    let key = [7; 32];
+    let (bytes, inputs) = store::encode(&store::Status::Compiled, Path::new("/x.el"), &[], &[], &[]);
+    let path = store::publish(&store, &key, &inputs, &bytes).unwrap();
+    assert!(store::lookup(&store, &key, |_| true).is_some_and(|(found, _)| found == path));
+    let mut damaged = bytes.clone();
+    *damaged.last_mut().unwrap() ^= 1;
+    std::fs::write(&path, damaged).unwrap();
+    assert!(store::lookup(&store, &key, |_| true).is_none());
+    assert!(!path.exists());
+    std::fs::remove_dir_all(&store).unwrap();
+}
