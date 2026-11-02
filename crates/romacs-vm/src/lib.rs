@@ -2034,11 +2034,8 @@ impl Vm {
             // lambda parameter. Verified on live GNU 32.0.50 interpreted with
             // `lexical-binding: t`: the parameter form signals `void-variable`
             // while the `let` form answers 18.
-            if let Some(source) = name
-                .source()
-                .filter(|n| self.dynamic_scope || self.specials.contains(*n) || self.pending_specials.contains(*n))
-            {
-                let slot = self.slot(source);
+            if self.binds_dynamically(&b, &name, false) {
+                let slot = self.name_slot(&name);
                 b.emit(Op::Bind(slot, reg));
                 dynamic += 1;
             } else {
@@ -2662,9 +2659,7 @@ impl Vm {
                             };
                             let reg = b.reg();
                             b.emit(Op::Move(reg, value));
-                            let cell = !name.source().is_some_and(|n| {
-                                self.dynamic_scope || self.specials.contains(n) || self.pending_specials.contains(n) || b.local_specials.contains(n)
-                            });
+                            let cell = !self.binds_dynamically(b, &name, true);
                             if cell {
                                 b.emit(Op::Cell(reg));
                             }
@@ -2856,9 +2851,7 @@ impl Vm {
         } else {
             let reg = b.reg();
             b.emit(Op::Move(reg, payload));
-            let cell = !variable.source().is_some_and(|name| self.dynamic_scope
-                || self.specials.contains(name)
-                || self.pending_specials.contains(name));
+            let cell = !self.binds_dynamically(b, variable, false);
             if cell {
                 b.emit(Op::Cell(reg));
             }
@@ -2875,12 +2868,25 @@ impl Vm {
         b.env = saved;
         Ok(())
     }
+    /// Whether a binding of NAME is dynamic: every binding under dynamic
+    /// scope, an uninterned symbol's too, as GNU's specbind binds the symbol
+    /// object; otherwise a special variable's, B's local specials counting
+    /// when LOCAL.
+    fn binds_dynamically(&self, b: &Builder, name: &Name, local: bool) -> bool {
+        self.dynamic_scope || name.source().is_some_and(|n| {
+            self.specials.contains(n) || self.pending_specials.contains(n) || (local && b.local_specials.contains(n))
+        })
+    }
+    /// The symbol slot of NAME.
+    fn name_slot(&mut self, name: &Name) -> usize {
+        match name {
+            Name::Source(source) => self.slot(source),
+            Name::Generated(id) => self.generated_symbol(*id).index(7).expect("a generated symbol") - 1,
+        }
+    }
     fn bind(&mut self, b: &mut Builder, (name, binding): &(Name, Binding)) -> usize {
-        if let Some(source) = name
-            .source()
-            .filter(|n| self.dynamic_scope || self.specials.contains(*n) || self.pending_specials.contains(*n) || b.local_specials.contains(*n))
-        {
-            let slot = self.slot(source);
+        if self.binds_dynamically(b, name, true) {
+            let slot = self.name_slot(name);
             b.emit(Op::Bind(slot, binding.reg));
             1
         } else {
