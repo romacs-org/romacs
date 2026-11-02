@@ -67,7 +67,7 @@ INIT = r'''
   "Record the chrome and the windows' edges in NAME, a JSON file."
   (let ((state (romacs-chrome-state)))
     (with-temp-file (expand-file-name (concat name ".json") chrome-live-dir)
-      (insert (format "{\"classic\": %s, \"gap\": %d, \"radius\": %d, \"dim\": %s, \"right_divider\": %d, \"internal_border\": %d, \"focus\": %S, \"background\": %S, \"windows\": [%s], \"status_bar\": %d, \"label\": \"%s\", \"bar_top\": %d, \"bar_background\": %S, \"native_width\": %d, \"border\": %d}"
+      (insert (format "{\"classic\": %s, \"gap\": %d, \"radius\": %d, \"dim\": %s, \"right_divider\": %d, \"internal_border\": %d, \"focus\": %S, \"background\": %S, \"windows\": [%s], \"status_bar\": %d, \"label\": \"%s\", \"bar_top\": %d, \"bar_background\": %S, \"native_width\": %d, \"border\": %d, \"pill\": [%S, %S], \"state_pill\": [%S, %S], \"char_width\": %d, \"bar_height\": %d}"
                       (if (plist-get state :classic) "true" "false") (plist-get state :gap) (plist-get state :pane-radius)
                       (plist-get state :pane-dim) (plist-get state :right-divider) (plist-get state :internal-border)
                       (or (plist-get state :focus) "") (chrome-live--hex (face-background 'default nil t))
@@ -77,7 +77,12 @@ INIT = r'''
                                  (window-list nil 'never (frame-first-window)) ", ")
                       (plist-get state :status-bar) (plist-get state :label)
                       (romacs-chrome-bottom) (chrome-live--hex (face-background 'mode-line-active nil t))
-                      (frame-native-width) (frame-internal-border-width))))))
+                      (frame-native-width) (frame-internal-border-width)
+                      (or (chrome-live--hex (face-foreground 'mode-line-active nil t)) "")
+                      (or (chrome-live--hex (face-background 'romacs-mode-line-pill nil t)) "")
+                      (or (chrome-live--hex (face-foreground 'romacs-mode-line-state-pill nil t)) "")
+                      (or (chrome-live--hex (face-background 'romacs-mode-line-state-pill nil t)) "")
+                      (frame-char-width) (romacs-status-bar-height))))))
 '''
 
 STEPS = r'''
@@ -126,6 +131,16 @@ def pixel(png: Path, x: int, y: int) -> str:
     out = subprocess.run(['magick', str(png), '-crop', f'1x1+{x}+{y}', '-format', '#%[hex:p{0,0}]', 'info:'],
                          capture_output=True, text=True, check=True)
     return out.stdout.strip().lower()[:7]
+
+
+def contrast(a: str, b: str) -> float:
+    """WCAG 2 contrast of two #rrggbb colours."""
+    def luminance(hex_):
+        c = [int(hex_[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        c = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in c]
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    x, y = luminance(a), luminance(b)
+    return (max(x, y) + 0.05) / (min(x, y) + 0.05)
 
 
 def near(a: str, b: str, slack: int = 3) -> bool:
@@ -266,6 +281,12 @@ def main():
                         checks[f'corner-{step}'] = [pixel(png, round(left * s), round(top * s)), state['background']]
                         bx = round((state['native_width'] - state['border'] - 3) * s)
                         checks[f'bar-{step}'] = [pixel(png, bx, round((state['bar_top'] + 2) * s)), state['bar_background']]
+                        # The accent block at the bar's left edge, and the
+                        # buffer's pill: its leading space, a column in.
+                        mid = round((state['bar_top'] + state['bar_height'] / 2) * s)
+                        checks[f'accent-{step}'] = [pixel(png, round((state['border'] + 1) * s), mid), state['focus']]
+                        px = round((state['border'] + 3 + 1.5 * state['char_width']) * s)
+                        checks[f'pill-{step}'] = [pixel(png, px, mid), state['pill'][1]]
                 for scene in (('vc', 'modified', 'flymake', 'prompt') if args.scenes else ()):
                     note = notes / f'{scene}.json'
                     wait(note.exists, args.timeout, f'record {scene}', proc)
@@ -291,6 +312,10 @@ def main():
             ok = ok and (report['chrome_divider_quads'] == 0 if args.classic else (report['chrome_divider_quads'] or 0) > 0)
             ok = ok and (state['status_bar'], state['label']) == ((0, 'full') if args.classic else (1, 'name'))
             ok = ok and (report['chrome_bar_bands'] == 0 if args.classic else (report['chrome_bar_bands'] or 0) > 0)
+            # The pills keep the bar's text readable (WCAG AA).
+            if not args.classic:
+                report['pill_contrast'] = [round(contrast(*state['pill']), 2), round(contrast(*state['state_pill']), 2)]
+                ok = ok and min(report['pill_contrast']) >= 4.5
             for name, (got, want) in checks.items():
                 ok = ok and near(got, want)
             if args.gpu_frames:

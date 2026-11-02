@@ -179,12 +179,10 @@ pub(super) struct DisplayState {
     pub(super) height: u32,
     building_band: bool,
     diagnostics: std::cell::RefCell<Vec<String>>,
-    /// The text the status bar last showed (`romacs-status-bar-string').
-    pub(super) status_bar_text: Option<String>,
     /// Every evaluator entry a mode-line expansion made (`Vm::mode_line_evals').
     pub(super) mode_line_evals: u64,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, version, hosted, width, height, building_band, diagnostics, status_bar_text, mode_line_evals });
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, version, hosted, width, height, building_band, diagnostics, mode_line_evals });
 impl DisplayState {
     /// The theme with every pending face edit applied: built once for them
     /// all, or, when that fails, one edit at a time, so an edit the theme
@@ -318,7 +316,6 @@ impl DisplayState {
             height: 0,
             building_band: false,
             diagnostics: Default::default(),
-            status_bar_text: None,
             mode_line_evals: 0,
         }
     }
@@ -2213,6 +2210,7 @@ impl Vm {
             frame_cols,
             command_loop_level,
             clip: None,
+            marks: false,
         })
     }
     /// GNU's `CURRENT_MODE_LINE_ACTIVE_FACE_ID`: the selected window

@@ -130,7 +130,7 @@ A window GNU draws no mode line for has none under any value."
   :initialize #'custom-initialize-default
   :set #'romacs-chrome--set)
 
-(defvar romacs-pane-label-format '("%b")
+(defvar romacs-pane-label-format '("" romacs-mode-line-mode-icon "%b")
   "The mode-line format of a window's band under the pane label `name'.")
 (put 'romacs-pane-label-format 'risky-local-variable t)
 

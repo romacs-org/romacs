@@ -2040,6 +2040,9 @@ pub struct FrameDisplayState {
     /// The status bar's band (`FrameGlyphBuffer::status_bar`).
     #[serde(default)]
     pub status_bar: Option<crate::types::Rect>,
+    /// Rounded backgrounds behind chrome text (`FrameGlyphBuffer::rounded_fills`).
+    #[serde(default)]
+    pub rounded_fills: Vec<crate::frame_glyphs::RoundedFill>,
     pub frame_cols: usize,
     pub frame_rows: usize,
     pub frame_pixel_width: f32,
@@ -2573,6 +2576,7 @@ impl FrameDisplayState {
             frame_chrome: FrameChrome::default(),
             panes: Vec::new(),
             status_bar: None,
+            rounded_fills: Vec::new(),
             frame_cols,
             frame_rows,
             frame_pixel_width: frame_cols as f32 * char_width,
@@ -2693,6 +2697,7 @@ impl FrameDisplayState {
         state.frame_chrome = buf.frame_chrome.clone();
         state.panes = buf.panes.clone();
         state.status_bar = buf.status_bar;
+        state.rounded_fills = buf.rounded_fills.clone();
         // Reconstruct the layout-internal phys_cursor from the unified list's
         // active entry; charpos isn't carried on WindowCursor so default to 0.
         state.phys_cursor = buf.active_cursor().map(|c| PhysCursor {
@@ -2870,6 +2875,7 @@ impl FrameDisplayState {
         buf.frame_chrome = self.frame_chrome.clone();
         buf.panes = self.panes.clone();
         buf.status_bar = self.status_bar;
+        buf.rounded_fills = self.rounded_fills.clone();
 
         // --- Materialize all glyphs in canonical row/overlay order ---
         self.for_each_glyph(|g| buf.glyphs.push(g));

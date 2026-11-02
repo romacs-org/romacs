@@ -116,17 +116,18 @@ fn the_bar_shows_the_selected_window_and_a_prompt_its_origin() {
 #[test]
 fn the_bar_expands_the_mode_line_at_its_own_columns() {
     let mut vm = session("full");
-    // `%-' fills the bar's 121 columns; a string's `--'.
+    // `%-' fills the bar's 121 columns; a string's `--'. The painter
+    // clips what the bar shows there (`romacs-status-bar-string').
+    let shows = |vm: &mut Vm| { bar(vm); eval(vm, "(romacs--status-bar-text)").trim_matches('"').to_owned() };
     eval(&mut vm, "(setq mode-line-format \"%b %-\")");
-    let text = bar(&mut vm).text.utf8;
-    assert_eq!(text.chars().count(), 121);
+    assert!(bar(&mut vm).text.utf8.starts_with(&format!("*scratch* {}", "-".repeat(121))));
+    let text = shows(&mut vm);
+    assert_eq!(text.chars().count(), 121, "{text:?}");
     assert!(text.starts_with("*scratch* ---"), "{text}");
     assert_eq!(eval(&mut vm, "(let ((noninteractive nil)) (format-mode-line mode-line-format))"), "\"*scratch* --\"");
     // A longer format is clipped at them.
     eval(&mut vm, "(setq mode-line-format (make-string 300 ?x))");
-    assert_eq!(bar(&mut vm).text.utf8, "x".repeat(121));
-    // What it shows is `romacs-status-bar-string'.
-    assert_eq!(eval(&mut vm, "(length (romacs--status-bar-text))"), "121");
+    assert_eq!(shows(&mut vm), "x".repeat(121));
     // A window's `mode-line-format' parameter is its effective format.
     eval(&mut vm, "(set-window-parameter nil 'mode-line-format \"param %l\")");
     assert_eq!(bar(&mut vm).text.utf8, "param 1");
@@ -280,4 +281,112 @@ fn a_click_on_the_bar_runs_the_shown_mode_lines_binding() {
     eval(&mut vm, "(select-window w2)");
     eval(&mut vm, "(romacs--status-bar-click 0 'mouse-1)");
     assert_eq!(eval(&mut vm, "(equal (car clicked) (list 'two w2))"), "t");
+}
+
+/// The bar's marks under Romacs's mode line (VM2-STATUS-BAR): its
+/// segments, the `right-align' marker, the buffer's pill on
+/// `romacs-mode-line-pill''s background, `%*' drawn as an icon while
+/// Romacs Icons is there; `romacs-status-bar-string' is what the bar
+/// shows, the right side flush with its right edge.
+#[test]
+fn the_bar_marks_its_segments_pills_and_icons() {
+    let mut vm = session("name");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
+        vm.load_file(&root.join(file)).unwrap();
+    }
+    eval(&mut vm, "(progn (setq romacs-icons--font t) (romacs-mode-line-mode 1))");
+    eval(&mut vm, "(set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\")");
+    let shown = bar(&mut vm);
+    let names: Vec<&str> = shown.marks.segments.iter().map(|s| s.name.as_str()).collect();
+    for name in ["front", "buffer", "position", "right-align", "major-mode", "encoding"] {
+        assert!(names.contains(&name), "{name} in {names:?}");
+    }
+    let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
+    assert_eq!(buffer.pill.map(|p| p.background), Some([0x5a, 0x14, 0x14]));
+    assert!(shown.text.utf8[buffer.bytes.clone()].contains("*scratch*"));
+    // `%*' of the unmodified *scratch*: `-', drawn as the `saved' icon.
+    let (byte, icon) = shown.marks.icons[0];
+    assert_eq!((&shown.text.utf8[byte..byte + 1], icon), ("-", '\u{FE002}'));
+    eval(&mut vm, "(insert \"x\")");
+    let shown = bar(&mut vm);
+    let (byte, icon) = shown.marks.icons[0];
+    assert_eq!((&shown.text.utf8[byte..byte + 1], icon), ("*", '\u{FE001}'));
+    // The drawn text: the bar's 121 columns, the right side at the end.
+    let drawn = eval(&mut vm, "(romacs-status-bar-string)");
+    let drawn = drawn.trim_matches('"');
+    assert_eq!(drawn.chars().count(), 121, "{drawn}");
+    let marker = shown.marks.right_align().unwrap();
+    let right = shown.text.utf8[marker.end..].to_owned();
+    assert!(drawn.ends_with(&right), "{drawn:?} ends with {right:?}");
+    // A click right of the marker reaches that element's map: the click's
+    // column is the expanded text's index, as the bar's extents give it.
+    eval(&mut vm, "(progn (setq noninteractive nil clicked nil)
+                     (defvar right-map (let ((m (make-sparse-keymap))) (define-key m [mode-line mouse-1] (lambda () (interactive) (setq clicked 'right))) m))
+                     (defvar right-probe (propertize \"RIGHT\" 'local-map right-map))
+                     (put 'right-probe 'risky-local-variable t)
+                     (setopt romacs-mode-line-right (append romacs-mode-line-right '(right-probe))))");
+    let column = eval(&mut vm, "(string-search \"RIGHT\" (format-mode-line mode-line-format))");
+    let marker = eval(&mut vm, "(string-search \" \" (format-mode-line mode-line-format) (next-single-property-change 0 'romacs-segment (format-mode-line mode-line-format) ))");
+    assert!(column.parse::<usize>().unwrap() > marker.parse::<usize>().unwrap_or(0));
+    eval(&mut vm, &format!("(romacs--status-bar-click {column} 'mouse-1)"));
+    assert_eq!(eval(&mut vm, "clicked"), "right");
+    eval(&mut vm, "(setq noninteractive t)");
+    // format-mode-line carries the segments and the icon alist.
+    assert_eq!(eval(&mut vm, "(let ((noninteractive nil)) (seq-uniq (delq nil (mapcar (lambda (i) (get-text-property i 'romacs-segment (format-mode-line mode-line-format))) (number-sequence 0 20)))))").contains("buffer"), true);
+    // Icons only while wanted: not with `romacs-icons-ascii' or the `text'
+    // source, though the font is there.
+    eval(&mut vm, "(setq romacs-icons-ascii t)");
+    assert!(bar(&mut vm).marks.icons.is_empty());
+    eval(&mut vm, "(setq romacs-icons-ascii nil romacs-icons-source 'text)");
+    assert!(bar(&mut vm).marks.icons.is_empty());
+    eval(&mut vm, "(setq romacs-icons-source 'romacs)");
+    assert_eq!(bar(&mut vm).marks.icons.len(), 1);
+    // Flymake's counters are its own `:propertize' forms: they stay inside
+    // the diagnostics segment's pill.
+    eval(&mut vm, "(progn (require 'flymake) (setq trusted-content :all)
+        (defun mle-backend (report &rest _)
+          (funcall report (list (flymake-make-diagnostic (current-buffer) 1 2 :error \"e\")
+                                (flymake-make-diagnostic (current-buffer) 1 2 :warning \"w\"))))
+        (setq-local flymake-diagnostic-functions '(mle-backend)) (flymake-mode 1) (flymake-start))");
+    let shown = bar(&mut vm);
+    let diagnostics = shown.marks.segments.iter().find(|s| s.name == "diagnostics").expect("a diagnostics segment");
+    assert!(diagnostics.pill.is_some());
+    let counters = &shown.text.utf8[diagnostics.bytes.clone()];
+    assert!(counters.contains('1') && counters.matches('1').count() >= 2, "{counters:?}");
+    eval(&mut vm, "(flymake-mode -1)");
+    // The state reads in the accent on a band; its pill inverts it.
+    eval(&mut vm, "(set-face-attribute 'romacs-pane-focus nil :foreground \"#d48a20\")");
+    eval(&mut vm, "(setq romacs-mode-line--pill-colors nil) (set-face-attribute 'romacs-mode-line-state nil :foreground 'unspecified) (romacs-mode-line-pill-faces)");
+    assert_eq!(eval(&mut vm, "(face-foreground 'romacs-mode-line-state)"), "\"#d48a20\"");
+    eval(&mut vm, "(start-kbd-macro nil)");
+    let state = bar(&mut vm).marks.segments.iter().find(|s| s.name == "state").cloned().expect("a state segment");
+    eval(&mut vm, "(end-kbd-macro)");
+    assert!(state.pill.is_some_and(|p| p.foreground.is_some()), "{state:?}");
+}
+
+/// `romacs-status-bar-string' is what the painter places: the host's
+/// advances right of the accent block, a long text clipped where the bar
+/// ends, a right side wider than the bar from its start.
+#[test]
+fn the_bar_string_follows_the_painter() {
+    let mut vm = session("full");
+    vm.set_layout_host(Some(Box::new(Rows)));
+    vm.set_frame_geometry(120, 876, 25, 10).unwrap();
+    vm.frame_snapshot(120, 876).unwrap();
+    vm.display_apply_layout(&[]).unwrap();
+    let shows = |vm: &mut Vm| { vm.frame_snapshot(120, 876).unwrap(); eval(vm, "(romacs-status-bar-string)") };
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/romacs-chrome.el");
+    vm.load_file(&root).unwrap();
+    // 120 pixels less the 3-pixel accent: 11 cells of 10.
+    eval(&mut vm, "(setq mode-line-format (make-string 300 ?x))");
+    assert_eq!(shows(&mut vm), format!("{:?}", "x".repeat(11)));
+    eval(&mut vm, "(setq mode-line-format (list \"L\" '(:propertize \" \" romacs-segment right-align) (make-string 30 ?R)))");
+    assert_eq!(shows(&mut vm), format!("{:?}", "R".repeat(11)));
+    eval(&mut vm, "(setq mode-line-format (list \"LL\" '(:propertize \" \" romacs-segment right-align) \"RRR\"))");
+    assert_eq!(shows(&mut vm), format!("{:?}", format!("LL{}RRR", " ".repeat(6))));
+    // A left side longer than the expansion keeps of it leaves the right
+    // side whole.
+    eval(&mut vm, "(setq mode-line-format (list (make-string 60 ?L) '(:propertize \" \" romacs-segment right-align) \"RRR\"))");
+    assert_eq!(shows(&mut vm), format!("{:?}", format!("{}RRR", "L".repeat(8))));
 }

@@ -294,6 +294,48 @@ thousandth a stack mark."
           (run-hooks 'scaling-mode-line-hook)
           (run-hooks 'after-change-major-mode-hook)))
 
+;; The status bar's marks and paint (VM2-STATUS-BAR): N pill segments,
+;; each with an icon state, its own pill colour and its own pill text
+;; colour, laid out after each step's change.
+(scaling-probe mode-line-bar-segments :gui t :n 40 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (dotimes (i n)
+             (let ((face (intern (format "bar-probe-face-%d" i))))
+               (make-face face)
+               (set-face-attribute face nil :background (format "#%02x3040" (% (* 5 i) 256))
+                                   :foreground (format "#e0%02xa0" (% (* 3 i) 256)))
+               (eval `(romacs-mode-line-define-segment ,(intern (format "bar-probe-%d" i)) "A probe."
+                        :pill ,face :pill-text ,face
+                        :format (" " (:propertize "%*" romacs-icon ((?* . modified) (?- . saved))) " "))
+                     t))
+             (push (intern (format "bar-probe-%d" i)) romacs-mode-line-right))
+           (romacs-mode-line-rebuild)
+           (switch-to-buffer (scaling--lines-buffer "scaling-bar" 50)))
+  :body (with-current-buffer it (insert "x")))
+
+;; N pills on one pill face, each a different character in its own text
+;; colour, all shown (the right side shows whole): the painter's
+;; recoloured faces and their character bindings.
+(scaling-probe mode-line-bar-pill-text :gui t :n 12 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (setq romacs-mode-line-right nil)
+           (dotimes (i n)
+             (let ((face (intern (format "bar-text-face-%d" i))))
+               (make-face face)
+               (set-face-attribute face nil :foreground (format "#e0%02x%02x" (% (* 7 i) 256) (% (* 11 i) 256)))
+               (eval `(romacs-mode-line-define-segment ,(intern (format "bar-text-%d" i)) "A probe."
+                        :pill romacs-mode-line-pill :pill-text ,face
+                        :format ,(format " %c " (+ ?α i)))
+                     t)
+               (push (intern (format "bar-text-%d" i)) romacs-mode-line-right)))
+           (romacs-mode-line-rebuild)
+           (switch-to-buffer (scaling--lines-buffer "scaling-bar-text" 50)))
+  :body (with-current-buffer it (insert "x")))
+
 ;;;; Redisplay (GUI: the host lays out each step's change)
 
 (scaling-probe redisplay-lines :gui t :n 2000 :steps 20 :budget 0.5

@@ -1178,6 +1178,11 @@ impl WgpuRenderer {
             self.add_rounded_rect(&mut rounded_fill_vertices, band.x + offset_x, band.y + offset_y,
                                   band.width, band.height, 0.0, band.radius, &band.color);
         }
+        // Chrome rows' rounded backgrounds (the status bar's pills).
+        for fill in &frame.rounded_fills {
+            self.add_rounded_rect(&mut rounded_fill_vertices, fill.bounds.x + offset_x, fill.bounds.y + offset_y,
+                                  fill.bounds.width, fill.bounds.height, 0.0, fill.radius, &fill.color);
+        }
 
         for span in box_spans {
             if let Some(face) = faces.get(&span.face_id) {

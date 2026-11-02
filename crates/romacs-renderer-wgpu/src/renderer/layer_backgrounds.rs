@@ -806,6 +806,11 @@ impl WgpuRenderer {
         // Draw filled rounded rect backgrounds for overlay ROUNDED boxed spans.
         {
             let mut overlay_box_fill: Vec<RoundedRectVertex> = Vec::new();
+            // Chrome rows' rounded backgrounds (the status bar's pills).
+            for fill in &ctx.params.frame_glyphs.rounded_fills {
+                self.add_rounded_rect(&mut overlay_box_fill, fill.bounds.x, fill.bounds.y, fill.bounds.width,
+                                      fill.bounds.height, 0.0, fill.radius, &fill.color);
+            }
             for span in box_spans {
                 if !span.row_role.is_chrome() {
                     continue;

@@ -465,7 +465,7 @@ fn romacs_status_bar_height(cx) {
 }}
 defsubr! { name = "romacs--status-bar-text", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_text(cx) {
-    Ok(cx.windows().status_bar_text())
+    cx.windows().status_bar_text()
 }}
 defsubr! { name = "romacs--minibuffer-host", gnu = "romacs:frame", effect = Reads,
 fn romacs_minibuffer_host(cx) {

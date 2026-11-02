@@ -2,7 +2,7 @@
 //! xdisp.c display_tab_bar), on a 10-pixel cell.
 use romacs_display_protocol::{FrameGlyph, frame_glyphs::{FringeSide, GlyphRowRole}};
 use romacs_layout_input::{BitmapAlign, Face, FaceHandle, FaceRun, FrameSnapshot, FringeBitmap, Indicators, LineWrap,
-    PlacedWindowSnapshot, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowChrome, WindowSnapshot};
+    PlacedWindowSnapshot, BandMarks, Pill, Segment, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowChrome, WindowSnapshot};
 
 fn face(foreground: [u8; 3], background: [u8; 3]) -> Face {
     Face { foreground, background, family: "Liberation Mono".into(), pixel_size: 16.0 }
@@ -137,14 +137,16 @@ fn the_status_bar_paints_its_band_and_clips_its_text() {
         x: 4, y: 150, width: 116 - 8, height: 20,
         text: TextSlice { utf8: "abcdefghijklmnop".into(), face_runs: vec![FaceRun { bytes: 0..2, face: FaceHandle(1) }], raw: vec![] },
         face: FaceHandle(0), faces: vec![face([0; 3], [30, 40, 50]), face([9; 3], [200, 0, 0])], window: 1, focused: true,
+        marks: Default::default(),
     });
-    let painted = lay_out(snapshot);
-    let extents = romacs_layout2::status_bar_extents(&painted);
+    let painted = lay_out(snapshot.clone());
+    let (extents, marker) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
     let shown = chars(&painted, GlyphRowRole::StatusBar);
     assert!(shown.len() < 16 && "abcdefghijklmnop".starts_with(&shown), "{shown}");
-    assert_eq!(extents.len(), shown.len());
-    assert_eq!(extents[0].0, 4.0);
-    assert!(extents.last().is_some_and(|&(x, w)| x + w <= 4.0 + 108.0));
+    assert_eq!((extents.len(), marker), (16, None));
+    assert_eq!(extents[0].unwrap().0, 4.0 + 3.0, "right of the accent block");
+    assert!(extents[shown.len() - 1].is_some_and(|(x, w)| x + w <= 4.0 + 108.0));
+    assert!(extents[shown.len()..].iter().all(Option::is_none));
     assert_eq!(painted.status_bar.map(|r| (r.x, r.y, r.width, r.height)), Some((4.0, 150.0, 108.0, 20.0)));
     // A run's face keeps the bar's background, as a window's band does.
     let face = painted.glyphs.iter().find_map(|g| match g {
@@ -152,6 +154,70 @@ fn the_status_bar_paints_its_band_and_clips_its_text() {
         _ => None,
     }).unwrap();
     assert_eq!(painted.faces[&face].background, romacs_display_protocol::Color::from_pixel(0x1e2832));
+}
+
+/// The status bar's marks (VM2-STATUS-BAR): the part after the
+/// `right-align' marker flush with the right edge and whole, the part
+/// before it clipped where that starts, the marker spanning the room; a
+/// pill's characters in a boxed face on its background, rounded; an icon
+/// drawn as its icon, one column wide; the accent block at the left edge.
+#[test]
+fn the_status_bar_splits_at_its_marker_and_draws_pills_and_icons() {
+    // The GUI host registers Romacs Icons at startup (vm-gui fonts.rs).
+    assert!(romacs_font::register_font_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/RomacsIcons.ttf")));
+    let band = [30, 40, 50];
+    let bar = |text: &str, marks: BandMarks| StatusBarSnapshot {
+        x: 0, y: 150, width: 116, height: 20,
+        text: TextSlice { utf8: text.into(), face_runs: vec![], raw: vec![] },
+        face: FaceHandle(0), faces: vec![face([200; 3], band)], window: 1, focused: true, marks,
+    };
+    let marker = |at: usize| Segment { bytes: at..at + 1, name: "right-align".into(), pill: None };
+    let mut snapshot = frame(window("x", LineWrap::Window), None);
+    // 4 + marker + 3 characters fit: the right side flush right.
+    snapshot.status_bar = Some(bar("abcd xyz", BandMarks { segments: vec![marker(4)], icons: vec![] }));
+    let painted = lay_out(snapshot.clone());
+    let (extents, index) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
+    assert_eq!(chars(&painted, GlyphRowRole::StatusBar), "abcdxyz");
+    assert_eq!(index, Some(4));
+    let (right_x, right_w) = extents[7].unwrap();
+    assert!((right_x + right_w - 116.0).abs() < 0.01, "{extents:?}");
+    assert_eq!(extents[0].unwrap().0, 3.0, "right of the accent block");
+    let (gap_x, gap_w) = extents[4].unwrap();
+    assert!((gap_x + gap_w - extents[5].unwrap().0).abs() < 0.01);
+    // A left side too long for the room is clipped where the right starts.
+    let long = format!("{} xyz", "l".repeat(40));
+    snapshot.status_bar = Some(bar(&long, BandMarks { segments: vec![marker(40)], icons: vec![] }));
+    let painted = lay_out(snapshot.clone());
+    let (extents, _) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
+    assert!(chars(&painted, GlyphRowRole::StatusBar).ends_with("xyz"));
+    assert!(extents[39].is_none() && extents[41..].iter().all(Option::is_some));
+    assert!(extents[..40].iter().flatten().all(|(x, w)| x + w <= extents[41].unwrap().0 + 0.01));
+    // A pill and an icon.
+    let pill = Pill { background: [90, 20, 20], radius: 6, foreground: Some([1, 2, 3]) };
+    snapshot.status_bar = Some(bar(" ab*", BandMarks {
+        segments: vec![Segment { bytes: 1..3, name: "buffer".into(), pill: Some(pill) }], icons: vec![(3, '\u{FE001}')] }));
+    let painted = lay_out(snapshot);
+    let glyphs: Vec<_> = painted.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, char, face_id, width, .. } => Some((*char, *face_id, *width)),
+        _ => None,
+    }).collect();
+    let fill = painted.rounded_fills[0];
+    assert_eq!((fill.radius, fill.color), (6.0, romacs_display_protocol::Color::from_pixel(0x5a1414)));
+    let (_, a) = (glyphs[1], glyphs[1]);
+    let first = painted.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, x, .. } => Some(*x), _ => None }).collect::<Vec<_>>();
+    assert_eq!(fill.bounds.x, first[1], "{a:?}");
+    assert!((fill.bounds.x + fill.bounds.width - (first[2] + glyphs[2].2)).abs() < 0.01);
+    assert!(fill.bounds.y > 150.0 && fill.bounds.y + fill.bounds.height < 170.0);
+    // The pill's text in its own foreground; outside it, the face's.
+    assert_eq!(painted.faces[&glyphs[1].1].foreground, romacs_display_protocol::Color::from_pixel(0x010203));
+    assert_ne!(painted.faces[&glyphs[3].1].foreground, romacs_display_protocol::Color::from_pixel(0x010203));
+    assert_eq!(glyphs[3].0, '\u{FE001}');
+    assert_eq!(glyphs[3].2, glyphs[0].2, "an icon is one column");
+    // The accent block: the second background, 3 pixels at the left edge.
+    let accent = painted.glyphs.iter().filter_map(|g| match g { FrameGlyph::Background { bounds, .. } => Some(*bounds), _ => None })
+        .find(|b| b.y == 150.0 && b.width == 3.0);
+    assert!(accent.is_some());
 }
 
 /// Panes (VM2-PANE-CHROME): each window's box, fringes included, but the

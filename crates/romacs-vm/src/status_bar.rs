@@ -6,7 +6,10 @@
 //! the host measures for its faces.
 use super::mode_line;
 use crate::{data::Object, *};
-use romacs_layout_input::{FaceHandle, FaceRun, StatusBarSnapshot, TextSlice};
+use romacs_layout_input::{BandMarks, FaceHandle, FaceRun, Pill, Segment, StatusBarSnapshot, TextSlice};
+
+/// The corner radius of a segment's pill, in pixels.
+const PILL_RADIUS: u32 = 6;
 
 impl Vm {
     /// The window GNU's mode-line face rule treats as selected
@@ -48,10 +51,7 @@ impl Vm {
     /// Lisp.
     pub(crate) fn status_bar_snapshot(&mut self) -> Result<Option<StatusBarSnapshot>> {
         let reserved = self.window_state.status_reserved;
-        if !self.status_bar_wanted() {
-            self.display_state.status_bar_text = None;
-            return Ok(None);
-        }
+        if !self.status_bar_wanted() { return Ok(None); }
         let (owner, focused) = self.status_bar_owner()?;
         let window = self.window(owner)?.id;
         let [width, height] = self.window_state.text_area;
@@ -59,7 +59,8 @@ impl Vm {
         let band = self.status_bar_band(owner, columns)?;
         let table = self.display_faces()?;
         let base = table.handle("mode-line-active").or_else(|| table.handle("mode-line")).ok_or("mode-line face required")?;
-        let (text, runs) = band.map_or((String::new(), vec![]), |band| (band.text, band.runs));
+        let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
+        let marks = self.band_marks(&text, &props, &segments, &table)?;
         // The bar's faces: its base face first, then those its runs use.
         let mut faces = vec![table.faces[base.0 as usize].clone()];
         let mut local: Vec<(u32, FaceHandle)> = vec![];
@@ -76,12 +77,137 @@ impl Vm {
             };
             face_runs.push(FaceRun { bytes, face });
         }
-        self.display_state.status_bar_text = (reserved > 0).then(|| text.clone());
         let border = self.host_border();
         Ok(Some(StatusBarSnapshot {
             x: border, y: border + height - self.window_state.mini_reserved - reserved, width, height: reserved,
-            text: TextSlice { utf8: text, face_runs, raw: vec![] }, face: FaceHandle(0), faces, window, focused,
+            text: TextSlice { utf8: text, face_runs, raw: vec![] }, face: FaceHandle(0), faces, window, focused, marks,
         }))
+    }
+    /// The marks of a bar's TEXT: its segments, from the `:propertize'
+    /// constructs that name one (SEGMENTS, which own all they expanded to)
+    /// and from strings that carry `romacs-segment' (PROPS), each a pill on
+    /// the background of its `romacs-pill' face, its text in the foreground
+    /// of its `romacs-pill-text' face; and each character a `romacs-icon'
+    /// alist names, drawn as that icon (`icon_characters').
+    fn band_marks(&mut self, text: &str, props: &[(std::ops::Range<usize>, mode_line::Projected)],
+                  segments: &[(std::ops::Range<usize>, mode_line::Projected)], table: &super::FaceTable) -> Result<BandMarks> {
+        let mut marks = BandMarks::default();
+        let structural = segments.iter().filter_map(|(bytes, projected)| self.segment_of(bytes, projected, table)).collect::<Vec<_>>();
+        // Each structural segment's ranges by name, ordered, to find the one
+        // containing a property run by search.
+        let mut by_name: std::collections::HashMap<&str, Vec<std::ops::Range<usize>>> = std::collections::HashMap::new();
+        for s in &structural { by_name.entry(s.name.as_str()).or_default().push(s.bytes.clone()); }
+        for ranges in by_name.values_mut() { ranges.sort_by_key(|r| r.start); }
+        let contained = |name: &str, bytes: &std::ops::Range<usize>| by_name.get(name).is_some_and(|ranges| {
+            let at = ranges.partition_point(|r| r.start <= bytes.start);
+            at > 0 && ranges[at - 1].end >= bytes.end
+        });
+        let mut icons: Option<Vec<(String, char)>> = None;
+        for (bytes, projected) in props {
+            if let Some(segment) = self.segment_of(bytes, projected, table)
+                && !contained(&segment.name, bytes) {
+                match marks.segments.last_mut() {
+                    // One segment's pieces are adjacent runs of its name.
+                    Some(last) if last.name == segment.name && last.bytes.end == segment.bytes.start && last.pill == segment.pill => {
+                        last.bytes.end = segment.bytes.end;
+                    }
+                    _ => marks.segments.push(segment),
+                }
+            }
+            let Some((_, alist)) = projected.iter().find(|(name, _)| *name == "romacs-icon") else { continue };
+            let alist = self.ml_icon_alist(alist);
+            let icons = match &mut icons { Some(icons) => icons, None => icons.insert(self.icon_characters()?) };
+            for (at, c) in text[bytes.clone()].char_indices() {
+                let named = alist.iter().find(|(key, _)| *key == c as i64).map(|(_, name)| name);
+                if let Some(&(_, icon)) = named.and_then(|n| icons.iter().find(|(name, _)| name == n)) {
+                    marks.icons.push((bytes.start + at, icon));
+                }
+            }
+        }
+        marks.segments.extend(structural);
+        marks.segments.sort_by_key(|s| (s.bytes.start, std::cmp::Reverse(s.bytes.end)));
+        Ok(marks)
+    }
+    /// The segment PROJECTED names over BYTES, if it names one.
+    fn segment_of(&self, bytes: &std::ops::Range<usize>, projected: &mode_line::Projected, table: &super::FaceTable) -> Option<Segment> {
+        let value = |name: &str| projected.iter().find(|(n, _)| *n == name).and_then(|(_, form)| self.ml_form_name(form));
+        let face = |name: &str| value(name).and_then(|face| table.handle(&face)).map(|h| &table.faces[h.0 as usize]);
+        let name = value("romacs-segment")?;
+        let pill = face("romacs-pill").map(|f| Pill { background: f.background, radius: PILL_RADIUS,
+                                                      foreground: face("romacs-pill-text").map(|t| t.foreground) });
+        Some(Segment { bytes: bytes.clone(), name, pill })
+    }
+    /// What the bar shows now, as `romacs-status-bar-string' gives it.
+    fn status_bar_shown_text(&mut self) -> Result<Option<String>> {
+        if self.window_state.status_reserved == 0 { return Ok(None); }
+        let Some(bar) = self.status_bar_snapshot()? else { return Ok(None) };
+        let column = self.window_state.column.max(1) as f32;
+        let advances: Vec<f32> = if self.display_state.hosted && self.has_layout_host() {
+            // The characters as painted: an icon in place of the one it marks.
+            let mut shown = String::new();
+            let mut map = vec![];
+            let mut icons = bar.marks.icons.iter().peekable();
+            for (byte, ch) in bar.text.utf8.char_indices() {
+                while icons.peek().is_some_and(|(at, _)| *at < byte) { icons.next(); }
+                map.push((byte, shown.len()));
+                shown.push(icons.peek().filter(|(at, _)| *at == byte).map_or(ch, |&&(_, icon)| icon));
+            }
+            map.push((bar.text.utf8.len(), shown.len()));
+            let at = |byte: usize| map[map.partition_point(|(b, _)| *b < byte)].1;
+            let face_runs = bar.text.face_runs.iter().map(|run| FaceRun { bytes: at(run.bytes.start)..at(run.bytes.end), face: run.face }).collect();
+            let background = bar.faces[bar.face.0 as usize].background;
+            let input = romacs_layout_input::MeasureInput {
+                font_selection: self.display_state.font_selection_order,
+                font_alternatives: self.font_alternative_state()?,
+                faces: bar.faces.iter().map(|f| romacs_layout_input::Face { background, ..f.clone() }).collect(),
+                text: TextSlice { utf8: shown, face_runs, raw: vec![] },
+            };
+            self.host_layout(&input)?.glyphs.iter().map(|(advance, _)| *advance as f32).collect()
+        } else {
+            bar.text.utf8.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as f32 * column).collect()
+        };
+        let places = bar.places(&advances);
+        Ok(Some(bar.shown_text(&places, column)))
+    }
+    /// A symbol's name from a projected value's FORM.
+    fn ml_form_name(&self, form: &Form) -> Option<String> {
+        match form {
+            Form::Sym(name) if name != "nil" => Some(name.clone()),
+            Form::Object(object) => object.value(self).ok().and_then(|v| self.ml_face_name(v)),
+            _ => None,
+        }
+    }
+    /// A `romacs-icon' alist FORM's entries: a character and an icon name.
+    fn ml_icon_alist(&self, form: &Form) -> Vec<(i64, String)> {
+        let form = match form { Form::Object(object) => object.value(self).map(|v| self.mode_line_form(v)).unwrap_or(Form::Sym("nil".into())), form => form.clone() };
+        let Form::List(entries) = form else { return vec![] };
+        entries.into_iter().filter_map(|entry| match entry {
+            Form::Dotted(key, name) => match (key.as_slice(), *name) {
+                ([Form::Int(k)], Form::Sym(name)) => Some((*k, name)),
+                _ => None,
+            },
+            _ => None,
+        }).collect()
+    }
+    /// Each icon's name and character from `romacs-icons-alist', while
+    /// Romacs Icons is there to draw them (`romacs-icons--font' t) and
+    /// wanted (`romacs-icons-source' `romacs', `romacs-icons-ascii' nil),
+    /// as `romacs-icon' decides; else none.
+    fn icon_characters(&mut self) -> Result<Vec<(String, char)>> {
+        let [font, source, ascii] = ["romacs-icons--font", "romacs-icons-source", "romacs-icons-ascii"].map(|name| self.slot(name));
+        let romacs = self.intern("romacs");
+        if self.variable_value(font)? != Value::TRUE || self.variable_value(source)? != romacs
+            || !matches!(self.variable_value(ascii)?, Value::NIL | Value::UNBOUND) { return Ok(vec![]); }
+        let alist = self.slot("romacs-icons-alist");
+        let alist = self.variable_value(alist)?;
+        let Form::List(entries) = self.mode_line_form(alist) else { return Ok(vec![]) };
+        Ok(entries.into_iter().filter_map(|entry| match entry {
+            Form::List(fields) => match fields.as_slice() {
+                [Form::Sym(name), Form::Int(point), ..] => char::from_u32(u32::try_from(*point).ok()?).map(|c| (name.clone(), c)),
+                _ => None,
+            },
+            _ => None,
+        }).collect())
     }
     /// OWNER's effective mode-line format expanded as its band is, at
     /// COLUMNS: `%-' fills them and the text is clipped there. None when it
@@ -101,6 +227,7 @@ impl Vm {
             let text_height = self.window(window)?.height.saturating_sub(self.window_state.line + below);
             let mut state = self.mode_line_state(root, buffer_slot, text_height)?;
             state.clip = Some(columns);
+            state.marks = true;
             let [_, band] = self.expand_bands(root, buffer_slot, &state, [None, Some(&format)])?;
             Ok(band)
         })();
@@ -141,11 +268,12 @@ impl crate::window::Windows<'_> {
     pub(crate) fn status_bar_height(&mut self) -> u32 {
         self.vm.window_state.status_reserved
     }
-    /// The text the status bar last showed, nil while it shows none.
-    pub(crate) fn status_bar_text(&mut self) -> Value {
-        match self.vm.display_state.status_bar_text.clone() {
-            Some(text) => { let multibyte = !text.is_ascii(); self.vm.make_lisp_string(text.into_bytes(), multibyte) }
-            None => Value::NIL,
-        }
+    /// The text the status bar shows (`romacs-status-bar-string'), placed
+    /// as the painter places it (`StatusBarSnapshot::places') with the
+    /// advances the host measures, or a column each without a host; nil
+    /// while it shows none. Expands the bar's mode line now.
+    pub(crate) fn status_bar_text(&mut self) -> std::result::Result<Value, crate::prim::Fault> {
+        let text = self.vm.status_bar_shown_text().map_err(crate::prim::Fault::Error)?;
+        Ok(text.map_or(Value::NIL, |text| self.vm.make_lisp_string(text.into_bytes(), true)))
     }
 }

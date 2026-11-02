@@ -36,6 +36,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'project)
 
 (defgroup romacs-mode-line nil
@@ -49,8 +50,47 @@
 (defface romacs-mode-line-bright '((t :inherit mode-line-buffer-id))
   "The buffer's name in the mode line.")
 
-(defface romacs-mode-line-state '((t :inherit (romacs-pane-focus bold)))
-  "A state the mode line announces: a macro recording, overwrite, an agent.")
+(defface romacs-mode-line-state '((t :inherit bold))
+  "A state the mode line announces: a macro recording, overwrite, an
+agent, in the accent (`romacs-mode-line-pill-faces').")
+
+(defface romacs-mode-line-state-pill '((t))
+  "The status bar's state pill: the accent, with the frame's background
+as its text (`romacs-mode-line-pill-faces').")
+
+(defface romacs-mode-line-pill '((t))
+  "The background of the status bar's pills: the bar's own blended
+toward the frame's (`romacs-mode-line-pill-faces').")
+
+(defvar romacs-mode-line--pill-colors nil
+  "The colours `romacs-mode-line-pill-faces' last gave the pill faces.")
+
+(defun romacs-mode-line--mix (a b fraction)
+  "Colour A blended FRACTION of the way toward colour B, as #RRGGBB."
+  (let ((a (color-values a)) (b (color-values b)))
+    (and a b (apply #'format "#%02x%02x%02x"
+                    (cl-mapcar (lambda (x y) (round (/ (+ (* (- 1 fraction) x) (* fraction y)) 257.0))) a b)))))
+
+(defun romacs-mode-line-pill-faces (&rest _)
+  "Give the pill faces the colours the theme leaves them: a pill the bar's
+background blended 40% toward the frame's; the state the accent
+\(`romacs-pane-focus'), and its pill the accent with the frame's
+background as its text.  A face the theme or the user set keeps its
+colours."
+  (let* ((bar (face-background 'mode-line-active nil t))
+         (frame (face-background 'default nil t))
+         (accent (or (and (facep 'romacs-pane-focus) (face-foreground 'romacs-pane-focus nil t))
+                     (face-foreground 'default nil t)))
+         (colors (list (list 'romacs-mode-line-pill :background (romacs-mode-line--mix bar frame 0.4))
+                       (list 'romacs-mode-line-state :foreground accent)
+                       (list 'romacs-mode-line-state-pill :background accent :foreground frame))))
+    (dolist (entry colors)
+      (let ((face (car entry)) (last (assq (car entry) romacs-mode-line--pill-colors)))
+        (cl-loop for (attribute value) on (cdr entry) by #'cddr
+                 for current = (face-attribute face attribute nil)
+                 when (and value (or (eq current 'unspecified) (equal current (plist-get (cdr last) attribute))))
+                 do (set-face-attribute face nil attribute value))))
+    (setq romacs-mode-line--pill-colors colors)))
 
 (defface romacs-mode-line-error '((t :inherit error)) "An error state.")
 (defface romacs-mode-line-warning '((t :inherit warning)) "A warning state.")
@@ -91,17 +131,23 @@ DOC documents it.  SPEC is a plist:
                      variable holds (`romacs-mode-line-refresh-NAME');
   :hooks (HOOK ...)  with :compute, the hooks that make it stale;
   :local BOOL        with :compute, buffer-local (the default) or global;
-  :face FACE         the face the segment shows in where it gives none."
+  :face FACE         the face the segment shows in where it gives none;
+  :pill FACE         in the status bar, a rounded pill on FACE's
+                     background behind the segment (VM2-STATUS-BAR);
+  :pill-text FACE    the segment's text on its pill in FACE's foreground."
   (declare (indent 1) (doc-string 2))
   (let* ((variable (romacs-mode-line--variable name))
          (face (plist-get spec :face))
+         (pill (plist-get spec :pill))
+         (pill-text (plist-get spec :pill-text))
          (format (plist-get spec :format))
          (compute (plist-get spec :compute))
          (local (if (plist-member spec :local) (plist-get spec :local) t)))
     (when (and format compute) (error "Segment %s has both :format and :compute" name))
     `(progn
        (defvar ,variable
-         ,(and format `'(:propertize ,format ,@(and face `(face ,face)) romacs-segment ,name))
+         ,(and format `'(:propertize ,format ,@(and face `(face ,face)) romacs-segment ,name ,@(and pill `(romacs-pill ,pill))
+                                     ,@(and pill-text `(romacs-pill-text ,pill-text))))
          ,doc)
        (put ',variable 'risky-local-variable t)
        ,@(when compute
@@ -109,7 +155,9 @@ DOC documents it.  SPEC is a plist:
              (defun ,(intern (format "romacs-mode-line-refresh-%s" name)) ()
                ,(format "Compute the segment `%s' again in the current buffer." name)
                (let* ((text (funcall ,compute))
-                      (value (and text (propertize text ,@(and face `('face ',face)) 'romacs-segment ',name))))
+                      (value (and text (propertize text ,@(and face `('face ',face)) 'romacs-segment ',name
+                                                   ,@(and pill `('romacs-pill ',pill))
+                                                   ,@(and pill-text `('romacs-pill-text ',pill-text))))))
                  (unless (equal-including-properties value ,variable)
                    (setq ,variable value)
                    (force-mode-line-update))))))
@@ -278,6 +326,8 @@ else nil."
 (romacs-mode-line-define-segment state
   "A keyboard macro recording, overwrite mode, recursive edits, an agent."
   :face romacs-mode-line-state
+  :pill romacs-mode-line-state-pill
+  :pill-text romacs-mode-line-state-pill
   :format ("" (defining-kbd-macro " REC ") (overwrite-mode " OVR ") "%[%]"
            (romacs-mode-line-agent ("" " " romacs-mode-line-agent " "))))
 
@@ -296,9 +346,10 @@ else nil."
 (romacs-mode-line-define-segment buffer
   "The buffer: its icon, name, modified or read-only state, remote and
 narrowed markers."
-  :format ("" romacs-mode-line-mode-icon romacs-mode-line-buffer-name " "
+  :pill romacs-mode-line-pill
+  :format (" " romacs-mode-line-mode-icon romacs-mode-line-buffer-name " "
            (:propertize "%*" romacs-icon ((?* . modified) (?- . saved) (?% . read-only)))
-           romacs-mode-line-buffer-remote "%n"))
+           romacs-mode-line-buffer-remote "%n" " "))
 
 (romacs-mode-line-define-segment position
   "Point's line and column and how far the window is down the buffer."
@@ -337,7 +388,8 @@ narrowed markers."
 
 (romacs-mode-line-define-segment diagnostics
   "Flymake's counters, GNU's element."
-  :format (flymake-mode ("" flymake-mode-line-counters " ")))
+  :pill romacs-mode-line-pill
+  :format (flymake-mode (" " flymake-mode-line-counters " ")))
 
 (romacs-mode-line-define-segment lsp
   "The language server Eglot manages the buffer with."
@@ -477,6 +529,7 @@ Off, GNU's default returns where this mode's is installed."
   :group 'romacs-mode-line
   (if romacs-mode-line-mode
       (let ((current (default-value 'mode-line-format)))
+        (romacs-mode-line-pill-faces)
         (unless romacs-mode-line-format (romacs-mode-line-rebuild))
         (romacs-mode-line--hook t)
         (romacs-mode-line--refresh-all)
@@ -492,6 +545,7 @@ Off, GNU's default returns where this mode's is installed."
       (romacs-mode-line--install romacs-mode-line--installed romacs-mode-line--gnu-default))))
 
 (romacs-mode-line-rebuild)
+(add-hook 'enable-theme-functions #'romacs-mode-line-pill-faces)
 
 (provide 'romacs-mode-line)
 ;;; romacs-mode-line.el ends here
