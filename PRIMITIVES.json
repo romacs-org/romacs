@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "298509bb5c5f98d66425627e1a1a421045b073c1a6733126bacd4589528faeb9",
+  "source_fingerprint": "b634be25da47195679e33fddfedbf05e605831eb66181b2e7297b781d428f44d",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1254,
-  "parsed_vm2_only": 1254
+  "parsed_total": 1257,
+  "parsed_vm2_only": 1257
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -393,7 +393,7 @@
   "barf-if-buffer-read-only": {
    "name": "barf-if-buffer-read-only",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:66"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:73"
   },
   "base64-decode-region": {
    "name": "base64-decode-region",
@@ -4143,6 +4143,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:439"
   },
+  "romacs--indirect-buffers": {
+   "name": "romacs--indirect-buffers",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:39"
+  },
   "romacs--insert-file-contents-format": {
    "name": "romacs--insert-file-contents-format",
    "implementation": "vm2",
@@ -4659,10 +4664,20 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/file_identity.rs:35"
   },
+  "romacs-instructions": {
+   "name": "romacs-instructions",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/profiler.rs:43"
+  },
   "romacs-json-read": {
    "name": "romacs-json-read",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process_jobs.rs:20"
+  },
+  "romacs-native-stack-room": {
+   "name": "romacs-native-stack-room",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/profiler.rs:52"
   },
   "romacs-status-bar-height": {
    "name": "romacs-status-bar-height",

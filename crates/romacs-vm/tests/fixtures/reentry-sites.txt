@@ -202,8 +202,9 @@ threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
 threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended
 threaded.rs reader_call compile_request 1 held  # an open compiler builder holds collection
 threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are quoted objects; the caller's registers are set aside
-threaded.rs reentrant_load call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
-threaded.rs reentrant_load loader_primitive 1 suspended  # inside call_suspended
+threaded.rs reentrant_load reentrant_step 1 suspended  # the step does the call; the handler only dispatches its Continue
+threaded.rs reentrant_step call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
+threaded.rs reentrant_step loader_primitive 1 suspended  # inside call_suspended
 threaded.rs resolve_entry force_lazy 1 suspended  # registers are rebased from the result
 threaded.rs return_unbind checked_unbind 1 suspended  # the return value is read from its register after
 threaded.rs route_escape checked_unbind 2 suspended  # the exit and its control stay engine state across the restores

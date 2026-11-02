@@ -159,8 +159,21 @@ impl Vm {
         if !matches!(feature.tag(), 7) && feature != Value::NIL && feature != Value::TRUE {
             return Err("symbol required".into());
         }
-        let slot = self.names["features"];
-        Ok(self.list_values(self.slots[slot].value)?.contains(&feature))
+        // Fmemq: stop at the first match, without copying the list; the
+        // copy, bounds-checked per element, made each featurep linear in
+        // `features' at ~80 instructions an element.
+        let (limit, mut tail) = (self.list_limit(), self.slots[self.names["features"]].value);
+        for _ in 0..=limit {
+            if tail == Value::NIL {
+                return Ok(false);
+            }
+            let (head, next) = self.cons_pair(tail)?;
+            if head == feature {
+                return Ok(true);
+            }
+            tail = next;
+        }
+        Err("circular list".into())
     }
     // Fmember's equal comparison and FOR_EACH_TAIL semantics. This read-only
     // helper is also used to recover a typed fault at the legacy call boundary.
