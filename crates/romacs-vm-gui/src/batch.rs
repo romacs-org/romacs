@@ -7,8 +7,8 @@
 //! (`world::default_store`) when that exists, unless ROMACS_WORLD=off. No
 //! session is slower than a boot from source: one whose world is missing
 //! or stale boots the chain from source while a detached builder, under
-//! the world's lock, prepares it for the next (`--world-build` prepares
-//! it ahead); a session in a fresh HOME makes no store at all. The batch
+//! the world's lock, prepares it for the next; a session in a fresh HOME
+//! makes no store at all. The batch
 //! world is not the GUI's: their recipes differ, so neither restores the
 //! other's, and `prune` bounds each family alone.
 use romacs_vm::Vm;
@@ -174,20 +174,6 @@ fn world(store: Option<PathBuf>, dir: &Path) -> Option<World> {
             if named { eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason.to_string()})); }
             None
         }
-    }
-}
-
-/// `--world-build`'s batch world in STORE: built here, or waited for,
-/// when missing or stale, as the GUI's is (`world::prepare`).
-pub fn prepare(store: PathBuf) -> Result<(), String> {
-    let dir = super::startup::lisp_root(&super::startup::lisp_dir())?;
-    let world = World::new(store, recipe(&dir)).map_err(|e| e.to_string())?;
-    match world.prepare(|| builder_args(&world)) {
-        Ok(manifest) => {
-            eprintln!("romacs-world: {}", serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
-            Ok(())
-        }
-        Err(reason) => Err(format!("batch world not prepared: {reason}")),
     }
 }
 

@@ -155,7 +155,9 @@ package sources it loads, the project to clone, an org file, a gnosis
 database copy and the hermes dashboard URL; `real_init.py`'s docstring
 lists the keys.  Both
 profiles give GNU the settings Romacs's `--loadup` makes by design, as the
-parity harnesses do.  Each engine serves
+parity harnesses do, and Romacs GNU's completion: fido-vertical, not its
+own completion layer (`romacs-complete-mode`), which takes the root
+window's last line, and the completion styles without fzf.  Each engine serves
 `rlisp/romacs-mcp.el` with the session tools from
 `rlisp/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
 expose the same tools with the same result shapes:
@@ -288,7 +290,11 @@ script's docstring:
 * GUI, each engine on its own headless labwc as the parity harnesses run
   them: first-start world build (Romacs only), warm launch to first paint
   (Romacs only) and to idle, per-key self-insert, C-f and C-n, and C-x C-f
-  over 5,000 files in fido-vertical.  Per-key instructions count every
+  over 5,000 files in fido-vertical, then (Romacs only) in its default
+  completion, the `romacs-complete-mode` layer with the fzf style.  The
+  comparison rows give Romacs GNU's completion, as the bench's profiles do
+  (`real_init.GNU_COMPLETION_UI`): fido-vertical, not the layer, which takes
+  the root window's last line, and the styles without fzf.  Per-key instructions count every
   thread but llvmpipe's: the headless compositor has no GPU, so Mesa's
   software GL does the GPU's work there.  The parity probe's polling is
   paused while a phase is counted.  Wall per key runs from
