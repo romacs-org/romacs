@@ -634,7 +634,6 @@ impl Vm {
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| pending.push(*v));
         }
-        pending.extend(self.thrown_no_catch.iter().copied());
         for handler in &mut self.signal_handlers {
             handler.visit_values(&mut |v| pending.push(*v));
         }
@@ -860,6 +859,13 @@ impl Vm {
                 }
             }
         }
+        // A throw's no-catch mark is weak: an error object nothing else
+        // reaches is carried by no escape, so its mark goes.
+        let thrown = std::mem::take(&mut self.thrown_no_catch);
+        self.thrown_no_catch = thrown
+            .into_iter()
+            .filter(|&object| self.survives(&marks, &obarray_symbols_live, &region_marks, object))
+            .collect();
         // GNU `sweep_weak_table (h, true)`: drop entries the rule rejects
         // before forwarding, which asserts that every rewritten Value is live.
         for &t in &weak_tables {

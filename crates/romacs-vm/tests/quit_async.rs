@@ -199,7 +199,7 @@ fn a_quit_in_a_nested_eval_leaves_the_outer_expansion() {
 /// a `no-catch' a cleanup signals stays a signal though a throw elsewhere
 /// made one meanwhile, or though it carries a caught throw's very data
 /// (GNU `caught', both); and a throw stays a throw though its cleanup
-/// catches another throw's `no-catch' (GNU `t').
+/// catches another throw's `no-catch', or sixteen nested ones (GNU `t').
 #[test]
 fn quit_flag_in_an_expansion_raises_what_gnu_does() {
     let (mut vm, _signal) = busy_vm();
@@ -214,7 +214,10 @@ fn quit_flag_in_an_expansion_raises_what_gnu_does() {
       (defmacro rt-stale () (unwind-protect (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch '(done 7))) (eval '(rt-swallow) t)))
       (defvar rt-saved (condition-case e (eval '(throw 'done 7) t) (no-catch e)))
       (defmacro rt-resignal () (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch (cdr rt-saved))))
-      (defmacro rt-ti-nested () (unwind-protect (progn (setq quit-flag 'done) (while t)) (eval '(rt-swallow) t))))");
+      (defmacro rt-ti-nested () (unwind-protect (progn (setq quit-flag 'done) (while t)) (eval '(rt-swallow) t)))
+      (defun rt-nested-no-catch (n) (when (> n 0) (condition-case nil (unwind-protect (throw 'missing n) (rt-nested-no-catch (1- n))) (no-catch nil))))
+      (defmacro rt-swallow-deep () (rt-nested-no-catch 16) nil)
+      (defmacro rt-ti-deep () (unwind-protect (progn (setq quit-flag 'done) (while t)) (eval '(rt-swallow-deep) t))))");
     let cases = [
         ("(eval '(let ((rt-phase 'inner)) (condition-case e (rt-cq) (error e))) t)", "(error inner)"),
         ("(eval '(catch 'done (condition-case nil (rt-nc) (no-catch 'caught))) t)", "caught"),
@@ -224,6 +227,7 @@ fn quit_flag_in_an_expansion_raises_what_gnu_does() {
         ("(eval '(catch 'done (condition-case nil (rt-stale) (no-catch 'caught))) t)", "caught"),
         ("(eval '(catch 'done (condition-case nil (rt-resignal) (no-catch 'caught))) t)", "caught"),
         ("(let ((throw-on-input 'done)) (eval '(catch 'done (condition-case nil (rt-ti-nested) (no-catch 'wrong-handler))) t))", "t"),
+        ("(let ((throw-on-input 'done)) (eval '(catch 'done (condition-case nil (rt-ti-deep) (no-catch 'wrong-handler))) t))", "t"),
     ];
     for (form, gnu) in cases {
         assert_eq!(eval(&mut vm, form), gnu, "{form}");

@@ -1302,8 +1302,9 @@ pub struct Vm {
     /// found no live catch made, while those errors escape, the newest last:
     /// an error with one of these very objects, made afresh for each signal,
     /// is that throw, not one Lisp signalled (`signal_form' raises it again
-    /// as the throw). Roots, each retired when its error is caught; one a
-    /// Rust caller discards stays until `THROWN_NO_CATCH_KEPT' newer ones.
+    /// as the throw). Each retires when its error is caught; they are weak
+    /// (gc.rs), so one whose error a Rust caller discards goes at the next
+    /// collection and keeps nothing alive.
     thrown_no_catch: Vec<Value>,
     /// The next form compiled is a deferred call reached (`force_lazy'): its
     /// own expansion signals there, the forms inside it defer as ever.

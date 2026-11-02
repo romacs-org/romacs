@@ -690,8 +690,6 @@ struct Frame {
     mark: usize,
 }
 const NO_MARK: usize = usize::MAX;
-/// The throws' `no-catch' marks kept (`Vm::thrown_no_catch').
-const THROWN_NO_CATCH_KEPT: usize = 16;
 pub(super) enum Escape {
     Normal(Value),
     Throw(Value, Value),
@@ -935,9 +933,7 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
         if !prepare_signal(e, false, None)
             && let Some(Escape::Error { object, .. }) = e.escape
         {
-            let marks = &mut e.vm.thrown_no_catch;
-            if marks.len() == THROWN_NO_CATCH_KEPT { marks.remove(0); }
-            marks.push(object);
+            e.vm.thrown_no_catch.push(object);
         }
         escape = e.escape.take().unwrap();
     }
