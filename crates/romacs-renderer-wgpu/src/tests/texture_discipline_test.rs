@@ -87,6 +87,14 @@ fn allowlist() -> BTreeMap<&'static str, &'static str> {
              bounded by media_budget's Surface accounting and its eviction driver.",
         ),
         (
+            "src/scene_graph/targets.rs",
+            "Scene targets and their MSAA attachments, sized to a placement's \
+             logical size times the device scale and refused above the \
+             device's max_texture_dimension_2d (targets::validate); a page \
+             scene's placement is charged to media_budget's Surface accounting \
+             under its surface id (renderer/scene_placements.rs).",
+        ),
+        (
             "src/model/gpu.rs",
             "Native model colour, depth, MSAA and pick targets, sized to the \
              model glyph's logical size times the device scale and clamped to \
