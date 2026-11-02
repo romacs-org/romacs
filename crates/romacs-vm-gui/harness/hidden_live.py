@@ -2,7 +2,7 @@
 """A window on a hidden workspace, in a native --loadup session in a private
 headless labwc with two desktops.
 
-The owner's sessions died a little after he switched Hyprland workspaces: a
+Sessions died a little after the user switched Hyprland workspaces: a
 window the compositor does not draw gets no frame callbacks, winit then
 withholds RedrawRequested, the paint in flight never renders, and the loop
 gave up after 30 s.  Here labwc's GoToDesktop (bound to a key wtype sends)
@@ -85,6 +85,12 @@ def drawn_prompts(text):
     return text.count('"diagnostic":"prompt-paint","drawn":true')
 
 
+def grab(env, path):
+    """The output's pixels as PNG bytes."""
+    subprocess.run(['grim', str(path)], env=env, check=True, timeout=10)
+    return path.read_bytes()
+
+
 def stalls(text):
     return [line for line in text.splitlines() if line.startswith('romacs: render stalled:')]
 
@@ -94,7 +100,11 @@ def hidden_round(name, args, env, state, process, text, report, check, warnings)
     chord(env, 'logo', 'F2')
     time.sleep(1)  # a paint drawn as the switch lands
     hidden_at, drawn_at_hide, ticks_at_hide = time.monotonic(), len(paints(text())), len(ticks(state))
-    cpu = tl.idle_cpu(process.pid, args.hidden - 1)
+    # The loop polls every millisecond until the paint counts as stalled:
+    # measure the steady state after that.
+    settle = args.stall + 0.5
+    time.sleep(settle)
+    cpu = tl.idle_cpu(process.pid, max(args.hidden - 1 - settle, 2))
     hidden_for = time.monotonic() - hidden_at + 1
     alive = process.poll() is None
     drawn_hidden = paints(text())[drawn_at_hide:]
@@ -165,10 +175,28 @@ def run(args, output, report):
                 # A held key gives the seat a keyboard before the client starts.
                 keyboard = subprocess.Popen(['wtype', '-s', '600000', '-k', 'Shift_L'], env=env, stdout=log, stderr=log)
                 time.sleep(.3)
+                empty = grab(env, output / 'empty.png')
                 process = subprocess.Popen([str(args.binary), '--loadup'], env=env, cwd=work,
                                            stdin=subprocess.DEVNULL, stdout=log, stderr=log)
                 report['pid'] = process.pid
                 text = lambda: log_path.read_text(errors='replace')
+                if args.hidden_start:
+                    # Hidden as it starts (the owner switches away while it
+                    # prepares its world): once mapped, by the first start's
+                    # "Preparing" frame or the first paint, its next frame is
+                    # not drawn until it shows.
+                    # Mapped once the output differs from the empty desktop
+                    # (a window maps on the desktop current when it does).
+                    fio.wait(lambda: grab(env, output / 'start.png') != empty, args.timeout, 'the window drawn', process)
+                    first_paint = 'paint-submitted' in text()
+                    chord(env, 'logo', 'F2')
+                    fio.wait(lambda: len(ticks(state)) >= 2 * args.stall + 4, args.timeout, 'ticks while hidden from the start', process)
+                    report['hidden_start'] = {'drawn': paints(text()), 'warnings': stalls(text()),
+                                              'first_paint_before_hiding': first_paint}
+                    check('hidden from the start: hidden before the first paint', not first_paint, report['hidden_start'])
+                    check('hidden from the start: alive, no paint drawn', process.poll() is None and not paints(text()),
+                          report['hidden_start'])
+                    chord(env, 'logo', 'F1')
                 fio.wait(lambda: len(ticks(state)) >= 2 and paints(text()), args.timeout, 'ticks and a drawn paint', process)
                 fio.shot(output / 'before.png', env, report)
 
@@ -204,6 +232,7 @@ def main():
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--stall', type=float, default=2, help='ROMACS_RENDER_STALL_MS, in seconds')
     parser.add_argument('--hidden', type=float, default=10, help='seconds on the other desktop')
+    parser.add_argument('--hidden-start', action='store_true', help='hide the window as the session starts, too')
     parser.add_argument('--present-mode', choices=('fifo', 'mailbox'), help='the surface present mode (default: mailbox if supported)')
     args = parser.parse_args()
     args.binary = Path(args.binary).resolve()

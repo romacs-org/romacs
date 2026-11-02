@@ -138,14 +138,15 @@ def main():
             (home / 'config' / 'romacs').mkdir(parents=True)
             (home / 'config' / 'romacs' / 'init.el').write_text(
                 init + PROBE % {'path': json.dumps(str(styles))})
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
+            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
                    'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
                    'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
                    'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
                    'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': args.font_size, 'SHELL': '/bin/bash'}
-            for k in ('CARGO_HOME', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_WORLD'):
+            for k in ('CARGO_HOME', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_WORLD',
+                      'ROMACS_PRESENT_TRACE', 'ROMACS_DISABLE_RETAINED_ROOT'):
                 if k in os.environ:
                     env[k] = os.environ[k]
             log_path = out / 'binary.stderr'

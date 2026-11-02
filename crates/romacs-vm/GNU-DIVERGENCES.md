@@ -239,7 +239,7 @@ the root ledger.
 
 ## D001 — Unicode scalar string mutation
 
-**Deliberate owner decision:** `aset` on a Unicode string permits replacement of any Unicode scalar by any Unicode scalar, even when UTF-8 width changes. Byte strings remain octet arrays: only integers 0–255 may be stored. Invalid scalars, octets and indices still signal.
+**Deliberate Romacs decision:** `aset` on a Unicode string permits replacement of any Unicode scalar by any Unicode scalar, even when UTF-8 width changes. Byte strings remain octet arrays: only integers 0–255 may be stored. Invalid scalars, octets and indices still signal.
 
 GNU's storage restriction is not reproduced in the one-model UTF-8 representation. In particular, replacing β with the identical β is meaningful and safe, but GNU rejects it. The restriction concerns representation, not the meaning of indexed scalar replacement.
 

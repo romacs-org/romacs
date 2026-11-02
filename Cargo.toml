@@ -9,6 +9,7 @@ members = [
     "tests/retired-vm-contract",
     "crates/romacs-obj",
     "crates/romacs-chars",
+    "crates/romacs-logo",
     "crates/romacs-text",
     "crates/romacs-props",
     "crates/romacs-regex",
@@ -88,6 +89,7 @@ romacs-allocator = { path = "crates/romacs-allocator" }
 romacs-host-abi = { path = "crates/romacs-host-abi" }
 romacs-display-runtime = { path = "crates/romacs-display-runtime", default-features = false }
 romacs-display-protocol = { path = "crates/romacs-display-protocol", default-features = false }
+romacs-logo = { path = "crates/romacs-logo" }
 romacs-face = { path = "crates/romacs-face" }
 romacs-font = { path = "crates/romacs-font" }
 romacs-font-materializer = { path = "crates/romacs-font-materializer" }

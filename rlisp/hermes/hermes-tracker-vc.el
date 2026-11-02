@@ -1,4 +1,5 @@
 ;;; hermes-tracker-vc.el --- Derive Tracker context from Git -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026 Thanos Apollo
 

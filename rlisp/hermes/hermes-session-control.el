@@ -2,6 +2,7 @@
 
 ;; Copyright (C) 2026 Thanos Apollo
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

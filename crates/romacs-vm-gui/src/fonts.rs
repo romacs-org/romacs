@@ -275,7 +275,7 @@ mod tests {
     }
 
     /// `--loadup` on the GUI's display: the session puts the frame on it, a
-    /// `pgtk' frame as pinned GNU pgtk's, and the owner's init, which turns
+    /// `pgtk' frame as pinned GNU pgtk's, and a user's init, which turns
     /// prettify-symbols on in Lisp modes, lets startup finish: prettify asks
     /// `char-displayable-on-frame-p' about λ, which needs `fontp', when
     /// *scratch* takes `initial-major-mode', and then `emacs-startup-hook'

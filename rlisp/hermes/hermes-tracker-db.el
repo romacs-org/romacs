@@ -1,4 +1,5 @@
 ;;; hermes-tracker-db.el --- SQLite read model for Tracker -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026 Thanos Apollo
 

@@ -1,4 +1,5 @@
 ;;; hermes-request.el --- Headless isolated Hermes prompts -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

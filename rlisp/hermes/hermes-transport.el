@@ -1,4 +1,5 @@
 ;;; hermes-transport.el --- Async Hermes transport  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

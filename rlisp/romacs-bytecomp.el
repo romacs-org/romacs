@@ -1,5 +1,6 @@
 ;;; romacs-bytecomp.el --- byte-compile of a function value  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; VM2 compiles every function when it is defined, so a function value is

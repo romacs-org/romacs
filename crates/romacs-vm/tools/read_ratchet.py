@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owner-accepted read costs against immutable flat Text, never against Guile."""
+"""Accepted read costs against immutable flat Text, never against Guile."""
 import os as _portable_os
 import tempfile as _portable_tempfile
 from pathlib import Path as _PortablePath
@@ -17,7 +17,7 @@ LOCATE_NEWLINE_ASCII_MAX_RATIO = 1.2463525479867612
 CHAR_AT_ASCII_MAX_RATIO = 1.2188105337899982
 LOCATE_NEWLINE_UNICODE_MAX_RATIO = 1.295891322581137
 CHAR_AT_UNICODE_MAX_RATIO = 2.305663661441276
-# Owner-authorized noise budget, applied once to every row: measured <= cap * 1.02.
+# Accepted noise budget, applied once to every row: measured <= cap * 1.02.
 # The counter has 36-instruction resolution and a conservative 72-instruction
 # slope floor. A zero-tolerance ratchet flaps on noise rather than regressions;
 # 2% is above sampling noise and well below the regressions this guard targets.

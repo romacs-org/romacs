@@ -1,6 +1,7 @@
 ;;; romacs-ert-batch.el --- GNU ERT for Romacs batch processes
 ;; Copyright (C) 2007-2026 Free Software Foundation, Inc.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Adapted from GNU ert.el's test context and condition formatter at the pin.

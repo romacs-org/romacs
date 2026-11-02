@@ -294,7 +294,7 @@ def main():
                 "while True: time.sleep(1)\n")
             (config / 'rc.xml').write_text(live.RC_XML.replace('</labwc_config>',
                 '<keyboard><keybind key="A-F4"><action name="Close"/></keybind></keyboard></labwc_config>'))
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
+            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
                    'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
@@ -315,6 +315,12 @@ def main():
                                             stdout=log, stderr=log)
                 time.sleep(.3)
                 flags = ['--loadup'] if args.prompt_grow else []
+                if args.prompt_grow:
+                    # The minibuffer must grow over the terminal: fido-vertical's
+                    # display, not the default layer (VM2-COMPLETE-DEFAULT).
+                    (home / 'config' / 'romacs').mkdir(parents=True, exist_ok=True)
+                    (home / 'config' / 'romacs' / 'init.el').write_text(
+                        "(romacs-complete-mode -1)\n(fido-vertical-mode 1)\n")
                 process = subprocess.Popen([str(binary), *flags, '--trace-scene', str(original)], env=env, cwd=work,
                                            stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 

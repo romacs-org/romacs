@@ -3,6 +3,7 @@
 ;; Foundation, Inc.
 ;; Copyright (C) 1992-2026 Free Software Foundation, Inc.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; GNU's frame.el and faces.el answer display questions by dispatching on

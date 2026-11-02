@@ -31,7 +31,7 @@ showed exactly that:
     mode line must read with the dumped position (All/Top/Bottom/NN%, L<n>)
     and most of its words.
 
-Masked only when present: if the owner's desktop notifications (orange
+Masked only when present: if desktop notifications (orange
 border, top-right corner) are drawn over the window in a screenshot, cells
 inside NOTIFICATION_MASK are not judged for that screenshot, and the step
 records that it was masked. Without notifications nothing is masked.

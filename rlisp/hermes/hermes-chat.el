@@ -1,4 +1,5 @@
 ;;; hermes-chat.el --- EWOC chat buffer for Hermes  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

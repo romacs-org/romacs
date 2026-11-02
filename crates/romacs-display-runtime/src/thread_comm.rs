@@ -733,19 +733,21 @@ impl ClipboardCommand {
     }
 }
 
-/// One paint: the primary frame and the child frames shown over it,
-/// lowest first. A child absent from the next paint is removed.
+/// One paint: the primary frame, the child frames shown over it, lowest
+/// first, and the text animations drawn over the primary frame, each by
+/// its key. A child or an animation absent from the next paint is removed.
 #[cfg(feature = "core-free")]
 #[derive(Debug)]
 pub struct PaintScene {
     pub root: romacs_display_protocol::FrameGlyphBuffer,
     pub children: Vec<romacs_display_protocol::FrameGlyphBuffer>,
+    pub text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
 
 #[cfg(feature = "core-free")]
 impl From<romacs_display_protocol::FrameGlyphBuffer> for PaintScene {
     fn from(root: romacs_display_protocol::FrameGlyphBuffer) -> Self {
-        Self { root, children: Vec::new() }
+        Self { root, children: Vec::new(), text_animations: Vec::new() }
     }
 }
 

@@ -39,6 +39,10 @@ INIT = '''(setq gnosis-dir {gnosis})
 (defun timers-live-record (form)
   (write-region (concat (prin1-to-string form) "\\n") nil {state} 'append 'silent))
 (timers-live-record '(init))
+;; What the host hands the display for each echo-area message (the echo
+;; line, or a toast in romacs-complete-mode), with `current-message' then.
+(add-hook 'romacs-echo-area-functions
+          (lambda (text) (when text (timers-live-record (list 'echo text (current-message))))))
 (run-with-timer 2 nil (lambda () (timers-live-record (list 'ordinary (and (current-idle-time) t)))))
 (run-with-timer 3 nil (lambda () (require 'gnosis-feed) (timers-live-record (list 'dwell (gnosis-feed--dwell-supported-p)))))
 (run-with-idle-timer 1 t
@@ -98,7 +102,7 @@ def session_env(root, args):
     (config / 'rc.xml').write_text(live.RC_XML)
     path = os.environ.get('PATH', '/usr/bin:/bin')
     env = {'PATH': f'{args.tools}:{path}' if args.tools else path,
-           'HOME': str(home), 'LANG': 'C.UTF-8',
+           'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
            'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
            'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
            'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
@@ -179,6 +183,20 @@ def quiet(process, seconds, timeout):
             last, since = now, time.monotonic()
 
 
+def scenes(text):
+    """Every complete submitted scene in TEXT, oldest first."""
+    result = []
+    for line in text.split('\n'):
+        if line.startswith('{') and '"submitted-scene"' in line:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if record.get('diagnostic') == 'submitted-scene':
+                result.append(record)
+    return result
+
+
 def checked(binary, args, output, report):
     """The timer checks, over --trace-scene's scene dumps."""
     with session(binary, args, output, 'binary', report, True) as (env, state, process, log_path):
@@ -212,13 +230,27 @@ def checked(binary, args, output, report):
         fio.wait(lambda: any(r.startswith('(dwell') for r in records(state)), 15, 'dwell probe', process)
         check("a timer's queued input wakes a read (gnosis-feed--dwell-supported-p)",
               '(dwell t)' in records(state), records(state))
-        check('echo area shows the idle probe', any('Idle probe 1' in row for row in rows()), rows()[-2:])
+        # The display received it (whatever draws it, the echo line or a
+        # toast) with `current-message' it, and a frame submitted before any
+        # key showed it: recorded conditions, not a frame that may already
+        # have changed.
+        shown = '(echo "Idle probe 1" "Idle probe 1")'
+        def drawn():
+            return any('Idle probe 1' in row for scene in scenes(log_path.read_text(errors='replace'))
+                       for row in fio.scene_rows(scene))
+        try:
+            fio.wait(lambda: shown in records(state) and drawn(), 15, 'idle probe shown', process)
+        except Exception:
+            pass
+        check('echo area shows the idle probe', shown in records(state),
+              [r for r in records(state) if r.startswith('(echo')])
+        check('a frame shows the idle probe before any key', drawn(), rows())
         time.sleep(args.cpu_window)
         check('no more idle probes without input', len([r for r in records(state) if r.startswith('(idle')]) == 1,
               records(state))
 
         keys(env, '-M', 'alt', 'x', '-m', 'alt')
-        fio.wait(lambda: rows()[-1:] == ['M-x '] or rows()[:1] == ['M-x '], args.timeout, 'M-x prompt', process)
+        fio.wait(lambda: ff.prompt_shown(rows(), 'M-x '), args.timeout, 'M-x prompt', process)
         keys(env, 'gnosis-dashboard', '-k', 'Return')
         fio.wait(lambda: any('Gnosis Dashboard' in row or 'Studied today' in row for row in rows()),
                  args.timeout, 'gnosis dashboard', process)

@@ -78,3 +78,25 @@ fn full_policy_preserves_requested_features() {
         NonZeroU16::new(144)
     );
 }
+
+#[test]
+fn layers_animate_on_hardware_and_not_on_a_software_adapter() {
+    use romacs_display_protocol::LayerAnimation;
+    let requested = VisualConfig::default();
+    let full = RenderQualityPolicy::negotiate(RenderBackendProfile::hardware(), &requested).child_frame_motion();
+    assert!(!full.open.is_instant() && !full.close.is_instant());
+    assert!(!full.resize.is_instant() && !full.selection.is_instant());
+    assert_eq!(full.open_slide, 8.0);
+    // Screenshots and parity under a software adapter must not depend on
+    // when a frame was sampled; ROMACS_LAYER_ANIMATION=1 opts a test in.
+    if std::env::var_os("ROMACS_LAYER_ANIMATION").is_none() {
+        let software = RenderQualityPolicy::negotiate(RenderBackendProfile::software(), &requested);
+        assert_eq!(software.child_frame_motion(), ChildFrameMotionSpecs::INSTANT);
+    }
+    let reduced = full.for_layer(LayerAnimation::Reduced);
+    assert_eq!((reduced.open, reduced.close), (full.open, full.close));
+    assert_eq!((reduced.open_slide, reduced.close_slide), (0.0, 0.0));
+    assert!(reduced.resize.is_instant() && reduced.selection.is_instant() && reduced.movement.is_instant());
+    assert_eq!(full.for_layer(LayerAnimation::Off), ChildFrameMotionSpecs::INSTANT);
+    assert_eq!(full.for_layer(LayerAnimation::Full), full);
+}

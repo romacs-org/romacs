@@ -126,6 +126,7 @@ mod intervals;
 mod properties;
 pub mod text;
 mod backtrace;
+mod profiler;
 mod threaded;
 
 mod expand;
@@ -1229,6 +1230,8 @@ pub struct Vm {
     propagated_escape: Option<threaded::Escape>,
     signal_handlers: Vec<threaded::SignalHandler>,
     backtrace: backtrace::Backtrace,
+    /// profiler.c's CPU and memory profilers (`profiler.rs`).
+    profiler: profiler::Profiler,
     propagated_escape_hooked: bool,
     propagated_eval_depth: Option<usize>,
     /// Set immediately before executing an `eval` form; consumed by the engine.
@@ -1363,6 +1366,8 @@ pub struct Vm {
     /// keyboard.c recent_keys: the last input events and the commands they
     /// ran, as names (the heap may compact under the command loop).
     recent_keys: std::collections::VecDeque<RecentKey>,
+    /// keyboard.c lossage_limit: how many RECENT_KEYS entries are kept.
+    lossage_limit: usize,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
     /// The objects that name a buffer: each buffer's markers and overlays
@@ -1506,6 +1511,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     tz_rule_dstoff,
     local_zone,
     recent_keys,
+    lossage_limit,
     conses,
     objects,
     referrers,
@@ -1543,6 +1549,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     execution,
     spare_programs,
     idle_since,
+    profiler,
 });
 
 impl Default for Vm {
@@ -1606,6 +1613,7 @@ impl Vm {
             propagated_escape: None,
             signal_handlers: Vec::new(),
             backtrace: backtrace::Backtrace::default(),
+            profiler: profiler::Profiler::default(),
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
@@ -1681,6 +1689,7 @@ impl Vm {
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,
             recent_keys: std::collections::VecDeque::new(),
+            lossage_limit: RECENT_KEYS,
             conses: vec![],
             objects: vec![],
             referrers: None,

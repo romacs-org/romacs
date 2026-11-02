@@ -98,7 +98,7 @@ def main():
                 **{name: json.dumps(str(path)) for name, path in
                    (('explicit', explicit), ('state', state), ('sample', sample))}))
             (config / 'rc.xml').write_text(live.RC_XML)
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
+            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
                    'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
@@ -150,7 +150,7 @@ def main():
                 if not defmacro or not comment or plain in colours['defmacro'] or plain in colours['comment']:
                     raise AssertionError(f'not fontified on screen: {colours}')
                 subprocess.run(['wtype', '-d', '40', '-M', 'alt', 'x', '-m', 'alt'], env=env, check=True, timeout=20)
-                fio.wait(lambda: rows()[:1] == ['M-x '], args.timeout, 'M-x prompt', process)
+                fio.wait(lambda: ff.prompt_shown(rows(), 'M-x '), args.timeout, 'M-x prompt', process)
                 subprocess.run(['wtype', '-d', '40', 'romacs-live-fontify-state', '-k', 'Return'],
                                env=env, check=True, timeout=20)
                 fio.wait(state.exists, args.timeout, 'fontify state', process)

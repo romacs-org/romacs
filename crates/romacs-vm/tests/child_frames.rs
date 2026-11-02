@@ -51,6 +51,26 @@ fn a_child_frame_leaves_its_parents_windows_alone() {
     assert_eq!(vm.eval_source(edges).unwrap().display().unwrap(), before);
 }
 
+/// A child frame starts with a copy of each of its parent's faces, as a
+/// frame `make-frame' makes gets them from `face-set-after-frame-default':
+/// `copy-face' copies on every frame in `frame-list' (cc-mode's
+/// `c-make-inverse-face' with a popup up), and the copies are the frame's own.
+#[test]
+fn a_child_frame_has_its_parents_faces() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    vm.eval_source("(progn (setq f (selected-frame)) (internal-make-lisp-face 'probe-face) (internal-make-lisp-face 'probe-face f) \
+                    (internal-set-lisp-face-attribute 'probe-face :weight 'bold f) \
+                    (setq c (romacs--create-frame `((parent-frame . ,f) (width . 10) (height . 2)))))").unwrap();
+    let probe = "(list (internal-get-lisp-face-attribute 'probe-face :weight c) \
+                 (progn (dolist (frame (frame-list)) (internal-copy-lisp-face 'probe-face 'probe-copy frame frame)) \
+                        (internal-get-lisp-face-attribute 'probe-copy :weight c)) \
+                 (progn (internal-set-lisp-face-attribute 'probe-face :weight 'light c) \
+                        (internal-get-lisp-face-attribute 'probe-face :weight f)))";
+    assert_eq!(vm.eval_source(probe).unwrap().display().unwrap(), "(bold bold bold)");
+}
+
 /// Positions as frame.c reads them for a child frame: a negative integer
 /// or `(- N)' from the parent's far edge, a float a fraction of the room.
 #[test]

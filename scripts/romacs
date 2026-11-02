@@ -8,7 +8,8 @@
 #   --loadup       run GNU's lisp/loadup.el in its own order, every load site
 #                  the VM can reach; then, for each journey key whose GNU
 #                  command did not load, a romacs stand-in named romacs-...
-#                  The log lists every load site's outcome (romacs-loadup:).
+#                  With ROMACS_DIAGNOSTICS=1 the log lists every load
+#                  site's outcome (romacs-loadup:) and every paint.
 #                  It boots from its world in $XDG_CACHE_HOME/romacs/worlds:
 #                  the first launch after a build or an input change builds
 #                  it, about a boot from source, and later launches restore it

@@ -378,7 +378,7 @@ mod tests {
         assert!(!out.bell, "{out:?}");
         assert_ne!(vm.eval_source("romacs-gui-quit-requested").unwrap(), Fixed::NIL);
     }
-    /// The owner's journey through the real key path: visit a file, type into
+    /// A user's journey through the real key path: visit a file, type into
     /// it, C-x C-s. The bytes on disk must be exactly the edited text.
     #[test]
     fn visiting_typing_and_c_x_c_s_save_the_file_byte_identically() {

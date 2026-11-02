@@ -86,6 +86,20 @@ impl Leaf<'_> {
         Ok(if frame == Value::NIL { self.pair(value).map_or(Value::NIL, |(_, face)| face) } else { value })
     }
 
+    /// A new frame's faces: a copy of each of FROM's lface vectors, as
+    /// make-terminal-frame copies the selected frame's (frame.c:1879) and a
+    /// window system's frame gets them from `face-set-after-frame-default'.
+    pub(crate) fn face_copy_frame(&mut self, from: Value, to: Value) -> super::super::Out {
+        let table = self.face_table(from, false)?;
+        if table == Value::NIL { return Ok(to); }
+        for (face, lface) in self.vm.declaration_hash_entries(table).map_err(Fault::Error)? {
+            let values = self.vector_values(lface)?;
+            let copy = self.vector_from(values);
+            self.face_insert(face, to, copy)?;
+        }
+        Ok(to)
+    }
+
     pub(crate) fn face_insert(&mut self, face: Value, frame: Value, vector: Value) -> super::super::Out {
         let table = self.face_table(frame, true)?;
         let value = if frame == Value::NIL {

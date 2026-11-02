@@ -218,7 +218,7 @@ def run_variant(args, name: str, flags: list, metrics: dict, specs: dict) -> dic
         for directory in ('config', 'cache', 'data', 'state'):
             (home / directory).mkdir()
         env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home),
-               'LANG': 'C.UTF-8', 'XDG_RUNTIME_DIR': str(runtime),
+               'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1', 'XDG_RUNTIME_DIR': str(runtime),
                'XDG_CONFIG_HOME': str(home / 'config'),
                'XDG_CACHE_HOME': str(home / 'cache'),
                'XDG_DATA_HOME': str(home / 'data'),

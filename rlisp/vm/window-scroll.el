@@ -2,6 +2,7 @@
 ;;; window-scroll.el --- VM2: recenter, scrolling and move-to-window-line  -*- lexical-binding: t -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

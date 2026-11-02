@@ -1,4 +1,5 @@
 ;;; keymap-popup.el --- Described keymaps with popup help  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Free Software Foundation, Inc.
 

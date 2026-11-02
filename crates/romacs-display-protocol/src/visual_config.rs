@@ -8,6 +8,7 @@
 use crate::child_frame_animation::{
     ChildFrameAnimation, ChildFrameAnimationsConfig, default_child_frame_close,
     default_child_frame_movement, default_child_frame_open, default_child_frame_resize,
+    default_child_frame_selection,
 };
 use crate::window_animation::{
     WindowAnimation, WindowAnimationsConfig, default_window_close, default_window_movement,
@@ -153,9 +154,13 @@ pub struct VisualConfig {
     /// A child frame whose anchor moved. Drives placement only.
     #[serde(default = "default_child_frame_movement")]
     pub child_frame_movement: ChildFrameAnimation,
-    /// A child frame whose size changes. Reserved for content crossfades.
+    /// A child frame whose size changes: its rect tweens, content placed
+    /// as it settles.
     #[serde(default = "default_child_frame_resize")]
     pub child_frame_resize: ChildFrameAnimation,
+    /// A layer's selection highlight moving between rows.
+    #[serde(default = "default_child_frame_selection")]
+    pub child_frame_selection: ChildFrameAnimation,
 }
 
 /// Written out rather than derived, because the four window-animation slots do
@@ -181,6 +186,7 @@ impl Default for VisualConfig {
             child_frame_close: default_child_frame_close(),
             child_frame_movement: default_child_frame_movement(),
             child_frame_resize: default_child_frame_resize(),
+            child_frame_selection: default_child_frame_selection(),
         }
     }
 }

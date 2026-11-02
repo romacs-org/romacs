@@ -1,5 +1,6 @@
 ;;; romacs-loadup-bootstrap.el --- GNU loadup as source, for package suites
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; The files GNU's loadup.el preloads on GNU/Linux, as source, in loadup's

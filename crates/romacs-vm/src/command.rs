@@ -536,11 +536,17 @@ impl Vm {
         };
         if let Some(key) = key { self.record_recent_key(key); }
     }
-    /// record_char: keep the last RECENT_KEYS entries.
+    /// record_char: keep the last `lossage_limit' entries.
     fn record_recent_key(&mut self, key: RecentKey) {
-        if self.recent_keys.len() == RECENT_KEYS { self.recent_keys.pop_front(); }
         self.recent_keys.push_back(key);
+        self.set_lossage_limit(self.lossage_limit);
     }
+    /// update_recent_keys: keep at most LIMIT entries, the newest.
+    pub(crate) fn set_lossage_limit(&mut self, limit: usize) {
+        self.lossage_limit = limit;
+        while self.recent_keys.len() > limit { self.recent_keys.pop_front(); }
+    }
+    pub(crate) fn lossage_limit(&self) -> usize { self.lossage_limit }
     /// Frecent_keys: the recorded input events, oldest first, and with
     /// INCLUDE_CMDS the commands as (nil . COMMAND).
     pub(crate) fn recent_keys_value(&mut self, include_commands: bool) -> Value {

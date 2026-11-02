@@ -26,10 +26,19 @@ def current_rows(text):
         except json.JSONDecodeError:
             continue
         if record.get("diagnostic") == "prompt-paint":
-            result = [record["minibuffer"]]
+            # The minibuffer's text (none while the layer hosting it is
+            # hidden), then each layer's lines: candidates, messages.
+            result = [record["minibuffer"]] if record.get("minibuffer") is not None else []
+            result += [line for layer in record.get("layers") or [] for text in layer for line in text.split("\n")]
         elif record.get("diagnostic") == "submitted-scene":
             result = fio.scene_rows(record)
     return result
+
+
+def prompt_shown(rows, prompt):
+    """Whether ROWS show PROMPT on the first or last row: the minibuffer's
+    text, which romacs-complete's candidate count may precede."""
+    return any(row.endswith(prompt) for row in rows[:1] + rows[-1:])
 
 
 def check_prompt_close(proc, keys, control, wait_visible, capture, trace, work, timeout, report):
@@ -321,7 +330,7 @@ def main():
             (work / "02 removed.txt").write_text("removed")
             for index, name in enumerate(["line\nname.txt", "tab\tname.txt", "back\\name.txt"]):
                 (work / name).write_text(f"Escaped entry {index}\n")
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home), "LANG": "C.UTF-8",
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home), "LANG": "C.UTF-8", "ROMACS_DIAGNOSTICS": "1",
                "XDG_RUNTIME_DIR": str(runtime), "XDG_CONFIG_HOME": str(home / "config"),
                "XDG_CACHE_HOME": str(home / "cache"), "XDG_DATA_HOME": str(home / "data"),
                "XDG_STATE_HOME": str(home / "state"), "TMPDIR": str(runtime), "WLR_BACKENDS": "headless",

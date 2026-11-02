@@ -1,4 +1,5 @@
 ;;; jabber-srv.el --- SRV DNS lookups for XMPP  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2005, 2007, 2018  Magnus Henoch
 

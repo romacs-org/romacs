@@ -153,7 +153,7 @@ CASES = [
     ('refusal-ahead', '(insert "abc\n" (propertize " " (quote display) (quote (space :width 2 :height 2))) "x")', [
         '(window-text-pixel-size nil 1 4)', '(pos-visible-in-window-p 2 nil t)', '(progn (goto-char 2) (vertical-motion 0))',
     ]),
-    # The owner's global-display-line-numbers-mode: numbers before each
+    # A common init's global-display-line-numbers-mode: numbers before each
     # row, which C-n, isearch, help and log windows measure past.
     ('line-numbers', '(setq display-line-numbers t) (dotimes (i 30) (insert (format "line %d" i) (if (= i 3) "\tTAB" "") (propertize " " (quote display) (quote (space :align-to 20))) "x\n"))', [
         '(line-number-display-width)', '(line-number-display-width t)', '(line-number-display-width (quote columns))',

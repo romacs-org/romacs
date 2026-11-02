@@ -26,6 +26,8 @@ pub struct HostFrame {
     /// window, or a child frame's when one hosts it.
     pub minibuffer: u64,
     pub snapshot: std::time::Duration,
+    /// The text animations drawn over this frame (`Vm::text_animations').
+    pub text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
 
 /// What the host answers a read with.
@@ -75,6 +77,13 @@ pub trait HostInput {
     /// Publish CLIPBOARD text with a bounded wait and without running Lisp.
     fn set_clipboard_text(&mut self, _text: &str) -> std::result::Result<(), String> {
         Err("native clipboard is unavailable".into())
+    }
+
+    /// Whether the display shows frame-by-frame animation
+    /// (`romacs--display-animates'): None until it knows its adapter.  A
+    /// host with no window, every test's, shows none.
+    fn display_animates(&mut self) -> Option<bool> {
+        Some(false)
     }
 }
 
@@ -215,6 +224,10 @@ impl Vm {
                 // queues; a redisplay's Lisp (a mode-line :eval) may change
                 // them, and then the wait ends for Lisp to compute it again.
                 let before = self.host_wait_state()?;
+                // GNU's `message' redisplays the echo area at once (xdisp.c
+                // message3_nolog): a host that renders it shows a message
+                // left during this wait (a timer's) before the snapshot.
+                self.call_prepared_source_raw("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])?;
                 let (width, height) = (self.window_state.width, self.window_state.height);
                 let started = crate::host::monotonic();
                 let frame = self.frame_snapshot(width, height)?;
@@ -222,7 +235,8 @@ impl Vm {
                 let selected = self.selected_window_value()?;
                 let selected = self.window(selected)?.id;
                 let minibuffer = self.window(self.mini_window())?.id;
-                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot })?;
+                let text_animations = self.text_animations()?;
+                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
                 self.display_apply_layout(&ends)?;
                 redraw = false;
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }

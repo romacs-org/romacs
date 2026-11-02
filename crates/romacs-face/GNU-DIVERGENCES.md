@@ -5,7 +5,7 @@ checked by `scripts/gnu_oracle.py`), throwaway HOME. Fixtures before R228 came f
 `/usr/bin/emacs` at b28750b822d; regenerating at the pin changed only `separator-line`.
 This crate is not wired to redisplay yet. These are the contracts for wiring,
 not claims about the running editor. R90 removes Custom's machinery, not the
-owner's preferences. `defface` and `face-remapping-alist` remain supported.
+user's preferences. `defface` and `face-remapping-alist` remain supported.
 
 ## Input and GC boundary
 
@@ -105,7 +105,7 @@ display-graphic-p true, featurep gtk nil. Today's faces.el matches `graphic`
 but not `(type x w32 ns haiku pgtk android)` there. Wiring this crate will
 select the GUI branch for nine corpus specs. `custom-button` currently gets
 **no attributes at all**, not a tty fallback; it gains its GUI attributes.
-The owner's running GNU pgtk editor is not affected by today's romacs bug.
+A running GNU pgtk editor is not affected by today's romacs bug.
 Our answer is deliberately graphical, not preservation of that blank face.
 
 Tests: `collapse.rs::specs_written_for_pgtk_match_romacs` and
@@ -121,7 +121,7 @@ explicit user inheritance replaces the inherited-name list. Changing the
 builder cannot mutate an already-built theme. Theme replacement retains
 the same user preferences; transient runtime setter edits are discarded.
 
-`examples/user-overrides.eld` is the port of the owner's eight face
+`examples/user-overrides.eld` is the port of one user's eight face
 preferences from custom.el: Iosevka 120 default, black fringe/dividers,
 Iosevka italic and variable-pitch, and Iosevka Aile org-modern-symbol.
 It is **plain data**, loaded with `BoundedDatum::parse` and

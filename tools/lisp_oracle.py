@@ -51,7 +51,7 @@ OVERLAY = 'lisp-overlay'
 HEADER = 'romacs-overlay:'
 # Files in lisp-overlay/ that describe it rather than vary a GNU file.
 OVERLAY_META = {'README.md', 'MANIFEST.tsv'}
-OVERLAY_INERT = 'proposed'  # patches awaiting an owner decision; never loaded
+OVERLAY_INERT = 'proposed'  # patches awaiting a decision; never loaded
 
 
 def git(*args, cwd=None, data=None):

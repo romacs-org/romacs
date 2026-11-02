@@ -1,4 +1,5 @@
 ;;; hermes-kanban-log.el --- Worker-log diff engine for Hermes Kanban  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

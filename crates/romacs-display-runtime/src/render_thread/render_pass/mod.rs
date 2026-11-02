@@ -47,6 +47,7 @@ mod full_render;
 pub(in crate::render_thread) mod model_provenance;
 mod present;
 mod retained_scroll;
+pub(in crate::render_thread) mod retained_root;
 pub(in crate::render_thread) mod retained_static;
 pub(super) use retained_scroll::RetainedScroll;
 mod scene;
@@ -212,7 +213,6 @@ fn render_frame_window_contents_to_surface(
         bg_gradient.is_some() || extra_line_spacing != 0.0 || extra_letter_spacing != 0.0,
     )?;
     window_state.render.child_opacity_src = targets.picture;
-    window_state.render.child_resize_src = targets.resize;
     let result = render_frame_window_contents_reserved(
         renderer,
         window_state,
@@ -229,7 +229,6 @@ fn render_frame_window_contents_to_surface(
         models,
     );
     window_state.render.child_opacity_src = None;
-    window_state.render.child_resize_src = None;
     result
 }
 
@@ -559,11 +558,7 @@ fn render_frame_window_contents_reserved(
     let models = super::models::picture_of(renderer.take_drawn_surfaces(), models);
     // Asked after the composition, so a transition or child crossfade that
     // finished this frame (showing the new picture alone) no longer counts.
-    let blends_older = model_provenance::blends_older_pictures(
-        render,
-        !pane_blits.is_empty(),
-        renderer.frame_sample(),
-    );
+    let blends_older = model_provenance::blends_older_pictures(render, !pane_blits.is_empty());
 
     let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
         romacs_display_protocol::present_trace::Stage::NonRootStart,

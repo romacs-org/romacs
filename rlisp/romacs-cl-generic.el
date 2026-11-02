@@ -1,5 +1,6 @@
 ;;; romacs-cl-generic.el --- GNU generic functions for Romacs -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Load after the GNU core prerequisites.  The representation bridge must be

@@ -34,6 +34,8 @@ mod overlays;
 pub(crate) struct FrameCompositor {
     pub current_frame: Option<FrameGlyphBuffer>,
     pub(in crate::render_thread) input_scroll: input_scroll::InputScroll,
+    /// Text animations drawn over the current frame at every draw.
+    pub(in crate::render_thread) text_animations: super::text_animations::TextAnimations,
     /// Video identities present in the root or any accepted child
     /// presentation. Rebuilt only when editor presentation data changes, so
     /// decoder wakeups do not rescan every glyph at video frame rate.
@@ -66,6 +68,11 @@ pub(crate) struct FrameCompositor {
     /// (frame scheduling plan, Stage 4). Built lazily from the current frame
     /// and reused across cursor-only frames; invalidated on any full render.
     pub(super) retained_static: Option<RetainedStatic>,
+    /// The root glyph pass's last picture, for a commit whose root repeats
+    /// (`render_pass::retained_root`).
+    pub(in crate::render_thread) retained_root: Option<RetainedRoot>,
+    /// The key of the last root the root glyph pass painted.
+    pub(in crate::render_thread) last_root_key: Option<crate::render_thread::render_pass::retained_root::RootKey>,
     pub(super) retained_scroll: Option<super::render_pass::RetainedScroll>,
     /// Anchors and imprints of the presentation most recently *installed*,
     /// waiting to become the baseline if and when it is composed. Separate from
@@ -186,6 +193,7 @@ impl FrameCompositor {
         Self {
             current_frame: None,
             input_scroll: input_scroll::InputScroll::default(),
+            text_animations: Default::default(),
             #[cfg(feature = "video")]
             visible_videos: HashSet::new(),
             current_scene_generation: 0,
@@ -200,6 +208,8 @@ impl FrameCompositor {
             renderer_effects: RendererFrameEffects::default(),
             transitions: TransitionState::default(),
             retained_static: None,
+            retained_root: None,
+            last_root_key: None,
             retained_scroll: None,
             incoming_scroll_anchors: ScrollAnchorsByWindow::default(),
             incoming_reflow_imprints: ReflowImprintsByWindow::default(),
@@ -220,6 +230,13 @@ impl FrameCompositor {
 /// frames so an ambient cursor effect composites over it instead of
 /// re-running the glyph pipeline. Validity is keyed on the generation, the
 /// size and the snapshot of every native model it pictures.
+/// The root glyph pass's picture and the root it shows.
+pub(crate) struct RetainedRoot {
+    pub(in crate::render_thread) texture: FullFrameTexture,
+    pub(in crate::render_thread) bind_group: wgpu::BindGroup,
+    pub(in crate::render_thread) key: Option<crate::render_thread::render_pass::retained_root::RootKey>,
+}
+
 pub(crate) struct RetainedStatic {
     /// The scene texture, its GPU-budget category and its cost as one value.
     ///

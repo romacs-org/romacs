@@ -1,6 +1,7 @@
 ;;; romacs-mcp-editor.el --- Bounded native MCP reads -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Optional observation tools, not mutation handles or an ownership framework.

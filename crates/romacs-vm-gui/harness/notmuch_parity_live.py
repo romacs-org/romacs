@@ -10,13 +10,13 @@ Both load notmuch from the system site-lisp (GNU its .elc, Romacs its .el)
 through a mail init: --snippet FILE, a user's notmuch and smtpmail settings
 as a Romacs init would hold them, or else DEFAULT_INIT below; then fixture
 overrides: the fixture's identities and Fcc folders, smtpmail (and a
-snippet's `thanos/mail-accounts' table, address to :server :port :type)
+snippet's accounts table, --accounts-variable, address to :server :port :type)
 pointed at the engine's own server, its CA as the only extra trust and a
 fixture authinfo.  No real mail, notmuch database, ~/.notmuch-config or
 network is touched; the mail sync command is never run.
 
 usage: notmuch_parity_live.py --romacs BIN [--gnu EMACS] --output DIR
-                              [--workflow NAME]... [--snippet FILE]
+                              [--workflow NAME]... [--snippet FILE [--accounts-variable NAME]]
 
 Workflows: `read' (hello, a saved search, motion, tagging, archiving,
 notmuch-show with HTML parts, notmuch-tree), `compose-send' (a new mail
@@ -82,8 +82,8 @@ FIXTURE_INIT = r'''
                                 (json-parse-buffer :object-type 'alist))))
   (setq smtpmail-smtp-server "localhost" smtpmail-smtp-service (alist-get 'starttls ports)
         gnutls-trustfiles (list (expand-file-name "ca.pem" dir)))
-  (when (boundp 'thanos/mail-accounts)
-    (setq thanos/mail-accounts
+  (when (and '@ACCOUNTS@ (boundp '@ACCOUNTS@))
+    (set '@ACCOUNTS@
           `(("owner@example.org" :user "owner@example.org" :server "localhost"
              :port ,(alist-get 'starttls ports) :type starttls)
             ("owner@students.example.org" :user "owner@example.org" :server "localhost"
@@ -99,7 +99,7 @@ FIXTURE_INIT = r'''
 '''
 
 
-def init_source(engine, snippet):
+def init_source(engine, snippet, accounts=None):
     mail = f'(load {lisp_string(str(snippet))} nil t)' if snippet else DEFAULT_INIT
     gnu_setup = ('(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n'
                  '(setq scroll-conservatively 101)\n'
@@ -109,7 +109,7 @@ def init_source(engine, snippet):
     return f''';; -*- lexical-binding: t -*-
 {gnu_setup}{parity_live.GNU_COMPLETION}(setq inhibit-startup-screen t initial-scratch-message nil)
 {mail}
-{FIXTURE_INIT}
+{FIXTURE_INIT.replace('@ACCOUNTS@', accounts or 'nil')}
 (setq parity-probe-variables '({variables}))
 (random "notmuch-parity")
 (load {lisp_string(str(parity_live.PROBE))} nil t)
@@ -126,7 +126,7 @@ def launch(engine, base, args):
                               stdout=subprocess.DEVNULL, stderr=(root / 'smtp.log').open('w'))
     parity_live.wait(lambda: (smtp / 'ports.json').exists(), 30, 'fake SMTP server', server)
     env['FAKE_SMTP_DIR'] = str(smtp)
-    init = init_source(engine, args.snippet and Path(args.snippet).resolve())
+    init = init_source(engine, args.snippet and Path(args.snippet).resolve(), args.accounts_variable)
     engine_ = (gnu_engine(root, home, env, init, None, args.timeout, args.tools) if engine == 'gnu'
                else romacs_engine(args.romacs, root, home, env, init, None, args.timeout, args.tools))
     engine_.processes.insert(0, server)
@@ -244,6 +244,7 @@ def check(engines):
 
 def add_arguments(parser):
     parser.add_argument('--snippet', help="a mail init fragment, instead of DEFAULT_INIT")
+    parser.add_argument('--accounts-variable', help="the snippet's accounts table, pointed at the fixture's servers")
 
 
 HARNESS_SPEC = Harness(WORKFLOWS, launch, seed='notmuch-parity-', rewrite=rewrite, check=check)

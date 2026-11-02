@@ -7,14 +7,6 @@ use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 use romacs_display_protocol::types::{AnimatedCursor, Color};
 use romacs_display_protocol::{PointerAppearanceSelection, RootSurfaceRect};
 
-/// Unscaled old picture and mix parameters for child resize preparation.
-pub struct ChildResizePicture<'a> {
-    pub old: &'a super::SnapshotLease,
-    pub old_width: f32,
-    pub old_height: f32,
-    pub mix: f32,
-}
-
 /// A child picture whose opacity and required composition resources were checked.
 /// Consumed by rendering; the borrowed leases stay live until that draw finishes.
 ///
@@ -24,7 +16,7 @@ pub struct ChildResizePicture<'a> {
 /// use romacs_renderer_wgpu::{renderer::PreparedChildFrame, SnapshotSize};
 /// let mut child = FrameGlyphBuffer::with_size(96.0, 64.0);
 /// let prepared = PreparedChildFrame::new(
-///     &child, 1.0, SnapshotSize::new(96, 64).unwrap(), None, None, None,
+///     &child, 1.0, SnapshotSize::new(96, 64).unwrap(), None,
 /// ).unwrap();
 /// child.background_alpha = 0.5;
 /// drop(prepared);
@@ -46,22 +38,15 @@ pub struct PreparedChildFrame<'a> {
 
 enum ChildComposition<'a> {
     Direct,
-    Picture {
-        picture: &'a super::SnapshotLease,
-        resize: Option<(ChildResizePicture<'a>, &'a super::SnapshotLease)>,
-    },
+    Picture { picture: &'a super::SnapshotLease },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ChildPreparationError {
     #[error("child picture composition requires a scratch lease")]
     MissingPicture,
-    #[error("child resize composition requires a second scratch lease")]
-    MissingResizePicture,
     #[error("child scratch dimensions do not match the render target")]
     WrongSize,
-    #[error("child resize composition cannot sample its render attachment")]
-    AliasedResizePicture,
 }
 
 fn child_alpha(alpha: f32) -> f32 {
@@ -81,32 +66,14 @@ impl<'a> PreparedChildFrame<'a> {
         alpha: f32,
         size: super::SnapshotSize,
         picture: Option<&'a super::SnapshotLease>,
-        resize: Option<ChildResizePicture<'a>>,
-        resize_picture: Option<&'a super::SnapshotLease>,
     ) -> Result<Self, ChildPreparationError> {
         let alpha = child_alpha(alpha);
-        let composition = if child.background_alpha != 1.0 || alpha != 1.0 || resize.is_some() {
+        let composition = if child.background_alpha != 1.0 || alpha != 1.0 {
             let picture = picture.ok_or(ChildPreparationError::MissingPicture)?;
             if picture.size() != size {
                 return Err(ChildPreparationError::WrongSize);
             }
-            let resize = resize
-                .map(|resize| {
-                    let mixed =
-                        resize_picture.ok_or(ChildPreparationError::MissingResizePicture)?;
-                    if mixed.size() != size {
-                        return Err(ChildPreparationError::WrongSize);
-                    }
-                    if mixed.id() == picture.id()
-                        || mixed.id() == resize.old.id()
-                        || picture.id() == resize.old.id()
-                    {
-                        return Err(ChildPreparationError::AliasedResizePicture);
-                    }
-                    Ok((resize, mixed))
-                })
-                .transpose()?;
-            ChildComposition::Picture { picture, resize }
+            ChildComposition::Picture { picture }
         } else {
             ChildComposition::Direct
         };
@@ -116,22 +83,6 @@ impl<'a> PreparedChildFrame<'a> {
             size,
             composition,
         })
-    }
-}
-
-impl WgpuRenderer {
-    /// The scissor rect a child frame's clip resolves to on this surface.
-    ///
-    /// The crossfade quad needs the same clip the frame's own chrome
-    /// computes internally, so the fading old picture cannot paint outside
-    /// the popup's placed area.
-    pub fn child_frame_scissor(
-        &self,
-        clip: RootSurfaceRect,
-        surface_width: u32,
-        surface_height: u32,
-    ) -> Option<(u32, u32, u32, u32)> {
-        child_scissor(clip, self.scale_factor, surface_width, surface_height)
     }
 }
 
@@ -157,14 +108,11 @@ fn child_scissor(
 }
 
 impl WgpuRenderer {
-    /// Draw one snapshot's picture as an alpha-blended quad.
-    ///
-    /// The resize content crossfade's old-content layer: the previous
-    /// presentation's picture, leased from the snapshot pool, fading out
-    /// beneath the freshly installed frame. The image pipeline's blended
-    /// variant composites `tex_color * vertex_color`, so the alpha rides on
-    /// the vertex color and the draw-parameters snapshot stays the shared
-    /// identity one.
+    /// Draw a child's composed picture as an alpha-blended quad: the
+    /// image pipeline's blended variant composites `tex_color *
+    /// vertex_color`, so the alpha rides on the vertex color and the
+    /// draw-parameters snapshot stays the shared identity one.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_child_crossfade_quad(
         &mut self,
         view: &wgpu::TextureView,
@@ -177,36 +125,6 @@ impl WgpuRenderer {
         surface_height: u32,
         alpha: f32,
         scissor: Option<(u32, u32, u32, u32)>,
-    ) {
-        self.draw_child_picture_quad(
-            view,
-            snapshot_bind_group,
-            x,
-            y,
-            width,
-            height,
-            surface_width,
-            surface_height,
-            alpha,
-            scissor,
-            false,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn draw_child_picture_quad(
-        &mut self,
-        view: &wgpu::TextureView,
-        snapshot_bind_group: &wgpu::BindGroup,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        surface_width: u32,
-        surface_height: u32,
-        alpha: f32,
-        scissor: Option<(u32, u32, u32, u32)>,
-        additive: bool,
     ) {
         let logical_w = surface_width as f32 / self.scale_factor;
         let logical_h = surface_height as f32 / self.scale_factor;
@@ -262,11 +180,7 @@ impl WgpuRenderer {
                 if let Some((sx, sy, sw, sh)) = scissor {
                     pass.set_scissor_rect(sx, sy, sw, sh);
                 }
-                pass.set_pipeline(if additive {
-                    &self.pipelines.crossfade_add
-                } else {
-                    &self.pipelines.composition
-                });
+                pass.set_pipeline(&self.pipelines.composition);
                 pass.set_bind_group(0, draw.binding(), &[]);
                 pass.set_bind_group(1, snapshot_bind_group, &[]);
                 pass.set_vertex_buffer(0, upload.buffer_slice());
@@ -326,10 +240,7 @@ impl WgpuRenderer {
                 alpha,
                 size,
                 composition: match picture.as_ref() {
-                    Some(picture) => ChildComposition::Picture {
-                        picture,
-                        resize: None,
-                    },
+                    Some(picture) => ChildComposition::Picture { picture },
                     None => ChildComposition::Direct,
                 },
             },
@@ -381,7 +292,7 @@ impl WgpuRenderer {
         } = prepared;
         let surface_width = size.width();
         let surface_height = size.height();
-        if let ChildComposition::Picture { picture, resize } = composition {
+        if let ChildComposition::Picture { picture } = composition {
             self.clear_child_picture(picture.view());
             // Backgrounds replace one another inside the child's own picture;
             // text is source-over coverage. Apply lifecycle opacity only once,
@@ -407,44 +318,9 @@ impl WgpuRenderer {
                 scale,
                 pivot,
             );
-            let composed = if let Some((resize, mixed)) = resize {
-                self.clear_child_picture(mixed.view());
-                let scissor = self.child_frame_scissor(clip_in_root, surface_width, surface_height);
-                // Both pictures are already premultiplied. Sum their weighted
-                // RGBA, then source-over the complete result once below.
-                self.draw_child_picture_quad(
-                    mixed.view(),
-                    resize.old.bind_group(),
-                    offset_x,
-                    offset_y,
-                    resize.old_width * scale,
-                    resize.old_height * scale,
-                    surface_width,
-                    surface_height,
-                    1.0 - resize.mix,
-                    scissor,
-                    true,
-                );
-                self.draw_child_picture_quad(
-                    mixed.view(),
-                    picture.bind_group(),
-                    0.0,
-                    0.0,
-                    surface_width as f32 / self.scale_factor,
-                    surface_height as f32 / self.scale_factor,
-                    surface_width,
-                    surface_height,
-                    resize.mix,
-                    None,
-                    true,
-                );
-                mixed
-            } else {
-                picture
-            };
             self.draw_child_crossfade_quad(
                 view,
-                composed.bind_group(),
+                picture.bind_group(),
                 0.0,
                 0.0,
                 surface_width as f32 / self.scale_factor,
@@ -610,7 +486,7 @@ impl WgpuRenderer {
         // and its radii and border widths thin proportionally.
         let frame_w = child.width * scale;
         let frame_h = child.height * scale;
-        let corner_radius = corner_radius * scale;
+        let corner_radius = corner_radius.max(child.layer.radius) * scale;
         let bg_alpha = child.background_alpha * alpha;
         let Some(scissor) = child_scissor(
             clip_in_root,
@@ -630,6 +506,47 @@ impl WgpuRenderer {
             bw,
             child.glyphs.len(),
         );
+
+        // A layer's lighting falls outside its rect: a soft shadow below it
+        // and its glow around it, clipped only by the surface.
+        if child.layer.shadow || child.layer.glow.is_some() {
+            let mut light: Vec<RoundedRectVertex> = Vec::new();
+            if child.layer.shadow {
+                let shade = Color::new(0.0, 0.0, 0.0, 0.55 * alpha);
+                self.add_rounded_rect_styled(&mut light, (offset_x, offset_y + 6.0 * scale, frame_w, frame_h),
+                                             corner_radius, &shade, 11, 18.0 * scale);
+            }
+            if let Some(glow) = child.layer.glow {
+                let glow = Color::new(glow.r, glow.g, glow.b, 0.35 * alpha);
+                self.add_rounded_rect_styled(&mut light, (offset_x, offset_y, frame_w, frame_h),
+                                             corner_radius, &glow, 12, 14.0 * scale);
+            }
+            if let Some(upload) = self.arenas.rounded.upload(&self.device, &self.queue, &light) {
+                let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Child Frame Light Encoder"),
+                });
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Child Frame Light Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view,
+                            resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    pass.set_pipeline(&self.pipelines.rounded_rect);
+                    pass.set_bind_group(0, draw.binding(), &[]);
+                    pass.set_vertex_buffer(0, upload.buffer_slice());
+                    pass.draw(0..light.len() as u32, 0..1);
+                }
+                self.submit_commands(std::iter::once(encoder.finish()));
+            }
+        }
 
         // Child-frame-specific rendering: shadow + background + border.
         {
@@ -767,7 +684,8 @@ impl WgpuRenderer {
                 }
             }
 
-            if bw > 0.0 || corner_radius > 0.0 {
+            // A glowing layer is lit, not outlined.
+            if bw > 0.0 || (corner_radius > 0.0 && child.layer.glow.is_none()) {
                 let mut border_verts: Vec<RoundedRectVertex> = Vec::new();
                 let bc = if bw > 0.0 {
                     child.border_color
