@@ -4,9 +4,13 @@
 //! so a world image is the range's used prefix written to a file, and
 //! restore maps that file back at the same address, copy-on-write
 //! (`adopt`). Nothing is decoded and nothing is relocated: every pointer
-//! in the image is valid again where it was. The process allocates from
-//! the image from then on; what it allocated before stays in its first
-//! arena, which keeps serving those blocks' frees. A builder's arena is a
+//! in the image is valid again where it was. From then on the process
+//! allocates from the production allocator (`romacs_allocator`), and the
+//! image and its first arena only take back the blocks they hold: only a
+//! builder captures an image, so nothing needs a restored process's later
+//! blocks in the range, and the production allocator returns what a peak
+//! freed (`trim`), where size classes would keep it resident for good. A
+//! builder's arena is a
 //! shared mapping of an unlinked memory file, and its image is copied from
 //! that file by the kernel, so capture never reads heap bytes (`write_image`).
 //!
@@ -40,7 +44,9 @@
 //!
 //! The allocator has size classes up to 32 KiB, carved from page slabs and
 //! kept on free lists, and page runs above that, kept in bins by size. One
-//! spin lock serializes it. Outside world binaries nothing installs it; when
+//! spin lock serializes it. A run freed at the top, or freed long enough
+//! anywhere, gives its pages back, and so does every free run after a
+//! collection (`trim`). Outside world binaries nothing installs it; when
 //! its range cannot be reserved it hands every request to the system
 //! allocator.
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -64,13 +70,19 @@ const ALIGN: usize = 1 << 30;
 /// as a process may hold two (`adopt`).
 const RESERVE: usize = 1 << 37;
 const PAGE: usize = 4096;
-const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA2");
+const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA3");
 /// 16..=1024 by 16, then four steps per doubling to 32 KiB.
 const CLASSES: usize = 64 + 20;
 const SMALL_MAX: usize = 32768;
 const BINS: usize = 40;
 /// Freed page runs this long give their pages back.
 const RELEASE_PAGES: usize = 64;
+/// When the top falls this far below the highest page touched since the
+/// last release, the pages above it go back but for TRIM_KEEP: a peak's
+/// pages do not stay resident, and a block freed and allocated again at
+/// the top costs no system call.
+const TRIM_SLACK: usize = 16 << 20;
+const TRIM_KEEP: usize = 4 << 20;
 
 /// The allocator's state, at the arena's start. An image carries it, and
 /// the fields a restore needs.
@@ -85,6 +97,9 @@ struct Header {
     top: usize,
     /// Every address at or above this one is untouched, so zero.
     zero: usize,
+    /// Pages above the top and below this address may be resident
+    /// (`trim_top`).
+    dirty: usize,
     free: [usize; CLASSES],
     cursor: [usize; CLASSES],
     end: [usize; CLASSES],
@@ -129,6 +144,12 @@ static MAP_STEP: AtomicU8 = AtomicU8::new(0);
 static MAP_ERRNO: AtomicI32 = AtomicI32::new(0);
 static MAP_RESERVED: AtomicBool = AtomicBool::new(false);
 const STEPS: [&str; 6] = ["", "no arena", "adopted already", "address-space limit", "image", "rest of the range"];
+/// Set once an image is adopted: new blocks come from the production
+/// allocator (`PLATFORM`) from then on, and the arenas only take back their own.
+static ADOPTED: AtomicBool = AtomicBool::new(false);
+/// A restored process's allocator for every block outside the arenas.
+const PLATFORM: romacs_allocator::PlatformAllocator = romacs_allocator::PLATFORM_ALLOCATOR;
+
 /// Where the arena allocations come from starts, once it has.
 static BASE: AtomicUsize = AtomicUsize::new(0);
 /// Where the process's first arena starts, once an image replaced it.
@@ -225,16 +246,18 @@ fn bin(pages: usize) -> usize {
     ((usize::BITS - 1 - pages.leading_zeros()) as usize).min(BINS - 1)
 }
 
-/// A free run's head: its length in pages and the next run of its bin.
+/// A free run's head: its length in pages, the next run of its bin, and
+/// whether its pages but the head's went back to the system.
 #[repr(C)]
 struct Run {
     pages: usize,
     next: usize,
+    released: bool,
 }
 
-unsafe fn push_run(h: &mut Header, at: usize, pages: usize) {
+unsafe fn push_run(h: &mut Header, at: usize, pages: usize, released: bool) {
     let run = at as *mut Run;
-    unsafe { *run = Run { pages, next: h.runs[bin(pages)] } };
+    unsafe { *run = Run { pages, next: h.runs[bin(pages)], released } };
     h.runs[bin(pages)] = at;
 }
 
@@ -252,7 +275,7 @@ unsafe fn take_pages(h: &mut Header, pages: usize, align: usize) -> usize {
                     unsafe { *link = run.next };
                     let rest = run.pages - pages;
                     if rest > 0 {
-                        unsafe { push_run(h, at + pages * PAGE, rest) };
+                        unsafe { push_run(h, at + pages * PAGE, rest, run.released) };
                     }
                     return at;
                 }
@@ -267,7 +290,7 @@ unsafe fn take_pages(h: &mut Header, pages: usize, align: usize) -> usize {
         return 0;
     }
     if at > h.top {
-        unsafe { push_run(h, h.top, (at - h.top) / PAGE) };
+        unsafe { push_run(h, h.top, (at - h.top) / PAGE, false) };
     }
     h.top = end;
     at
@@ -276,12 +299,31 @@ unsafe fn take_pages(h: &mut Header, pages: usize, align: usize) -> usize {
 unsafe fn give_pages(h: &mut Header, at: usize, pages: usize) {
     if at + pages * PAGE == h.top {
         h.top = at;
+        unsafe { trim_top(h, TRIM_SLACK) };
         return;
     }
-    if pages >= RELEASE_PAGES {
+    let released = pages >= RELEASE_PAGES;
+    if released {
         unsafe { release(at + PAGE, (pages - 1) * PAGE) };
     }
-    unsafe { push_run(h, at, pages) };
+    unsafe { push_run(h, at, pages, released) };
+}
+
+/// Record that the top grew: what lies below it is touched.
+fn grew(h: &mut Header) {
+    h.zero = h.zero.max(h.top);
+    h.dirty = h.dirty.max(h.top);
+}
+
+/// Give back the pages above the top but for TRIM_KEEP, when more than
+/// SLACK of them may be resident. The zero mark stays: a released page of
+/// a restored image reads its file's bytes again, not zeros.
+unsafe fn trim_top(h: &mut Header, slack: usize) {
+    if h.dirty > h.top + slack {
+        let keep = h.top + TRIM_KEEP.min(slack);
+        unsafe { release(keep, h.dirty - keep) };
+        h.dirty = keep;
+    }
 }
 
 unsafe fn take_small(h: &mut Header, class: usize) -> usize {
@@ -310,7 +352,7 @@ unsafe fn give_small(h: &mut Header, at: usize, class: usize) {
     h.free[class] = at;
 }
 
-/// The header of the arena AT is in, or None for the system allocator's.
+/// The header of the arena AT is in, or None for a block outside the arenas.
 fn owner(at: *mut u8) -> Option<*mut Header> {
     let at = at as usize;
     // An adoption publishes FORMER before BASE: a block of the first arena
@@ -442,6 +484,7 @@ unsafe fn start() -> u8 {
             h.reserve = reserve;
             h.top = base + size_of::<Header>().next_multiple_of(PAGE);
             h.zero = h.top;
+            h.dirty = h.top;
             return ARENA;
         }
         if at != libc::MAP_FAILED {
@@ -602,6 +645,7 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     lock();
     FORMER.store(BASE.load(Ordering::Relaxed), Ordering::Release);
     BASE.store(base, Ordering::Release);
+    ADOPTED.store(true, Ordering::Release);
     unlock();
     Restore::Mapped
 }
@@ -853,10 +897,116 @@ pub fn active() -> bool {
     state() == ARENA
 }
 
+/// Whether the arena already serves this process, without starting one:
+/// a process whose global allocator is another never maps it.
+fn started() -> bool {
+    STATE.load(Ordering::Acquire) == ARENA
+}
+
 /// The range the arena's allocations come from: where it starts and how
 /// much address space it holds. None when the heap is the system's.
 pub fn current_range() -> Option<(usize, usize)> {
     active().then(|| { let h = unsafe { &*header() }; (h.base, h.reserve) })
+}
+
+/// Where the arena's bytes are: the span handed out from its start
+/// (`used`), and of that span the free small blocks (`small_free`, by
+/// class in `classes`), the uncarved rest of the current slabs
+/// (`slab_rest`) and the free runs, whose pages are kept (`runs_kept`) or
+/// went back to the system (`runs_released`); and the pages above the top
+/// that may still be resident (`above_top`). Both arenas of a process
+/// that adopted an image count.
+#[derive(Clone, Debug, Default)]
+pub struct Census {
+    pub used: usize,
+    pub small_free: usize,
+    pub slab_rest: usize,
+    pub runs_kept: usize,
+    pub runs_released: usize,
+    pub above_top: usize,
+    pub classes: Vec<(usize, usize)>,
+}
+
+/// The arena's census (`Census`), or None when the heap is the system's.
+/// It walks every free list under the allocator's lock.
+pub fn census() -> Option<Census> {
+    if !started() {
+        return None;
+    }
+    let mut c = Census { classes: vec![(0, 0); CLASSES], ..Census::default() };
+    lock();
+    for base in [BASE.load(Ordering::Acquire), FORMER.load(Ordering::Acquire)] {
+        if base != 0 {
+            unsafe { count(&*(base as *const Header), &mut c) };
+        }
+    }
+    unlock();
+    for (class, row) in c.classes.iter_mut().enumerate() {
+        row.0 = class_size(class);
+    }
+    c.small_free = c.classes.iter().map(|&(_, free)| free).sum();
+    c.classes.retain(|&(_, free)| free > 0);
+    Some(c)
+}
+
+/// Add H's free lists to C. The caller holds the lock.
+unsafe fn count(h: &Header, c: &mut Census) {
+    c.used += h.top - h.base;
+    c.above_top += h.dirty.saturating_sub(h.top);
+    for class in 0..CLASSES {
+        let mut at = h.free[class];
+        while at != 0 {
+            c.classes[class].1 += class_size(class);
+            at = unsafe { *(at as *const usize) };
+        }
+        c.slab_rest += h.end[class] - h.cursor[class];
+    }
+    for b in 0..BINS {
+        let mut at = h.runs[b];
+        while at != 0 {
+            let run = unsafe { &*(at as *const Run) };
+            if run.released {
+                c.runs_released += (run.pages - 1) * PAGE;
+                c.runs_kept += PAGE;
+            } else {
+                c.runs_kept += run.pages * PAGE;
+            }
+            at = run.next;
+        }
+    }
+}
+
+/// Give free memory back to the system after a collection: the production
+/// allocator's free pages (`romacs_allocator::release_free`), and the arenas' pages above
+/// their tops and in their free runs but for each run's head. A run
+/// remembers its release, so a later trim skips it.
+pub fn trim() {
+    if !started() {
+        return;
+    }
+    if ADOPTED.load(Ordering::Acquire) {
+        romacs_allocator::release_free();
+    }
+    lock();
+    for base in [BASE.load(Ordering::Acquire), FORMER.load(Ordering::Acquire)] {
+        if base == 0 {
+            continue;
+        }
+        let h = unsafe { &mut *(base as *mut Header) };
+        unsafe { trim_top(h, 0) };
+        for b in 0..BINS {
+            let mut at = h.runs[b];
+            while at != 0 {
+                let run = unsafe { &mut *(at as *mut Run) };
+                if !run.released && run.pages > 1 {
+                    unsafe { release(at + PAGE, (run.pages - 1) * PAGE) };
+                    run.released = true;
+                }
+                at = run.next;
+            }
+        }
+    }
+    unlock();
 }
 
 /// The fields of the image this process mapped.
@@ -918,10 +1068,11 @@ unsafe fn scrub(h: &mut Header) {
     for b in 0..BINS {
         let mut at = h.runs[b];
         while at != 0 {
-            let run = unsafe { &*(at as *const Run) };
+            let run = unsafe { &mut *(at as *mut Run) };
             unsafe { std::ptr::write_bytes((at + size_of::<Run>()) as *mut u8, 0, PAGE - size_of::<Run>()) };
             if run.pages > 1 {
                 unsafe { release(at + PAGE, (run.pages - 1) * PAGE) };
+                run.released = true;
             }
             at = run.next;
         }
@@ -995,6 +1146,9 @@ unsafe fn copy_range(from: i32, to: i32, start: i64, end: i64) -> std::io::Resul
 
 unsafe impl GlobalAlloc for Arena {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if ADOPTED.load(Ordering::Relaxed) {
+            return unsafe { PLATFORM.alloc(layout) };
+        }
         if state() != ARENA {
             return unsafe { System.alloc(layout) };
         }
@@ -1004,12 +1158,15 @@ unsafe impl GlobalAlloc for Arena {
             Some(class) => unsafe { take_small(h, class) },
             None => unsafe { take_pages(h, pages(layout.size()), layout.align().max(PAGE)) },
         };
-        h.zero = h.zero.max(h.top);
+        grew(h);
         unlock();
         at as *mut u8
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        if ADOPTED.load(Ordering::Relaxed) {
+            return unsafe { PLATFORM.alloc_zeroed(layout) };
+        }
         if state() != ARENA {
             return unsafe { System.alloc_zeroed(layout) };
         }
@@ -1020,7 +1177,7 @@ unsafe impl GlobalAlloc for Arena {
             Some(class) => unsafe { take_small(h, class) },
             None => unsafe { take_pages(h, pages(layout.size()), layout.align().max(PAGE)) },
         };
-        h.zero = h.zero.max(h.top);
+        grew(h);
         unlock();
         // Memory at or above the old zero mark was never handed out.
         if at != 0 && at < zero {
@@ -1031,7 +1188,12 @@ unsafe impl GlobalAlloc for Arena {
 
     unsafe fn dealloc(&self, at: *mut u8, layout: Layout) {
         let Some(owner) = owner(at) else {
-            return unsafe { System.dealloc(at, layout) };
+            // A block outside the arenas is the production allocator's in a
+            // process that adopted an image (every earlier block is an
+            // arena's), else the system's (an arena that never started).
+            return unsafe {
+                if ADOPTED.load(Ordering::Acquire) { PLATFORM.dealloc(at, layout) } else { System.dealloc(at, layout) }
+            };
         };
         if SCRUB.load(Ordering::Relaxed) {
             unsafe { std::ptr::write_bytes(at, 0, layout.size()) };
@@ -1047,7 +1209,9 @@ unsafe impl GlobalAlloc for Arena {
 
     unsafe fn realloc(&self, at: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let Some(owner) = owner(at) else {
-            return unsafe { System.realloc(at, layout, new_size) };
+            return unsafe {
+                if ADOPTED.load(Ordering::Acquire) { PLATFORM.realloc(at, layout, new_size) } else { System.realloc(at, layout, new_size) }
+            };
         };
         let align = layout.align();
         if SCRUB.load(Ordering::Relaxed) && new_size < layout.size() {
@@ -1065,9 +1229,11 @@ unsafe impl GlobalAlloc for Arena {
                         unsafe { give_pages(h, start + new * PAGE, old - new) };
                     }
                     true
-                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= h.base + h.reserve {
+                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= h.base + h.reserve
+                    && !ADOPTED.load(Ordering::Relaxed)
+                {
                     h.top += (new - old) * PAGE;
-                    h.zero = h.zero.max(h.top);
+                    grew(h);
                     true
                 } else {
                     false
