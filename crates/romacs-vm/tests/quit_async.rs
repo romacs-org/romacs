@@ -49,6 +49,29 @@ fn quit_into(vm: &mut Vm, signal: &Arc<QuitSignal>, source: &str) -> String {
     value
 }
 
+/// SOURCE's printed value, C-g pressed once MARKER exists (written by a
+/// form SOURCE evaluates), so the quit always lands after work has run
+/// however long reading took; asserts the evaluation ended within 100 ms of
+/// the press.
+fn quit_after_marker(vm: &mut Vm, signal: &Arc<QuitSignal>, source: &str, marker: &std::path::Path) -> String {
+    let (signal_, marker_) = (signal.clone(), marker.to_path_buf());
+    let presser = std::thread::spawn(move || {
+        let start = Instant::now();
+        while !marker_.exists() {
+            assert!(start.elapsed() < Duration::from_secs(60), "the first form never ran");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(signal_.interrupt(), "a busy evaluator takes the press");
+        Instant::now()
+    });
+    let value = eval(vm, source);
+    let ended = Instant::now();
+    let pressed = presser.join().unwrap();
+    let latency = ended.saturating_duration_since(pressed);
+    assert!(latency < Duration::from_millis(100), "{source}: ended {latency:?} after C-g");
+    value
+}
+
 #[test]
 fn a_tight_loop_and_a_calling_loop_quit() {
     let (mut vm, signal) = busy_vm();
@@ -79,18 +102,25 @@ fn eval_buffer_and_load_quit_between_forms_keeping_what_ran() {
     // Forms that reach no safepoint of their own: a primitive's work, then
     // a count. Only the poll between forms can end the load.
     const FORMS: usize = 200_000;
-    let text = "(progn (make-string 30000 ?a) (setq quit-async-n (1+ quit-async-n)))\n".repeat(FORMS);
+    let marker = std::env::temp_dir().join(format!("quit-async-{}.ran", std::process::id()));
+    // The eleventh form leaves MARKER, so C-g comes after ten counted forms
+    // ran even when reading the file is slow under load.
+    let form = "(progn (make-string 30000 ?a) (setq quit-async-n (1+ quit-async-n)))\n";
+    let text = form.repeat(10) + &format!("(write-region \"\" nil {:?})\n", marker.display().to_string())
+        + &form.repeat(FORMS - 10);
     let file = std::env::temp_dir().join(format!("quit-async-{}.el", std::process::id()));
     std::fs::write(&file, &text).unwrap();
     eval(&mut vm, &format!("(progn (defvar quit-async-n 0) (set-buffer (get-buffer-create \"quit-async\")) (insert-file-contents {:?}) t)", file.display().to_string()));
-    let quit = quit_into(&mut vm, &signal, "(condition-case nil (progn (eval-buffer) 'done) (quit 'quit))");
+    let quit = quit_after_marker(&mut vm, &signal, "(condition-case nil (progn (eval-buffer) 'done) (quit 'quit))", &marker);
+    std::fs::remove_file(&marker).unwrap();
     let n: usize = eval(&mut vm, "quit-async-n").parse().unwrap();
     assert_eq!(quit, "quit");
     assert!(n > 0 && n < FORMS, "eval-buffer ran {n} forms");
     eval(&mut vm, "(setq quit-async-n 0)");
-    let quit = quit_into(&mut vm, &signal, &format!("(condition-case nil (progn (load {:?} nil t t) 'done) (quit 'quit))", file.display().to_string()));
+    let quit = quit_after_marker(&mut vm, &signal, &format!("(condition-case nil (progn (load {:?} nil t t) 'done) (quit 'quit))", file.display().to_string()), &marker);
     let n: usize = eval(&mut vm, "quit-async-n").parse().unwrap();
     std::fs::remove_file(&file).unwrap();
+    std::fs::remove_file(&marker).unwrap();
     assert_eq!(quit, "quit");
     assert!(n > 0 && n < FORMS, "load ran {n} forms");
 }
