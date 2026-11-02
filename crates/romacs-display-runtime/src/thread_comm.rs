@@ -1057,6 +1057,7 @@ impl ThreadComms {
         };
 
         let render = RenderComms {
+            input_interrupt: None,
             keep_alive_without_frames: false,
             native_window_waits: None,
             #[cfg(feature = "core-free")]
@@ -1090,8 +1091,23 @@ pub struct EmacsComms {
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
 }
 
+/// The evaluator's out-of-band quit, as the render thread sees it. GNU
+/// keyboard.c never queues the quit character typed while Lisp runs: it
+/// sets `quit-flag' at once (handle_interrupt). The embedder decides which
+/// key event is that character and counts it for a busy evaluator.
+pub trait InputInterrupt: Send + Sync {
+    /// Whether the key EVENT was taken as an interrupt instead of being
+    /// queued: true only while the evaluator is busy.
+    fn interrupt(&self, event: &InputEvent) -> bool;
+    /// The evaluator's busy span, while it is busy: a new one each time it
+    /// leaves a wait for input.
+    fn busy_span(&self) -> Option<u32>;
+}
+
 /// Render thread communication handle
 pub struct RenderComms {
+    /// The embedder's quit for a busy evaluator, when it has one.
+    pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
     #[cfg(feature = "core-free")]
     pub(crate) paint_diagnostics: Option<Arc<crate::paint_host::PaintDiagnostics>>,
     /// Daemon root, rather than the primary native frame, owns display lifetime.
@@ -1250,6 +1266,11 @@ impl RenderComms {
         }
     }
 
+    /// The evaluator's busy span, while it is busy (`InputInterrupt').
+    pub(crate) fn evaluator_busy_span(&self) -> Option<u32> {
+        self.input_interrupt.as_ref().and_then(|hook| hook.busy_span())
+    }
+
     /// Queue a display input event for the input bridge.
     ///
     /// After converting the display event, the bridge owns notifying the
@@ -1278,6 +1299,9 @@ impl RenderComms {
         Option<romacs_display_protocol::input_progress::InputReceipt>,
         Option<romacs_display_protocol::input_latency::InputToken>,
     ) {
+        if self.input_interrupt.as_ref().is_some_and(|hook| hook.interrupt(&event)) {
+            return (None, None, None);
+        }
         let delivery = matches!(&event, InputEvent::Key { pressed: true, .. })
             .then(romacs_display_protocol::input_progress::InputDelivery::for_read);
         let read = delivery.as_ref().map(|delivery| delivery.receipt());

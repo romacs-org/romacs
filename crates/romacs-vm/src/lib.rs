@@ -22,6 +22,8 @@ mod command;
 mod interpreted_closure;
 mod oclosure;
 mod host_input;
+mod quit;
+pub use quit::QuitSignal;
 mod bidi;
 mod layout_host;
 mod display_host;
@@ -40,7 +42,7 @@ mod watchers;
 mod user_db;
 mod locale_info;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
-pub use host_input::{HostEvent, HostFrame, HostInput};
+pub use host_input::{HostEvent, HostFrame, HostInput, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
 pub use display_host::{DisplayHost, FontEntity, FontQuery, OpenedFont, OtfTable};
@@ -1248,6 +1250,13 @@ pub struct Vm {
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     idle_since: Option<std::time::Instant>,
+    /// The host's `C-g', shared with its input thread (quit.rs).
+    quit: std::sync::Arc<quit::QuitSignal>,
+    /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
+    force_quit_count: u8,
+    /// `quit-flag', `inhibit-quit' and `throw-on-input''s symbol slots, for
+    /// the evaluator's quit polls (quit.rs).
+    quit_slots: [usize; 3],
     /// Counts keymap stores and parent changes, GNU's two flushes of the
     /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
     keymap_generation: u64,
@@ -1530,7 +1539,9 @@ romacs_snapshot::snapshot_fields!(Vm {
     conditions,
     rooted,
     spread_reserve,
-
+    quit,
+    force_quit_count,
+    quit_slots,
 } at_rest {
     regexp_cache,
     suspended_code,
@@ -1622,6 +1633,9 @@ impl Vm {
             display: None,
             session_host: None,
             idle_since: None,
+            quit: std::sync::Arc::default(),
+            force_quit_count: 0,
+            quit_slots: [0; 3],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
@@ -1742,6 +1756,7 @@ impl Vm {
         // already-read forms compile their bindings dynamically.
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
+        vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);

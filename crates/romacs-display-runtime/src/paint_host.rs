@@ -189,6 +189,12 @@ impl PaintHost {
         ))
     }
 
+    /// Let the render thread take the quit character out of band while the
+    /// evaluator is busy, and show that it is.
+    pub fn set_input_interrupt(&mut self, hook: std::sync::Arc<dyn crate::thread_comm::InputInterrupt>) {
+        self.render.input_interrupt = Some(hook);
+    }
+
     pub fn run(self) -> Result<render_thread::RenderLoopExit, render_thread::RenderLoopError> {
         render_thread::run_render_loop_current_thread(
             self.event_loop,
