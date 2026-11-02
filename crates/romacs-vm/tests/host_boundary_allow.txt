@@ -50,7 +50,7 @@ crates/romacs-vm/src/lib.rs:1739 slot:exec-path declares the environment special
 crates/romacs-vm/src/lib.rs:1739 slot:initial-environment declares the environment specials by name; reads no slot
 crates/romacs-vm/src/lib.rs:1739 slot:process-environment declares the environment specials by name; reads no slot
 crates/romacs-vm/src/lib.rs:1812 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/lib.rs:3030 dynamic:saved unbind: restores the saved value as the binding ends
+crates/romacs-vm/src/lib.rs:3036 dynamic:saved unbind: restores the saved value as the binding ends
 crates/romacs-vm/src/prim.rs:963 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
 crates/romacs-vm/src/prim.rs:973 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
 crates/romacs-vm/src/prim.rs:985 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)

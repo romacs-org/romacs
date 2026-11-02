@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "9d9c5c7ba6352f4e043b80e7f28fbc8462f62689df5aed31bed5dd6aec58312c",
+  "source_fingerprint": "537e16e958533dc6b9940f62ba1b6edbe8d7a7400e6542320724cade5269086d",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -617,7 +617,7 @@
   "byte-code-function-p": {
    "name": "byte-code-function-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:58"
+   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:51"
   },
   "byte-to-position": {
    "name": "byte-to-position",
@@ -3255,7 +3255,7 @@
   "native-comp-available-p": {
    "name": "native-comp-available-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:48"
+   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:58"
   },
   "native-comp-function-p": {
    "name": "native-comp-function-p",
