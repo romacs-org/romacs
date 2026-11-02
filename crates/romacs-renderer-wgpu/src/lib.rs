@@ -23,6 +23,7 @@ pub mod model;
 pub mod native_presentation;
 pub mod renderer;
 mod root_gpu_timing;
+pub mod scene_graph;
 pub mod shader_surface;
 pub mod shader_surface_cache;
 mod svg;
