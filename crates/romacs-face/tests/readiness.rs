@@ -552,3 +552,22 @@ fn duplicate_preference_and_alias_keys_are_explicit_errors() {
         "duplicate canonical theme keys must be rejected"
     );
 }
+
+/// Repeated `set-face-attribute' edits keep only a keyword's latest value,
+/// and the slot `:bold' and `:weight' share still ends as the last edit to
+/// either set it, whatever order they came in.
+#[test]
+fn repeated_attribute_edits_keep_the_last_word() {
+    let t = theme(&[("f", "((t))")]);
+    let weight = |t: &Theme| attrs_get(&t.realize("f").unwrap(), A::Weight);
+    let edits = |pairs: &[(&str, &str)]| {
+        pairs.iter().fold(t.clone(), |t, (k, v)| t.with_face_attribute("f", k, &d(v)).unwrap())
+    };
+    assert_eq!(weight(&edits(&[(":weight", "light"), (":bold", "t"), (":weight", "heavy")])), d("heavy"));
+    assert_eq!(weight(&edits(&[(":bold", "t"), (":weight", "light"), (":bold", "nil")])), d("normal"));
+    assert_eq!(weight(&edits(&[(":weight", "light"), (":bold", "t")])), d("bold"));
+    let many = (0..2000).fold(t.clone(), |t, i| {
+        t.with_face_attribute("f", ":weight", &d(if i % 2 == 0 { "light" } else { "heavy" })).unwrap()
+    });
+    assert_eq!(weight(&many), d("heavy"));
+}

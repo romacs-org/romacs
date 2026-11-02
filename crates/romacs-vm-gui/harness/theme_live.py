@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Theme switch cost in a live GUI session: evaluator instructions per switch.
+
+One fresh private headless labwc and one `romacs-vm-gui -Q --loadup', as
+perkey_live.py starts them (private HOME/XDG/TMPDIR, no DISPLAY; keys typed
+with wtype into that compositor only).  Each switch is one M-: of
+`(theme-live-switch 'THEME LOAD)': every enabled theme disabled, then THEME
+enabled, loading its file first when LOAD (`load-theme' THEME t, which
+evaluates the file every time, as GNU's does).  The evaluator thread alone
+is counted over it (`perf stat -t', instructions:u), from before the M-: to
+after its reply and a quiet evaluator, so the redisplay the switch causes
+counts too; the Lisp elapsed time of the switch itself is reported beside.
+The median of three M-:s that do nothing, counted the same way, is
+subtracted: what is judged is the switch, not the M-: around it.
+
+The switches run in rounds: the session's own faces, then after each
+--extra step that many more faces (`custom-declare-face', a background-
+dependent spec each) are declared.  Every round switches through all of
+--themes with `load-theme' (reported as `load'), then again with
+`enable-theme' alone: applying a loaded theme, what the budget and the
+growth check judge.
+
+The run fails when
+  * a switch signals, or a theme is not the one enabled after it;
+  * an `enable-theme' switch of the first round costs more than --budget
+    instructions;
+  * a round's median `enable-theme' switch grows faster than its face
+    count: the ratio of its median to the first round's exceeds --slack
+    times the ratio of the face counts (cost linear in the faces passes;
+    quadratic does not).
+
+usage: theme_live.py --binary PATH --output DIR [--themes rum,modus-vivendi,tango-dark]
+                     [--extra 1000] [--budget 200e6] [--slack 1.5] [--tools DIR:DIR]
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import statistics
+import tempfile
+import time
+
+import perkey_live as perkey
+
+SETUP = r'''(progn
+  (setq auto-save-timeout nil)
+  (defun theme-live-switch (theme load)
+    (let ((started (float-time)))
+      (mapc #'disable-theme custom-enabled-themes)
+      (if load (load-theme theme t) (enable-theme theme))
+      (list (- (float-time) started) custom-enabled-themes (length (face-list)))))
+  (defun theme-live-noop ()
+    (list 0.0 custom-enabled-themes (length (face-list))))
+  (defun theme-live-faces (n)
+    (let ((base (length (face-list))))
+      (dotimes (i n)
+        (custom-declare-face (intern (format "theme-live-%d-%d" base i))
+                             '((((background dark)) :foreground "#aabbcc") (t :foreground "#112233")) "Probe."))
+      (length (face-list))))
+  t)'''
+
+
+class Session(perkey.Session):
+    def eval_form(self, form):
+        """M-: FORM; its reply records, once the evaluator is quiet again."""
+        before = len(perkey.records(self.stdout))
+        self.type(['-M', 'alt', ':', '-m', 'alt'])
+        time.sleep(.2)
+        self.type([form])
+        self.type(['-k', 'Return'])
+        done = lambda: [r for r in perkey.records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
+        self.wait(done, self.args.timeout, f'M-: {form[:40]}')
+        self.quiesce()
+        return done()
+
+    def value(self, form):
+        """FORM's value, read back through a file the M-: writes."""
+        out = self.root / f'value-{time.monotonic_ns()}.el'
+        self.eval_form(f'(with-temp-file "{out}" (prin1 {form} (current-buffer)))')
+        return out.read_text()
+
+
+def switch(session, theme, load):
+    """One switch to THEME (with `load-theme' when LOAD), or with THEME None
+    the same M-: doing nothing: what the M-: itself costs."""
+    out = session.root / f'switch-{time.monotonic_ns()}.el'
+    call = f"(theme-live-switch '{theme} {'t' if load else 'nil'})" if theme else '(theme-live-noop)'
+    form = f'(with-temp-file "{out}" (prin1 {call} (current-buffer)))'
+    count, seconds, replies = session.counted(lambda: session.eval_form(form))
+    problems = [r for r in replies if r.get('signal') or r.get('native_error')]
+    text = out.read_text() if out.exists() else ''
+    lisp_seconds = float(text[1:].split()[0]) if text.startswith('(') else None
+    enabled = text.split('(', 2)[2].split(')')[0].split() if text.count('(') >= 2 else []
+    if theme and not problems and enabled[:1] != [theme]:
+        problems.append(f'enabled {enabled}, not {theme}')
+    return {'theme': theme, 'instructions': count, 'seconds': seconds, 'lisp_seconds': lisp_seconds,
+            'problems': [str(p) for p in problems]}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--binary', type=Path, required=True)
+    ap.add_argument('--output', type=Path, required=True)
+    ap.add_argument('--themes', default='rum,modus-vivendi,tango-dark')
+    ap.add_argument('--extra', default='1000', help='comma-separated face counts to add between rounds')
+    ap.add_argument('--budget', type=float, default=200e6, help='instructions per first-round switch')
+    ap.add_argument('--slack', type=float, default=1.5)
+    ap.add_argument('--settle', type=float, default=2)
+    ap.add_argument('--timeout', type=float, default=600)
+    ap.add_argument('--mode', default='1600x1000')
+    ap.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
+    args = ap.parse_args()
+    args.binary, args.output = args.binary.resolve(), args.output.resolve()
+    args.regime, args.lines, args.classic, args.state, args.gap = 'loadup', 20, False, False, .25
+    args.output.mkdir(parents=True, exist_ok=True)
+    themes = [t for t in args.themes.split(',') if t]
+    report = {'binary': str(args.binary), 'themes': themes, 'budget': args.budget, 'slack': args.slack, 'rounds': []}
+    failures = []
+    runtime = Path(os.environ.get('XDG_RUNTIME_DIR', '/run/user/1000'))
+    with tempfile.TemporaryDirectory(prefix='theme-', dir=runtime) as temporary:
+        root = Path(temporary)
+        root.chmod(0o700)
+        session = Session(args, root, False)
+        try:
+            session.start()
+            session.eval_form(SETUP)
+            for extra in [0] + [int(n) for n in args.extra.split(',') if n]:
+                faces = int(session.value(f'(theme-live-faces {extra})'))
+                passes = [[switch(session, theme, load) for theme in themes] for load in (True, False)]
+                noop = statistics.median(switch(session, None, False)['instructions'] for _ in range(3))
+                kept = passes[1]
+                for s in kept:
+                    s['net_instructions'] = s['instructions'] - noop
+                median = statistics.median(s['net_instructions'] for s in kept)
+                report['rounds'].append({'faces': faces, 'median_instructions': median, 'noop_instructions': noop,
+                                         'load': passes[0], 'switches': kept})
+                print(json.dumps({'faces': faces, 'median_instructions': median, 'noop': noop,
+                                  'load': [(s['theme'], s['instructions'], s['lisp_seconds']) for s in passes[0]],
+                                  'apply': [(s['theme'], s['net_instructions'], s['lisp_seconds']) for s in kept]}), flush=True)
+                failures += [f"{s['theme']}: {s['problems']}" for p in passes for s in p if s['problems']]
+        except (perkey.Invalid, AssertionError, OSError) as error:
+            failures.append(repr(error))
+        finally:
+            session.stop()
+            for name in ('binary.stdout', 'binary.stderr', 'compositor.log'):
+                if (root / name).exists():
+                    shutil.copy(root / name, args.output / name)
+    rounds = report['rounds']
+    if rounds:
+        first = rounds[0]
+        failures += [f"{s['theme']}: {s['net_instructions']:.3g} instructions > budget {args.budget:.3g}"
+                     for s in first['switches'] if s['net_instructions'] > args.budget]
+        for r in rounds[1:]:
+            growth, allowed = r['median_instructions'] / first['median_instructions'], args.slack * r['faces'] / first['faces']
+            r['growth'], r['allowed_growth'] = growth, allowed
+            if growth > allowed:
+                failures.append(f"{r['faces']} faces: median grew {growth:.2f}x, more than {allowed:.2f}x")
+    report['failures'] = failures
+    report['status'] = 'FAIL' if failures or not rounds else 'PASS'
+    (args.output / 'report.json').write_text(json.dumps(report, indent=1) + '\n')
+    print(json.dumps({'status': report['status'], 'failures': failures}))
+    return 0 if report['status'] == 'PASS' else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

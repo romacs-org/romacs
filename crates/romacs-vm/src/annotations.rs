@@ -742,8 +742,10 @@ impl Vm {
     pub(super) fn plist_lookup(&self, plist: Value, key: Value) -> Value {
         let mut walk = TailWalk::new(plist);
         let mut tail = plist;
-        while let Ok((k, rest)) = self.cons_pair(tail) {
-            let Ok((v, next)) = self.cons_pair(rest) else { break };
+        // A tail that is no cons ends the walk; testing the tag first spares
+        // the error `cons_pair' would format for it.
+        while tail.index_if(3).is_some() && let Ok((k, rest)) = self.cons_pair(tail) {
+            let Some((v, next)) = rest.index_if(3).and_then(|_| self.cons_pair(rest).ok()) else { break };
             if k == key {
                 return v;
             }

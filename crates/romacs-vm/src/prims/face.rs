@@ -12,17 +12,26 @@ fn resolve(cx: &mut Leaf<'_>, mut face: Value, signal_cycle: bool) -> Out {
     }
     let original = face;
     let property = cx.intern("face-alias");
+    // Faces seen along an alias chain, kept only once there is one.
     let mut seen = std::collections::HashSet::new();
     while face != Value::NIL && cx.kind(face) == Kind::Symbol {
+        let next = cx.face_property(face, property)?;
+        if next == Value::NIL || cx.kind(next) != Kind::Symbol { break; }
         if !seen.insert(face.0) {
             return if signal_cycle { Err(Fault::Circular(original)) }
                 else { Ok(cx.intern("default")) };
         }
-        let next = cx.face_property(face, property)?;
-        if next == Value::NIL || cx.kind(next) != Kind::Symbol { break; }
         face = next;
     }
     Ok(face)
+}
+
+/// Whether the display realizes faces from FRAME's: every frame but a child
+/// frame, which the display draws with its root frame's faces
+/// (DIVERGENCES.md VM2-CHILD-FRAME). A theme recomputes each face on every
+/// frame; mirroring only these keeps the display's work one frame's.
+fn displayed_faces(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<bool, Fault> {
+    Ok(!cx.windows().is_child_frame(frame)?)
 }
 
 fn lookup(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
@@ -110,7 +119,7 @@ fn internal_copy_lisp_face(cx, from: Value, to: Value, frame: Value, new_frame: 
     }
     // A frame's realized faces follow its named faces (face_change).
     let no_inherit = cx.intern("face-no-inherit");
-    if target != Value::NIL && cx.face_property(to, no_inherit)? == Value::NIL {
+    if target != Value::NIL && displayed_faces(cx, target)? && cx.face_property(to, no_inherit)? == Value::NIL {
         let name = cx.symbol_name(to)?;
         for (index, keyword) in LFACE_ATTRIBUTES.iter().enumerate() {
             let value = cx.vector_get(copy, Value::integer((index + 1) as i64).unwrap())?;
@@ -492,7 +501,7 @@ fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut valu
     let old = cx.vector_get(lface, index(keyword))?;
     cx.vector_set(lface, index(keyword), value)?;
     let changed = !cx.equal(old, value).map_err(|_| Fault::Circular(value))?;
-    if !global && changed {
+    if !global && changed && displayed_faces(cx, frame)? {
         let no_inherit = cx.intern("face-no-inherit");
         if cx.face_property(face, no_inherit)? == Value::NIL {
             let face_name = cx.symbol_name(face)?;

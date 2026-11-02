@@ -90,9 +90,15 @@ fn recent_auto_save_p(cx) {
     let state = cx.buffer_modification(Value::NIL)?;
     Ok(if state.save_modiff < state.autosave_modiff { Value::TRUE } else { Value::NIL })
 }}
+/// The parameters only the frame's font gives, which realizing the default
+/// face computes: what `frame-parameter' computes the font for.
+const FONT_PARAMETERS: [&str; 3] = ["font", "font-backend", "window-system"];
+
 /// Fframe_parameters for a frame without a window system: the stored alist
-/// plus the entries GNU computes, each added as store_in_alist would.
-fn frame_alist(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<Vec<(Value, Value)>, Fault> {
+/// plus the entries GNU computes, each added as store_in_alist would; the
+/// font's entries (FONT_PARAMETERS) only when FONT, since realizing the
+/// default face applies every pending face edit.
+fn frame_alist(cx: &mut Leaf<'_>, frame: Value, font: bool) -> std::result::Result<Vec<(Value, Value)>, Fault> {
     let stored = cx.windows().frame_parameter_entries(frame)?;
     let name_key = cx.intern("name");
     let name = stored.iter().find(|(k, _)| *k == name_key).map_or(Value::NIL, |(_, v)| *v);
@@ -111,17 +117,19 @@ fn frame_alist(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<Vec<(Valu
     }
     // The frame's font: the initial terminal's "tty", else the display's
     // font for the default face, named as GNU's pgtk names it.
-    match super::font::frame_font(cx)? {
-        Some(name) => {
-            let name = cx.string(&name);
-            store(&mut alist, cx.intern("font"), name);
-            let backend = cx.intern(super::font::BACKEND);
-            let backends = cx.cons(backend, Value::NIL);
-            store(&mut alist, cx.intern("font-backend"), backends);
-            let window_system = cx.windows().window_system(Value::NIL)?;
-            store(&mut alist, cx.intern("window-system"), window_system);
+    if font {
+        match super::font::frame_font(cx)? {
+            Some(name) => {
+                let name = cx.string(&name);
+                store(&mut alist, cx.intern("font"), name);
+                let backend = cx.intern(super::font::BACKEND);
+                let backends = cx.cons(backend, Value::NIL);
+                store(&mut alist, cx.intern("font-backend"), backends);
+                let window_system = cx.windows().window_system(Value::NIL)?;
+                store(&mut alist, cx.intern("window-system"), window_system);
+            }
+            None => { let tty = cx.string("tty"); store(&mut alist, cx.intern("font"), tty); }
         }
-        None => { let tty = cx.string("tty"); store(&mut alist, cx.intern("font"), tty); }
     }
     store(&mut alist, name_key, name);
     let (cols, lines) = cx.windows().frame_text_size(frame)?;
@@ -264,14 +272,15 @@ fn alpha_pair(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<[f32; 2], 
 defsubr! { name = "frame-parameters", gnu = "frame.c:4083", effect = Reads,
 fn frame_parameters(cx; optional frame: Value) {
     // A fresh alist with fresh conses.
-    let entries = frame_alist(cx, frame)?;
+    let entries = frame_alist(cx, frame, true)?;
     Ok(entries.into_iter().rev().fold(Value::NIL, |tail, (k, v)| { let entry = cx.cons(k, v); cx.cons(entry, tail) }))
 }}
 defsubr! { name = "frame-parameter", gnu = "frame.c:4172", effect = Reads,
 fn frame_parameter(cx, frame: Value, parameter: Value) {
     cx.windows().frame_parameter_entries(frame)?;
     if cx.kind(parameter) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", parameter)); }
-    Ok(frame_alist(cx, frame)?.into_iter().find(|(k, _)| *k == parameter).map_or(Value::NIL, |(_, v)| v))
+    let font = cx.symbol_name(parameter).is_ok_and(|name| FONT_PARAMETERS.contains(&name.as_str()));
+    Ok(frame_alist(cx, frame, font)?.into_iter().find(|(k, _)| *k == parameter).map_or(Value::NIL, |(_, v)| v))
 }}
 defsubr! { name = "modify-frame-parameters", gnu = "frame.c:4243", effect = Global,
 fn modify_frame_parameters(cx, frame: Value, alist: Value) {
