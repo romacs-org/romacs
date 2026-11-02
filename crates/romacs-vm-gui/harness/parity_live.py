@@ -34,7 +34,9 @@ GRID = (120, 33)  # the root window's body columns and lines in both frames
 # GNU's completion, displayed by fido-vertical.
 GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"
                   "      completion-category-overrides '((file (styles partial-completion))))\n"
-                  "(when (fboundp 'romacs-complete-mode) (romacs-complete-mode -1) (fido-vertical-mode 1))\n")
+                  ";; GNU sees romacs-complete-mode through the bundled autoloads, but\n"
+                  ";; only Romacs can host a minibuffer in a layer.\n"
+                  "(when (fboundp 'romacs--host-minibuffer) (romacs-complete-mode -1) (fido-vertical-mode 1))\n")
 RC_XML = '''<?xml version="1.0"?>
 <labwc_config><core><gap>0</gap></core>
 <windowRules><windowRule identifier="*" serverDecoration="no"><action name="Maximize"/></windowRule></windowRules>
