@@ -259,6 +259,38 @@ fn a_grown_mini_window_never_resizes_the_pty() {
     assert_eq!(state.borrow().resized, vec![(80, 28)], "MINI_WINDOW_GROWTH_MUST_NOT_RESIZE_THE_PTY");
 }
 
+/// A window system that answers nothing about fonts.
+struct Pgtk;
+impl romacs_vm::DisplayHost for Pgtk {
+    fn window_system(&self) -> &str { "pgtk" }
+    fn display_name(&self) -> String { String::new() }
+    fn list_fonts(&mut self, _: &romacs_vm::FontQuery) -> Vec<romacs_vm::FontEntity> { vec![] }
+    fn font_families(&mut self) -> Vec<String> { vec![] }
+    fn open_font(&mut self, _: &romacs_vm::FontEntity, _: i64) -> Option<romacs_vm::OpenedFont> { None }
+    fn char_font(&mut self, _: &str, _: f32, _: char) -> Option<(romacs_vm::OpenedFont, u32)> { None }
+}
+
+/// On a window-system frame with the pane gap (dividers and border 6) the
+/// pty's rows exclude the window's bottom divider and its columns the
+/// fringes, and a grown mini-window still never resizes it.
+#[test]
+fn the_pty_excludes_the_bottom_divider() {
+    let (mut vm, state) = setup();
+    vm.set_display_host(Some(Box::new(Pgtk)));
+    assert!(vm.open_display());
+    vm.eval_source("(modify-frame-parameters nil '((right-divider-width . 6) (bottom-divider-width . 6) (internal-border-width . 6)))").unwrap();
+    publish(&mut vm);
+    // 788x588 inside the border, 20 px of mini-window, 6 of divider, 20 of mode line.
+    assert_eq!(eval(&mut vm, "(list (window-body-width) (window-body-height) (window-bottom-divider-width) (window-pixel-height))"), "(77 27 6 568)");
+    assert_eq!(state.borrow().resized.last(), Some(&(77, 27)), "THE_PTY_EXCLUDES_THE_BOTTOM_DIVIDER");
+    let before = state.borrow().resized.len();
+    mini_text(&mut vm, "1\n2\n3\n4\n5");
+    publish(&mut vm);
+    mini_text(&mut vm, "");
+    publish(&mut vm);
+    assert_eq!(state.borrow().resized.len(), before, "MINI_WINDOW_GROWTH_MUST_NOT_RESIZE_THE_PTY");
+}
+
 #[test]
 fn split_delete_and_host_resize_follow_the_controlling_window() {
     let (mut vm, state) = setup();

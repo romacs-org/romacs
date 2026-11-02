@@ -439,7 +439,9 @@ impl Vm {
     /// (romacs_display_protocol::text_animation): `romacs-animate--elements',
     /// which rlisp/romacs-animate.el keeps, a list of (KEY WINDOW BUFFER
     /// TOP COLS ROWS FPS MOVING KIND), each while WINDOW is live and shows
-    /// BUFFER, keyed by KEY and WINDOW.  KIND is (logo CELL-ASPECT EPOCH).
+    /// BUFFER, keyed by KEY and WINDOW.  MOVING is t, nil (held where it
+    /// is) or `still' (motion is off: its still frame).  KIND is (logo
+    /// CELL-ASPECT EPOCH).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
     pub fn text_animations(&mut self) -> Result<Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>> {
@@ -449,6 +451,7 @@ impl Vm {
         if list == Value::NIL || list == Value::UNBOUND { return Ok(vec![]); }
         let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
         let logo = self.intern("logo");
+        let still = self.intern("still");
         let mut animations = vec![];
         for entry in self.list_values(list)? {
             let fields = self.list_values(entry)?;
@@ -475,7 +478,7 @@ impl Vm {
             let window = self.window(window)?.id;
             animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
                 window, top, cols: natural(cols)? as u32, rows: natural(rows)? as u32,
-                fps: natural(fps)? as u32, moving: moving != Value::NIL, kind,
+                fps: natural(fps)? as u32, moving: moving != Value::NIL && moving != still, still: moving == still, kind,
             }));
         }
         Ok(animations)
@@ -493,7 +496,32 @@ impl Vm {
         self.display_state.height = height;
         let background_alpha = self.frame_background_alpha()?;
         let tab_bar = self.tab_bar_snapshot()?;
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar })
+        let chrome = self.pane_chrome()?;
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome })
+    }
+    /// The host frame's pane chrome, from its `romacs-pane-radius',
+    /// `romacs-pane-dim', `romacs-pane-focus' and `romacs-pane-border'
+    /// parameters (rlisp/romacs-chrome.el): the window with the focus edge
+    /// is the frame's selected window, or while the mini-window is
+    /// selected the ordinary window selected last (VM2-PANE-CHROME).
+    fn pane_chrome(&mut self) -> Result<romacs_layout_input::FrameChrome> {
+        let frame = self.host_frame_peek();
+        let radius = self.frame_parameter_of(frame, "romacs-pane-radius")?
+            .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
+        let dim = match self.frame_parameter_of(frame, "romacs-pane-dim")? {
+            Some(v) => match self.object_if(v) { Some(Object::Float(f)) => *f as f32, _ => v.integer_value().unwrap_or(0) as f32 },
+            None => 0.0,
+        }.clamp(0.0, 1.0);
+        let focus = self.frame_hex_parameter(frame, "romacs-pane-focus")?;
+        let border = self.frame_hex_parameter(frame, "romacs-pane-border")?;
+        let selected = self.frame(frame)?.selected;
+        let selected = if self.window(selected)?.mini {
+            self.leaf_windows()?.into_iter().filter_map(|w| self.window(w).ok()).max_by_key(|w| w.use_time).map_or(0, |w| w.id)
+        } else {
+            self.window(selected)?.id
+        };
+        let minibuffer = self.window(self.mini_window())?.id;
+        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, selected, minibuffer })
     }
     /// FRAME's parameter NAME, if it has one.
     fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
@@ -521,7 +549,7 @@ impl Vm {
             let (x, y) = self.frame_origin(frame)?;
             let f = self.frame(frame)?;
             let (width, height, border, root, hosts, background_alpha) =
-                (f.width, f.height, f.border, f.root, f.hosts_minibuffer.is_some(), f.alpha_background);
+                (f.width, f.height, f.border, f.root, f.hosts_minibuffer, f.alpha_background);
             let default = self.display_face("default")?;
             let edge = self.display_face("child-frame-border")?;
             // An unspecified border face draws in the default foreground.
@@ -1121,7 +1149,7 @@ impl Vm {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
-            background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
     /// The least height a painted row can have: the default face's row
@@ -1145,12 +1173,14 @@ impl Vm {
         (chrome.indicators.bob, chrome.indicators.eob) = (base <= begv, at_zv);
         Ok(chrome)
     }
-    /// WINDOW's text width less its margins and fringes, and its height,
-    /// as a frame's snapshot gives them.
+    /// WINDOW's text width less its margins, fringes and right divider,
+    /// and its height less its bottom divider, as a frame's snapshot gives
+    /// them (`snapshot_leaves').
     fn window_body_size(&self, window: Value) -> Result<(u32, u32)> {
         let [left, right] = self.window_text_insets(window)?;
+        let [_, below] = self.window_dividers(window)?;
         let w = self.window(window)?;
-        Ok((w.width.saturating_sub(left + right), w.height))
+        Ok((w.width.saturating_sub(left + right), w.height.saturating_sub(below)))
     }
     /// The text WINDOW shows from its start, as a snapshot publishes it:
     /// for any window but the mini-window, only the bytes the rows of a
@@ -1800,7 +1830,8 @@ impl Vm {
         self.slots[saved_buffer].value = self.slots[self.buffer_slot].value;
         let format = self.mode_line_form(format);
         let outcome = (|| {
-            let height = self.window(window)?.height.saturating_sub(self.window_state.line);
+            let [_, below] = self.window_dividers(window)?;
+            let height = self.window(window)?.height.saturating_sub(self.window_state.line + below);
             // Fselect_window (WINDOW, t): its point becomes its buffer's.
             self.select_window_value(window, false)?;
             self.slots[self.buffer_slot].value = buffer;

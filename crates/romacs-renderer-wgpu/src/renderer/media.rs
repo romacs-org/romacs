@@ -588,6 +588,36 @@ impl WgpuRenderer {
         self.caches.surface.set_uniform(id, name, value);
     }
 
+    /// Resize shader surface `id` to a logical size, keeping its compiled
+    /// pipeline. Whether it had one to resize.
+    pub fn resize_shader_surface(&mut self, id: u32, width: u32, height: u32) -> bool {
+        let layout = self.caches.image.bind_group_layout();
+        let sampler = self.caches.image.sampler();
+        let resized = self.caches.surface.resize(
+            &self.device,
+            layout,
+            sampler,
+            self.surface_format,
+            id,
+            width,
+            height,
+        );
+        if let Some((width_px, height_px)) = resized {
+            let recreatable = self.surface_recreatable.get(&id).copied().unwrap_or(false);
+            self.media_budget
+                .unregister(crate::media_budget::MediaType::Surface, id);
+            self.register_surface_bytes(id, width_px, height_px, recreatable);
+        }
+        resized.is_some()
+    }
+
+    /// Whether surface `id` exists (it may have been freed by an eviction
+    /// or lost with the device).
+    #[must_use]
+    pub fn has_surface(&self, id: u32) -> bool {
+        self.caches.surface.get(id).is_some()
+    }
+
     /// Whether any shader surface exists, so a pointer path can skip searching
     /// a frame's glyphs for one when the answer could only be "none".
     #[must_use]

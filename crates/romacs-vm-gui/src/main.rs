@@ -474,7 +474,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
             font_alternatives: vm.font_alternative_state()?,
             width: 400, height: 300,
-            background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
             }],
         })
@@ -486,9 +486,8 @@ const USAGE: &str = "\
 usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE...]
   --loadup              run GNU's loadup chain; a live launch boots from its world
   --world-store DIR     keep worlds in DIR (default $XDG_CACHE_HOME/romacs/worlds)
-  --world-build         make the world a live --loadup launch would boot from,
-                        and a --batch session's, usable, with no window, and
-                        exit (what an installer runs)
+  --world-build         make the world a live --loadup launch would boot from
+                        usable, with no window, and exit (what an installer runs)
   --world-reset         forget the store's failed and refused builds, so the next
                         launch builds again
   --world-reset=all     remove the store's worlds and files altogether
@@ -499,7 +498,10 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   --eval EXPR           evaluate EXPR there
   --batch ARG...        GNU's `emacs --batch ARG...', from a batch world of its own
                         once one is prepared in an existing store
+  --compile-lisp FILE   compile FILE into the compiled-Lisp store beside the
+                        world store (what a compiled load runs on a miss)
   ROMACS_WORLD=off      boot from source, without a world
+  ROMACS_COMPILED_LISP=on  load GNU-compiled-kind files through compiled artifacts
   ROMACS_DIAGNOSTICS=1  print each paint, message and the loadup tables on stderr (harnesses)
   ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
                         stalled (default 2000): editing goes on, once told
@@ -579,6 +581,10 @@ fn run() -> Result<Option<exit::Exit>, String> {
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
             "--batch" => return batch::run(args.collect(), quick, world_store).map(|()| None),
+            "--compile-lisp" => {
+                let file = args.next().ok_or("--compile-lisp needs a FILE")?;
+                return batch::compile_lisp(file.into(), world_store).map(|()| None);
+            }
             // A worker's own end is its spawner's to report; its failure says why here.
             "--isolate" => return Ok(isolate_worker::run(std::iter::once(arg).chain(args).collect()).err()
                                      .map(|error| exit::Exit::new("isolate-error", error, 1))),
@@ -618,19 +624,21 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if let Some(phases) = &mut phases { phases.mark("main"); }
     let (width, height) = geometry.unwrap_or(if live { (1600, 1000) } else { (400, 300) });
     // --world-build: the world this launch would boot from, made usable
-    // (built here, or waited for), with no window, and a batch session's
-    // in this environment; then exit. What an installer runs so a user's
-    // first launch and first `--batch' restore.
+    // (built here, or waited for), with no window; then exit. What an
+    // installer runs so a user's first launch restores. A batch session's
+    // world is not built here: the first session in this store boots from
+    // source and prepares it in the background (batch.rs), as GNU's batch
+    // startup costs no install step.
     if world_build {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
         if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
-        let base = world::open(store.clone(), width, height, floor)?;
+        let base = world::open(store, width, height, floor)?;
         world::prepare(&base, width, height, floor)?;
         if let Some(init) = user_init::path().filter(|_| load_user_init) {
             world::prepare_layer(&base, &init, width, height, floor);
         }
-        return batch::prepare(store).map(|()| None);
+        return Ok(None);
     }
     // A live --loadup launch boots from its world, in --world-store or by
     // default in the user's cache (world::default_store), unless
@@ -647,6 +655,9 @@ fn run() -> Result<Option<exit::Exit>, String> {
     };
     if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
         world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor, init_layer.as_ref())?;
+    }
+    if live && launch == startup::Launch::Loadup && !romacs_vm::world::store::building() {
+        batch::configure_compiled_lisp(world_store.as_deref());
     }
     // The session from here: its every end says why.
     exit::install();

@@ -39,7 +39,9 @@ ROMACS_DEFAULTS_OFF = "(when (fboundp 'romacs-defaults-mode) (romacs-defaults-mo
 # switch, so both engines edit with GNU's values.
 GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"
                   "      completion-category-overrides '((file (styles partial-completion))))\n"
-                  "(when (fboundp 'romacs-complete-mode) (romacs-complete-mode -1) (fido-vertical-mode 1))\n"
+                  ";; GNU sees romacs-complete-mode through the bundled autoloads, but\n"
+                  ";; only Romacs can host a minibuffer in a layer.\n"
+                  "(when (fboundp 'romacs--host-minibuffer) (romacs-complete-mode -1) (fido-vertical-mode 1))\n"
                   + ROMACS_DEFAULTS_OFF)
 RC_XML = '''<?xml version="1.0"?>
 <labwc_config><core><gap>0</gap></core>

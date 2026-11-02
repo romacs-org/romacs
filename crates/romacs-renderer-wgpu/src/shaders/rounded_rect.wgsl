@@ -17,6 +17,7 @@
 //  10 = Heartbeat (pulsing border width, two-color blend)
 //  11 = Soft shadow (Gaussian falloff of the box, sigma = speed)
 //  12 = Glow (emitted light outside the box, reach = speed)
+//  13 = Outside (the box's complement, a pane's corners; panes.rs)
 //
 // 11 and 12 are a layer's lighting (graphics.md "light, not chrome"); their
 // falloffs come from the scene-graph SDF terms of feat/scene-gpu 8b6b0b3b.
@@ -385,6 +386,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let falloff = (1.0 - t) * (1.0 - t) * (1.0 - t * 0.5);
         let a = in.color.a * falloff * (1.0 - outer_alpha) * uniforms.content_alpha;
         return vec4<f32>(in.color.rgb * a, a);
+    }
+
+    if (style_id == 13u) {
+        // Outside the box only: the corner a rounded pane leaves to the
+        // frame background, in straight alpha as the solid border's.
+        let a = in.color.a * (1.0 - outer_alpha) * uniforms.content_alpha;
+        return vec4<f32>(in.color.rgb, a);
     }
 
     // Filled mode (no inner cutout)

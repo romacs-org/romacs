@@ -659,6 +659,38 @@ impl ShaderSurfaceCache {
         rescaled
     }
 
+    /// Give shader surface `id` a new logical size, keeping its pipeline,
+    /// uniforms and clock (a resize must not recompile the shader); it
+    /// renders again on the next pass. The new physical size, or `None` for
+    /// an unknown or pipeline-less surface.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        composite_layout: &wgpu::BindGroupLayout,
+        composite_sampler: &wgpu::Sampler,
+        target_format: wgpu::TextureFormat,
+        id: u32,
+        width: u32,
+        height: u32,
+    ) -> Option<(u32, u32)> {
+        let surface = self.surfaces.get_mut(&id).filter(|s| s.pipeline.is_some())?;
+        let (width_px, height_px) = Self::clamp_size(width, height, surface.scale);
+        surface.width = width;
+        surface.height = height;
+        if (width_px, height_px) != (surface.width_px, surface.height_px) {
+            let (texture, view) = Self::make_texture(device, width_px, height_px, target_format, true);
+            surface.composite_bind_group =
+                Self::composite_bind_group(device, composite_layout, composite_sampler, &view);
+            surface.texture = texture;
+            surface.view = view;
+            surface.width_px = width_px;
+            surface.height_px = height_px;
+        }
+        surface.dirty = true;
+        Some((width_px, height_px))
+    }
+
     /// Update one named uniform; unknown names are ignored with a warning
     /// (the accessor set is fixed at create time).
     pub fn set_uniform(&mut self, id: u32, name: &str, value: [f32; 4]) {

@@ -25,7 +25,7 @@
 
 ;;; Generated autoloads from romacs-animate.el
 
-(register-definition-prefixes "romacs-animate" '("romacs-animate-"))
+(register-definition-prefixes "romacs-animate" '("romacs-animat"))
 
 
 ;;; Generated autoloads from romacs-buffer-switch.el
@@ -36,6 +36,11 @@
 ;;; Generated autoloads from romacs-bytecomp.el
 
 (register-definition-prefixes "romacs-bytecomp" '("romacs-bytecomp--"))
+
+
+;;; Generated autoloads from romacs-chrome.el
+
+(register-definition-prefixes "romacs-chrome" '("romacs-"))
 
 
 ;;; Generated autoloads from romacs-coding.el
@@ -53,6 +58,11 @@
 (register-definition-prefixes "romacs-companion-receipts" '("romacs-companion-"))
 
 
+;;; Generated autoloads from romacs-compile.el
+
+(register-definition-prefixes "romacs-compile" '("romacs-compile--"))
+
+
 ;;; Generated autoloads from romacs-complete.el
 
 (defvar romacs-complete-mode nil
@@ -67,8 +77,8 @@ or call the function `romacs-complete-mode'.")
 "Vertical minibuffer completion, with the minibuffer shown in a layer.
 
 The frame then reserves no minibuffer line: the prompt, the input and
-the candidates show in a child frame over the frame's windows, placed by
-`romacs-complete-position', and messages show briefly as toasts in the
+the candidates show in a panel, a child frame over the frame's windows,
+placed by `romacs-complete-position', and messages show briefly as toasts in the
 frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode' and `fido-vertical-mode' off.
 
 This is a global minor mode.  If called interactively, toggle the

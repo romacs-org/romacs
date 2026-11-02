@@ -33,7 +33,12 @@ Workloads (--quick runs those marked q):
              wall from pre-command-hook to the next idle moment, after
              redisplay); C-x C-f over 5,000 files, fido-vertical in both
              (icomplete-compute-delay 0, so each key's completion is
-             synchronous), the keys of `file-1'.
+             synchronous), the keys of `file-1', then the same keys in
+             Romacs's default completion (romacs-complete-mode's layer and
+             the fzf style; Romacs only).  Romacs's GUI sessions take GNU's
+             completion for the comparison rows: fido-vertical, not the
+             layer, which takes the root window's last line, and the styles
+             without fzf (real_init.GNU_COMPLETION_UI).
   init       the real-init profile (real_init.py, from --profile-config or
              $ROMACS_BENCH_PROFILE): init body, from the init's
              first form to its last, GNU against Romacs from source (its
@@ -445,7 +450,9 @@ def gui_init(engine, idle_file=None):
     idle = ('(add-hook (quote emacs-startup-hook) (lambda () (run-with-idle-timer 0 nil'
             f' (lambda () (perfbench-gui-stamp {parity_live.lisp_string(str(idle_file))}) (kill-emacs 0)))))\n'
             if idle_file else '')
-    return (';; -*- lexical-binding: t -*-\n' + (real_init.gnu_settings() if engine == 'gnu' else parity_live.ROMACS_DEFAULTS_OFF)
+    return (';; -*- lexical-binding: t -*-\n'
+            + (real_init.gnu_settings() if engine == 'gnu'
+               else real_init.GNU_COMPLETION_UI + parity_live.ROMACS_DEFAULTS_OFF)
             + '(setq inhibit-startup-screen t)\n'
             f'(load {parity_live.lisp_string(str(GUI_LISP))} nil t)\n' + idle
             + f'(load {parity_live.lisp_string(str(parity_live.PROBE))} nil t)\n'
@@ -599,7 +606,9 @@ def key_rows(ctx, keys=40, gap=.2):
                                       'samples': sum(p['samples'] for p in runs)}
                                for name, runs in phases.items()}
             if not ctx.quick:
-                results[engine]['C-x C-f'] = completion(session, ctx.fixtures / 'd5000', rate, rounds)
+                results[engine]['C-x C-f'] = completion(session, ctx.fixtures / 'd5000', rate, rounds, FIDO)
+                if engine == 'romacs':
+                    results[engine]['layer'] = completion(session, ctx.fixtures / 'd5000', rate, rounds, LAYER)
         finally:
             session.stop()
     rows = [row(f'key {name}', 'gui', 'key', results['gnu'][name], results['romacs'][name], rounds,
@@ -613,11 +622,23 @@ def key_rows(ctx, keys=40, gap=.2):
                                    'fido-vertical, keys of file-1; candidates GNU'
                                    f' {results["gnu"]["C-x C-f"]["candidates"]},'
                                    f' Romacs {results["romacs"]["C-x C-f"]["candidates"]}')))
+        layer = results['romacs']['layer']
+        rows.append(row('C-x C-f 5,000 files, per key, romacs-complete', 'gui', 'key', None, layer, rounds,
+                        f'Romacs only: its default completion (the layer, fzf), keys of file-1; candidates {layer["candidates"]},'
+                        f' minibuffer {layer["check"]!r}'))
     return rows
 
 
-def completion(session, directory, rate, rounds):
-    session.ask('(progn (setq icomplete-compute-delay 0) (fido-vertical-mode 1)'
+# The two completions C-x C-f runs under: GNU's fido-vertical in both
+# engines, and Romacs's defaults, its layer with the standard styles
+# (fzf first) the comparison session left.
+FIDO = '(fido-vertical-mode 1)'
+LAYER = ("(progn (custom-reevaluate-setting 'completion-styles)"
+         " (custom-reevaluate-setting 'completion-category-overrides) (romacs-complete-mode 1))")
+
+
+def completion(session, directory, rate, rounds, display):
+    session.ask(f'(progn (setq icomplete-compute-delay 0) {display}'
                 f' (with-current-buffer (window-buffer (selected-window)) (setq default-directory'
                 f' {parity_live.lisp_string(str(directory) + "/")})) t)')
     runs, check, candidates = [], None, None

@@ -8,11 +8,16 @@
 ;; top of the *Romacs* startup screen, drawn in braille cells (renderer in
 ;; crates/romacs-logo).  Lisp draws a still frame into the buffer
 ;; (`romacs--logo-frame') and registers it with rlisp/romacs-animate.el as
-;; a display element in every window of the frame that shows it: the
-;; render thread sweeps light across the letters and drifts faint dots
-;; behind them, frame after frame, with no Lisp per frame.  Where motion
-;; is off (`romacs-animate-motion-p') it stands still.  SPC pauses and
-;; Home restarts it; the other keys stay the startup screen's.
+;; a display element in every window of the frame that shows it.  On a GPU
+;; the display draws the element as a scene over those cells
+;; (render_thread/page_scenes in romacs-display-runtime): braille dots rain
+;; into the mark, swell into a lit, extruded R that turns slowly in a warm
+;; rim light, a band of light crosses it, and the wordmark rises in as a
+;; vector.  Elsewhere the render thread sweeps light across the braille
+;; letters.  Either way no Lisp runs per frame.  Where motion is off
+;; (`romacs-animation', `romacs-animate-motion-p') it stands still, on a
+;; GPU in its posed, lit still frame.  SPC pauses and Home restarts it;
+;; the other keys stay the startup screen's.
 
 ;;; Code:
 

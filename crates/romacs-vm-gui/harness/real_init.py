@@ -151,6 +151,26 @@ def gnu_settings():
             f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n')
 
 
+# GNU's completion as it loads rlisp/romacs-completion-defaults.el, for
+# Romacs in a comparison: Romacs's window-system display is its own layer
+# (romacs-complete-mode, DIVERGENCES.md VM2-MINI-COMPLETION-LAYER), which
+# takes the root window's last line, and its styles begin with fzf
+# (VM2-FZF-DEFAULT), which fido then completes with instead of flex; GNU
+# gets `fido-vertical-mode' and the same styles without fzf, and no
+# project-file override, which the defaults add only with fzf.
+GNU_COMPLETION_UI = '''(romacs-complete-mode -1)
+(setq completion-styles (remq 'fzf completion-styles)
+      completion-category-overrides
+      (mapcar (lambda (entry)
+                (cons (car entry)
+                      (mapcar (lambda (prop)
+                                (if (eq (car-safe prop) 'styles) (cons 'styles (remq 'fzf (cdr prop))) prop))
+                              (cdr entry))))
+              (assq-delete-all 'project-file (copy-sequence completion-category-overrides))))
+(fido-vertical-mode 1)
+'''
+
+
 def init_source(engine, lisp, port_file, token, profile, config):
     """ENGINE's init: under PROFILE init the config's blocks from LISP, under
     stock nothing of anyone's, then the MCP endpoint on loopback, its port
@@ -158,8 +178,9 @@ def init_source(engine, lisp, port_file, token, profile, config):
     local socket: Romacs's GUI host refuses local network processes."""
     real = profile == 'init'
     blocks = profile_init(config) if real else ''
-    # Romacs's own defaults off under an init, as -Q keeps them off under stock.
-    setup = gnu_settings() if engine == 'gnu' else ROMACS_DEFAULTS_OFF if real else ''
+    # Romacs takes GNU's completion and turns its own defaults off (stock's
+    # -Q already keeps them off).
+    setup = gnu_settings() if engine == 'gnu' else GNU_COMPLETION_UI + ROMACS_DEFAULTS_OFF
     return f''';; -*- lexical-binding: t -*-
 (defvar bench-init-errors nil "Init blocks that signalled, as (NAME MESSAGE).")
 (defmacro bench-block (name &rest body)

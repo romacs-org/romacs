@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Regenerate child_frames.gnu: pinned GNU's answers to child_frames.el.
+"""Regenerate a probe's .gnu file: pinned GNU's answers to its forms.
 
-Child frames need a window system, which GNU batch does not have, so this
-runs the pinned GNU X11 build ($ROMACS_GNU_GUI_BINARY) on a private Xvfb
-($ROMACS_DISPLAY_TOOLS) over loopback TCP, with a private HOME, and writes
-one printed value per probe form.  tests/child_frames.rs compares Romacs's
-answers with the file.
+Child frames and window dividers need a window system, which GNU batch
+does not have, so this runs the pinned GNU X11 build
+($ROMACS_GNU_GUI_BINARY) on a private Xvfb ($ROMACS_DISPLAY_TOOLS) over
+loopback TCP, with a private HOME, and writes one printed value per probe
+form beside the probe.  tests/child_frames.rs compares Romacs's answers
+with child_frames.gnu, tests/frame_chrome.rs with frame_chrome.gnu.
 
-usage: child_frames_oracle.py [--output FILE]
+usage: child_frames_oracle.py [--probe FILE.el] [--output FILE]
 """
 import argparse
 import os
@@ -19,7 +20,6 @@ import tempfile
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
-PROBE = HERE / "child_frames.el"
 
 # Each probe line in one session, as tests/child_frames.rs evaluates it.
 DRIVER = r"""
@@ -49,8 +49,10 @@ def free_display():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", default=str(HERE / "child_frames.gnu"))
+    parser.add_argument("--probe", default=str(HERE / "child_frames.el"))
+    parser.add_argument("--output")
     args = parser.parse_args()
+    probe = pathlib.Path(args.probe).resolve()
     tools = pathlib.Path(os.environ["ROMACS_DISPLAY_TOOLS"])
     emacs = os.environ["ROMACS_GNU_GUI_BINARY"]
     scratch = pathlib.Path(tempfile.mkdtemp(prefix="child-frames-", dir=os.environ.get("TMPDIR")))
@@ -71,16 +73,16 @@ def main():
         home.mkdir()
         out = scratch / "answers"
         env = {"PATH": os.environ["PATH"], "HOME": str(home), "DISPLAY": display, "XAUTHORITY": str(auth),
-               "GDK_BACKEND": "x11", "LANG": "C.UTF-8", "PROBE": str(PROBE), "OUT": str(out)}
+               "GDK_BACKEND": "x11", "LANG": "C.UTF-8", "PROBE": str(probe), "OUT": str(out)}
         if "ROMACS_GATE_FONTCONFIG" in os.environ:
             env["FONTCONFIG_FILE"] = os.environ["ROMACS_GATE_FONTCONFIG"]
-        subprocess.run([emacs, "-Q", "--eval", DRIVER], env=env, check=True, timeout=60)
+        subprocess.run([emacs, "-Q", "--eval", DRIVER], env=env, check=True, timeout=120)
         answers = out.read_text()
     finally:
         server.terminate()
         server.wait()
     header = f";; pinned GNU {os.path.basename(os.path.dirname(os.path.dirname(emacs)))} X11 on Xvfb: child_frames_oracle.py\n"
-    pathlib.Path(args.output).write_text(header + answers)
+    pathlib.Path(args.output or probe.with_suffix(".gnu")).write_text(header + answers)
 
 
 if __name__ == "__main__":

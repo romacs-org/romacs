@@ -335,7 +335,7 @@ impl Vm {
     }
 
     /// `load-path` as strings; nil, the working directory, as ".".
-    fn load_path_strings(&mut self) -> crate::Result<Vec<String>> {
+    pub(crate) fn load_path_strings(&mut self) -> crate::Result<Vec<String>> {
         let slot = self.slot("load-path");
         let value = self.variable_value(slot)?;
         self.list_values(value)?.into_iter()

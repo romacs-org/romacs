@@ -237,9 +237,49 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
             (list romacs-complete-position (frame-parameter f 'romacs-layer-radius) (frame-parameter f 'romacs-layer-shadow)
                   (frame-parameter f 'romacs-layer-glow) (frame-parameter f 'child-frame-border-width)
-                  (stringp (frame-parameter f 'background-color))
+                  (stringp (frame-parameter f 'background-color)) (frame-parameter f 'romacs-layer-edge)
                   (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
                     (= (+ l (/ w 2)) (/ (- (frame-text-width) (* 2 (frame-parameter f 'child-frame-border-width))) 2)))))"));
+        // Each position moves the same panel, glass, centred and as wide,
+        // and nothing else: `bottom' ends a line above the mode line of the
+        // window the minibuffer was entered from, at the panel's tallest.
+        report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
+            (cl-letf (((symbol-function 'minibuffer-selected-window) #'selected-window))
+              (list (romacs-complete--mode-line-top (frame-parent f))
+                    (mapcar (lambda (position)
+                              (let ((romacs-complete-position position))
+                                (romacs-complete--frame)
+                                (cons position (append (romacs-complete--placement f 3)
+                                                       (list (frame-parameter f 'romacs-layer-radius)
+                                                             (frame-parameter f 'romacs-layer-edge))))))
+                            '(top center bottom)))))"));
+        // At `bottom' over a short selected window the panel shows only
+        // the rows that fit above its mode line.
+        report.push(printed(&mut vm, "(let ((f romacs-complete--layer) (romacs-complete-position 'bottom))
+            (cl-letf (((symbol-function 'minibuffer-selected-window) #'selected-window))
+              (split-window nil 10)
+              (prog1 (list (romacs-complete--mode-line-top (frame-parent f)) (romacs-complete--rows)
+                           (cadr (romacs-complete--placement f (romacs-complete--rows))))
+                (delete-other-windows))))"));
+        // A prompt that wraps, at `bottom' over a short selected window:
+        // the rows, the panel and paging all fit the room above its mode
+        // line once the prompt wrapped.
+        vm.eval_source("(defun rc-pick () (interactive)
+            (minibuffer-with-setup-hook
+                (lambda () (add-hook 'post-command-hook
+                             (lambda () (let ((f romacs-complete--layer))
+                                          (push (list (romacs-complete--rows) romacs-complete--index (window-pixel-height (minibuffer-window))
+                                                      (+ (cdr (frame-position f)) (frame-pixel-height f))
+                                                      (romacs-complete--mode-line-top (frame-parent f)))
+                                                rc-pick-seen)))
+                             90 t))
+              (setq rc-pick-result (completing-read (make-string 70 ?p) (mapcar (lambda (i) (format \"cand-%02d\" i)) (number-sequence 1 30))))))
+            (setq romacs-complete-position 'bottom rc-pick-seen nil) (split-window nil 10)").unwrap();
+        attach(&mut vm, "rc-pick\n\u{16}\n");
+        keys(&mut vm, &[(1 << 27) | 'x' as i64]);
+        report.push(printed(&mut vm, "(prog1 (list rc-pick-result (car rc-pick-seen) (length rc-pick-seen)
+                                                  (seq-every-p (lambda (r) (<= (nth 3 r) (- (nth 4 r) 20))) rc-pick-seen))
+                                          (delete-other-windows) (setq romacs-complete-position 'top))"));
         // Messages stack as toasts in the top-right corner, newest on top, at
         // most three; the same message again extends the newest.
         report.push(printed(&mut vm, "(progn (dolist (m '(\"one\" \"two\" \"three\" \"four\" \"four\")) (romacs-layer-toast m))
@@ -272,11 +312,29 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
             (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
               (list l (+ l w (* 2 (frame-parameter f 'child-frame-border-width))) (frame-text-width))))"));
+        // Input that wraps at the panel's width grows it before redisplay:
+        // at `bottom' the panel rises by the input's new lines and still
+        // ends at least a line above the mode line.
+        // (This frame's panel is 48 columns, under `truncate-partial-width-windows'.)
+        report.push(printed(&mut vm, "(let ((f romacs-complete--layer) (romacs-complete-position 'bottom)
+                  (truncate-partial-width-windows nil))
+            (cl-letf (((symbol-function 'minibuffer-selected-window) #'selected-window))
+              (with-current-buffer (window-buffer (minibuffer-window)) (insert (make-string 300 ?x)))
+              (romacs-complete--show (romacs-complete--candidates-buffer) 3)
+              (list (window-pixel-height (minibuffer-window)) (frame-text-height f) (cdr (frame-position f))
+                    (<= (+ (cdr (frame-position f)) (frame-pixel-height f)) (- (romacs-complete--mode-line-top (frame-parent f)) 20)))))"));
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#,
-                        r##"(top 8 t "#d48a20" 10 t t)"##,
+                        r##"(top 8 t "#d48a20" 10 t top t)"##,
+                        // Under the pane gap (VM2-PANE-CHROME) the room and the mode
+                        // line are the text area's, inside the 6-pixel internal border;
+                        // placing layers against it is L2's (romacs-chrome-bottom).
+                        "(774 ((top 316 87 600 80 8 top) (center 316 254 600 80 8 top) (bottom 316 474 600 80 8 top)))",
+                        "(186 6 6)", "(\"cand-06\" (5 5 40 166 186) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
-                        "(8 (nil 1))", "(600 840 480 1260)", "(0 484 484)"]);
+                        // 500 pixels less the fringes and the pane gap's
+                        // internal border (VM2-PANE-CHROME).
+                        "(8 (nil 1))", "(600 840 480 1260)", "(0 472 472)", "(140 200 354 t)"]);
 }

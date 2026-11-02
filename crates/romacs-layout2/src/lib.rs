@@ -161,7 +161,29 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
     if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(&mut frame, tab_bar, snapshot.width as f32, resolver)?; }
+    frame.panes = panes(snapshot);
     Ok((frame, ends))
+}
+
+/// SNAPSHOT's windows as panes (VM2-PANE-CHROME): each window's box (its
+/// text area, margins and fringes, not its dividers) but the
+/// mini-window's, with the frame's corners and hairline, the selected
+/// window's edge in the focus colour and the others dimmed; none in GNU's
+/// look.
+fn panes(snapshot: &FrameSnapshot) -> Vec<romacs_display_protocol::Pane> {
+    let chrome = &snapshot.chrome;
+    if !chrome.drawn() { return vec![]; }
+    snapshot.windows.iter().filter(|placed| placed.snapshot.id != chrome.minibuffer).map(|placed| {
+        let (left, right) = placed.snapshot.chrome.insets();
+        let selected = placed.snapshot.id == chrome.selected;
+        let edge = if selected { chrome.focus.or(chrome.border) } else { chrome.border };
+        romacs_display_protocol::Pane {
+            bounds: Rect::new((placed.x - left) as f32, placed.y as f32, (left + placed.snapshot.width + right) as f32, placed.snapshot.height as f32),
+            radius: chrome.radius as f32,
+            edge: edge.map(color),
+            dim: if selected { 0.0 } else { chrome.dim },
+        }
+    }).collect()
 }
 
 /// The frame's tab bar row across its top (xdisp.c display_tab_bar): FACE's
@@ -210,7 +232,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
     if child.id == 1 || child.windows.is_empty() { return Err("invalid child frame".into()); }
     let frame_snapshot = FrameSnapshot {
         font_selection: snapshot.font_selection, font_alternatives: snapshot.font_alternatives.clone(),
-        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![], tab_bar: None,
+        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![], tab_bar: None, chrome: Default::default(),
     };
     let cursor = cursor.filter(|(id, _)| child.windows.iter().any(|w| w.snapshot.id == *id));
     let (mut frame, ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, resolver)?;

@@ -88,12 +88,12 @@ fn window_tab_line_height(cx; optional window: Value) {
 
 defsubr! { name = "window-right-divider-width", gnu = "window.c:1242", effect = Reads,
 fn window_right_divider_width(cx; optional window: Value) {
-    cx.windows().live_zero(window)
+    cx.windows().window_divider_width(window, 0)
 }}
 
 defsubr! { name = "window-bottom-divider-width", gnu = "window.c:1251", effect = Reads,
 fn window_bottom_divider_width(cx; optional window: Value) {
-    cx.windows().live_zero(window)
+    cx.windows().window_divider_width(window, 1)
 }}
 
 defsubr! { name = "window-scroll-bar-width", gnu = "window.c:1260", effect = Reads,
@@ -206,12 +206,12 @@ fn frame_char_width(cx; optional frame: Value) {
 
 defsubr! { name = "frame-right-divider-width", gnu = "frame.c:4531", effect = Reads,
 fn frame_right_divider_width(cx; optional frame: Value) {
-    cx.windows().frame_absent_width(frame)
+    cx.windows().frame_divider_width(frame, 0)
 }}
 
 defsubr! { name = "frame-bottom-divider-width", gnu = "frame.c:4538", effect = Reads,
 fn frame_bottom_divider_width(cx; optional frame: Value) {
-    cx.windows().frame_absent_width(frame)
+    cx.windows().frame_divider_width(frame, 1)
 }}
 
 defsubr! { name = "active-minibuffer-window", gnu = "minibuf.c:215", effect = Reads,
@@ -446,7 +446,7 @@ fn window_top_line(cx; optional window: Value) {
 
 defsubr! { name = "frame-internal-border-width", gnu = "frame.c:4524", effect = Reads,
 fn frame_internal_border_width(cx; optional frame: Value) {
-    cx.windows().frame_absent_width(frame)
+    cx.windows().frame_internal_border_width(frame)
 }}
 
 // xdisp.c sets a buffer's long_line_optimizations_p when redisplay meets a

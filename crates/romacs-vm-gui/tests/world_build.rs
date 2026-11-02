@@ -1,7 +1,7 @@
-//! `--world-build`: the world a live `--loadup` launch would boot from, and
-//! a `--batch` session's (src/batch.rs), made usable with no window, so
-//! the user's first launch and first batch session restore; a second call
-//! finds them and builds nothing.
+//! `--world-build`: the world a live `--loadup` launch would boot from, made
+//! usable with no window, so the user's first launch restores; a second
+//! call finds it and builds nothing. A `--batch` session's world is not
+//! built here: the first session in the store prepares it (src/batch.rs).
 
 fn build(home: &std::path::Path) -> (bool, String) {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
@@ -16,11 +16,11 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).unwrap();
     let (ok, said) = build(&home);
-    assert!(ok && said.contains(r#""mode":"prepared""#) && said.contains(r#""launch":"batch""#), "{said}");
+    assert!(ok && said.contains(r#""mode":"prepared""#) && !said.contains(r#""launch":"batch""#), "{said}");
     let store = home.join("cache/romacs/worlds");
     let worlds: Vec<_> = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "rwi")).collect();
-    assert_eq!(worlds.len(), 2, "{worlds:?}");
+    assert_eq!(worlds.len(), 1, "{worlds:?}");
     assert!(worlds.iter().all(|w| w.with_extension("json").is_file()));
     let images: Vec<_> = worlds.iter().map(|w| std::fs::metadata(w).unwrap().modified().unwrap()).collect();
     let (ok, said) = build(&home);

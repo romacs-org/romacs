@@ -21,6 +21,7 @@ const ENTRIES: &[&str] = &[
     "finish_request", "poll_collect", "collect_garbage", "watched_write", "call_suspended",
     "load_source_named", "variable_set", "notify", "prepared_function",
     "prepare_source", "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
+    "load_file_kind", "load_artifact", "compile_walk", "compile_unit",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];

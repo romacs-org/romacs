@@ -34,6 +34,7 @@ mod html;
 mod html_entities;
 pub mod host;
 pub mod world;
+pub mod compiled_lisp;
 mod environment;
 mod watchers;
 mod user_db;

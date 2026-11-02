@@ -111,8 +111,8 @@ fn child_frame_snapshots_survive_a_collecting_mode_line() {
 }
 
 /// A child frame hosting the minibuffer window (`romacs--host-minibuffer'):
-/// the frame's windows take its line, the minibuffer window is laid out at
-/// the host's edge and drawn there, it grows the host at the far side, and
+/// the frame's windows take its line, the minibuffer window is laid out on
+/// the host's top edge and drawn there, it grows the host downward, and
 /// giving it back, or deleting the host, restores the line.
 #[test]
 fn a_hosted_minibuffer_takes_no_line_of_the_frame() {
@@ -126,11 +126,11 @@ fn a_hosted_minibuffer_takes_no_line_of_the_frame() {
     assert_eq!(edges(&mut vm, "(frame-root-window)"), "(0 0 800 580)");
     vm.eval_source("(setq c (romacs--create-frame `((parent-frame . ,(selected-frame)) (minibuffer . ,(minibuffer-window)) \
                     (width . (text-pixels . 798)) (height . (text-pixels . 100)) (child-frame-border-width . 1) (left . 0) (top . 498))))").unwrap();
-    assert_eq!(vm.eval_source("(eq (romacs--host-minibuffer c 'bottom) c)").unwrap().display().unwrap(), "t");
+    assert_eq!(vm.eval_source("(eq (romacs--host-minibuffer c) c)").unwrap().display().unwrap(), "t");
     assert_eq!(vm.eval_source("(eq (romacs--minibuffer-host) c)").unwrap().display().unwrap(), "t");
     assert_eq!(edges(&mut vm, "(frame-root-window)"), "(0 0 800 600)");
-    assert_eq!(edges(&mut vm, "(minibuffer-window)"), "(1 579 798 20)");
-    assert_eq!(edges(&mut vm, "(frame-root-window c)"), "(1 1 798 80)");
+    assert_eq!(edges(&mut vm, "(minibuffer-window)"), "(1 499 798 20)");
+    assert_eq!(edges(&mut vm, "(frame-root-window c)"), "(1 21 798 80)");
     // The minibuffer window is the host frame's still, drawn in the child.
     assert_eq!(vm.eval_source("(list (eq (window-frame (minibuffer-window)) (selected-frame)) (eq (minibuffer-window c) (minibuffer-window)))")
         .unwrap().display().unwrap(), "(t t)");
@@ -138,18 +138,18 @@ fn a_hosted_minibuffer_takes_no_line_of_the_frame() {
     assert_eq!(snapshot.windows.len(), 1, "the root frame draws its own windows only");
     let child = &snapshot.children[0];
     let placed: Vec<_> = child.windows.iter().map(|w| (w.x, w.y, w.snapshot.height)).collect();
-    assert_eq!(placed, vec![(1, 1, 80), (1, 81, 20)]);
-    // Three lines of input grow the strip upward; its bottom stays.
+    assert_eq!(placed, vec![(1, 21, 80), (1, 1, 20)]);
+    // Three lines of input grow the box downward; its top stays.
     vm.eval_source("(setq resize-mini-windows t)").unwrap();
     vm.eval_source("(with-current-buffer (window-buffer (minibuffer-window)) (insert \"a\\nb\\nc\"))").unwrap();
     vm.frame_snapshot(800, 600).unwrap();
-    assert_eq!(edges(&mut vm, "(minibuffer-window)"), "(1 539 798 60)");
-    assert_eq!(vm.eval_source("(list (frame-position c) (frame-text-height c))").unwrap().display().unwrap(), "((0 . 458) 140)");
+    assert_eq!(edges(&mut vm, "(minibuffer-window)"), "(1 499 798 60)");
+    assert_eq!(vm.eval_source("(list (frame-position c) (frame-text-height c))").unwrap().display().unwrap(), "((0 . 498) 140)");
     assert_eq!(edges(&mut vm, "(frame-root-window)"), "(0 0 800 600)");
-    // A top edge: a box keeps its top and its root window follows the minibuffer.
+    // Moved, the box's root window still follows the minibuffer.
     vm.eval_source("(with-current-buffer (window-buffer (minibuffer-window)) (erase-buffer))").unwrap();
     vm.frame_snapshot(800, 600).unwrap();
-    vm.eval_source("(romacs--host-minibuffer c 'top) (set-frame-position c 100 50)").unwrap();
+    vm.eval_source("(set-frame-position c 100 50)").unwrap();
     assert_eq!(edges(&mut vm, "(minibuffer-window)"), "(101 51 798 20)");
     assert_eq!(edges(&mut vm, "(frame-root-window c)"), "(1 21 798 80)");
     // Only the minibuffer: the root window keeps no line and is not drawn.
@@ -180,7 +180,7 @@ fn a_hosted_minibuffer_grows_for_its_wrapped_rows() {
     vm.eval_source("(setq resize-mini-windows t truncate-partial-width-windows nil)").unwrap();
     vm.eval_source("(setq c (romacs--create-frame `((parent-frame . ,(selected-frame)) (minibuffer . ,(minibuffer-window)) \
                     (width . (text-pixels . 400)) (height . (text-pixels . 20)) (left . 100) (top . 100))))").unwrap();
-    vm.eval_source("(romacs--host-minibuffer c 'top)").unwrap();
+    vm.eval_source("(romacs--host-minibuffer c)").unwrap();
     // 39 columns a row: 100 characters take 3 rows.
     vm.eval_source("(with-current-buffer (window-buffer (minibuffer-window)) (insert (make-string 100 ?x)))").unwrap();
     vm.frame_snapshot(800, 600).unwrap();
@@ -203,7 +203,7 @@ fn a_hosted_minibuffer_wraps_wide_glyphs_whole() {
     vm.eval_source("(setq resize-mini-windows t truncate-partial-width-windows nil)").unwrap();
     vm.eval_source("(setq c (romacs--create-frame `((parent-frame . ,(selected-frame)) (minibuffer . ,(minibuffer-window)) \
                     (width . (text-pixels . 400)) (height . (text-pixels . 20)) (left . 100) (top . 100))))").unwrap();
-    vm.eval_source("(romacs--host-minibuffer c 'top)").unwrap();
+    vm.eval_source("(romacs--host-minibuffer c)").unwrap();
     vm.eval_source("(with-current-buffer (window-buffer (minibuffer-window)) (insert (make-string 39 ?中)))").unwrap();
     vm.frame_snapshot(800, 600).unwrap();
     assert_eq!(vm.eval_source("(window-pixel-height (minibuffer-window))").unwrap().display().unwrap(), "60");
