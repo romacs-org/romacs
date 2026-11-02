@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "47e4d5739511a2d63f119e143b9f93afc616af45d17504a4a05faa34a6e5297d",
+  "source_fingerprint": "fafa580f4e4a99b6863d4d81ca87e22e416980be355ec0c96edc3cc12cf00235",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1246,
-  "parsed_vm2_only": 1246
+  "parsed_total": 1247,
+  "parsed_vm2_only": 1247
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -534,6 +534,11 @@
    "name": "buffer-file-name",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:21"
+  },
+  "buffer-hash": {
+   "name": "buffer-hash",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/digest.rs:27"
   },
   "buffer-list": {
    "name": "buffer-list",
