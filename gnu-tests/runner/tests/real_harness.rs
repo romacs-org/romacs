@@ -122,6 +122,19 @@ fn real_mode_evaluates_deeply_nested_expansions() {
     );
     assert_eq!(output.status.code(), Some(0), "NESTING: {}", stdout(&output));
 }
+// keyboard.c handle_user_signal: SIGUSR1 is input, not the end of the
+// process; read_char runs its `special-event-map' binding. GNU gives the
+// same (nil (usr1)).
+#[test]
+fn real_mode_reads_a_user_signal_as_an_event() {
+    let f = Fixture::new();
+    let output = f.run(
+        "(defun ert-run-tests-batch (_) (if (equal rt-value '(nil (usr1))) 0 1))",
+        ";;; -*- lexical-binding: t -*-\n(defvar rt-got nil)\n(current-global-map)\n(define-key special-event-map [sigusr1] (lambda () (interactive) (setq rt-got (cons 'usr1 rt-got))))\n(signal-process (emacs-pid) 'sigusr1)\n(setq rt-before rt-got)\n(read-event nil nil 0.2)\n(setq rt-value (list rt-before rt-got))",
+        "(ert-run-tests-batch t)",
+    );
+    assert_eq!(output.status.code(), Some(0), "USER-SIGNAL: {} {:?}", stdout(&output), output.status);
+}
 #[test]
 fn real_mode_stops_on_target_load_error() {
     let f = Fixture::new();

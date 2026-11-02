@@ -396,6 +396,10 @@ fn load_chain(vm: &mut Vm, args: &Args, from: usize, to: usize, chain: &mut Vec<
 const EVALUATOR_STACK_SIZE: usize = 64 * 1024 * 1024;
 
 fn main() {
+    if let Err(error) = romacs_vm::host::catch_user_signals() {
+        emit(json!({"event": "setup", "ok": false, "phase": "user-signals", "error": error.to_string()}));
+        std::process::exit(3);
+    }
     let evaluator = std::thread::Builder::new()
         .name("romacs-evaluator".into())
         .stack_size(EVALUATOR_STACK_SIZE)

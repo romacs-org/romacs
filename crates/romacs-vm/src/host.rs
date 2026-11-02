@@ -1995,6 +1995,35 @@ pub fn catch_isolate_signals() -> io::Result<()> {
 pub fn interrupt_pending() -> bool {
     INTERRUPT.load(std::sync::atomic::Ordering::Relaxed) || TERMINATE.load(std::sync::atomic::Ordering::Relaxed)
 }
+/// keyboard.c handle_user_signal: SIGUSR1 and SIGUSR2 are input, counted
+/// here until read as `sigusr1' and `sigusr2' events, never the end of the
+/// process. An isolate worker gives SIGUSR1 its own meaning afterwards
+/// (`catch_isolate_signals').
+static USER_SIGNALS: [std::sync::atomic::AtomicU32; 2] =
+    [std::sync::atomic::AtomicU32::new(0), std::sync::atomic::AtomicU32::new(0)];
+const USER_SIGNAL_EVENTS: [(libc::c_int, &str); 2] = [(libc::SIGUSR1, "sigusr1"), (libc::SIGUSR2, "sigusr2")];
+extern "C" fn note_user_signal(signal: libc::c_int) {
+    let index = usize::from(signal == libc::SIGUSR2);
+    USER_SIGNALS[index].fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+pub fn catch_user_signals() -> io::Result<()> {
+    for (signal, _) in USER_SIGNAL_EVENTS {
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = note_user_signal as *const () as usize;
+        action.sa_flags = libc::SA_RESTART;
+        unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+    }
+    Ok(())
+}
+/// A pending user signal's event, SIGUSR1's first, taking it.
+pub fn take_user_signal() -> Option<&'static str> {
+    USER_SIGNALS.iter().zip(USER_SIGNAL_EVENTS).find_map(|(count, (_, event))| {
+        count.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |n| n.checked_sub(1))
+            .ok().map(|_| event)
+    })
+}
+
 /// Take the pending interrupt, if any.
 pub fn take_interrupt() -> bool {
     INTERRUPT.swap(false, std::sync::atomic::Ordering::SeqCst)
