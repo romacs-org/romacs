@@ -506,6 +506,7 @@ fn daily_driver_load_slice_matches_gnu() {
         r###"(list (mapcar (lambda (a) (secure-hash a "abc")) (secure-hash-algorithms)) (mapcar (lambda (a) (secure-hash a "")) '(md5 sha1 sha224 sha384 sha3-224 sha3-256 sha3-384 sha3-512)))"###,
         r###"(list (secure-hash 'sha256 (make-string 200 ?x)) (secure-hash 'sha3-224 (make-string 144 ?y)) (secure-hash 'sha3-224 (make-string 143 ?y)) (secure-hash 'sha3-512 (make-string 72 ?z)) (secure-hash 'sha3-512 (make-string 71 ?z)) (secure-hash 'sha3-256 (make-string 1000 ?q)) (secure-hash 'sha512 (make-string 111 ?w)))"###,
         r###"(list (secure-hash 'sha1 "abcdef" 1 -1) (secure-hash 'sha1 "abcdef" -3) (secure-hash 'sha1 (string-to-unibyte "\377\0\200")) (secure-hash 'md5 (string-to-unibyte "\377") 0 1) (string-to-list (secure-hash 'md5 "abc" nil nil t)) (multibyte-string-p (secure-hash 'md5 "abc")) (multibyte-string-p (secure-hash 'md5 "abc" nil nil t)) (length (secure-hash 'sha512 "abc" nil nil t)) (md5 "abc") (md5 "abcdef" 2 4) (md5 (string-to-unibyte "\377")))"###,
+        r###"(let ((print-symbols-bare t)) (list (prin1-to-string '(a "b" 1 (c . d))) (format "%S" 'e) (with-output-to-string (prin1 'f))))"###,
         r###"(let ((b (get-buffer-create " rt-hash")))
   (with-current-buffer b (insert "h\u00e9llo\n" (string (unibyte-char-to-multibyte 255) (unibyte-char-to-multibyte 128)) "\u4e00"))
   (prog1 (list (buffer-hash b) (buffer-hash " rt-hash") (with-current-buffer b (narrow-to-region 2 3) (buffer-hash))
