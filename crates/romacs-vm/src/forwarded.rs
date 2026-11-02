@@ -467,8 +467,8 @@ pub(crate) enum Init {
     List(&'static [Init]),
     /// make_nil_vector (N).
     NilVector(usize),
-    /// A file name under the runtime root: ROMACS_RUNTIME_ROOT, else this
-    /// checkout (GNU's installation-relative directories). The flag adds a
+    /// A file name under `host::runtime_root` (GNU's installation-relative
+    /// directories). The flag adds a
     /// final slash, as file-name-as-directory does.
     RuntimeFile(&'static str, bool),
     /// init_cmdargs: the running executable's file name (true) or its
@@ -1083,9 +1083,7 @@ impl Vm {
                 self.list_value(&values)
             }
             Init::RuntimeFile(name, slash) => {
-                let root = crate::host::getenv("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
-                    .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
-                let text = format!("{}{}", root.join(name).display(), if slash { "/" } else { "" });
+                let text = format!("{}{}", crate::host::runtime_root().join(name).display(), if slash { "/" } else { "" });
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::Invocation(name) => {

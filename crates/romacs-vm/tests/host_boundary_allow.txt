@@ -28,8 +28,8 @@ crates/romacs-vm/src/bin/romacs-vm-image.rs:42 std::fs bin adapter that builds n
 crates/romacs-vm/src/display.rs:322 delayed-variable the window record's display variables, read through variable_value, which checks the fence
 crates/romacs-vm/src/display.rs:950 delayed-variable reads through variable_value, which checks the fence
 crates/romacs-vm/src/forwarded.rs:704 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/forwarded.rs:1389 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/forwarded.rs:1583 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/forwarded.rs:1387 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/forwarded.rs:1581 delayed-variable declares the variable; reads no slot
 crates/romacs-vm/src/gc.rs:119 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
 crates/romacs-vm/src/gc.rs:647 dynamic:saved collector: marks the saved values
 crates/romacs-vm/src/gc.rs:1029 dynamic:saved collector: forwards the saved values

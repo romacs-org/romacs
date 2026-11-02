@@ -113,13 +113,12 @@ pub fn build_roots(recipe: Vec<PathBuf>, dir: &Path) -> Vec<PathBuf> {
     roots
 }
 
-/// The roots this binary itself reads at run time: its build tree (etc/,
-/// the source directory) and `ROMACS_RUNTIME_ROOT`, the directories of the
+/// The roots this binary itself reads at run time: its build tree (the
+/// source directory) and its runtime tree (`host::runtime_root`), the directories of the
 /// shared objects it maps (glibc loads NSS modules from its own), the
 /// process's /proc entries, the time zones and the user and host databases.
 pub fn runtime_roots() -> Vec<PathBuf> {
-    let mut roots = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")];
-    roots.extend(crate::host::getenv("ROMACS_RUNTIME_ROOT").map(PathBuf::from));
+    let mut roots = vec![crate::host::build_root(), crate::host::runtime_root()];
     let maps = crate::host::read_to_string("/proc/self/maps").unwrap_or_default();
     for path in maps.lines().filter_map(|line| line.split_whitespace().nth(5)).filter(|p| p.starts_with('/')) {
         if let Some(parent) = Path::new(path).parent().filter(|p| !roots.iter().any(|r| r == p)) {
