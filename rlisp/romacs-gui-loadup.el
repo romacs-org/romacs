@@ -87,9 +87,10 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; so they follow the display record.
         (let ((user-emacs-directory-warning nil))
           (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
-        ;; The root frame's windows are drawn as panes on a window system
+        ;; The root frame's windows are drawn as panes on a window system,
+        ;; in the chrome colours of the faces this display shows
         ;; (romacs-chrome.el, DIVERGENCES.md VM2-PANE-CHROME).
-        (when (fboundp 'romacs-chrome-apply) (romacs-chrome-apply)))
+        (when (fboundp 'romacs-chrome-refresh) (romacs-chrome-refresh)))
     (romacs--startup-phase nil)))
 (setq romacs-startup-function #'romacs-gui-startup)
 (romacs-gui-startup)

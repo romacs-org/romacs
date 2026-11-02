@@ -116,9 +116,13 @@
    'rum-palette-user
    'rum-palette-overrides))
 
-(let ((bg (cadr (assq 'bg-main rum-palette))))
+(let ((bg (cadr (assq 'bg-main rum-palette)))
+      (gold (cadr (assq 'gold rum-palette))))
   (custom-theme-set-faces
    'rum
+   ;; Romacs's chrome accent (romacs-chrome.el): the focus edge, a layer's
+   ;; glow and completion matches.
+   `(romacs-layer-glow ((t (:foreground ,gold))))
    `(fringe ((t (:background ,bg :foreground ,bg))))
    `(window-divider ((t (:background ,bg :foreground ,bg))))
    `(window-divider-first-pixel ((t (:background ,bg :foreground ,bg))))

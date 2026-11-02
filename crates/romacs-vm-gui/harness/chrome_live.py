@@ -35,8 +35,16 @@ fails unless each of the 200 has a sample.
 With --light the default face is dark on light (#202020 on #f0f0f0),
 where a corner blended wrongly shows.
 
+With --themes A,B the three panes then show each theme in turn, every
+other theme disabled first (`load-theme'), each recorded and probed as
+above: the focus edge must show the colour `romacs-chrome-state' reports
+for that theme, and every theme's focus colour must differ from the
+others' and from the one before any theme (romacs-chrome.el
+`romacs-chrome-derived-faces').
+
 usage: chrome_live.py --binary BIN --output DIR [--classic] [--scale 1.5]
        [--slowdown 8] [--mode 1600x1000] [--gpu-frames 200] [--light]
+       [--themes modus-operandi,tango-dark]
 """
 import argparse
 import hashlib
@@ -73,9 +81,13 @@ STEPS = r'''
 (run-at-time 7 nil (lambda () (split-window-right) (chrome-live--note "2")))
 (run-at-time 10 nil (lambda () (split-window-below) (chrome-live--note "3")))
 '''
+THEME = r'''
+(run-at-time {at} nil (lambda () (mapc #'disable-theme custom-enabled-themes) (load-theme '{theme} t)
+                        (chrome-live--note "{theme}")))
+'''
 LOAD = r'''
 (blink-cursor-mode -1)
-(run-at-time 13 nil (lambda ()
+(run-at-time {at} nil (lambda ()
   (set-window-buffer (frame-first-window) (get-buffer-create "load"))
   (let ((n 0) timer)
     (setq timer (run-at-time 0.5 0.05 (lambda ()
@@ -141,11 +153,15 @@ def main():
     ap.add_argument('--timeout', type=float, default=120)
     ap.add_argument('--gpu-frames', type=int, default=0)
     ap.add_argument('--light', action='store_true')
+    ap.add_argument('--themes', default='', help='comma-separated themes to load in turn after the splits')
     ap.add_argument('--labwc', default=live.LABWC)
     ap.add_argument('--wlr-randr', default=live.RANDR)
     args = ap.parse_args()
     if args.gpu_frames and args.gpu_frames < MEASURED:
         ap.error(f'--gpu-frames measures the last {MEASURED} presentations')
+    themes = [t for t in args.themes.split(',') if t]
+    if args.classic and themes:
+        ap.error('--themes probes the focus edge, which --classic does not draw')
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
     binary = args.binary.resolve()
@@ -169,7 +185,11 @@ def main():
                 init += '(romacs-classic-chrome 1)\n'
             if args.slowdown != 1:
                 init += f'(setopt romacs-window-animations-slowdown {args.slowdown})\n'
-            end = LOAD.replace('{frames}', str(args.gpu_frames)) if args.gpu_frames else '(run-at-time 13 nil (lambda () (kill-emacs 0)))\n'
+            for i, theme in enumerate(themes):
+                init += THEME.replace('{at}', str(13 + 3 * i)).replace('{theme}', theme)
+            at = str(13 + 3 * len(themes))
+            end = (LOAD.replace('{frames}', str(args.gpu_frames)).replace('{at}', at) if args.gpu_frames
+                   else f'(run-at-time {at} nil (lambda () (kill-emacs 0)))\n')
             (home / 'config' / 'romacs' / 'init.el').write_text(init + STEPS + end)
             stats = out / 'frame-stats.txt'
             if stats.exists():
@@ -207,7 +227,7 @@ def main():
                     subprocess.run(['/usr/bin/grim', str(path)], env=env, check=True, timeout=30)
                     return path
 
-                for step in ('1', '2', '3'):
+                for step in ['1', '2', '3'] + themes:
                     note = notes / f'{step}.json'
                     wait(note.exists, args.timeout, f'record {step}', proc)
                     if step == '3' and args.slowdown != 1:
@@ -242,6 +262,10 @@ def main():
             ok = ok and (report['chrome_divider_quads'] == 0 if args.classic else (report['chrome_divider_quads'] or 0) > 0)
             for name, (got, want) in checks.items():
                 ok = ok and near(got, want)
+            if themes:
+                focuses = [report[f'state-{step}']['focus'] for step in ['3'] + themes]
+                report['theme_focus'] = dict(zip(['none'] + themes, focuses))
+                ok = ok and len(set(focuses)) == len(focuses)
             if args.gpu_frames:
                 gpu = report['gpu']
                 ok = ok and gpu['presentations'] == MEASURED and gpu['missing'] == 0

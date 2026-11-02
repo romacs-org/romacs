@@ -146,13 +146,13 @@ downward as candidates come and go."
 ;; Apache-2.0 or GPL-3.0; ideas and values only, no code): the selected row a
 ;; subtle tinted band, rounded and inset (the host draws it from the
 ;; `romacs-layer-selection' parameter), matched characters in the accent
-;; colour, a file's directory muted beside its name.  Colours are the Ember
-;; Lattice palette (graphics.md section 3): the selection the background
-;; lifted 16% toward the foreground (#2a2822 on the rum theme), accent #d48a20.
-(defface romacs-complete-current '((t :background "#2a2822" :extend t))
+;; colour, a file's directory muted beside its name.  The colours follow the
+;; theme (romacs-chrome.el `romacs-chrome-derived-faces'): the selection the
+;; background lifted 20% toward the foreground, the matches the accent.
+(defface romacs-complete-current '((t :extend t))
   "Face used to highlight the currently selected candidate.")
 
-(defface romacs-complete-match '((t :foreground "#d48a20"))
+(defface romacs-complete-match '((t :inherit romacs-layer-glow))
   "Face of the characters a completion style matched in a candidate,
 in place of the style's own (`romacs-fzf-match', `completions-common-part',
 orderless's).")
@@ -161,10 +161,9 @@ orderless's).")
   "Face of the directory part of a file candidate, shown after its name;
 the name keeps the default face.")
 
-(defface romacs-complete-prompt '((t :foreground "#756b59"))
+(defface romacs-complete-prompt '((t :inherit shadow))
   "Face of a completing prompt's label and count in the panel: the input
-is what the panel shows first.  The default is the Ember Lattice palette's
-muted slot, its comment colour.")
+is what the panel shows first.")
 
 (defvar-keymap romacs-complete-map
   :doc "Minibuffer keymap of `romacs-complete-mode', derived from `minibuffer-local-map'."

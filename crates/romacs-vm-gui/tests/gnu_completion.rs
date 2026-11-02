@@ -338,3 +338,54 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         // internal border (VM2-PANE-CHROME).
                         "(8 (nil 1))", "(600 840 480 1260)", "(0 472 472)", "(140 200 354 t)"]);
 }
+
+/// Every chrome colour follows the theme (romacs-chrome.el
+/// `romacs-chrome-derived-faces'): a theme's own Romacs face wins (Rum's
+/// accent, a theme setting `romacs-pane-focus'), the rest are derived from
+/// the faces every theme sets, light or dark, and the root frame's and a
+/// shown glass layer's parameters change with them when a theme is enabled
+/// or disabled.  With no theme the built-in palette's accent shows.
+#[test]
+fn chrome_colours_follow_the_theme() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        // The default background; the root frame's focus edge and hairline;
+        // a toast's glow and glass, the same toast each time (the same text
+        // extends the toast shown); the panel's selected row and matches.
+        vm.eval_source("(defun tc-probe ()
+            (romacs-layer-toast \"toast\")
+            (let ((root (romacs-chrome--root-frame)) (toast (romacs-layer--frame (caar romacs-layer--toasts)))
+                  (hex (lambda (face background)
+                         (romacs-chrome--hex (if background (face-background face nil t) (face-foreground face nil t))))))
+              (list custom-enabled-themes (funcall hex 'default t)
+                    (frame-parameter root 'romacs-pane-focus) (frame-parameter root 'romacs-pane-border)
+                    (frame-parameter toast 'romacs-layer-glow) (frame-parameter toast 'background-color)
+                    (funcall hex 'romacs-complete-current t) (funcall hex 'romacs-complete-match nil))))").unwrap();
+        let mut report = vec![printed(&mut vm, "(tc-probe)")];
+        for step in ["(load-theme 'rum t)",
+                     "(progn (disable-theme 'rum) (load-theme 'modus-operandi t))",
+                     "(progn (disable-theme 'modus-operandi) (load-theme 'tango-dark t))",
+                     "(progn (deftheme tc-focus) (custom-theme-set-faces 'tc-focus '(romacs-pane-focus ((t :foreground \"#ff0000\")))) (enable-theme 'tc-focus))",
+                     "(mapc #'disable-theme custom-enabled-themes)"] {
+            report.push(printed(&mut vm, &format!("(progn {step} (tc-probe))")));
+        }
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, [
+        // No theme: the built-in palette, Rum's black, and its accent.
+        r##"(nil "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#2a2720" "#d48a20")"##,
+        // Rum sets `romacs-layer-glow' itself: the same accent, though its
+        // cursor is indigo.
+        r##"((rum) "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#2a2720" "#d48a20")"##,
+        // Light: the cursor is black, so the accent is the link colour; the
+        // hairline 15%, glass 8% and selection 20% toward black.
+        r##"((modus-operandi) "#ffffff" "#3548cf" "#d9d9d9" "#3548cf" "#ebebeb" "#cccccc" "#3548cf")"##,
+        // Dark: the cursor's butter yellow.
+        r##"((tango-dark) "#2e3436" "#fce94f" "#4b5051" "#fce94f" "#3d4345" "#54595a" "#fce94f")"##,
+        // A theme that sets the focus edge alone changes it alone.
+        r##"((tc-focus tango-dark) "#2e3436" "#ff0000" "#4b5051" "#fce94f" "#3d4345" "#54595a" "#fce94f")"##,
+        r##"(nil "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#2a2720" "#d48a20")"##]);
+}
