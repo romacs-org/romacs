@@ -64,3 +64,12 @@ fn compare_buffer_substrings_matches_pinned_gnu() {
 (with-temp-buffer (insert "abc") (list (condition-case e (compare-buffer-substrings nil 0 3 nil 1 2) (error e)) (condition-case e (compare-buffer-substrings "no such" 1 3 nil 1 2) (error e)) (condition-case e (compare-buffer-substrings 'x 1 3 nil 1 2) (error e)) (condition-case e (compare-buffer-substrings nil 1 9 nil 1 2) (error e)) (let ((b (generate-new-buffer "dead"))) (kill-buffer b) (condition-case e (compare-buffer-substrings b 1 1 nil 1 2) (error e)))))
 "###);
 }
+
+#[test]
+fn string_collation_matches_pinned_gnu() {
+    matches_pinned_gnu(r###"
+(list (string-collate-lessp "a" "B") (string-collate-lessp "a" "B" nil t) (string-collate-equalp "A" "a" nil t) (string-collate-equalp "A" "a") (string-collate-lessp 'abc "abd") (string-collate-lessp "a\0b" "a\0a") (string-collate-equalp "a\0b" "a\0a"))
+(list (string-collate-lessp "é" "f" "POSIX") (string-collate-lessp "XYZZY" "xyzzy" "POSIX") (string-collate-equalp "xyzzy" "XYZZY" "C" t) (string-collate-lessp (unibyte-string 200) (unibyte-string 100)) (sort (list "11" "12" "1 1" "1 2" "1.1" "1.2") #'string-collate-lessp))
+(list (condition-case e (string-collate-lessp "a" "b" "no_SUCH.locale") (error e)) (condition-case e (string-collate-lessp 1 "b") (error e)) (condition-case e (string-collate-equalp "a" "b" 'x) (error e)))
+"###);
+}
