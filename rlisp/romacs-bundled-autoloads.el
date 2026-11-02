@@ -167,7 +167,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-gnu-ert-bootstrap.el
 
-(register-definition-prefixes "romacs-gnu-ert-bootstrap" '("shortdoc--groups"))
+(register-definition-prefixes "romacs-gnu-ert-bootstrap" '("customize-package-emacs-version-alist" "shortdoc--groups"))
 
 
 ;;; Generated autoloads from romacs-gradients.el

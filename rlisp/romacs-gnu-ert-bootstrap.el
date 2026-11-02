@@ -49,6 +49,9 @@
 (load "emacs-lisp/regexp-opt.el" nil t t)
 (load "emacs-lisp/lisp-mode.el" nil t t)
 (load "minibuffer.el" nil t t)
+;; loadup.el:138: window.el before files.el (`walk-windows',
+;; `pop-to-buffer-same-window', which auto-revert and uniquify reach).
+(load "window.el" nil t t)
 ;; cus-start.el's Linux standard value for this C variable, applied before
 ;; files.el reads it.  GNU reaches it through custom-initialize-delay at
 ;; startup; loading all of cus-start needs C variables Romacs lacks.
@@ -68,7 +71,17 @@
 ;; simple.el's undo-auto--undoable-change runs on every undoable change and
 ;; sets its boundary timer with run-at-time, as GNU's loadup provides it.
 (load "emacs-lisp/timer.el" nil t t)
-;; More of GNU's dump (loadup.el:249, 258-260, 280, 293-296, 377), each
+;; loadup.el:275: menu-bar.el's maps, which files.el's and simple.el's
+;; menu items and tests (filenotify's backup case) reach.
+(load "menu-bar.el" nil t t)
+;; loaddefs.el's autoload of filenotify's handler, which the `file-notify'
+;; special event runs; of cond-star's `cond*', which vc-hooks.el's
+;; `vc-refresh-state' (auto-revert's) uses, so before vc-hooks.el loads;
+;; and cus-edit's autoloaded alist, which trampver.el adds to at top level.
+(autoload 'file-notify-handle-event "filenotify" nil t)
+(autoload 'cond* "cond-star" nil nil 'macro)
+(defvar customize-package-emacs-version-alist nil)
+;; More of GNU's dump (loadup.el:249, 258-260, 280, 293-296, 377, 379), each
 ;; one a GNU test file reaches.  fringe.el supplies `define-fringe-bitmap'
 ;; where no window system defines it, as GNU's loaddefs does.
 (load "indent.el" nil t t)
@@ -79,6 +92,7 @@
 (load "fringe.el" nil t t)
 (load "image.el" nil t t)
 (load "vc/vc-hooks.el" nil t t)
+(load "uniquify.el" nil t t)
 ;; loaddefs.el's autoload of shortdoc's group macro, which treesit.el
 ;; calls at top level.
 (defvar shortdoc--groups nil)
