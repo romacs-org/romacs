@@ -35,7 +35,7 @@ const EVALUATED: [&str; 9] = [
 /// Forms evaluated as they are, each around an `eval' of its own: what the
 /// eval'd form's own handlers catch, no handler around the `eval' sees, and
 /// a deferred call's expansion defers the calls inside it in turn.
-const AROUND: [&str; 11] = [
+const AROUND: [&str; 13] = [
     r#"(catch 'rt-tag (list 'outer (eval '(catch 'rt-tag (rt-t)) t)))"#,
     r#"(progn (setq rt-log nil) (list (catch 'rt-tag (eval '(unwind-protect (rt-t) (push 'cleanup rt-log)) t)) rt-log))"#,
     r#"(progn (setq rt-log nil) (list (handler-bind ((error (lambda (e) (push e rt-log)))) (eval '(condition-case nil (rt-m) (error 'inner)) t)) rt-log))"#,
@@ -52,6 +52,10 @@ const AROUND: [&str; 11] = [
     r#"(progn (setq rt-log nil) (list (condition-case e (eval '(progn (push 'before rt-log) (rt-undefined (push 'arg rt-log))) t) (error e)) rt-log))"#,
     r#"(progn (setq rt-log nil) (list (eval '(condition-case e (rt-undefined (push 'arg rt-log)) (void-function (list 'inner e))) t) rt-log))"#,
     r#"(progn (setq rt-log nil) (list (eval '(progn (defun rt-late (x) (list 'late x)) (rt-late (push 'arg rt-log))) t) rt-log))"#,
+    // An argument's failing expansion is never reached past the void head;
+    // the call, reached again once defined, runs.
+    r#"(condition-case e (eval '(rt-undefined (condition-case nil (rt-m) (error 'inner))) t) (error e))"#,
+    r#"(eval '(let ((r nil)) (dotimes (_ 2) (push (condition-case nil (rt-later) (void-function (defalias 'rt-later (lambda () 'ok)) 'void)) r)) r) t)"#,
     // No debugger for an error the form's own handler catches.
     r#"(progn (setq rt-log nil) (list (let ((debug-on-error t) (debugger (lambda (&rest _) (push 'debugged rt-log) nil))) (eval '(condition-case nil (rt-m) (error 'caught)) t)) rt-log))"#,
 ];

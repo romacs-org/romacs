@@ -1309,6 +1309,10 @@ pub struct Vm {
     /// The next form compiled is a deferred call reached (`force_lazy'): its
     /// own expansion signals there, the forms inside it defer as ever.
     strict_root: bool,
+    /// The head of the deferred call being reached, while it compiles: with
+    /// no function, that call compiles to signal void-function at once, not
+    /// to defer again. Consumed by the call's own compilation.
+    reached_head: Option<String>,
     /// Set for the builder about to be created (`Builder::loader_order`).
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
@@ -1507,6 +1511,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit_unwinding,
     thrown_no_catch,
     strict_root,
+    reached_head,
     loader_order_request,
     keep_captures,
     lambda_depth,
@@ -1687,6 +1692,7 @@ impl Vm {
             quit_unwinding: false,
             thrown_no_catch: Vec::new(),
             strict_root: false,
+            reached_head: None,
             loader_order_request: false,
             keep_captures: false,
             lambda_depth: 0,
@@ -2355,15 +2361,17 @@ impl Vm {
     }
     fn expr_inner(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
         // A deferred call reached: its expansion signals here, at its reach.
-        // With no function yet, it signals void-function before any argument
-        // runs, so nothing inside it is reached to defer.
+        // With no function yet, it compiles as a call that signals
+        // void-function before any argument runs (`reached_head'); the calls
+        // in its arguments defer as ever.
         if std::mem::take(&mut self.strict_root) {
-            let unbound = matches!(f, Form::List(items) if matches!(items.first(), Some(Form::Sym(head))
-                if self.names.get(head).is_none_or(|&slot| self.slots[slot].function == Value::UNBOUND)));
-            let saved = self.defer_expansion_errors;
-            self.defer_expansion_errors = saved && !unbound;
+            if let Form::List(items) = f
+                && let Some(Form::Sym(head)) = items.first()
+            {
+                self.reached_head = Some(head.clone());
+            }
             let result = self.expr_now(b, f);
-            self.defer_expansion_errors = saved;
+            self.reached_head = None;
             return result;
         }
         if self.evaluating && self.defer_expansion_errors {
@@ -2902,7 +2910,9 @@ impl Vm {
                             // Non-eager Lisp bodies may name a macro before its
                             // defining file is loaded. Keep that entire form
                             // unevaluated until reached, not just its arguments.
-                            if self.defer_expansion_errors && self.slots[slot].function == Value::UNBOUND {
+                            if self.defer_expansion_errors && self.slots[slot].function == Value::UNBOUND
+                                && self.reached_head.take_if(|reached| reached == head).is_none()
+                            {
                                 return Err(format!("defer unresolved function {head}"));
                             }
                         }
