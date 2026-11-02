@@ -645,6 +645,12 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         vm.eval_source(include_str!("../../../rlisp/romacs-animate.el"))?;
         vm.eval_source(include_str!("../../../rlisp/romacs-landing.el"))?;
     }
+    // Romacs's interactive defaults and the GNU libraries they set, which
+    // [`before_init`] turns on, where the chain's tree has those libraries
+    // (elec-pair, the first, standing for them; a test's scratch tree may not).
+    if launch == Launch::Loadup && vm.eval_source("(require 'elec-pair nil t)")? != romacs_vm::Fixed::NIL {
+        vm.eval_source(include_str!("../../../rlisp/romacs-defaults.el"))?;
+    }
     mark_phase("session-definitions");
     Ok(())
 }
@@ -718,6 +724,20 @@ pub fn open_workspace(vm: &mut Vm, started: Started, files: &[std::path::PathBuf
 /// user's init would load, by the GUI's --loadup and the batch session.
 pub const QUICK_START: &str = "(progn (setq init-file-user nil site-run-file nil inhibit-x-resources t)
   (put 'site-run-file 'standard-value '(nil)))";
+
+/// A --loadup session's last steps before the user's init: -Q's settings
+/// ([`QUICK_START`]), then the session's start of rlisp/romacs-defaults.el:
+/// its libraries' per-user files, and Romacs's interactive defaults unless
+/// -Q, which keeps GNU's values; the init may override them or turn them
+/// off with `romacs-defaults-mode'.
+pub fn before_init(vm: &mut Vm, launch: Launch, quick: bool) -> Result<(), String> {
+    if launch == Launch::Loadup {
+        if quick { vm.eval_source(QUICK_START)?; }
+        vm.eval_source(&format!("(when (fboundp 'romacs-defaults-start) (romacs-defaults-start {}))",
+                                if quick { "t" } else { "nil" }))?;
+    }
+    Ok(())
+}
 
 /// The buffer --loadup shows where GNU shows its "*GNU Emacs*" startup
 /// screen.  *scratch* stays GNU's: `initial-scratch-message' and whatever

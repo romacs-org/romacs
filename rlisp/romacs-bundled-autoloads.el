@@ -109,6 +109,11 @@ disabled.
 (register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-"))
 
 
+;;; Generated autoloads from romacs-defaults.el
+
+(register-definition-prefixes "romacs-defaults" '("romacs-defaults-"))
+
+
 ;;; Generated autoloads from romacs-dired.el
 
 (register-definition-prefixes "romacs-dired" '("dired" "romacs-dired-"))
