@@ -36,6 +36,13 @@ fn buffer_base_buffer(cx; optional buffer: Value) {
     Ok(cx.buffer_base(buffer))
 }}
 
+defsubr! { name = "romacs--indirect-buffers", gnu = "buffer.c:2019", effect = Reads,
+fn romacs_indirect_buffers(cx, buffer: Value) {
+    // The live buffers BUFFER is the base of, for kill-buffer's Lisp half.
+    let buffer = cx.decode_buffer(buffer)?;
+    Ok(cx.indirect_buffers(buffer))
+}}
+
 /// GNU Fbarf_if_buffer_read_only (buffer.c:2465): signal `buffer-read-only'
 /// in a read-only current buffer, unless `inhibit-read-only' is set or the
 /// text at POSITION (point when nil) has an `inhibit-read-only' property.

@@ -254,3 +254,70 @@ fn batch_prepares_its_world_per_locale_in_an_existing_store() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!((used, again), (2, images), "both locales' worlds restored, neither rebuilt");
 }
+
+/// The processors this process may run on, from /proc/self/status.
+fn allowed_cpus() -> Vec<u32> {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap();
+    let list = status.lines().find_map(|line| line.strip_prefix("Cpus_allowed_list:")).unwrap().trim();
+    list.split(',').flat_map(|range| {
+        let (low, high) = range.split_once('-').unwrap_or((range, range));
+        low.parse().unwrap()..=high.parse().unwrap()
+    }).collect()
+}
+
+/// The processor count is a per-process fact, as GNU's `num-processors'
+/// asks it at each call: a batch world built under one CPU affinity is
+/// restored under another, in either direction and under an OpenMP
+/// limit, and the restored session answers with its own count, as do
+/// the startup-delayed defaults computed from it.
+#[test]
+fn a_batch_world_restores_under_another_processor_affinity() {
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let cpus = allowed_cpus();
+    let wide: Vec<String> = cpus.iter().take(8).map(u32::to_string).collect();
+    let narrow = wide[..wide.len() / 2].to_vec();
+    assert!(!narrow.is_empty(), "two processors needed: {cpus:?}");
+    let form = "(princ (list (num-processors) (num-processors 'current) compile-command))";
+    // The default query honours OMP_NUM_THREADS; `current' is the affinity's.
+    let expected = |default: usize, current: usize| format!("({default} {current} make -k -j{} )", (2 * default).div_ceil(3));
+    let session = |dir: &Path, cpus: &[String], omp: Option<&str>| {
+        let mut command = Command::new("taskset");
+        command.args(["-c", &cpus.join(","), romacs, "-Q", "--batch", "--eval", form]).current_dir(dir)
+            .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
+            .env_remove("ROMACS_WORLD").env_remove("OMP_THREAD_LIMIT").env_remove("OMP_NUM_THREADS");
+        if let Some(omp) = omp { command.env("OMP_NUM_THREADS", omp); }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    // A builder publishes the image, then its manifest.
+    let built = |dir: &Path| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+        while stored(dir, "rwi").iter().filter(|image| image.with_extension("json").is_file()).count() < 1 {
+            assert!(std::time::Instant::now() < deadline, "no world after 600 s");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    };
+    let modified = |path: &Path| std::fs::metadata(path).unwrap().modified().unwrap();
+    for (build, restore) in [(&narrow, &wide), (&wide, &narrow)] {
+        let dir = std::env::temp_dir().join(format!("romacs-batch-cpus-{}-{}", std::process::id(), build.len()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut store = std::fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(store.recursive(true), 0o700);
+        store.create(dir.join("cache/romacs/worlds")).unwrap();
+        // Booted from source, its builder (under the same affinity) prepares the world.
+        assert_eq!(session(&dir, build, None), expected(build.len(), build.len()), "from source on {build:?}");
+        built(&dir);
+        let image = stored(&dir, "rwi");
+        let built_at = modified(&image[0]);
+        for omp in [None, Some("1")] {
+            let before = std::time::SystemTime::now();
+            let answer = session(&dir, restore, omp);
+            let used = stored(&dir, "use");
+            assert!(used.len() == 1 && modified(&used[0]) >= before, "built on {build:?}, not restored on {restore:?} (OMP {omp:?}): {used:?}");
+            assert_eq!(answer, expected(omp.map_or(restore.len(), |_| 1), restore.len()), "restored on {restore:?}, OMP {omp:?}");
+        }
+        assert_eq!((stored(&dir, "rwi"), modified(&image[0])), (image, built_at), "the world was not rebuilt");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

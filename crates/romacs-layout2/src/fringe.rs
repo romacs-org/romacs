@@ -7,12 +7,14 @@ use romacs_display_protocol::{Color, DisplayWindowId, FaceId, FrameGlyphBuffer, 
 use romacs_layout_input::{BitmapAlign, FringeBitmap, Indicators, Row, WindowChrome, WindowSnapshot};
 
 /// How a laid-out row breaks: it CONTINUED onto the next row, it is a
-/// CONTINUATION of the row above, or the text area TRUNCATED it.
+/// CONTINUATION of the row above, or the text area TRUNCATED it on the
+/// right or, scrolled horizontally, on the left (TRUNCATED_LEFT).
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RowMarks {
     pub continued: bool,
     pub continuation: bool,
     pub truncated: bool,
+    pub truncated_left: bool,
 }
 
 /// Where a window's text area lies in the frame: its origin OX, OY, its
@@ -108,7 +110,7 @@ fn row_bitmaps<'a>(chrome: &'a WindowChrome, rows: &[Row], marks: &[RowMarks], a
     let mut out = vec![];
     for (i, (row, mark)) in rows.iter().zip(marks).enumerate().filter(|(_, (row, _))| visible(row)) {
         let pick = |side: usize| -> Option<&'a FringeBitmap> {
-            let truncated = side == 1 && mark.truncated;
+            let truncated = if side == 0 { mark.truncated_left } else { mark.truncated };
             let broken = if side == 0 { mark.continuation } else { mark.continued };
             let at_top = bob == Some(i) && ind.top[side].is_some();
             let at_bottom = eob == Some(i) && ind.bottom[side].is_some();

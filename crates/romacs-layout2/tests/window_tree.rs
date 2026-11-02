@@ -53,7 +53,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
             id, width: w, height: h, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: romacs_layout_input::TextSlice { utf8: String::new(), face_runs: vec![], raw: vec![] },
             mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-            vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
+            vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
         }
     }
     let mut vm = Vm::new();
@@ -64,7 +64,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     let duplicate = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
         width: 400, height: 300,
-        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![
+        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snap(7, 400, 150, &face) },
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 150, snapshot: snap(7, 400, 150, &face) },
         ],
@@ -77,7 +77,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     let overflow = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
         width: 400, height: 300,
-        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
             x: 0, y: 200, snapshot: snap(1, 400, 200, &face) }],
     };
     assert!(romacs_layout2::layout_frame(&overflow, 1).is_err(),
@@ -87,7 +87,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     let valid = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
         font_alternatives: romacs_layout_input::FontAlternativeState::default(),
         width: 400, height: 300,
-        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![
+        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snap(1, 400, 150, &face) },
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 150, snapshot: snap(2, 400, 150, &face) },
         ],

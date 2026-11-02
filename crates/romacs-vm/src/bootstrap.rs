@@ -8,14 +8,20 @@ impl Vm {
         if depth > 100 {
             return Err("equal nesting limit exceeded".into());
         }
+        // Conses first: a cons is never a string, and `member' and `assoc'
+        // over lists compare conses most, so they skip two string views.
+        match (a.tag() == 3, b.tag() == 3) {
+            (true, true) => {
+                let (ac, ad) = self.cons_pair(a)?;
+                let (bc, bd) = self.cons_pair(b)?;
+                return Ok(self.equal_bootstrap(ac, bc, depth + 1)?
+                    && self.equal_bootstrap(ad, bd, depth + 1)?);
+            }
+            (true, false) | (false, true) => return Ok(false),
+            (false, false) => {}
+        }
         if let (Some(x), Some(y)) = (self.str_view(a), self.str_view(b)) {
             return Ok(x.len() == y.len() && x.bytes() == y.bytes());
-        }
-        if a.tag() == 3 && b.tag() == 3 {
-            let (ac, ad) = self.cons_pair(a)?;
-            let (bc, bd) = self.cons_pair(b)?;
-            return Ok(self.equal_bootstrap(ac, bc, depth + 1)?
-                && self.equal_bootstrap(ad, bd, depth + 1)?);
         }
         Ok(match (self.object_if(a), self.object_if(b)) {
             (Some(data::Object::Float(a)), Some(data::Object::Float(b))) => a == b,

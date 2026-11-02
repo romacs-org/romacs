@@ -151,3 +151,76 @@ fn propertized_strings_expand_as_their_text() {
     let s = vm.display_snapshot(400, 300).unwrap();
     assert_eq!(s.mode_line.as_ref().map(|b| b.utf8.as_str()), Some("[g1]**E%b"));
 }
+
+#[path = "support/gui_probe.rs"]
+mod gui_probe;
+
+/// Romacs's mode line (rlisp/romacs-mode-line.el) enters the evaluator
+/// only where a region shows or a package's element asks: the evaluator
+/// entries `Vm::mode_line_evals' counts for one expansion of the
+/// installed format, over a file buffer, with `vc-mode' set, with a
+/// region, and in `flymake-mode' with three diagnostics, where it makes
+/// as many as GNU's `flymake-mode-line-counters' element alone.
+#[test]
+fn romacs_mode_line_enters_the_evaluator_only_where_due() {
+    let mut vm = gui_probe::gnu_session();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for file in ["rlisp/romacs-layer.el", "rlisp/romacs-chrome.el", "rlisp/romacs-mode-line.el"] {
+        vm.load_file(&root.join(file)).unwrap();
+    }
+    let eval = |vm: &mut Vm, form: &str| vm.eval_source(form).unwrap_or_else(|e| panic!("{form}: {e}")).display().unwrap();
+    let dir = std::env::temp_dir().join(format!("romacs-mode-line-evals-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("a.el");
+    std::fs::write(&file, ";;; a.el -*- lexical-binding: t -*-\n(defun a () 1)\n(defun b () 2)\n").unwrap();
+    eval(&mut vm, "(progn (setq noninteractive nil) (romacs-mode-line-mode 1))");
+    eval(&mut vm, &format!("(switch-to-buffer (find-file-noselect {:?}))", file.to_str().unwrap()));
+    let evals = |vm: &mut Vm, format: &str| {
+        let before = vm.mode_line_evals();
+        eval(vm, &format!("(format-mode-line {format})"));
+        vm.mode_line_evals() - before
+    };
+    assert_eq!(eval(&mut vm, "(eq mode-line-format romacs-mode-line-format)"), "t");
+    assert_eq!(evals(&mut vm, "mode-line-format"), 0, "a file buffer");
+    eval(&mut vm, "(setq vc-mode \" Git-main\")");
+    assert_eq!(evals(&mut vm, "mode-line-format"), 0, "with vc-mode");
+    eval(&mut vm, "(progn (transient-mark-mode 1) (goto-char 1) (push-mark (point) t t) (forward-line 2))");
+    assert_eq!(evals(&mut vm, "mode-line-format"), 1, "with a region");
+    eval(&mut vm, "(deactivate-mark)");
+    eval(&mut vm, "(progn (require 'flymake) (setq trusted-content :all)
+        (defun mle-backend (report &rest _)
+          (funcall report (list (flymake-make-diagnostic (current-buffer) 1 3 :error \"e\")
+                                (flymake-make-diagnostic (current-buffer) 4 6 :warning \"w\")
+                                (flymake-make-diagnostic (current-buffer) 7 9 :note \"n\"))))
+        (setq-local flymake-diagnostic-functions '(mle-backend)) (flymake-mode 1) (flymake-start))");
+    assert_eq!(eval(&mut vm, "(length (flymake-diagnostics))"), "3");
+    let gnu = evals(&mut vm, "flymake-mode-line-counters");
+    assert!(gnu > 0);
+    assert_eq!(evals(&mut vm, "mode-line-format"), gnu, "flymake's element, no more");
+    eval(&mut vm, "(progn (flymake-mode -1) (set-buffer-modified-p nil) (kill-buffer))");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// rlisp/romacs-mode-line.el's own tests (tests/romacs-mode-line-test.el):
+/// segments refreshed by their hooks, the installed format's components,
+/// and the ownership of `mode-line-format', in a session with GNU's Lisp.
+#[test]
+fn romacs_mode_line_lisp_tests_pass() {
+    let mut vm = gui_probe::gnu_session();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    vm.eval_source(&format!("(setq load-path (cons {:?} load-path))", root.join("rlisp").to_str().unwrap())).unwrap();
+    for file in ["rlisp/romacs-test.el", "rlisp/romacs-layer.el", "rlisp/romacs-chrome.el", "rlisp/romacs-icons.el",
+                 "rlisp/romacs-mode-line.el", "crates/romacs-vm/tests/romacs-mode-line-test.el"] {
+        vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+    }
+    let summary = vm.eval_source("(let ((s (romacs-test-run t))) (format \"%S\" s))").unwrap().display().unwrap();
+    assert!(summary.contains(":failed 0") && summary.contains(":errors 0"), "{summary}");
+    // The Lisp icon table is the font's: assets/icons/codepoints.txt.
+    let table = std::fs::read_to_string(root.join("assets/icons/codepoints.txt")).unwrap();
+    let font: Vec<String> = table.lines().filter(|l| !l.starts_with('#') && !l.is_empty())
+        .map(|l| { let (name, point) = l.split_once(' ').unwrap(); format!("{name} {}", i64::from_str_radix(&point[2..], 16).unwrap()) }).collect();
+    let font = font.iter().map(|l| format!("{l:?}")).collect::<Vec<_>>().join(" ");
+    let same = vm.eval_source(&format!("(equal (mapcar (lambda (e) (format \"%s %d\" (car e) (cadr e))) romacs-icons-alist) '({font}))"))
+        .unwrap().display().unwrap();
+    assert_eq!(same, "t", "romacs-icons-alist and assets/icons/codepoints.txt differ");
+}

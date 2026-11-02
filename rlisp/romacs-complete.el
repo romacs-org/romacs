@@ -996,22 +996,27 @@ large font gets a panel as wide as the frame."
                  (min (- room (* 4 column))
                       (round (* romacs-complete-center-width room))))))
 
+(declare-function romacs-chrome-bottom "romacs-chrome" (&optional frame except))
+
 (defun romacs-complete--mode-line-top (root)
   "The top of the mode line of the window the minibuffer was entered
-from, in ROOT's pixels, or ROOT's bottom when that window is elsewhere."
+from, in ROOT's native pixels, where child frames are placed; or where a
+layer anchored at ROOT's bottom ends when that window is elsewhere
+\(`romacs-chrome-bottom', the panel itself excepted)."
   (let ((window (minibuffer-selected-window)))
     (if (and window (eq (window-frame window) root))
-        (- (nth 3 (window-pixel-edges window)) (window-mode-line-height window))
-      (frame-text-height root))))
+        (- (nth 3 (window-edges window nil nil t)) (window-mode-line-height window)
+           (window-bottom-divider-width window))
+      (romacs-chrome-bottom root romacs-complete--layer))))
 
 (defun romacs-complete--panel-top (root tallest ch)
   "The panel's outer top in ROOT for `romacs-complete-position', the
 panel TALLEST pixels at most, with CH-pixel lines."
-  (let ((height (frame-text-height root)))
+  (let ((height (frame-text-height root)) (inset (frame-internal-border-width root)))
     (pcase romacs-complete-position
-      ('center (/ (- height tallest) 2))
+      ('center (+ inset (/ (- height tallest) 2)))
       ('bottom (- (romacs-complete--mode-line-top root) ch tallest))
-      (_ (max (* 2 ch) (round (* 0.11 height)))))))
+      (_ (+ inset (max (* 2 ch) (round (* 0.11 height))))))))
 
 (defun romacs-complete--rows ()
   "Most candidate rows the panel shows: `romacs-complete-count', fewer
@@ -1038,7 +1043,10 @@ downward and its input stays put."
          (room (- (frame-text-width root) (* 2 border)))
          (width (romacs-complete--panel-width room cw))
          (tallest (+ (* (romacs-complete--rows) ch) mini (* 2 border))))
-    (list (/ (- room width) 2) (max 0 (romacs-complete--panel-top root tallest ch))
+    ;; Centred on the frame: child frames are placed from its native
+    ;; origin, outside the internal border round the windows.
+    (list (/ (- (frame-native-width root) width (* 2 border)) 2)
+          (max 0 (romacs-complete--panel-top root tallest ch))
           width (+ (* rows ch) mini))))
 
 (defvar romacs-complete--looks nil

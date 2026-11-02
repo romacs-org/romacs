@@ -2037,6 +2037,9 @@ pub struct FrameDisplayState {
     /// The windows drawn as panes (`FrameGlyphBuffer::panes`).
     #[serde(default)]
     pub panes: Vec<crate::frame_glyphs::Pane>,
+    /// The status bar's band (`FrameGlyphBuffer::status_bar`).
+    #[serde(default)]
+    pub status_bar: Option<crate::types::Rect>,
     pub frame_cols: usize,
     pub frame_rows: usize,
     pub frame_pixel_width: f32,
@@ -2569,6 +2572,7 @@ impl FrameDisplayState {
             window_matrices: Vec::new(),
             frame_chrome: FrameChrome::default(),
             panes: Vec::new(),
+            status_bar: None,
             frame_cols,
             frame_rows,
             frame_pixel_width: frame_cols as f32 * char_width,
@@ -2688,6 +2692,7 @@ impl FrameDisplayState {
         state.window_infos = buf.window_infos.clone();
         state.frame_chrome = buf.frame_chrome.clone();
         state.panes = buf.panes.clone();
+        state.status_bar = buf.status_bar;
         // Reconstruct the layout-internal phys_cursor from the unified list's
         // active entry; charpos isn't carried on WindowCursor so default to 0.
         state.phys_cursor = buf.active_cursor().map(|c| PhysCursor {
@@ -2864,6 +2869,7 @@ impl FrameDisplayState {
         buf.transition_hints = self.transition_hints.clone();
         buf.frame_chrome = self.frame_chrome.clone();
         buf.panes = self.panes.clone();
+        buf.status_bar = self.status_bar;
 
         // --- Materialize all glyphs in canonical row/overlay order ---
         self.for_each_glyph(|g| buf.glyphs.push(g));

@@ -201,7 +201,11 @@ impl Leaf<'_> {
                     let condition = self.intern("args-out-of-range");
                     return Err(Fault::Signal(condition, self.vm.list_value(&[area.window, value])));
                 }
-                Some(x as i64)
+                // The goal counts from after the line number, and in a
+                // horizontally scrolled window adds to the scrolled
+                // columns (first_x + to_x).
+                let lnum = if area.hosted { self.line_number_widths(&area)?.1 } else { 0 };
+                Some(x as i64 + lnum + area.first_visible * area.column)
             }
             None => None,
         };
@@ -290,21 +294,36 @@ impl Leaf<'_> {
         let window = if window == Value::NIL { self.vm.selected_window_value().map_err(Fault::Error)? } else { window };
         let Some((w, charpos, top)) = self.windows().pos_visible(pos, window, caller)? else { return Ok(Value::NIL) };
         let Some(v) = self.hosted_pos_visible(w, charpos, top, caller)? else { return Ok(Value::NIL) };
+        // Point scrolled out on the left shows nowhere.
+        if v.x < -1 { return Ok(Value::NIL); }
         let area = self.windows().text_area(w, caller)?;
         let buffer = area.buffer;
         // posn-at-x-y's Y counts from the window's top, above its header line.
         let p = self.with_buffer(buffer, |leaf| leaf.hosted_posn(&area, top, v.x, v.y - area.header_line))?;
         let int = |n: i64| Value::integer(n).map_err(Fault::Error);
+        // At the text area's right edge, as past a truncated row's last
+        // glyph, X is on the right fringe (coordinates_in_window): its
+        // posn counts X from the window's left edge, column 0, DX from the
+        // fringe (make_lispy_position).
+        let [left_fringe, _] = self.vm.window_fringe_widths(w).map_err(Fault::Error)?.map(i64::from);
+        let fringe = area.right_fringe > 0 && v.x >= area.body_width && v.x < area.body_width + area.right_fringe;
+        let (area_name, x, col, dx) = if fringe {
+            let wx = v.x + left_fringe + area.left_margin * area.column;
+            (self.intern("right-fringe"), wx, 0, v.x - area.body_width)
+        } else {
+            (Value::NIL, v.x, p.col, p.dx)
+        };
         // The position's (X . Y) counts from the text area's top, below
         // the header line (make_lispy_position).
-        let (x, y, zero, pos) = (int(v.x)?, int(v.y - area.header_line)?, int(0)?, int(p.pos)?);
+        let (x, y, zero, pos) = (int(x)?, int(v.y - area.header_line)?, int(0)?, int(p.pos)?);
         let xy = self.cons(x, y);
-        let col_row = { let (c, r) = (int(p.col)?, int(p.row)?); self.cons(c, r) };
-        let offset = { let (dx, dy) = (int(p.dx)?, int(p.dy)?); self.cons(dx, dy) };
+        let col_row = { let (c, r) = (int(col)?, int(p.row)?); self.cons(c, r) };
+        let offset = { let (dx, dy) = (int(dx)?, int(p.dy)?); self.cons(dx, dy) };
         let size = { let (wd, ht) = (int(p.width)?, int(p.height)?); self.cons(wd, ht) };
         // A string's glyph names the string and its position there.
         let object = match p.string { Some((string, at)) => { let at = int(at as i64)?; self.cons(string, at) } None => Value::NIL };
-        Ok(self.vm.list_value(&[w, pos, xy, zero, object, pos, col_row, Value::NIL, offset, size]))
+        let place = if area_name == Value::NIL { pos } else { area_name };
+        Ok(self.vm.list_value(&[w, place, xy, zero, object, pos, col_row, Value::NIL, offset, size]))
     }
 
     /// pos_visible_p (xdisp.c:1693) for CHARPOS in window W from its start
@@ -313,7 +332,6 @@ impl Leaf<'_> {
     /// makes it. W's text is GNU's for the host only where no row breaks.
     fn hosted_pos_visible(&mut self, w: Value, charpos: i64, top: i64, caller: &str) -> std::result::Result<Option<Visible>, Fault> {
         let area = self.windows().text_area(w, caller)?;
-        if charpos < 0 { return Err(unsupported("of the window end in a displayed window")); }
         if area.vscroll != 0 { return Err(unsupported("of a vertically scrolled displayed window")); }
         let buffer = area.buffer;
         self.with_buffer(buffer, |leaf| {
@@ -321,6 +339,17 @@ impl Leaf<'_> {
             let src = &mut hosted;
             let top_it = it;
             let last_y = area.body_height;
+            if charpos < 0 {
+                // The window end: the start of the row at the text area's
+                // bottom, or the text's end above it.
+                motion::move_to(src, &cx, &mut it, -1, -1, last_y - 1, -1, Op { y: true, ..Op::default() })?;
+                let mut rest = it;
+                motion::move_in_line(src, &cx, &mut rest, -1, -1, Op::default())?;
+                let height = if rest.max_h > 0 { rest.max_h } else { src.default_height };
+                let bottom = it.current_y + height;
+                return Ok(Some(Visible { x: it.current_x - area.hscroll * area.column, y: area.header_line + it.current_y, rtop: 0,
+                    rbot: (bottom - last_y).max(0), rowh: bottom.min(last_y) - it.current_y, vpos: it.vpos }));
+            }
             motion::move_to(src, &cx, &mut it, charpos, -1, last_y - 1, -1, Op { pos: true, y: true, ..Op::default() })?;
             if motion::charpos(src, &it)? < charpos {
                 // Stopped by the window's bottom: CHARPOS may still be in
@@ -358,8 +387,10 @@ impl Leaf<'_> {
                     (x, y) = display_start(src, &cx, top_it, top, charpos, start, string, it.lnum_x)?;
                 }
             }
-            // Y counts from the window's top: the text starts below the
-            // header line (window_top_y).
+            // X counts from the text area's left edge, scrolled
+            // (window_hscroll_limited); Y from the window's top: the text
+            // starts below the header line (window_top_y).
+            let x = x - area.hscroll * area.column;
             Ok(Some(Visible { x, y: area.header_line + y, rtop: 0, rbot: (bottom - last_y).max(0),
                 rowh: bottom.min(last_y) - it.current_y, vpos: it.vpos }))
         })
@@ -414,6 +445,8 @@ impl Leaf<'_> {
     fn hosted_posn(&mut self, area: &TextArea, top: i64, x: i64, y: i64) -> std::result::Result<Posn, Fault> {
         let (mut hosted, cx, mut it) = self.hosted_from(area, top)?;
         motion::move_to(&mut hosted, &cx, &mut it, -1, 0, y, -1, Op { x: true, y: true, ..Op::default() })?;
+        // Iterator positions include the hscroll.
+        let x = x + area.first_visible * area.column;
         motion::move_in_line(&mut hosted, &cx, &mut it, cx.zv, x, Op { x: true, ..Op::default() })?;
         let pos = motion::charpos(&mut hosted, &it)?;
         // The glyph under X, else the space glyph GNU appends after a
@@ -598,22 +631,28 @@ impl Leaf<'_> {
     pub(crate) fn line_number_display_width(&mut self, pixelwise: Value) -> super::super::Out {
         let window = self.vm.selected_window_value().map_err(Fault::Error)?;
         let area = self.windows().text_area(window, "line-number-display-width")?;
-        let buffer = area.buffer;
-        let top = self.windows().window_end(window)?.2;
-        let numbers = self.with_buffer(buffer, |leaf| {
-            let point = leaf.point_position()?;
-            leaf.line_numbers(&area, top, point)
-        })?;
-        // The window start's line's, as move_it_by_lines produces it.
-        let (width, pixels) = match numbers {
-            Some(labels) => (labels.width, labels.prefix(self.with_buffer(buffer, |leaf| leaf.line_index(top))?).1),
-            None => (0, 0),
-        };
+        let (width, pixels) = self.line_number_widths(&area)?;
         // A terminal's column is a pixel.
         let column = if area.hosted { area.column.max(1) } else { 1 };
         let columns = self.intern("columns");
         if pixelwise == columns { return Ok(self.float(pixels as f64 / column as f64)); }
         Value::integer(if pixelwise != Value::NIL { pixels } else { width }).map_err(Fault::Error)
+    }
+
+    /// GNU's line_number_display_width (indent.c:2122) for AREA's window:
+    /// its labels' digits and their row prefix in pixels, as the window
+    /// start's line produces them.
+    fn line_number_widths(&mut self, area: &TextArea) -> std::result::Result<(i64, i64), Fault> {
+        let buffer = area.buffer;
+        let top = self.windows().window_end(area.window)?.2;
+        let numbers = self.with_buffer(buffer, |leaf| {
+            let point = leaf.point_position()?;
+            leaf.line_numbers(area, top, point)
+        })?;
+        Ok(match numbers {
+            Some(labels) => (labels.width, labels.prefix(self.with_buffer(buffer, |leaf| leaf.line_index(top))?).1),
+            None => (0, 0),
+        })
     }
 
     /// init_iterator's line wrap and last visible x on a terminal frame,
@@ -629,8 +668,8 @@ impl Leaf<'_> {
         // GNU's initial terminal frame counts line numbers in their width
         // but not in the iterator's x (no glyph row to copy them from).
         if lnum.is_some() && !area.hosted { return Err(unsupported("with line numbers")); }
-        if area.hscroll != 0 { return Err(unsupported("in a horizontally scrolled window")); }
-        let wrap = self.vm.line_wrap(area.full_width, area.columns).map_err(Fault::Error)?;
+        // A horizontally scrolled window truncates its lines (init_iterator).
+        let wrap = if area.hscroll != 0 { Wrap::Truncate } else { self.vm.line_wrap(area.full_width, area.columns).map_err(Fault::Error)? };
         if wrap == Wrap::Word && var(self, "word-wrap-by-category")? != Value::NIL {
             return Err(unsupported("with `word-wrap-by-category'"));
         }
@@ -647,7 +686,7 @@ impl Leaf<'_> {
             return Err(unsupported("with a display table in a displayed window"));
         }
         Ok(Ctx {
-            last_visible_x: area.columns - area.left_margin - area.right_margin - glyph - border,
+            last_visible_x: area.first_visible + area.columns - area.left_margin - area.right_margin - glyph - border,
             wrap,
             tab_width: self.tab_width()? as i64,
             zv,
@@ -750,7 +789,8 @@ struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height
 /// truncates rows as GNU does, but wraps no words.
 fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> std::result::Result<Ctx, Fault> {
     let advance = if area.right_fringe > 0 { 0 } else { hosted.default_advance(if cx.wrap == Wrap::Truncate { '$' } else { '\\' })?.0 };
-    cx.last_visible_x = area.body_width - advance;
+    // Iterator x counts from the line's start, the hidden columns too.
+    cx.last_visible_x = area.first_visible * area.column + area.body_width - advance;
     cx.breaks = cx.wrap != Wrap::Word;
     Ok(cx)
 }

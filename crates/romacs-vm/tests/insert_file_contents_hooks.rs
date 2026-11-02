@@ -172,3 +172,29 @@ fn insert_file_contents_replace_checks_the_ranges_it_changes() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// A visiting REPLACE of the whole buffer (fileio.c:4647, 4828) binds
+// `buffer-file-name' to nil around its deletion and insertion, so a file
+// changed on disk is read in (auto-revert, revert-buffer) without locking it
+// or asking about a supersession threat, and its change hooks see no file
+// name; narrowed, the change asks as any first change does. The truename is set unabbreviated so the lock's
+// visited-buffer lookup sees the buffer wherever the file lives.
+const VISIT_CASE: &str = r##"(let ((threats 0)) (fset 'userlock--ask-user-about-supersession-threat (lambda (_f) (setq threats (1+ threats)))) (write-region "one" nil FILE nil 'silent) (set-buffer (find-file-noselect FILE)) (setq buffer-file-truename (file-truename FILE)) (write-region "zzz" nil FILE nil 'silent) (set-file-times FILE (time-add nil 5)) (setq log nil) (setq-local before-change-functions (list (lambda (b e) (ifc-log 'b b e (and buffer-file-name t))))) (setq-local after-change-functions (list (lambda (b e l) (ifc-log 'a b e l (and buffer-file-name t))))) NARROW (insert-file-contents FILE t nil nil t) (prog1 (list threats (buffer-string) (buffer-modified-p) (reverse log)) (set-buffer-modified-p nil) (kill-buffer)))"##;
+
+#[test]
+fn visiting_replace_does_not_ask_about_supersession_as_gnu() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-visit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("visited.txt");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let failures: Vec<String> = ["", "(narrow-to-region 1 2)"].iter()
+        .map(|narrow| VISIT_CASE.replace("FILE", &lisp(&file)).replace("NARROW", narrow))
+        .filter_map(|expression| {
+            let (gnu, ours) = (oracle(&expression), romacs(&mut vm, &expression));
+            (gnu != ours).then(|| format!("{expression}\n  gnu:    {gnu}\n  romacs: {ours}"))
+        })
+        .collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

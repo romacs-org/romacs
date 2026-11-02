@@ -43,6 +43,9 @@ pub(super) static ROOT_GLYPH_PASSES: AtomicU64 = AtomicU64::new(0);
 /// Quads the root frame's pane chrome drew (VM2-PANE-CHROME): its dims,
 /// corners and edges. Zero in GNU's look (`romacs-classic-chrome').
 pub(super) static CHROME_DIVIDER_QUADS: AtomicU64 = AtomicU64::new(0);
+/// Root glyph passes that drew the status bar's band (VM2-STATUS-BAR).
+/// Zero without one (`romacs-classic-chrome').
+pub(super) static CHROME_BAR_BANDS: AtomicU64 = AtomicU64::new(0);
 /// Surface submissions on top-level frame windows.
 pub(super) static SURFACE_SUBMISSIONS: AtomicU64 = AtomicU64::new(0);
 /// Frame plans by render work class (frame scheduling plan, Stage 2).
@@ -237,6 +240,7 @@ pub struct FrameSchedSnapshot {
     pub scene_commits: u64,
     pub root_glyph_passes: u64,
     pub chrome_divider_quads: u64,
+    pub chrome_bar_bands: u64,
     /// Surface submissions; historical field name retained for diagnostics.
     pub presents: u64,
     pub plan_none: u64,
@@ -310,6 +314,7 @@ pub fn snapshot() -> FrameSchedSnapshot {
         scene_commits: SCENE_COMMITS.load(Ordering::Relaxed),
         root_glyph_passes: ROOT_GLYPH_PASSES.load(Ordering::Relaxed),
         chrome_divider_quads: CHROME_DIVIDER_QUADS.load(Ordering::Relaxed),
+        chrome_bar_bands: CHROME_BAR_BANDS.load(Ordering::Relaxed),
         presents: SURFACE_SUBMISSIONS.load(Ordering::Relaxed),
         plan_none: PLAN_NONE.load(Ordering::Relaxed),
         plan_composite_only: PLAN_COMPOSITE_ONLY.load(Ordering::Relaxed),

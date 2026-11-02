@@ -24,10 +24,11 @@ def main():
     oracle = subprocess.run([sys.executable, 'tools/lisp_oracle.py', 'check', '--root', str(root)], cwd=root)
     ratchet = subprocess.run([sys.executable, 'tools/parity_ratchet.py', 'verify', '--candidate', '--root', str(root)], cwd=root)
     arity = subprocess.run([sys.executable, 'tools/gnu_arity.py', 'check', '--root', str(root)], cwd=root)
-    if layout.returncode or oracle.returncode or ratchet.returncode or arity.returncode:
+    icons = subprocess.run([sys.executable, '-B', 'tools/icon_font.py', 'check', '--root', str(root)], cwd=root)
+    if layout.returncode or oracle.returncode or ratchet.returncode or arity.returncode or icons.returncode:
         return 1
     print(f'check-derived: ok, {len(derived_artifacts.ARTIFACTS)} derived artifacts match their sources; '
-          'lisp/ is the GNU pin; parity floors and GNU DEFUN arities verified')
+          'lisp/ is the GNU pin; parity floors, GNU DEFUN arities and the icon font verified')
     return 0
 
 
