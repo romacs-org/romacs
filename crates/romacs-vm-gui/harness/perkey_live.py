@@ -42,11 +42,17 @@ every command the collections so far and their seconds (`gcs-done',
 `gc-elapsed') and the selected window's start, end, point and body and
 total heights in pixels, and writes them to the session's state.el at
 C-x C-s; --mode sets the output's size (default 1600x1000).
+With --populate the visited file is tracked in a Git repository (so
+`vc-mode' shows a branch), the buffer is in `flymake-mode' with a backend
+that reports three fixed diagnostics once, and `isearch-lazy-count' is
+on: the key phases then type in a buffer whose mode line shows them; a
+fourth phase, region, sets the mark (C-SPC, not counted) and moves N C-f
+with the region active.
 
 usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
                       [--record PHASE] [--tools DIR:DIR] [--classic] [--state]
-                      [--mode WxH]
+                      [--mode WxH] [--populate]
 """
 import argparse
 import hashlib
@@ -64,7 +70,8 @@ import live_oracle as live
 
 PHASES = ('self-insert', 'C-n', 'C-f')
 KEYS = {'self-insert': ['a'], 'C-n': ['-M', 'ctrl', 'n', '-m', 'ctrl'],
-        'C-f': ['-M', 'ctrl', 'f', '-m', 'ctrl'],
+        'C-f': ['-M', 'ctrl', 'f', '-m', 'ctrl'], 'region': ['-M', 'ctrl', 'f', '-m', 'ctrl'],
+        'mark': ['-M', 'ctrl', '-k', 'space', '-m', 'ctrl'],
         'save': ['-M', 'ctrl', '-k', 'x', '-k', 's', '-m', 'ctrl']}
 IDLE_SLACK = 1_000_000
 SPREAD_FLAG = 0.10
@@ -92,6 +99,11 @@ def next_line(text, point, goal):
     start = end + 1
     stop = text.find('\n', start)
     return start + min(goal, (stop if stop >= 0 else len(text)) - start)
+
+
+def phases(args):
+    """The key phases a session runs: --populate adds the region phase."""
+    return PHASES + (('region',) if args.populate else ())
 
 
 def expected_point(name, text, start, keys):
@@ -238,6 +250,10 @@ class Session:
         (config / 'rc.xml').write_text(live.RC_XML)
         self.file = work / 'text.txt'
         self.file.write_text(text_of(self.args.lines))
+        if self.args.populate:
+            git = ['git', '-C', str(work), '-c', 'user.name=perkey', '-c', 'user.email=perkey@localhost', '-c', 'commit.gpgsign=false']
+            for command in (['init', '-q', '-b', 'main'], ['add', 'text.txt'], ['commit', '-q', '-m', 'text']):
+                subprocess.run(git + command, check=True, capture_output=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(self.root / 'home')})
         self.stdout, self.stderr = self.root / 'binary.stdout', self.root / 'binary.stderr'
         self.environ = env = self.env()
         log = (self.root / 'compositor.log').open('w')
@@ -270,6 +286,15 @@ class Session:
         forms = ['(setq auto-save-timeout nil)']
         if self.args.classic:
             forms.append('(romacs-classic-chrome 1)')
+        if self.args.populate:
+            forms += ['(require (quote flymake))',
+                      '(setq trusted-content :all flymake-no-changes-timeout nil flymake-start-on-save-buffer nil isearch-lazy-count t)',
+                      '(defun perkey--diagnostics (report &rest _) (funcall report (list'
+                      ' (flymake-make-diagnostic (current-buffer) 1 2 :error "e")'
+                      ' (flymake-make-diagnostic (current-buffer) 3 4 :warning "w")'
+                      ' (flymake-make-diagnostic (current-buffer) 5 6 :note "n"))))',
+                      '(setq-local flymake-diagnostic-functions (list (quote perkey--diagnostics)))',
+                      '(flymake-mode 1)']
         return f"(progn {' '.join(forms)})"
 
     def state_form(self):
@@ -392,7 +417,11 @@ class Session:
             raise Invalid('point is not at the start of the visited file')
         first = self.counted(idle, idle=True)
         commands = {'self-insert': 'self-insert-command', 'C-f': 'forward-char', 'C-n': self.commands.get('[14]')}
-        for name in PHASES:
+        commands['region'] = 'forward-char'
+        for name in phases(self.args):
+            if name == 'region':
+                mark = self.run_keys(KEYS['mark'], 1)
+                result['mark'] = delivery(mark, 'set-mark-command', 1)
             phase = self.phase(name, commands[name], keys)
             want = expected_point(name, text, point, keys)
             if phase['point'] != want:
@@ -408,7 +437,7 @@ class Session:
             result['idle'] = [(first[0], first[1]), (second[0], second[1])]
         save = self.run_keys(KEYS['save'], 1)
         result['save'] = save
-        problems = delivery(save, self.commands.get('[24 19]'), 1)
+        problems = delivery(save, self.commands.get('[24 19]'), 1) + result.get('mark', [])
         self.wait(lambda: self.file.read_text() == text, 10, 'saved text')
         result['problems'] = problems
         if self.evaluator() != self.tid:
@@ -466,7 +495,7 @@ def per_key(sessions, keys):
     found = {}
     for result in sessions:
         rate = idle_rate(result['idle'])
-        for name in PHASES:
+        for name in result['phases']:
             phase = result['phases'][name]
             entry = found.setdefault(name, {'valid': [], 'refused': [], 'why': [], 'paints': []})
             entry['refused' if phase['problems'] else 'valid'].append(
@@ -493,7 +522,7 @@ def invalid(result):
 
 def latencies(sessions):
     found = {}
-    for name in PHASES:
+    for name in dict.fromkeys(name for result in sessions for name in result['phases']):
         phases = [result['phases'][name] for result in sessions if not result['phases'][name]['problems']]
         values = [v for phase in phases for v in phase['latency_ns']]
         if values:
@@ -519,6 +548,7 @@ def main():
     parser.add_argument('--record', choices=PHASES, help='after the first counted session, profile this phase')
     parser.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
     parser.add_argument('--classic', action='store_true', help="measure under `romacs-classic-chrome'")
+    parser.add_argument('--populate', action='store_true', help='a Git-tracked flymake buffer, and a region phase')
     parser.add_argument('--state', action='store_true', help='record collections and the window around each phase')
     parser.add_argument('--mode', default='1600x1000', help="the output's size")
     args = parser.parse_args()

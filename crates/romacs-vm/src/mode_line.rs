@@ -575,6 +575,7 @@ impl Vm {
                             if let Some((expression, _)) = split(cdr) {
                                 // GNU `dsafe_eval`: an error displays as nil.
                                 self.ml_elt_restarted();
+                                self.display_state.mode_line_evals += 1;
                                 let spec = match self.eval_datum_raw(&expression) {
                                     Ok(value) => self.mode_line_form(value),
                                     Err(error) => {
@@ -737,6 +738,7 @@ impl Vm {
                         Form::String("no process".into()),
                     ]),
                 ]);
+                self.display_state.mode_line_evals += 1;
                 match self.eval_datum_raw(&form) {
                     Ok(value) => string_of(Some(self.mode_line_form(value))),
                     Err(_) => "no process".into(),
@@ -749,6 +751,7 @@ impl Vm {
                     Form::List(vec![Form::Sym("fboundp".into()), Form::List(vec![Form::Sym("quote".into()), Form::Sym("file-remote-p".into())])]),
                     Form::List(vec![Form::Sym("file-remote-p".into()), Form::Sym("default-directory".into())]),
                 ]);
+                self.display_state.mode_line_evals += 1;
                 if self.eval_datum_raw(&form).is_ok_and(|v| v != Value::NIL) { "@" } else { "-" }.into()
             }
             // A window-system frame shows the buffer's coding system

@@ -175,6 +175,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-gui-loadup" '("romacs-gui-"))
 
 
+;;; Generated autoloads from romacs-icons.el
+
+(register-definition-prefixes "romacs-icons" '("romacs-icon"))
+
+
 ;;; Generated autoloads from romacs-image.el
 
 (register-definition-prefixes "romacs-image" '("romacs-"))
@@ -247,6 +252,11 @@ Preserve trusted owner eval and the separate companion claim/receipt authority."
 ;;; Generated autoloads from romacs-menu.el
 
 (register-definition-prefixes "romacs-menu" '("romacs-menu--" "x-popup-"))
+
+
+;;; Generated autoloads from romacs-mode-line.el
+
+(register-definition-prefixes "romacs-mode-line" '("romacs-mode-line-"))
 
 
 ;;; Generated autoloads from romacs-model.el

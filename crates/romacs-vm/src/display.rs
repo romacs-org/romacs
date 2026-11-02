@@ -181,8 +181,10 @@ pub(super) struct DisplayState {
     diagnostics: std::cell::RefCell<Vec<String>>,
     /// The text the status bar last showed (`romacs-status-bar-string').
     pub(super) status_bar_text: Option<String>,
+    /// Every evaluator entry a mode-line expansion made (`Vm::mode_line_evals').
+    pub(super) mode_line_evals: u64,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, version, hosted, width, height, building_band, diagnostics, status_bar_text });
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, version, hosted, width, height, building_band, diagnostics, status_bar_text, mode_line_evals });
 impl DisplayState {
     /// The theme with every pending face edit applied: built once for them
     /// all, or, when that fails, one edit at a time, so an edit the theme
@@ -317,6 +319,7 @@ impl DisplayState {
             building_band: false,
             diagnostics: Default::default(),
             status_bar_text: None,
+            mode_line_evals: 0,
         }
     }
 }
@@ -941,6 +944,11 @@ impl Vm {
         self.display_state.segments(id).map_or(self.display_state.base(id) + display, |s| shown_byte(s, display))
     }
     /// Read-only: the display version a renderer uses to decide whether to repaint.
+    /// How many times a mode-line expansion entered the evaluator: its
+    /// `:eval' elements and the `%@' and `%s' specs, since the VM started.
+    pub fn mode_line_evals(&self) -> u64 {
+        self.display_state.mode_line_evals
+    }
     pub fn display_version(&self) -> u64 {
         self.display_state.version
     }

@@ -551,6 +551,8 @@ fn main() {
 /// The session's end, when this process ran one.
 fn run() -> Result<Option<exit::Exit>, String> {
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
+    // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
+    fonts::register_icon_font();
     let mut args = std::env::args().skip(1);
     let mut socket = None;
     let mut floor = None;
