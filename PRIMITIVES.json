@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "b13220dec020c8a1a09654199b08eecc653f069aa3a50320e96e95e76bbe2062",
+  "source_fingerprint": "868f018b310b467571252fa229463bbddefe98daba723a7dd288ece189aa013b",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1247,
-  "parsed_vm2_only": 1247
+  "parsed_total": 1248,
+  "parsed_vm2_only": 1248
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -617,7 +617,7 @@
   "byte-code-function-p": {
    "name": "byte-code-function-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:51"
+   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:58"
   },
   "byte-to-position": {
    "name": "byte-to-position",
@@ -3251,6 +3251,11 @@
    "implementation": "vm2",
    "variant": "Primitive::Narrow",
    "registered_at": "crates/romacs-vm/src/lib.rs:615"
+  },
+  "native-comp-available-p": {
+   "name": "native-comp-available-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:48"
   },
   "native-comp-function-p": {
    "name": "native-comp-function-p",

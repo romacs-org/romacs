@@ -43,6 +43,13 @@ fn native_comp_function_p(_cx, _object: Value) {
     Ok(Value::NIL)
 }}
 
+// comp.c without HAVE_NATIVE_COMP: Romacs has no native compiler, so
+// support is not built in and `native-compile' callers take their fallback.
+defsubr! { name = "native-comp-available-p", gnu = "comp.c:5580", effect = Pure,
+fn native_comp_available_p(_cx) {
+    Ok(Value::NIL)
+}}
+
 // GNU requires a closure whose CLOSURE_CODE is a string (data.c:536).
 // VM2 closures contain its own register-code representation, not GNU bytecode;
 // neither the GNU #[...] reader nor make-byte-code is implemented. Thus no

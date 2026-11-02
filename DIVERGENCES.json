@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "70c360482c895da85b654d9d584d18038a1f3ab76141045075bc5fe8f0ffce2a",
+  "input_hash": "f04832ce1b67334798ab0fb2d779ac10352079fd4dba63bc74c0ab122563c9e1",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 326,
-  "symbols": 913,
+  "symbols": 914,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -1909,6 +1909,9 @@
   ],
   "move_it_to": [
    244
+  ],
+  "native-comp-available-p": [
+   62
   ],
   "native-comp-function-p": [
    62
@@ -4234,11 +4237,12 @@
    "planned": false,
    "mechanism": "`subrp` and callable object representation",
    "gnu": "GNU `data.c:510` tests `PVEC_SUBR` (`lisp.h:2216`), including unevalled special-form subrs and native-compiled Lisp (`NATIVE_COMP_FUNCTIONP`, `lisp.h:5494`). Live pinned GNU reports `(subrp (symbol-function 'if))` and `(subrp (symbol-function 'get-upcase-table))` as t; the latter also satisfies `native-comp-function-p` and is defined in `lisp/case-table.el:84`, not C.",
-   "romacs": "VM2 returns t exactly for its `Kind::Subr` objects, nil for symbols and compiled Lisp closures. Each special form's function cell holds its subr, with arity `(MIN . unevalled)`, so `(subrp (symbol-function 'if))` is t as in GNU. There is no native-comp object kind or native library loader: the `get-upcase-table` witness returns nil and is pinned VALUE. `byte-compile` is GNU Lisp not loaded in the bare replay, pinned MISSING; compiled-function object introspection remains outside this implementation.",
+   "romacs": "VM2 returns t exactly for its `Kind::Subr` objects, nil for symbols and compiled Lisp closures. Each special form's function cell holds its subr, with arity `(MIN . unevalled)`, so `(subrp (symbol-function 'if))` is t as in GNU. There is no native-comp object kind or native library loader: the `get-upcase-table` witness returns nil and is pinned VALUE, and `native-comp-available-p` is nil where pinned GNU, built with native compilation, answers t. `byte-compile` is GNU Lisp not loaded in the bare replay, pinned MISSING; compiled-function object introspection remains outside this implementation.",
    "why": "**Package-observable representation gaps**, not a claim that all GNU callable kinds are representable. Never label VM2 bytecode closures native-comp subrs merely because the pinned binary native-compiles its Lisp libraries. `subrp/0052` is the inherited VM2-EV2 circular printer gap. Live evidence: `crates/romacs-vm/tools/primh/evidence/subrp.json`; object and alias tests: `tests/subrp_chain.rs`.",
    "symbols": [
     "subrp",
     "native-comp-function-p",
+    "native-comp-available-p",
     "byte-compile"
    ],
    "symbols_derived": false
