@@ -193,6 +193,14 @@ mod leaf {
         pub(in crate::prim) fn new(vm: &'a mut Vm) -> Self {
             Leaf { vm }
         }
+        /// The automatic collection's trigger (`Vm::collection_budget').
+        pub(crate) fn collection_budget(&self) -> (f64, f64) {
+            self.vm.collection_budget()
+        }
+        /// `Vm::collection_share'.
+        pub(crate) fn collection_share(&self) -> f64 {
+            self.vm.collection_share()
+        }
         pub(crate) fn set_font_alternative_families(&mut self, raw: Value, names: Vec<Vec<String>>) {
             let slot = self.vm.slot(super::FONT_ALTERNATIVE_FAMILIES);
             self.vm.slots[slot].value = raw;

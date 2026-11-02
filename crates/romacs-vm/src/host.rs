@@ -1434,6 +1434,12 @@ pub fn monotonic() -> Instant {
     Instant::now()
 }
 
+/// When a collection started, for `gc-elapsed'; none in build mode, so a
+/// world's heap never depends on how long its collections took.
+pub fn collection_clock() -> Option<Instant> {
+    (!building()).then(Instant::now)
+}
+
 // Effects.
 
 /// Four bytes of kernel entropy; in build mode the pinned seed.
