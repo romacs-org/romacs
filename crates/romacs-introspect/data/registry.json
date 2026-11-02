@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "982fd6403b345a88816b5e1a5e8f78022f5a9f0f8a4558a4e20d378275e3c1b2",
+    "input_hash": "dee7f3a7de6d906a5376872d7031193d8b773fcf1c7d864151fc13d5f7c8bb72",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7717
+    "vm2_universe": 7724
   },
   "schema": 2,
   "vm2": {
-    "count": 1256,
+    "count": 1259,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -113,6 +113,7 @@
       "buffer-enable-undo",
       "buffer-encode-utf8",
       "buffer-file-name",
+      "buffer-hash",
       "buffer-list",
       "buffer-live-p",
       "buffer-local-value",
@@ -639,6 +640,7 @@
       "multibyte-char-to-unibyte",
       "multibyte-string-p",
       "narrow-to-region",
+      "native-comp-available-p",
       "native-comp-function-p",
       "natnump",
       "nconc",
@@ -898,6 +900,7 @@
       "romacs--sort-by-length-alpha",
       "romacs--startup-phase",
       "romacs--take-doomed-finalizers",
+      "romacs--take-user-signal",
       "romacs--term-close",
       "romacs--term-create",
       "romacs--term-follow",

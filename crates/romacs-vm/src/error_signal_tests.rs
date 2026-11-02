@@ -170,7 +170,7 @@ fn error_data_survives_a_forced_moving_collection() {
 fn unclassified_internal_error_keeps_its_message() {
     let mut vm = Vm::new();
     assert_eq!(
-        text(&mut vm, "(condition-case e (let ((print-symbols-bare t)) (prin1-to-string 'a)) (error e))"),
-        "(error \"printing print-symbols-bare is not supported\")"
+        text(&mut vm, "(condition-case e (let ((print-integers-as-characters t)) (prin1-to-string 'a)) (error e))"),
+        "(error \"printing print-integers-as-characters is not supported\")"
     );
 }

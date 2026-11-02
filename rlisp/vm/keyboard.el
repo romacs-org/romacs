@@ -140,14 +140,19 @@ runs no timers."
               (let* ((ran (if timers romacs--timers-run 0))
                      (delay (and timers (romacs--timer-delay)))
                      (delay (if save-at (min (or delay save-at) (max 0 (- save-at (float-time)))) delay)))
-                (setq c (romacs--host-event
-                         (if (and delay left) (min delay left) (or delay left))
-                         (and shown (not dispatched) (= shown ran)))
+                ;; A user signal (SIGUSR1, SIGUSR2) is an event before the
+                ;; host's (kbd_buffer_get_event).
+                (setq c (or (romacs--take-user-signal)
+                            (romacs--host-event
+                             (if (and delay left) (min delay left) (or delay left))
+                             (and shown (not dispatched) (= shown ran))))
                       shown ran)
-                ;; read_char: an event `special-event-map' binds (focus) runs
-                ;; its binding at once and is never input; the read goes on,
-                ;; and redisplays first what the binding changed.
-                (when (and (consp c) (lookup-key special-event-map (vector (car c))))
+                ;; read_char: an event `special-event-map' binds (focus, a
+                ;; user signal) runs its binding at once and is never input;
+                ;; the read goes on, and redisplays first what the binding
+                ;; changed.
+                (when (and (or (consp c) (and c (symbolp c)))
+                           (lookup-key special-event-map (vector (if (consp c) (car c) c))))
                   (romacs--special-event c)
                   (setq c nil shown nil))
                 (setq waiting (null c))))))
@@ -326,6 +331,11 @@ reports it, raised from the innermost recursive edit when there is one."
                    (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
           (when (boundp 'echo-area-clear-hook) (romacs--safe-run-hooks 'echo-area-clear-hook))
           (message nil))))
+     ;; Without a host keyboard a user signal is still an event
+     ;; (kbd_buffer_get_event); a special one runs its binding and the read
+     ;; goes on, as read_char's do.
+     ((setq c (romacs--take-user-signal))
+      (when (romacs--special-event c) (setq c nil again t)))
      (seconds)
      ;; Batch GNU blocks for the terminal here. With no input left, VM2
      ;; leaves the innermost recursive edit or minibuffer instead, so a
@@ -702,7 +712,7 @@ Return nil at the end of an executing keyboard macro."
 its `special-event-map' binding at once, outside any key sequence, with
 EVENT as its keys.  Value: whether EVENT ran a command.  A VM without
 GNU's preloaded Lisp has the bindings but not frame.el's handlers."
-  (let ((command (lookup-key special-event-map (vector (car-safe event)))))
+  (let ((command (lookup-key special-event-map (vector (if (consp event) (car event) event)))))
     (when (commandp command)
       (setq last-input-event event)
       (command-execute command nil (vector event) t)
