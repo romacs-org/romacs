@@ -1488,6 +1488,52 @@ fn count_processors(set: Processors) -> u64 {
     u64::try_from(unsafe { libc::sysconf(name) }).ok().filter(|&n| n > 0).unwrap_or(1)
 }
 
+// Performance counters.
+
+/// User-space instructions the calling thread has retired since its first
+/// call: a pinned Linux hardware counter (perf_event_open), opened once per
+/// thread. Unlike time it is load-insensitive and repeatable, so scaling
+/// probes compare work at two sizes by it. None where the kernel refuses
+/// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
+/// counting all the time: a number is always a whole count.
+pub(crate) fn thread_instructions() -> Option<u64> {
+    thread_local! {
+        static COUNTER: std::cell::OnceCell<Option<std::os::fd::OwnedFd>> = const { std::cell::OnceCell::new() };
+    }
+    COUNTER.with(|counter| counter.get_or_init(open_instruction_counter).as_ref().and_then(read_counter))
+}
+
+#[cfg(target_os = "linux")]
+fn open_instruction_counter() -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+    // perf_event_attr, PERF_ATTR_SIZE_VER0: type HARDWARE (0) and size,
+    // config INSTRUCTIONS (1), flags pinned | exclude_kernel | exclude_hv.
+    const PERF_FLAG_FD_CLOEXEC: libc::c_ulong = 8;
+    let mut attr = [0u64; 8];
+    attr[0] = 64 << 32;
+    attr[1] = 1;
+    attr[5] = 1 << 2 | 1 << 5 | 1 << 6;
+    // SAFETY: ATTR is a zeroed PERF_ATTR_SIZE_VER0 struct that outlives the call.
+    let fd = unsafe { libc::syscall(libc::SYS_perf_event_open, attr.as_ptr(), 0, -1, -1, PERF_FLAG_FD_CLOEXEC) };
+    // SAFETY: a non-negative result is a new descriptor this thread owns.
+    (fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd as i32) })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_instruction_counter() -> Option<std::os::fd::OwnedFd> {
+    None
+}
+
+/// The counter's value; none once a pinned counter lost its PMU slot,
+/// which the kernel reports as end of file.
+fn read_counter(fd: &std::os::fd::OwnedFd) -> Option<u64> {
+    use std::os::fd::AsRawFd;
+    let mut count = 0u64;
+    // SAFETY: COUNT is 8 writable bytes; FD is open for the thread's life.
+    let read = unsafe { libc::read(fd.as_raw_fd(), (&raw mut count).cast(), 8) };
+    (read == 8).then_some(count)
+}
+
 // Time.
 
 /// The kernel's clock ticks per second (`_SC_CLK_TCK`), the unit of
