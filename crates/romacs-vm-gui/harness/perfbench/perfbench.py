@@ -439,12 +439,13 @@ def ert_row(ctx, batch):
 # --- GUI workloads ------------------------------------------------------------
 
 def gui_init(engine, idle_file=None):
-    """The GUI init: GNU's --loadup settings, the probe and perfbench-gui.el;
-    with IDLE_FILE, write the first idle moment after startup there and exit."""
+    """The GUI init: GNU's --loadup settings (Romacs's own defaults off in
+    Romacs), the probe and perfbench-gui.el; with IDLE_FILE, write the first
+    idle moment after startup there and exit."""
     idle = ('(add-hook (quote emacs-startup-hook) (lambda () (run-with-idle-timer 0 nil'
             f' (lambda () (perfbench-gui-stamp {parity_live.lisp_string(str(idle_file))}) (kill-emacs 0)))))\n'
             if idle_file else '')
-    return (';; -*- lexical-binding: t -*-\n' + (real_init.gnu_settings() if engine == 'gnu' else '')
+    return (';; -*- lexical-binding: t -*-\n' + (real_init.gnu_settings() if engine == 'gnu' else parity_live.ROMACS_DEFAULTS_OFF)
             + '(setq inhibit-startup-screen t)\n'
             f'(load {parity_live.lisp_string(str(GUI_LISP))} nil t)\n' + idle
             + f'(load {parity_live.lisp_string(str(parity_live.PROBE))} nil t)\n'

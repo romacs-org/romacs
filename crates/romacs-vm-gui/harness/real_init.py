@@ -43,7 +43,7 @@ import re
 import shutil
 import subprocess
 
-from parity_live import ROOT, lisp_copy, lisp_string
+from parity_live import ROMACS_DEFAULTS_OFF, ROOT, lisp_copy, lisp_string
 
 CONFIG_ENV = 'ROMACS_BENCH_PROFILE'
 PROFILES = ('stock', 'init')
@@ -158,7 +158,8 @@ def init_source(engine, lisp, port_file, token, profile, config):
     local socket: Romacs's GUI host refuses local network processes."""
     real = profile == 'init'
     blocks = profile_init(config) if real else ''
-    gnu_setup = gnu_settings() if engine == 'gnu' else ''
+    # Romacs's own defaults off under an init, as -Q keeps them off under stock.
+    setup = gnu_settings() if engine == 'gnu' else ROMACS_DEFAULTS_OFF if real else ''
     return f''';; -*- lexical-binding: t -*-
 (defvar bench-init-errors nil "Init blocks that signalled, as (NAME MESSAGE).")
 (defmacro bench-block (name &rest body)
@@ -167,7 +168,7 @@ def init_source(engine, lisp, port_file, token, profile, config):
      (error (push (list ,name (error-message-string err)) bench-init-errors)
             (message "bench init: %s: %s" ,name (error-message-string err)))))
 {f"(setq load-path (cons {lisp_string(str(lisp))} load-path))" if real else ""}
-{gnu_setup}(setq inhibit-startup-screen t)
+{setup}(setq inhibit-startup-screen t)
 {HERMES_REMOTE if real else ""}{blocks}
 {"(setq hermes-dashboard-transport-start-mode 'remote)" if real else ""}
 (defun bench--strings (value)

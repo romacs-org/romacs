@@ -1070,9 +1070,7 @@ fn evaluate(
         if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
             eprintln!("romacs: usage log: {error}");
         }
-        if quick && launch == startup::Launch::Loadup {
-            vm.eval_source(startup::QUICK_START)?;
-        }
+        startup::before_init(&mut vm, launch, quick)?;
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // What the init loads is its layer's plan (world.rs).
