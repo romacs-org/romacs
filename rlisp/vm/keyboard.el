@@ -257,6 +257,11 @@ A nil entry, or a C beyond a string or vector table, is no translation."
              (aref table c))
         c)))
 
+(defvar romacs--keyboard-quit nil
+  "Whether `romacs--read-char''s last event was the quit character typed on
+the host keyboard, before `keyboard-translate-table': keyboard.c
+handle_interrupt's `C-g', which sets `quit-flag' (quit.rs).")
+
 (defun romacs--read-char (&optional seconds)
   "keyboard.c read_char: the next event, recorded as input.
 It comes from `unread-post-input-method-events', `unread-command-events'
@@ -267,6 +272,7 @@ waiting at most SECONDS when given (then nil).  No input method runs:
 SECONDS gives nil and its absence `end-of-file', as batch GNU's minibuffer
 reports it, raised from the innermost recursive edit when there is one."
   (let ((reread nil) (recorded nil) c (again t))
+   (setq romacs--keyboard-quit nil)
    (while again
     (setq again nil)
     (cond
@@ -302,7 +308,8 @@ reports it, raised from the innermost recursive edit when there is one."
       (when (and romacs--reading-command-keys (romacs--auto-save-due-p) (not (romacs--unread-p)) (not (input-pending-p)))
         (romacs--auto-save))
       (let ((sit (and romacs--reading-command-keys (null seconds) (romacs--auto-save-delay))))
-        (setq c (romacs--read-host-char seconds sit))
+        (setq c (romacs--read-host-char seconds sit)
+              romacs--keyboard-quit (eq c ?\C-g))
         ;; An event a timer or filter queued in `unread-command-events'
         ;; while the host waited: when the wait was read_char's auto-save
         ;; `sit_for', it is read next as a requeued event (keyboard.c:2999);
@@ -359,6 +366,10 @@ reports it, raised from the innermost recursive edit when there is one."
   (let ((seconds (and (numberp seconds) seconds)) val)
     (while (progn
              (setq val (romacs--read-char seconds))
+             ;; read_char's quit: a C-g from the keyboard set `quit-flag',
+             ;; or cleared it under `inhibit-quit' and is read as a key;
+             ;; maybe_quit acts on it before the event is returned.
+             (and romacs--keyboard-quit (not inhibit-quit) (signal 'quit nil))
              (and ascii-required (not (and seconds (null val)))
                   (progn
                     ;; A function key with an ASCII equivalent is that
@@ -525,7 +536,10 @@ unbound upper-case or shifted key is looked up without its shift, and
                     ((and executing-kbd-macro (romacs--at-end-of-macro-p)
                           (not unread-command-events))
                      (setq state 'end))
+                    ;; A C-g read here is a key: read_key_sequence clears
+                    ;; the `quit-flag' it set (keyboard.c:11352).
                     (t (setq key (romacs--read-char)
+                             quit-flag nil
                              raw (vconcat raw (list key))
                              keys (vconcat keys (list key)))))
               ;; A click in a mode line, header line or margin is looked
