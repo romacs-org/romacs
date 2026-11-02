@@ -3606,8 +3606,10 @@ unsafe fn nested_then(e: &mut Engine<'_>, r: *mut Value, run: impl FnOnce(&mut V
     }
 }
 // eval, load, require, macroexpand, autoload-do-load and the host read run
-// Lisp with this frame suspended (`call_suspended`). ARGS are a copy taken
-// before the call; the primitive roots whatever it keeps across Lisp.
+// Lisp with this frame suspended (`call_suspended`). The work, and the copy of
+// ARGS it owns, live in `reentrant_step`, so this handler keeps its sibling-call
+// dispatch: a frame kept here per call grew the native stack with every `eval`
+// a Lisp loop made (eval-buffer's readevalloop, one per top-level form).
 #[cold]
 unsafe fn reentrant_load(
     e: &mut Engine<'_>,
@@ -3617,6 +3619,23 @@ unsafe fn reentrant_load(
     start: usize,
     argc: usize,
 ) -> Value {
+    unsafe {
+        let to = reentrant_step(e, r, pc, p, start, argc);
+        continue_at(e, to)
+    }
+}
+/// `reentrant_load`'s call: Continue::At the next instruction with the
+/// value stored, or Stop with the condition pending.
+#[cold]
+#[inline(never)]
+unsafe fn reentrant_step(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    p: Primitive,
+    start: usize,
+    argc: usize,
+) -> Continue {
     unsafe {
         let args = e.vm.stack[start..start + argc].to_vec();
         e.vm.execution_fatal = false;
@@ -3633,13 +3652,14 @@ unsafe fn reentrant_load(
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         let Some(r) = r else {
-            return fail(e, "register storage overflow");
+            fail(e, "register storage overflow");
+            return Continue::Stop;
         };
         match result {
             Ok(value) => {
                 leave_native(e);
                 *r.add((*pc).a) = value;
-                advance(e, r, pc)
+                Continue::At(r, pc.add(1))
             }
             Err(error) => {
                 // An `eval` form's own signal or throw crosses back unchanged;
@@ -3648,16 +3668,17 @@ unsafe fn reentrant_load(
                     e.escape = Some(escape);
                     e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
                     e.failed_eval_depth = e.vm.propagated_eval_depth.take();
-                    return Value::UNBOUND;
+                    return Continue::Stop;
                 }
                 if error == "native stack exhausted while compiling Lisp" {
-                    return native_stack_failure(e, &error);
+                    native_stack_failure(e, &error);
+                    return Continue::Stop;
                 }
                 if let Some((condition, data)) = e.vm.primitive_condition(p, start, argc, &error) {
                     e.escape = Some(Escape::Signal(condition, data));
                 }
                 e.error = Some(error);
-                Value::UNBOUND
+                Continue::Stop
             }
         }
     }
