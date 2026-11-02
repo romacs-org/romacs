@@ -46,7 +46,7 @@ impl Leaf<'_> {
                 data::Object::Buffer(buffer) => {
                     let at = low + offset;
                     let code = buffer.character_at(ByteOffset(at)).ok().flatten().map_or(0, |code| code as u32);
-                    (code, offset + buffer.char_width_at(at))
+                    (code, offset + crate::lstring::char_string(code, &mut [0; 5]))
                 }
                 data::Object::ByteBuffer(buffer) => (u32::from(buffer.bytes[low + offset]), offset + 1),
                 _ => unreachable!("buffer_index validates"),

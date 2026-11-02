@@ -29,6 +29,9 @@ struct View<'a> {
     ascii: [std::cell::Cell<Option<i32>>; 128],
     replay: Vec<i32>,
     read: std::cell::RefCell<Vec<i32>>,
+    /// The last character read, as (byte, code): a scan reads a
+    /// character, its syntax and its width at one position in turn.
+    last: std::cell::Cell<(usize, u32)>,
 }
 
 /// SYNTAX_WITH_FLAGS of C in TABLE: the car of its (CODE . MATCH) entry.
@@ -52,7 +55,7 @@ impl<'a> View<'a> {
             _ => unreachable!("buffer_index validates"),
         };
         let ascii = std::array::from_fn(|_| std::cell::Cell::new(None));
-        Self { vm, body, table, properties, ascii, replay: Vec::new(), read: Default::default() }
+        Self { vm, body, table, properties, ascii, replay: Vec::new(), read: Default::default(), last: std::cell::Cell::new((usize::MAX, 0)) }
     }
     fn len(&self) -> usize {
         match self.body {
@@ -71,7 +74,13 @@ impl<'a> View<'a> {
 impl scan::Text for View<'_> {
     fn char_at(&self, at: Pos) -> u32 {
         match self.body {
-            Body::Multibyte(t, _) => t.character_at(ByteOffset(at.byte)).ok().flatten().map_or(0, |c| c as u32),
+            Body::Multibyte(t, _) => {
+                let (byte, code) = self.last.get();
+                if byte == at.byte { return code; }
+                let code = t.character_at(ByteOffset(at.byte)).ok().flatten().map_or(0, |c| c as u32);
+                self.last.set((at.byte, code));
+                code
+            }
             Body::Unibyte(b) => b.bytes.get(at.byte).map_or(0, |&byte| {
                 if byte < 128 { u32::from(byte) } else { u32::from(byte) + crate::lstring::BYTE8_OFFSET }
             }),
@@ -80,7 +89,8 @@ impl scan::Text for View<'_> {
     fn inc(&self, at: Pos) -> Pos {
         let width = match self.body {
             // A placeholder's UTF-8 width is its raw byte's internal width.
-            Body::Multibyte(t, _) => t.char_width_at(at.byte),
+            Body::Multibyte(..) if at.byte >= self.len() => 1,
+            Body::Multibyte(..) => crate::lstring::char_string(self.char_at(at), &mut [0; 5]),
             Body::Unibyte(_) => 1,
         };
         Pos { char: at.char + 1, byte: at.byte + width }

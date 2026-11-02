@@ -665,24 +665,24 @@ impl TextBody {
     }
     /// The byte where the character before byte AT starts; 0 at the start.
     pub(crate) fn char_start_before(&self, at: usize) -> usize {
-        if at == 0 {
-            return 0;
-        }
-        // A chunk never splits a character.
-        let (chunk, start) = self.chunk_before(at);
-        let mut i = chunk.len() - 1;
-        while i > 0 && chunk[i] & 0xc0 == 0x80 {
-            i -= 1;
-        }
-        start + i
-    }
-    /// The bytes of the character at byte AT; 1 at the end.
-    pub(crate) fn char_width_at(&self, at: usize) -> usize {
-        match self.chunk_from(at).first() {
-            Some(&lead) if lead >= 0xf0 => 4,
-            Some(&lead) if lead >= 0xe0 => 3,
-            Some(&lead) if lead >= 0xc0 => 2,
-            _ => 1,
+        // A chunk never splits a character: scan back within the one
+        // holding the byte before AT.
+        let start = |bytes: &[u8], base: usize| {
+            let mut i = at - 1 - base;
+            while i > 0 && bytes[i] & 0xc0 == 0x80 {
+                i -= 1;
+            }
+            base + i
+        };
+        let rope_bytes = self.bytes_len - self.tail.len();
+        match self.flat.get() {
+            _ if at == 0 => 0,
+            Some(flat) => start(flat.as_bytes(), 0),
+            None if at > rope_bytes => start(self.tail.as_bytes(), rope_bytes),
+            None => {
+                let cursor = self.chunk_for_byte(at - 1);
+                start(cursor.text.as_bytes(), cursor.byte)
+            }
         }
     }
     /// The bytes of the chunk holding the byte before END, up to END, and
