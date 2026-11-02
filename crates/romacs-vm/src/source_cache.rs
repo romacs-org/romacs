@@ -418,7 +418,7 @@ impl Vm {
     /// valid only while this is unchanged for every symbol it mentions, so a
     /// call through an alias is recompiled when the alias target, or any
     /// alias in between, becomes a macro.
-    fn call_is_macro(&self, slot: usize) -> bool {
+    pub(super) fn call_is_macro(&self, slot: usize) -> bool {
         let end = self.macro_alias_end(slot);
         self.macros.contains(&end) || self.autoload_macro(self.slots[end].function)
     }

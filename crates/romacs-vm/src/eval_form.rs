@@ -125,7 +125,10 @@ impl Vm {
         // form made are retired once unreachable, as for any request. Code
         // compiled per call and never retired grew every collection's walk.
         let saved = std::mem::replace(&mut self.dynamic_scope, lexical == Value::NIL);
+        // GNU's `eval' interprets: macros expand as evaluation reaches them.
+        let saved_reach = std::mem::replace(&mut self.reach_expansion, true);
         let compiled = self.compile_request(&form);
+        self.reach_expansion = saved_reach;
         self.dynamic_scope = saved;
         let (function, _) = compiled?;
         self.propagate_next = true;

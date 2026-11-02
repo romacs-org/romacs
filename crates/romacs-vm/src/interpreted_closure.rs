@@ -396,6 +396,8 @@ impl Vm {
                     pending_specials: self.pending_specials.clone(),
                     dynamic_scope: a[2] == Value::NIL,
                     deferred: false,
+                    // GNU's interpreted closure expands each macro call at its reach.
+                    reach: true,
                 };
                 let function = self.install_function(Function {
                     capture_mutations: vec![true; names.len()],

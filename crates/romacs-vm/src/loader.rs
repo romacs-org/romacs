@@ -362,7 +362,12 @@ impl Vm {
         // expansion budget across sibling top-level forms.
         self.expanded_macros.clear();
         self.expanded_symbols.clear();
-        if let Some(expanded) = self.expand_macro(form)? {
+        self.propagated_escape = None;
+        let expanded = match self.expand_macro(form) {
+            Ok(expanded) => expanded,
+            Err(error) => return Err(self.eager_expansion_failure(error)),
+        };
+        if let Some(expanded) = expanded {
             return self.eval_load_toplevel(&expanded, None, lazy, depth + 1);
         }
         // Before GNU subr.el has installed prog2, its bootstrap surface
@@ -391,6 +396,10 @@ impl Vm {
                 self.compile_request(form).map(|(function, _)| function)
             };
             self.seed_file_specials = false;
+            let compiled = match compiled {
+                Ok(function) => Ok(function),
+                Err(error) => Err(self.eager_expansion_failure(error)),
+            };
             compiled.and_then(|function| {
                 self.propagate_next |= self.loader.propagate != 0;
                 self.execute_raw(function)
@@ -413,6 +422,31 @@ impl Vm {
             self.set_variable_value(dynvars, declared)?;
         }
         result
+    }
+    /// macroexp.el internal-macroexpand-for-load: an error that expanding a
+    /// top-level form signals reaches the loader's caller as (error "Eager
+    /// macro-expansion failure: ERR"), ERR printed as `%S' prints it. A quit
+    /// or another signal that is no error passes as it is, as does a throw
+    /// to a catch outside the load.
+    fn eager_expansion_failure(&mut self, error: String) -> String {
+        let (condition, object) = match self.propagated_escape {
+            Some(threaded::Escape::Signal(condition, data)) => {
+                self.conses.push((condition, data));
+                (condition, Value::reference(self.conses.len() - 1, 3))
+            }
+            Some(threaded::Escape::Error { condition, object, .. }) => (condition, object),
+            _ => return error,
+        };
+        let error_symbol = self.intern("error");
+        if !self.condition_matches(condition, error_symbol) {
+            return error;
+        }
+        let Ok(printed) = self.print_render(object, true, Value::NIL, false) else { return error };
+        let message = format!("Eager macro-expansion failure: {printed}");
+        let Ok(text) = self.literal(&Form::String(message.clone())) else { return error };
+        let data = self.list_value(&[text]);
+        self.propagated_escape = Some(threaded::Escape::Signal(error_symbol, data));
+        message
     }
     pub(super) fn source_load_active(&self) -> bool {
         !self.loader.active.is_empty()

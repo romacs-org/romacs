@@ -993,8 +993,11 @@ struct LazyBody {
     /// expands each form when evaluation reaches it). Its own root is
     /// compiled strictly, so a failure signals instead of deferring again.
     deferred: bool,
+    /// Compiled in `reach_expansion', as GNU's interpreter runs `eval''s
+    /// code: each macro call expands when evaluation reaches it.
+    reach: bool,
 }
-romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, local_specials, pending_specials, dynamic_scope, deferred });
+romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, local_specials, pending_specials, dynamic_scope, deferred, reach });
 #[derive(Clone, Copy)]
 struct Binding {
     reg: usize,
@@ -1275,6 +1278,13 @@ pub struct Vm {
     lazy_regime: bool,
     /// R215: compile a failing form as a deferred reach-time expansion.
     defer_expansion_errors: bool,
+    /// GNU's interpreter, behind `eval': a macro call, or a call whose
+    /// function may become one, expands only when evaluation reaches it, so
+    /// what its expansion signals, throws or quits meets the handlers
+    /// dynamically around it there.
+    reach_expansion: bool,
+    /// The next form compiled is a reach-time thunk's own, reached now.
+    expand_reached: bool,
     /// Set for the builder about to be created (`Builder::loader_order`).
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
@@ -1466,6 +1476,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     seed_file_specials,
     lazy_regime,
     defer_expansion_errors,
+    reach_expansion,
+    expand_reached,
     loader_order_request,
     keep_captures,
     lambda_depth,
@@ -1636,6 +1648,8 @@ impl Vm {
             seed_file_specials: false,
             lazy_regime: false,
             defer_expansion_errors: false,
+            reach_expansion: false,
+            expand_reached: false,
             loader_order_request: false,
             keep_captures: false,
             lambda_depth: 0,
@@ -2208,6 +2222,7 @@ impl Vm {
             pending_specials: self.pending_specials.clone(),
             dynamic_scope: self.dynamic_scope,
             deferred,
+            reach: self.reach_expansion,
         };
         let id = self.install_function(Function {
             capture_mutations: vec![true; names.len()],
@@ -2239,7 +2254,10 @@ impl Vm {
         let Some(lazy) = self.functions.get(id).and_then(|f| f.lazy.clone()) else {
             return Ok(());
         };
-        let body = match self.expansion_form(lazy.body, 0)? {
+        // A body `eval' compiles keeps each quoted object itself, as GNU's
+        // interpreter evaluates the very structure it was handed.
+        let body = if lazy.reach { self.eval_datum_form(lazy.body)? } else { self.expansion_form(lazy.body, 0)? };
+        let body = match body {
             Form::List(forms) => forms,
             Form::Sym(nil) if nil == "nil" => vec![],
             _ => return Err("invalid lazy body".into()),
@@ -2255,6 +2273,8 @@ impl Vm {
         let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, !lazy.deferred);
         let saved_scope = std::mem::replace(&mut self.dynamic_scope, lazy.dynamic_scope);
         let saved_pending = std::mem::replace(&mut self.pending_specials, lazy.pending_specials.clone());
+        let saved_reach = std::mem::replace(&mut self.reach_expansion, lazy.reach);
+        let saved_reached = std::mem::replace(&mut self.expand_reached, lazy.reach && lazy.deferred);
         if self.compile_depth == 0 {
             self.expanded_macros.clear();
             self.expanded_symbols.clear();
@@ -2271,6 +2291,8 @@ impl Vm {
         self.defer_expansion_errors = saved_defer;
         self.dynamic_scope = saved_scope;
         self.pending_specials = saved_pending;
+        self.reach_expansion = saved_reach;
+        self.expand_reached = saved_reached;
         let (compiled, names) = result?;
         if names != lazy.names {
             return Err("lazy body changed its capture layout".into());
@@ -2290,6 +2312,14 @@ impl Vm {
         self.expr_inner(b, f)
     }
     fn expr_inner(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
+        // A reach-time thunk's body is its one form, the first compiled.
+        let reached = std::mem::take(&mut self.expand_reached);
+        if self.reach_expansion && !reached && self.expands_at_reach(f) {
+            let thunk = self.lazy_lambda(b, &[], std::slice::from_ref(f), true)?;
+            let r = b.reg();
+            b.emit(Op::Call(r, thunk, b.next, 0));
+            return Ok(r);
+        }
         if !self.defer_expansion_errors || !matches!(f, Form::List(a) if !a.is_empty()) {
             return self.expr_now(b, f);
         }
@@ -2313,6 +2343,17 @@ impl Vm {
                 Ok(r)
             }
         }
+    }
+    /// Whether F expands only when reached in `reach_expansion': a call of a
+    /// macro, or of a symbol with no function yet, which a form evaluated
+    /// before it may define as one. Romacs's own internal heads compile now.
+    fn expands_at_reach(&self, f: &Form) -> bool {
+        let Form::List(items) = f else { return false };
+        let Some(Form::Sym(head)) = items.first() else { return false };
+        let Some(&slot) = self.names.get(head) else { return !head.starts_with("#:") };
+        self.call_is_macro(slot)
+            || (self.slots[slot].function == Value::UNBOUND && !head.starts_with("#:")
+                && prim::prims::special_forms::special_form_min(head).is_none())
     }
     /// The special form HEAD's function names through a chain of symbol
     /// aliases (GNU indirect_function), if it ends at one.
