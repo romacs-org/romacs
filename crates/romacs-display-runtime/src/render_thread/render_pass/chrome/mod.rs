@@ -101,5 +101,12 @@ pub(super) fn render_frame_window_overlays_with_toolbar_resources(
         native.content_size().1,
     );
     transient_overlays::draw_typing_speed(renderer, render, surface_view, frame);
+    transient_overlays::draw_busy(
+        renderer,
+        render,
+        surface_view,
+        native.content_size().0,
+        native.content_size().1,
+    );
     Ok(())
 }
