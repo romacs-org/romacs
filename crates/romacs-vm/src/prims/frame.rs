@@ -107,11 +107,17 @@ fn frame_alist(cx: &mut Leaf<'_>, frame: Value, font: bool) -> std::result::Resu
         Some(entry) => entry.1 = value,
         None => alist.insert(0, (key, value)),
     };
-    // tty_color_name of the initial terminal's unspecified default pixels.
+    // A child frame showing another's faces has that frame's default
+    // colours; else tty_color_name of the initial terminal's unspecified
+    // default pixels.
+    let live = cx.windows().decode_live_frame(frame)?;
+    let owner = cx.face_owner(live)?;
+    let shown = if owner == live { vec![] } else { cx.windows().frame_parameter_entries(owner)? };
     for (key, unspecified) in [("foreground-color", "unspecified-fg"), ("background-color", "unspecified-bg")] {
         let key = cx.intern(key);
-        if !alist.iter().any(|(k, v)| *k == key && matches!(cx.kind(*v), leaf::Kind::String | leaf::Kind::Bytes)) {
-            let value = cx.string(unspecified);
+        let colour = |cx: &Leaf<'_>, (k, v): &(Value, Value)| *k == key && matches!(cx.kind(*v), leaf::Kind::String | leaf::Kind::Bytes);
+        if !alist.iter().any(|e| colour(cx, e)) {
+            let value = match shown.iter().find(|e| colour(cx, e)) { Some(&(_, v)) => v, None => cx.string(unspecified) };
             store(&mut alist, key, value);
         }
     }
@@ -248,6 +254,14 @@ fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Va
         let alpha = alpha_pair(cx, value)?;
         let limit = alpha_lower_limit(cx)?;
         cx.windows().set_frame_alpha(frame, alpha, limit)
+    } else if let Some(attribute) = [(cx.intern("foreground-color"), ":foreground"), (cx.intern("background-color"), ":background")]
+        .iter().find(|(k, _)| *k == key).map(|&(_, attribute)| attribute)
+        && matches!(cx.kind(value), leaf::Kind::String) && super::face::displayed_faces(cx, frame)? {
+        // update_face_from_frame_parameter (xfaces.c:3887): the frame's
+        // default face takes the colour, and a new background its
+        // background mode. A child frame's colours paint only it (VM2-CHILD-FRAME).
+        let (default, attribute) = (cx.intern("default"), cx.intern(attribute));
+        super::face::set_lisp_face_attribute(cx, default, attribute, value, frame).map(|_| ())
     } else { Ok(()) }
 }
 
@@ -419,8 +433,9 @@ fn romacs_create_frame(cx, parms: Value) {
         stored.retain(|(k, _)| *k != name_key);
         stored.insert(0, (name_key, name));
     }
+    // Its faces are its parent's until something sets one on it alone
+    // (`face_own').
     let frame = cx.windows().create_child_frame(parent, geometry, stored)?;
-    cx.face_copy_frame(parent, frame)?;
     // gui_default_parameter (pgtkfns.c:1599) on the frame already listed:
     // a refused value leaves it, not yet visible, as x_create_frame does.
     for name in ["alpha", "alpha-background", "left-fringe", "right-fringe"] {

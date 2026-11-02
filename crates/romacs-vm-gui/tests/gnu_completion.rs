@@ -389,3 +389,44 @@ fn chrome_colours_follow_the_theme() {
         r##"((tc-focus tango-dark) "#2e3436" "#ff0000" "#4b5051" "#fce94f" "#3d4345" "#54595a" "#fce94f")"##,
         r##"(nil "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#2a2720" "#d48a20")"##]);
 }
+
+/// A theme switch recomputes the frame's background mode as GNU's does
+/// (xfaces.c update_face_from_frame_parameter -> frame-set-background-mode),
+/// so a dark theme after a light one gets the dark defface specs; and a
+/// shown layer keeps showing the root frame's faces throughout
+/// (VM2-CHILD-FRAME). Pinned GNU X11 on Xvfb, the same switches from -Q:
+/// modus-operandi `light' "#595959", then tango-dark `dark' "grey70".
+#[test]
+fn a_theme_switch_recomputes_the_background_mode() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        vm.eval_source("(defun bm-probe ()
+            (romacs-layer-toast \"toast\")
+            (let ((toast (romacs-layer--frame (caar romacs-layer--toasts))))
+              (list custom-enabled-themes (frame-parameter nil 'background-mode)
+                    (romacs-chrome--hex (face-foreground 'shadow nil t)) (romacs--frame-shares-faces-p toast))))").unwrap();
+        let mut report = vec![printed(&mut vm, "(bm-probe)")];
+        // A plain child frame shares the root's default colours, asked about
+        // by name or as the selected frame.
+        report.push(printed(&mut vm, "(let* ((after-make-frame-functions nil) (c (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil)))))
+            (prog1 (list (romacs--frame-shares-faces-p c) (equal (frame-parameter c 'background-color) (frame-parameter nil 'background-color))
+                         (equal (with-selected-frame c (frame-parameter nil 'background-color)) (frame-parameter nil 'background-color)))
+              (delete-frame c)))"));
+        for step in ["(load-theme 'modus-operandi t)",
+                     "(progn (disable-theme 'modus-operandi) (load-theme 'tango-dark t))",
+                     "(mapc #'disable-theme custom-enabled-themes)"] {
+            report.push(printed(&mut vm, &format!("(progn {step} (bm-probe))")));
+        }
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, [
+        // The built-in palette is dark (GNU's stock frame is light: `light' "grey50").
+        r##"(nil dark "#b3b3b3" t)"##,
+        "(t t t)",
+        r##"((modus-operandi) light "#595959" t)"##,
+        r##"((tango-dark) dark "#b3b3b3" t)"##,
+        r##"(nil dark "#b3b3b3" t)"##]);
+}

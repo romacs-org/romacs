@@ -11,26 +11,29 @@ is counted over it (`perf stat -t', instructions:u), from before the M-: to
 after its reply and a quiet evaluator, so the redisplay the switch causes
 counts too; the Lisp elapsed time of the switch itself is reported beside.
 The median of three M-:s that do nothing, counted the same way, is
-subtracted: what is judged is the switch, not the M-: around it.
+subtracted: what is reported is the switch, not the M-: around it.
 
 The switches run in rounds: the session's own faces, then after each
 --extra step that many more faces (`custom-declare-face', a background-
 dependent spec each) are declared.  Every round switches through all of
 --themes with `load-theme' (reported as `load'), then again with
-`enable-theme' alone: applying a loaded theme, what the budget and the
-growth check judge.
+`enable-theme' alone, one M-: per switch (reported per theme), then
+--rounds passes of `enable-theme' through them all in one M-:: applying a
+loaded theme, per switch, what the budget and the growth check judge.
+One M-: costs more than a switch and varies by more, so only the cycled
+measure, which divides it among all its switches, is judged.
 
 The run fails when
   * a switch signals, or a theme is not the one enabled after it;
-  * an `enable-theme' switch of the first round costs more than --budget
+  * a cycled switch of the first round costs more than --budget
     instructions;
-  * a round's median `enable-theme' switch grows faster than its face
-    count: the ratio of its median to the first round's exceeds --slack
-    times the ratio of the face counts (cost linear in the faces passes;
-    quadratic does not).
+  * a round's cycled switch grows faster than its face count: its ratio
+    to the first round's exceeds --slack times the ratio of the face
+    counts (cost linear in the faces passes; quadratic does not).
 
 usage: theme_live.py --binary PATH --output DIR [--themes rum,modus-vivendi,tango-dark]
-                     [--extra 1000] [--budget 200e6] [--slack 1.5] [--tools DIR:DIR]
+                     [--extra 1000] [--budget 200e6] [--slack 1.5] [--rounds 4]
+                     [--tools DIR:DIR]
 """
 import argparse
 import json
@@ -49,6 +52,13 @@ SETUP = r'''(progn
     (let ((started (float-time)))
       (mapc #'disable-theme custom-enabled-themes)
       (if load (load-theme theme t) (enable-theme theme))
+      (list (- (float-time) started) custom-enabled-themes (length (face-list)))))
+  (defun theme-live-cycle (themes rounds)
+    (let ((started (float-time)))
+      (dotimes (_ rounds)
+        (dolist (theme themes)
+          (mapc #'disable-theme custom-enabled-themes)
+          (enable-theme theme)))
       (list (- (float-time) started) custom-enabled-themes (length (face-list)))))
   (defun theme-live-noop ()
     (list 0.0 custom-enabled-themes (length (face-list))))
@@ -81,6 +91,20 @@ class Session(perkey.Session):
         return out.read_text()
 
 
+def cycle(session, themes, rounds, noop):
+    """ROUNDS passes of `enable-theme' through THEMES in one M-:: per switch,
+    the instructions net of NOOP and the Lisp seconds."""
+    out = session.root / f'cycle-{time.monotonic_ns()}.el'
+    names = ' '.join(themes)
+    form = f"(with-temp-file \"{out}\" (prin1 (theme-live-cycle '({names}) {rounds}) (current-buffer)))"
+    count, _, replies = session.counted(lambda: session.eval_form(form))
+    switches = rounds * len(themes)
+    text = out.read_text() if out.exists() else ''
+    return {'switches': switches, 'instructions': (count - noop) / switches,
+            'lisp_seconds': float(text[1:].split()[0]) / switches if text.startswith('(') else None,
+            'problems': [str(r) for r in replies if r.get('signal') or r.get('native_error')]}
+
+
 def switch(session, theme, load):
     """One switch to THEME (with `load-theme' when LOAD), or with THEME None
     the same M-: doing nothing: what the M-: itself costs."""
@@ -106,6 +130,7 @@ def main():
     ap.add_argument('--extra', default='1000', help='comma-separated face counts to add between rounds')
     ap.add_argument('--budget', type=float, default=200e6, help='instructions per first-round switch')
     ap.add_argument('--slack', type=float, default=1.5)
+    ap.add_argument('--rounds', type=int, default=4, help='passes through --themes in the cycled measure')
     ap.add_argument('--settle', type=float, default=2)
     ap.add_argument('--timeout', type=float, default=600)
     ap.add_argument('--mode', default='1600x1000')
@@ -132,10 +157,12 @@ def main():
                 kept = passes[1]
                 for s in kept:
                     s['net_instructions'] = s['instructions'] - noop
-                median = statistics.median(s['net_instructions'] for s in kept)
+                cycled = cycle(session, themes, args.rounds, noop)
+                median = cycled['instructions']
                 report['rounds'].append({'faces': faces, 'median_instructions': median, 'noop_instructions': noop,
-                                         'load': passes[0], 'switches': kept})
-                print(json.dumps({'faces': faces, 'median_instructions': median, 'noop': noop,
+                                         'cycle': cycled, 'load': passes[0], 'switches': kept})
+                failures += [f"cycle: {p}" for p in cycled['problems']]
+                print(json.dumps({'faces': faces, 'per_switch': median, 'lisp_seconds': cycled['lisp_seconds'], 'noop': noop,
                                   'load': [(s['theme'], s['instructions'], s['lisp_seconds']) for s in passes[0]],
                                   'apply': [(s['theme'], s['net_instructions'], s['lisp_seconds']) for s in kept]}), flush=True)
                 failures += [f"{s['theme']}: {s['problems']}" for p in passes for s in p if s['problems']]
@@ -149,8 +176,8 @@ def main():
     rounds = report['rounds']
     if rounds:
         first = rounds[0]
-        failures += [f"{s['theme']}: {s['net_instructions']:.3g} instructions > budget {args.budget:.3g}"
-                     for s in first['switches'] if s['net_instructions'] > args.budget]
+        if first['median_instructions'] > args.budget:
+            failures.append(f"{first['median_instructions']:.3g} instructions per switch > budget {args.budget:.3g}")
         for r in rounds[1:]:
             growth, allowed = r['median_instructions'] / first['median_instructions'], args.slack * r['faces'] / first['faces']
             r['growth'], r['allowed_growth'] = growth, allowed

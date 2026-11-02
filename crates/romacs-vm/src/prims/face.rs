@@ -30,7 +30,7 @@ fn resolve(cx: &mut Leaf<'_>, mut face: Value, signal_cycle: bool) -> Out {
 /// frame, which the display draws with its root frame's faces
 /// (DIVERGENCES.md VM2-CHILD-FRAME). A theme recomputes each face on every
 /// frame; mirroring only these keeps the display's work one frame's.
-fn displayed_faces(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<bool, Fault> {
+pub(super) fn displayed_faces(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<bool, Fault> {
     Ok(!cx.windows().is_child_frame(frame)?)
 }
 
@@ -87,6 +87,14 @@ fn make_lisp_face(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
     // GNU resolves before validating FRAME, including alias-cycle errors.
     let global = lookup(cx, face, Value::NIL)?;
     let frame = cx.face_frame(frame, false)?;
+    // A frame showing another's faces keeps showing them while making FACE
+    // on it changes nothing it shows: FACE is new there, or still empty.
+    if frame != Value::NIL && cx.frame_shares_faces(frame)? {
+        let owner = cx.face_owner(frame)?;
+        let shown = cx.face_lookup(face, owner)?;
+        if shown == Value::NIL || empty_lface(cx, shown)? { return make_lisp_face(cx, face, owner); }
+        cx.face_own(frame)?;
+    }
     let local = if frame == Value::NIL { Value::NIL } else { lookup(cx, face, frame)? };
     let global = if global == Value::NIL {
         let vector = new_vector(cx);
@@ -111,6 +119,13 @@ fn internal_copy_lisp_face(cx, from: Value, to: Value, frame: Value, new_frame: 
     let resolved = resolve(cx, from, true)?;
     let lface = cx.face_lookup(resolved, source)?;
     if lface == Value::NIL { return Err(signal(cx, "Invalid face", from)); }
+    // A frame showing another's faces gets its own only when the copy
+    // changes what it shows.
+    if target != Value::NIL && cx.frame_shares_faces(target)? {
+        let shown = cx.face_lookup(to, target)?;
+        if shown != Value::NIL && same_lface(cx, shown, lface)? { return Ok(to); }
+        cx.face_own(target)?;
+    }
     let copy = make_lisp_face(cx, to, target)?;
     for index in 0..LFACE_VECTOR_SIZE {
         let index = Value::integer(index as i64).unwrap();
@@ -353,7 +368,7 @@ fn theme_value(cx: &mut Leaf<'_>, keyword: &str, value: Value, frame: Value) -> 
     })
 }
 
-fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut value: Value, frame: Value) -> Out {
+pub(super) fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut value: Value, frame: Value) -> Out {
     if cx.kind(face) != Kind::Symbol { return Err(Fault::Wrong("symbolp", face)); }
     if cx.kind(attr) != Kind::Symbol { return Err(Fault::Wrong("symbolp", attr)); }
     let face = resolve(cx, face, true)?;
@@ -362,7 +377,8 @@ fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut valu
         let frames = cx.windows().frame_list()?;
         let mut tail = frames;
         while let Some((each, rest)) = cx.pair(tail) {
-            set_lisp_face_attribute(cx, face, attr, value, each)?;
+            // A frame showing another's faces has this change through it.
+            if !cx.frame_shares_faces(each)? { set_lisp_face_attribute(cx, face, attr, value, each)?; }
             tail = rest;
         }
         return Ok(face);
@@ -498,6 +514,15 @@ fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut valu
         _ => return Err(signal(cx, "Invalid face attribute name", attr)),
     };
     let Some(keyword) = slot else { return Ok(face); };
+    // A frame showing another's faces gets its own only when VALUE changes
+    // what it shows.
+    let mut lface = lface;
+    if !global && cx.frame_shares_faces(frame)? {
+        let shown = cx.vector_get(lface, index(keyword))?;
+        if cx.equal(shown, value).map_err(|_| Fault::Circular(value))? { return Ok(face); }
+        cx.face_own(frame)?;
+        lface = cx.face_lookup(face, frame)?;
+    }
     let old = cx.vector_get(lface, index(keyword))?;
     cx.vector_set(lface, index(keyword), value)?;
     let changed = !cx.equal(old, value).map_err(|_| Fault::Circular(value))?;
@@ -541,6 +566,13 @@ fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut valu
             }
         } else {
             cx.windows().store_frame_parameter(frame, key, value)?;
+            // update_face_from_frame_parameter (xfaces.c:3896): a new
+            // background may change the frame's background mode, and with
+            // it which defface specs apply.
+            if parameter == "background-color" && cx.windows().window_system(frame)? != Value::NIL && displayed_faces(cx, frame)? {
+                let function = cx.intern("frame-set-background-mode");
+                if cx.fboundp(function) { cx.safe_call(function, &[frame]); }
+            }
         }
     }
     Ok(face)
@@ -695,10 +727,40 @@ fn closest_font(cx: &mut Leaf<'_>, family: Option<&str>, lface: &[Value]) -> Opt
 
 defsubr! { name = "frame--face-hash-table", gnu = "xfaces.c:4619", effect = Global,
 fn frame_face_hash_table(cx; optional frame: Value) {
-    // A live frame always has its face table, as GNU's frames do.
+    // A live frame always has its face table, as GNU's frames do; a child
+    // frame showing another's faces answers with that frame's.
     let frame = cx.face_frame(frame, true)?;
-    cx.face_table(frame, true)
+    let owner = cx.face_owner(frame)?;
+    cx.face_table(owner, true)
 }}
+
+defsubr! { name = "romacs--frame-shares-faces-p", gnu = "romacs:faces", effect = Reads,
+fn romacs_frame_shares_faces_p(cx; optional frame: Value) {
+    // FRAME shows another frame's faces: a child frame nothing set a face
+    // on alone (DIVERGENCES.md VM2-CHILD-FRAME). `face-spec-recalc' has
+    // nothing to recompute there.
+    let frame = cx.face_frame(frame, true)?;
+    Ok(if cx.frame_shares_faces(frame)? { Value::TRUE } else { Value::NIL })
+}}
+
+/// Whether lface vector LFACE has every attribute unspecified.
+fn empty_lface(cx: &mut Leaf<'_>, lface: Value) -> std::result::Result<bool, Fault> {
+    let unspecified = cx.intern("unspecified");
+    for index in 1..LFACE_VECTOR_SIZE {
+        if cx.vector_get(lface, Value::integer(index as i64).unwrap())? != unspecified { return Ok(false); }
+    }
+    Ok(true)
+}
+
+/// Whether lface vectors A and B hold `equal' attributes.
+fn same_lface(cx: &mut Leaf<'_>, a: Value, b: Value) -> std::result::Result<bool, Fault> {
+    for index in 1..LFACE_VECTOR_SIZE {
+        let index = Value::integer(index as i64).unwrap();
+        let (x, y) = (cx.vector_get(a, index)?, cx.vector_get(b, index)?);
+        if !cx.equal(x, y).map_err(|_| Fault::Circular(x))? { return Ok(false); }
+    }
+    Ok(true)
+}
 
 defsubr! { name = "color-values-from-color-spec", gnu = "xfaces.c:1029", effect = Pure,
 fn color_values_from_color_spec(cx, spec: Value) {
