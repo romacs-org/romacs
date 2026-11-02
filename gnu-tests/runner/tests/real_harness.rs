@@ -28,11 +28,19 @@ impl Fixture {
         path
     }
     fn run(&self, harness: &str, target: &str, reporter: &str) -> Output {
+        self.run_with_stack_limit(None, harness, target, reporter)
+    }
+    /// `run` under `ulimit -s KIB` when given: the invoking shell's stack.
+    fn run_with_stack_limit(&self, kib: Option<u32>, harness: &str, target: &str, reporter: &str) -> Output {
         let h = self.put("fixture-harness.el", harness);
         let t = self.put("target.el", target);
         let r = self.put("reporter.el", reporter);
         let plan = self.put("plan.json", &json!({"file":t,"forms":[{"ordinal":1,"source":"(error \"PLAN-FORMS-MUST-NOT-RUN\")"}]}).to_string());
-        Command::new(env!("CARGO_BIN_EXE_romacs-gnu-ert"))
+        let limit = kib.map_or(String::new(), |kib| format!("ulimit -s {kib}; "));
+        Command::new("sh")
+            .arg("-c")
+            .arg(format!("{limit}exec \"$0\" \"$@\""))
+            .arg(env!("CARGO_BIN_EXE_romacs-gnu-ert"))
             .args(["--harness-kind", "real", "--harness"])
             .arg(h)
             .arg("--plan")
@@ -87,6 +95,20 @@ fn real_mode_loads_target_and_runs_reporter_without_mini_accessors() {
         !stdout(&output).contains("MINI-ACCESSOR"),
         "REAL-ISOLATION: mini accessor was invoked"
     );
+}
+// The runner evaluates on the evaluator stack Romacs's batch has, so a
+// 128 KiB shell stack, too small for the prelude on the main thread, does
+// not decide a test file's results. GNU computes the same 400.
+#[test]
+fn real_mode_evaluates_off_the_invoking_shells_stack() {
+    let f = Fixture::new();
+    let output = f.run_with_stack_limit(
+        Some(128),
+        "(defun ert-run-tests-batch (_) (if (= rt-value 400) 0 1))",
+        ";;; -*- lexical-binding: t -*-\n(defun rt-rec (n) (if (= n 0) 0 (1+ (rt-rec (1- n)))))\n(setq rt-value (rt-rec 400))",
+        "(ert-run-tests-batch t)",
+    );
+    assert_eq!(output.status.code(), Some(0), "STACK: {}", stdout(&output));
 }
 #[test]
 fn real_mode_stops_on_target_load_error() {
