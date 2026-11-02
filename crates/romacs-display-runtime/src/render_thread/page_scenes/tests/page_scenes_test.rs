@@ -5,7 +5,7 @@ use romacs_display_protocol::types::DisplayWindowId;
 
 /// A frame whose window WINDOW shows ROWS rows of COLS cells, 9 by 22
 /// pixels, from (5, 20).
-fn frame(window: u64, rows: u32, cols: u16) -> FrameGlyphBuffer {
+pub(super) fn frame(window: u64, rows: u32, cols: u16) -> FrameGlyphBuffer {
     let mut frame = FrameGlyphBuffer::new();
     frame.char_width = 9.0;
     for row in 0..rows {

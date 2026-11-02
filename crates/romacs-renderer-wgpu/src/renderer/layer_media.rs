@@ -574,7 +574,8 @@ impl WgpuRenderer {
         }
     }
 
-    /// Draw inline shader surfaces (image pipeline, alpha blended). Also
+    /// Draw inline shader surfaces (image pipeline, alpha blended; a
+    /// premultiplied surface through the composition pipeline). Also
     /// stamps each composited surface as recently drawn so its animation
     /// demand and iTime clock stay live only while visible.
     ///
@@ -701,10 +702,14 @@ impl WgpuRenderer {
         };
 
         let render_pass = &mut ctx.pass;
-        render_pass.set_pipeline(&self.pipelines.image);
         render_pass.set_vertex_buffer(0, upload.buffer_slice());
         for (i, quad) in quads.iter().enumerate() {
             if let Some(cached) = self.caches.surface.get(quad.id) {
+                render_pass.set_pipeline(if cached.premultiplied {
+                    &self.pipelines.composition
+                } else {
+                    &self.pipelines.image
+                });
                 render_pass.set_bind_group(1, &cached.composite_bind_group, &[]);
                 render_pass.draw((i * 6) as u32..(i * 6 + 6) as u32, 0..1);
             }
