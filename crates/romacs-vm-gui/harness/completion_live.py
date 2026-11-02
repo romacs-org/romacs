@@ -10,7 +10,12 @@ keys drive vertico's UI, whose candidates show in the layer that hosts the
 minibuffer, TAB inserts the selected candidate and Return exits with it.
 Every prompt's first command records the root window's height, which must
 be the frame's whole height before, during and after each prompt: no row
-is kept for the minibuffer.
+is kept for the minibuffer.  Each prompt also records the panel's place:
+--position sets `romacs-complete-position' and must move the panel and
+nothing else.  The panel stays centred across the frame, narrower than it,
+rounded, its input on its top edge, and at `bottom' it ends above the
+mode line of the window the prompt was entered from.  --size sets the
+output's size.
 
 With --fido the init turns the mode off and `fido-vertical-mode' on, as a
 user's init may, and the same keys drive icomplete's fido-vertical display:
@@ -24,6 +29,8 @@ user's init may, and the same keys drive icomplete's fido-vertical display:
 
 Each state is captured as a screenshot and as the prompt's minibuffer text.
 labwc, wlr-randr, wtype and grim come from PATH (the gate's headless tools).
+ROMACS_HARNESS_WLR_ENV (KEY=VALUE ...) is passed to the compositor alone,
+to run it on a real GPU.
 """
 import argparse
 import hashlib
@@ -61,6 +68,21 @@ LAYER_INIT = '''(defun romacs-live-root-height (where)
                   nil {heights} t 'quiet)))
 (romacs-live-root-height 'init)
 (add-hook 'minibuffer-setup-hook (lambda () (romacs-live-root-height 'prompt)))
+(setopt romacs-complete-position '{position})
+(defun romacs-live-panel ()
+  (when-let* ((window (minibuffer-selected-window)))
+    (let* ((host (romacs--minibuffer-host)) (root (frame-parent host))
+           (border (frame-parameter host 'child-frame-border-width)) (ch (frame-char-height root))
+           (mini (minibuffer-window root)))
+      (write-region (format "%S\n" (list (car (frame-position host)) (cdr (frame-position host))
+                                         (frame-pixel-width host) (frame-pixel-height host)
+                                         (frame-text-width root) (frame-text-height root)
+                                         (- (nth 3 (window-pixel-edges window)) (window-mode-line-height window))
+                                         (- (window-pixel-top mini) (cdr (frame-position host)) border)
+                                         (frame-parameter host 'romacs-layer-radius)
+                                         (+ (* romacs-complete-count ch) (window-pixel-height mini) (* 2 border)) ch))
+                    nil {panels} t 'quiet))))
+(add-hook 'minibuffer-setup-hook (lambda () (run-with-idle-timer 0.3 nil #'romacs-live-panel)))
 (add-hook 'minibuffer-exit-hook (lambda () (run-at-time 0 nil #'romacs-live-root-height 'exit)))
 '''
 
@@ -115,7 +137,24 @@ def default_ui(report, keys, minibuffer, shown, selected, probe, work, timeout, 
     selected('cxb-switched', '*scratch*')
 
 
-def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout, process, output, env):
+def check_panels(recorded, position):
+    """Each recorded panel is the same panel at POSITION: centred, narrower
+    than the frame, rounded, its input on its top edge, and placed at its
+    tallest: in the frame's top third at `top', centred within a line at
+    `center', and at `bottom' ending at least a line above the selected
+    window's mode line, and within a line of that."""
+    for left, top, width, height, frame_width, frame_height, mode_line, input_offset, radius, tallest, line in recorded:
+        centred = abs(2 * left + width - frame_width) <= 1
+        vertical = {'top': top < frame_height / 3,
+                    'center': abs(2 * top + tallest - frame_height) <= line,
+                    'bottom': mode_line - 2 * line <= top + tallest and top + height <= mode_line - line,
+                    }[position]
+        if not (centred and width < frame_width and input_offset == 0 and radius == 8 and vertical):
+            raise AssertionError(f'the panel at {position} must be centred, narrower than the frame, '
+                                 f'rounded, input on top and placed: {recorded}')
+
+
+def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout, process, output, env, position):
     """M-x, C-x C-f and C-x b through `romacs-complete-mode'."""
     def shown(name, what, test):
         fio.wait(lambda: test(*layer()), timeout, what, process)
@@ -168,6 +207,12 @@ def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout
     if (len(exits) < 4 or any(p[3] != 'nil)' for p in exits)
             or any(height != frame for _, height, frame, _ in prompts) or len({p[1] for p in prompts}) != 1):
         raise AssertionError(f'the root window must keep the frame height and the layer hide on exit: {recorded}')
+    panels = [[int(n) for n in line.strip('()').split()] for line in (work / 'panels.el').read_text().splitlines()]
+    report['checks'].append({'panels': panels})
+    # The last prompt quits before its record.
+    if len(panels) < 3:
+        raise AssertionError(f'every prompt must record its panel: {panels}')
+    check_panels(panels, position)
 
 
 def main():
@@ -176,6 +221,8 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--fido', action='store_true')
+    parser.add_argument('--position', choices=('top', 'center', 'bottom'), default='top')
+    parser.add_argument('--size', default='1280x800', help='the output size, WIDTHxHEIGHT')
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
@@ -195,7 +242,8 @@ def main():
             (home / 'config/romacs').mkdir(parents=True)
             (home / 'config/romacs/init.el').write_text(INIT.format(
                 defaults=json.dumps(str(defaults)), probe=json.dumps(str(probe)))
-                + (FIDO_INIT if args.fido else LAYER_INIT.format(heights=json.dumps(str(heights)))))
+                + (FIDO_INIT if args.fido else LAYER_INIT.format(heights=json.dumps(str(heights)), position=args.position,
+                                                                 panels=json.dumps(str(work / 'panels.el')))))
             (config / 'rc.xml').write_text(live.RC_XML)
             env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
@@ -208,13 +256,15 @@ def main():
                     env[key] = os.environ[key]
             if 'ROMACS_GATE_FONTCONFIG' in env:
                 env['FONTCONFIG_FILE'] = env['ROMACS_GATE_FONTCONFIG']
+            # The compositor's own renderer on a real GPU (gles2), when asked.
+            wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
             log_path = output / 'binary.stderr'
             with (output / 'compositor.log').open('w') as compositor_log, log_path.open('w') as log:
                 compositor = subprocess.Popen([shutil.which('labwc', path=env['PATH']) or live.LABWC, '-C', str(config)],
-                                              env=env, stdout=compositor_log, stderr=compositor_log)
+                                              env=env | wlr, stdout=compositor_log, stderr=compositor_log)
                 fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'private compositor', compositor)
                 env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x800'],
+                subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', args.size],
                                env=env, check=True, timeout=15)
                 # A held key gives the seat a keyboard before the client starts.
                 keyboard = subprocess.Popen(['wtype', '-s', '600000', '-k', 'Shift_L'], env=env, stdout=log, stderr=log)
@@ -273,7 +323,8 @@ def main():
                 fio.wait(lambda: ff.current_rows(log_path.read_text(errors='replace')), args.timeout, 'first frame', process)
                 time.sleep(1)
                 if not args.fido:
-                    romacs_complete(report, keys, layer, selected, probe, heights, work, args.timeout, process, output, env)
+                    romacs_complete(report, keys, layer, selected, probe, heights, work, args.timeout, process, output, env,
+                                    args.position)
                 else:
                     default_ui(report, keys, minibuffer, shown, selected, probe, work, args.timeout, process)
                 report['status'] = 'PASS'
