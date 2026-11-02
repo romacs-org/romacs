@@ -55,11 +55,14 @@ romacs-display-protocol.workspace = true
 romacs-logo.workspace = true
 romacs-video-model.workspace = true
 romacs-renderer-wgpu.workspace = true
+romacs-scene.workspace = true
+kurbo.workspace = true
 romacs-video = { workspace = true, optional = true }
 romacs-webview.workspace = true
 
 [dev-dependencies]
 romacs-infra.workspace = true
+png.workspace = true
 
 [features]
 gui-test-hooks = []

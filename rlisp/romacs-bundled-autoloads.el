@@ -25,7 +25,7 @@
 
 ;;; Generated autoloads from romacs-animate.el
 
-(register-definition-prefixes "romacs-animate" '("romacs-animate-"))
+(register-definition-prefixes "romacs-animate" '("romacs-animat"))
 
 
 ;;; Generated autoloads from romacs-buffer-switch.el

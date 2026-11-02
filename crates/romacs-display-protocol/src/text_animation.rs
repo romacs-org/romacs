@@ -21,6 +21,9 @@ pub struct TextAnimation {
     pub fps: u32,
     /// Whether it moves; else it shows the frame it reached.
     pub moving: bool,
+    /// Motion is off (`romacs-animation' reduced or nil): it shows its
+    /// still frame, not the frame it reached.
+    pub still: bool,
     pub kind: TextAnimationKind,
 }
 
