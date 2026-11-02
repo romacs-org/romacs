@@ -44,6 +44,42 @@ installs its Lisp in =/usr/share/emacs/site-lisp=, which the init adds to
 =rlisp/= holds Romacs Lisp, =gnu-lisp/= the pinned GNU sources, and
 =rlisp/deps/= temporary third-party dependencies and their replacement plan.
 
+* Install a release
+
+Every push to =master= replaces the assets of the =nightly= prerelease;
+each =v*= tag is a stable release.  Both ship =romacs-x86_64-linux.tar.gz=
+and its =SHA256SUMS=.  The tarball runs wherever it is unpacked, on x86_64
+Linux with glibc 2.39 or newer, in a Wayland session with a Vulkan driver,
+fontconfig and FreeType.
+
+Download the nightly with the GitHub CLI (for the latest stable release,
+omit =nightly=):
+
+#+begin_src sh
+gh release download nightly -R romacs-org/romacs
+#+end_src
+
+or with curl (for the latest stable release, replace =download/nightly=
+with =latest/download=):
+
+#+begin_src sh
+curl -fLO https://github.com/romacs-org/romacs/releases/download/nightly/romacs-x86_64-linux.tar.gz
+curl -fLO https://github.com/romacs-org/romacs/releases/download/nightly/SHA256SUMS
+#+end_src
+
+Then check and install it:
+
+#+begin_src sh
+sha256sum -c SHA256SUMS
+mkdir -p ~/.local/opt ~/.local/bin ~/.local/share
+tar -xzf romacs-x86_64-linux.tar.gz -C ~/.local/opt
+ln -sf ~/.local/opt/romacs-x86_64-linux/bin/romacs ~/.local/bin/romacs
+cp -r ~/.local/opt/romacs-x86_64-linux/share/applications ~/.local/opt/romacs-x86_64-linux/share/icons ~/.local/share/
+#+end_src
+
+To upgrade, remove =~/.local/opt/romacs-x86_64-linux= first, so no file
+of the old release remains.
+
 * Build and run
 
 On Linux with a Wayland session, install the Rust toolchain specified in
