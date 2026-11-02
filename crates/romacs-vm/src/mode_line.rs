@@ -12,10 +12,34 @@ use std::ops::Range;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Target { Display, String, NoProp }
 
+/// The text properties a `format-mode-line' string carries besides faces
+/// (VM2-G1B): a string element's own, else an enclosing `:propertize''s.
+const PROJECTED: [&str; 3] = ["local-map", "keymap", "help-echo"];
+
+/// A piece's projected properties, by name.
+pub(super) type Projected = std::rc::Rc<Vec<(&'static str, Form)>>;
+
+/// An enclosing `:propertize''s properties the expansion keeps: its face,
+/// and for a string its PROJECTED ones.
+#[derive(Clone, Default)]
+pub(super) struct Propertize {
+    face: Option<String>,
+    projected: Projected,
+}
+
+/// A propertized string's own properties from one character on.
+#[derive(Clone, Default)]
+struct Own {
+    face: Option<String>,
+    projected: Projected,
+}
+
 /// One expanded mode line: text plus face-name runs over its bytes.
 pub(super) struct Band {
     pub text: String,
     pub runs: Vec<(Range<usize>, String)>,
+    /// A string's projected properties over its bytes.
+    pub props: Vec<(Range<usize>, Projected)>,
     pub target: Target,
     /// GNU's `mode_line_elt_no` for a string: the count of elements entered
     /// so far, and the count each piece was stored under, its
@@ -46,6 +70,9 @@ pub(super) struct SpecState {
     pub frame_cols: usize,
     /// keyboard.c command_loop_level: recursive edits, not minibuffers.
     pub command_loop_level: usize,
+    /// The columns a painted band is clipped at: the status bar's, else
+    /// none past `4 * frame_cols'.
+    pub clip: Option<usize>,
 }
 
 /// Field widths and precisions, after GNU's C `int` wrap, are clamped here:
@@ -168,6 +195,34 @@ fn is_cons(form: &Form) -> bool {
     matches!(form, Form::List(items) | Form::Dotted(items, _) if !items.is_empty())
 }
 
+/// What a `:propertize' PLIST gives the pieces inside it: its face and,
+/// for a string (PROJECTING), its PROJECTED properties; none without either.
+fn propertize_of(plist: &Form, projecting: bool) -> Option<std::rc::Rc<Propertize>> {
+    let face = face_of(plist);
+    let projected: Vec<(&'static str, Form)> = match plist {
+        Form::List(items) if projecting => items.chunks(2)
+            .filter_map(|pair| match (&pair[0], pair.get(1)) {
+                (Form::Sym(name), Some(value)) if !is_nil(value) => PROJECTED.iter().find(|p| **p == name).map(|p| (*p, value.clone())),
+                _ => None,
+            }).collect(),
+        _ => vec![],
+    };
+    (face.is_some() || !projected.is_empty()).then(|| std::rc::Rc::new(Propertize { face, projected: std::rc::Rc::new(projected) }))
+}
+
+/// OUTER's projected properties over OWN's: an enclosing `:propertize'
+/// wins (display_mode_element), else the string's own show.
+fn merged(outer: Option<&Propertize>, own: Option<&Own>) -> Option<Projected> {
+    let outer = outer.map(|o| &o.projected).filter(|p| !p.is_empty());
+    let own = own.map(|o| &o.projected).filter(|p| !p.is_empty());
+    match (outer, own) {
+        (None, None) => None,
+        (Some(p), None) | (None, Some(p)) => Some(p.clone()),
+        (Some(outer), Some(own)) => Some(std::rc::Rc::new(outer.iter().cloned()
+            .chain(own.iter().filter(|(name, _)| !outer.iter().any(|(o, _)| o == name)).cloned()).collect())),
+    }
+}
+
 /// The `face` of a `:propertize` plist: a face symbol, or the first symbol of
 /// a face list. Anonymous face specs are not projected (VM2-G1B).
 fn face_of(props: &Form) -> Option<String> {
@@ -187,7 +242,7 @@ impl Band {
     /// `n` columns of padding, never more than can still be shown.
     fn pad(&mut self, n: i64, face: Option<&String>) {
         let n = usize::try_from(n).unwrap_or(0).min(self.max_cols - self.cols);
-        self.push(&" ".repeat(n), face);
+        self.push(&" ".repeat(n), face, None);
     }
 
     /// An element's own padding, which GNU stores with no element number.
@@ -200,28 +255,38 @@ impl Band {
     /// Append text. A painted band clips it at `max_cols` and shows control
     /// characters as GNU's `^X`; a string keeps them all
     /// (`store_mode_line_string`, `store_mode_line_noprop`).
-    fn push(&mut self, s: &str, face: Option<&String>) {
+    fn push(&mut self, s: &str, face: Option<&String>, projected: Option<&Projected>) {
         let begin = self.text.len();
         if self.target == Target::Display { self.push_clipped(s) } else { self.text.push_str(s) }
         if self.text.len() == begin || self.target == Target::NoProp { return; }
         if let Some(face) = face { self.runs.push((begin..self.text.len(), face.clone())); }
-        if self.target == Target::String { self.elts.push((begin..self.text.len(), self.elt)); }
+        if self.target == Target::String {
+            self.elts.push((begin..self.text.len(), self.elt));
+            if let Some(projected) = projected { self.props.push((begin..self.text.len(), projected.clone())); }
+        }
     }
 
-    /// Append S, the characters from START of a string whose own faces
-    /// are OWN (`ml_own_faces'), each run in its own face.
-    fn push_own(&mut self, s: &str, own: &[(usize, Option<String>)], start: usize) {
+    /// Append S in an enclosing `:propertize' OUTER over a string's OWN
+    /// properties there.
+    fn push_piece(&mut self, s: &str, outer: Option<&Propertize>, own: Option<&Own>) {
+        let face = outer.and_then(|o| o.face.as_ref()).or_else(|| own.and_then(|o| o.face.as_ref()));
+        self.push(s, face, merged(outer, own).as_ref());
+    }
+
+    /// Append S, the characters from START of a string whose own
+    /// properties are OWN (`ml_own_props'), each run in its own.
+    fn push_own(&mut self, s: &str, own: &[(usize, Own)], start: usize, outer: Option<&Propertize>) {
         let mut run = own.partition_point(|(at, _)| *at <= start).saturating_sub(1);
         let mut from = 0;
         for (k, (at, _)) in s.char_indices().enumerate() {
             // Character K of S is the string's character START + K.
             if own.get(run + 1).is_some_and(|(next, _)| start + k >= *next) {
-                if at > from { self.push(&s[from..at], own[run].1.as_ref()); }
+                if at > from { self.push_piece(&s[from..at], outer, Some(&own[run].1)); }
                 from = at;
                 while own.get(run + 1).is_some_and(|(next, _)| start + k >= *next) { run += 1; }
             }
         }
-        if from < s.len() { self.push(&s[from..], own[run].1.as_ref()); }
+        if from < s.len() { self.push_piece(&s[from..], outer, Some(&own[run].1)); }
     }
 
     fn push_clipped(&mut self, s: &str) {
@@ -240,9 +305,9 @@ impl Band {
     }
 }
 
-/// The face of character K of a string whose own faces are OWN.
-fn own_face(own: &[(usize, Option<String>)], k: usize) -> Option<&String> {
-    own[..own.partition_point(|(at, _)| *at <= k)].last().and_then(|(_, face)| face.as_ref())
+/// The own properties of character K of a string whose own are OWN.
+fn own_at(own: &[(usize, Own)], k: usize) -> Option<&Own> {
+    own[..own.partition_point(|(at, _)| *at <= k)].last().map(|(_, own)| own)
 }
 
 impl Vm {
@@ -285,7 +350,7 @@ impl Vm {
     /// A string element's text. A string with text properties reaches the
     /// expander as an object (`expansion_form`), as GNU's `propertize`d
     /// mode-line strings do; it expands as its text, and its own faces come
-    /// from `ml_own_faces' (other properties are not projected, VM2-G1B).
+    /// and the properties a string projects from `ml_own_props' (VM2-G1B).
     fn ml_string(&self, elt: &Form) -> Result<Option<String>> {
         Ok(match elt {
             Form::String(s) => Some(s.clone()),
@@ -301,24 +366,33 @@ impl Vm {
         })
     }
 
-    /// A propertized string element's own faces where the element's PROPS
-    /// give none: GNU merges PROPS onto a string's own properties unless it
-    /// is risky (display_mode_element), so each character shows its `face'
-    /// (a symbol, or a face list's first one). Runs of one face, each from
-    /// its first character; None when no character has one.
-    fn ml_own_faces(&mut self, elt: &Form, props: Option<&String>, risky: bool) -> Result<Option<Vec<(usize, Option<String>)>>> {
-        if props.is_some() || risky { return Ok(None); }
+    /// A propertized string element's own properties: GNU merges an
+    /// enclosing `:propertize''s PROPS onto them unless the element is
+    /// risky (display_mode_element), so each character shows its `face'
+    /// (a symbol, or a face list's first one) where PROPS give none, and
+    /// in a string (PROJECTING) its PROJECTED properties where PROPS do
+    /// not give them. Runs, each from its first character; None when no
+    /// character has any, or a band's PROPS give its face.
+    fn ml_own_props(&mut self, elt: &Form, props: Option<&Propertize>, risky: bool, projecting: bool) -> Result<Option<Vec<(usize, Own)>>> {
+        if risky || (!projecting && props.is_some_and(|p| p.face.is_some())) { return Ok(None); }
         let Form::Object(object) = elt else { return Ok(None) };
         let value = object.value(self)?;
         if !matches!(self.object_if(value), Some(data::Object::String(_))) || self.string_bytes(value)?.is_empty() { return Ok(None); }
         let face = self.intern("face");
-        let mut runs: Vec<(usize, Option<String>)> = vec![];
+        let names = if projecting { PROJECTED.map(|name| self.intern(name)).to_vec() } else { vec![] };
+        let mut runs: Vec<(usize, Own)> = vec![];
         for start in self.property_run_starts(value).map_err(crate::forwarded::fault_text)? {
             let v = self.property_textget(value, start, face).map_err(crate::forwarded::fault_text)?;
-            let name = self.ml_face_name(v);
-            if runs.last().is_none_or(|(_, last)| *last != name) { runs.push((start as usize, name)); }
+            let mut projected = vec![];
+            for (&name, &key) in PROJECTED.iter().zip(&names) {
+                let v = self.property_textget(value, start, key).map_err(crate::forwarded::fault_text)?;
+                if v != Value::NIL { projected.push((name, Form::Object(crate::handle::FormObject::new(self, v)))); }
+            }
+            let own = Own { face: self.ml_face_name(v), projected: std::rc::Rc::new(projected) };
+            let same = runs.last().is_some_and(|(_, last)| last.face == own.face && last.projected.is_empty() && own.projected.is_empty());
+            if !same { runs.push((start as usize, own)); }
         }
-        Ok(runs.iter().any(|(_, face)| face.is_some()).then_some(runs))
+        Ok(runs.iter().any(|(_, own)| own.face.is_some() || !own.projected.is_empty()).then_some(runs))
     }
 
     /// A `face' property's name: a symbol, or a face list's first symbol.
@@ -379,8 +453,8 @@ impl Vm {
     }
 
     pub(super) fn mode_line_expand(&mut self, format: &Form, state: &SpecState, target: Target) -> Result<Band> {
-        let max_cols = if target == Target::Display { 4 * state.frame_cols } else { usize::MAX };
-        let mut band = Band { text: String::new(), runs: vec![], target, elt: 0, elts: vec![], cols: 0, max_cols };
+        let max_cols = if target == Target::Display { state.clip.unwrap_or(4 * state.frame_cols) } else { usize::MAX };
+        let mut band = Band { text: String::new(), runs: vec![], props: vec![], target, elt: 0, elts: vec![], cols: 0, max_cols };
         self.mode_line_element(&mut band, state, 0, 0, 0, format.clone(), None, false)?;
         Ok(band)
     }
@@ -394,7 +468,7 @@ impl Vm {
         mut field_width: i64,
         mut precision: i64,
         mut elt: Form,
-        mut props: Option<String>,
+        mut props: Option<std::rc::Rc<Propertize>>,
         mut risky: bool,
     ) -> Result<i64> {
         if band.text.len() > 1 << 16 {
@@ -414,12 +488,12 @@ impl Vm {
                 // GNU replaces a risky string's properties with PROPS and
                 // otherwise merges PROPS onto the string's own: where PROPS
                 // has no face, the string's own faces show.
-                let own = self.ml_own_faces(&elt, props.as_ref(), risky)?;
+                let own = self.ml_own_props(&elt, props.as_deref(), risky, band.target == Target::String)?;
                 if literal {
                     // GNU `store_mode_line_string`: precision and N count characters.
                     let shown = if precision - n > 0 { char_prefix(&s, (precision - n) as usize) } else { &s };
                     n += chars(shown);
-                    match &own { Some(own) => band.push_own(shown, own, 0), None => band.push(shown, props.as_ref()) }
+                    match &own { Some(own) => band.push_own(shown, own, 0, props.as_deref()), None => band.push_piece(shown, props.as_deref(), None) }
                     break;
                 }
                 let mut rest = s.split('\0').next().unwrap_or_default();
@@ -433,8 +507,8 @@ impl Vm {
                         n += chars(shown);
                         match &own {
                             // The segment's first character's index in S.
-                            Some(own) => band.push_own(shown, own, chars(&s[..rest.as_ptr() as usize - s.as_ptr() as usize]) as usize),
-                            None => band.push(shown, props.as_ref()),
+                            Some(own) => band.push_own(shown, own, chars(&s[..rest.as_ptr() as usize - s.as_ptr() as usize]) as usize, props.as_deref()),
+                            None => band.push_piece(shown, props.as_deref(), None),
                         }
                         rest = &rest[percent..];
                         continue;
@@ -442,10 +516,8 @@ impl Vm {
                     // rest starts with '%'. Its expansion takes the string's
                     // own face there (xdisp.c display_mode_element takes the
                     // text properties at the construct's offset).
-                    let face = match &own {
-                        Some(own) => own_face(own, chars(&s[..rest.as_ptr() as usize - s.as_ptr() as usize]) as usize),
-                        None => props.as_ref(),
-                    };
+                    let at = own.as_deref().and_then(|own| own_at(own, chars(&s[..rest.as_ptr() as usize - s.as_ptr() as usize]) as usize));
+                    let face = props.as_deref().and_then(|p| p.face.as_ref()).or_else(|| at.and_then(|o| o.face.as_ref()));
                     rest = &rest[1..];
                     let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
                     // GNU accumulates the width in a C `int` (`xdisp.c:28663`);
@@ -468,7 +540,7 @@ impl Vm {
                     let spec = self.decode_mode_spec(state, c, field, band.target)?;
                     let shown = if prec > 0 { char_prefix(&spec, prec as usize) } else { spec.as_str() };
                     let mut written = chars(shown);
-                    band.push(shown, face);
+                    band.push_piece(shown, props.as_deref(), at);
                     if field > written {
                         band.pad(field - written, face);
                         written = field;
@@ -503,6 +575,7 @@ impl Vm {
                             if let Some((expression, _)) = split(cdr) {
                                 // GNU `dsafe_eval`: an error displays as nil.
                                 self.ml_elt_restarted();
+                                self.display_state.mode_line_evals += 1;
                                 let spec = match self.eval_datum_raw(&expression) {
                                     Ok(value) => self.mode_line_form(value),
                                     Err(error) => {
@@ -520,7 +593,7 @@ impl Vm {
                                 break;
                             }
                             if let Some((inner, plist)) = split(cdr) {
-                                n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, face_of(&plist), risky)?;
+                                n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, propertize_of(&plist, band.target == Target::String), risky)?;
                             }
                             break;
                         }
@@ -665,6 +738,7 @@ impl Vm {
                         Form::String("no process".into()),
                     ]),
                 ]);
+                self.display_state.mode_line_evals += 1;
                 match self.eval_datum_raw(&form) {
                     Ok(value) => string_of(Some(self.mode_line_form(value))),
                     Err(_) => "no process".into(),
@@ -677,6 +751,7 @@ impl Vm {
                     Form::List(vec![Form::Sym("fboundp".into()), Form::List(vec![Form::Sym("quote".into()), Form::Sym("file-remote-p".into())])]),
                     Form::List(vec![Form::Sym("file-remote-p".into()), Form::Sym("default-directory".into())]),
                 ]);
+                self.display_state.mode_line_evals += 1;
                 if self.eval_datum_raw(&form).is_ok_and(|v| v != Value::NIL) { "@" } else { "-" }.into()
             }
             // A window-system frame shows the buffer's coding system

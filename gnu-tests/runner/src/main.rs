@@ -390,7 +390,31 @@ fn load_chain(vm: &mut Vm, args: &Args, from: usize, to: usize, chain: &mut Vec<
     true
 }
 
+/// The evaluator's stack, romacs-vm-gui's `EVALUATOR_STACK_SIZE` for its
+/// `--batch`: a test file sees the stack Romacs's batch gives Lisp, not
+/// whatever `ulimit -s` the invoking shell had.
+const EVALUATOR_STACK_SIZE: usize = 64 * 1024 * 1024;
+
 fn main() {
+    if let Err(error) = romacs_vm::host::catch_user_signals() {
+        emit(json!({"event": "setup", "ok": false, "phase": "user-signals", "error": error.to_string()}));
+        std::process::exit(3);
+    }
+    let evaluator = std::thread::Builder::new()
+        .name("romacs-evaluator".into())
+        .stack_size(EVALUATOR_STACK_SIZE)
+        .spawn(evaluate);
+    match evaluator.map(|thread| thread.join()) {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => panic_exit("evaluator", "panic", None),
+        Err(error) => {
+            emit(json!({"event": "setup", "ok": false, "phase": "evaluator", "error": error.to_string()}));
+            std::process::exit(3);
+        }
+    }
+}
+
+fn evaluate() {
     let args = parse();
     let world_out = args.world_trace.clone().zip(args.world_child.clone());
     if let Some(out) = &args.world_trace && args.world_child.is_none() {

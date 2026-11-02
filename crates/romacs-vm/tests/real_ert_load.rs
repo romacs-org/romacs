@@ -5,7 +5,7 @@ mod gnu_ert_vm;
 use gnu_ert_vm::bootstrapped_with;
 
 fn bootstrapped(root: &Path) -> Vm {
-    bootstrapped_with(root, "rlisp/romacs-gnu-ert-bootstrap.el")
+    bootstrapped_with(root, "rlisp/romacs-loadup-bootstrap.el")
 }
 
 #[test]
@@ -506,6 +506,21 @@ fn daily_driver_load_slice_matches_gnu() {
         r###"(list (mapcar (lambda (a) (secure-hash a "abc")) (secure-hash-algorithms)) (mapcar (lambda (a) (secure-hash a "")) '(md5 sha1 sha224 sha384 sha3-224 sha3-256 sha3-384 sha3-512)))"###,
         r###"(list (secure-hash 'sha256 (make-string 200 ?x)) (secure-hash 'sha3-224 (make-string 144 ?y)) (secure-hash 'sha3-224 (make-string 143 ?y)) (secure-hash 'sha3-512 (make-string 72 ?z)) (secure-hash 'sha3-512 (make-string 71 ?z)) (secure-hash 'sha3-256 (make-string 1000 ?q)) (secure-hash 'sha512 (make-string 111 ?w)))"###,
         r###"(list (secure-hash 'sha1 "abcdef" 1 -1) (secure-hash 'sha1 "abcdef" -3) (secure-hash 'sha1 (string-to-unibyte "\377\0\200")) (secure-hash 'md5 (string-to-unibyte "\377") 0 1) (string-to-list (secure-hash 'md5 "abc" nil nil t)) (multibyte-string-p (secure-hash 'md5 "abc")) (multibyte-string-p (secure-hash 'md5 "abc" nil nil t)) (length (secure-hash 'sha512 "abc" nil nil t)) (md5 "abc") (md5 "abcdef" 2 4) (md5 (string-to-unibyte "\377")))"###,
+        r###"(let ((s (make-symbol "rt-u")) (g (gensym "rt-g")))
+  (list (eval (list 'let (list (list s 5)) (list 'symbol-value (list 'quote s))) nil)
+        (eval (list 'let (list (list s 6)) s) nil)
+        (eval (list 'funcall (list 'lambda (list g) (list 'symbol-value (list 'quote g))) 7) nil)
+        (eval (list 'condition-case g '(signal 'error '(8)) (list 'error (list 'cadr (list 'symbol-value (list 'quote g))))) nil)
+        (condition-case e (eval (list 'let (list (list s 9)) (list 'symbol-value (list 'quote s))) t) (error (car e)))
+        (progn (require 'cl-lib) (cl-progv (list s) (list 10) (list (symbol-value s) (eval s t) (eval s nil))))))"###,
+        r###"(let ((print-symbols-bare t)) (list (prin1-to-string '(a "b" 1 (c . d))) (format "%S" 'e) (with-output-to-string (prin1 'f))))"###,
+        r###"(let ((b (get-buffer-create " rt-hash")))
+  (with-current-buffer b (insert "h\u00e9llo\n" (string (unibyte-char-to-multibyte 255) (unibyte-char-to-multibyte 128)) "\u4e00"))
+  (prog1 (list (buffer-hash b) (buffer-hash " rt-hash") (with-current-buffer b (narrow-to-region 2 3) (buffer-hash))
+               (with-temp-buffer (set-buffer-multibyte nil) (insert "\377\0abc") (buffer-hash)) (with-temp-buffer (buffer-hash))
+               (condition-case e (buffer-hash "rt-no-such-buffer") (error e)) (condition-case e (buffer-hash 3) (error e))
+               (equal (buffer-hash b) (with-current-buffer b (widen) (secure-hash 'sha1 (encode-coding-string (buffer-string) 'utf-8-emacs-unix)))))
+    (kill-buffer b)))"###,
         r###"(list (condition-case e (secure-hash 'nope "a") (error e)) (condition-case e (secure-hash "md5" "a") (error e)) (condition-case e (secure-hash 'md5 3) (error e)) (condition-case e (secure-hash 'md5 nil) (error e)) (condition-case e (secure-hash 'md5 '(1 2)) (error e)) (condition-case e (secure-hash 'md5 "abc" 2 9) (error e)) (condition-case e (secure-hash 'md5 "abc" 'x) (error e)) (condition-case e (secure-hash 'md5 'iv-auto) (error e)) (condition-case e (md5 "abc" nil nil 'nosuch) (error e)) (md5 "abc" nil nil 'nosuch t))"###,
         r###"(list (find-operation-coding-system 'write-region 1 2 "a.tzst") (find-operation-coding-system 'insert-file-contents "x.el")
       (find-operation-coding-system 'insert-file-contents (cons "x.elc" (current-buffer))) (find-operation-coding-system 'write-region 1 2 "plain.txt")

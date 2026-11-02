@@ -50,6 +50,7 @@ pub(crate) struct Pipelines {
     pub(crate) stencil_grayscale_glyph: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_subpixel_glyph: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_image: DeferredResource<wgpu::RenderPipeline>,
+    pub(crate) stencil_composition: DeferredResource<wgpu::RenderPipeline>,
     #[cfg(feature = "video")]
     pub(crate) stencil_bi_planar_video: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_opaque_image: DeferredResource<wgpu::RenderPipeline>,
@@ -273,6 +274,7 @@ mod deferred_tests {
                 &renderer.pipelines.stencil_subpixel_glyph,
             ),
             ("stencil_image", &renderer.pipelines.stencil_image),
+            ("stencil_composition", &renderer.pipelines.stencil_composition),
             #[cfg(feature = "video")]
             (
                 "stencil_bi_planar_video",

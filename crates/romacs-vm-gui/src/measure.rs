@@ -89,9 +89,10 @@ mod tests {
 
     /// Evaluate INSERT, which inserts the text under test (without `\\'
     /// or `$', the continuation and truncation glyphs), add a sentinel
-    /// line, and compare the VM's answers with the host's layout.
+    /// line, and compare the VM's answers with the host's layout, which
+    /// automatic hscrolling does not move as point goes along.
     fn agree(h: &mut Hosted, insert: &str) {
-        let text = h.eval(&format!("(progn (erase-buffer) {insert} (prog1 (buffer-string) (insert \"\\n#\") (goto-char 1) (set-window-start nil 1)))"));
+        let text = h.eval(&format!("(progn (setq auto-hscroll-mode nil) (erase-buffer) {insert} (prog1 (buffer-string) (insert \"\\n#\") (goto-char 1) (set-window-start nil 1)))"));
         let text: String = h.vm.eval_source(&format!("(substring-no-properties {text})")).unwrap().display().unwrap();
         let text: String = serde_json::from_str(&text).unwrap();
         assert!(!text.contains(['\\', '$']), "{text:?}");
@@ -104,11 +105,15 @@ mod tests {
         let mut painted = text_glyphs().filter(|g| g.0 != '\\' && g.0 != '$').peekable();
         // Each position's cursor, if the host shows it, and the painted
         // glyph of each character.
-        let mut at = vec![];
+        let (mut at, mut previous) = (vec![], None);
         for (index, ch) in text.chars().chain("\n#".chars()).enumerate() {
             let pos = index + 1;
             h.eval(&format!("(goto-char {pos})"));
-            let cursor = h.paint().cursor;
+            // Past a truncation the cursor stays where the row's last
+            // glyph ends (GNU's glyph_after): that position is not shown.
+            let painted_cursor = h.paint().cursor;
+            let cursor = painted_cursor.filter(|c| previous.is_none_or(|p: (f32, f32, f32, f32)| (p.0, p.1) != (c.0, c.1)));
+            previous = painted_cursor;
             let glyph = if ch == '\n' || cursor.is_none() { None }
                 else { painted.next_if(|g| (g.1, g.2) == (cursor.unwrap().0, cursor.unwrap().1)) };
             if let Some(g) = glyph { assert_eq!(g.0, ch, "{text:?}: glyph {pos}"); }
@@ -251,10 +256,8 @@ mod tests {
             let visible = h.eval(&format!("(pos-visible-in-window-p {form} nil t)"));
             visible != "nil" && visible.split(' ').count() == 2
         };
-        let line = h.eval("(frame-char-height)").parse::<u32>().unwrap();
-        let body = h.eval("(window-body-height nil t)").parse::<u32>().unwrap();
-        let back = { let dy = body / 2; let mut back = (dy / line).max(1);
-            if dy > back * line && dy - back * line > body.min(line * 2 / 3) { back += 1; } back };
+        let line = h.eval("(frame-char-height)").parse::<i64>().unwrap();
+        let body = h.eval("(window-body-height nil t)").parse::<i64>().unwrap();
         let mut scrolls = 0;
         for (conservative, step) in [(101, "(forward-line 1)"), (101, "(forward-line -1)"), (0, "(forward-line 7)"), (0, "(forward-line -9)")] {
             h.eval(&format!("(setq scroll-conservatively {conservative})"));
@@ -266,9 +269,13 @@ mod tests {
                 assert!(whole(&mut h, "(point)"), "{step}: point shows whole after the scroll");
                 let row = h.eval("(save-excursion (vertical-motion 0) (point))");
                 if conservative == 0 {
-                    // Recentring: point's row is BACK rows below the start, or the buffer starts sooner.
-                    let down = h.eval(&format!("(save-excursion (goto-char (window-start)) (vertical-motion {back}) (point))"));
-                    assert!(down == row || h.eval("(window-start)") == "1", "{step}: row {row}, {back} rows down {down}");
+                    // Recentring (move_it_vertically_backward): point's row
+                    // about half the text area down, short by less than two
+                    // thirds of a line or past by less than the tallest
+                    // row (a `hosted-big' one), or the buffer starts sooner.
+                    let y = h.eval("(nth 1 (pos-visible-in-window-p (point) nil t))").parse::<i64>().unwrap();
+                    assert!((body / 2 - line * 2 / 3 <= y && y < body / 2 + 3 * line) || h.eval("(window-start)") == "1",
+                        "{step}: row {row} at y {y} of {body}");
                 } else if step.contains(" -") {
                     assert_eq!(h.eval("(window-start)"), row, "{step}: point on the first row");
                 } else {

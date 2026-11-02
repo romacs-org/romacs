@@ -7,6 +7,24 @@ use romacs_font::{FontRequest, FontResolver, FontsetPolicy, entity};
 use romacs_vm::{FontEntity, FontQuery, OpenedFont};
 use std::collections::HashMap;
 
+/// Romacs's icon font (assets/fonts/RomacsIcons.ttf, DIVERGENCES.md
+/// VM2-MODE-LINE): under `ROMACS_RUNTIME_ROOT' (an installed
+/// share/romacs), else in the checkout this binary was built from.
+pub fn icon_font() -> std::path::PathBuf {
+    std::env::var_os("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .join("assets/fonts/RomacsIcons.ttf")
+}
+
+/// Make the icon font a Fontconfig application font, so a character only
+/// it has resolves to it as any font's fallback does. Run before a
+/// resolver is built, so none has cached its codepoints as missing. False
+/// when the file is absent or Fontconfig refused it.
+pub fn register_icon_font() -> bool {
+    let font = icon_font();
+    font.is_file() && romacs_font::register_font_file(&font)
+}
+
 pub struct Display {
     resolver: FontResolver,
     policy: FontsetPolicy,
@@ -135,6 +153,20 @@ mod tests {
     }
     fn printed(vm: &mut Vm, source: &str) -> String {
         vm.eval_source(source).unwrap_or_else(|e| panic!("{source}: {e}")).display().unwrap()
+    }
+
+    /// A character in the icons' range resolves to Romacs's icon font, for
+    /// a face of any family: it is the only font with it.
+    #[test]
+    fn an_icon_resolves_to_the_icon_font() {
+        assert!(register_icon_font());
+        let mut resolver = FontResolver::new().unwrap();
+        for family in ["Liberation Mono", "PlemolJP Console NF"] {
+            let resolved = resolver.resolve_char(&FontRequest::new(family, 15.0), '\u{FE001}', &FontsetPolicy::new()).unwrap();
+            let file = resolved.font.identity.file_path.clone().unwrap();
+            assert_eq!(std::path::Path::new(&file).canonicalize().unwrap(), icon_font().canonicalize().unwrap(), "{family}");
+            assert_ne!(resolved.glyph.glyph_id.get(), 0, "{family}: the glyph, not .notdef");
+        }
     }
 
     #[test]

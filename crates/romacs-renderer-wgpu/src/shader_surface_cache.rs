@@ -166,11 +166,23 @@ pub struct CachedShaderSurface {
     width_px: u32,
     height_px: u32,
     scale: f32,
+    /// The texture holds premultiplied colour (a scene placement's root);
+    /// every other surface holds straight alpha.
+    pub premultiplied: bool,
 }
 
 /// A rendered-texture surface entry built by
 /// [`ShaderSurfaceCache::prepare_rendered`] and not yet installed.
 pub struct PreparedSurface(CachedShaderSurface);
+
+impl PreparedSurface {
+    /// The same entry, marked as holding premultiplied colour, so the
+    /// composite paths blend it premultiplied.
+    pub fn premultiplied(mut self) -> Self {
+        self.0.premultiplied = true;
+        self
+    }
+}
 
 pub struct ShaderSurfaceCache {
     surfaces: HashMap<u32, CachedShaderSurface>,
@@ -444,6 +456,7 @@ impl ShaderSurfaceCache {
                 } else {
                     1.0
                 },
+                premultiplied: false,
             },
         );
         tracing::info!(
@@ -524,6 +537,7 @@ impl ShaderSurfaceCache {
                 width_px: width,
                 height_px: height,
                 scale: 1.0,
+                premultiplied: false,
             },
         );
         tracing::info!("pixel surface {id} created: {width}x{height}px");
@@ -602,6 +616,7 @@ impl ShaderSurfaceCache {
             width_px,
             height_px,
             scale: 1.0,
+            premultiplied: false,
         }))
     }
 

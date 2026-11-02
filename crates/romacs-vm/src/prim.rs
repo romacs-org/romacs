@@ -1735,6 +1735,7 @@ mod leaf {
     mod insdel;
     mod sqlite;
     pub(crate) mod treesit;
+    pub(crate) mod inotify;
     mod process;
     mod gnutls;
     pub(crate) use process::{CallOutput, Target};
@@ -2203,6 +2204,7 @@ impl Vm {
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
         self.eval_source_raw(prims::PRELUDE)?;
         self.eval_source_raw(prims::PROCESS_PRELUDE)?;
+        self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
         self.eval_source_raw(prims::ISOLATE_PRELUDE)
     }
 }

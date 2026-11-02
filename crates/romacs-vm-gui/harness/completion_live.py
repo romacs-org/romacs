@@ -59,12 +59,14 @@ INIT = '''(write-region
   (interactive)
   (write-region "ran" nil {probe}))
 '''
-# Appended unless --fido: the root window's height against the frame's,
-# recorded at init and in each prompt.
+# Appended unless --fido: the root window's height against the frame's
+# less the status bar's (VM2-STATUS-BAR), recorded at init and in each
+# prompt.
 LAYER_INIT = '''(defun romacs-live-root-height (where)
   (let ((frame (window-frame (minibuffer-selected-window))))
     (write-region (format "%S\n" (list where (window-pixel-height (frame-root-window frame))
-                                        (frame-text-height frame) (frame-visible-p (romacs--minibuffer-host))))
+                                        (- (frame-text-height frame) (romacs-status-bar-height))
+                                        (frame-visible-p (romacs--minibuffer-host))))
                   nil {heights} t 'quiet)))
 (romacs-live-root-height 'init)
 (add-hook 'minibuffer-setup-hook (lambda () (romacs-live-root-height 'prompt)))
@@ -76,8 +78,9 @@ LAYER_INIT = '''(defun romacs-live-root-height (where)
            (mini (minibuffer-window root)))
       (write-region (format "%S\n" (list (car (frame-position host)) (cdr (frame-position host))
                                          (frame-pixel-width host) (frame-pixel-height host)
-                                         (frame-text-width root) (frame-text-height root)
-                                         (- (nth 3 (window-pixel-edges window)) (window-mode-line-height window))
+                                         (frame-native-width root) (frame-native-height root)
+                                         (- (nth 3 (window-edges window nil nil t)) (window-mode-line-height window)
+                                            (window-bottom-divider-width window))
                                          (- (window-pixel-top mini) (cdr (frame-position host)) border)
                                          (frame-parameter host 'romacs-layer-radius)
                                          (+ (* romacs-complete-count ch) (window-pixel-height mini) (* 2 border)) ch))
@@ -142,7 +145,9 @@ def check_panels(recorded, position):
     than the frame, rounded, its input on its top edge, and placed at its
     tallest: in the frame's top third at `top', centred within a line at
     `center', and at `bottom' ending at least a line above the selected
-    window's mode line, and within a line of that."""
+    window's mode line, and within a line of that. Child frames are
+    placed in the frame's native pixels, so those are the frame's size
+    and the mode line's top here."""
     for left, top, width, height, frame_width, frame_height, mode_line, input_offset, radius, tallest, line in recorded:
         centred = abs(2 * left + width - frame_width) <= 1
         vertical = {'top': top < frame_height / 3,

@@ -83,6 +83,21 @@ defsubr! { name = "window-hscroll", gnu = "window.c:1278", effect = Reads,
 fn window_hscroll(cx; optional window: Value) { cx.windows().window_hscroll(window) }}
 defsubr! { name = "set-window-hscroll", gnu = "window.c:1313", effect = Global,
 fn set_window_hscroll(cx, window: Value, ncol: Value) { cx.windows().set_window_hscroll(window, ncol) }}
+defsubr! { name = "scroll-left", gnu = "window.c:7101", effect = Global,
+fn scroll_left(cx; optional arg: Value, set_minimum: Value) { scroll_horizontally(cx, arg, set_minimum, true) }}
+defsubr! { name = "scroll-right", gnu = "window.c:7127", effect = Global,
+fn scroll_right(cx; optional arg: Value, set_minimum: Value) { scroll_horizontally(cx, arg, set_minimum, false) }}
+fn scroll_horizontally(cx: &mut Leaf<'_>, arg: Value, set_minimum: Value, left: bool) -> std::result::Result<Value, Fault> {
+    let columns = match arg {
+        Value::NIL => None,
+        _ => { let n = super::callint::prefix_numeric(cx, arg); Some(n.integer_value().ok_or(Fault::Wrong("fixnump", n))?) }
+    };
+    cx.windows().scroll_horizontally(columns, set_minimum, left)
+}
+defsubr! { name = "window-line-height", gnu = "window.c:2048", effect = Reads,
+fn window_line_height(cx; optional line: Value, window: Value) { cx.windows().window_line_height(line, window) }}
+defsubr! { name = "window-old-point", gnu = "window.c:1803", effect = Reads,
+fn window_old_point(cx; optional window: Value) { cx.windows().window_old_point(window) }}
 defsubr! { name = "select-frame", gnu = "frame.c:2103", effect = Global,
 fn select_frame(cx, frame: Value; optional norecord: Value) { cx.windows().select_frame(frame, norecord) }}
 defsubr! { name = "recent-auto-save-p", gnu = "fileio.c:6541", effect = Reads,
@@ -230,7 +245,8 @@ fn alpha_lower_limit(cx: &mut Leaf<'_>) -> std::result::Result<f32, Fault> {
 /// opacity of the backgrounds the frame paints; `left-fringe' and
 /// `right-fringe' its fringes; `right-divider-width', `bottom-divider-width'
 /// and `internal-border-width' the gaps between and around its windows;
-/// `tab-bar-lines' its tab bar. Other parameters, and
+/// `tab-bar-lines' its tab bar; `romacs-status-bar-lines' its status bar
+/// and `romacs-pane-label' its windows' mode-line bands (VM2-STATUS-BAR). Other parameters, and
 /// every parameter of a frame without a window system, are only stored.
 fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
     if cx.kind(key) != leaf::Kind::Symbol || cx.windows().window_system(frame)? == Value::NIL { return Ok(()); }
@@ -247,6 +263,15 @@ fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Va
         // pgtk_set_tab_bar_lines (pgtkfns.c:444): an integer >= 0, else 0.
         let lines = value.integer_value().filter(|&n| n >= 0).map_or(0, |n| n.min(i64::from(i32::MAX)) as u32);
         cx.windows().set_frame_tab_bar_lines(frame, lines)
+    } else if key == cx.intern("romacs-status-bar-lines") {
+        // Like `tab-bar-lines': an integer >= 1 shows the bar, else none.
+        let lines = u32::from(value.integer_value().is_some_and(|n| n > 0));
+        cx.windows().set_frame_status_bar_lines(frame, lines)
+    } else if key == cx.intern("romacs-pane-label") {
+        let label = if value == Value::NIL { crate::frame::PaneLabel::None }
+            else if value == cx.intern("name") { crate::frame::PaneLabel::Name }
+            else { crate::frame::PaneLabel::Full };
+        cx.windows().set_frame_pane_label(frame, label)
     } else if key == cx.intern("alpha-background") {
         let background = opacity(cx, value)?.unwrap_or(1.0);
         cx.windows().set_frame_background_alpha(frame, background)
@@ -453,6 +478,18 @@ fn romacs_create_frame(cx, parms: Value) {
 defsubr! { name = "romacs--host-minibuffer", gnu = "romacs:frame", effect = Global,
 fn romacs_host_minibuffer(cx, frame: Value) {
     cx.windows().host_minibuffer(frame)
+}}
+defsubr! { name = "romacs-status-bar-window", gnu = "romacs:frame", effect = Reads,
+fn romacs_status_bar_window(cx) {
+    cx.windows().status_bar_window()
+}}
+defsubr! { name = "romacs-status-bar-height", gnu = "romacs:frame", effect = Reads,
+fn romacs_status_bar_height(cx) {
+    Ok(Value::integer(i64::from(cx.windows().status_bar_height())).unwrap())
+}}
+defsubr! { name = "romacs--status-bar-text", gnu = "romacs:frame", effect = Reads,
+fn romacs_status_bar_text(cx) {
+    Ok(cx.windows().status_bar_text())
 }}
 defsubr! { name = "romacs--minibuffer-host", gnu = "romacs:frame", effect = Reads,
 fn romacs_minibuffer_host(cx) {
