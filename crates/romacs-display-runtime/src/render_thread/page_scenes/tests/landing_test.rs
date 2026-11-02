@@ -548,6 +548,59 @@ mod gpu {
         }
     }
 
+    /// A window scrolls the landing out of view and back (M-> then M-<),
+    /// and part way (one line up), through the render thread's own
+    /// animation path on the software adapter: out of view the frame
+    /// draws nothing of it and its scene and surfaces stay; back in view
+    /// the same placement shows at the block, where it was, never cells;
+    /// part way, it moves with the block's rows.  The scene is never
+    /// retired, so its motion goes on where it was.
+    #[test]
+    fn the_landing_follows_its_block_out_of_view_and_back() {
+        use crate::render_thread::text_animations::{Drawn, TextAnimations};
+        use romacs_display_protocol::frame_glyphs::FrameGlyph;
+        use romacs_display_protocol::text_animation::{TextAnimation, TextAnimationKind};
+        use romacs_renderer_wgpu::WgpuRenderer;
+        let Some((device, queue)) = device(true) else {
+            eprintln!("SKIP: no software (lavapipe) Vulkan adapter");
+            return;
+        };
+        let (cols, rows) = (110_u16, 36_u32);
+        let (w, h) = (10 + u32::from(cols) * 9, 40 + rows * 22);
+        let frame = super::super::super::tests::frame(1, rows, cols);
+        let animation = |top: i32| TextAnimation { window: 1, top, cols: cols.into(), rows, fps: 25, moving: top > -(rows as i32),
+                                                   still: true, kind: TextAnimationKind::Logo { cell_aspect: 9.0 / 22.0, epoch: 0 } };
+        let mut renderer = WgpuRenderer::with_device(std::sync::Arc::new(device.clone()),
+                                                     std::sync::Arc::new(queue.clone()), w, h, FORMAT, 1.0);
+        let mut atlas = WgpuGlyphAtlas::new(&device);
+        let mut animations = TextAnimations::default();
+        // One frame of the render thread: the evaluator's animations, the
+        // scenes brought up to date and drawn, the frame painted.
+        let mut show = |top: i32| {
+            animations.replace(vec![(1, animation(top))]);
+            animations.prepare_scenes(&frame, true, &mut renderer);
+            renderer.process_shader_surfaces();
+            animations.draw_scenes(&mut renderer, &mut atlas);
+            let mut painted = frame.clone();
+            animations.paint(&mut painted);
+            assert!(animations.take_retired().is_empty(), "the scene is never retired (top {top})");
+            let placements: Vec<u32> = painted.glyphs.iter().filter_map(|g| match g {
+                FrameGlyph::Surface { surface_id, .. } => Some(surface_id.get()),
+                _ => None,
+            }).collect();
+            (animations.drawn(1), placements)
+        };
+        let (first, placement) = show(0);
+        let Some(Drawn::Scene(at)) = first else { panic!("the landing draws as a scene: {first:?}") };
+        assert!(at.x0 >= 5.0 && at.y0 >= 20.0, "the placement sits in the block: {at:?}");
+        assert_eq!(placement.len(), 1);
+        assert_eq!(show(-(rows as i32)), (Some(Drawn::Hidden), vec![]), "out of view nothing of it is drawn");
+        assert_eq!(show(0), (Some(Drawn::Scene(at)), placement.clone()), "back in view, the same placement where it was");
+        let up = at - kurbo::Vec2::new(0.0, 22.0);
+        assert_eq!(show(-1), (Some(Drawn::Scene(up)), placement.clone()), "one line up, it moves with the block");
+        assert_eq!(show(0), (Some(Drawn::Scene(at)), placement));
+    }
+
     /// A frame sequence of the open and the loop for review, on the hardware
     /// adapter when there is one: `ROMACS_LANDING_FRAMES=DIR`.
     #[test]
