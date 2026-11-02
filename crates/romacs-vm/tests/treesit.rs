@@ -3,7 +3,7 @@
 //! errors, load errors, printing, `equal' and hashing of nodes, edits,
 //! narrowing, ranges, notifiers and searches. The cases run on the system
 //! C grammar; given ROMACS_TREESIT_GRAMMARS, a private directory holding
-//! copies of the json, python and rust grammars (never an owner's
+//! copies of the json, python and rust grammars (never a user's
 //! directory), the cases on those run too.
 use romacs_vm::Vm;
 use std::path::Path;

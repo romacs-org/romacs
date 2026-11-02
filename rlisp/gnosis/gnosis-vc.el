@@ -1,4 +1,5 @@
 ;;; gnosis-vc.el --- Version control for gnosis  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2023-2026  Free Software Foundation, Inc.
 

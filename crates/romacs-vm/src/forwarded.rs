@@ -423,6 +423,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "window-selection-change-functions", gnu: "window.c:9367", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "window-size-change-functions", gnu: "window.c:9348", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "window-state-change-functions", gnu: "window.c:9381", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "window-state-change-hook", gnu: "window.c:9399", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "window-configuration-change-hook", gnu: "window.c:9412", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "word-wrap-by-category", gnu: "xdisp.c:38789", kind: Kind::Bool(false) },
     CVariable { name: "words-include-escapes", gnu: "syntax.c:3785", kind: Kind::Bool(false) },
     CVariable { name: "wrap-prefix", gnu: "xdisp.c:39129", kind: Kind::Lisp(Init::Nil) },
@@ -702,8 +704,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
     // Heap-valued C variables materialize lazily on first read.
-    // A build without GnuTLS (VM2-TLS1).
+    // VM2-TLS1: TLS is rustls's, not a libgnutls's.
     CVariable { name: "libgnutls-version", gnu: "gnutls.c:3021", kind: Kind::Lisp(Init::Fixnum(-1)) },
+    CVariable { name: "gnutls-log-level", gnu: "gnutls.c:3015", kind: Kind::Lisp(Init::Fixnum(0)) },
     CVariable { name: "latin-extra-code-table", gnu: "coding.c:12140", kind: Kind::Lisp(Init::NilVector(256)) },
     CVariable { name: "user-full-name", gnu: "editfns.c:4862", kind: Kind::Lisp(Init::UserIdentity("user-full-name")) },
     CVariable { name: "user-login-name", gnu: "editfns.c:4865", kind: Kind::Lisp(Init::UserIdentity("user-login-name")) },
@@ -722,6 +725,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "eol-mnemonic-unix", gnu: "coding.c:12091", kind: Kind::Lisp(Init::Str(":")) },
     CVariable { name: "overlay-arrow-string", gnu: "xdisp.c:38711", kind: Kind::Lisp(Init::Str("=>")) },
     CVariable { name: "yes-or-no-prompt", gnu: "fns.c:6874", kind: Kind::Lisp(Init::Str("(yes or no) ")) },
+    // Read when a profiler log is made (`profiler.rs').
+    CVariable { name: "profiler-max-stack-depth", gnu: "profiler.c:708", kind: Kind::Int(16) },
+    CVariable { name: "profiler-log-size", gnu: "profiler.c:711", kind: Kind::Int(10000) },
 ];
 
 /// C_SPECIALS that GNU leaves bound but not special: lread.c:5559 clears

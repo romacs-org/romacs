@@ -26,6 +26,8 @@ pub struct HostFrame {
     /// window, or a child frame's when one hosts it.
     pub minibuffer: u64,
     pub snapshot: std::time::Duration,
+    /// The text animations drawn over this frame (`Vm::text_animations').
+    pub text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
 
 /// What the host answers a read with.
@@ -75,6 +77,13 @@ pub trait HostInput {
     /// Publish CLIPBOARD text with a bounded wait and without running Lisp.
     fn set_clipboard_text(&mut self, _text: &str) -> std::result::Result<(), String> {
         Err("native clipboard is unavailable".into())
+    }
+
+    /// Whether the display shows frame-by-frame animation
+    /// (`romacs--display-animates'): None until it knows its adapter.  A
+    /// host with no window, every test's, shows none.
+    fn display_animates(&mut self) -> Option<bool> {
+        Some(false)
     }
 }
 
@@ -149,10 +158,57 @@ impl Vm {
         self.display(state)
     }
 
+    /// redisplay_internal's run_window_change_functions, which every
+    /// redisplay's frame snapshot runs first (display.rs): the command
+    /// loop's Lisp half (rlisp/vm/window-change.el) once it is installed.
+    /// Lisp runs only when the windows differ from what the last run saw,
+    /// so a redisplay that changed no window enters no Lisp.
+    pub(crate) fn run_window_change_functions(&mut self) -> Result<()> {
+        if self.window_change_signature()? == self.window_change_seen { return Ok(()); }
+        let run = "(lambda () (and (fboundp 'romacs--run-window-change-functions)
+                     (condition-case err (romacs--run-window-change-functions)
+                       (error (message \"Error in window change functions: %S\" err)))))";
+        self.call_prepared_source_raw(run, &[])?;
+        self.window_change_seen = self.window_change_signature()?;
+        Ok(())
+    }
+    /// What window_change_record keeps, for the run's gate: the selected
+    /// frame, and each frame with its selected window and its windows'
+    /// buffers, pixel boxes and what their body sizes also depend on (their
+    /// parameters, whether their buffers show a mode or header line, the
+    /// faces' revision and the frame's line and column). Its words are heap
+    /// indices, which a collection may reuse, so the count of collections
+    /// is part of it.
+    fn window_change_signature(&mut self) -> Result<Vec<u64>> {
+        let mut out = vec![self.gc_stats.collections, self.frame_value_peek().0, self.display_state.face_revision,
+                           u64::from(self.window_state.line), u64::from(self.window_state.column)];
+        let lines = [self.slot("mode-line-format"), self.slot("header-line-format")];
+        for frame in self.frames() {
+            let Ok(f) = self.frame(frame) else { continue };
+            out.extend([frame.0, f.selected.0]);
+            let mut pending = vec![f.root, f.minibuffer];
+            while let Some(window) = pending.pop() {
+                let Ok(w) = self.window(window) else { continue };
+                let buffer = w.buffer;
+                out.extend([window.0, buffer.0, u64::from(w.x), u64::from(w.y), u64::from(w.width), u64::from(w.height),
+                            u64::from(w.left_margin), u64::from(w.right_margin)]);
+                out.extend(w.parameters.iter().flat_map(|(k, v)| [k.0, v.0]));
+                pending.extend(w.children.iter().copied());
+                if buffer != Value::NIL {
+                    for slot in lines {
+                        let format = self.value_in_buffer(slot, buffer)?;
+                        out.push(u64::from(format != Value::NIL && format != Value::UNBOUND));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// keyboard.c timer_stop_idle: the host read a key for a command.
     pub fn timer_stop_idle(&mut self) { self.idle_since = None; }
 
-    fn redisplay_inhibited(&mut self) -> Result<bool> {
+    pub(crate) fn redisplay_inhibited(&mut self) -> Result<bool> {
         let slot = self.slot("inhibit-redisplay");
         Ok(self.variable_value(slot)? != Value::NIL)
     }
@@ -168,6 +224,10 @@ impl Vm {
                 // queues; a redisplay's Lisp (a mode-line :eval) may change
                 // them, and then the wait ends for Lisp to compute it again.
                 let before = self.host_wait_state()?;
+                // GNU's `message' redisplays the echo area at once (xdisp.c
+                // message3_nolog): a host that renders it shows a message
+                // left during this wait (a timer's) before the snapshot.
+                self.call_prepared_source_raw("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])?;
                 let (width, height) = (self.window_state.width, self.window_state.height);
                 let started = crate::host::monotonic();
                 let frame = self.frame_snapshot(width, height)?;
@@ -175,7 +235,8 @@ impl Vm {
                 let selected = self.selected_window_value()?;
                 let selected = self.window(selected)?.id;
                 let minibuffer = self.window(self.mini_window())?.id;
-                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot })?;
+                let text_animations = self.text_animations()?;
+                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
                 self.display_apply_layout(&ends)?;
                 redraw = false;
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }

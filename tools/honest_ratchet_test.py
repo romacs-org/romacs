@@ -17,7 +17,7 @@ import parity_ratchet as pr  # noqa: E402
 
 RX = 'lisp/emacs-lisp/rx-tests.el'
 SUBR = 'lisp/subr-tests.el'
-WHY = 'owner restatement: these members pass only because their subject is missing'
+WHY = 'restatement: these members pass only because their subject is missing'
 
 
 def ev(cls, method='mutation', gnu_caught=()):

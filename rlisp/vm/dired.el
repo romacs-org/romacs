@@ -2,6 +2,7 @@
 ;;; dired.el --- VM2: the Lisp half of dired.c's file_name_completion  -*- lexical-binding: t -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

@@ -1976,7 +1976,7 @@ macro_rules! effect_schema_table {
                     Some(crate::child_frame_animation::ChildFrameAnimationsConfig::PROPERTIES)
                 }
                 "child_frame_open" | "child_frame_close" | "child_frame_movement"
-                | "child_frame_resize" => {
+                | "child_frame_resize" | "child_frame_selection" => {
                     Some(crate::child_frame_animation::ChildFrameAnimation::PROPERTIES)
                 }
                 _ => None,

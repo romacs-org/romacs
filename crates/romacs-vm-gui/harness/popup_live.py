@@ -25,7 +25,8 @@ lines must not move while it shows or after it goes.
 
 With --which-key, which-key's `custom' popup type shows its keys in a
 layer (romacs-layer.el) after C-x: a strip directly above the minibuffer
-line, with the root frame's windows unmoved while it shows and after it
+(the frame's bottom edge while romacs-complete's minibuffer layer is
+hidden), with the root frame's windows unmoved while it shows and after it
 goes.
 """
 import argparse
@@ -128,7 +129,7 @@ CHILD_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
                          (nreverse out)))
               :root-windows (popup-live--root-windows)
               :frames (length (frame-list))))
-       nil {state}))))
+       nil {state} nil (quote quiet)))))
 (with-eval-after-load 'keymap-popup
   (advice-add 'keymap-popup--show-child-frame :after #'popup-live--record))
 '''
@@ -147,17 +148,23 @@ WHICH_KEY_INIT = '''(require 'which-key)
      (prin1-to-string
       (list :position (list (car (frame-position frame)) (cdr (frame-position frame)))
             :native (list (frame-native-width frame) (frame-native-height frame))
-            :minibuffer-top (window-pixel-top (minibuffer-window))
+            ;; Where the minibuffer begins: its line, its layer while that
+            ;; shows, else (its layer hidden) the frame's bottom edge.
+            :minibuffer-top (let ((host (romacs--minibuffer-host)))
+                              (cond ((null host) (window-pixel-top (minibuffer-window)))
+                                    ((frame-visible-p host) (cdr (frame-position host)))
+                                    (t (frame-text-height (frame-parent frame)))))
             :root-windows (mapcar (lambda (w) (list (window-pixel-top w) (window-pixel-height w)))
                                   (window-list (frame-parent frame) 'nomini))))
-     nil {state})))
+     nil {state} nil (quote quiet))))
 (advice-add 'romacs-layer-which-key-show :after #'popup-live--record)
 '''
 
 
 def check_which_key(args, output, report, env, process, state, keys, glyphs):
-    """C-x shows which-key's keys in a layer above the minibuffer line; the
-    root frame's windows do not move."""
+    """C-x shows which-key's keys in a layer above the minibuffer (at the
+    frame's bottom while the minibuffer's layer is hidden); the root
+    frame's windows do not move."""
     def root_bands():
         return [y for y, _, _ in rows([g for g in glyphs() if g.get('frame', 1) == 1], 'ModeLine')]
 
@@ -342,7 +349,7 @@ def main():
             init = WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame else INIT
             (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state))))
             (config / 'rc.xml').write_text(live.RC_XML)
-            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
+            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
                    'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(root),
@@ -361,7 +368,7 @@ def main():
                 fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')), 15, 'private compositor', compositor)
                 env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
                 # Every client below connects to XDG_RUNTIME_DIR/WAYLAND_DISPLAY:
-                # the private compositor's socket, never the owner's display.
+                # the private compositor's socket, never the user's display.
                 socket = Path(env['XDG_RUNTIME_DIR']) / env['WAYLAND_DISPLAY']
                 assert socket.is_socket() and socket.parent == root, socket
                 assert 'DISPLAY' not in env
@@ -393,7 +400,7 @@ def main():
                     report['status'] = 'PASS'
                     return
                 keys('-M', 'alt', 'x', '-m', 'alt')
-                fio.wait(lambda: ff.current_rows(log_path.read_text(errors='replace'))[:1] == ['M-x '], args.timeout, 'M-x prompt', process)
+                fio.wait(lambda: ff.prompt_shown(ff.current_rows(log_path.read_text(errors='replace')), 'M-x '), args.timeout, 'M-x prompt', process)
                 keys('hermes', '-k', 'Return')
                 fio.wait(lambda: any('*Hermes Dashboard*' in row for row in mode_lines()), args.timeout, 'dashboard', process)
                 time.sleep(1)

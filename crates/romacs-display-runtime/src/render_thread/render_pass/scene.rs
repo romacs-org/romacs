@@ -51,24 +51,40 @@ pub(super) fn render_frame_root_glyphs(
     if let Some(atlas) = render.compositor.glyph_atlas.as_mut() {
         atlas.set_current_frame_fonts(frame.font_bindings());
     }
-    renderer.with_frame_effects(&mut render.compositor.renderer_effects, |renderer| {
-        renderer.set_idle_dim_alpha(render.overlays.idle_dim.current_alpha);
-        renderer.render_frame_glyphs(
-            surface_view,
-            frame,
-            render.compositor.glyph_atlas.as_mut().unwrap(),
-            present_mapping,
-            cursor_visible,
-            root_animated_cursor,
-            hovered_scroll_bar,
-            bg_gradient,
-            pointer_selection,
-            if raster.is_some() {
-                None
-            } else {
-                render.compositor.current_row_damage.as_ref()
-            },
-        );
+    // Only the frame's own glyphs and cursors decide its pixels: no raster,
+    // gradient, animated cursor, pointer highlight or running effect.
+    let stable = raster.is_none()
+        && bg_gradient.is_none()
+        && root_animated_cursor.is_none()
+        && pointer_selection.is_none()
+        && hovered_scroll_bar.is_none()
+        && render.overlays.idle_dim.current_alpha == 0.0
+        && super::retained_scroll::static_body_effects(&renderer.effects)
+        && !render.compositor.renderer_effects.needs_redraw();
+    let key = romacs_renderer_wgpu::SnapshotSize::new(renderer.width(), renderer.height()).and_then(|size| {
+        super::retained_root::key(frame, cursor_visible, size, renderer.scale_factor(), stable)
+    });
+    let repeats = render.compositor.child_frames.has_animation_activity();
+    super::retained_root::paint(renderer, render, surface_view, present_mapping, key, repeats, |renderer, render, view| {
+        renderer.with_frame_effects(&mut render.compositor.renderer_effects, |renderer| {
+            renderer.set_idle_dim_alpha(render.overlays.idle_dim.current_alpha);
+            renderer.render_frame_glyphs(
+                view,
+                frame,
+                render.compositor.glyph_atlas.as_mut().unwrap(),
+                present_mapping,
+                cursor_visible,
+                root_animated_cursor,
+                hovered_scroll_bar,
+                bg_gradient,
+                pointer_selection,
+                if raster.is_some() {
+                    None
+                } else {
+                    render.compositor.current_row_damage.as_ref()
+                },
+            );
+        });
     });
     let presentation = frame.presentation_id;
     if let Some(raster) = raster {
@@ -126,9 +142,8 @@ pub(super) fn render_frame_content_overlays(
     // position, and the retained texture -- frozen mid-drift at an
     // interpolated origin -- must rebuild before it is blitted again.
     let mut drift_finished = false;
-    // Whether the corpse-clearing (or crossfade-closing) repaint was
-    // requested this pass.
-    let mut crossfade_finished = false;
+    // Reshape boxes and gliding bands where this sample puts them.
+    render.compositor.child_frames.advance(sample);
     let result = renderer.with_frame_effects(&mut render.compositor.renderer_effects, |renderer| {
         // One merged draw order: living frames and dying corpses
         // interleaved in z-path order, a corpse drawing before a living
@@ -145,7 +160,7 @@ pub(super) fn render_frame_content_overlays(
                 clip_in_root,
                 alpha,
                 offset_y,
-                crossfade_layer,
+                reshape,
                 scale,
             ) = if dying {
                 let Some(dying_entry) = render.compositor.child_frames.dying_entry(child_id) else {
@@ -252,30 +267,15 @@ pub(super) fn render_frame_content_overlays(
                 if finished && child_entry.animation.is_some() {
                     finished_animations.push(child_id);
                 }
-                // Resize mixes complete unscaled old/new pictures in reserved
-                // scratch before applying accepted/lifecycle opacity once. At
-                // completion the next frame uses the new payload alone.
-                let mut crossfade_layer: Option<(
-                    &romacs_renderer_wgpu::SnapshotLease,
-                    f32,
-                    f32,
-                    f32,
-                )> = None;
-                if let Some(crossfade) = child_entry.crossfade.as_ref() {
-                    let progress = crossfade.motion.sample(sample);
-                    if progress.finished {
-                        crossfade_finished = true;
-                    } else {
-                        child_animation_active = true;
-                        let mix = progress.content_mix.get();
-                        crossfade_layer = Some((
-                            &crossfade.old,
-                            crossfade.old_width,
-                            crossfade.old_height,
-                            mix,
-                        ));
-                    }
-                }
+                // A rect tween draws the frame's box in the moving rect and
+                // its settled content clipped to it.
+                let reshape = child_entry.reshape.as_ref().and_then(|reshape| {
+                    let progress = reshape.motion.sample(sample);
+                    (!progress.finished).then(|| (&reshape.frame_box, child_entry.drawn_rect(sample)))
+                });
+                // A gliding selection draws the payload with its band moving.
+                let glide = child_entry.glide.as_ref().filter(|glide| !glide.motion.sample(sample).finished);
+                child_animation_active |= reshape.is_some() || glide.is_some();
                 // A placement drift glides the frame from where the last
                 // pass painted it to its placed position. While it runs,
                 // the drawn origin is the interpolation; the placed
@@ -294,8 +294,6 @@ pub(super) fn render_frame_content_overlays(
                         drift_drawn.push((child_id, drawn_x, drawn_y, progress.rate));
                     }
                 }
-                // Accepted/lifecycle opacity belongs to the completed resize
-                // picture, not the independently weighted new content.
                 let effective_alpha = alpha * child_entry.applied_frame_alpha;
                 if effective_alpha <= 0.0 {
                     continue;
@@ -306,42 +304,60 @@ pub(super) fn render_frame_content_overlays(
                     continue;
                 };
                 (
-                    &child_entry.frame,
+                    glide.map_or(&child_entry.frame, |glide| &glide.frame),
                     drawn_x,
                     drawn_y,
                     clip_in_root,
                     effective_alpha,
                     offset_y,
-                    crossfade_layer,
+                    reshape,
                     scale,
                 )
             };
-            let resize = crossfade_layer.map(|(old, old_width, old_height, mix)| {
-                romacs_renderer_wgpu::renderer::ChildResizePicture {
-                    old,
-                    old_width,
-                    old_height,
-                    mix,
-                }
-            });
             let size = romacs_renderer_wgpu::SnapshotSize::new(content_size.0, content_size.1)
                 .ok_or(super::surface::FrameRenderFailure::WindowNotReady)?;
-            let prepared = romacs_renderer_wgpu::renderer::PreparedChildFrame::new(
-                child_frame,
-                alpha,
-                size,
-                render.child_opacity_src.as_ref(),
-                resize,
-                render.child_resize_src.as_ref(),
-            )
-            .map_err(|error| {
-                tracing::error!(
-                    ?error,
-                    child_id,
-                    "child preparation rejected; retrying without present"
-                );
-                super::surface::FrameRenderFailure::WindowNotReady
-            })?;
+            let prepare = |frame| {
+                romacs_renderer_wgpu::renderer::PreparedChildFrame::new(
+                    frame,
+                    alpha,
+                    size,
+                    render.child_opacity_src.as_ref(),
+                )
+                .map_err(|error| {
+                    tracing::error!(
+                        ?error,
+                        child_id,
+                        "child preparation rejected; retrying without present"
+                    );
+                    super::surface::FrameRenderFailure::WindowNotReady
+                })
+            };
+            let prepared = prepare(child_frame)?;
+            // While a rect tween runs: the box at the drawn rect first, then
+            // the content inside both its own border and the box's.
+            let (boxed, clip_in_root) = match reshape {
+                Some((frame_box, rect)) => {
+                    let inset = |[x, y, w, h]: [f32; 4], b: f32| {
+                        romacs_display_protocol::RootSurfaceRect::new(x + b, y + b + offset_y, (w - 2.0 * b).max(0.0), (h - 2.0 * b).max(0.0)).ok()
+                    };
+                    let border = child_frame.border_width;
+                    let within = |a: Option<romacs_display_protocol::RootSurfaceRect>, b: Option<romacs_display_protocol::RootSurfaceRect>| {
+                        a.zip(b).and_then(|(a, b)| a.try_intersection(b).ok().flatten())
+                    };
+                    // The box may be larger than the placed frame (a layer
+                    // shrinking), so the root clips it, not the frame's own
+                    // clip; the content stays inside both borders.
+                    let root_clip = romacs_display_protocol::RootSurfaceRect::new(0.0, 0.0, frame.width, frame.height).ok();
+                    let box_clip = within(inset(rect, 0.0), root_clip);
+                    let content_clip = within(
+                        within(inset(rect, border), Some(clip_in_root)),
+                        inset([base_x, base_y, child_frame.width, child_frame.height], border),
+                    );
+                    let Some(content_clip) = content_clip else { continue };
+                    (box_clip.map(|clip| (prepare(frame_box), rect, clip)), content_clip)
+                }
+                None => (None, clip_in_root),
+            };
             let pointer_selection = pointer_appearance.selection_for(child_frame);
             if let Some(atlas) = render.compositor.glyph_atlas.as_mut() {
                 atlas.set_current_frame_fonts(child_frame.font_bindings());
@@ -368,8 +384,25 @@ pub(super) fn render_frame_content_overlays(
                     "child_frame_lifecycle: render_child_frame_start"
                 );
             }
-            if crossfade_layer.is_some() {
-                frame_stats::count(&frame_stats::CHILD_FRAME_CROSSFADE_QUADS);
+            if let Some((frame_box, rect, box_clip)) = boxed {
+                renderer.render_child_frame_prepared(
+                    surface_view,
+                    frame_box?,
+                    rect[0],
+                    rect[1] + offset_y,
+                    box_clip,
+                    render.compositor.glyph_atlas.as_mut().unwrap(),
+                    false,
+                    None,
+                    child_frame_style.corner_radius,
+                    child_frame_style.shadow_enabled,
+                    child_frame_style.shadow_layers,
+                    child_frame_style.shadow_offset,
+                    child_frame_style.shadow_opacity,
+                    None,
+                    1.0,
+                    [rect[0], rect[1] + offset_y],
+                );
             }
             renderer.render_child_frame_prepared(
                 surface_view,
@@ -417,10 +450,6 @@ pub(super) fn render_frame_content_overlays(
             .compositor
             .child_frames
             .clear_finished_animation(frame_id);
-    }
-    if crossfade_finished && render.compositor.child_frames.prune_crossfades(sample) {
-        // The mix ended: one more repaint draws the new payload alone.
-        render.mark_dirty();
     }
     for (frame_id, x, y, rate) in drift_drawn {
         render

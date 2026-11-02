@@ -1,10 +1,10 @@
 # romacs-vm
 
-The replacement Elisp runtime for romacs: a Rust reader, lexical compiler,
-strand-private register VM, moving collector, source loader and local agent
-interface. The owner has selected VM2 as the runtime. **The shipping editor
-launcher has not yet been switched, and bundled bootstrap is not complete.**
-Nothing here delegates evaluation or reading to the inherited evaluator.
+Romacs's Elisp runtime: a Rust reader, lexical compiler, strand-private
+register VM, moving collector, source loader and local agent interface. The
+GUI host (`romacs-vm-gui`) runs on it: `--loadup` boots GNU's preloaded Lisp
+chain from source or restores it from a world image (`src/world`), and
+`--batch` does the same for noninteractive runs.
 
 GNU 32.0.50 remains the semantic oracle. Deliberate departures belong in
 [GNU-DIVERGENCES.md](GNU-DIVERGENCES.md), beginning with scalar `aset` replacement.
@@ -16,7 +16,7 @@ Compiled IR, stable symbols and a constrained configured-world snapshot can be
 persisted in the existing authenticated mapped store. Function bodies are decoded
 and lowered only when called. See [CODE-IMAGE.md](CODE-IMAGE.md) for the CLI,
 compiler/config identity, integrity/GC proofs, eager metadata costs and limits.
-This does not connect VM2 to GUI startup.
+GUI startup does not use these code images; it restores a world image (`src/world`).
 
 ## Build and verify
 
@@ -31,7 +31,7 @@ python3 crates/romacs-vm/tools/check_source.py \
   --binary "$CARGO_TARGET_DIR/debug/romacs-vm" --output "$CARGO_TARGET_DIR/source-oracle.json"
 ```
 
-`-p romacs-vm` selects this runtime without building the inherited editor.
+`-p romacs-vm` builds and tests this runtime without the GUI host.
 
 ## Source and agent requests
 

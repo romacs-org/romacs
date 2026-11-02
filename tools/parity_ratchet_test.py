@@ -216,7 +216,7 @@ def fns_members():
     """Two members src/fns-tests.el records RIGHT NOW. Hardcoding a member NAME
     has exactly the defect fns_floor() documents for the floor SIZE: when the
     recorded set changes, a correct ratchet turns into a red gate. Measured: the
-    owner's 2026-10-22 floor restatement dropped fns-tests-nreverse (16 members
+    2026-10-22 floor restatement dropped fns-tests-nreverse (16 members
     -> 13) and every test naming it failed in its own fixture, not in the
     checker. Derive the names; never spell them."""
     floor = sorted(pr.load_ratchet(ROOT, evidence=False)['gnu_suite']['passing'][FNS])
@@ -935,7 +935,7 @@ class Wiring(unittest.TestCase):
 
 PIN_SHA = 'a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8'
 FNS_BASELINE = ROOT / 'gnu-tests' / 'baseline' / 'src' / 'fns-tests.el.json'
-# Until the owner authorises re-recording the 565 GNU baselines with the
+# Until a deliberate re-record of the 565 GNU baselines with the
 # pinned binary, run.py refuses every one of them (they were recorded by the
 # distro /usr/bin/emacs-32.0.50), so nothing can be measured at all.
 BASELINES_PINNED = json.loads(FNS_BASELINE.read_text())['gnu'].get('sha256') == PIN_SHA

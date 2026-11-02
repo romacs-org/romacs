@@ -58,7 +58,7 @@ fn minibuffer_motion_keeps_to_the_input_field() {
     let probes = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
-        // The session's user directory is a private one, never the owner's.
+        // The session's user directory is a private one, never the user's own.
         vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
             quoted(&format!("HOME={}", home.display())),
             quoted(&format!("XDG_CONFIG_HOME={}", home.join("config").display())))).unwrap();

@@ -981,6 +981,7 @@ fn hit_test_respects_updated_z_order() {
 
 use romacs_display_protocol::motion_spec::{MotionDuration, TweenSpec};
 use romacs_display_protocol::scroll_animation::TransitionEasing;
+use crate::core::frame_glyphs::FrameGlyph;
 
 fn tween_100ms() -> MotionSpec {
     MotionSpec::Tween(TweenSpec {
@@ -1320,4 +1321,84 @@ fn finished_drifts_clear_so_the_retained_path_returns() {
     assert!(mgr.clear_finished_drifts(sample_at(origin, 200)));
     assert!(!mgr.has_animation_activity());
     assert!(mgr.frames.get(&1).unwrap().drift.is_none());
+}
+
+// ===================================================================
+// Layer motion: rect tween, selection glide, keys ending animation
+// ===================================================================
+
+#[test]
+fn a_reshape_draws_the_rect_from_its_departure_to_the_placed_rect() {
+    let mut mgr = make_manager();
+    let mut buf = make_child_buf(1, 0.0, 300.0, 800.0, 100.0, 0);
+    buf.layer.radius = 8.0;
+    buf.layer.selection = Some(romacs_display_protocol::SelectionBand {
+        x: 0.0, y: 20.0, width: 800.0, height: 20.0, radius: 4.0,
+        color: romacs_display_protocol::Color::WHITE, base: romacs_display_protocol::Color::BLACK,
+    });
+    mgr.update_frame(buf);
+    let origin = origin_now();
+    mgr.begin_reshape(1, [0.0, 100.0, 800.0, 300.0], tween_100ms(), origin);
+    let entry = mgr.frames.get(&1).unwrap();
+    assert_eq!(entry.drawn_rect(sample_at(origin, 0)), [0.0, 100.0, 800.0, 300.0]);
+    let mid = entry.drawn_rect(sample_at(origin, 50));
+    assert!(mid[1] > 100.0 && mid[1] < 300.0 && mid[3] > 100.0 && mid[3] < 300.0, "{mid:?}");
+    assert_eq!(entry.drawn_rect(sample_at(origin, 200)), [0.0, 300.0, 800.0, 100.0]);
+    // The box carries the frame's background, border and look (not its
+    // selection, which the content draws), sized each pass.
+    mgr.advance(sample_at(origin, 50));
+    let frame_box = &mgr.frames.get(&1).unwrap().reshape.as_ref().unwrap().frame_box;
+    assert!(frame_box.glyphs.is_empty());
+    assert_eq!((frame_box.layer.radius, frame_box.layer.selection), (8.0, None));
+    assert_eq!((frame_box.width, frame_box.height), (mid[2], mid[3]));
+    assert!(mgr.reclaim_finished_composition(sample_at(origin, 200)));
+    assert!(mgr.frames.get(&1).unwrap().reshape.is_none());
+}
+
+#[test]
+fn a_glide_moves_the_band_over_the_rows_and_hides_the_new_row_s_highlight() {
+    let mut mgr = make_manager();
+    let mut buf = make_child_buf(1, 0.0, 0.0, 800.0, 200.0, 0);
+    let (band, base) = (romacs_display_protocol::Color::WHITE, romacs_display_protocol::Color::BLACK);
+    buf.layer.selection = Some(romacs_display_protocol::SelectionBand {
+        x: 0.0, y: 60.0, width: 800.0, height: 20.0, radius: 4.0, color: band, base,
+    });
+    let glyphs = buf.glyphs.len();
+    mgr.update_frame(buf);
+    let origin = origin_now();
+    mgr.begin_glide(1, 20.0, tween_100ms(), origin);
+    let glide = mgr.frames.get(&1).unwrap().glide.as_ref().unwrap();
+    // The payload's glyphs, then its base over the row it settles on; its
+    // band moves, and its text draws over the band, not on its own face's
+    // background.
+    assert_eq!(glide.frame.glyphs.len(), glyphs + 1);
+    assert!(glide.frame.text_over_backgrounds && !mgr.frames[&1].frame.text_over_backgrounds);
+    assert!(matches!(glide.frame.glyphs[glyphs], FrameGlyph::Background { bounds, color }
+        if bounds.y == 60.0 && color == base));
+    let band_y = |mgr: &ChildFrameManager| {
+        let moving = mgr.frames[&1].glide.as_ref().unwrap().frame.layer.selection.unwrap();
+        assert_eq!(moving.color, band);
+        moving.y
+    };
+    mgr.advance(sample_at(origin, 0));
+    assert_eq!(band_y(&mgr), 20.0);
+    mgr.advance(sample_at(origin, 50));
+    assert!((20.0..60.0).contains(&band_y(&mgr)) && band_y(&mgr) > 20.0);
+    assert_eq!(mgr.frames[&1].drawn_selection_y(sample_at(origin, 200)), Some(60.0));
+}
+
+#[test]
+fn a_key_ends_every_animation_where_lisp_put_the_layer() {
+    let mut mgr = make_manager();
+    mgr.update_frame(make_child_buf(1, 0.0, 300.0, 800.0, 100.0, 0));
+    mgr.update_frame(make_child_buf(2, 0.0, 0.0, 100.0, 100.0, 1));
+    let origin = origin_now();
+    mgr.begin_open_animation(1, tween_100ms(), origin, 8.0, 1.0);
+    mgr.begin_reshape(1, [0.0, 100.0, 800.0, 300.0], tween_100ms(), origin);
+    mgr.retire_frame(2, tween_100ms(), origin, 0.0, 1.0);
+    assert!(mgr.has_active_animation(sample_at(origin, 10)));
+    assert!(mgr.finish_animations());
+    assert!(!mgr.has_animation_activity());
+    assert_eq!(mgr.frames[&1].drawn_rect(sample_at(origin, 10)), [0.0, 300.0, 800.0, 100.0]);
+    assert!(!mgr.finish_animations(), "nothing was left to end");
 }

@@ -1,5 +1,6 @@
 ;;; romacs-gnu-ert-bootstrap.el --- Strict GNU ERT source prerequisites
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; ERT-specific source bootstrap: GNU's preloaded libraries, loaded as

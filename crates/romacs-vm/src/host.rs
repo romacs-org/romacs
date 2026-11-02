@@ -2140,12 +2140,76 @@ pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -
     Ok(())
 }
 
+/// profiler.c's SIGPROF timer, as a thread that only counts: every
+/// INTERVAL nanoseconds it looks at the calling thread, and when that
+/// thread is running, adds one to TICKS. A late wake samples once: the
+/// thread's state over the intervals it missed is unknown. The evaluator takes them at its next
+/// call boundary, a moment later, under the stack that was running. A
+/// sample is never counted for a thread that waits, so like GNU's
+/// CLOCK_THREAD_CPUTIME_ID timer the samples measure the thread's CPU time,
+/// and no wait is charged with work done before it. (A thread CPU-time
+/// timer itself is not used: under a zero RLIMIT_RTTIME hard limit
+/// Linux kills a thread whose CPU timer fires.) Dropping the sender ends
+/// the thread.
+pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::AtomicU64>) -> io::Result<std::sync::mpsc::Sender<()>> {
+    use std::os::unix::fs::FileExt;
+    effect(|| "cpu profiler sampler".into())?;
+    let stat = File::open("/proc/thread-self/stat")?;
+    // stat's third field, after the parenthesized command name.
+    let running = move || {
+        let mut text = [0u8; 512];
+        let n = stat.read_at(&mut text, 0).ok()?;
+        let close = text[..n].iter().rposition(|&b| b == b')')?;
+        Some(text.get(close + 2) == Some(&b'R'))
+    };
+    running().ok_or_else(|| io::Error::other("unreadable thread state"))?;
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
+    let period = std::time::Duration::from_nanos(interval.max(100_000));
+    std::thread::Builder::new().name("romacs-profiler".into()).stack_size(64 * 1024).spawn(move || {
+        let mut due = Instant::now() + period;
+        loop {
+            match stopped.recv_timeout(due.saturating_duration_since(Instant::now())) {
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                _ => break,
+            }
+            due = next_sample(due, Instant::now(), period);
+            // The profiled thread is gone: its state no longer reads.
+            let Some(running) = running() else { break };
+            if running {
+                ticks.fetch_add((period.as_nanos() as u64 / interval).max(1), std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    })?;
+    Ok(stop)
+}
+
+/// The first sampling deadline after NOW, on DUE's period: a late wake
+/// skips the deadlines it missed.
+fn next_sample(due: Instant, now: Instant, period: std::time::Duration) -> Instant {
+    let into = now.saturating_duration_since(due).as_nanos() % period.as_nanos();
+    now.max(due) + period - std::time::Duration::from_nanos(into as u64)
+}
+
 /// The termination signal `catch_termination_signals' noted since the
 /// last call, taken; `pending' only looks.
 pub fn termination_signal(pending: bool) -> Option<i32> {
     use std::sync::atomic::Ordering;
     let signal = if pending { TERMINATION.load(Ordering::SeqCst) } else { TERMINATION.swap(0, Ordering::SeqCst) };
     (signal != 0).then_some(signal)
+}
+
+static MESSAGES_TO_STDERR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether `message' also writes to stderr while `noninteractive' is nil.
+/// GNU's xdisp.c message_to_stderr writes only in batch; a bare VM's tools
+/// and test runners report through stderr, so that is the default, and an
+/// interactive embedder (the GUI) turns it off: its echo area is no log.
+pub fn set_messages_to_stderr(on: bool) {
+    MESSAGES_TO_STDERR.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn messages_to_stderr() -> bool {
+    MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
@@ -2300,6 +2364,14 @@ pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
 
 #[cfg(test)]
 mod tests {
+    /// A late wake samples once, at the next deadline after it.
+    #[test]
+    fn a_late_sampler_wake_skips_the_deadlines_it_missed() {
+        let ms = std::time::Duration::from_millis(1);
+        let due = super::Instant::now();
+        assert_eq!(super::next_sample(due, due, ms), due + ms);
+        assert_eq!(super::next_sample(due, due + ms * 150 + ms / 2, ms), due + ms * 151);
+    }
     /// A build's walk of the account database replays as the same walk.
     #[test]
     fn account_name_walks_replay() {

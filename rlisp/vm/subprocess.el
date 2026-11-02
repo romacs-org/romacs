@@ -1,6 +1,7 @@
 ;;; subprocess.el --- VM2 T3 tier: GNU process.c and callproc.c paths that call Lisp  -*- lexical-binding: t -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 
@@ -365,9 +366,8 @@ GNU process.c Fmake_network_process, for TCP and local stream sockets."
              (port nil)
              proc)
         (if (and server nowait) (error "`:server' is incompatible with `:nowait'"))
-        ;; Refusals: VM2-PROC1.
-        (if (plist-get contact :tls-parameters)
-            (error "VM2 network processes do not support :tls-parameters"))
+        (or (listp (plist-get contact :tls-parameters))
+            (signal 'wrong-type-argument (list 'listp (plist-get contact :tls-parameters))))
         ;; :use-external-socket names the socket a daemon was started
         ;; with; there is none, so it is nil, as in GNU without one.
         (cond
@@ -440,7 +440,9 @@ GNU process.c Fmake_network_process, for TCP and local stream sockets."
                                       (or (and (not (eq (process-filter proc) t))
                                                (not (eq (process-command proc) t)))
                                           (and server (null (process-command proc)))))))
-                  (romacs--setup-process-coding-systems proc))
+                  (romacs--setup-process-coding-systems proc)
+                  (if (and (not failed) (not server) (plist-get contact :tls-parameters))
+                      (romacs--boot-tls-parameters proc)))
                 (setq done t))
             (if (not done) (romacs--proc-remove proc))))
         proc))))
@@ -682,7 +684,8 @@ GNU process.c Fdelete_process."
 (defun romacs--connect-finished (proc errno remote local)
   "The wait's handling of PROC's completed :nowait connection: run and
 \"open\" with the REMOTE and LOCAL addresses it connected, or failed
-with ERRNO."
+with ERRNO.  A connection with a TLS handshake to go is \"open\" once
+that is done (`romacs--tls-finished')."
   (if (/= errno 0)
       (progn
         (romacs--proc-tick proc)
@@ -692,12 +695,61 @@ with ERRNO."
         (romacs--proc-set proc 'childp
                           (plist-put (plist-put (romacs--proc-get proc 'childp) :remote remote)
                                      :local local)))
-    (romacs--proc-set proc 'status 'run)
-    (romacs--exec-sentinel proc "open\n")
+    (unless (plist-get (romacs--proc-get proc 'childp) :tls-parameters)
+      (romacs--proc-set proc 'status 'run)
+      (romacs--exec-sentinel proc "open\n"))
     (if (and (romacs--proc-get proc 'infd)
              (not (eq (process-filter proc) t))
              (not (eq (process-command proc) t)))
         (romacs--proc-set proc 'reading t))))
+
+(defun romacs--boot-tls-parameters (proc)
+  "connect_network_socket's boot of PROC's :tls-parameters (TYPE . PLIST):
+a blocking client's handshake is done here and its connection finished
+\(`romacs--finish-tls-connection'); a :nowait one's goes on in the wait."
+  (let* ((params (plist-get (romacs--proc-get proc 'childp) :tls-parameters))
+         (boot (gnutls-boot proc (car params) (cdr params)))
+         (stage (gnutls-get-initstage proc)))
+    (cond
+     ((= stage 9) (romacs--finish-tls-connection proc))
+     ((/= stage 8)
+      (romacs--proc-deactivate proc)
+      (unless (eq (car-safe (romacs--proc-get proc 'status)) 'failed)
+        (romacs--proc-set proc 'status
+                          (list 'failed (if boot (gnutls-error-string boot) "TLS negotiation failed"))))))))
+
+(defun romacs--tls-finished (proc result)
+  "The wait's handling of PROC's TLS handshake that ended with RESULT:
+gnutls_verify_boot, then the connection finished, or failed."
+  (cond
+   ((not (eq result t)) (romacs--tls-failed proc "TLS negotiation failed"))
+   ((eq (romacs--gnutls-verify proc) t) (romacs--finish-tls-connection proc))
+   ;; gnutls_verify_boot's boot_error left the reason in the status.
+   (t (romacs--tls-failed proc nil))))
+
+(defun romacs--tls-failed (proc reason)
+  "PROC's TLS connection failed for REASON (nil: as its status says):
+closed, and its sentinel told."
+  (romacs--proc-tick proc)
+  (if reason (romacs--proc-set proc 'status (list 'failed reason)))
+  (romacs--proc-deactivate proc))
+
+(defun romacs--finish-tls-connection (proc)
+  "finish_after_tls_connection: the Network Security Manager's verdict on
+PROC, then run and \"open\" (its handshake waited for the connection)."
+  (let* ((contact (romacs--proc-get proc 'childp))
+         (ok (if (fboundp 'nsm-verify-connection)
+                 (nsm-verify-connection proc (plist-get contact :host) (plist-get contact :service))
+               t)))
+    (cond
+     ((null ok) (romacs--tls-failed proc "The Network Security Manager stopped the connections"))
+     ((not (romacs--proc-get proc 'infd))
+      (romacs--proc-tick proc)
+      (romacs--proc-set proc 'status 'failed)
+      (romacs--proc-deactivate proc))
+     (t
+      (romacs--proc-set proc 'status 'run)
+      (romacs--exec-sentinel proc "open\n")))))
 
 (defun romacs--send-process (proc string)
   "send_process: encode STRING as PROC's encoding requires, and write it,
@@ -1021,6 +1073,8 @@ got_some_output."
                  ((eq ready t) nil)
                  ((eq (car-safe ready) 'connect)
                   (apply #'romacs--connect-finished (cdr ready)))
+                 ((eq (car-safe ready) 'tls)
+                  (apply #'romacs--tls-finished (cdr ready)))
                  ((eq (romacs--proc-get ready 'status) 'listen)
                   (romacs--server-accept-connection ready))
                  (t

@@ -1,6 +1,7 @@
 ;;; romacs-effects.el --- Customization for Romacs visual effects  -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

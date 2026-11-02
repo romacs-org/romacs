@@ -53,12 +53,11 @@ pub(super) static RETAINED_STATIC_BUILDS: AtomicU64 = AtomicU64::new(0);
 /// Certified off-screen body rasterizations and viewport crops of those rasters.
 pub(super) static SCROLL_RASTER_BUILDS: AtomicU64 = AtomicU64::new(0);
 pub(super) static SCROLL_RASTER_BLITS: AtomicU64 = AtomicU64::new(0);
-/// Resize content crossfade quads drawn: the previous presentation's
-/// picture fading out beneath a freshly installed child-frame payload.
-pub(super) static CHILD_FRAME_CROSSFADE_QUADS: AtomicU64 = AtomicU64::new(0);
 /// Frames served by the retained-static composite fast path (blit + cursor,
 /// no glyph pipeline).
 pub(super) static COMPOSITE_ONLY_FRAMES: AtomicU64 = AtomicU64::new(0);
+/// Root glyph passes served by blitting the retained root picture.
+pub(super) static RETAINED_ROOT_BLITS: AtomicU64 = AtomicU64::new(0);
 /// Full-frame textures the GPU budget refused. Each one costs that frame its
 /// offscreen composition (so its transitions and pane motion) or its post
 /// shader, and the frame is still drawn. Structurally zero unless the render

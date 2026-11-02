@@ -1,6 +1,7 @@
 //! GNU's minibuffer completion in the `--loadup` GUI, through the GUI's
 //! keyboard (`romacs_vm::HostInput`) on the real chain: Romacs's completion
-//! defaults are the options' standard values; M-x, C-x C-f and C-x b read
+//! defaults are the options' standard values (with no window system,
+//! fido-vertical, not `romacs-complete-mode'); M-x, C-x C-f and C-x b read
 //! with GNU's `execute-extended-command`, `read-file-name` and `read-buffer`;
 //! icomplete shows the candidates in the mini-window as an overlay string,
 //! the mini-window grows to hold them and shrinks back when the minibuffer
@@ -12,6 +13,8 @@ mod command;
 mod echo;
 #[path = "../src/eval_last_sexp.rs"]
 mod eval_last_sexp;
+#[path = "../src/fonts.rs"]
+mod fonts;
 #[path = "../src/loadup.rs"]
 mod loadup;
 #[path = "../src/native.rs"]
@@ -35,10 +38,13 @@ type Frames = Rc<RefCell<Vec<(String, u32)>>>;
 struct Keys {
     keys: VecDeque<HostEvent>,
     frames: Frames,
+    /// Keys read so far, and after how many the rest count as typed ahead.
+    read: usize,
+    ahead_after: usize,
 }
 impl HostInput for Keys {
     fn input_pending(&mut self) -> bool {
-        false
+        self.read > self.ahead_after && !self.keys.is_empty()
     }
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         let mini = &frame.frame.windows.last().unwrap().snapshot;
@@ -46,15 +52,28 @@ impl HostInput for Keys {
         Ok(vec![])
     }
     fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
-        self.keys.pop_front().ok_or_else(|| "completion host script exhausted".into())
+        self.read += 1;
+        match self.keys.pop_front() {
+            Some(key) => Ok(key),
+            // A typed-ahead script quits whatever still reads, so a wrong
+            // command fails the test instead of waiting forever.
+            None if self.ahead_after != usize::MAX => Ok(HostEvent::Key(CommandEvent::Character(7))),
+            None => Err("completion host script exhausted".into()),
+        }
     }
 }
 
 /// Attach a keyboard that types TEXT, Return as the GUI sends it (C-j).
 fn attach(vm: &mut Vm, text: &str) -> Frames {
+    attach_typing_ahead(vm, text, usize::MAX)
+}
+
+/// `attach', the keys after the first AFTER pending while each is read,
+/// as when typing outruns the commands.
+fn attach_typing_ahead(vm: &mut Vm, text: &str, after: usize) -> Frames {
     let frames = Frames::default();
     let keys = text.chars().map(|c| HostEvent::Key(CommandEvent::Character(c as i64))).collect();
-    vm.set_host_input(Some(Box::new(Keys { keys, frames: frames.clone() })));
+    vm.set_host_input(Some(Box::new(Keys { keys, frames: frames.clone(), read: 0, ahead_after: after })));
     frames
 }
 
@@ -106,7 +125,7 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
-        // The session's user directory is a private one, never the owner's.
+        // The session's user directory is a private one, never the user's own.
         vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
             quoted(&format!("HOME={}", home.display())),
             quoted(&format!("XDG_CONFIG_HOME={}", home.join("config").display())))).unwrap();
@@ -192,4 +211,72 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         "None", "(\"zqab.txt\" (fzf partial-completion basic emacs22))",
         "None", "(\"alpha-kt-buffer\" \"alpha-kt-buffer\")", "true",
     ]);
+}
+
+/// On a window system the defaults show the minibuffer in romacs-complete's
+/// layer (DIVERGENCES VM2-COMPLETE-DEFAULT), and Return takes the
+/// candidate of the input typed, even when typing outran the candidate
+/// updates after its first key: Return, `romacs-complete-directory-enter',
+/// once exited with a candidate computed for that first key.
+#[test]
+fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_input() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        let mut report = vec![printed(&mut vm, "(list window-system romacs-complete-mode
+            (eval (car (get 'romacs-complete-mode 'standard-value)) t) fido-vertical-mode icomplete-mode
+            (frame-live-p (romacs--minibuffer-host)))")];
+        vm.eval_source("(defun rc-ahead-target () (interactive) (setq rc-ahead-ran 'ran))").unwrap();
+        attach_typing_ahead(&mut vm, "rc-ahead-target\r", 1);
+        let outcome = keys(&mut vm, &[(1 << 27) | 'x' as i64]);
+        report.push(format!("{:?}", outcome.and_then(|o| o.signal).map(|s| s.condition)));
+        report.push(printed(&mut vm, "(list (bound-and-true-p rc-ahead-ran) (car extended-command-history))"));
+        // The panel floats centred, glass: rounded, lit, padded, its own background.
+        report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
+            (list romacs-complete-position (frame-parameter f 'romacs-layer-radius) (frame-parameter f 'romacs-layer-shadow)
+                  (frame-parameter f 'romacs-layer-glow) (frame-parameter f 'child-frame-border-width)
+                  (stringp (frame-parameter f 'background-color))
+                  (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
+                    (= (+ l (/ w 2)) (/ (- (frame-text-width) (* 2 (frame-parameter f 'child-frame-border-width))) 2)))))"));
+        // Messages stack as toasts in the top-right corner, newest on top, at
+        // most three; the same message again extends the newest.
+        report.push(printed(&mut vm, "(progn (dolist (m '(\"one\" \"two\" \"three\" \"four\" \"four\")) (romacs-layer-toast m))
+            (list (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts)
+                  (let ((tops (mapcar (lambda (toast) (cdr (frame-position (romacs-layer--frame (car toast))))) romacs-layer--toasts)))
+                    (equal tops (sort (copy-sequence tops) #'<)))
+                  (let ((f (romacs-layer--frame (caar romacs-layer--toasts))))
+                    (list (frame-parameter f 'romacs-layer-edge)
+                          (= (+ (car (frame-position f)) (frame-pixel-width f) 12) (frame-text-width))))
+                  (current-message)))"));
+        // Only the characters fzf matched carry the match face; a file shows
+        // its name, then its directory, muted.
+        report.push(printed(&mut vm, "(let* ((completion-styles '(fzf)) (completion-lazy-hilit nil)
+                (s (romacs-complete--dim-directory
+                    (romacs-complete--accent (copy-sequence (car (completion-all-completions \"band\" '(\"docs/band.rs\") nil 4))))))
+                (with (lambda (face) (seq-filter (lambda (i) (memq face (ensure-list (get-text-property i 'face s))))
+                                                 (number-sequence 0 (1- (length s)))))))
+            (list (string-to-multibyte (substring-no-properties s)) (funcall with 'romacs-complete-match) (funcall with 'romacs-complete-directory)))"));
+        // A panel made again is glass again; with glass off a toast is square.
+        report.push(printed(&mut vm, "(progn (romacs-complete-mode -1) (romacs-complete-mode 1)
+            (list (frame-parameter romacs-complete--layer 'romacs-layer-radius)
+                  (let ((romacs-layer-glass nil)) (romacs-layer-toast \"square\")
+                    (let ((f (romacs-layer--frame (caar romacs-layer--toasts))))
+                      (list (frame-parameter f 'romacs-layer-radius) (frame-parameter f 'child-frame-border-width))))))"));
+        // The panel is 42% of the room, at least 60 columns, never wider
+        // than the room: a narrow frame or a large font is not clipped.
+        report.push(printed(&mut vm, "(mapcar (lambda (room-column) (apply #'romacs-complete--panel-width room-column))
+            '((1260 10) (2000 10) (480 10) (1260 30)))"));
+        vm.set_frame_geometry(500, 800, LINE, 10).unwrap();
+        report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
+            (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
+              (list l (+ l w (* 2 (frame-parameter f 'child-frame-border-width))) (frame-text-width))))"));
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#,
+                        r##"(top 8 t "#d48a20" 10 t t)"##,
+                        "((\"four\" \"three\" \"two\") t (top t) nil)",
+                        "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
+                        "(8 (nil 1))", "(600 840 480 1260)", "(0 484 484)"]);
 }

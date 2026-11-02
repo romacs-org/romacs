@@ -99,6 +99,10 @@ impl RenderApp {
         }
         let backend_profile =
             super::render_quality::RenderBackendProfile::from_device_type(adapter_info.device_type);
+        #[cfg(feature = "core-free")]
+        if let Some(diagnostics) = &self.comms.paint_diagnostics {
+            diagnostics.publish_adapter(adapter_info.device_type == wgpu::DeviceType::Cpu);
+        }
         tracing::info!(
             "wgpu adapter: {} (vendor={:04x}, device={:04x}, type={:?}, backend={:?})",
             adapter_info.name,
@@ -125,6 +129,8 @@ impl RenderApp {
             tracing::error!(?reason, message, "wgpu device lost");
             lost_flag.store(true, std::sync::atomic::Ordering::SeqCst);
         });
+        // Never wgpu's default, which panics on any validation error.
+        device.on_uncaptured_error(Arc::new(self.device_lost.uncaptured_errors()));
 
         crate::paint_host::trace_gpu("installing");
         let phys = window.surface_size();

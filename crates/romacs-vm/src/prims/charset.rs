@@ -66,6 +66,18 @@ fn charset_called(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 defsubr! { name = "char-charset", gnu = "charset.c:2024", effect = Reads,
 fn char_charset(cx, ch: Value; optional restriction: Value) { cx.char_charset(ch, restriction) }}
 
+defsubr! { name = "find-charset-region", gnu = "charset.c:1517", effect = Reads,
+fn find_charset_region(cx, beg: Value, end: Value; optional table: Value) {
+    if matches!(cx.kind(beg), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("integer-or-marker-p", beg)); }
+    cx.find_charsets(beg, end, table)
+}}
+
+defsubr! { name = "find-charset-string", gnu = "charset.c:1569", effect = Reads,
+fn find_charset_string(cx, string: Value; optional table: Value) {
+    if !matches!(cx.kind(string), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", string)); }
+    cx.find_charsets(string, Value::NIL, table)
+}}
+
 // Fcharset_after: char-after POS, then CHAR_CHARSET of a character.
 defsubr! { name = "charset-after", gnu = "charset.c:2063", effect = Reads,
 fn charset_after(cx; optional pos: Value) -> Step {

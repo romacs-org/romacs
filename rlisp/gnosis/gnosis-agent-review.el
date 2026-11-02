@@ -1,4 +1,5 @@
 ;;; gnosis-agent-review.el --- Session-local adaptive practice -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026 Free Software Foundation, Inc.
 ;; Author: Thanos Apollo <public@thanosapollo.org>

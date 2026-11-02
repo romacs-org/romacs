@@ -346,7 +346,6 @@ pub(crate) struct GuiFrameRenderState {
     pub(super) frame_post_src: Option<romacs_renderer_wgpu::SnapshotLease>,
     pub(super) native_content_src: Option<romacs_renderer_wgpu::SnapshotLease>,
     pub(super) child_opacity_src: Option<romacs_renderer_wgpu::SnapshotLease>,
-    pub(super) child_resize_src: Option<romacs_renderer_wgpu::SnapshotLease>,
     pub(super) applied_frame_alpha: f32,
     /// The current native input-method composition, if any.
     ///
@@ -556,7 +555,6 @@ impl GuiFrameRenderState {
             frame_post_src: None,
             native_content_src: None,
             child_opacity_src: None,
-            child_resize_src: None,
             applied_frame_alpha: 1.0,
             input_method: InputMethodState::default(),
             cursor: CursorState::new(at),
@@ -1404,6 +1402,7 @@ impl GuiFrameRenderState {
         let current_frame = self.compositor.current_frame.as_mut()?;
         let mut frame = Self::take_frame_for_render(current_frame);
         self.compositor.input_scroll.paint(&mut frame);
+        self.compositor.text_animations.paint(&mut frame);
         Some(frame)
     }
 
@@ -2800,6 +2799,18 @@ impl GuiFrameWindowManager {
         });
     }
 
+    /// End every child-frame animation of every top-level window, so its
+    /// layers show where Lisp put them; repaint the windows where one ran.
+    pub(super) fn finish_top_level_child_frame_animations(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            if window_state.render.compositor.child_frames.finish_animations() {
+                window_state.render.compositor.current_scene_generation =
+                    crate::render_thread::frame_state::next_scene_generation();
+                window_state.render.mark_dirty();
+            }
+        });
+    }
+
     /// Discard renderer-owned animation timelines for every top-level window.
     ///
     /// A quality-policy downgrade must remove the state that advertises frame
@@ -2818,16 +2829,14 @@ impl GuiFrameWindowManager {
     pub(super) fn clear_gpu_resident_state(&mut self) {
         self.for_each_top_level_window_mut(|window_state| {
             let render = &mut window_state.render;
-            // Resize crossfades lease snapshot-pool textures; theirs died
-            // with the device and the crossfades themselves have no meaning
-            // on a rebuilt device. CPU child-frame state is kept.
-            render.compositor.child_frames.drop_all_crossfades();
             // Glyph atlas textures (recreated against the new device by
             // populate_glyph_atlas / recreate_secondary_native_surfaces).
             render.compositor.glyph_atlas = None;
             // Retained cursorless scene: texture + view + bind group.
             render.compositor.retained_static = None;
             render.compositor.retained_scroll = None;
+            render.compositor.retained_root = None;
+            render.compositor.last_root_key = None;
             // Composition ring plus every running transition's leased
             // source picture.
             clear_frame_transition_textures(&mut render.compositor.transitions);

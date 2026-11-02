@@ -71,7 +71,7 @@ the count is surgical probes, not a count of independent semantic facts.
 The initial readiness red run compiled and failed the nine newly defective
 behaviours at their intended assertions. Existing-correct underline, undefined
 parent and font-policy behaviours were additionally forced red by the
-committed mutants, then restored green. Owner-preference loading and alias-key
+committed mutants, then restored green. User-preference loading and alias-key
 composition also have separately recorded initial failing assertion runs in
 the private lane report. No gate or performance comparison is implied by
 these tests.

@@ -1,4 +1,5 @@
 ;;; hermes-dashboard-api.el --- HTTP and URL layer for the Hermes dashboard  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

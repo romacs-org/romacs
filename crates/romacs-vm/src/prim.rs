@@ -230,6 +230,8 @@ mod leaf {
         pub(crate) fn recent_keys(&mut self, include_commands: bool) -> Value { self.vm.recent_keys_value(include_commands) }
         pub(crate) fn record_recent_key(&mut self, value: Value, command: bool) { self.vm.record_recent_value(value, command) }
         pub(crate) fn clear_recent_keys(&mut self) { self.vm.recent_keys.clear() }
+        pub(crate) fn lossage_limit(&self) -> usize { self.vm.lossage_limit() }
+        pub(crate) fn set_lossage_limit(&mut self, limit: usize) { self.vm.set_lossage_limit(limit) }
         pub(crate) fn set_local_zone(&mut self, zone: crate::LocalZone) { self.vm.local_zone = zone; }
         pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
             self.symbol_slot(v)
@@ -747,6 +749,16 @@ mod leaf {
                 data::Object::RawString(Box::new(copy))
             };
             Ok(self.vm.allocate_object(object))
+        }
+        /// A string of TEXT whose `face` is each run's value over its byte
+        /// range (UTF-8 offsets), as `propertize' would give each piece.
+        pub fn faced_text(&mut self, text: String, runs: &[(std::ops::Range<usize>, Value)]) -> Value {
+            let multibyte = !text.is_ascii();
+            let mut string = data::LispString::from_bytes(text.into_bytes(), multibyte);
+            for (range, face) in runs {
+                string.properties.put(coordinates::ByteOffset(range.start)..coordinates::ByteOffset(range.end), "face", *face);
+            }
+            self.vm.allocate_object(if string.is_utf8() { data::Object::String(Box::new(string)) } else { data::Object::RawString(Box::new(string)) })
         }
         pub fn vector_values(&self, v: Value) -> std::result::Result<Vec<Value>, Fault> {
             match self.vm.object_if(v) {
@@ -1673,6 +1685,7 @@ mod leaf {
     mod file_attributes;
     mod terminal;
     mod process_jobs;
+    mod animate;
     mod clipboard;
     mod keyboard;
     mod filesave;
@@ -1707,6 +1720,7 @@ mod leaf {
     mod completion;
     pub(crate) use completion::{OrderlessPass, OrderlessSpec};
     mod backtrace;
+    mod profiler;
     mod text_properties;
     pub(crate) use text_properties::{PropertyBegin, Retry};
     mod undo;
@@ -1714,6 +1728,7 @@ mod leaf {
     mod sqlite;
     pub(crate) mod treesit;
     mod process;
+    mod gnutls;
     pub(crate) use process::{CallOutput, Target};
     mod random;
     mod width;

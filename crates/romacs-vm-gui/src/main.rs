@@ -8,6 +8,13 @@ use std::time::Instant;
 static TRACE_LATENCY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static SCENE_DUMPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 fn tracing() -> bool { TRACE_LATENCY.load(std::sync::atomic::Ordering::Relaxed) }
+static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// Per-paint lines (`paint', `paint-submitted', `cursor-publication',
+/// `prompt-paint'), echo-area messages and the loadup tables on stderr:
+/// what harnesses read, never a daily session's log (a message or a prompt
+/// can hold what the user typed). On under ROMACS_DIAGNOSTICS=1, the trace
+/// flags, and the --wayland oracle transport.
+fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
 
 mod native;
 mod loadup;
@@ -29,6 +36,7 @@ mod timers;
 mod world;
 mod isolate_worker;
 mod exit;
+mod preparing;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -114,9 +122,9 @@ mod lent_tests {
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
         let (seen, closed) = lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
-            let seen = (shared.presentation, shared.in_flight, shared.pending.len());
-            // What a prompt's redisplay does: settle the loop's frame, submit its own.
-            shared.settled = shared.in_flight.take().map(|p| (p, Instant::now()));
+            let seen = (shared.presentation, shared.in_flight.map(|(p, _)| p), shared.pending.len());
+            // What a prompt's drawn redisplay does: settle the loop's frame, submit its own.
+            shared.settled = shared.in_flight.take().map(|(p, _)| (p, Instant::now()));
             shared.presentation += 1;
             shared.size = Some((30, 40));
             shared.closed = true;
@@ -150,7 +158,7 @@ mod lent_tests {
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
         lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
-            shared.settled = shared.in_flight.take().map(|p| (p, now));
+            shared.settled = shared.in_flight.take().map(|(p, _)| (p, now));
             shared.presentation += 1;
         });
         let (presentation, observed) = live.take_retired().expect("the settled presentation retired");
@@ -161,6 +169,37 @@ mod lent_tests {
         live.submitted(9, now);
         trace.submitted(9, paint(), now, 0);
         assert_eq!(trace.completed(9, now).len(), 1);
+    }
+
+    /// A prompt that painted into a window the compositor does not draw
+    /// leaves the loop's undrawn paint in flight: the stall goes on counting,
+    /// and the prompt's render when the window shows settles it, by its own
+    /// id, so the latency trace retires it and takes the next paint (it
+    /// asserted, ending the session, when the prompt's id replaced it).
+    #[test]
+    fn an_undrawn_prompt_paint_leaves_the_loops_in_flight() {
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        let since = Instant::now();
+        let mut live = presentation::Presentation::new();
+        let mut trace = latency::Trace::default();
+        let paint = || latency::Paint { submitted: since, layout_ns: 0, diagnostic_ns: 0, submit_ns: 0, layout_apply_ns: 0 };
+        host.borrow_mut().presentation = 7;
+        live.submitted(7, since);
+        trace.submitted(7, paint(), since, 0);
+        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
+        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        lent.run(&host, |_| {
+            let mut shared = host.borrow_mut();
+            shared.presentation += 1;
+            shared.in_flight = Some((shared.presentation, shared.in_flight.unwrap().1));
+        });
+        assert_eq!(live.in_flight(), Some((7, since)));
+        live.completed(8, Instant::now());
+        let (retired, at) = live.take_retired().unwrap();
+        assert_eq!(retired, 7);
+        trace.completed(retired, at);
+        assert!(live.ready(), "the prompt's paint leaves the frame to repaint");
+        trace.submitted(9, paint(), since, 0);
     }
 
     /// A prompt read inside any Lisp the loop runs (a timer, a background
@@ -357,6 +396,8 @@ mod frame_tests {
 struct Frame {
     snapshot: romacs_layout_input::FrameSnapshot,
     selected: Option<u64>,
+    /// The text animations drawn over it (`Vm::text_animations').
+    animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
 
 /// Equal frames paint identically, so an equal one needs no repaint.
@@ -366,6 +407,7 @@ struct Frame {
 impl PartialEq for Frame {
     fn eq(&self, other: &Self) -> bool {
         self.selected == other.selected && frames_alike(&self.snapshot, &other.snapshot)
+            && self.animations == other.animations
     }
 }
 
@@ -379,7 +421,8 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
         && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
-            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha) && windows_alike(&a.windows, &b.windows))
+            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha)
+            && (a.animation, a.edge, a.selection) == (b.animation, b.edge, b.selection) && windows_alike(&a.windows, &b.windows))
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
@@ -412,7 +455,8 @@ fn changed_frame(vm: &mut Vm, shown: &Shown, next: Frame, presentation: u64) -> 
 fn frame(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<Frame, String> {
     let snapshot = snapshot(vm, g1, width, height)?;
     let selected = selected_window(vm, &snapshot)?;
-    Ok(Frame { snapshot, selected })
+    let animations = if g1 { vec![] } else { vm.text_animations()? };
+    Ok(Frame { snapshot, selected, animations })
 }
 
 /// The selected window's id, once the GUI's own Lisp lays out windows: a
@@ -437,27 +481,6 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
     } else { vm.frame_snapshot(width, height) }
 }
 
-/// What a first launch shows while it builds its world.
-const PREPARING: &str = "Preparing Romacs (first start)…";
-
-/// Show PREPARING in the window as presentation 1, before any VM can
-/// paint: one window of that text in a default face, laid out by an engine
-/// of its own. The launch's own frames then start at 2.
-fn preparing_frame(sender: &PaintSender, width: u32, height: u32) -> Result<(), String> {
-    use romacs_layout_input::{FaceHandle, FrameSnapshot, PlacedWindowSnapshot, TextSlice, WindowSnapshot};
-    let face = Vm::new().display_default_face()?;
-    let snapshot = FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width, height,
-        background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
-            id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
-            text: TextSlice { utf8: PREPARING.into(), face_runs: vec![], raw: vec![] }, mode_line: None,
-            mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face],
-        } }],
-    };
-    let (frame, _) = romacs_layout2::LayoutEngine::new()?.layout_frame(&snapshot, 1, None)?;
-    sender.submit(frame)
-}
-
 /// `--help`.
 const USAGE: &str = "\
 usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE...]
@@ -480,6 +503,9 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         world store (what a compiled load runs on a miss)
   ROMACS_WORLD=off      boot from source, without a world
   ROMACS_COMPILED_LISP=on  load GNU-compiled-kind files through compiled artifacts
+  ROMACS_DIAGNOSTICS=1  print each paint, message and the loadup tables on stderr (harnesses)
+  ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
+                        stalled (default 2000): editing goes on, once told
 ";
 
 fn main() {
@@ -589,6 +615,10 @@ fn run() -> Result<Option<exit::Exit>, String> {
     }
     TRACE_LATENCY.store(trace_latency, std::sync::atomic::Ordering::Relaxed);
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
+    DIAGNOSTICS.store(!live || trace_scene || trace_latency || std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1"),
+                      std::sync::atomic::Ordering::Relaxed);
+    // Batch and the isolates keep GNU's `noninteractive' messages on stderr.
+    romacs_vm::host::set_messages_to_stderr(diagnostics());
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
     // Startup phases, on the clock of this process's exec, under the trace.
     let mut phases = trace_latency.then(startup::Phases::from_exec);
@@ -658,14 +688,18 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase("world-open");
         let restored_layer = layer.as_ref().and_then(world::restore_layer);
         let from_layer = restored_layer.is_some();
+        let mut preparing = None;
         let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
             // Said first, so a launcher sees it whether or not a window can.
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": PREPARING}));
-            let painted = preparing_frame(&sender, width, height);
-            if painted.is_ok() { first_presentation = 2; }
+            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": preparing::MESSAGE}));
+            let painted = preparing::start(sender.clone(), width, height);
             eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing-frame", "painted": painted.is_ok(),
-                                                               "error": painted.err()}));
+                                                               "error": painted.as_ref().err()}));
+            // A first frame that failed may still have been submitted.
+            if painted.is_err() { first_presentation = 2; }
+            preparing = painted.ok();
         })));
+        if let Some(preparing) = preparing { first_presentation = preparing.finish(); }
         // The world this launch booted from, which its worker isolates adopt.
         let booted = world.as_ref().map(|base| if from_layer { &layer.as_ref().unwrap().world } else { base });
         let isolate_world = booted.map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
@@ -755,6 +789,19 @@ fn activate(sender: &PaintSender, presentation: u64, pending: &mut std::collecti
         }
     }
 }
+/// How a paint waits for its render before it says so.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Wait {
+    /// Submit only; the live loop sees the render later.
+    No,
+    /// Rendered within 30 s, or an error: the oracle transport.
+    Rendered,
+    /// The live session's first frame: rendered within 30 s, or left in
+    /// flight undrawn (its window hidden as it starts). Its lines and the
+    /// `ready' reply follow the render, as harnesses expect.
+    Bounded,
+}
+
 fn paint(
     engine: &mut romacs_layout2::LayoutEngine,
     vm: &mut Vm,
@@ -764,7 +811,7 @@ fn paint(
     floor: Option<usize>,
     shown: Frame,
     pending: &mut std::collections::VecDeque<InputEvent>,
-    synchronous: bool,
+    wait: Wait,
     timings: &mut Option<latency::Paint>,
 ) -> Result<Shown, String> {
     if force_gc {
@@ -810,10 +857,10 @@ fn paint(
             channel(color.b)
         )
     };
-    eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
+    if diagnostics() { eprintln!("{}", json!({"diagnostic":"cursor-publication", "presentation":presentation,
         "cursors":frame.window_cursors.iter().map(|c| json!({"window":c.window_id.get(),"x":c.x,"y":c.y,"active":c.active,"color":hex(c.color)})).collect::<Vec<_>>(),
         // Point as a buffer byte: a window publishes its text from a base byte.
-        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_buffer_byte(w.snapshot.id, w.snapshot.point_byte)})).collect::<Vec<_>>() }));
+        "points":snapshot.windows.iter().map(|w| json!({"id":w.snapshot.id,"point_byte":vm.published_buffer_byte(w.snapshot.id, w.snapshot.point_byte)})).collect::<Vec<_>>() })); }
     let glyphs: Vec<_> = std::iter::once(&frame).chain(&children).filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).flat_map(|frame| {
         let (id, origin) = (frame.frame_placement.frame().get(), frame.frame_placement.outer_in_parent());
         frame.glyphs.iter().filter_map(move |glyph| {
@@ -827,30 +874,33 @@ fn paint(
     let diagnostics_prepare_ns = diagnostic_start.elapsed().as_nanos();
     let tab_bar = romacs_layout2::tab_bar_extents(&frame);
     let submit_start = Instant::now();
-    sender.submit_scene(frame, children)?;
+    sender.submit_scene(frame, children, shown.animations.clone())?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
-    if synchronous { activate(sender, presentation, pending)?; }
+    if wait != Wait::No { activate(sender, presentation, pending)?; }
     let activation_ns = activation_start.elapsed().as_nanos();
     let wait_start = Instant::now();
-    let diagnostic = if synchronous {
-        Some(sender.wait_for_render(presentation, std::time::Duration::from_secs(30))?)
-    } else { None };
+    let render = || sender.wait_for_render(presentation, std::time::Duration::from_secs(30));
+    let diagnostic = match wait {
+        Wait::No => None,
+        Wait::Rendered => Some(render()?),
+        Wait::Bounded => render().ok(),
+    };
     let wait_render_ns = wait_start.elapsed().as_nanos();
     let diagnostic_write_start = Instant::now();
-    eprintln!(
+    if diagnostics() { eprintln!(
         "{}",
-        json!({"diagnostic":if synchronous { "paint" } else { "paint-submitted" },"presentation":presentation,
+        json!({"diagnostic":if diagnostic.is_some() { "paint" } else { "paint-submitted" },"presentation":presentation,
         "buffer_versions":snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),"resolved_fonts":resolved_fonts,
         "unresolved_face_text_total":diagnostic.map(|sample| sample.unresolved_face_text_total)})
-    );
+    ); }
     if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { eprintln!(
         "{}",
         json!({"diagnostic":"submitted-scene", "presentation":presentation,
         "vscroll_px":snapshot.windows.first().map(|w|w.snapshot.vscroll_px),"glyphs":glyphs})
     ); }
     if tracing() {
-        eprintln!("{}", json!({"diagnostic":if synchronous { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
+        eprintln!("{}", json!({"diagnostic":if diagnostic.is_some() { "latency-paint" } else { "latency-submit" }, "presentation":presentation, "units":"ns",
             "layout_ns":layout_ns,"diagnostics_prepare_ns":diagnostics_prepare_ns,"submit_ns":submit_ns,
             "activation_ns":activation_ns,"wait_render_ns":wait_render_ns,
             "activation_and_render_ns":activation_ns + wait_render_ns,
@@ -931,7 +981,7 @@ fn paint_prompt(
             })
         }).collect::<Vec<_>>()
     });
-    sender.submit_scene(glyphs, children)?;
+    sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
     if let Some(observed) = observed {
         eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
     }
@@ -1058,12 +1108,12 @@ fn evaluate(
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
-        if let Some(loadup) = &started.loadup {
+        if let Some(loadup) = started.loadup.as_ref().filter(|_| diagnostics()) {
             for line in loadup.table().lines() { eprintln!("romacs-loadup: {line}"); }
         }
         // Per journey key: whose command it runs. The journey judge reads these
         // so a reply can never pass a stand-in off as GNU's command.
-        for (key, gnu, romacs) in startup::STAND_INS {
+        for (key, gnu, romacs) in startup::STAND_INS.into_iter().filter(|_| diagnostics()) {
             if let Some(b) = started.bindings.iter().find(|b| b.key == key) {
                 eprintln!("romacs-binding: {key}\t{gnu}\t{}", if b.gnu_defined { gnu } else { romacs });
             }
@@ -1091,9 +1141,15 @@ fn evaluate(
     let mut pending = std::collections::VecDeque::new();
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
-    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending, true, &mut paint_timings)?;
-    startup::mark_phase("first-paint");
+    let first_submitted = Instant::now();
+    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending,
+                             if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?;
     let mut live_presentation = presentation::Presentation::new();
+    if live && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
+        // Not drawn (hidden as it starts): the loop waits for it, stalled.
+        live_presentation.submitted(previous.presentation, first_submitted);
+    }
+    startup::mark_phase("first-paint");
     let mut terminal_modal = false;
     reply(json!({"ready":true,"presentation":last_presentation()}))?;
     if let Some(after) = after_first_frame { after(); }
@@ -1153,6 +1209,8 @@ fn evaluate(
                         width = w; height = h;
                         let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
                         vm.set_frame_geometry(width, height, lh, cw)?;
+                        // The repaint's redisplay runs `window-size-change-functions'
+                        // (`frame_snapshot'), as GNU's does.
                         live_presentation.changed();
                     }
                     continue;
@@ -1225,7 +1283,7 @@ fn evaluate(
                     let next = frame(&mut vm, g1, width, height)?;
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     let presentation = next_presentation(&host)?;
-                    previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
+                    previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
@@ -1243,11 +1301,16 @@ fn evaluate(
                 match outcome {
                     Ok(Some(outcome)) => {
                         if outcome.bell { eprint!("\x07"); }
-                        if let Some(message) = &outcome.message { eprintln!("{message}"); }
-                        let reply_start = diagnostic_start.map(|_| Instant::now());
-                        reply(json!({"native_command":outcome.command,"signal":outcome.signal.map(|s|json!({"condition":s.condition,"data":s.data})),
-                            "bell":outcome.bell,"message":outcome.message,"presentation":last_presentation()}))?;
-                        reply_ns = reply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
+                        // Each command's reply is a harness protocol: a daily
+                        // session's log keeps no record of its commands,
+                        // signals or messages.
+                        if diagnostics() {
+                            if let Some(message) = &outcome.message { eprintln!("{message}"); }
+                            let reply_start = diagnostic_start.map(|_| Instant::now());
+                            reply(json!({"native_command":outcome.command,"signal":outcome.signal.map(|s|json!({"condition":s.condition,"data":s.data})),
+                                "bell":outcome.bell,"message":outcome.message,"presentation":last_presentation()}))?;
+                            reply_ns = reply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
+                        }
                     }
                     Ok(None) => {},
                     Err(error) => {
@@ -1271,17 +1334,21 @@ fn evaluate(
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
                 if let Ok(diagnostic) = sender.wait_for_render(in_flight, std::time::Duration::ZERO) {
                     live_presentation.completed(in_flight, Instant::now());
-                    eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
+                    if diagnostics() { eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
-                        "unresolved_face_text_total":diagnostic.unresolved_face_text_total}));
+                        "unresolved_face_text_total":diagnostic.unresolved_face_text_total})); }
                     if tracing() {
                         eprintln!("{}", json!({"diagnostic":"latency-render","presentation":in_flight,
                             "units":"ns","submit_to_render_observed_ns":submitted.elapsed().as_nanos(),
                             "render_semantics":"renderer-successful-submit-not-compositor-present"}));
                     }
                     retired = true;
-                } else if submitted.elapsed() >= std::time::Duration::from_secs(30) {
-                    return Err(format!("no rendered atlas diagnostic for presentation {in_flight}"));
+                } else if let Some((undrawn, waited)) = live_presentation.stall_warning(presentation::render_stall()) {
+                    // A window the compositor does not draw (another workspace,
+                    // minimized) gets no frame callbacks; its paint renders when
+                    // it shows. Editing goes on, its paints coalesced meanwhile.
+                    eprintln!("romacs: render stalled: presentation {undrawn} undrawn for {:.1}s \
+                               (window hidden?); editing continues and repaints when it shows", waited.as_secs_f64());
                 }
             }
             // Here, or in a prompt that settled it first (`Lent').
@@ -1297,7 +1364,7 @@ fn evaluate(
                 // such as show-paren's runs after every key.
                 let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? else { return Ok(None) };
                 let presentation = next_presentation(&host)?;
-                previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, false, &mut paint_timings)?;
+                previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::No, &mut paint_timings)?;
                 Ok(Some((snapshot_start, snapshot_ns, presentation)))
             }) {
                 if let Some((snapshot_start, snapshot_ns, presentation)) = result? {
@@ -1321,7 +1388,8 @@ fn evaluate(
                 // after any ran, redisplay and check again before blocking.
                 // A timer may read input (`read-event' with a timeout, a
                 // prompt) as a command may, so it gets the same handoff.
-                let auto_save = retired || live_presentation.in_flight().is_none();
+                let auto_save = retired || live_presentation.in_flight().is_none()
+                    || live_presentation.stalled(presentation::render_stall());
                 let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
                 let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm, auto_save));
                 if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
@@ -1331,7 +1399,7 @@ fn evaluate(
                     let _ = echo::show(&mut vm, &format!("Timer: {error}"));
                     timers::Idle { ran: true, message: false, delay: None }
                 });
-                if idle.ran {
+                if idle.ran || idle.message {
                     if idle.message { echo::sync_current_message(&mut vm)?; }
                     live_presentation.changed();
                     continue;
@@ -1341,7 +1409,7 @@ fn evaluate(
                 let processes = vm.process_wait_fds();
                 // A termination signal whose wake other work took: back to the top.
                 if romacs_vm::host::termination_signal(true).is_some() { continue; }
-                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(), idle.delay), &processes) {
+                match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(presentation::render_stall()), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(exit::Exit::new("host-input-closed", "", 1)),
                     terminal_wait::Wake::Terminal | terminal_wait::Wake::Process | terminal_wait::Wake::Timeout => {},
@@ -1367,7 +1435,7 @@ fn evaluate(
         let next = frame(&mut vm, g1, width, height)?;
         if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? {
             let presentation = next_presentation(&host)?;
-            previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
+            previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
         }
         match result {
             Err(error) => reply(json!({"error":error,"presentation":last_presentation()}))?,
@@ -1422,7 +1490,7 @@ impl Lent<'_> {
         let before = {
             let mut shared = host.borrow_mut();
             shared.pending = std::mem::take(self.queue);
-            shared.in_flight = self.live.in_flight().map(|(p, _)| p);
+            shared.in_flight = self.live.in_flight();
             shared.presentation
         };
         let value = run(self.live);
@@ -1430,7 +1498,7 @@ impl Lent<'_> {
         *self.queue = std::mem::take(&mut shared.pending);
         if shared.presentation != before { self.live.changed(); }
         if let Some((settled, at)) = shared.settled.take() { self.live.completed(settled, at); }
-        shared.in_flight = None;
+        self.live.lent_back(shared.in_flight.take());
         if let Some((w, h)) = shared.size.take() { (*self.width, *self.height) = (w, h); }
         (value, std::mem::take(&mut shared.closed))
     }

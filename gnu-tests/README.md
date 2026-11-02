@@ -118,7 +118,7 @@ Static `verify --candidate` checks floor policy without replaying runtime eviden
 
 - The **vacuous budget** may only decrease. A budget member that stops
   passing is `PROGRESS` (exit 3: record it), never a floor loss. A member
-  enters the budget only through an owner `--lower` that moves it out of the
+  enters the budget only through a deliberate `--lower` that moves it out of the
   protected floor in the same step.
 - **Vacuous-pass rule** (run.py): the adapter loads
   `harness/romacs-mini-ert-audit.el` and reports each `should-error`
@@ -130,7 +130,7 @@ Static `verify --candidate` checks floor policy without replaying runtime eviden
   `gnu.sha256` is not `parity-reference.toml` `executable_sha256` is refused,
   naming the file and both hashes. Every baseline committed before this
   check was recorded by `/usr/bin/emacs-32.0.50`; re-recording them is a
-  separate, owner-authorised act:
+  separate, deliberate act:
   `ROMACS_GNU_ORACLE=<pinned emacs> python3 gnu-tests/run.py baseline --all --force`.
 - **Two labelled numbers**: `gnu_suite.passed` (REDUCED harness,
   `reduced_harness` says so) and `gnu_suite.real_ert` (GNU `ert.el`,

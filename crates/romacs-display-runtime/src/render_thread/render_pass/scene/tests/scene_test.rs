@@ -238,13 +238,13 @@ fn mixed_policy_child_admission_tracks_applied_highlight_under_held_pressure() {
                 admission,
                 Err(super::super::surface::FrameRenderFailure::WindowNotReady)
             ));
-            assert!(render.child_opacity_src.is_none() && render.child_resize_src.is_none());
+            assert!(render.child_opacity_src.is_none());
             assert_eq!(pixels(&renderer, &target), before);
             continue;
         }
-        let (picture, mixed) = admission
+        let picture = admission
             .expect("currently opaque mixed-policy child needs no picture under held pressure");
-        assert!(picture.is_none() && mixed.is_none());
+        assert!(picture.is_none());
         draw_root(&mut renderer, &mut render, &view, &root);
         render_frame_content_overlays(
             &mut renderer,
@@ -312,10 +312,10 @@ fn mixed_policy_child_admission_tracks_applied_highlight_under_held_pressure() {
     ));
     assert_eq!(format!("{:?}", render.compositor.interaction), interaction);
     drop(pressure);
-    let (picture, mixed) =
+    let picture =
         super::super::composition_targets::prepare_child_targets(&mut renderer, &mut render, size)
             .unwrap();
-    assert!(picture.is_some() && mixed.is_none());
+    assert!(picture.is_some());
     render.child_opacity_src = picture;
     draw_root(&mut renderer, &mut render, &view, &root);
     render_frame_content_overlays(
@@ -334,290 +334,6 @@ fn mixed_policy_child_admission_tracks_applied_highlight_under_held_pressure() {
     assert!((127..=129).contains(&px(&data, 48, 40)[3]));
     assert_eq!(px(&data, 25, 25), [255; 4], "foreground remains opaque");
     assert_eq!(px(&data, 60, 40), [0, 0, 255, 255]);
-}
-
-#[test]
-fn expired_child_resize_recovers_under_unchanged_budget_pressure() {
-    if !in_gpu_budget_child(
-        "render_thread::render_pass::scene::tests::expired_child_resize_recovers_under_unchanged_budget_pressure",
-    ) {
-        return;
-    }
-    let mut renderer = WgpuRenderer::new(None, W, H).expect("GPU required for expiry regression");
-    let origin = observe_platform_now();
-    let mut render = GuiFrameRenderState::new(42, renderer.device(), 1.0, false, origin);
-    let mut root = FrameGlyphBuffer::with_size(W as f32, H as f32);
-    root.set_frame_identity(
-        DisplayFrameId::new(42),
-        DisplayFrameId::new(0),
-        0.0,
-        0.0,
-        0,
-        false,
-        0.0,
-        Color::BLACK,
-        false,
-        1.0,
-    );
-    root.background_alpha = 0.0;
-    render.set_current_frame(
-        Some(root.clone()),
-        None,
-        Default::default(),
-        Default::default(),
-    );
-    let old_frame = picture(43, 42, 64.0);
-    let old = renderer
-        .acquire_snapshot(SnapshotSize::new(64, 48).unwrap())
-        .unwrap();
-    let old_id = old.id();
-    renderer.capture_child_frame_picture(
-        &old,
-        &old_frame,
-        render.compositor.glyph_atlas.as_mut().unwrap(),
-        0.0,
-        false,
-        0,
-        0.0,
-        0.0,
-    );
-    let mut new_frame = picture(43, 42, 80.0);
-    new_frame.background = Color::BLUE;
-    new_frame.frame_alpha = [1.0, 0.5];
-    assert!(render.compositor.child_frames.update_frame(new_frame));
-    let mut controls = crate::thread_comm::FrameOpacityState::default();
-    controls.accept(42, [1.0; 2], 0.0);
-    controls.accept(43, [1.0, 0.5], 0.0);
-    controls.set_redirects(vec![(42, Some(43))]);
-    controls.focus(42, true);
-    render.apply_frame_opacity(&controls);
-    assert_eq!(
-        render.compositor.child_frames.frames[&43].applied_frame_alpha,
-        1.0
-    );
-    render.compositor.child_frames.begin_resize_crossfade(
-        43,
-        old,
-        64.0,
-        48.0,
-        linear_second(),
-        origin,
-    );
-    // Seed a genuine nonidentity submitted projection and pending motion. Admission
-    // may reclaim expired picture ownership, but must not publish undrawn geometry.
-    seed_pending_layout(&mut render, &root, origin);
-    let surface_point = romacs_display_protocol::GeometryPoint::<
-        romacs_display_protocol::RootSurfaceSpace,
-        LogicalPixels,
-    >::from_px(40.0, 20.0)
-    .unwrap();
-    let mapped = render
-        .compositor
-        .interaction
-        .as_ref()
-        .unwrap()
-        .map(surface_point)
-        .unwrap();
-    assert!(
-        (mapped.x() - 40.0).abs() > 1.0,
-        "guard must start with nonidentity submitted geometry"
-    );
-    render.compositor.pending.theme = Some(
-        crate::render_thread::frame_compositor::continuity::theme::ThemeChange {
-            bounds: romacs_display_protocol::types::Rect::new(0.0, 0.0, W as f32, H as f32),
-        },
-    );
-    let pending_theme = render.compositor.pending.theme;
-    let current_frame = render.compositor.current_frame.clone();
-    assert!(
-        render
-            .compositor
-            .child_frames
-            .begin_drift(43, 4.0, 4.0, linear_second(), origin)
-    );
-    render
-        .compositor
-        .child_frames
-        .record_drift_drawn(43, 4.0, 4.0, 0.25);
-    let drift = render.compositor.child_frames.frames[&43]
-        .drift
-        .as_ref()
-        .unwrap()
-        .last_drawn;
-    let clip = render.compositor.child_frames.frames[&43].clip_in_root;
-    let interaction = format!("{:?}", render.compositor.interaction);
-    let baseline = format!(
-        "{:?}",
-        render.compositor.baseline.as_ref().unwrap().window_infos
-    );
-    let placement = render.compositor.child_frames.frames[&43]
-        .frame
-        .frame_placement;
-    let target = target(&renderer);
-    let view = target.create_view(&Default::default());
-    draw_root(&mut renderer, &mut render, &view, &root);
-    let before = pixels(&renderer, &target);
-    let pressure = renderer
-        .acquire_snapshot(SnapshotSize::new(512, 500).unwrap())
-        .unwrap();
-    let size = SnapshotSize::new(W, H).unwrap();
-    for millis in [250, 750, 999] {
-        renderer.set_frame_sample(FrameSample::new(
-            origin.plus(Duration::from_millis(millis)),
-            Duration::ZERO,
-        ));
-        assert!(matches!(
-            super::super::composition_targets::prepare_child_targets(
-                &mut renderer,
-                &mut render,
-                size
-            ),
-            Err(super::super::surface::FrameRenderFailure::WindowNotReady)
-        ));
-        assert!(
-            render.compositor.child_frames.frames[&43]
-                .crossfade
-                .is_some()
-        );
-        assert!(render.child_opacity_src.is_none() && render.child_resize_src.is_none());
-        assert_eq!(pixels(&renderer, &target), before);
-        assert_eq!(render.compositor.current_frame, current_frame);
-        assert_eq!(render.compositor.pending.theme, pending_theme);
-        assert_eq!(
-            render.compositor.child_frames.frames[&43]
-                .drift
-                .as_ref()
-                .unwrap()
-                .last_drawn,
-            drift
-        );
-        assert_eq!(
-            render.compositor.child_frames.frames[&43].clip_in_root,
-            clip
-        );
-        assert_eq!(format!("{:?}", render.compositor.interaction), interaction);
-    }
-    let generation = render.compositor.current_scene_generation;
-    let style = ChildFrameStyle {
-        corner_radius: 0.0,
-        shadow_enabled: false,
-        shadow_layers: 0,
-        shadow_offset: 0.0,
-        shadow_opacity: 0.0,
-    };
-    for millis in [1000, 1250] {
-        renderer.set_frame_sample(FrameSample::new(
-            origin.plus(Duration::from_millis(millis)),
-            Duration::ZERO,
-        ));
-        let (picture, mixed) = super::super::composition_targets::prepare_child_targets(
-            &mut renderer,
-            &mut render,
-            size,
-        )
-        .expect("settled opaque child must resume without pressure release or replacement payload");
-        assert!(picture.is_none() && mixed.is_none());
-        assert!(
-            render.compositor.child_frames.frames[&43]
-                .crossfade
-                .is_none()
-        );
-        assert_ne!(render.compositor.current_scene_generation, generation);
-        assert_eq!(render.compositor.current_frame, current_frame);
-        assert_eq!(render.compositor.pending.theme, pending_theme);
-        assert_eq!(
-            render.compositor.child_frames.frames[&43].clip_in_root,
-            clip
-        );
-        if millis == 1000 {
-            assert_eq!(
-                render.compositor.child_frames.frames[&43]
-                    .drift
-                    .as_ref()
-                    .unwrap()
-                    .last_drawn,
-                drift
-            );
-        }
-        assert_eq!(format!("{:?}", render.compositor.interaction), interaction);
-        assert_eq!(
-            format!(
-                "{:?}",
-                render.compositor.baseline.as_ref().unwrap().window_infos
-            ),
-            baseline
-        );
-        assert!(
-            render.compositor.layout.wants_frames(),
-            "preflight must not settle unpublished pane motion"
-        );
-        assert_eq!(
-            render.compositor.child_frames.frames[&43]
-                .frame
-                .frame_placement,
-            placement
-        );
-        draw_root(&mut renderer, &mut render, &view, &root);
-        render_frame_content_overlays(
-            &mut renderer,
-            (W, H),
-            &mut render,
-            &view,
-            &root,
-            false,
-            None,
-            &style,
-            false,
-        )
-        .unwrap();
-        let data = pixels(&renderer, &target);
-        assert_eq!(px(&data, 48, 40), [0, 0, 255, 255]);
-        assert_eq!(
-            px(&data, 80, 40),
-            [0, 0, 255, 255],
-            "settled new-only extent"
-        );
-        assert_eq!(px(&data, 2, 2), [0; 4]);
-    }
-    let released = renderer
-        .acquire_snapshot(SnapshotSize::new(64, 48).unwrap())
-        .unwrap();
-    assert_eq!(
-        released.id(),
-        old_id,
-        "old lease was returned to the production pool"
-    );
-    drop(released);
-    let mut controls = crate::thread_comm::FrameOpacityState::default();
-    controls.accept(43, [0.5; 2], 0.0);
-    render.apply_frame_opacity(&controls);
-    let before = pixels(&renderer, &target);
-    assert!(matches!(
-        super::super::composition_targets::prepare_child_targets(&mut renderer, &mut render, size),
-        Err(super::super::surface::FrameRenderFailure::WindowNotReady)
-    ));
-    assert_eq!(pixels(&renderer, &target), before);
-    assert_eq!(format!("{:?}", render.compositor.interaction), interaction);
-    drop(pressure);
-    let (picture, mixed) =
-        super::super::composition_targets::prepare_child_targets(&mut renderer, &mut render, size)
-            .unwrap();
-    assert!(picture.is_some() && mixed.is_none());
-    render.child_opacity_src = picture;
-    draw_root(&mut renderer, &mut render, &view, &root);
-    render_frame_content_overlays(
-        &mut renderer,
-        (W, H),
-        &mut render,
-        &view,
-        &root,
-        false,
-        None,
-        &style,
-        false,
-    )
-    .unwrap();
-    assert!((127..=129).contains(&px(&pixels(&renderer, &target), 48, 40)[3]));
 }
 
 use super::*;
@@ -780,13 +496,13 @@ fn expired_child_lifecycle_needs_no_scratch_under_unchanged_pressure() {
             origin.plus(Duration::from_millis(1000)),
             Duration::ZERO,
         ));
-        let (picture, mixed) = super::super::composition_targets::prepare_child_targets(
+        let picture = super::super::composition_targets::prepare_child_targets(
             &mut renderer,
             &mut render,
             size,
         )
         .unwrap();
-        assert!(picture.is_none() && mixed.is_none());
+        assert!(picture.is_none());
         assert!(!render.compositor.child_frames.has_animation_activity());
         assert_eq!(
             render.compositor.child_frames.frames.contains_key(&43),
@@ -913,208 +629,6 @@ fn px(data: &[u8], x: u32, y: u32) -> [u8; 4] {
     [data[i + 2], data[i + 1], data[i], data[i + 3]]
 }
 #[test]
-fn production_child_resize_applies_complete_picture_opacity_once() {
-    let mut renderer =
-        WgpuRenderer::new(None, W, H).expect("GPU required for production resize regression");
-    for (background_alpha, radius, lifecycle) in
-        [(1.0, 0.0, false), (0.5, 8.0, false), (0.5, 8.0, true)]
-    {
-        let origin = observe_platform_now();
-        let mut render = GuiFrameRenderState::new(42, renderer.device(), 1.0, false, origin);
-        let mut root = FrameGlyphBuffer::with_size(W as f32, H as f32);
-        root.set_frame_identity(
-            DisplayFrameId::new(42),
-            DisplayFrameId::new(0),
-            0.0,
-            0.0,
-            0,
-            false,
-            0.0,
-            Color::BLACK,
-            false,
-            1.0,
-        );
-        root.background_alpha = 0.0;
-        render.set_current_frame(
-            Some(root.clone()),
-            None,
-            Default::default(),
-            Default::default(),
-        );
-        let mut old_frame = picture(43, 42, 64.0);
-        old_frame.background_alpha = background_alpha;
-        let old = renderer
-            .acquire_snapshot(SnapshotSize::new(64, 48).unwrap())
-            .unwrap();
-        // Poison the reusable capture lease with opaque pixels first. The same
-        // complete-picture capture used by frame_ingest must clear uncovered corners.
-        let mut poison = old_frame.clone();
-        poison.background_alpha = 1.0;
-        renderer.render_frame_glyphs(
-            old.view(),
-            &poison,
-            render.compositor.glyph_atlas.as_mut().unwrap(),
-            mapping(&poison, 64, 48),
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-        renderer.capture_child_frame_picture(
-            &old,
-            &old_frame,
-            render.compositor.glyph_atlas.as_mut().unwrap(),
-            radius,
-            false,
-            0,
-            0.0,
-            0.0,
-        );
-        let mut new_frame = picture(43, 42, 80.0);
-        new_frame.background = Color::BLUE;
-        new_frame.background_alpha = background_alpha;
-        new_frame.frame_alpha = [0.5, 0.25];
-        assert!(render.compositor.child_frames.update_frame(new_frame));
-        let spec = MotionSpec::Tween(TweenSpec {
-            duration: MotionDuration::new(Duration::from_secs(1)).unwrap(),
-            easing: TransitionEasing::Linear,
-            bezier: None,
-        });
-        render
-            .compositor
-            .child_frames
-            .begin_resize_crossfade(43, old, 64.0, 48.0, spec, origin);
-        if lifecycle {
-            render
-                .compositor
-                .child_frames
-                .begin_open_animation(43, spec, origin, 0.0, 1.0);
-        }
-        (render.child_opacity_src, render.child_resize_src) =
-            super::super::composition_targets::mandatory_child_targets(
-                &mut renderer,
-                true,
-                true,
-                SnapshotSize::new(W, H).unwrap(),
-            )
-            .unwrap();
-        let target = renderer.device().create_texture(&wgpu::TextureDescriptor {
-            label: Some("runtime child resize target"),
-            size: wgpu::Extent3d {
-                width: W,
-                height: H,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = target.create_view(&Default::default());
-        let style = ChildFrameStyle {
-            corner_radius: radius,
-            shadow_enabled: false,
-            shadow_layers: 0,
-            shadow_offset: 0.0,
-            shadow_opacity: 0.0,
-        };
-        let mut controls = crate::thread_comm::FrameOpacityState::default();
-        controls.accept(42, [-1.0; 2], 0.0);
-        controls.accept(43, [0.5, 0.25], 0.0);
-        controls.set_redirects(vec![(42, Some(43))]);
-        // Focus changes at the identical intermediate sample must update both pictures,
-        // not only the freshly ingested foreground. No sleeps or display/input access.
-        for millis in [0, 250, 500, 750, 1000] {
-            renderer.set_frame_sample(FrameSample::new(
-                origin.plus(Duration::from_millis(millis)),
-                Duration::ZERO,
-            ));
-            for accepted in [[0.5, 0.25], [0.75, 0.375]] {
-                controls.accept(43, accepted, 0.0);
-                for focused in [true, false] {
-                    controls.focus(42, focused);
-                    render.apply_frame_opacity(&controls);
-                    renderer.render_frame_glyphs(
-                        &view,
-                        &root,
-                        render.compositor.glyph_atlas.as_mut().unwrap(),
-                        mapping(&root, W, H),
-                        false,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    );
-                    render_frame_content_overlays(
-                        &mut renderer,
-                        (W, H),
-                        &mut render,
-                        &view,
-                        &root,
-                        false,
-                        None,
-                        &style,
-                        false,
-                    )
-                    .unwrap();
-                    let data = pixels(&renderer, &target);
-                    let bg = px(&data, 48, 40);
-                    let fg = px(&data, 25, 25);
-                    let mix = millis as f32 / 1000.0;
-                    let alpha =
-                        accepted[if focused { 0 } else { 1 }] * if lifecycle { mix } else { 1.0 };
-                    let expected = (255.0 * alpha).round() as u8;
-                    eprintln!(
-                        "runtime resize {millis}ms focus {focused}: background {bg:?}, foreground {fg:?}"
-                    );
-                    assert!(
-                        bg[3].abs_diff((255.0 * alpha * background_alpha).round() as u8) <= 2,
-                        "complete child background alpha: {millis}/{focused}: {bg:?}"
-                    );
-                    assert!(
-                        fg[3].abs_diff(expected) <= 1,
-                        "complete child foreground alpha: {millis}/{focused}: {fg:?}"
-                    );
-                    let weighted = Color::new(
-                        0.0,
-                        alpha * background_alpha * (1.0 - mix),
-                        alpha * background_alpha * mix,
-                        alpha * background_alpha,
-                    )
-                    .linear_to_srgb();
-                    assert!(
-                        bg[0] == 0
-                            && bg[1].abs_diff((255.0 * weighted.g).round() as u8) <= 2
-                            && bg[2].abs_diff((255.0 * weighted.b).round() as u8) <= 2,
-                        "weighted pictures: {bg:?}"
-                    );
-                    assert!(
-                        fg[0] == fg[1] && fg[1] == fg[2] && (alpha == 0.0 || fg[0] > 0),
-                        "foreground preserved: {fg:?}"
-                    );
-                    let new_only = px(&data, 80, 40);
-                    assert!(
-                        new_only[3]
-                            .abs_diff((255.0 * alpha * background_alpha * mix).round() as u8)
-                            <= 2,
-                        "new-only resize extent: {new_only:?}"
-                    );
-                    assert_eq!(px(&data, 2, 2), [0; 4], "parent outside child is untouched");
-                    if radius > 0.0 {
-                        assert_eq!(px(&data, 8, 8), [0; 4], "capture clears rounded corner");
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[test]
 fn missing_child_scratch_returns_retry_without_drawing_and_recovers() {
     let mut renderer =
         WgpuRenderer::new(None, W, H).expect("GPU required for preparation regression");
@@ -1166,7 +680,7 @@ fn missing_child_scratch_returns_retry_without_drawing_and_recovers() {
     ));
     assert_eq!(pixels(&renderer, &texture), before);
     assert_eq!(format!("{:?}", render.compositor.interaction), interaction);
-    (render.child_opacity_src, render.child_resize_src) =
+    render.child_opacity_src =
         super::super::composition_targets::prepare_child_targets(
             &mut renderer,
             &mut render,

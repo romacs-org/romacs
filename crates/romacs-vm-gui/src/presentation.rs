@@ -16,15 +16,30 @@ pub fn take_batch(
     take_pending(pending)
 }
 
+/// How long a submitted paint may go undrawn before the render counts as
+/// stalled: a window the compositor does not draw (another workspace,
+/// minimized) gets no frame callbacks, so its paint waits until it shows.
+/// A stall never ends the session; it stops blocking waits on the render.
+/// `ROMACS_RENDER_STALL_MS` sets it (tests); 2 s otherwise.
+pub fn render_stall() -> Duration {
+    static STALL: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *STALL.get_or_init(|| Duration::from_millis(
+        std::env::var("ROMACS_RENDER_STALL_MS").ok().and_then(|ms| ms.parse().ok()).unwrap_or(2000)))
+}
+
 pub struct Presentation {
     dirty: bool,
+    /// The paint submitted and not yet drawn, and when the oldest undrawn
+    /// paint it stands for was submitted.
     in_flight: Option<(u64, Instant)>,
     /// The presentation last retired and when it rendered, until taken.
     retired: Option<(u64, Instant)>,
+    /// The current stall has been reported.
+    warned: bool,
 }
 
 impl Presentation {
-    pub fn new() -> Self { Self { dirty: false, in_flight: None, retired: None } }
+    pub fn new() -> Self { Self { dirty: false, in_flight: None, retired: None, warned: false } }
 
     pub fn changed(&mut self) { self.dirty = true; }
 
@@ -65,12 +80,12 @@ impl Presentation {
         // Unlike GNU's reprompt, other input cancels before ordinary dispatch;
         // clearing the echo area must never leave invisible discard consent.
         let answer = matches!(first, Some(romacs_vm::CommandEvent::Character(121 | 110 | 7))) && !in_prefix;
-        vm.eval_source(&format!(
-            "(when (and (boundp 'romacs-gui-pending) romacs-gui-pending
-                        (not (and {} (eq (current-buffer) (car (cdr romacs-gui-pending))))))
-               (romacs-gui-answer-no))",
-            if answer { "t" } else { "nil" },
-        ))?;
+        // Two fixed forms, so the VM's source cache compiles each once.
+        vm.eval_source(if answer {
+            "(and (fboundp 'romacs-gui--cancel-pending-unless) (romacs-gui--cancel-pending-unless t))"
+        } else {
+            "(and (fboundp 'romacs-gui--cancel-pending-unless) (romacs-gui--cancel-pending-unless nil))"
+        })?;
         // GNU's command loop clears the previous message when a new command
         // starts, not on each key of a prefix sequence.
         if !in_prefix { crate::echo::clear(vm)?; }
@@ -95,16 +110,39 @@ impl Presentation {
     pub fn submitted(&mut self, presentation: u64, now: Instant) {
         self.dirty = false;
         self.in_flight = Some((presentation, now));
+        self.warned = false;
     }
 
     pub fn in_flight(&self) -> Option<(u64, Instant)> { self.in_flight }
 
+    /// A prompt's paint left in flight (main.rs `Lent'): it becomes this
+    /// loop's when none of its own is; an undrawn one of its own stays, since
+    /// the prompt's later presentation drawn settles it (and the latency
+    /// trace retires it by its own id).
+    pub fn lent_back(&mut self, in_flight: Option<(u64, Instant)>) {
+        if self.in_flight.is_none() { self.in_flight = in_flight; }
+    }
+
+    /// The in-flight paint has waited past STALL for its render.
+    pub fn stalled(&self, stall: Duration) -> bool {
+        self.in_flight.is_some_and(|(_, since)| since.elapsed() >= stall)
+    }
+
+    /// Once per stall: the paint waiting and for how long.
+    pub fn stall_warning(&mut self, stall: Duration) -> Option<(u64, Duration)> {
+        let (presentation, since) = self.in_flight.filter(|_| !self.warned && self.stalled(stall))?;
+        self.warned = true;
+        Some((presentation, since.elapsed()))
+    }
+
     /// PRESENTATION rendered AT, whether the loop saw it or a prompt
-    /// settled it first (main.rs `Lent').
+    /// settled it first (main.rs `Lent'): it settles the paint in flight,
+    /// or an earlier one it superseded.
     pub fn completed(&mut self, presentation: u64, at: Instant) {
-        if self.in_flight.is_some_and(|(actual, _)| actual == presentation) {
+        if let Some((actual, _)) = self.in_flight.filter(|(actual, _)| *actual <= presentation) {
             self.in_flight = None;
-            self.retired = Some((presentation, at));
+            self.retired = Some((actual, at));
+            self.warned = false;
         }
     }
 
@@ -113,9 +151,10 @@ impl Presentation {
     pub fn take_retired(&mut self) -> Option<(u64, Instant)> { self.retired.take() }
 
     /// How long to block for input: briefly while a paint is in flight, whose
-    /// completion nothing signals; otherwise until input or a wake.
-    pub fn wait(&self) -> Option<Duration> {
-        self.in_flight.is_some().then(|| Duration::from_millis(1))
+    /// completion nothing signals, and less often once it stalled (a hidden
+    /// window may stay undrawn for hours); otherwise until input or a wake.
+    pub fn wait(&self, stall: Duration) -> Option<Duration> {
+        self.in_flight.map(|_| Duration::from_millis(if self.stalled(stall) { 50 } else { 1 }))
     }
 }
 
@@ -274,6 +313,29 @@ mod tests {
         let snapshot = crate::snapshot(&mut vm, false, 1200, 800).unwrap();
         assert_eq!(snapshot.windows[0].snapshot.text.utf8, "!");
         assert_eq!(snapshot.windows[0].snapshot.point_byte, 1);
+    }
+
+    /// A window the compositor stops drawing: its paint stays in flight,
+    /// later commands coalesce behind it, the stall is told once, and the
+    /// render that comes when it shows again releases the newest frame.
+    #[test]
+    fn an_undrawn_paint_stalls_without_ending_and_releases_when_drawn() {
+        let stall = Duration::from_millis(20);
+        let mut presentation = Presentation::new();
+        presentation.submitted(7, Instant::now());
+        assert!(!presentation.stalled(stall) && presentation.stall_warning(stall).is_none());
+        assert_eq!(presentation.wait(stall), Some(Duration::from_millis(1)));
+        std::thread::sleep(stall);
+        for _ in 0..3 { presentation.changed(); }
+        assert!(presentation.stalled(stall) && !presentation.ready(), "commands coalesce while undrawn");
+        assert_eq!(presentation.stall_warning(stall).map(|(p, _)| p), Some(7));
+        assert_eq!(presentation.stall_warning(stall), None, "one warning per stall");
+        assert_eq!(presentation.wait(stall), Some(Duration::from_millis(50)), "no 1 ms spin while hidden");
+        presentation.completed(7, Instant::now());
+        assert!(presentation.ready(), "the frame drawn on showing releases the newest");
+        presentation.submitted(8, Instant::now());
+        std::thread::sleep(stall);
+        assert_eq!(presentation.stall_warning(stall).map(|(p, _)| p), Some(8), "a new stall is told again");
     }
 
     #[test]

@@ -48,6 +48,7 @@ pub mod scroll_input;
 pub mod sealed_frame_presentation;
 pub mod snapshot_text;
 pub mod terminal_color;
+pub mod text_animation;
 pub mod toolbar_icon;
 pub mod tooltip;
 pub mod transition_policy;

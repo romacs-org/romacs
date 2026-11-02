@@ -23,6 +23,11 @@
 (register-definition-prefixes "ob-wgsl" '("ob-wgsl-" "org-babel-"))
 
 
+;;; Generated autoloads from romacs-animate.el
+
+(register-definition-prefixes "romacs-animate" '("romacs-animate-"))
+
+
 ;;; Generated autoloads from romacs-buffer-switch.el
 
 (register-definition-prefixes "romacs-buffer-switch" '("romacs-" "switch-to-buffer"))
@@ -68,8 +73,8 @@ or call the function `romacs-complete-mode'.")
 
 The frame then reserves no minibuffer line: the prompt, the input and
 the candidates show in a child frame over the frame's windows, placed by
-`romacs-complete-position', and messages show briefly in a layer of
-their own.  Turning it on turns `fido-mode' and `fido-vertical-mode' off.
+`romacs-complete-position', and messages show briefly as toasts in the
+frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode' and `fido-vertical-mode' off.
 
 This is a global minor mode.  If called interactively, toggle the
 `Romacs-Complete mode' mode.  If the prefix argument is positive, enable
@@ -185,6 +190,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-keymap" '("current-active-maps" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
 
 
+;;; Generated autoloads from romacs-landing.el
+
+(register-definition-prefixes "romacs-landing" '("romacs-landing"))
+
+
 ;;; Generated autoloads from romacs-layer.el
 
 (register-definition-prefixes "romacs-layer" '("romacs-layer"))
@@ -193,11 +203,6 @@ This function is part of the `fzf' completion style.
 ;;; Generated autoloads from romacs-loadup-bootstrap.el
 
 (register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "minibuffer--sort-by-" "romacs-"))
-
-
-;;; Generated autoloads from romacs-mail.el
-
-(register-definition-prefixes "romacs-mail" '("romacs-mail-"))
 
 
 ;;; Generated autoloads from romacs-mcp.el
@@ -276,11 +281,6 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 
 (fn MESHES &rest PLIST)")
 (register-definition-prefixes "romacs-model" '("romacs-model-"))
-
-
-;;; Generated autoloads from romacs-notmuch.el
-
-(register-definition-prefixes "romacs-notmuch" '("notmuch" "romacs-notmuch-"))
 
 
 ;;; Generated autoloads from romacs-oclosure.el

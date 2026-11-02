@@ -4,6 +4,18 @@ use super::*;
 use crate::coordinates::CharOffset;
 use crate::data::Object;
 
+/// Text a primitive scans: internal bytes, their character count, and
+/// whether they are multibyte.
+pub(crate) struct TextSpan { pub bytes: Vec<u8>, pub chars: usize, pub multibyte: bool }
+
+impl TextSpan {
+    /// Only ASCII: what needs no encoding and has only the ascii charset.
+    pub(crate) fn ascii(&self) -> bool { if self.multibyte { self.chars == self.bytes.len() } else { self.bytes.is_ascii() } }
+    pub(crate) fn view(&self) -> crate::lstring::StrView<'_> {
+        crate::lstring::StrView { bytes: &self.bytes, chars: self.chars, multibyte: self.multibyte }
+    }
+}
+
 impl Leaf<'_> {
     /// get_translation_table (ATTRS, true) as translate_char applies it: its
     /// char-tables in order, none when translation is off. A nil own table
@@ -38,7 +50,7 @@ impl Leaf<'_> {
     }
     /// translate_char's walk: a char-table, or the tables of each element
     /// of a list; anything else translates nothing.
-    fn translation_char_tables(&self, table: Value, seen: &mut HashSet<u64>, out: &mut Vec<Value>) -> std::result::Result<(), Fault> {
+    pub(crate) fn translation_char_tables(&self, table: Value, seen: &mut HashSet<u64>, out: &mut Vec<Value>) -> std::result::Result<(), Fault> {
         if self.kind(table) == Kind::CharTable { out.push(table); return Ok(()); }
         let mut tail = table;
         while let Some((car, cdr)) = self.pair(tail) {
@@ -62,32 +74,41 @@ impl Leaf<'_> {
         }
         Ok(false)
     }
+    /// A string START's text, or the current buffer's from START to END, as
+    /// internal bytes; END before START is out of range unless SWAP
+    /// (validate_region's order).
+    pub(crate) fn text_span(&mut self, start: Value, end: Value, swap: bool) -> std::result::Result<TextSpan, Fault> {
+        if let Some(view) = self.vm.str_view(start) {
+            return Ok(TextSpan { bytes: view.bytes().to_vec(), chars: view.chars, multibyte: view.multibyte });
+        }
+        let (s, e) = (self.vm.text_property_position(start)?, self.vm.text_property_position(end)?);
+        let (s, e) = if swap { (s.min(e), s.max(e)) } else { (s, e) };
+        // validate_region's error names the buffer; the coding search's
+        // args_out_of_range only the positions.
+        let buffer = if swap { Some(self.current_buffer()?) } else { None };
+        let out_of_range = || buffer.map_or(Fault::Range(start, end), |b| Fault::Range3(b, start, end));
+        if s > e { return Err(out_of_range()); }
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let Object::Buffer(b) = &self.vm.objects[index] else {
+            let bytes = match &self.vm.objects[index] { Object::ByteBuffer(b) => b.bytes.as_slice(), _ => &[] };
+            if !(1 <= s && e <= bytes.len() as i64 + 1) { return Err(out_of_range()); }
+            let bytes = bytes[s as usize - 1..e as usize - 1].to_vec();
+            return Ok(TextSpan { chars: bytes.len(), bytes, multibyte: false });
+        };
+        if !(1 <= s && e <= b.len_chars() as i64 + 1) { return Err(out_of_range()); }
+        let byte = |c: i64| b.byte_of_char(CharOffset(c as usize - 1)).map_err(Fault::Error);
+        let (from, to) = (byte(s)?, byte(e)?);
+        let text: &crate::text::Text = b;
+        Ok(TextSpan { bytes: text.internal(from..to).map_err(Fault::Error)?.to_vec(), chars: (e - s) as usize, multibyte: true })
+    }
     /// Ffind_coding_systems_region_internal: t when the text needs no
     /// encoding (unibyte or ASCII), else the base coding systems of
     /// `coding-system-list', less EXCLUDE, that encode every character,
     /// then `raw-text' and `no-conversion'.
     pub(crate) fn find_coding_systems_region(&mut self, start: Value, end: Value, exclude: Value) -> super::super::Out {
-        let chars: Vec<u32> = if let Some(view) = self.vm.str_view(start) {
-            if !view.multibyte || view.bytes().is_ascii() { return Ok(Value::TRUE); }
-            view.chars().collect()
-        } else {
-            let s = self.vm.text_property_position(start)?;
-            let e = self.vm.text_property_position(end)?;
-            let index = self.vm.buffer_index().map_err(Fault::Error)?;
-            let Object::Buffer(b) = &self.vm.objects[index] else {
-                let z = match &self.vm.objects[index] { Object::ByteBuffer(b) => b.bytes.len() as i64 + 1, _ => 1 };
-                if !(1 <= s && s <= e && e <= z) { return Err(Fault::Range(start, end)); }
-                return Ok(Value::TRUE);
-            };
-            let z = b.len_chars() as i64 + 1;
-            if !(1 <= s && s <= e && e <= z) { return Err(Fault::Range(start, end)); }
-            let byte = |c: i64| b.byte_of_char(CharOffset(c as usize - 1)).map_err(Fault::Error);
-            let (from, to) = (byte(s)?, byte(e)?);
-            if (e - s) as usize == to.0 - from.0 { return Ok(Value::TRUE); }
-            let text: &crate::text::Text = b;
-            let internal = text.internal(from..to).map_err(Fault::Error)?;
-            crate::lstring::StrView { bytes: &internal, chars: (e - s) as usize, multibyte: true }.chars().collect()
-        };
+        let text = self.text_span(start, end, false)?;
+        if !text.multibyte || text.ascii() { return Ok(Value::TRUE); }
+        let chars: Vec<u32> = text.view().chars().collect();
         let list = self.intern("coding-system-list");
         let names = self.variable_value(list)?.unwrap_or(Value::NIL);
         let excluded = if exclude == Value::NIL { Vec::new() } else { self.coding_items(exclude)? };

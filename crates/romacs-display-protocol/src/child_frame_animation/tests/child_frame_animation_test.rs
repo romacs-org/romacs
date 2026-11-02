@@ -14,8 +14,8 @@ fn an_easing_slot_builds_a_tween_carrying_the_slide_distance() {
     };
     // Duration::mul_f32 rounds; compare in seconds with slack rather than
     // pinning the exact nanos the multiply happens to produce.
-    assert!((tween.duration.get().as_secs_f32() - 0.15).abs() < 1e-3);
-    assert_eq!(tween.easing, TransitionEasing::EaseOutExpo);
+    assert!((tween.duration.get().as_secs_f32() - 0.14).abs() < 1e-3);
+    assert_eq!(tween.easing, TransitionEasing::EaseOutCubic);
     assert!(tween.bezier.is_none(), "a named easing carries no points");
 
     // The slide distance is the one property this module adds over the
@@ -52,18 +52,24 @@ fn a_disabled_slot_and_the_master_switch_both_resolve_to_instant() {
     assert_eq!(default_child_frame_open().motion(off), MotionSpec::Instant);
     assert_eq!(default_child_frame_close().motion(off), MotionSpec::Instant);
 
-    // Movement and resize ship off: re-anchoring must land exactly where
-    // Emacs put the frame until the user opts into the drift.
+    // Movement ships off: re-anchoring must land exactly where Emacs put
+    // the frame until the user opts into the drift.
     assert_eq!(
         default_child_frame_movement().motion(globals()),
         MotionSpec::Instant,
         "child-frame-movement ships disabled"
     );
-    assert_eq!(
-        default_child_frame_resize().motion(globals()),
-        MotionSpec::Instant,
-        "child-frame-resize ships disabled"
-    );
+}
+
+#[test]
+fn the_layer_slots_ship_the_design_note_s_durations() {
+    let millis = |slot: ChildFrameAnimation| match slot.motion(globals()) {
+        MotionSpec::Tween(tween) => ((tween.duration.get().as_secs_f64() * 1000.0).round() as u64, tween.easing),
+        other => panic!("{other:?} is not a tween"),
+    };
+    assert_eq!(millis(default_child_frame_close()), (90, TransitionEasing::EaseOutCubic));
+    assert_eq!(millis(default_child_frame_resize()), (80, TransitionEasing::EaseOutCubic));
+    assert_eq!(millis(default_child_frame_selection()), (60, TransitionEasing::EaseOutCubic));
 }
 
 #[test]

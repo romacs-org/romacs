@@ -100,6 +100,7 @@ fn annotation_graphs_compact_and_dead_marker_slots_are_reused() {
         front: Bias::Left,
         rear: Bias::Right,
         properties: Vec::new(),
+        inserted: 0,
     })));
     vm.move_overlay_object(
         overlay,
@@ -194,6 +195,7 @@ fn notmuch_buffer_queries_use_the_interval_index() {
             front: Bias::Left,
             rear: Bias::Right,
             properties: Vec::new(),
+            inserted: 0,
         })));
         vm.move_overlay_object(
             v,
@@ -277,6 +279,7 @@ fn hermes_shape_reuses_three_overlay_slots_for_9276_moves() {
             front: Bias::Left,
             rear: Bias::Right,
             properties: Vec::new(),
+            inserted: 0,
         })));
         vm.move_overlay_object(
             v,
@@ -330,6 +333,7 @@ fn identical_overlay_property_ties_keep_the_newest_identity_after_compaction() {
             front: Bias::Left,
             rear: Bias::Right,
             properties: vec![(key, Value::integer(i).unwrap())],
+            inserted: 0,
         })));
         let buffer = vm.slots[vm.buffer_slot].value;
         vm.move_overlay_object(
@@ -397,6 +401,7 @@ fn bulk_overlay_removal_scaling_and_evaporation_roots() {
                         front: Bias::Left,
                         rear: Bias::Left,
                         properties: Vec::new(),
+                        inserted: 0,
                     })));
                     vm.move_overlay_object(
                         overlay,

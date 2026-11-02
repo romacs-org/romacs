@@ -2,6 +2,7 @@
 
 ;; Copyright (C) 2026 Free Software Foundation, Inc.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Pure camera computations shared by review and scene authoring.  A view

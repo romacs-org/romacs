@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Thanos Apollo
 ;; Author: Thanos Apollo <public@thanosapollo.org>
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Project the owning session's reported context categories and file manifest.

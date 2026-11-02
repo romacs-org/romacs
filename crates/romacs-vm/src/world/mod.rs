@@ -715,9 +715,8 @@ impl Vm {
                     }
                 }
                 (_, Some(Object::HashTable(table))) => {
-                    let test = match table.test { crate::hash::Test::Eq => 0, crate::hash::Test::Eql => 1, crate::hash::Test::Equal => 2, crate::hash::Test::Including(_) => 3 };
-                    hasher.update([b'h', test, table.weakness as u8]);
-                    if let crate::hash::Test::Including(name) = table.test { hasher.update(name.0.to_le_bytes()); }
+                    hasher.update([b'h', table.test.code(), table.weakness as u8]);
+                    if let crate::hash::Test::User(name, _) = table.test { hasher.update(name.0.to_le_bytes()); }
                     hasher.update([table.size(), table.count()].map(usize::to_le_bytes).concat());
                     let free: Vec<u8> = table.free_slots().iter().flat_map(|slot| slot.to_le_bytes()).collect();
                     framed(&mut hasher, &free);

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Paired-session bench: pinned GNU and Romacs side by side, driven by an agent.
 
-Each engine runs a profile's session (owner.py: stock, no init on a generic
-project, by default; or the owner's) in its own private HOME on
+Each engine runs a profile's session (real_init.py: stock, no init on a
+generic project, by default; or init, a real init from a profile config) in
+its own private HOME on
 a headless labwc and serves romacs-mcp.el's endpoint with the session tools
 (romacs-mcp-session.el): the same Lisp and the same tool surface in both.
 The bench is itself an MCP server whose tools take an engine argument --
@@ -31,7 +32,8 @@ usage:
   bench.py daemon  --control SOCK [options]     the same tools on a socket
   bench.py call    --control SOCK TOOL [JSON]   one call to a daemon
   bench.py replay  RECORDING --output DIR [--gnu-cache RESULTS] [options]
-options: --romacs BIN --gnu EMACS --output DIR --work DIR --profile stock|owner --gnosis-db COPY
+options: --romacs BIN --gnu EMACS --output DIR --work DIR --profile stock|init --gnosis-db COPY
+         --profile-config FILE (ROMACS_BENCH_PROFILE)
          --project REPO --org FILE (ROMACS_BENCH_ORG) --tools DIR --timeout SECONDS
 
 COMPARISON POLICY (bench_compare): the selected buffer, the buffer's name,
@@ -52,7 +54,7 @@ tool call failed.
 
 DATA SAFETY: everything a session writes is inside its private trees.  The
 gnosis database is a copy of a copy given with --gnosis-db, never the live
-one.  A send_keys call that sends a hermes prompt must say
+one, and hermes only attaches to a running dashboard (real_init.py).  A send_keys call that sends a hermes prompt must say
 effect=hermes-prompt; the bench allows one per engine per session, and
 replay skips such calls unless --allow-effect hermes-prompt.
 """
@@ -76,7 +78,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import parity_live  # noqa: E402
 import fixture  # noqa: E402
-import owner  # noqa: E402
+import real_init  # noqa: E402
 
 ENGINES = ('gnu', 'romacs')
 GUARDED = {'hermes-prompt': 1}  # effect -> calls allowed per engine per session
@@ -278,9 +280,9 @@ STEP = {'type': 'string', 'description': 'the journey step this call belongs to,
 
 TOOLS = {
     'bench_start': ('Start GNU and Romacs (or one engine) in private HOMEs: profile stock (no init, a generic '
-                    'project at ~/src/tally, the default) or owner (the owner\'s packages and data copies).',
+                    'project at ~/src/tally, the default) or init (a real init: the profile config\'s packages and data copies).',
                     schema({'engines': {'type': 'array', 'items': {'type': 'string', 'enum': list(ENGINES)}},
-                            'profile': {'type': 'string', 'enum': ['stock', 'owner']},
+                            'profile': {'type': 'string', 'enum': list(real_init.PROFILES)},
                             'hermes': {'type': 'boolean'}, 'step': STEP})),
     'bench_send_keys': ('Type keys (kbd notation, e.g. "C-x C-f") or literal text into each engine through its '
                         'command loop (via events, paced like typing) or the compositor (via wtype). '
@@ -390,8 +392,10 @@ class Bench:
         work.mkdir(parents=True, exist_ok=True)
         profile = arguments.get('profile') or options.profile
         stock = profile == 'stock'
-        project = Path(options.project) if options.project else None if stock else owner.default_project()
-        org = Path(options.org) if options.org and not stock else None
+        config = {} if stock else real_init.load(options.profile_config)
+        project = Path(options.project) if options.project else None if stock else real_init.default_project(config)
+        org = None if stock else Path(options.org) if options.org else config.get('org')
+        gnosis_db = None if stock else options.gnosis_db or config.get('gnosis_db')
         started = {}
 
         def launch(name):
@@ -401,14 +405,14 @@ class Bench:
             root, home, env = parity_live.private_tree(name, work, options.tools, prefix=f'{name[:3]}-')
             (root / 'mcp').mkdir(mode=0o700)
             token = secrets.token_hex(24)
-            used = owner.populate(home, project, org, None if stock else options.gnosis_db)
+            used = real_init.populate(home, project, org, gnosis_db, config)
             if stock and not project:
                 fixture.make_repo(home / 'src/tally')
                 used['project'] = '~/src/tally'
-            lisp = None if stock else owner.lisp_dir(work, name)
-            init = owner.init_source(name, lisp, root / 'mcp/port', token, profile)
+            lisp = None if stock else real_init.lisp_dir(work, name, config)
+            init = real_init.init_source(name, lisp, root / 'mcp/port', token, profile, config)
             # A stock session loads the bench's init as `emacs -Q -l' does,
-            # in both engines; an owner session, as the user's init.
+            # in both engines; an init session, as the user's init.
             if stock:
                 (root / 'bench-init.el').write_text(init)
                 # -Q first: GNU's `command-line' reads it only before other options.
@@ -768,8 +772,10 @@ def main():
     parser.add_argument('--work', default=os.environ.get('ROMACS_BENCH_WORK'))
     parser.add_argument('--gnosis-db', default=os.environ.get('ROMACS_BENCH_GNOSIS_DB'),
                         help='a copy of gnosis.db; never the live one')
-    parser.add_argument('--profile', choices=['stock', 'owner'], default='stock',
+    parser.add_argument('--profile', choices=real_init.PROFILES, default='stock',
                         help="bench_start's default profile")
+    parser.add_argument('--profile-config', default=os.environ.get(real_init.CONFIG_ENV),
+                        help='the init profile: a JSON file outside the repository (real_init.py)')
     parser.add_argument('--project')
     parser.add_argument('--org', default=os.environ.get('ROMACS_BENCH_ORG'), help='an org file to copy')
     parser.add_argument('--tools', default=parity_live.TOOLS)

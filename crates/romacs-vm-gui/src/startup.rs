@@ -493,6 +493,7 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
 fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool) -> Result<Started, String> {
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
     vm.install_lisp_prelude()?;
+    install_window_change(vm)?;
     policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
     policy(vm, root, "romacs-find-file.el", include_str!("../../../rlisp/romacs-find-file.el"))?;
     policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
@@ -503,8 +504,6 @@ fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool)
     policy(vm, root, "romacs-dired.el", include_str!("../../../rlisp/romacs-dired.el"))?;
     policy(vm, root, "romacs-term.el", include_str!("../../../rlisp/romacs-term.el"))?;
     policy(vm, root, "vm/process.el", include_str!("../../../rlisp/vm/process.el"))?;
-    policy(vm, root, "romacs-mail.el", include_str!("../../../rlisp/romacs-mail.el"))?;
-    policy(vm, root, "romacs-notmuch.el", include_str!("../../../rlisp/romacs-notmuch.el"))?;
     policy(vm, root, "romacs-install-command.el", include_str!("../../../rlisp/romacs-install-command.el"))?;
     policy(vm, root, "romacs-project.el", include_str!("../../../rlisp/romacs-project.el"))?;
     policy(vm, root, "romacs-fontify.el", include_str!("../../../rlisp/romacs-fontify.el"))?;
@@ -591,7 +590,18 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
 /// chain (world.rs); a source boot takes them after it. Dired is GNU's
 /// dired.el here: the workspace's browser would shadow its autoloads and
 /// its `defvar` of `dired-mode-map` would keep GNU's keys out.
+/// window.c's change functions (rlisp/vm/window-change.el), which every
+/// redisplay runs (host_input.rs), installed before a live launch's first
+/// one: a resize can repaint before the first key reaches the command loop
+/// that would install them. Their state is defvar'd, so that later install
+/// keeps it.
+fn install_window_change(vm: &mut Vm) -> Result<(), String> {
+    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el"))?;
+    Ok(())
+}
+
 pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path::Path) -> Result<(), String> {
+    install_window_change(vm)?;
     if launch == Launch::GnuOnly {
         return Ok(());
     }
@@ -610,8 +620,6 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     // The session's command log, which each interactive process starts
     // itself (`romacs-usage-log-start').
     if launch == Launch::Loadup {
@@ -625,6 +633,14 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         if vm.eval_source("(featurep 'minibuffer)")? != romacs_vm::Fixed::NIL {
             vm.eval_source(include_str!("../../../rlisp/romacs-complete.el"))?;
         }
+    }
+    // The scheduler for animations drawn in buffer text, and the startup
+    // screen's logo, its first client, where the chain gave
+    // them the GNU Lisp they use (simple.el, nadvice.el, timer.el).
+    if launch == Launch::Loadup
+        && vm.eval_source("(and (fboundp 'buffer-disable-undo) (fboundp 'add-function) (fboundp 'run-at-time) (fboundp 'make-composed-keymap))")? != romacs_vm::Fixed::NIL {
+        vm.eval_source(include_str!("../../../rlisp/romacs-animate.el"))?;
+        vm.eval_source(include_str!("../../../rlisp/romacs-landing.el"))?;
     }
     mark_phase("session-definitions");
     Ok(())
@@ -728,7 +744,9 @@ pub fn finish_loadup(vm: &mut Vm, started: &Started) -> Result<(), String> {
 /// `fancy-startup-screen' (startup.el:2269) sets up *GNU Emacs*, it starts
 /// in `command-line-default-directory' and takes GNU's
 /// `splash-screen-keymap': typing does nothing, SPC and DEL scroll, and q
-/// (`exit-splash-screen') kills it.
+/// (`exit-splash-screen') kills it.  The full screen opens with the
+/// animated logo (rlisp/romacs-landing.el), whose keys (SPC, Home) come
+/// first.
 fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), String> {
     let name = lisp_string(STARTUP_SCREEN);
     if vm.eval_source(&format!("(get-buffer {name})"))? != romacs_vm::Fixed::NIL {
@@ -742,10 +760,14 @@ fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), S
              (use-local-map splash-screen-keymap)
              (setq buffer-read-only t)
              (set-buffer-modified-p nil)
+             {landing}
              (goto-char (point-min))
              (current-buffer))
            {concise})",
         screen = screen_text(started, "\n"),
+        // The full screen opens with the animated logo; the concise one,
+        // fitted beside the visited files, stays text.
+        landing = if concise { "" } else { "(when (fboundp 'romacs-landing) (romacs-landing))" },
         concise = if concise { "t" } else { "nil" },
     ))?;
     Ok(())
@@ -1861,7 +1883,7 @@ mod tests {
 
     /// A private HOME and XDG_CONFIG_HOME for `vm`'s session: the interactive
     /// session's user directory, which GNU's startup creates, is never the
-    /// owner's.
+    /// user's own.
     fn private_home(vm: &mut Vm, name: &str) -> std::path::PathBuf {
         let home = scratch_lisp(&format!("{name}-home"), &[]);
         let entries = [format!("HOME={}", home.display()), format!("XDG_CONFIG_HOME={}", home.join("config").display())];
@@ -2278,7 +2300,10 @@ mod tests {
                 };
                 let record = printed(&mut vm, &format!("(let ((print-escape-newlines t)) (prin1-to-string {record}))"));
                 let record: String = serde_json::from_str(&record).unwrap();
-                let expected = expected.replace("\"*GNU Emacs*\"", &lisp_string(STARTUP_SCREEN));
+                // *Romacs* is GNU's screen under another name, whose SPC
+                // pauses the logo where GNU's scrolls (GUI-STARTUP1).
+                let expected = expected.replace("\"*GNU Emacs*\"", &lisp_string(STARTUP_SCREEN))
+                    .replace("(undefined scroll-up-command ", "(undefined romacs-landing-pause ");
                 if record != expected { failures.push(format!("{name}:\n  romacs {record}\n  gnu    {expected}")); }
                 let _ = std::fs::remove_dir_all(&home);
             }
@@ -2306,8 +2331,10 @@ mod tests {
             let sites: Vec<String> = crate::loadup::load_sites(&text).unwrap().1.into_iter().map(|s| s.name).collect();
             let snapshot = vm.frame_snapshot(1200, 800).unwrap();
             let mode_line = snapshot.windows[0].snapshot.mode_line.is_some();
+            // The session's bindings, read where no screen keymap shadows
+            // them (*Romacs* binds keys of its own).
             let keys: Vec<(bool, String)> = started.bindings.iter().map(|b| {
-                let v = vm.eval_source(&format!("(key-binding {})", b.key)).unwrap();
+                let v = vm.eval_source(&format!("(with-current-buffer \"*scratch*\" (key-binding {}))", b.key)).unwrap();
                 (b.gnu_defined, v.display().unwrap())
             }).collect();
             // The live path after loadup: the host's selection query, then

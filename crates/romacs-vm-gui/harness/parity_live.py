@@ -28,11 +28,13 @@ PROBE = HARNESS / 'parity_probe.el'
 TOOLS = os.environ.get('ROMACS_HEADLESS_TOOLS', '/nix/store/klrgwbvpwd7napzdhacw1nhj8xmpbpdc-romacs-gate-headless-tools/bin')
 GRID = (120, 33)  # the root window's body columns and lines in both frames
 # Completion as GNU's engine has it after loading rlisp/romacs-completion-defaults.el,
-# which lacks the fzf style, set in both engines' inits: Romacs's own default
-# completes with fzf (DIVERGENCES.md VM2-FZF-DEFAULT), and these harnesses
-# compare GNU's completion.
+# which lacks the fzf style and romacs-complete, set in both engines' inits:
+# Romacs's own defaults complete with fzf (DIVERGENCES.md VM2-FZF-DEFAULT) in
+# romacs-complete's layer (VM2-COMPLETE-DEFAULT), and these harnesses compare
+# GNU's completion, displayed by fido-vertical.
 GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"
-                  "      completion-category-overrides '((file (styles partial-completion))))\n")
+                  "      completion-category-overrides '((file (styles partial-completion))))\n"
+                  "(when (fboundp 'romacs-complete-mode) (romacs-complete-mode -1) (fido-vertical-mode 1))\n")
 RC_XML = '''<?xml version="1.0"?>
 <labwc_config><core><gap>0</gap></core>
 <windowRules><windowRule identifier="*" serverDecoration="no"><action name="Maximize"/></windowRule></windowRules>
@@ -288,7 +290,7 @@ def private_tree(engine, base, tools, prefix=None):
     for directory in ('home', 'work', 'probe', 'tmp', 'home/.config', 'home/.cache', 'home/.local/share',
                       'home/.local/state'):
         (root / directory).mkdir(parents=True)
-    env = {'PATH': f'{tools}:{os.environ["PATH"]}', 'HOME': str(home), 'LANG': 'C.UTF-8',
+    env = {'PATH': f'{tools}:{os.environ["PATH"]}', 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
            'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / '.config'),
            'XDG_CACHE_HOME': str(home / '.cache'), 'XDG_DATA_HOME': str(home / '.local/share'),
            'XDG_STATE_HOME': str(home / '.local/state'), 'TMPDIR': str(root / 'tmp'),
@@ -325,7 +327,7 @@ def lisp_copy(base, name, sources, compile_):
 
 
 def gnu_engine(root, home, env, init, lisp, timeout, tools, cls=None):
-    """Pinned GNU pgtk on INIT, as the owner's ~/.config/emacs/init.el;
+    """Pinned GNU pgtk on INIT, as a user's ~/.config/emacs/init.el;
     LISP is the package directory its paths are normalised from.  GNU's
     native compiler, which Romacs lacks, compiles nothing: neither the
     packages (the harness byte-compiles them) nor the trampolines advising

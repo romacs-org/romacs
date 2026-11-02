@@ -1,4 +1,5 @@
 ;;; hermes-chat-models.el --- Model and provider selection for Hermes chat  -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026  Thanos Apollo
 

@@ -1,4 +1,5 @@
 ;;; gnosis-agent-review-data.el --- Bounded local study values -*- lexical-binding: t; -*-
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; Copyright (C) 2026 Free Software Foundation, Inc.
 ;; Author: Thanos Apollo <public@thanosapollo.org>

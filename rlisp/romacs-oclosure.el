@@ -1,5 +1,6 @@
 ;;; romacs-oclosure.el --- OClosure representation bridge -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; Ordinary Romacs closures retain documentation without public array slots.

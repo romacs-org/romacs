@@ -24,19 +24,21 @@ pub struct Shared {
     pub pending: VecDeque<InputEvent>,
     /// Last presentation id submitted, by either loop.
     pub presentation: u64,
-    /// The outer loop's in-flight presentation; the prompt settles it before
-    /// it submits its own (the renderer retains only the latest sample).
-    pub in_flight: Option<u64>,
-    /// Set when the prompt settled `in_flight`: it and when it rendered.
+    /// The paint in flight and when its oldest undrawn paint was submitted
+    /// (presentation.rs): the outer loop's, until a prompt's own replaces it.
+    pub in_flight: Option<(u64, std::time::Instant)>,
+    /// Set when a prompt's drawn paint settled the outer loop's in-flight
+    /// one (a later presentation drawn settles every earlier): it and when.
     pub settled: Option<(u64, std::time::Instant)>,
     /// Latest frame geometry seen by the prompt.
     pub size: Option<(u32, u32)>,
     pub closed: bool,
     /// Under --trace-latency, when the prompt last read a key.
     pub key_read: Option<std::time::Instant>,
-    /// The prompt's last painted frame, its selected window, presentation
-    /// and window ends: an unchanged redisplay answers these again.
-    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>)>,
+    /// The prompt's last painted frame, its selected window, presentation,
+    /// window ends and text animations: an unchanged redisplay answers
+    /// these again.
+    pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>, Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>)>,
 }
 
 pub struct GuiHost {
@@ -151,6 +153,15 @@ impl GuiHost {
 
 }
 
+/// Whether SENDER's window shows animation drawn frame by frame: on a GPU,
+/// and on a software rasterizer, every headless harness's, only when
+/// ROMACS_LAYER_ANIMATION is 1 or more, as for layers.  None until the
+/// window has chosen its adapter.
+pub(crate) fn display_animates(sender: &PaintSender) -> Option<bool> {
+    let forced = || std::env::var("ROMACS_LAYER_ANIMATION").ok().and_then(|v| v.parse::<f32>().ok()).is_some_and(|n| n >= 1.0);
+    sender.software_adapter().map(|software| !software || forced())
+}
+
 impl HostInput for GuiHost {
     fn clipboard_text(&mut self) -> Result<Option<String>, String> {
         self.sender.clipboard_text()
@@ -158,6 +169,10 @@ impl HostInput for GuiHost {
 
     fn set_clipboard_text(&mut self, text: &str) -> Result<(), String> {
         self.sender.set_clipboard_text(text)
+    }
+
+    fn display_animates(&mut self) -> Option<bool> {
+        display_animates(&self.sender)
     }
 
     fn input_pending(&mut self) -> bool {
@@ -171,21 +186,17 @@ impl HostInput for GuiHost {
         // As the loop's changed_frame: a timer run in a prompt that left the
         // frame as this prompt last painted it, with nothing presented
         // since, submits no frame and answers that paint's window ends.
-        if let Some((painted, selected, presentation, ends)) = &self.shared.borrow().painted {
+        if let Some((painted, selected, presentation, ends, animations)) = &self.shared.borrow().painted {
             let shared = self.shared.borrow();
-            if *presentation == shared.presentation && shared.in_flight.is_none()
-                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame) {
+            if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
+                && *selected == frame.selected && crate::frames_alike(painted, &frame.frame)
+                && *animations == frame.text_animations {
                 return Ok(ends.clone());
             }
         }
         let started = std::time::Instant::now();
-        let wait = Duration::from_secs(30);
         let presentation = {
             let mut shared = self.shared.borrow_mut();
-            if let Some(in_flight) = shared.in_flight.take() {
-                self.sender.wait_for_render(in_flight, wait)?;
-                shared.settled = Some((in_flight, std::time::Instant::now()));
-            }
             shared.presentation = shared.presentation.checked_add(1).ok_or("presentation exhausted")?;
             shared.presentation
         };
@@ -193,20 +204,36 @@ impl HostInput for GuiHost {
         let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, presentation, &frame)?;
         let submitted = std::time::Instant::now();
         // Synchronous, like the oracle path: the prompt is on screen before
-        // the evaluator blocks for its key.
-        self.sender.wait_for_render(presentation, wait)?;
-        self.shared.borrow_mut().painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone()));
-        eprintln!(
+        // the evaluator blocks for its key. A window the compositor does not
+        // draw never renders it: wait no longer than the paint in flight
+        // may stall, then leave this one in flight in its place. A drawn
+        // paint settles every earlier one.
+        let drawn = {
+            let mut shared = self.shared.borrow_mut();
+            if let Some((earlier, _)) = shared.in_flight
+                && self.sender.wait_for_render(earlier, Duration::ZERO).is_ok() {
+                shared.in_flight = None;
+                shared.settled = Some((earlier, std::time::Instant::now()));
+            }
+            let since = shared.in_flight.map_or(submitted, |(_, since)| since);
+            let deadline = since + crate::presentation::render_stall();
+            let drawn = self.sender.wait_for_render(presentation, deadline.saturating_duration_since(submitted)).is_ok();
+            shared.in_flight = (!drawn).then_some((presentation, since));
+            if drawn { shared.settled = Some((presentation, std::time::Instant::now())); }
+            shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
+            drawn
+        };
+        if crate::diagnostics() { eprintln!(
             "{}",
             serde_json::json!({"diagnostic":"prompt-paint","presentation":presentation,
-                "selected":frame.selected,
+                "selected":frame.selected,"drawn":drawn,
                 "minibuffer":frame.frame.windows.iter().chain(frame.frame.children.iter().flat_map(|c| &c.windows))
                     .find(|w| w.snapshot.id == frame.minibuffer).map(|w| w.snapshot.text.utf8.clone()),
                 // Each child frame's other windows' text: the layers shown.
                 "layers":frame.frame.children.iter().map(|c| c.windows.iter().filter(|w| w.snapshot.id != frame.minibuffer)
                     .map(|w| w.snapshot.text.utf8.clone()).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "glyphs":glyphs})
-        );
+        ); }
         // The key's command and hooks ran before this redisplay began.
         if let Some(read) = self.shared.borrow_mut().key_read.take() {
             let now = std::time::Instant::now();

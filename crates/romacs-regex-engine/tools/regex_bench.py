@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def org_with_greek():
     """org.el with `α` opening every 40th line and `ω` closing lines 0 and 79
-    of every 80: the owner's `α.*ω` / `α.*?ω` shape over real text -- most
+    of every 80: a user's `α.*ω` / `α.*?ω` shape over real text -- most
     lines match neither, half the `α` lines match, and the `ω` lines without
     an `α` do not."""
     lines = (ROOT / "gnu-lisp/org/org.el").read_text().splitlines()

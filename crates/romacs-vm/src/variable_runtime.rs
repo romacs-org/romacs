@@ -464,7 +464,7 @@ impl Vm {
             return match p {
                 SymbolValue => Ok(symbol),
                 SpecialVariableP => Ok(Value::TRUE),
-                Fboundp | LocalVariableIfSetP | CustomVariableP => Ok(Value::NIL),
+                Fboundp | CustomVariableP => Ok(Value::NIL),
                 _ => Err("setting constant".into())
             };
         }
@@ -522,14 +522,6 @@ impl Vm {
                 }
                 Ok(symbol)
             }
-            // GNU data.c:2494: all BUFFER_OBJFWD slots become local if set.
-            LocalVariableIfSetP if self.forwarding(slot).is_some() => Ok(truth(matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_))))),
-            LocalVariableIfSetP if slot == self.multibyte_slot => Ok(Value::TRUE),
-            LocalVariableIfSetP => {
-                let local = self.variable_binding_slot(slot, false)? != slot;
-                let automatic = self.local_table(slot)?.is_some() && !self.slots[slot].explicit_local;
-                Ok(truth(automatic || local))
-            },
             // A built-in variable is always bound (GNU Fboundp), so `defvar'
             // never replaces its value.
             // These read or write the toplevel or saved value, never a let's.

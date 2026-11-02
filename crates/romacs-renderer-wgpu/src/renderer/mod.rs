@@ -20,7 +20,7 @@ use super::webview_cache::WgpuWebViewCache;
 
 mod box_tessellation;
 mod child_frames;
-pub use child_frames::{ChildPreparationError, ChildResizePicture, PreparedChildFrame};
+pub use child_frames::{ChildPreparationError, PreparedChildFrame};
 mod composition_ring;
 pub use composition_ring::CompositionRing;
 mod content;
@@ -1974,6 +1974,21 @@ impl WgpuRenderer {
     /// result retains square-ended top/bottom rails and the background fill,
     /// but neither a vertical cap nor a rounded corner is rasterized there.
     #[allow(clippy::too_many_arguments)]
+    pub(super) fn add_rounded_rect_styled(
+        &self,
+        vertices: &mut Vec<RoundedRectVertex>,
+        (x, y, width, height): (f32, f32, f32, f32),
+        corner_radius: f32,
+        color: &Color,
+        style_id: u32,
+        speed: f32,
+    ) {
+        self.add_rounded_rect_styled_with_box_vertical_edges(
+            vertices, x, y, width, height, 0.0, corner_radius, color, style_id, speed,
+            &Color::TRANSPARENT, BoxVerticalEdges::Both,
+        );
+    }
+
     fn add_rounded_rect_styled_with_box_vertical_edges(
         &self,
         vertices: &mut Vec<RoundedRectVertex>,
@@ -1992,6 +2007,8 @@ impl WgpuRenderer {
         // Extra padding: glow/neon effects need more room for falloff
         let padding = match style_id {
             4 | 5 => 12.0,
+            11 => speed * 3.0 + 1.0, // shadow: three sigma
+            12 => speed + 1.0,       // glow: its reach
             10 => border_width + 2.0, // heartbeat expands border
             _ => 1.0,
         };

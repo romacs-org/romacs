@@ -1,5 +1,6 @@
 ;;; romacs-menu.el --- menu.c's popup menus and dialogs over tmm  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 ;; GNU's menu.c pops `x-popup-menu' and `x-popup-dialog' up through the

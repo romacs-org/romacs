@@ -1,8 +1,62 @@
-//! The order in which xdisp.c's load_overlay_strings delivers the overlay
-//! strings shown at one buffer position, shared by measurement
+//! GNU's overlay orders: buffer.c sort_overlays/compare_overlays, which
+//! decide which overlay's property wins (`overlays-at' SORTED, character
+//! properties, faces), and xdisp.c load_overlay_strings, the order of the
+//! overlay strings shown at one buffer position, shared by measurement
 //! (prim/leaf/display_elements.rs) and the mini-window's display
 //! (mini_window.rs).
 use crate::Value;
+
+/// buffer.c struct sortvec: an overlay's range and its `priority',
+/// (PRIMARY . SECONDARY) or PRIMARY, as make_sortvec_item reads it.
+#[derive(Clone, Copy)]
+pub(crate) struct SortItem {
+    pub overlay: Value,
+    pub start: u32,
+    pub end: u32,
+    pub priority: i64,
+    pub secondary: i64,
+    /// Overlay::inserted, which orders equal starts.
+    pub inserted: u64,
+}
+
+/// ITREE_FOREACH's ascending order: by start, and among equal starts the
+/// latest inserted first (itree_insert_node goes left on a tie).
+fn tree_order<T>(items: &mut [T], key: impl Fn(&T) -> SortItem) {
+    items.sort_by_key(|item| { let k = key(item); (k.start, std::cmp::Reverse(k.inserted)) });
+}
+
+/// ITEMS in increasing precedence of their KEY, as sort_overlays leaves
+/// them. The comparator is not transitive, so its input is GNU's:
+/// overlays_in's tree order.
+pub(crate) fn sort_overlays<T: Copy>(mut items: Vec<T>, key: impl Fn(&T) -> SortItem) -> Vec<T> {
+    tree_order(&mut items, &key);
+    merge_sort(items, &|a: &T, b: &T| compare_overlays(&key(a), &key(b)))
+}
+
+/// The item of highest precedence by the running comparison that
+/// textprop.c get_char_property_and_overlay and editfns.c
+/// get_pos_property make over the overlays with the property, in tree
+/// order.
+pub(crate) fn highest_overlay<T: Copy>(mut items: Vec<T>, key: impl Fn(&T) -> SortItem) -> Option<T> {
+    tree_order(&mut items, &key);
+    items.into_iter().reduce(|best, this| if compare_overlays(&key(&best), &key(&this)).is_lt() { this } else { best })
+}
+
+/// compare_overlays: Greater when A takes precedence over B. At equal
+/// priority the overlay not covered by the other wins; where neither
+/// covers the other the secondary priority decides. Not a total order.
+/// GNU breaks a full tie by object address; Romacs by heap index.
+pub(crate) fn compare_overlays(a: &SortItem, b: &SortItem) -> std::cmp::Ordering {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    let pick = |a_wins: bool| if a_wins { Greater } else { Less };
+    if a.priority != b.priority { a.priority.cmp(&b.priority) }
+    else if a.start < b.start { pick(a.end < b.end && a.secondary > b.secondary) }
+    else if a.start > b.start { pick(!(a.end > b.end && a.secondary < b.secondary)) }
+    else if a.end != b.end { pick(b.end > a.end) }
+    else if a.secondary != b.secondary { a.secondary.cmp(&b.secondary) }
+    else if a.overlay == b.overlay { Equal }
+    else { a.overlay.index(0).unwrap_or(0).cmp(&b.overlay.index(0).unwrap_or(0)) }
+}
 
 /// An overlay string recorded by load_overlay_strings.
 #[derive(Clone, Copy)]

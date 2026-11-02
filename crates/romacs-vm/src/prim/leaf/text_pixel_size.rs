@@ -554,7 +554,7 @@ impl Leaf<'_> {
         }
     }
     /// BUFFER's accessible text's first and last positions.
-    fn accessible_positions(&self, buffer: Value) -> std::result::Result<(i64, i64), Fault> {
+    pub(crate) fn accessible_positions(&self, buffer: Value) -> std::result::Result<(i64, i64), Fault> {
         let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { return Err(unsupported("in a unibyte buffer")) };
         let r = b.accessible();
         let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);

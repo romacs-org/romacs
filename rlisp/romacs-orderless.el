@@ -1,14 +1,14 @@
 ;;; romacs-orderless.el --- The orderless completion style, matched natively  -*- lexical-binding: t; -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Copyright (C) 2021-2026 Free Software Foundation, Inc.
+;; Portions Copyright (C) 2021-2026 Free Software Foundation, Inc.,
+;; from orderless.el by Omar Antolín Camarena and Daniel Mendler, kept as the GPL requires.
 
-;; Author: Omar Antolín Camarena <omar@matem.unam.mx>
-;; Maintainer: Omar Antolín Camarena <omar@matem.unam.mx>, Daniel Mendler <mail@daniel-mendler.de>
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 ;; Keywords: matching, completion
-;; URL: https://github.com/oantolin/orderless
 
-;; Romacs: derived from orderless.el, orderless commit e271a8e
+;; Romacs: derived from orderless.el by Omar Antolín Camarena and Daniel
+;; Mendler (https://github.com/oantolin/orderless), orderless commit e271a8e
 ;; ("orderless-expand-substring: Strip common suffix in substring
 ;; expansion"), version 1.8.  What changed is marked "Romacs:" below.
 

@@ -14,7 +14,6 @@ use std::collections::HashMap;
 
 use romacs_display_protocol::frame_time::{EventTime, FrameSample};
 use romacs_display_protocol::motion_spec::MotionSpec;
-use romacs_renderer_wgpu::SnapshotLease;
 
 use crate::core::frame_glyphs::FrameGlyphBuffer;
 use crate::render_thread::frame_compositor::motion::{Motion, ProgressRate};
@@ -83,25 +82,62 @@ pub(crate) struct ChildFrameEntry {
     pub ingest_seq: u64,
     /// The lifecycle animation in progress, if one was started.
     pub animation: Option<EntryAnimation>,
-    /// A content crossfade from the previous presentation's picture, when a
-    /// size-changing update arrived with the resize slot enabled.
-    pub crossfade: Option<EntryCrossfade>,
+    /// A rect tween toward the entry's placed rect, when a size-changing
+    /// update arrived with the resize slot enabled.
+    pub reshape: Option<EntryReshape>,
+    /// The selection band gliding toward its row, when an update moved a
+    /// layer's selection with the selection slot enabled.
+    pub glide: Option<EntryGlide>,
     /// A placement drift toward the entry's settled position, when a
     /// re-anchoring update moved the popup with the movement slot enabled.
     pub drift: Option<EntryDrift>,
 }
 
-/// A content crossfade between the previous presentation's picture and the
-/// freshly installed one.
-pub(crate) struct EntryCrossfade {
+impl ChildFrameEntry {
+    /// Where SAMPLE draws the frame's rect, `[x, y, width, height]`: its
+    /// placed rect, or the reshape's interpolation toward it.
+    pub fn drawn_rect(&self, sample: FrameSample) -> [f32; 4] {
+        let to = [self.abs_x, self.abs_y, self.frame.width, self.frame.height];
+        let Some(reshape) = self.reshape.as_ref() else { return to };
+        let progress = reshape.motion.sample(sample);
+        if progress.finished {
+            return to;
+        }
+        std::array::from_fn(|i| reshape.from[i] + (to[i] - reshape.from[i]) * progress.progress)
+    }
+
+    /// Where SAMPLE draws the selection band's row, if the frame shows one.
+    pub fn drawn_selection_y(&self, sample: FrameSample) -> Option<f32> {
+        let to = self.frame.layer.selection?.y;
+        Some(self.glide.as_ref().map_or(to, |glide| {
+            let progress = glide.motion.sample(sample);
+            if progress.finished { to } else { glide.from_y + (to - glide.from_y) * progress.progress }
+        }))
+    }
+}
+
+/// A rect tween: the frame drawn in a rect travelling from `from` to its
+/// placed rect, its new content placed where it settles and clipped to the
+/// moving rect, over a box of its own background and border. Nothing is
+/// stretched, so no older picture is kept.
+pub(crate) struct EntryReshape {
     pub(in crate::render_thread) motion: Motion,
-    /// The old content's picture, leased from the snapshot pool. Dropping
-    /// the entry returns the lease.
-    pub(in crate::render_thread) old: SnapshotLease,
-    /// The old content's logical size, which may differ from the new
-    /// frame's.
-    pub(in crate::render_thread) old_width: f32,
-    pub(in crate::render_thread) old_height: f32,
+    /// The departure rect, `[x, y, width, height]` in logical surface
+    /// coordinates.
+    pub(in crate::render_thread) from: [f32; 4],
+    /// The frame's background and border without its glyphs, resized to
+    /// the drawn rect before each pass.
+    pub(in crate::render_thread) frame_box: FrameGlyphBuffer,
+}
+
+/// A selection band gliding from `from_y` to the row the payload selects.
+pub(crate) struct EntryGlide {
+    pub(in crate::render_thread) motion: Motion,
+    pub(in crate::render_thread) from_y: f32,
+    /// The payload drawn while the glide runs: its own glyphs, then its base
+    /// colour over the row it settles on, with its band moved before each
+    /// pass; the text draws over the band wherever it is.
+    pub(in crate::render_thread) frame: FrameGlyphBuffer,
 }
 
 /// A placement drift: the popup gliding from where it was drawn to where
@@ -260,35 +296,56 @@ impl ChildFrameManager {
         !self.dying.is_empty()
     }
 
-    /// Attach a resize content crossfade to a freshly updated entry.
-    ///
-    /// Called after `update_frame` replaced the payload: the leased picture
-    /// is the pre-update content, and the crossfade blends it into the new
-    /// payload's picture over the resize slot's curve.
-    pub fn begin_resize_crossfade(
-        &mut self,
-        frame_id: u64,
-        old: SnapshotLease,
-        old_width: f32,
-        old_height: f32,
-        spec: MotionSpec,
-        origin: EventTime,
-    ) {
+    /// Start a rect tween for `frame_id` from `from`, toward its placed rect.
+    pub fn begin_reshape(&mut self, frame_id: u64, from: [f32; 4], spec: MotionSpec, origin: EventTime) {
         if let Some(entry) = self.frames.get_mut(&frame_id)
             && let Some(motion) = Motion::start(spec, origin)
         {
-            entry.crossfade = Some(EntryCrossfade {
-                motion,
-                old,
-                old_width,
-                old_height,
-            });
-            tracing::info!(
-                frame_id,
-                old_width,
-                old_height,
-                "child_frame_lifecycle: resize_crossfade_started"
-            );
+            let mut frame_box = FrameGlyphBuffer::with_size(from[2], from[3]);
+            frame_box.clone_font_bindings_from(&entry.frame);
+            frame_box.presentation_id = entry.frame.presentation_id;
+            frame_box.frame_placement = entry.frame.frame_placement;
+            frame_box.background = entry.frame.background;
+            frame_box.background_alpha = entry.frame.background_alpha;
+            frame_box.border_width = entry.frame.border_width;
+            frame_box.border_color = entry.frame.border_color;
+            frame_box.undecorated = entry.frame.undecorated;
+            // Its look (rounded, lit), not its selection, which the content draws.
+            frame_box.layer = romacs_display_protocol::Layer { selection: None, ..entry.frame.layer };
+            entry.reshape = Some(EntryReshape { motion, from, frame_box });
+            tracing::debug!(frame_id, ?from, "child_frame_lifecycle: reshape_started");
+        }
+    }
+
+    /// Start a selection glide for `frame_id` from band row `from_y`.
+    pub fn begin_glide(&mut self, frame_id: u64, from_y: f32, spec: MotionSpec, origin: EventTime) {
+        let Some(entry) = self.frames.get_mut(&frame_id) else { return };
+        let Some(band) = entry.frame.layer.selection else { return };
+        let Some(motion) = Motion::start(spec, origin) else { return };
+        let mut frame = entry.frame.clone();
+        // Text's own pre-mixed background would show the row it settled on.
+        frame.text_over_backgrounds = true;
+        frame.add_background(band.x, band.y, band.width, band.height, band.base);
+        if let Some(moving) = frame.layer.selection.as_mut() { moving.y = from_y; }
+        entry.glide = Some(EntryGlide { motion, from_y, frame });
+    }
+
+    /// Bring every reshape box and gliding band to where SAMPLE puts it,
+    /// before a pass draws them.
+    pub fn advance(&mut self, sample: FrameSample) {
+        for entry in self.frames.values_mut() {
+            let rect = entry.drawn_rect(sample);
+            if let Some(reshape) = entry.reshape.as_mut() {
+                reshape.frame_box.width = rect[2];
+                reshape.frame_box.height = rect[3];
+            }
+            let to = entry.frame.layer.selection.map(|band| band.y);
+            if let (Some(glide), Some(to)) = (entry.glide.as_mut(), to) {
+                let progress = glide.motion.sample(sample).progress;
+                if let Some(band) = glide.frame.layer.selection.as_mut() {
+                    band.y = glide.from_y + (to - glide.from_y) * progress;
+                }
+            }
         }
     }
 
@@ -385,68 +442,39 @@ impl ChildFrameManager {
         before != after
     }
 
-    /// Drop crossfades whose mix has finished at `sample`; the leases they
-    /// held return to the pool. Returns whether anything was removed, so the
-    /// caller repaints once more.
-    pub fn prune_crossfades(&mut self, sample: FrameSample) -> bool {
-        let before = self
-            .frames
-            .values()
-            .filter(|entry| entry.crossfade.is_some())
-            .count();
-        for entry in self.frames.values_mut() {
-            if entry
-                .crossfade
-                .as_ref()
-                .is_some_and(|crossfade| crossfade.motion.sample(sample).finished)
-            {
-                entry.crossfade = None;
-            }
-        }
-        let after = self
-            .frames
-            .values()
-            .filter(|entry| entry.crossfade.is_some())
-            .count();
-        before != after
-    }
-
     /// Reclaim time-expired composition ownership before mandatory admission.
     /// Sampling expiry is pure: do not advance drift, placement or the submitted
     /// interaction projection when a frame might still be refused.
     pub fn reclaim_finished_composition(&mut self, sample: FrameSample) -> bool {
-        let mut changed = self.prune_crossfades(sample);
-        changed |= self.prune_dying(sample);
+        let mut changed = self.prune_dying(sample);
         for entry in self.frames.values_mut() {
-            if entry
-                .animation
-                .as_ref()
-                .is_some_and(|animation| animation.motion.sample(sample).finished)
-            {
+            let finished = |motion: Option<&Motion>| motion.is_some_and(|motion| motion.sample(sample).finished);
+            if finished(entry.animation.as_ref().map(|a| &a.motion)) {
                 entry.animation = None;
+                changed = true;
+            }
+            if finished(entry.reshape.as_ref().map(|r| &r.motion)) {
+                entry.reshape = None;
+                changed = true;
+            }
+            if finished(entry.glide.as_ref().map(|g| &g.motion)) {
+                entry.glide = None;
                 changed = true;
             }
         }
         changed
     }
 
-    /// Drop every crossfade, returning their leases to the pool. The
-    /// device-loss path calls this: the leased textures died with the
-    /// device.
-    pub fn drop_all_crossfades(&mut self) {
+    /// End every animation at once, as a key does: each frame settles where
+    /// Lisp put it, and fading corpses go. Returns whether any ran.
+    pub fn finish_animations(&mut self) -> bool {
+        let mut changed = !self.dying.is_empty();
+        self.dying.clear();
         for entry in self.frames.values_mut() {
-            entry.crossfade = None;
+            changed |= entry.animation.take().is_some() | entry.reshape.take().is_some()
+                | entry.glide.take().is_some() | entry.drift.take().is_some();
         }
-    }
-
-    /// Whether any living entry carries a crossfade whose mix is unfinished.
-    pub fn has_active_crossfade(&self, sample: FrameSample) -> bool {
-        self.frames.values().any(|entry| {
-            entry
-                .crossfade
-                .as_ref()
-                .is_some_and(|crossfade| !crossfade.motion.sample(sample).finished)
-        })
+        changed
     }
 
     /// Record where a drifting frame was painted this pass, for the next
@@ -477,7 +505,7 @@ impl ChildFrameManager {
     /// alpha it had when the texture was last built.
     pub fn has_animation_activity(&self) -> bool {
         self.frames.values().any(|entry| {
-            entry.animation.is_some() || entry.crossfade.is_some() || entry.drift.is_some()
+            entry.animation.is_some() || entry.reshape.is_some() || entry.glide.is_some() || entry.drift.is_some()
         }) || self.has_dying()
     }
 
@@ -493,9 +521,13 @@ impl ChildFrameManager {
                     .as_ref()
                     .is_some_and(|drift| !drift.motion.sample(sample).finished)
                 || entry
-                    .crossfade
+                    .reshape
                     .as_ref()
-                    .is_some_and(|crossfade| !crossfade.motion.sample(sample).finished)
+                    .is_some_and(|reshape| !reshape.motion.sample(sample).finished)
+                || entry
+                    .glide
+                    .as_ref()
+                    .is_some_and(|glide| !glide.motion.sample(sample).finished)
         }) || self
             .dying
             .iter()
@@ -526,6 +558,16 @@ impl ChildFrameManager {
             .frames
             .get_mut(&frame_id.get())
             .and_then(|entry| entry.drift.take());
+        // A tween and a glide belong to the popup too; the update that
+        // replaces the payload decides whether to retarget them.
+        let previous_reshape = self
+            .frames
+            .get_mut(&frame_id.get())
+            .and_then(|entry| entry.reshape.take());
+        let previous_glide = self
+            .frames
+            .get_mut(&frame_id.get())
+            .and_then(|entry| entry.glide.take());
         let existing = self.frames.get_mut(&frame_id.get());
 
         // A re-delivery of a frame that is fading out cancels the fade: the
@@ -604,10 +646,8 @@ impl ChildFrameManager {
                 // and restarting its fade on every keystroke would read as
                 // flicker.
                 animation: previous_animation,
-                // A payload replace starts its own crossfade story; any
-                // in-flight one belongs to the replaced payload and drops
-                // with it.
-                crossfade: None,
+                reshape: previous_reshape,
+                glide: previous_glide,
                 // A placement drift belongs to the popup, not to one
                 // payload: the fresh entry settles at the same placed
                 // position the drift was gliding toward.

@@ -23,14 +23,31 @@ pub struct PaintDiagnostic {
 pub(crate) struct PaintDiagnostics {
     latest: std::sync::Mutex<Option<PaintDiagnostic>>,
     changed: std::sync::Condvar,
+    /// The adapter the window draws with: 0 not chosen yet, 1 a GPU, 2 a
+    /// software rasterizer (wgpu's `DeviceType::Cpu`).
+    adapter: std::sync::atomic::AtomicU8,
 }
 
 impl PaintDiagnostics {
+    pub(crate) fn publish_adapter(&self, software: bool) {
+        self.adapter.store(if software { 2 } else { 1 }, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn software_adapter(&self) -> Option<bool> {
+        match self.adapter.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => None,
+            kind => Some(kind == 2),
+        }
+    }
+
     pub(crate) fn publish(&self, diagnostic: PaintDiagnostic) {
         *self.latest.lock().unwrap() = Some(diagnostic);
         self.changed.notify_all();
     }
 
+    /// The latest sample once PRESENTATION or a later one has rendered: the
+    /// renderer draws only its newest frame, so a later presentation drawn
+    /// supersedes an earlier one it never drew.
     fn wait(
         &self,
         presentation: u64,
@@ -43,11 +60,11 @@ impl PaintDiagnostics {
                     .lock()
                     .map_err(|_| "paint diagnostic lock poisoned")?,
                 timeout,
-                |latest| latest.is_none_or(|sample| sample.presentation != presentation),
+                |latest| latest.is_none_or(|sample| sample.presentation < presentation),
             )
             .map_err(|_| "paint diagnostic lock poisoned")?;
         latest
-            .filter(|sample| sample.presentation == presentation)
+            .filter(|sample| sample.presentation >= presentation)
             .ok_or_else(|| format!("no rendered atlas diagnostic for presentation {presentation}"))
     }
 }
@@ -86,6 +103,11 @@ mod diagnostic_tests {
                 presentation: 2,
                 unresolved_face_text_total: 27,
             }
+        );
+        assert_eq!(
+            state.wait(1, Duration::ZERO).unwrap().presentation,
+            2,
+            "a later presentation drawn settles an earlier one never drawn"
         );
     }
 
@@ -241,6 +263,12 @@ fn latency_receipt_does_not_pair_a_discarded_native_event() {
 }
 
 impl PaintSender {
+    /// Whether the window draws on a software rasterizer: None until the
+    /// render thread has chosen its adapter.
+    pub fn software_adapter(&self) -> Option<bool> {
+        self.diagnostics.software_adapter()
+    }
+
     /// Read CLIPBOARD text through the existing display-owned worker. Only the
     /// evaluator waits, for at most one second; native I/O never runs here or
     /// on the render thread. Absence of text is distinct from transport errors.
@@ -285,8 +313,8 @@ impl PaintSender {
     }
 
     /// Wait for a successfully rendered primary presentation, not merely ingress
-    /// activation. Submit sequentially: this bounded snapshot retains only the
-    /// latest presentation. No sample exists before the first successful render.
+    /// activation: PRESENTATION or a later one, since this bounded snapshot
+    /// retains only the latest. No sample exists before the first successful render.
     pub fn wait_for_render(
         &self,
         presentation: u64,
@@ -299,20 +327,27 @@ impl PaintSender {
     /// backpressure rather than silently dropping a repaint. The producer must
     /// use PRIMARY_FRAME and a fresh nonzero presentation ID for every revision.
     pub fn submit(&self, frame: FrameGlyphBuffer) -> Result<(), String> {
-        self.submit_scene(frame, Vec::new())
+        self.submit_scene(frame, Vec::new(), Vec::new())
     }
 
-    /// Queue a frame and the child frames shown over it, lowest first, as
-    /// one paint: each child names PRIMARY_FRAME as its parent and carries
-    /// the frame's presentation. A child the last scene showed and this one
-    /// does not is removed.
-    pub fn submit_scene(&self, frame: FrameGlyphBuffer, children: Vec<FrameGlyphBuffer>) -> Result<(), String> {
+    /// Queue a frame, the child frames shown over it, lowest first, and the
+    /// text animations drawn over it, as one paint: each child names
+    /// PRIMARY_FRAME as its parent and carries the frame's presentation. A
+    /// child or an animation the last scene showed and this one does not is
+    /// removed.
+    pub fn submit_scene(
+        &self,
+        frame: FrameGlyphBuffer,
+        children: Vec<FrameGlyphBuffer>,
+        text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
+    ) -> Result<(), String> {
         validate_frame(&frame)?;
         validate_children(&frame, &children)?;
+        let scene = crate::thread_comm::PaintScene { root: frame, children, text_animations };
         let result = self
             .comms
             .cmd_tx
-            .try_send(RenderCommand::Paint(Box::new(crate::thread_comm::PaintScene { root: frame, children })))
+            .try_send(RenderCommand::Paint(Box::new(scene)))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result

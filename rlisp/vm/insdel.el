@@ -2,6 +2,7 @@
 ;;; insdel.el --- VM2: the Lisp half of buffer text changes  -*- lexical-binding: t -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
 

@@ -149,6 +149,9 @@ impl RenderApp {
     /// its capture ends at once (both reported before any later input),
     /// and it rejoins only by presenting after exposure (design §6.2).
     pub(super) fn handle_window_occluded(&mut self, emacs_frame_id: u64, occluded: bool) {
+        if let Some(window) = self.frame_windows.get_mut(emacs_frame_id) {
+            window.render.compositor.text_animations.occlude(occluded);
+        }
         if occluded {
             self.note_models_window_hidden(emacs_frame_id);
         } else {
@@ -338,6 +341,9 @@ impl RenderApp {
                         .set_focused(super::frame_sched::NativeWindowId(sched_id), focused);
                 }
                 self.handle_window_focus_models(emacs_fid, focused);
+                if let Some(window) = self.frame_windows.get_by_winit_mut(window_id) {
+                    window.render.compositor.text_animations.focus(focused);
+                }
                 if !focused {
                     // Focus left: any modifier-side observation is stale
                     // (the keys are tracked on this window's own key
@@ -403,6 +409,11 @@ impl RenderApp {
                 // only place winit distinguishes left from right, and they
                 // must be recorded before anything consumes the aggregate.
                 self.track_modifier_key(physical_key, state == ElementState::Pressed);
+                // Input never waits for a layer: a key ends every layer
+                // animation where Lisp already put the layer.
+                if state == ElementState::Pressed {
+                    self.frame_windows.finish_top_level_child_frame_animations();
+                }
                 #[cfg(feature = "webview")]
                 if let Some(target) = self.focused_webview {
                     use winit::platform::scancode::PhysicalKeyExtScancode;

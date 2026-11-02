@@ -210,7 +210,7 @@ class Session:
         home = self.root / 'home'
         path = os.environ.get('PATH', '/usr/bin:/bin')
         env = {'PATH': f'{self.args.tools}:{path}' if self.args.tools else path,
-               'HOME': str(home), 'LANG': 'C.UTF-8', 'XDG_RUNTIME_DIR': str(self.root),
+               'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1', 'XDG_RUNTIME_DIR': str(self.root),
                'XDG_CONFIG_HOME': str(home / 'config'), 'XDG_CACHE_HOME': str(home / 'cache'),
                'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'),
                'TMPDIR': str(self.root), 'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman',

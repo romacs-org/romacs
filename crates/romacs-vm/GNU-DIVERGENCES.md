@@ -239,7 +239,7 @@ the root ledger.
 
 ## D001 — Unicode scalar string mutation
 
-**Deliberate owner decision:** `aset` on a Unicode string permits replacement of any Unicode scalar by any Unicode scalar, even when UTF-8 width changes. Byte strings remain octet arrays: only integers 0–255 may be stored. Invalid scalars, octets and indices still signal.
+**Deliberate Romacs decision:** `aset` on a Unicode string permits replacement of any Unicode scalar by any Unicode scalar, even when UTF-8 width changes. Byte strings remain octet arrays: only integers 0–255 may be stored. Invalid scalars, octets and indices still signal.
 
 GNU's storage restriction is not reproduced in the one-model UTF-8 representation. In particular, replacing β with the identical β is meaningful and safe, but GNU rejects it. The restriction concerns representation, not the meaning of indexed scalar replacement.
 
@@ -590,6 +590,17 @@ Romacs: (3 4 1 0 2)
 GNU: (3 0 1 4 2)
 Romacs: (3 4 1 0 2)
 ```
+
+`overlays-at` with SORTED, character properties and overlay faces order
+overlays by GNU's `compare_overlays` (buffer.c), which is not transitive, so
+its input is GNU's too: ascending start, equal starts latest inserted first
+(itree_insert_node; `move-overlay` reinserts when the start moves), merged
+as glibc's qsort does (`src/overlay_order.rs`). An edit that brings two
+overlay starts together keeps Romacs's insertion order where GNU keeps its
+tree's. Where two overlays tie on priority, secondary priority and range,
+GNU orders them by object address and Romacs by heap index; both follow
+creation order for overlays made in sequence
+(`crates/romacs-vm-gui/tests/gnu_arity_fixes.rs` against pinned GNU).
 
 ## Reversed overlays-in bounds are swapped
 
