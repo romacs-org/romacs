@@ -4,6 +4,8 @@
 #[cfg(test)]
 mod callint_tests;
 #[cfg(test)]
+mod search_scaling_tests;
+#[cfg(test)]
 mod file_name_handler_tests;
 #[cfg(test)]
 mod keymap_tests;

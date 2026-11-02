@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 enum Body<'a> {
     /// The text, its str, and a reader of its `syntax-table' properties.
-    Multibyte(&'a crate::text::Text, &'a str, crate::properties::KeyReader<'a>),
+    Multibyte(&'a crate::text::Text, crate::properties::KeyReader<'a>),
     Unibyte(&'a crate::bytes::ByteBuffer),
 }
 
@@ -46,7 +46,7 @@ impl<'a> View<'a> {
         let body = match &vm.objects[index] {
             data::Object::Buffer(b) => {
                 let text: &crate::text::Text = b;
-                Body::Multibyte(text, text.as_str(), text.properties.reader("syntax-table"))
+                Body::Multibyte(text, text.properties.reader("syntax-table"))
             }
             data::Object::ByteBuffer(b) => Body::Unibyte(b),
             _ => unreachable!("buffer_index validates"),
@@ -56,13 +56,13 @@ impl<'a> View<'a> {
     }
     fn len(&self) -> usize {
         match self.body {
-            Body::Multibyte(_, text, _) => text.len(),
+            Body::Multibyte(t, _) => t.len_bytes(),
             Body::Unibyte(b) => b.bytes.len(),
         }
     }
     fn property(&self, byte: usize) -> Option<Value> {
         match self.body {
-            Body::Multibyte(_, _, ref reader) => reader.get(ByteOffset(byte)),
+            Body::Multibyte(_, ref reader) => reader.get(ByteOffset(byte)),
             Body::Unibyte(b) => b.properties.get(&ByteOffset(byte)).and_then(|p| p.get("syntax-table")).copied(),
         }
     }
@@ -71,7 +71,7 @@ impl<'a> View<'a> {
 impl scan::Text for View<'_> {
     fn char_at(&self, at: Pos) -> u32 {
         match self.body {
-            Body::Multibyte(t, _, _) => t.character_at(ByteOffset(at.byte)).ok().flatten().map_or(0, |c| c as u32),
+            Body::Multibyte(t, _) => t.character_at(ByteOffset(at.byte)).ok().flatten().map_or(0, |c| c as u32),
             Body::Unibyte(b) => b.bytes.get(at.byte).map_or(0, |&byte| {
                 if byte < 128 { u32::from(byte) } else { u32::from(byte) + crate::lstring::BYTE8_OFFSET }
             }),
@@ -80,24 +80,24 @@ impl scan::Text for View<'_> {
     fn inc(&self, at: Pos) -> Pos {
         let width = match self.body {
             // A placeholder's UTF-8 width is its raw byte's internal width.
-            Body::Multibyte(_, text, _) => text.get(at.byte..).and_then(|s| s.chars().next()).map_or(1, char::len_utf8),
+            Body::Multibyte(t, _) => t.char_width_at(at.byte),
             Body::Unibyte(_) => 1,
         };
         Pos { char: at.char + 1, byte: at.byte + width }
     }
     fn dec(&self, at: Pos) -> Pos {
         let mut byte = at.byte.saturating_sub(1).min(self.len());
-        if let Body::Multibyte(_, text, _) = self.body {
-            while byte > 0 && !text.is_char_boundary(byte) { byte -= 1; }
+        if let Body::Multibyte(t, _) = self.body && byte < self.len() {
+            byte = t.char_start_before(byte + 1);
         }
         Pos { char: at.char - 1, byte }
     }
     fn pos(&self, charpos: i64) -> Pos {
         match self.body {
-            Body::Multibyte(t, text, _) => {
+            Body::Multibyte(t, _) => {
                 let chars = t.len_chars() as i64;
                 let c = charpos.clamp(1, chars + 1);
-                let byte = t.byte_of_char(CharOffset(c as usize - 1)).map_or(text.len(), |b| b.0);
+                let byte = t.byte_of_char(CharOffset(c as usize - 1)).map_or(t.len_bytes(), |b| b.0);
                 Pos { char: c, byte }
             }
             Body::Unibyte(b) => {

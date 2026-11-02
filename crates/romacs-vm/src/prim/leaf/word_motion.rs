@@ -25,53 +25,59 @@ impl Leaf<'_> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let syntax = crate::regexp::VmSyntax::new(self.vm, source);
         // Byte offsets stay relative to the accessible region, matching the
-        // syntax properties.
-        let (characters, start, end): (Vec<(usize, u32)>, usize, usize) =
-            match &self.vm.objects[index] {
-                data::Object::Buffer(buffer) => {
-                    let r = buffer.accessible();
-                    (
-                        // Each character's code, a raw byte's as itself.
-                        buffer.as_str()[r.start.0..r.end.0].char_indices()
-                            .map(|(i, c)| (i, buffer.character_at(crate::coordinates::ByteOffset(r.start.0 + i)).ok().flatten().map_or(u32::from(c), |code| code as u32)))
-                            .collect(),
-                        buffer.point.0 - r.start.0,
-                        r.end.0 - r.start.0,
-                    )
-                }
-                data::Object::ByteBuffer(buffer) => {
-                    let r = &buffer.restriction;
-                    (
-                        buffer.bytes[r.start.0..r.end.0]
-                            .iter().enumerate().map(|(i, &c)| (i, u32::from(c))).collect(),
-                        buffer.point.0 - r.start.0,
-                        r.end.0 - r.start.0,
-                    )
-                }
-                _ => return Err(Fault::Error("buffer required".into())),
-            };
-        let word = |i: usize| {
-            let (offset, code) = characters[i];
-            syntax.code_syntax_at(code, offset) == SyntaxClass::Word
+        // syntax properties. Characters are read where they lie, from
+        // point on, so a motion costs the text it crosses.
+        let (low, start, end) = match &self.vm.objects[index] {
+            data::Object::Buffer(buffer) => {
+                let r = buffer.accessible();
+                (r.start.0, buffer.point.0 - r.start.0, r.end.0 - r.start.0)
+            }
+            data::Object::ByteBuffer(buffer) => {
+                let r = &buffer.restriction;
+                (r.start.0, buffer.point.0 - r.start.0, r.end.0 - r.start.0)
+            }
+            _ => return Err(Fault::Error("buffer required".into())),
         };
-        let mut at = characters.partition_point(|&(offset, _)| offset < start);
+        let objects = &self.vm.objects;
+        // The code of the character at OFFSET, a raw byte's as itself, and
+        // the offset after it.
+        let after = |offset: usize| -> (u32, usize) {
+            match &objects[index] {
+                data::Object::Buffer(buffer) => {
+                    let at = low + offset;
+                    let code = buffer.character_at(ByteOffset(at)).ok().flatten().map_or(0, |code| code as u32);
+                    (code, offset + buffer.char_width_at(at))
+                }
+                data::Object::ByteBuffer(buffer) => (u32::from(buffer.bytes[low + offset]), offset + 1),
+                _ => unreachable!("buffer_index validates"),
+            }
+        };
+        let before = |offset: usize| -> usize {
+            match &objects[index] {
+                data::Object::Buffer(buffer) => buffer.char_start_before(low + offset) - low,
+                _ => offset - 1,
+            }
+        };
+        let word = |offset: usize| syntax.code_syntax_at(after(offset).0, offset) == SyntaxClass::Word;
+        let next = |offset: usize| after(offset).1;
+        let mut at = start;
         let mut remaining = count.unsigned_abs();
         let forward = count > 0;
         while remaining != 0 {
             if forward {
-                while at < characters.len() && !word(at) { at += 1; }
-                if at == characters.len() { break; }
-                at += 1;
-                while at < characters.len() && word(at) { at += 1; }
+                while at < end && !word(at) { at = next(at); }
+                if at == end { break; }
+                at = next(at);
+                while at < end && word(at) { at = next(at); }
             } else {
-                while at > 0 && !word(at - 1) { at -= 1; }
+                while at > 0 && !word(before(at)) { at = before(at); }
                 if at == 0 { break; }
-                at -= 1;
-                while at > 0 && word(at - 1) { at -= 1; }
+                at = before(at);
+                while at > 0 && word(before(at)) { at = before(at); }
             }
             remaining -= 1;
         }
-        let offset = characters.get(at).map_or(end, |&(offset, _)| offset);
+        let offset = at;
         drop(syntax);
         match &mut self.vm.objects[index] {
             data::Object::Buffer(buffer) => {

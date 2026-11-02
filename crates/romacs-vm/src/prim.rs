@@ -323,8 +323,8 @@ mod leaf {
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
             let error = |e: String| Fault::Error(e);
             // Byte scans: a newline byte is never part of another character.
-            let (text, point, low, high): (&[u8], usize, usize, usize) = match &self.vm.objects[index] {
-                data::Object::Buffer(b) => { let range = b.accessible(); (b.as_str().as_bytes(), b.point.0, range.start.0, range.end.0) }
+            let (text, point, low, high): (&dyn crate::text::Newlines, usize, usize, usize) = match &self.vm.objects[index] {
+                data::Object::Buffer(b) => { let range = b.accessible(); (b.body(), b.point.0, range.start.0, range.end.0) }
                 data::Object::ByteBuffer(b) => (&b.bytes, b.point.0, b.restriction.start.0, b.restriction.end.0),
                 _ => unreachable!(),
             };
@@ -2522,13 +2522,13 @@ mod tests {
 /// The start of the line LINES lines from the one holding byte POINT of
 /// TEXT, within LOW..HIGH (`forward-line' from that line's start): at LOW
 /// or HIGH when there are fewer lines.
-pub(crate) fn line_beginning(text: &[u8], low: usize, high: usize, point: usize, lines: i64) -> usize {
-    let start_of = |at: usize| text[low..at].iter().rposition(|&c| c == b'\n').map_or(low, |i| low + i + 1);
+pub(crate) fn line_beginning(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, lines: i64) -> usize {
+    let start_of = |at: usize| text.previous_newline(at, low).map_or(low, |i| i + 1);
     let mut pos = start_of(point);
     if lines >= 0 {
         for _ in 0..lines {
-            match text[pos..high].iter().position(|&c| c == b'\n') {
-                Some(i) => pos += i + 1,
+            match text.next_newline(pos, high) {
+                Some(i) => pos = i + 1,
                 None => return high,
             }
         }
@@ -2544,20 +2544,20 @@ pub(crate) fn line_beginning(text: &[u8], low: usize, high: usize, point: usize,
 /// GNU find_before_next_newline from byte POINT of TEXT within LOW..HIGH:
 /// for COUNT > 0 the COUNTth newline on, else the -COUNTth newline back;
 /// with fewer newlines, HIGH or LOW.
-pub(crate) fn line_end_after(text: &[u8], low: usize, high: usize, point: usize, count: i64) -> usize {
+pub(crate) fn line_end_after(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, count: i64) -> usize {
     let mut pos = point;
     if count > 0 {
         for _ in 0..count {
-            match text[pos..high].iter().position(|&c| c == b'\n') {
-                Some(i) => pos += i + 1,
+            match text.next_newline(pos, high) {
+                Some(i) => pos = i + 1,
                 None => return high,
             }
         }
         return pos - 1;
     }
     for _ in count..0 {
-        match text[low..pos].iter().rposition(|&c| c == b'\n') {
-            Some(i) => pos = low + i,
+        match text.previous_newline(pos, low) {
+            Some(i) => pos = i,
             None => return low,
         }
     }
@@ -2613,6 +2613,20 @@ mod line_scan_tests {
                     let (bl, bh, bp) = (byte(low), byte(high), byte(point));
                     assert_eq!(char_of(line_beginning(text.as_bytes(), bl, bh, bp, count)), bol_chars(&chars, low, high, point, count), "bol {low}..{high} at {point} by {count}");
                     assert_eq!(char_of(line_end_after(text.as_bytes(), bl, bh, bp, count)), eol_chars(&chars, low, high, point, count), "eol {low}..{high} at {point} by {count}");
+                }
+            }
+        }
+        // A rope of many chunks scans as its flat text does.
+        let long = text.repeat(400);
+        let rope = crate::text::Text::new(long.as_bytes()).unwrap();
+        let body: &crate::text::TextBody = &rope;
+        assert!(body.chunks().count() > 4);
+        for point in (0..long.len()).step_by(97).filter(|&b| long.is_char_boundary(b)) {
+            for count in [-30, -2, -1, 0, 1, 2, 30] {
+                for (low, high) in [(0, long.len()), (1200, long.len() - 900)] {
+                    let point = point.clamp(low, high);
+                    assert_eq!(line_beginning(body, low, high, point, count), line_beginning(long.as_bytes(), low, high, point, count));
+                    assert_eq!(line_end_after(body, low, high, point, count), line_end_after(long.as_bytes(), low, high, point, count));
                 }
             }
         }

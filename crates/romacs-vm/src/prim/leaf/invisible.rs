@@ -11,31 +11,34 @@ impl Leaf<'_> {
     /// Point's line within the accessible text, point's byte offset in it,
     /// and the line's absolute byte start.
     fn line_text(&mut self) -> std::result::Result<(String, usize, usize), Fault> {
+        use crate::text::Newlines as _;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let (text, low, point, raw) = match &self.vm.objects[index] {
+        let (text, start, point, raw) = match &self.vm.objects[index] {
             crate::data::Object::Buffer(b) => {
-                let r = b.accessible();
-                (&b.as_str()[r.start.0..r.end.0], r.start.0, b.point.0, b.raw_in(r.start.0..r.end.0).to_vec())
+                let (r, point, body) = (b.accessible(), b.point.0, b.body());
+                let start = body.previous_newline(point, r.start.0).map_or(r.start.0, |at| at + 1);
+                let end = body.next_newline(point, r.end.0).unwrap_or(r.end.0);
+                let text = b.slice(crate::coordinates::ByteOffset(start)..crate::coordinates::ByteOffset(end)).map_err(Fault::Error)?;
+                (text, start, point, b.raw_in(start..end).to_vec())
             }
             crate::data::Object::ByteBuffer(b) => {
-                let r = &b.restriction;
-                (std::str::from_utf8(&b.bytes[r.start.0..r.end.0])
-                    .map_err(|_| Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()))?, r.start.0, b.point.0, vec![])
+                let (r, point) = (b.restriction.start.0..b.restriction.end.0, b.point.0);
+                let start = b.bytes.previous_newline(point, r.start).map_or(r.start, |at| at + 1);
+                let end = b.bytes.next_newline(point, r.end).unwrap_or(r.end);
+                let text = std::str::from_utf8(&b.bytes[start..end])
+                    .map_err(|_| Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()))?;
+                (std::borrow::Cow::Borrowed(text), start, point, vec![])
             }
             _ => unreachable!(),
         };
-        let point = point - low;
-        if !text.is_char_boundary(point) {
+        if !text.is_char_boundary(point - start) {
             return Err(Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()));
         }
-        let start = text[..point].rfind('\n').map_or(0, |at| at + 1);
-        let end = text[point..].find('\n').map_or(text.len(), |at| point + at);
         // A raw byte shows as `\NNN': four columns, like a C1 control.
-        let line_start = low + start;
-        let line: String = text[start..end].char_indices()
-            .map(|(at, c)| if raw.binary_search(&((line_start + at) as u32)).is_ok() { '\u{80}' } else { c })
+        let line: String = text.char_indices()
+            .map(|(at, c)| if raw.binary_search(&((start + at) as u32)).is_ok() { '\u{80}' } else { c })
             .collect();
-        Ok((line, point - start, low + start))
+        Ok((line, point - start, start))
     }
     pub fn set_point_byte(&mut self, byte: usize) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;

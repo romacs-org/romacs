@@ -236,7 +236,7 @@ impl Vm {
         let lines = (laid.body_height / self.min_row_height() as f32).ceil() as i64 + 1;
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let accessible = b.accessible();
-        let from = crate::prim::line_beginning(b.as_str().as_bytes(), accessible.start.0, accessible.end.0, point_byte, -lines);
+        let from = crate::prim::line_beginning(b.body(), accessible.start.0, accessible.end.0, point_byte, -lines);
         let Some(rows) = self.rows_between(window, from, point_byte)? else { return Ok(None) };
         Ok(Some(start_for_point(&rows, point_byte, laid.body_height, (minimal, point_byte >= start_byte), back)))
     }

@@ -1,6 +1,7 @@
 //! Lisp search boundary. Only owned text and integer offsets reach the engine.
 use crate::{coordinates::*, data::Object, *};
 use romacs_regex_engine::{self as regex, EmacsStr, MatchRegisters};
+use std::ops::Range;
 #[path = "regexp_syntax.rs"]
 mod syntax;
 pub(crate) use syntax::{parse_syntax_descriptor, VmSyntax};
@@ -108,30 +109,35 @@ impl Input {
     }
 }
 
-/// The current buffer's accessible text for one search, read in place:
-/// the engine gets its bytes and positions convert through the buffer's
-/// own character index, so a search costs what it reads, not the buffer.
+/// Bytes on either side of what a buffer search reaches that its window
+/// also holds: an assertion reads at most the character before or after
+/// a position (`\b', `^', `$', `\_<'), four bytes at most, so a window
+/// that does not end at the accessible text's bound gives the engine no
+/// false bound there. Edit-and-search loops move the gap about twice this
+/// per step.
+const SEARCH_MARGIN: usize = 16;
+
+/// A run of the current buffer's accessible text for one search, read in
+/// place: the engine gets its bytes and positions convert through the
+/// buffer's own character index, so a search costs what it reads, not the
+/// buffer.
 struct BufferInput<'a> {
     bytes: &'a [u8],
     /// None for a unibyte buffer, whose characters are its bytes.
     text: Option<&'a crate::text::TextBody>,
+    /// The byte of the text BYTES start at.
     start: usize,
-    /// The one-based character position of the text's first byte.
+    /// The one-based character position of the accessible text's start,
+    /// from which [`Self::character`] counts.
     base_char: usize,
-    chars: usize,
     /// Point, as a byte of BYTES.
     point: usize,
 }
 impl BufferInput<'_> {
-    /// The characters in BYTES before byte BYTE.
+    /// The characters of the accessible text before byte BYTE of BYTES.
     fn character(&self, byte: usize) -> SearchResult<usize> {
         let Some(t) = self.text else { return Ok(byte) };
         Ok(t.char_of_byte(ByteOffset(self.start + byte))?.0 + 1 - self.base_char)
-    }
-    /// The byte of BYTES at which character CHARACTER starts.
-    fn byte(&self, character: usize) -> SearchResult<usize> {
-        let Some(t) = self.text else { return Ok(character) };
-        Ok(t.byte_of_char(CharOffset(self.base_char - 1 + character))?.0 - self.start)
     }
 }
 
@@ -341,22 +347,39 @@ impl Vm {
         body: impl FnOnce(&str, usize, &mut dyn FnMut(usize, usize) -> Option<usize>) -> T) -> std::result::Result<T, prim::Fault> {
         let run = |vm: &mut Self| -> SearchResult<T> {
             let index = vm.buffer_index()?;
-            let Object::Buffer(b) = &vm.objects[index] else { return Err(Fault::Internal("multibyte buffer required".into())) };
-            let accessible = b.accessible();
-            let mut text = b.as_str()[accessible.start.0..accessible.end.0].to_owned();
-            // BODY's text has, at a raw byte's two bytes, a character GNU's
-            // bidi classes also count as strong left-to-right (U+00AA), so
-            // the raw byte neither reads as its Latin-1 code nor moves an
-            // offset; the matcher reads GNU's internal form.
-            for &p in b.raw_in(accessible.start.0..accessible.end.0) {
-                let at = p as usize - accessible.start.0;
-                text.replace_range(at..at + 2, "\u{aa}");
-            }
-            let internal = b.internal(accessible.clone())?.into_owned();
-            let point = b.point.0.clamp(accessible.start.0, accessible.end.0) - accessible.start.0;
+            if !matches!(vm.objects[index], Object::Buffer(_)) { return Err(Fault::Internal("multibyte buffer required".into())) }
             let patterns = patterns.iter().map(|&p| vm.regexp_input(p)).collect::<SearchResult<Vec<_>>>()?;
             let source = vm.regexp_syntax(None)?;
             let compiled = patterns.iter().map(|p| vm.regexp_compiled(p, true, false, false, &source)).collect::<SearchResult<Vec<_>>>()?;
+            // Compiling may have collected: find the buffer again.
+            let index = vm.buffer_index()?;
+            let Object::Buffer(b) = &mut vm.objects[index] else { return Err(Fault::Internal("multibyte buffer required".into())) };
+            let accessible = b.accessible();
+            let range = accessible.start.0..accessible.end.0;
+            // Without raw bytes the text is its internal form: both read
+            // the accessible text in place, as one window.
+            let raw = !b.raw_in(range.clone()).is_empty();
+            if !raw {
+                b.search_window(range.clone(), range.clone());
+            }
+            let Object::Buffer(b) = &vm.objects[index] else { unreachable!("checked above") };
+            let (text, internal) = if raw {
+                let mut text = b.slice(accessible.clone())?.into_owned();
+                // BODY's text has, at a raw byte's two bytes, a character GNU's
+                // bidi classes also count as strong left-to-right (U+00AA), so
+                // the raw byte neither reads as its Latin-1 code nor moves an
+                // offset; the matcher reads GNU's internal form.
+                for &p in b.raw_in(range.clone()) {
+                    let at = p as usize - range.start;
+                    text.replace_range(at..at + 2, "\u{aa}");
+                }
+                (std::borrow::Cow::Owned(text), b.internal(accessible.clone())?)
+            } else {
+                let bytes = b.search_bytes(range.clone());
+                let text = std::str::from_utf8(bytes).map_err(|e| Fault::Internal(e.to_string()))?;
+                (std::borrow::Cow::Borrowed(text), std::borrow::Cow::Borrowed(bytes))
+            };
+            let point = b.point.0.clamp(accessible.start.0, accessible.end.0) - accessible.start.0;
             let syntax = syntax::VmSyntax::new(vm, source);
             let mut looks = |pattern: usize, at: usize| {
                 let found = regex::re_match(&compiled[pattern].borrow(), &internal, at, internal.len(), &syntax, point);
@@ -543,35 +566,56 @@ impl Vm {
         let view = self.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
         Ok(Input::new(view.bytes().to_vec(), view.chars, view.is_multibyte()))
     }
-    /// The accessible text of the buffer at object INDEX, for one search.
-    fn regexp_buffer_input(&self, index: usize) -> SearchResult<BufferInput<'_>> {
+    /// The current buffer's accessible bytes, the one-based character
+    /// position of their start and their characters, and point's byte:
+    /// what a search needs before it reads any text.
+    fn regexp_buffer_frame(&self, index: usize) -> SearchResult<(Range<usize>, usize, usize, usize)> {
         Ok(match &self.objects[index] {
             Object::Buffer(t) => {
                 let r = t.accessible();
-                let body: &crate::text::TextBody = t;
                 let base = t.char_of_byte(r.start)?.0;
-                BufferInput {
-                    bytes: &t.bytes()[r.start.0..r.end.0],
-                    text: Some(body),
-                    start: r.start.0,
-                    base_char: base + 1,
-                    chars: t.char_of_byte(r.end)?.0 - base,
-                    point: t.point.0 - r.start.0,
-                }
+                (r.start.0..r.end.0, base + 1, t.char_of_byte(r.end)?.0 - base, t.point.0)
             }
             Object::ByteBuffer(t) => {
-                let r = &t.restriction;
-                BufferInput {
-                    bytes: &t.bytes[r.start.0..r.end.0],
-                    text: None,
-                    start: r.start.0,
-                    base_char: r.start.0 + 1,
-                    chars: r.end.0 - r.start.0,
-                    point: t.point.0 - r.start.0,
-                }
+                let r = t.restriction.start.0..t.restriction.end.0;
+                (r.clone(), r.start + 1, r.len(), t.point.0)
             }
             _ => unreachable!("buffer_index validates"),
         })
+    }
+    /// A run of the buffer at object INDEX that holds the bytes NEED and
+    /// lies within its accessible bytes, readable contiguously: for a
+    /// multibyte buffer, the window its text gives (`search_window').
+    fn regexp_buffer_window(&mut self, index: usize, need: Range<usize>) -> Range<usize> {
+        match &mut self.objects[index] {
+            Object::Buffer(t) => {
+                let r = t.accessible();
+                t.search_window(need, r.start.0..r.end.0)
+            }
+            Object::ByteBuffer(t) => t.restriction.start.0..t.restriction.end.0,
+            _ => unreachable!("buffer_index validates"),
+        }
+    }
+    /// WINDOW of the buffer at object INDEX, for one search, its
+    /// characters counted from BASE_CHAR, the accessible text's first.
+    fn regexp_buffer_input(&self, index: usize, window: Range<usize>, base_char: usize) -> BufferInput<'_> {
+        match &self.objects[index] {
+            Object::Buffer(t) => BufferInput {
+                bytes: t.search_bytes(window.clone()),
+                text: Some(t),
+                start: window.start,
+                base_char,
+                point: t.point.0 - window.start,
+            },
+            Object::ByteBuffer(t) => BufferInput {
+                bytes: &t.bytes[window.clone()],
+                text: None,
+                start: window.start,
+                base_char,
+                point: t.point.0 - window.start,
+            },
+            _ => unreachable!("buffer_index validates"),
+        }
     }
     fn regexp_int(&self, v: Value) -> SearchResult<i64> {
         v.as_integer().map_err(|_| Fault::Wrong("fixnump", v))
@@ -913,10 +957,16 @@ impl Vm {
             pattern = Input::new(quoted, chars, pattern.multibyte);
         }
         let index = self.buffer_index()?;
-        let (base_char, end_char, original_char, multibyte) = {
-            let text = self.regexp_buffer_input(index)?;
-            (text.base_char, text.base_char + text.chars, text.character(text.point)? + text.base_char, text.text.is_some())
+        let (accessible, base_char, chars, point_byte) = self.regexp_buffer_frame(index)?;
+        let multibyte = matches!(self.objects[index], Object::Buffer(_));
+        let end_char = base_char + chars;
+        let character_of = |vm: &Self, byte: usize| -> SearchResult<usize> {
+            Ok(match &vm.objects[index] {
+                Object::Buffer(t) => t.char_of_byte(ByteOffset(byte))?.0 + 1,
+                _ => byte + 1,
+            })
         };
+        let original_char = character_of(self, point_byte)?;
         let bound = if p == LookingAt || args[1] == Value::NIL {
             if p == LookingAt || count > 0 {
                 end_char
@@ -953,17 +1003,35 @@ impl Vm {
         if count == 0 {
             return Ok(Value::integer(original_char as i64)?);
         }
+        let limit_byte = match &self.objects[index] {
+            Object::Buffer(t) => t.byte_of_char(CharOffset(bound - 1))?.0,
+            _ => bound - 1,
+        };
         let folded = self.regexp_case_fold()?;
         let source = self.regexp_syntax(None)?;
         let compiled = self.regexp_compiled(&pattern, multibyte, posix, folded, &source)?;
         let compiled = compiled.borrow();
+        // What the engine can read: the candidates and the matches, which
+        // end at the bound forward and at point backward (GNU's STOP), and
+        // a margin for the characters assertions look at on either side.
+        let reach = if p == LookingAt {
+            point_byte..accessible.end
+        } else if count > 0 {
+            point_byte..limit_byte
+        } else {
+            limit_byte..point_byte
+        };
+        let need = reach.start.saturating_sub(SEARCH_MARGIN).max(accessible.start)
+            ..(reach.end + SEARCH_MARGIN).min(accessible.end);
+        // Compiling may have collected: find the buffer again.
         let index = self.buffer_index()?;
-        let text = self.regexp_buffer_input(index)?;
-        let syntax = syntax::VmSyntax::new(self, source);
+        let window = self.regexp_buffer_window(index, need);
+        let text = self.regexp_buffer_input(index, window.clone(), base_char);
+        let syntax = syntax::VmSyntax::new(self, source.rebased(window.start));
         // Match data is saved once, from the last success, after the engine.
         let (mut matched, mut overflow) = (None, false);
         let original = text.point;
-        let limit = text.byte(bound - base_char)?;
+        let limit = limit_byte - window.start;
         let mut point = original;
         let mut failed = false;
         for _ in 0..count.unsigned_abs() {
@@ -1015,11 +1083,8 @@ impl Vm {
         // Recover the buffer after the engine, rather than retaining its index.
         let index = self.buffer_index()?;
         match &mut self.objects[index] {
-            Object::Buffer(t) => {
-                let r = t.accessible();
-                t.point = ByteOffset(point + r.start.0);
-            }
-            Object::ByteBuffer(t) => t.point = ByteOffset(point + t.restriction.start.0),
+            Object::Buffer(t) => t.point = ByteOffset(point + window.start),
+            Object::ByteBuffer(t) => t.point = ByteOffset(point + window.start),
             _ => unreachable!("buffer_index validates"),
         }
         if failed {

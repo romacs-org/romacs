@@ -100,9 +100,16 @@ fn match_positions_over_mixed_widths_match_pinned_gnu() {
 (let ((s "aé😀λb😀λc")) (list (string-match "λ" s -3) (match-data) (string-match "😀\\(.\\)" s -4) (match-data) (string-match "a" s -8) (condition-case e (string-match "a" s -9) (error e))))
 (with-temp-buffer (insert "é😀éé😀") (narrow-to-region 3 6) (goto-char (point-min)) (list (re-search-forward "é+" nil t) (match-data t) (re-search-forward "😀" nil t)))
 "###;
+    assert_matches_pinned_gnu(CASES.lines().filter(|line| !line.is_empty()));
+}
+
+
+/// Each of EXPRESSIONS evaluated by pinned GNU and by a VM with the Lisp
+/// prelude, printed the same.
+fn assert_matches_pinned_gnu<'a>(expressions: impl IntoIterator<Item = &'a str>) {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    for expression in CASES.lines().filter(|line| !line.is_empty()) {
+    for expression in expressions {
         let source = format!("(prin1-to-string (condition-case e {expression} (error (list 'signal e))))");
         let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -117,4 +124,75 @@ fn match_positions_over_mixed_widths_match_pinned_gnu() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Searches between random edits read a window of the text that need not
+/// start or end where the accessible text does (text_gap.rs): every
+/// assertion at a window's edge, a bound, a narrowing, case folding, raw
+/// bytes and `syntax-table' properties answer as GNU's whole text does.
+/// Adjacent letters share a script: GNU's `\<' also stops between
+/// scripts, which the engine's word boundary does not model yet.
+#[test]
+fn searches_between_edits_match_pinned_gnu() {
+    const RANDOM: &str = r###"
+(with-temp-buffer
+  (let ((seed 7) (h 0) (i 0) (r nil) (pos 1) (pat nil)
+        (pieces (vector "word " "é" "→" "\n" "Foo_bar " "x" "a" "z" "AB" "  " "\t" "→é " "ü\n\n"))
+        (patterns ["\\bw[a-z]*" "^é" "→$" "\\_<x" "[[:upper:]]+" "o\\b" "\\(?:é\\|→\\)+" "\n\n" "\\w\\W" "a\\=" "\\`a" "z\\'" "^$" "\\>" "\\(a\\)\\1" "\\<" "[^a-z\n]+$" "\\=."]))
+    (while (< i 600) (insert (aref pieces (% i 13))) (setq i (1+ i)))
+    (setq i 0)
+    (while (< i 4000)
+      (setq seed (% (* seed 16807) 2147483647))
+      (setq pos (+ (point-min) (% (/ seed 8) (1+ (- (point-max) (point-min))))))
+      (setq pat (aref patterns (% (/ seed 64) 18)))
+      (goto-char pos)
+      (setq r (let ((op (% seed 9)))
+                (cond ((= op 0) (insert (aref pieces (% (/ seed 16) 13))) (point))
+                      ((= op 1) (delete-region pos (min (point-max) (+ pos (% (/ seed 32) 5)))) (point))
+                      ((= op 2) (and (re-search-forward pat (and (= 0 (% (/ seed 1024) 2)) (min (point-max) (+ pos 90))) t) (list (point) (match-beginning 0))))
+                      ((= op 3) (and (re-search-backward pat (and (= 0 (% (/ seed 1024) 2)) (max (point-min) (- pos 90))) t) (list (point) (match-end 0))))
+                      ((= op 4) (and (looking-at pat) (match-end 0)))
+                      ((= op 5) (and (re-search-forward pat nil t 2) (progn (replace-match "Q") (point))))
+                      ((= op 6) (and (re-search-backward pat nil t 2) (progn (replace-match "") (point))))
+                      ((= op 7) (setq case-fold-search (not case-fold-search)) (and (search-forward "ab" nil t) (point)))
+                      (t (if (and (= (point-min) 1) (> (buffer-size) 200))
+                             (narrow-to-region (+ (point-min) 70) (- (point-max) 70))
+                           (widen))
+                         (point-min)))))
+      (setq h (% (+ (* h 31) (point) (cond ((null r) 1) ((consp r) (+ (* 7 (car r)) (car (cdr r)))) (t r))) 1000000007))
+      (setq i (1+ i)))
+    (widen)
+    (list h (buffer-size) (buffer-substring 1 120))))
+;;
+(with-temp-buffer
+  (let ((seed 11) (h 0) (i 0) (r nil) (pos 1) (parse-sexp-lookup-properties t))
+    (while (< i 500) (insert "ab-cd_ef g.h ") (setq i (1+ i)))
+    (setq i 0)
+    (while (< i 3000)
+      (setq seed (% (* seed 16807) 2147483647))
+      (setq pos (1+ (% (/ seed 8) (buffer-size))))
+      (goto-char pos)
+      (setq r (let ((op (% seed 5)))
+                (cond ((= op 0) (insert (if (= 0 (% (/ seed 16) 2)) "x-y" "_")) (point))
+                      ((= op 1) (put-text-property pos (min (point-max) (+ pos 3)) 'syntax-table (if (= 0 (% (/ seed 16) 2)) '(2) '(1))) pos)
+                      ((= op 2) (and (re-search-forward "\\w+\\b" nil t) (list (point) (match-beginning 0))))
+                      ((= op 3) (and (re-search-backward "\\_<[a-z]" nil t) (list (point) (match-end 0))))
+                      (t (delete-region pos (min (point-max) (1+ pos))) pos))))
+      (setq h (% (+ (* h 31) (point) (cond ((null r) 1) ((consp r) (+ (* 7 (car r)) (car (cdr r)))) (t r))) 1000000007))
+      (setq i (1+ i)))
+    (list h (buffer-size))))
+;;
+(with-temp-buffer
+  (let ((raw (string (unibyte-char-to-multibyte #xe9))) (i 0) (found nil))
+    (while (< i 300) (insert "a " raw " λ\n") (setq i (1+ i)))
+    (goto-char (point-min))
+    (while (re-search-forward (concat (regexp-quote raw) " \\(.\\)") nil t)
+      (setq found (cons (match-beginning 1) found))
+      (replace-match (concat "<" raw "\\1>")))
+    (while (re-search-backward (concat raw "\\(>\\)$") nil t)
+      (setq found (cons (point) found))
+      (replace-match "" t t nil 1))
+    (list (length found) (car found) (nth 300 found) (buffer-size) (buffer-substring 1 40))))
+"###;
+    assert_matches_pinned_gnu(RANDOM.split("\n;;\n").map(str::trim));
 }

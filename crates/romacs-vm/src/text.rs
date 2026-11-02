@@ -6,6 +6,27 @@ use std::borrow::Cow;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+#[path = "text_gap.rs"]
+mod gap;
+
+#[cfg(test)]
+thread_local! {
+    /// Bytes this thread's texts copied whole or moved: flattenings,
+    /// search views built and their gap moves (the scaling probes).
+    static COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// Count N bytes copied (test builds only).
+pub(crate) fn count_copied(n: usize) {
+    #[cfg(test)]
+    COPIED.with(|c| c.set(c.get() + n));
+    #[cfg(not(test))]
+    let _ = n;
+}
+/// The bytes this thread's texts have copied so far.
+#[cfg(test)]
+pub(crate) fn copied_bytes() -> usize {
+    COPIED.with(|c| c.get())
+}
 
 #[derive(Clone, Default)]
 struct ChunkCursor {
@@ -59,6 +80,8 @@ pub struct TextBody {
     raw: Vec<u32>,
     /// `bytes()` in GNU's internal form, built once `raw` is non-empty.
     flat_internal: std::sync::OnceLock<Vec<u8>>,
+    /// The text kept contiguous for searches across edits (text_gap.rs).
+    search: gap::SearchView,
     is_ascii: bool,
     coordinate: std::cell::Cell<(usize, usize)>,
     chunk: std::cell::RefCell<ChunkCursor>,
@@ -75,7 +98,7 @@ pub struct TextBody {
     /// `ts_parser_list'), whose trees every change edits.
     pub(crate) treesit: crate::treesit::Registry,
 }
-romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, raw, flat_internal, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit });
+romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit });
 // GNU's eight-bit characters (#x3FFF80..#x3FFFFF, the raw bytes 0x80..0xFF)
 // cannot be UTF-8, which the rope requires. Raw byte B is stored as the
 // placeholder character U+00B, whose UTF-8 is GNU's internal form of the
@@ -85,6 +108,39 @@ romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, t
 // `internal_to_rope`, every Lisp-visible read back through
 // `rope_to_internal`.
 pub(crate) const RAW_LEAD_SHIFT: u8 = 2;
+
+/// Newline scans of text read where it lies, a slice or a buffer's rope:
+/// a newline byte is never part of another character.
+pub(crate) trait Newlines {
+    /// The first newline in FROM..TO.
+    fn next_newline(&self, from: usize, to: usize) -> Option<usize>;
+    /// The last newline in TO..FROM.
+    fn previous_newline(&self, from: usize, to: usize) -> Option<usize>;
+}
+impl Newlines for [u8] {
+    fn next_newline(&self, from: usize, to: usize) -> Option<usize> {
+        self[from..to].iter().position(|&c| c == b'\n').map(|i| from + i)
+    }
+    fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
+        self[to..from].iter().rposition(|&c| c == b'\n').map(|i| to + i)
+    }
+}
+impl Newlines for Vec<u8> {
+    fn next_newline(&self, from: usize, to: usize) -> Option<usize> {
+        self.as_slice().next_newline(from, to)
+    }
+    fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
+        self.as_slice().previous_newline(from, to)
+    }
+}
+impl Newlines for TextBody {
+    fn next_newline(&self, from: usize, to: usize) -> Option<usize> {
+        self.newline_after(from, to)
+    }
+    fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
+        self.newline_before(from, to)
+    }
+}
 
 /// Rope text and the local offsets of its raw bytes for GNU-internal
 /// BYTES; borrowed when they are plain UTF-8 (no scan beyond validation).
@@ -140,6 +196,11 @@ fn rope_to_internal(bytes: &[u8], base: usize, raw: &[u32]) -> Vec<u8> {
         out[p as usize - base] -= RAW_LEAD_SHIFT;
     }
     out
+}
+
+/// Rope text S, whose raw bytes are at LOCAL, in GNU's internal form.
+fn internal_of<'a>(s: &'a str, local: &[u32]) -> Cow<'a, [u8]> {
+    if local.is_empty() { Cow::Borrowed(s.as_bytes()) } else { Cow::Owned(rope_to_internal(s.as_bytes(), 0, local)) }
 }
 
 /// The byte a raw placeholder's UTF-8 LEAD and continuation CONT stand for.
@@ -232,6 +293,7 @@ impl Text {
                 flat: std::sync::OnceLock::new(),
                 raw,
                 flat_internal: std::sync::OnceLock::new(),
+                search: Default::default(),
                 is_ascii: s.is_ascii(),
                 coordinate: std::cell::Cell::new((0, 0)),
                 chunk: std::cell::RefCell::new(ChunkCursor::default()),
@@ -269,6 +331,10 @@ impl Text {
             category_table: Value::NIL,
             ts_linecols: [crate::treesit::EMPTY_LINECOL; 3],
         }
+    }
+    /// The text this view reads.
+    pub(crate) fn body(&self) -> &TextBody {
+        &self.body
     }
     /// Whether THIS and OTHER are views of one body.
     #[cfg(test)]
@@ -486,6 +552,8 @@ impl TextBody {
     /// after its end.
     fn append_body(&mut self, s: &str, chars: usize) {
         self.invalidate_reads();
+        let end = self.bytes_len;
+        self.search.replace(end..end, || Cow::Borrowed(s.as_bytes()));
         if self.tail.len() + s.len() > 1024 {
             self.flush_tail();
         }
@@ -500,6 +568,7 @@ impl TextBody {
     fn replace_body(&mut self, r: &Range<ByteOffset>, s: &str, local: &[u32]) -> usize {
         self.flush_tail();
         raw_splice(&mut self.raw, r.start.0..r.end.0, s.len(), local);
+        self.search.replace(r.start.0..r.end.0, || internal_of(s, local));
         // The edit API already validated UTF-8 boundaries; use the rope's native
         // scalar summaries without perturbing the read-coordinate cursor.
         let start = CharOffset(if self.is_ascii {
@@ -535,6 +604,7 @@ impl TextBody {
     fn rewrite_body(&mut self, r: Range<ByteOffset>, replacement: &str, local: &[u32]) {
         self.flush_tail();
         raw_splice(&mut self.raw, r.start.0..r.end.0, replacement.len(), local);
+        self.search.replace(r.start.0..r.end.0, || internal_of(replacement, local));
         let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
         self.properties.resize_character(r, replacement.len());
@@ -583,6 +653,38 @@ impl TextBody {
         }
         None
     }
+    /// The bytes of R, chunk by chunk, read where they lie.
+    pub(crate) fn chunks_in(&self, r: Range<usize>) -> impl Iterator<Item = &[u8]> + '_ {
+        let mut at = r.start;
+        std::iter::from_fn(move || {
+            let chunk = self.chunk_from(at);
+            let chunk = &chunk[..chunk.len().min(r.end.saturating_sub(at))];
+            at += chunk.len();
+            (!chunk.is_empty()).then_some(chunk)
+        })
+    }
+    /// The byte where the character before byte AT starts; 0 at the start.
+    pub(crate) fn char_start_before(&self, at: usize) -> usize {
+        if at == 0 {
+            return 0;
+        }
+        // A chunk never splits a character.
+        let (chunk, start) = self.chunk_before(at);
+        let mut i = chunk.len() - 1;
+        while i > 0 && chunk[i] & 0xc0 == 0x80 {
+            i -= 1;
+        }
+        start + i
+    }
+    /// The bytes of the character at byte AT; 1 at the end.
+    pub(crate) fn char_width_at(&self, at: usize) -> usize {
+        match self.chunk_from(at).first() {
+            Some(&lead) if lead >= 0xf0 => 4,
+            Some(&lead) if lead >= 0xe0 => 3,
+            Some(&lead) if lead >= 0xc0 => 2,
+            _ => 1,
+        }
+    }
     /// The bytes of the chunk holding the byte before END, up to END, and
     /// where that chunk starts.
     fn chunk_before(&self, end: usize) -> (&[u8], usize) {
@@ -595,6 +697,7 @@ impl TextBody {
     }
     pub fn as_str(&self) -> &str {
         self.flat.get_or_init(|| {
+            count_copied(self.bytes_len);
             let mut text = self.rope.to_string();
             text.push_str(&self.tail);
             text
@@ -631,16 +734,51 @@ impl TextBody {
         if self.raw.is_empty() {
             return self.as_str().as_bytes();
         }
-        self.flat_internal.get_or_init(|| rope_to_internal(self.as_str().as_bytes(), 0, &self.raw))
+        self.flat_internal.get_or_init(|| { count_copied(self.bytes_len); rope_to_internal(self.as_str().as_bytes(), 0, &self.raw) })
+    }
+    /// A run of the text that holds NEED and lies within BOUNDS (byte
+    /// ranges) and that [`Self::search_bytes`] reads contiguously, in GNU's
+    /// internal form, for a search: the flat text when it is current;
+    /// otherwise the search view, built once and then kept up to date by
+    /// each edit, so a search after an edit costs what it reads
+    /// (text_gap.rs).
+    pub(crate) fn search_window(&mut self, need: Range<usize>, bounds: Range<usize>) -> Range<usize> {
+        if self.flat_current() {
+            return bounds;
+        }
+        let view = match &mut self.search.0 {
+            Some(view) => view,
+            empty => empty.insert(gap::GapText::new(
+                self.rope.chunks().chain(std::iter::once(self.tail.as_str())).map(str::as_bytes),
+                self.bytes_len,
+                &self.raw,
+            )),
+        };
+        view.window(need, bounds)
+    }
+    /// The bytes of WINDOW, a run [`Self::search_window`] gave since the
+    /// last edit.
+    pub(crate) fn search_bytes(&self, window: Range<usize>) -> &[u8] {
+        match &self.search.0 {
+            Some(view) if !self.flat_current() => view.slice(window),
+            _ => &self.bytes()[window],
+        }
+    }
+    /// Whether [`Self::bytes`] is built and current.
+    fn flat_current(&self) -> bool {
+        if self.raw.is_empty() { self.flat.get().is_some() } else { self.flat_internal.get().is_some() }
     }
     /// R of the text in GNU's internal form; borrowed unless a raw byte
     /// is in it.
     pub fn internal(&self, r: Range<ByteOffset>) -> Result<Cow<'_, [u8]>> {
-        let bytes = self.slice(r.clone())?.as_bytes();
+        let text = self.slice(r.clone())?;
         if raw_in(&self.raw, r.start.0..r.end.0).is_empty() {
-            return Ok(Cow::Borrowed(bytes));
+            return Ok(match text {
+                Cow::Borrowed(s) => Cow::Borrowed(s.as_bytes()),
+                Cow::Owned(s) => Cow::Owned(s.into_bytes()),
+            });
         }
-        Ok(Cow::Owned(rope_to_internal(bytes, r.start.0, &self.raw)))
+        Ok(Cow::Owned(rope_to_internal(text.as_bytes(), r.start.0, &self.raw)))
     }
     /// R of the text as a multibyte Lisp string with its properties, raw
     /// bytes kept.
@@ -929,10 +1067,26 @@ impl TextBody {
             .set((c.0 + 1, chunk.byte + at + ch.len_utf8()));
         Ok(Some(self.code_at(chunk.byte + at, ch)))
     }
-    pub fn slice(&self, r: Range<ByteOffset>) -> Result<&str> {
-        self.as_str()
-            .get(r.start.0..r.end.0)
-            .ok_or_else(|| "index out of range".into())
+    /// R of the text: borrowed from the flat text when it is current or
+    /// from the one chunk that holds R, else copied from its chunks, so a
+    /// read after an edit costs R's length, not the text's.
+    pub fn slice(&self, r: Range<ByteOffset>) -> Result<Cow<'_, str>> {
+        self.validate_range(&r)?;
+        let (start, end) = (r.start.0, r.end.0);
+        if let Some(flat) = self.flat.get() {
+            return Ok(Cow::Borrowed(&flat[start..end]));
+        }
+        let first = self.chunk_from(start);
+        let bytes = if first.len() >= end - start {
+            Cow::Borrowed(&first[..end - start])
+        } else {
+            Cow::Owned(self.chunks_in(start..end).collect::<Vec<_>>().concat())
+        };
+        // Both ends are character boundaries (validate_range).
+        Ok(match bytes {
+            Cow::Borrowed(b) => Cow::Borrowed(std::str::from_utf8(b).map_err(|e| e.to_string())?),
+            Cow::Owned(b) => Cow::Owned(String::from_utf8(b).map_err(|e| e.to_string())?),
+        })
     }
     pub(crate) fn find_character(
         &self,
@@ -1021,6 +1175,7 @@ impl TextBody {
         if replacement.len() != r.end.0 - r.start.0 { return Err("overwrite length differs".into()); }
         self.flush_tail();
         raw_splice(&mut self.raw, r.start.0..r.end.0, replacement.len(), &local);
+        self.search.replace(r.start.0..r.end.0, || internal_of(&replacement, &local));
         let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
         self.invalidate_reads();
@@ -1065,7 +1220,7 @@ impl TextBody {
     }
     /// Width of a single line's text. Tabs/control layout belongs to the renderer.
     pub fn display_width(&self, r: Range<ByteOffset>) -> Result<DisplayColumn> {
-        Ok(DisplayColumn(UnicodeWidthStr::width(self.slice(r)?)))
+        Ok(DisplayColumn(UnicodeWidthStr::width(&*self.slice(r)?)))
     }
     pub(crate) fn storage_bytes(&self, capacity: bool) -> usize {
         let properties = self.properties.storage_bytes();
@@ -1090,6 +1245,7 @@ impl TextBody {
             + self.chunk.borrow().text.capacity()
             + rope_storage_bound
             + self.raw.capacity() * std::mem::size_of::<u32>()
+            + self.search.storage_bytes(capacity)
             + self.flat_internal.get().map_or(0, |b| if capacity { b.capacity() } else { b.len() })
             + self
                 .flat
@@ -1170,13 +1326,13 @@ mod tests {
         fn character_at(&self, c: usize) -> Result<Option<i64>> {
             self.0.character_at(self.0.byte_of_char(CharOffset(c))?)
         }
-        fn slice(&self, r: Range<usize>) -> Result<&[u8]> {
+        fn slice(&self, r: Range<usize>) -> Result<Vec<u8>> {
             self.0
                 .slice(
                     self.0.byte_of_char(CharOffset(r.start))?
                         ..self.0.byte_of_char(CharOffset(r.end))?,
                 )
-                .map(str::as_bytes)
+                .map(|s| s.as_bytes().to_vec())
         }
         fn replace(&mut self, r: Range<usize>, b: &[u8]) -> Result<()> {
             self.0.replace(ByteOffset(r.start)..ByteOffset(r.end), b)
