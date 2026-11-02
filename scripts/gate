@@ -591,7 +591,21 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
         for p in procs.values():
             p.terminate()                       # a no-op once the suite has been waited for
             p.wait()
-        shutil.rmtree(scratch, ignore_errors=True)
+        remove_scratch(scratch)
+
+
+def remove_scratch(root):
+    """Delete a run's scratch, including directories a test left without
+    permissions (GNU's ispell tests leave one mode 000), which rmtree skips."""
+    for parent, dirs, _ in os.walk(root):     # top-down: unlock a child before entering it
+        for name in dirs:
+            path = os.path.join(parent, name)
+            if not os.path.islink(path):
+                try:
+                    os.chmod(path, 0o700)
+                except OSError:
+                    pass
+    shutil.rmtree(root, ignore_errors=True)
 
 
 def sync(root, dest):
