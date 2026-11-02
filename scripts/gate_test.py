@@ -276,6 +276,22 @@ class BuildAndRun(unittest.TestCase):
             gate.build_and_run(root / 'missing', root, 'all()', {}, True, time.monotonic(), {})
         self.assertEqual(list((root / 'ng').iterdir()), [], 'scratch left behind')
 
+    def test_scratch_a_test_locked_is_removed(self):
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        src = root / 'src'
+        src.mkdir()
+        def popen(argv, **kw):
+            locked = pathlib.Path(kw['env']['TMPDIR']) / 'locked'
+            (locked / 'inner').mkdir(parents=True)
+            locked.chmod(0)
+            kw['stderr'].write('Summary [fixture] 1 test run: 1 passed\n')
+            return mock.Mock(wait=mock.Mock(return_value=0))
+        with mock.patch.multiple(gate, SHORT=root / 'ng', sh=metadata_command, cargo_flags=lambda s: []), \
+             mock.patch.object(gate.subprocess, 'call', listed_binaries), \
+             mock.patch.object(gate.subprocess, 'Popen', popen), contextlib.redirect_stdout(io.StringIO()):
+            gate.build_and_run(src, src, 'all()', {'vm2': 1, 'display': 1}, True, time.monotonic(), {})
+        self.assertEqual(list((root / 'ng').iterdir()), [], 'scratch left behind')
+
     def test_exception_mid_run_removes_scratch_and_stops_tests(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
         short, src, run_dir = root / 'ng', root / 'src', root / 'run'
