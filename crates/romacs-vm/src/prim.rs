@@ -1332,7 +1332,7 @@ mod leaf {
             matches!(self.vm.object_if(value), Some(data::Object::Obarray(_)))
         }
         pub fn make_obarray(&mut self, size: Value) -> super::Out {
-            let bits = if size == Value::NIL { 3 } else {
+            let bits = if size == Value::NIL { obarray::DEFAULT_BITS } else {
                 let n = size.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", size))? as u64;
                 let bits = 64 - n.leading_zeros();
                 if bits > 31 { return Err(Fault::Range1(size)); }
@@ -1366,6 +1366,7 @@ mod leaf {
             }
             Ok(if self.vm.obarray_unintern(table, found) { Value::TRUE } else { Value::NIL })
         }
+        pub fn clear_obarray(&mut self, table: Value) -> std::result::Result<(), Fault> { self.vm.obarray_clear(table) }
         pub fn obarray_next(&self, table: Value, bucket: usize, current: Value) -> Option<(usize, Value)> {
             self.vm.obarray_next(table, bucket, current)
         }
