@@ -94,6 +94,9 @@ pub struct FrameSnapshot {
     pub tab_bar: Option<TabBarSnapshot>,
     /// How the panes are drawn around their windows' boxes.
     pub chrome: FrameChrome,
+    /// The status bar between the windows and the mini-window, while
+    /// `romacs-status-bar-lines' shows one.
+    pub status_bar: Option<StatusBarSnapshot>,
 }
 
 /// The paint-only pane chrome of the root frame's windows but the
@@ -130,6 +133,7 @@ impl FrameSnapshot {
             && self.font_alternatives == other.font_alternatives
             && self.tab_bar == other.tab_bar
             && self.chrome == other.chrome
+            && self.status_bar == other.status_bar
             && windows_lay_out_like(&self.windows, &other.windows)
     }
 }
@@ -238,6 +242,8 @@ pub struct WindowSnapshot {
     pub header_line: Option<TextSlice>,
     pub header_line_face: FaceHandle,
     pub vscroll_px: u32,
+    /// How far the window is scrolled horizontally (GNU's `w->hscroll').
+    pub hscroll: Hscroll,
     /// FaceHandle indexes this owned table; entry zero is the default face.
     pub faces: Vec<Face>,
     /// The buffer's `tab-width', GNU's SANE_TAB_WIDTH (1 to 1000, else 8).
@@ -255,7 +261,26 @@ pub struct WindowSnapshot {
     /// area's, and the window's placed X its left edge.
     pub chrome: WindowChrome,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off, stretches, line_numbers, chrome });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, line_numbers, chrome });
+
+/// A window's horizontal scroll in pixels (GNU's first_visible_x): the x
+/// on each line, from its start after any line number, that shows at the
+/// text area's left edge. ROWS applies to every row but point's, which
+/// shows from POINT_ROW: they differ only under `auto-hscroll-mode'
+/// `current-line', where the other rows keep `min_hscroll' (init_iterator,
+/// display_line's hscroll_this_line). Scrolled rows are truncated.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Hscroll {
+    pub rows: u32,
+    pub point_row: u32,
+}
+romacs_snapshot::snapshot_struct!(Hscroll { rows, point_row });
+
+impl Hscroll {
+    /// The same scroll for every row.
+    pub fn uniform(px: u32) -> Self { Self { rows: px, point_row: px } }
+    pub fn is_zero(&self) -> bool { self.rows == 0 && self.point_row == 0 }
+}
 
 /// What GNU's window box shows of a window beside its text area
 /// (window_box, dispextern.h): its margins and fringes in pixels, the
@@ -344,6 +369,25 @@ pub struct TabBarSnapshot {
     pub faces: Vec<Face>,
 }
 
+/// The root frame's status bar (VM2-STATUS-BAR): one row of TEXT, the
+/// expanded mode line of WINDOW (the window GNU's mode-line face rule
+/// treats as selected), HEIGHT pixels tall at X, Y and WIDTH wide in the
+/// frame, on FACE's background, its faces indexing FACES. FOCUSED says
+/// whether WINDOW holds the input focus rather than a child frame's
+/// window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StatusBarSnapshot {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub text: TextSlice,
+    pub face: FaceHandle,
+    pub faces: Vec<Face>,
+    pub window: u64,
+    pub focused: bool,
+}
+
 /// GNU's line numbers (xdisp.c maybe_produce_line_number): every row
 /// starts with the label of the line starting at its byte, in FACE
 /// (CURRENT for point's line), else as many blanks as its line's label
@@ -396,6 +440,26 @@ pub struct WindowEnd {
     /// The rows laid out from the window start, top to bottom, through the
     /// first that reaches the text area's bottom.
     pub rows: Vec<Row>,
+    /// Where point shows, when a laid-out row holds it.
+    pub point: Option<PointPlace>,
+}
+
+/// Point on its row, in pixels from the text area's left edge, as GNU's
+/// hscroll_window_tree reads the cursor: X, where the cursor is drawn,
+/// which a truncated row keeps inside the text area (set_cursor_from_row
+/// puts it on the glyph past the row's last position); LINE_X, where point
+/// is on its line laid out unscrolled and infinitely wide, from the
+/// line's start; GUTTER, the line number's width before the text; whether
+/// the row is TRUNCATED on the LEFT (scrolled) or RIGHT; and whether point
+/// is AT_EOL, on its line's newline or the text's end.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PointPlace {
+    pub x: f32,
+    pub line_x: f32,
+    pub gutter: f32,
+    pub truncated_left: bool,
+    pub truncated_right: bool,
+    pub at_eol: bool,
 }
 
 /// One screen row: the byte it starts at, its top and its height.
@@ -424,9 +488,9 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, faces, tab_width, wrap, cursor_off: _, stretches, line_numbers, chrome } = self;
-        (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *tab_width)
-            == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.tab_width)
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, line_numbers, chrome } = self;
+        (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
+            == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
             && *wrap == other.wrap && *stretches == other.stretches && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
     }
 }

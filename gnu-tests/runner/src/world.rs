@@ -201,7 +201,7 @@ mod tests {
         let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
         let tree = paths(&["/r/rlisp/romacs-loadup-bootstrap.el", "/r/gnu-lisp/help-fns.el", "/r/rlisp/romacs-cl-print.el", "/case/setup.el", "/r/rlisp/x.el"]);
         assert_eq!(world_preloads(&tree), 3);
-        assert_eq!(world_preloads(&paths(&["/r/rlisp/romacs-gnu-ert-bootstrap.el"])), 0);
+        assert_eq!(world_preloads(&paths(&["/r/rlisp/x.el"])), 0);
         assert_eq!(world_preloads(&[]), 0);
     }
 

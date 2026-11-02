@@ -44,9 +44,18 @@ pub(super) struct Window {
     pub vscroll_px: u32,
     /// Deferred scroll, applied after the frozen frame paints (D-ML1).
     pub pending_vscroll: Option<u32>,
-    /// GNU `w->hscroll`, in columns. The display does not apply it yet
-    /// (VM2-HSCROLL1).
+    /// GNU `w->hscroll`, in columns: how far the window's lines are
+    /// scrolled left. Redisplay keeps point in view with it
+    /// (`hscroll_window`), never below `min_hscroll`, which `scroll-left'
+    /// and `scroll-right' set when called interactively.
     pub hscroll: i64,
+    pub min_hscroll: i64,
+    /// GNU `w->suspend_auto_hscroll`: an explicit scroll holds automatic
+    /// hscrolling until point moves from `old_point`, GNU's
+    /// `w->old_pointm`, a marker at the window's point at its last
+    /// redisplay, which edits move as they move point.
+    pub suspend_auto_hscroll: bool,
+    pub old_point: Value,
     pub parameters: Vec<(Value, Value)>,
     /// GNU `w->display_table` (`set-window-display-table`); the display
     /// reads the buffer's and the standard table only (VM2-DISPTAB1).
@@ -76,7 +85,7 @@ pub(super) struct Window {
     pub end_valid: bool,
     pub force_start: bool,
 }
-romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, pending_vscroll, hscroll, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
+romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, pending_vscroll, hscroll, min_hscroll, suspend_auto_hscroll, old_point, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
 impl Window {
     fn new(id: u64, buffer: Value) -> Self {
         Self {
@@ -103,6 +112,9 @@ impl Window {
             vscroll_px: 0,
             pending_vscroll: None,
             hscroll: 0,
+            min_hscroll: 0,
+            suspend_auto_hscroll: false,
+            old_point: Value::NIL,
             right_margin: 0,
             parameters: vec![],
             display_table: Value::NIL,
@@ -127,6 +139,7 @@ impl Window {
             &mut self.buffer,
             &mut self.point,
             &mut self.start,
+            &mut self.old_point,
             &mut self.parent,
             &mut self.new_total,
             &mut self.new_normal,
@@ -173,8 +186,13 @@ pub(super) struct WindowState {
     pub next_frame: u64,
     /// The host frame's text area at its last layout, tab bar included.
     pub text_area: [u32; 2],
+    /// The status bar's height as the host measured its row (0 before
+    /// one did: a canonical line), and the pixels the last layout left
+    /// for it between the root window and the mini-window (VM2-STATUS-BAR).
+    pub status_height: u32,
+    pub status_reserved: u32,
 }
-romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame, text_area });
+romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame, text_area, status_height, status_reserved });
 impl Default for WindowState {
     fn default() -> Self {
         Self {
@@ -188,6 +206,8 @@ impl Default for WindowState {
             mini_reserved: 0,
             next_frame: 1,
             text_area: [640, 480],
+            status_height: 0,
+            status_reserved: 0,
         }
     }
 }
@@ -244,6 +264,23 @@ impl Vm {
     pub(super) fn root_of(&self, v: Value) -> Result<Value> {
         Ok(self.frame(self.window(v)?.frame)?.root)
     }
+    /// Put window V's old point at POSITION in BUFFER, making its marker if
+    /// it has none.
+    pub(crate) fn set_window_old_point(&mut self, v: Value, position: Value, buffer: Value) -> Result<()> {
+        let marker = self.window(v)?.old_point;
+        if marker == Value::NIL {
+            let marker = self.window_marker(buffer, position)?;
+            self.window_mut(v)?.old_point = marker;
+            return Ok(());
+        }
+        self.set_marker_object(marker, position, buffer).map(drop)
+    }
+    /// How text inserted at a window's point moves its old point:
+    /// `window-point-insertion-type' in the window's BUFFER.
+    pub(crate) fn window_point_bias(&mut self, buffer: Value) -> Result<anchors::Bias> {
+        let slot = self.slot("window-point-insertion-type");
+        Ok(if self.value_in_buffer(slot, buffer)? == Value::NIL { anchors::Bias::Left } else { anchors::Bias::Right })
+    }
     fn window_marker(&mut self, buffer: Value, position: Value) -> Result<Value> {
         let v = self.allocate_object(Object::Marker(Box::new(annotations::Marker {
             buffer: Value::NIL,
@@ -267,6 +304,9 @@ impl Vm {
         if buffer != Value::NIL {
             w.point = self.window_marker(buffer, Value::integer(1)?)?;
             w.start = self.window_marker(buffer, Value::integer(1)?)?;
+            w.old_point = self.window_marker(buffer, Value::integer(1)?)?;
+            let bias = self.window_point_bias(buffer)?;
+            self.set_marker_bias(w.old_point, bias)?;
         }
         Ok(self.allocate_object(Object::Window(Box::new(w))))
     }
@@ -409,7 +449,16 @@ impl Vm {
             // per-buffer last window start, so it starts at 1. See
             // DIVERGENCES.md VM2-WB1.
             self.set_marker_object(st, Value::integer(1)?, buffer)?;
-            self.window_mut(v)?.hscroll = 0;
+            self.set_window_old_point(v, pos, buffer)?;
+            let w = self.window_mut(v)?;
+            (w.hscroll, w.min_hscroll, w.suspend_auto_hscroll) = (0, 0, false);
+        }
+        // window.c:4395, whatever KEEP-MARGINS kept: the old point inserts
+        // as the buffer's window points do.
+        let old = self.window(v)?.old_point;
+        if old != Value::NIL {
+            let bias = self.window_point_bias(buffer)?;
+            self.set_marker_bias(old, bias)?;
         }
         self.discard_buffer_from_window(buffer, v)?;
         let w = self.window_mut(v)?;
@@ -553,8 +602,8 @@ impl Vm {
         // live-byte assertion can observe this leak.
         let retired_id = self.window(v)?.id;
         self.display_state.forget_window(retired_id);
-        let (point, start) = (self.window(v)?.point, self.window(v)?.start);
-        for marker in [point, start] {
+        let (point, start, old) = (self.window(v)?.point, self.window(v)?.start, self.window(v)?.old_point);
+        for marker in [point, start, old] {
             if marker != Value::NIL {
                 self.set_marker_object(marker, Value::NIL, Value::NIL)?;
             }
@@ -564,6 +613,7 @@ impl Vm {
         w.buffer = Value::NIL;
         w.point = Value::NIL;
         w.start = Value::NIL;
+        w.old_point = Value::NIL;
         w.parent = Value::NIL;
         w.children = vec![];
         w.end_valid = false;
@@ -1033,8 +1083,9 @@ impl Vm {
         let root = self.window_root_peek(ROOT);
         let now = self.mini_growth()?;
         let reserved = if self.minibuffer_host().is_some() { 0 } else { line };
-        let tab_bar = (self.tab_bar_lines() * line).min(frame_height.saturating_sub(reserved + line));
-        if self.plan_window_geometry(root, 0, tab_bar, frame_width, frame_height - reserved - tab_bar, (now, 0), line, column, &mut geometry).is_err() {
+        let status = self.status_bar_reservation(frame_height, reserved, line);
+        let tab_bar = (self.tab_bar_lines() * line).min(frame_height.saturating_sub(reserved + status + line));
+        if self.plan_window_geometry(root, 0, tab_bar, frame_width, frame_height - reserved - status - tab_bar, (now, 0), line, column, &mut geometry).is_err() {
             return Ok(None);
         }
         let Some(&(_, _, _, width, height)) = geometry.iter().find(|g| g.0 == window) else { return Ok(None) };
@@ -1042,7 +1093,8 @@ impl Vm {
         let [_, below] = self.window_dividers(window)?;
         let width = width.saturating_sub(left + right);
         let columns = (width / column).clamp(2, u32::from(u16::MAX)) as u16;
-        let rows = (height.saturating_sub(below) / line).saturating_sub(1).clamp(1, u32::from(u16::MAX)) as u16;
+        let band = u32::from(self.pane_label(window) != crate::frame::PaneLabel::None);
+        let rows = (height.saturating_sub(below) / line).saturating_sub(band).clamp(1, u32::from(u16::MAX)) as u16;
         Ok(Some((columns, rows)))
     }
     /// The root window's growth now: minus the rows past one line that
@@ -1091,6 +1143,49 @@ impl Vm {
         if !self.window_system_open() { return 0; }
         self.frame(self.host_frame_peek()).map_or(0, |f| f.tab_bar_lines)
     }
+    /// Whether the host frame shows a status bar where it fits:
+    /// `romacs-status-bar-lines' on a window system.
+    pub(crate) fn status_bar_wanted(&self) -> bool {
+        self.window_system_open() && self.frame(self.host_frame_peek()).is_ok_and(|f| f.status_bar_lines > 0)
+    }
+    /// The pixels the host frame's status bar takes above a mini-window
+    /// MINI tall in a text area HEIGHT tall (VM2-STATUS-BAR): its measured
+    /// row, else a canonical LINE, while it is wanted and the tab bar and
+    /// two lines of the root window fit beside it; else none.
+    pub(crate) fn status_bar_reservation(&self, height: u32, mini: u32, line: u32) -> u32 {
+        let bar = if self.window_state.status_height > 0 { self.window_state.status_height } else { line };
+        let needed = [mini, bar, self.tab_bar_lines() * line, 2 * line].map(u64::from).iter().sum::<u64>();
+        if !self.status_bar_wanted() || u64::from(height) < needed { 0 } else { bar }
+    }
+    /// What WINDOW's mode-line band shows (`romacs-pane-label'): GNU's
+    /// mode line, except for the host frame's ordinary windows while the
+    /// frame's label says otherwise.
+    pub(crate) fn pane_label(&self, window: Value) -> crate::frame::PaneLabel {
+        let Ok(w) = self.window(window) else { return crate::frame::PaneLabel::Full };
+        if w.mini || w.frame != self.host_frame_peek() { return crate::frame::PaneLabel::Full; }
+        self.frame(w.frame).map_or(crate::frame::PaneLabel::Full, |f| f.pane_label)
+    }
+    /// GNU window_wants_mode_line (window.c:6037): a live non-minibuffer
+    /// window whose `mode-line-format' parameter is not `none', with that
+    /// parameter or its buffer's `mode-line-format' non-nil, taller than
+    /// one canonical line; and, in Romacs, a band its pane label keeps.
+    pub(crate) fn window_wants_mode_line(&mut self, window: Value) -> Result<bool> {
+        if self.pane_label(window) == crate::frame::PaneLabel::None { return Ok(false); }
+        Ok(self.window_mode_line_format(window)?.is_some_and(|_| self.window(window).is_ok_and(|w| w.height > self.window_state.line)))
+    }
+    /// The mode-line format WINDOW shows (xdisp.c:28149): its
+    /// `mode-line-format' parameter when non-nil, else its buffer's; none
+    /// for a mini-window, a parameter `none', or a nil format.
+    pub(crate) fn window_mode_line_format(&mut self, window: Value) -> Result<Option<Value>> {
+        let (key, none, slot) = (self.intern("mode-line-format"), self.intern("none"), self.slot("mode-line-format"));
+        let w = self.window(window)?;
+        if w.mini || !w.live() { return Ok(None); }
+        let parameter = w.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
+        if parameter == none { return Ok(None); }
+        if parameter != Value::NIL { return Ok(Some(parameter)); }
+        let format = self.value_in_buffer(slot, w.buffer)?;
+        Ok((format != Value::NIL && format != Value::UNBOUND).then_some(format))
+    }
     /// Install canonical font metrics before startup Lisp observes window sizes.
     pub fn set_frame_geometry(
         &mut self,
@@ -1119,14 +1214,16 @@ impl Vm {
         let mut geometry = vec![];
         let now = self.mini_growth()?;
         let wanted = if hosted { 0 } else { i64::from(line_height) - i64::from(mini_height) };
-        // The tab bar takes the top of the frame (FRAME_TOP_MARGIN), as
-        // far as a line is left for the root window.
-        let tab_bar = (self.tab_bar_lines() * line_height).min(height.saturating_sub(mini_height + line_height));
-        let planned = self.plan_window_geometry(root, 0, tab_bar, width, height - mini_height - tab_bar, (now, wanted), line_height, column_width, &mut geometry);
+        // The status bar takes a band above the mini-window, and the tab
+        // bar the top of the frame (FRAME_TOP_MARGIN), as far as a line is
+        // left for the root window.
+        let status = self.status_bar_reservation(height, mini_height, line_height);
+        let tab_bar = (self.tab_bar_lines() * line_height).min(height.saturating_sub(mini_height + status + line_height));
+        let planned = self.plan_window_geometry(root, 0, tab_bar, width, height - mini_height - status - tab_bar, (now, wanted), line_height, column_width, &mut geometry);
         let mini_height = if planned.is_err() && mini_height > line_height {
             self.window_state.mini_lines = 1;
             geometry.clear();
-            self.plan_window_geometry(root, 0, tab_bar, width, height - line_height - tab_bar, (now, 0), line_height, column_width, &mut geometry)?;
+            self.plan_window_geometry(root, 0, tab_bar, width, height - line_height - status - tab_bar, (now, 0), line_height, column_width, &mut geometry)?;
             line_height
         } else {
             planned?;
@@ -1137,6 +1234,7 @@ impl Vm {
             geometry.push((mini, 0, height - mini_height, width, mini_height));
         }
         self.window_state.mini_reserved = mini_height;
+        self.window_state.status_reserved = status;
         for (v, x, y, w, h) in geometry {
             let window = self.window_mut(v)?;
             if (window.x, window.y, window.width, window.height) != (x, y, w, h) {
@@ -1566,7 +1664,11 @@ pub(crate) struct TextArea {
     pub right_margin: i64,
     pub rightmost: bool,
     pub full_width: bool,
+    /// GNU `w->hscroll`, and the columns init_iterator hides at each
+    /// line's left (first_visible_x): `min_hscroll` under
+    /// `auto-hscroll-mode' `current-line', else the hscroll.
     pub hscroll: i64,
+    pub first_visible: i64,
     pub mode_line: i64,
     pub header_line: i64,
     pub column: i64,
@@ -1783,17 +1885,8 @@ impl<'a> Windows<'a> {
     /// canonical line tall (DIVERGENCES.md VM2-WIN3).
     pub(crate) fn window_mode_line_height(&mut self, window: Value) -> Out {
         let w = self.live(window)?;
-        let line = self.vm.window_state.line;
-        let (key, none, slot) = (self.vm.intern("mode-line-format"), self.vm.intern("none"), self.vm.slot("mode-line-format"));
-        let buffer = self.get(w)?.buffer;
-        let format = self.vm.value_in_buffer(slot, buffer).map_err(internal)?;
-        let x = self.get(w)?;
-        let parameter = x.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
-        let wants = !x.mini
-            && parameter != none
-            && (parameter != Value::NIL || (format != Value::UNBOUND && format != Value::NIL))
-            && x.height > line;
-        Self::int(if wants { i64::from(line) } else { 0 })
+        let wants = self.vm.window_wants_mode_line(w).map_err(internal)?;
+        Self::int(if wants { i64::from(self.vm.window_state.line) } else { 0 })
     }
     /// The header line window_wants_header_line (window.c:6067) gives W, a
     /// live window: its `header-line-format' parameter, else its buffer's
@@ -1916,7 +2009,10 @@ impl<'a> Windows<'a> {
         let (root_x, root_width) = self.vm.window(root).map_or((0, 0), |r| (i64::from(r.x), i64::from(r.width)));
         let fringes = self.vm.window_fringe_widths(w).map_err(internal)?;
         let [right_divider, bottom_divider] = self.vm.window_dividers(w).map_err(internal)?.map(i64::from);
+        let buffer = self.get(w)?.buffer;
+        let current_line = self.vm.hscrolls_current_line(w, buffer).map_err(internal)?;
         let x = self.get(w)?;
+        let first_visible = if current_line { x.min_hscroll } else { x.hscroll };
         let (left, width) = (i64::from(x.x), i64::from(x.width));
         let body_width = (width - i64::from(x.left_margin + x.right_margin) * column - i64::from(fringes[0] + fringes[1]) - right_divider).max(0);
         let body_height = (i64::from(x.height) - mode_line - header_line - bottom_divider).max(0);
@@ -1929,6 +2025,7 @@ impl<'a> Windows<'a> {
             rightmost: left + width >= root_x + root_width,
             full_width: left == root_x && width == root_width,
             hscroll: x.hscroll,
+            first_visible,
             mode_line,
             header_line,
             column,
@@ -2166,6 +2263,27 @@ impl<'a> Windows<'a> {
         let f = self.vm.frame_mut(frame).map_err(internal)?;
         if f.tab_bar_lines == lines { return Ok(()); }
         f.tab_bar_lines = lines;
+        self.vm.frame_changed().map_err(internal)
+    }
+    /// The host frame's status bar becomes LINES (0 or 1) lines and its
+    /// windows are laid out above it. A child frame keeps the parameter
+    /// only.
+    pub(crate) fn set_frame_status_bar_lines(&mut self, frame: Value, lines: u32) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        if self.is_child_frame(frame)? { return Ok(()); }
+        let f = self.vm.frame_mut(frame).map_err(internal)?;
+        if f.status_bar_lines == lines { return Ok(()); }
+        f.status_bar_lines = lines;
+        self.vm.frame_changed().map_err(internal)
+    }
+    /// The host frame's windows' mode-line bands show LABEL; a band that
+    /// comes or goes changes their bodies.
+    pub(crate) fn set_frame_pane_label(&mut self, frame: Value, label: crate::frame::PaneLabel) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        if self.is_child_frame(frame)? { return Ok(()); }
+        let f = self.vm.frame_mut(frame).map_err(internal)?;
+        if f.pane_label == label { return Ok(()); }
+        f.pane_label = label;
         self.vm.frame_changed().map_err(internal)
     }
     /// The host frame's tab bar lines as the display shows them.
@@ -2477,16 +2595,68 @@ impl<'a> Windows<'a> {
         let window = self.live(window)?;
         Self::int(self.get(window)?.hscroll)
     }
-    /// GNU window.c:1313 and set_window_hscroll: clipped to 0..most-positive-fixnum.
+    /// GNU window.c:1313.
     pub(crate) fn set_window_hscroll(&mut self, window: Value, ncol: Value) -> Out {
         let n = ncol.integer_value().ok_or(Fault::Wrong("fixnump", ncol))?;
         let window = self.live(window)?;
+        self.scroll_to(window, n)
+    }
+    /// GNU set_window_hscroll: WINDOW scrolled N columns, clipped to
+    /// 0..most-positive-fixnum, holding automatic hscrolling.
+    fn scroll_to(&mut self, window: Value, n: i64) -> Out {
         let n = n.clamp(0, Value::MAX_FIXNUM);
         let w = self.get_mut(window)?;
         if w.hscroll != n { w.end_valid = false; }
-        w.hscroll = n;
+        (w.hscroll, w.suspend_auto_hscroll) = (n, true);
         self.vm.display_state.version += 1;
         Self::int(n)
+    }
+    /// GNU `scroll-left' (LEFT) and `scroll-right' (window.c:7101): the
+    /// selected window COLUMNS further, by default its body's width in
+    /// columns less 2; with SET-MINIMUM the result bounds automatic
+    /// hscrolling from below.
+    pub(crate) fn scroll_horizontally(&mut self, columns: Option<i64>, set_minimum: Value, left: bool) -> Out {
+        let window = self.vm.selected_window_value().map_err(Fault::Error)?;
+        let columns = match columns {
+            Some(n) => n,
+            None => self.window_body_size(window, Value::NIL, true)?.integer_value().unwrap_or(0) - 2,
+        };
+        let hscroll = self.get(window)?.hscroll;
+        let result = self.scroll_to(window, if left { hscroll.saturating_add(columns) } else { hscroll.saturating_sub(columns) })?;
+        let w = self.get_mut(window)?;
+        if set_minimum != Value::NIL { w.min_hscroll = w.hscroll; }
+        Ok(result)
+    }
+    /// GNU window.c:2048 (`Vm::window_line_height').
+    pub(crate) fn window_line_height(&mut self, line: Value, window: Value) -> Out {
+        let window = self.live(window)?;
+        let bands = ["tab-line", "header-line", "mode-line"].map(|name| self.vm.intern(name));
+        if line != Value::NIL && line.integer_value().is_none() && !bands.contains(&line) { return Err(Fault::Wrong("fixnump", line)); }
+        // VM2 draws no tab line (DIVERGENCES.md VM2-WIN3).
+        if line == bands[0] { return Ok(Value::NIL); }
+        self.vm.window_line_height(line, window).map_err(Fault::Error)
+    }
+    pub(crate) fn selected_window(&mut self) -> Out {
+        self.vm.selected_window_value().map_err(Fault::Error)
+    }
+    /// Whether live WINDOW's point is at its old point.
+    pub(crate) fn old_point_is_point(&mut self, window: Value) -> std::result::Result<bool, Fault> {
+        let old = self.window_old_point(window)?;
+        let point = self.vm.window_point_value(window).map_err(Fault::Error)?;
+        Ok(old == point)
+    }
+    /// Move live WINDOW's old point to its point.
+    pub(crate) fn old_point_to_point(&mut self, window: Value) -> std::result::Result<(), Fault> {
+        let window = self.live(window)?;
+        let (point, buffer) = (self.vm.window_point_value(window).map_err(Fault::Error)?, self.get(window)?.buffer);
+        self.vm.set_window_old_point(window, point, buffer).map_err(Fault::Error)
+    }
+    /// GNU window.c:1803: WINDOW's point at its last redisplay.
+    pub(crate) fn window_old_point(&mut self, window: Value) -> Out {
+        let window = self.live(window)?;
+        let marker = self.get(window)?.old_point;
+        if marker == Value::NIL { return Ok(Value::NIL); }
+        self.vm.marker_position_value(marker).map_err(internal)
     }
     pub(crate) fn window_combination_limit(&mut self, window: Value) -> Out {
         if window == Value::NIL { return Err(Fault::Wrong("window-valid-p", window)); }

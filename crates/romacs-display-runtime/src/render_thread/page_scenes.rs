@@ -29,7 +29,7 @@ use romacs_scene::draw::{DrawList, Source};
 use romacs_scene::layout::{self, Measure, Measured};
 use romacs_scene::lower::{self, Resolve};
 use romacs_scene::motion::Policy;
-use romacs_scene::node::{Color, Font, ImageSource, NodeId, SceneId, TextNode};
+use romacs_scene::node::{Font, ImageSource, NodeId, SceneId, TextNode};
 use romacs_scene::prop::{Prop, Value};
 use romacs_scene::scene::Scene;
 
@@ -86,14 +86,13 @@ pub(crate) fn block(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Opti
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Built {
     geometry: landing::Geometry,
-    background: Color,
     policy: Policy,
     epoch: u64,
 }
 
 impl Built {
-    /// Whether NEXT continues this one's motion: a new size or background
-    /// redraws the same moment, a new policy or epoch starts over.
+    /// Whether NEXT continues this one's motion: a new size redraws the
+    /// same moment, a new policy or epoch starts over.
     fn continued_by(&self, next: &Self) -> bool {
         (self.policy, self.epoch) == (next.policy, next.epoch)
     }
@@ -163,13 +162,13 @@ impl PageScene {
         let Some(geometry) = landing::geometry(view, block.cell) else { self.shown = None; return };
         // With motion off the scene shows its targets: the still frame.
         let policy = if animation.still { Policy::Reduced } else { Policy::On };
-        let built = Built { geometry, background: background(frame, block.face), policy, epoch };
+        let built = Built { geometry, policy, epoch };
         match self.built {
             Some(b) if b == built => {}
-            // New geometry or background: the same scene, refitted by a
+            // New geometry: the same scene, refitted by a
             // diff, so its motions run on and its nodes' revisions move.
             Some(b) if b.continued_by(&built) => {
-                match self.scene.apply(&landing::refit(&geometry, built.background, self.scene.rev()), policy) {
+                match self.scene.apply(&landing::refit(&geometry, self.scene.rev()), policy) {
                     Ok(scene) => self.scene = scene,
                     Err(reject) => {
                         tracing::warn!("landing scene refit rejected: {reject:?}");
@@ -182,7 +181,7 @@ impl PageScene {
             // A new start: a new scene, drawn by a new pass.
             _ => {
                 let fresh = Scene::new(SceneId(1), 1).tick(seconds(moved), true);
-                match fresh.apply(&landing::scene(&geometry, built.background, policy), policy) {
+                match fresh.apply(&landing::scene(&geometry, policy), policy) {
                     Ok(scene) => self.scene = scene,
                     Err(reject) => {
                         tracing::warn!("landing scene rejected: {reject:?}");
@@ -307,12 +306,6 @@ impl PageScene {
 
 fn seconds(moved: f64) -> Duration {
     Duration::from_secs_f64(moved.max(0.0))
-}
-
-/// The background of FACE in FRAME, opaque.
-fn background(frame: &FrameGlyphBuffer, face: FaceId) -> Color {
-    let c = frame.faces.get(&face).map_or(frame.background, |f| f.background);
-    Color::rgba(c.r, c.g, c.b, 1.0)
 }
 
 /// Page scenes hold no text, so nothing measures.

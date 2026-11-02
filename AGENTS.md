@@ -55,6 +55,14 @@ possible; say so where you do.
   search, help, shells, org and text editing), not on one user's configuration
   or one package.
 - Keep working behavior and user data intact while improving the machine.
+- Derived state is recomputed at batch boundaries, not per item. Mutations
+  mark state dirty; expensive derivations (face realisation, display
+  mirroring, layout, chrome refresh) run once per command, redisplay, or
+  theme switch. Hot primitives index rather than scan growing collections.
+  Every new collection-holding subsystem adds a scaling probe to
+  `crates/romacs-vm-gui/harness/scaling/probes.el`. A probe over its exponent
+  budget is fixed, or carries `:known` with a ticket. Raising its budget is
+  not a fix.
 
 ## Testing loop
 
@@ -99,6 +107,10 @@ the pinned oracle.
   `--test`, `--match`, file arguments, and `--core` option support smaller checks.
 - ERT report/parser checks: `python3 -m unittest discover -s gnu-tests/tests -p test_ert_report.py`.
 - Real GNU ERT execution: `python3 gnu-tests/run.py run --harness real --bootstrap ert --ert-adapter romacs-batch --bin BINARY --out OUTPUT FILE ...`.
+- Scaling probes: `python3 crates/romacs-vm-gui/harness/scaling_live.py --binary BINARY --output OUTPUT`,
+  optionally `--mode batch|gui`, `--only NAME ...`, and `--record`. `--record`
+  writes call graphs for probes over budget; give it a frame-pointer build. The
+  gate runs the batch probes (`romacs-vm-gui` test `scaling`).
 - Derived artifacts and source/floor validation: `python3 scripts/check-derived`.
   It can regenerate stale output; inspect and stage only task-owned changes.
 - Combined verification: `python3 scripts/gate focused 'EXPR'`, then

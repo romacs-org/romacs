@@ -22,7 +22,7 @@ impl Leaf<'_> {
             let slot = self.vm.slot("charset-map-path");
             self.vm.specials.insert("charset-map-path".into());
             if self.vm.slots[slot].value == Value::UNBOUND {
-                let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../etc/charsets");
+                let directory = crate::host::runtime_root().join("etc/charsets");
                 let path = self.string(&directory.to_string_lossy());
                 self.vm.slots[slot].value = self.cons(path, Value::NIL);
             }

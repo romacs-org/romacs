@@ -2,7 +2,7 @@
 //! xdisp.c display_tab_bar), on a 10-pixel cell.
 use romacs_display_protocol::{FrameGlyph, frame_glyphs::{FringeSide, GlyphRowRole}};
 use romacs_layout_input::{BitmapAlign, Face, FaceHandle, FaceRun, FrameSnapshot, FringeBitmap, Indicators, LineWrap,
-    PlacedWindowSnapshot, TabBarSnapshot, TextSlice, WindowChrome, WindowSnapshot};
+    PlacedWindowSnapshot, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowChrome, WindowSnapshot};
 
 fn face(foreground: [u8; 3], background: [u8; 3]) -> Face {
     Face { foreground, background, family: "Liberation Mono".into(), pixel_size: 16.0 }
@@ -24,7 +24,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
         id: 1, width: 100, height: 200, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: TextSlice { utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, tab_width: 8, wrap, cursor_off: false, stretches: vec![], line_numbers: None,
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap, cursor_off: false, stretches: vec![], line_numbers: None,
         faces: vec![face([255; 3], [0; 3]), face([1, 2, 3], [200, 0, 0]), face([0, 255, 0], [0; 3])],
         chrome: WindowChrome { left_fringe: 8, right_fringe: 8, fringe_face: FaceHandle(1), indicators, ..WindowChrome::default() },
     }
@@ -34,7 +34,7 @@ fn frame(snapshot: WindowSnapshot, tab_bar: Option<TabBarSnapshot>) -> FrameSnap
     let y = tab_bar.as_ref().map_or(0, |t| t.height);
     FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), width: 116, height: 200 + y,
-        windows: vec![PlacedWindowSnapshot { x: 8, y, snapshot }], background_alpha: 1.0, children: vec![], tab_bar, chrome: Default::default(),
+        windows: vec![PlacedWindowSnapshot { x: 8, y, snapshot }], background_alpha: 1.0, children: vec![], tab_bar, chrome: Default::default(), status_bar: None,
     }
 }
 
@@ -125,6 +125,33 @@ fn the_tab_bar_paints_its_row_above_the_windows() {
     assert_eq!(extents.len(), 6);
     assert_eq!(extents[0].0, 0.0);
     assert!(extents.windows(2).all(|w| w[0].0 + w[0].1 == w[1].0));
+}
+
+/// The status bar (VM2-STATUS-BAR): its band where the snapshot puts it,
+/// every character on its face's background, those past its width
+/// clipped; its extents are the painted characters in text order.
+#[test]
+fn the_status_bar_paints_its_band_and_clips_its_text() {
+    let mut snapshot = frame(window("x", LineWrap::Window), None);
+    snapshot.status_bar = Some(StatusBarSnapshot {
+        x: 4, y: 150, width: 116 - 8, height: 20,
+        text: TextSlice { utf8: "abcdefghijklmnop".into(), face_runs: vec![FaceRun { bytes: 0..2, face: FaceHandle(1) }], raw: vec![] },
+        face: FaceHandle(0), faces: vec![face([0; 3], [30, 40, 50]), face([9; 3], [200, 0, 0])], window: 1, focused: true,
+    });
+    let painted = lay_out(snapshot);
+    let extents = romacs_layout2::status_bar_extents(&painted);
+    let shown = chars(&painted, GlyphRowRole::StatusBar);
+    assert!(shown.len() < 16 && "abcdefghijklmnop".starts_with(&shown), "{shown}");
+    assert_eq!(extents.len(), shown.len());
+    assert_eq!(extents[0].0, 4.0);
+    assert!(extents.last().is_some_and(|&(x, w)| x + w <= 4.0 + 108.0));
+    assert_eq!(painted.status_bar.map(|r| (r.x, r.y, r.width, r.height)), Some((4.0, 150.0, 108.0, 20.0)));
+    // A run's face keeps the bar's background, as a window's band does.
+    let face = painted.glyphs.iter().find_map(|g| match g {
+        FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, face_id, .. } => Some(*face_id),
+        _ => None,
+    }).unwrap();
+    assert_eq!(painted.faces[&face].background, romacs_display_protocol::Color::from_pixel(0x1e2832));
 }
 
 /// Panes (VM2-PANE-CHROME): each window's box, fringes included, but the

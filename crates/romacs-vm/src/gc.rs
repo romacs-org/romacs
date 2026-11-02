@@ -9,8 +9,11 @@ pub struct HeapStats {
     pub live_objects: usize,
     pub live_bytes: usize,
     pub capacity_bytes: usize,
+    /// Wall time spent collecting, every collection included (GNU's
+    /// `gc-elapsed' reports it).
+    pub elapsed_ns: u64,
 }
-romacs_snapshot::snapshot_struct!(HeapStats { collections, allocations, reclaimed, live_objects, live_bytes, capacity_bytes });
+romacs_snapshot::snapshot_struct!(HeapStats { collections, allocations, reclaimed, live_objects, live_bytes, capacity_bytes, elapsed_ns });
 
 /// Values a native frame keeps across a call that can run Lisp: a span of
 /// `external_roots`, pushed before the call and read back by index after it,
@@ -313,11 +316,19 @@ impl Vm {
         if self.region_collect {
             return true;
         }
+        let (allocated, budget) = self.collection_budget();
+        allocated >= budget
+    }
+    /// The objects allocated since the last collection, and how many make
+    /// the next automatic one due (GNU's `gc_threshold'). The proportional
+    /// rule `A >= S (L + A/2)' over the live heap L is `A >= S L / (1 - S/2)',
+    /// S being below 2.
+    pub(crate) fn collection_budget(&self) -> (f64, f64) {
+        let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64;
         // An embedder's floor overrides, as GNU's memory-full state does.
         if let Some(floor) = self.gc_floor {
-            return self.heap_objects() >= self.gc_retained.saturating_mul(2).max(floor);
+            return (allocated, self.gc_retained.saturating_mul(2).max(floor).saturating_sub(self.gc_retained) as f64);
         }
-        let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64;
         let threshold = self.forwarded.gc_cons_threshold().max(MIN_CONS_THRESHOLD) as f64 / CONS_BYTES as f64;
         let percentage = match self.forwarded.gc_cons_percentage() {
             Ok(value) => match self.object_if(value) {
@@ -327,9 +338,19 @@ impl Vm {
             Err(initial) => Some(initial),
         };
         let proportional = percentage.map_or(0.0, |p| {
-            scaled_percentage(p) * ((self.gc_retained + self.gc_code) as f64 + allocated / 2.0)
+            let s = scaled_percentage(p);
+            s * (self.gc_retained + self.gc_code) as f64 / (1.0 - s / 2.0)
         });
-        allocated >= threshold.max(proportional)
+        (allocated, threshold.max(proportional))
+    }
+    /// How far the next automatic collection is along, 1 being due: the
+    /// larger of the objects allocated over their trigger and the request
+    /// code compiled over its threshold (`finish_request'), which only a
+    /// collection at a request boundary retires.
+    pub(crate) fn collection_share(&self) -> f64 {
+        let (allocated, budget) = self.collection_budget();
+        let code = self.request_code.since_collection as f64 / self.code_collection_threshold() as f64;
+        (allocated / budget).max(code)
     }
     /// A forced stress collection is due at this Lisp entry.
     pub(crate) fn stress_due(&mut self) -> bool {

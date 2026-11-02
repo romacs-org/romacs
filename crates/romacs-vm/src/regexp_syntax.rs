@@ -184,7 +184,9 @@ impl<'a> VmSyntax<'a> {
         Self {
             vm,
             table: source.table,
-            ascii: std::array::from_fn(|_| std::cell::Cell::new(None)),
+            // A constant, not `from_fn': its closure, called out of line
+            // for each slot, cost more than many searches.
+            ascii: [const { std::cell::Cell::new(None) }; 128],
             subject,
             id: NEXT.fetch_add(1, Ordering::Relaxed),
         }
@@ -391,6 +393,24 @@ impl Vm {
             .unwrap_or(SyntaxClass::Whitespace);
         Some(class)
     }
+    /// Whether TABLE's chain of char-table parents loops: Floyd's walk,
+    /// which allocates nothing on the path every search takes.
+    fn char_table_parents_cycle(&self, table: Value) -> bool {
+        let parent = |t: Value| match self.object_if(t) {
+            Some(Object::CharTable(c)) => Some(c.parent),
+            _ => None,
+        };
+        let (mut slow, mut fast) = (table, table);
+        loop {
+            let Some(next) = parent(fast).and_then(parent) else { return false };
+            fast = next;
+            let Some(trail) = parent(slow) else { return false };
+            slow = trail;
+            if slow == fast {
+                return true;
+            }
+        }
+    }
     /// Whether OBJECT, a search subject, has any `syntax-table' property.
     fn has_syntax_properties(&self, object: Value) -> bool {
         match self.object_if(object) {
@@ -460,16 +480,17 @@ impl Vm {
     fn regexp_syntax_source(&mut self, current: Value, object: Value, base: usize) -> SearchResult<SyntaxSource> {
         self.regexp_syntax_table(current)?;
         // char_table_get follows parents, so a cycle must be refused here.
-        let mut seen = HashSet::default();
-        let mut table = current;
-        while let Some(Object::CharTable(t)) = self.object_if(table) {
-            if !seen.insert(table.0) {
-                return Err(Fault::Text("error", "Cyclic syntax table parent".into()));
-            }
-            table = t.parent;
+        if self.char_table_parents_cycle(current) {
+            return Err(Fault::Text("error", "Cyclic syntax table parent".into()));
         }
         // parse-sexp-lookup-properties: the subject's `syntax-table'
         // properties, read where the engine asks (GNU UPDATE_SYNTAX_TABLE).
+        // A subject without them reads the table alone (`VmSyntax::new'),
+        // so only one with them needs the variable, which every string
+        // match would otherwise look up.
+        if !self.has_syntax_properties(object) {
+            return Ok(SyntaxSource { table: current, subject: None });
+        }
         // The binding where the search runs: `syntax-propertize' sets it
         // buffer-locally, and a treesit `#match?' searches its parser's
         // buffer, which need not be current.

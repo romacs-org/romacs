@@ -39,8 +39,14 @@ A worker of a `world' VM adopts exactly this world.")
 (defvar isolate-worker-arguments nil
   "Arguments every worker is started with, after the boot arguments.")
 
-(defvar isolate-pool-size (max 1 (1- (if (fboundp 'num-processors) (num-processors) 2)))
-  "How many pooled workers `isolate-spawn' starts before queueing on them.")
+(defvar isolate-pool-size nil
+  "How many pooled workers `isolate-spawn' starts before queueing on them.
+nil means one fewer than the processors this process may run on now,
+asked at each use: affinity and CPU limits change between processes.")
+
+(defun isolate--pool-size ()
+  "The pool's bound: `isolate-pool-size', else from `num-processors'."
+  (or isolate-pool-size (max 1 (1- (num-processors)))))
 
 (defvar isolate-queue-limit 64
   "Jobs and messages a worker may have waiting before `isolate-queue-full'.")
@@ -205,7 +211,7 @@ features.  FRESH asks for a new worker outside the pool's bound."
           (setq best isolate))))
     (cond (fresh (isolate-create :require require :allow-source-boot allow-source-boot))
           ((and best (null (aref best 5))) best)
-          ((< (length live) isolate-pool-size)
+          ((< (length live) (isolate--pool-size))
            (isolate-create :require require :allow-source-boot allow-source-boot))
           (best best)
           ((setq idle (let (found) (dolist (i live) (when (null (aref i 5)) (setq found i))) found))
@@ -233,7 +239,7 @@ the isolate started, or nil."
   (romacs--isolate-recycle)
   (let ((live (delq nil (mapcar (lambda (i) (and (isolate-live-p i) (not (aref i 6)) i)) romacs--isolates))))
     (and (not (romacs--isolate-with-features live require))
-         (< (length live) isolate-pool-size)
+         (< (length live) (isolate--pool-size))
          (isolate-create :require require :allow-source-boot allow-source-boot))))
 
 (defun isolate-pooled-worker (require &optional allow-source-boot)

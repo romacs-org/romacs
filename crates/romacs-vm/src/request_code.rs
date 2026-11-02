@@ -283,7 +283,7 @@ impl Vm {
     /// collects: 1024 functions, or a quarter of the code installed, so that,
     /// as with objects (`gc_threshold`), the collections a load pays grow
     /// with what it adds rather than with what the heap already holds.
-    fn code_collection_threshold(&self) -> usize {
+    pub(super) fn code_collection_threshold(&self) -> usize {
         ((self.functions.len() - self.request_code.free.len()) / 4).max(1024)
     }
 

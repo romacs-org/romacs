@@ -613,6 +613,20 @@ mod tests {
         std::fs::remove_dir_all(store).unwrap();
     }
 
+    // Under dynamic scope a Lisp uninterned symbol binds dynamically, but a
+    // compiler temporary is no symbol: compiling a form that needs one again
+    // and again must not make symbol slots.
+    #[test]
+    fn dynamic_scope_temporaries_take_no_symbol_slots() {
+        let mut vm = crate::Vm::new();
+        let run = |vm: &mut crate::Vm| { vm.eval_source("(dotimes (i 50) (eval (list 'or (list 'car-safe i) i) nil))").unwrap(); };
+        run(&mut vm);
+        let slots = vm.slots.len();
+        run(&mut vm);
+        assert_eq!(vm.slots.len(), slots);
+        assert_eq!(vm.eval_source("(let ((s (make-symbol \"u\"))) (eval (list 'let (list (list s 5)) (list 'symbol-value (list 'quote s))) nil))").unwrap().display().unwrap(), "5");
+    }
+
     #[test]
     fn nested_expansions_preserve_bindings_and_closure_captures() {
         let mut vm = crate::Vm::new();

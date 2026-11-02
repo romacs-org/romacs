@@ -1,7 +1,8 @@
 //! The *Romacs* landing as a scene: the mark as a lit, turning object (a
 //! `shader` node, landing_mark.wgsl, reading the mark's distance field from
-//! landing_field.wgsl) over the page's background, and the wordmark as a
-//! vector `path` under it.  Every motion is a property motion the host
+//! landing_field.wgsl) and the wordmark as a vector `path` under it, over
+//! nothing: the placement is transparent where neither draws, so the page's
+//! own background shows through at the frame's opacity.  Every motion is a property motion the host
 //! samples: the mark's assembly, its turn and its light cycle are uniforms
 //! with motions, the wordmark rises in on its opacity and position.  Under
 //! reduced motion they all snap to their targets, which are the still frame.
@@ -18,11 +19,9 @@ use romacs_display_protocol::motion_spec::{MotionDuration, MotionSpec, TweenSpec
 use romacs_display_protocol::scroll_animation::TransitionEasing;
 use romacs_scene::diff::{Diff, Op, Rev};
 use romacs_scene::motion::{Animate, Policy, Repeat};
-use romacs_scene::node::{Color, Dim, FillRule, Kind, NodeId, NodeSpec, PathNode, RectNode, ShaderNode};
+use romacs_scene::node::{Color, Dim, FillRule, Kind, NodeId, NodeSpec, PathNode, ShaderNode};
 use romacs_scene::prop::{Prop, Value};
 
-/// The page's background, under everything: the placement is opaque.
-pub(crate) const BACKDROP: NodeId = NodeId(1);
 /// The mark's shader node.
 pub(crate) const MARK: NodeId = NodeId(2);
 pub(crate) const WORDMARK: NodeId = NodeId(3);
@@ -92,10 +91,10 @@ pub(crate) fn geometry(view: romacs_logo::View, cell: Size) -> Option<Geometry> 
     })
 }
 
-/// The scene drawing GEOMETRY over BACKGROUND, from its first frame: the
-/// nodes at their starting values and the motions toward their targets;
-/// unless POLICY is `On`, the targets alone, the still frame.
-pub(crate) fn scene(g: &Geometry, background: Color, policy: Policy) -> Diff {
+/// The scene drawing GEOMETRY, from its first frame: the nodes at their
+/// starting values and the motions toward their targets; unless POLICY is
+/// `On`, the targets alone, the still frame.
+pub(crate) fn scene(g: &Geometry, policy: Policy) -> Diff {
     let at = |spec: NodeSpec, r: Rect| {
         spec.with(|c| {
             c.transform.x = r.x0 as f32;
@@ -104,10 +103,6 @@ pub(crate) fn scene(g: &Geometry, background: Color, policy: Policy) -> Diff {
             c.height = Dim::Px(r.height() as f32);
         })
     };
-    let backdrop = at(
-        NodeSpec::new(BACKDROP.0, Kind::Rect(RectNode { fill: background, ..RectNode::default() })),
-        Rect::from_origin_size((0.0, 0.0), g.placement.size()),
-    );
     let mut uniforms = vec![0.0; UNIFORMS];
     uniforms[0] = YAW.0;
     uniforms[1] = PITCH.0;
@@ -145,9 +140,8 @@ pub(crate) fn scene(g: &Geometry, background: Color, policy: Policy) -> Diff {
     Diff {
         base: Rev(0),
         ops: vec![
-            insert(0, backdrop),
-            insert(1, mark),
-            insert(2, word),
+            insert(0, mark),
+            insert(1, word),
             set(MARK, Prop::Uniform(0), YAW.1, tween(9000, None, TransitionEasing::EaseInOutCubic), forever(true)),
             set(MARK, Prop::Uniform(1), PITCH.1, tween(13000, None, TransitionEasing::EaseInOutCubic), forever(true)),
             set(MARK, Prop::Uniform(2), 1.0, tween(7000, None, TransitionEasing::Linear), forever(false)),
@@ -159,19 +153,15 @@ pub(crate) fn scene(g: &Geometry, background: Color, policy: Policy) -> Diff {
 }
 
 /// The diff that moves the scene SCENE_REV built for other geometry onto
-/// GEOMETRY over BACKGROUND, motions running on; a running rise of the
-/// wordmark ends where it is.
-pub(crate) fn refit(g: &Geometry, background: Color, scene_rev: Rev) -> Diff {
+/// GEOMETRY, motions running on; a running rise of the wordmark ends where
+/// it is.
+pub(crate) fn refit(g: &Geometry, scene_rev: Rev) -> Diff {
     let set = |id, prop, value| Op::Set { id, prop, value: Some(value), animate: None };
     let px = |v: f64| Value::Dim(Dim::Px(v as f32));
     let num = |v: f64| Value::Num(v as f32);
-    let size = g.placement.size();
     Diff {
         base: scene_rev,
         ops: vec![
-            set(BACKDROP, Prop::Width, px(size.width)),
-            set(BACKDROP, Prop::Height, px(size.height)),
-            set(BACKDROP, Prop::Fill, Value::Color(background)),
             set(MARK, Prop::X, num(g.mark.x0)),
             set(MARK, Prop::Y, num(g.mark.y0)),
             set(MARK, Prop::Width, px(g.mark.width())),

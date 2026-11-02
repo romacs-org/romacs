@@ -31,6 +31,7 @@ compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rus
 compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is a symbol, which never moves
 compiled_lisp/unit.rs function force_lazy 1 held  # an open compiler builder holds collection
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
+display.rs ml_prop_value eval_datum_raw 1 rooted  # a `:propertize' datum quoted, its objects form objects; mode_line_string keeps the string in a #: slot and reads it back
 eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
 eval_form.rs eval_primitive compile_request 1 held  # an open compiler builder holds collection
 eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environment are converted to forms first
@@ -97,7 +98,7 @@ mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms wit
 prim.rs attach_variable_history set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs default_cell_set notify 2 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs detected_source variable_set 1 held  # a native writer: its watchers hold collection (rooted_write unset)
-prim.rs install_lisp_prelude_raw eval_source_raw 3 boundary  # VM setup: no caller Values
+prim.rs install_lisp_prelude_raw eval_source_raw 4 boundary  # VM setup: no caller Values
 prim.rs make_variable_alias notify 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs notify notify_watchers_at 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
@@ -201,8 +202,9 @@ threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
 threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended
 threaded.rs reader_call compile_request 1 held  # an open compiler builder holds collection
 threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are quoted objects; the caller's registers are set aside
-threaded.rs reentrant_load call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
-threaded.rs reentrant_load loader_primitive 1 suspended  # inside call_suspended
+threaded.rs reentrant_load reentrant_step 1 suspended  # the step does the call; the handler only dispatches its Continue
+threaded.rs reentrant_step call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
+threaded.rs reentrant_step loader_primitive 1 suspended  # inside call_suspended
 threaded.rs resolve_entry force_lazy 1 suspended  # registers are rebased from the result
 threaded.rs return_unbind checked_unbind 1 suspended  # the return value is read from its register after
 threaded.rs route_escape checked_unbind 2 suspended  # the exit and its control stay engine state across the restores
