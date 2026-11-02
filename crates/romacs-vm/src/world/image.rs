@@ -93,6 +93,7 @@ impl Vm {
         self.process_jobs = Default::default();
         self.subprocesses = Default::default();
         self.gc_stress.rearm();
+        self.reset_collection_counters();
     }
 }
 

@@ -213,6 +213,32 @@ saved, else the seconds until it is due, or nil when none is."
                (let ((left (- delay (float-time idle))))
                  (if (> left 0) left (romacs--auto-save))))))))
 
+(defvar romacs-gc-idle-delay 2
+  "Seconds of idleness after which the command loop collects garbage,
+once `romacs-gc-idle-factor' says enough was allocated since the last
+collection; nil never collects at idle.  Collecting while idle keeps the
+pauses off commands; the automatic trigger, `gc-cons-threshold' and
+`gc-cons-percentage' with the request code compiled, still governs
+collection while commands run.")
+
+(defvar romacs-gc-idle-factor 4
+  "The idle collection waits for more than 1/FACTOR of what makes an
+automatic collection due, as `garbage-collect-maybe' with FACTOR does.")
+
+(defun romacs--idle-collect ()
+  "When the command loop's host, waiting for keys itself (the GUI), should
+collect: once idle for `romacs-gc-idle-delay' seconds with no input
+pending, and more than 1/`romacs-gc-idle-factor' of the way to an
+automatic collection (`romacs--collection-share').  Value: t to collect
+now, the seconds until then, or nil: a quiet session never waits for it.
+The host collects outside any Lisp, where request code retires."
+  (let ((idle (current-idle-time)))
+    (when (and (numberp romacs-gc-idle-delay) (natnump romacs-gc-idle-factor) idle
+               (not (romacs--unread-p)) (not (input-pending-p))
+               (> (* romacs-gc-idle-factor (romacs--collection-share)) 1))
+      (let ((left (- romacs-gc-idle-delay (float-time idle))))
+        (if (> left 0) left t)))))
+
 (defun romacs--unread-p ()
   "Whether read_char has a requeued event: in any of its unread queues."
   (or unread-post-input-method-events unread-command-events unread-input-method-events))

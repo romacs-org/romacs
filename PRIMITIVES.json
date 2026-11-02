@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "60e7b98fbe50ba2edd97e43d2e22a36bd48794d4c1e7fdd1ce367a7c52383134",
+  "source_fingerprint": "367ec4edf4cd94459c3e7f2497c8c16f2c6bf9a15753ef5197367fc3b17f150b",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1246,
-  "parsed_vm2_only": 1246
+  "parsed_total": 1248,
+  "parsed_vm2_only": 1248
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2111,6 +2111,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:4"
   },
+  "garbage-collect-maybe": {
+   "name": "garbage-collect-maybe",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:9"
+  },
   "generate-new-buffer-name": {
    "name": "generate-new-buffer-name",
    "implementation": "vm2",
@@ -2882,7 +2887,7 @@
   "make-finalizer": {
    "name": "make-finalizer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:9"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:34"
   },
   "make-frame-invisible": {
    "name": "make-frame-invisible",
@@ -4063,6 +4068,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:420"
   },
+  "romacs--collection-share": {
+   "name": "romacs--collection-share",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:24"
+  },
   "romacs--concat-list": {
    "name": "romacs--concat-list",
    "implementation": "vm2",
@@ -4562,7 +4572,7 @@
   "romacs--take-doomed-finalizers": {
    "name": "romacs--take-doomed-finalizers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:17"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:42"
   },
   "romacs--term-close": {
    "name": "romacs--term-close",

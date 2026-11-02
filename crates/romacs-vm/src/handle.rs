@@ -333,7 +333,10 @@ impl Vm {
     /// slots are appended to the caller's roots and written back forwarded.
     pub(crate) fn collect(&mut self, roots: &mut [Value]) {
         self.profile_collection_begin();
+        let start = crate::host::collection_clock();
         self.collect_rooted(roots);
+        let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
+        self.count_collection(elapsed);
         self.profile_collection_end();
     }
     fn collect_rooted(&mut self, roots: &mut [Value]) {
