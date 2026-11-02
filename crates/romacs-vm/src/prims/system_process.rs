@@ -176,13 +176,16 @@ fn attributes(cx: &mut Leaf<'_>, pid: i64) -> Out {
     use std::os::unix::fs::MetadataExt;
     let dir = format!("/proc/{pid}");
     let Ok(meta) = crate::host::metadata(&dir) else { return Ok(Value::NIL) };
+    // The process may exit while it is read: read its files together first.
+    let stat_bytes = crate::host::read_file(format!("{dir}/stat"));
+    let cmdline = crate::host::read_file(format!("{dir}/cmdline"));
     let mut attrs: Vec<(&str, Value)> = Vec::new();
     let int = |n: i128| -> std::result::Result<Value, Fault> { Value::integer(n as i64).map_err(Fault::Error) };
     attrs.push(("euid", int(meta.uid().into())?));
     if let Some(name) = crate::host::user_by_uid(meta.uid(), 16384).ok().and_then(|p| p.name) { attrs.push(("user", account_name(cx, name))); }
     attrs.push(("egid", int(meta.gid().into())?));
     if let Ok(name) = crate::host::group_by_gid(meta.gid(), 16384) { attrs.push(("group", account_name(cx, name))); }
-    let (comm, stat) = match crate::host::read_file(format!("{dir}/stat")) {
+    let (comm, stat) = match stat_bytes {
         Ok(bytes) if !bytes.is_empty() => {
             let (comm, stat) = parse_stat(&bytes);
             let decoded = locale_decoded(cx, comm.clone())?;
@@ -192,7 +195,7 @@ fn attributes(cx: &mut Leaf<'_>, pid: i64) -> Out {
         _ => (b"???".to_vec(), None),
     };
     if let Some(stat) = stat { stat_attributes(cx, &stat, &mut attrs)?; }
-    if let Ok(cmdline) = crate::host::read_file(format!("{dir}/cmdline")) {
+    if let Ok(cmdline) = cmdline {
         let args = locale_decoded(cx, command_line(&cmdline, &comm))?;
         attrs.push(("args", args));
     }
