@@ -434,16 +434,25 @@ impl LispGraph for Graph<'_> {
         NodeView::Other("unsupported face datum")
     }
 }
+/// The newlines in TEXT, at most LIMIT.
+fn text_animation_lines(text: &[u8], limit: usize) -> usize {
+    text.iter().filter(|&&c| c == b'\n').take(limit).count()
+}
 impl Vm {
     /// The text animations the display draws over the frame being frozen
     /// (romacs_display_protocol::text_animation): `romacs-animate--elements',
     /// which rlisp/romacs-animate.el keeps, a list of (KEY WINDOW BUFFER
-    /// TOP COLS ROWS FPS MOVING KIND), each while WINDOW is live and shows
-    /// BUFFER, keyed by KEY and WINDOW.  MOVING is t, nil (held where it
-    /// is) or `still' (motion is off: its still frame).  KIND is (logo
-    /// CELL-ASPECT EPOCH).
+    /// START COLS ROWS FPS MOVING KIND), each while WINDOW is live and shows
+    /// BUFFER, keyed by KEY and WINDOW.  START is the buffer position (or
+    /// marker) where the block's first row begins.  MOVING is t, nil (held
+    /// where it is) or `still' (motion is off: its still frame).  KIND is
+    /// (logo CELL-ASPECT EPOCH).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
+    /// The block's row in WINDOW is counted here, from the window start
+    /// this frame's redisplay chose: a command that scrolls (M->, C-v,
+    /// recenter) moves the start after Lisp's hooks have run, so no Lisp
+    /// can know it.  A block out of the window's rows holds its motion.
     pub fn text_animations(&mut self) -> Result<Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>> {
         use romacs_display_protocol::text_animation::{TextAnimation, TextAnimationKind};
         let slot = self.slot("romacs-animate--elements");
@@ -455,12 +464,18 @@ impl Vm {
         let mut animations = vec![];
         for entry in self.list_values(list)? {
             let fields = self.list_values(entry)?;
-            let [key, window, buffer, top, cols, rows, fps, moving, kind] = fields[..] else { return Err("bad text animation entry".into()) };
+            let [key, window, buffer, start, cols, rows, fps, moving, kind] = fields[..] else { return Err("bad text animation entry".into()) };
             let shown = match self.object_if(window) {
                 Some(Object::Window(w)) => w.buffer == buffer,
                 _ => false,
             };
             if !shown { continue; }
+            let rows = natural(rows)? as u32;
+            let start = match start.integer_value() {
+                Some(n) => n,
+                None => self.marker_position_value(start)?.integer_value().ok_or("text animation start")?,
+            };
+            let (top, in_view) = self.text_animation_row(window, start, rows)?;
             let kind = match self.list_values(kind)?[..] {
                 [head, cell_aspect, epoch] if head == logo => {
                     let cell_aspect = match (cell_aspect.integer_value(), self.object_if(cell_aspect)) {
@@ -472,16 +487,35 @@ impl Vm {
                 }
                 _ => return Err("bad text animation kind".into()),
             };
-            let top = top.integer_value().and_then(|n| i32::try_from(n).ok()).ok_or("text animation top")?;
             // Keyed by animation and window: each window showing one has its
             // own motion.
             let window = self.window(window)?.id;
             animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
-                window, top, cols: natural(cols)? as u32, rows: natural(rows)? as u32,
-                fps: natural(fps)? as u32, moving: moving != Value::NIL && moving != still, still: moving == still, kind,
+                window, top, cols: natural(cols)? as u32, rows,
+                fps: natural(fps)? as u32, moving: in_view && moving != Value::NIL && moving != still, still: moving == still, kind,
             }));
         }
         Ok(animations)
+    }
+    /// The visual row of WINDOW where a block of ROWS lines starting at
+    /// buffer position START begins, counted in lines from the window's
+    /// start (negative above it), and whether any of its rows is in the
+    /// window.  Counts at most the lines that decide that.
+    fn text_animation_row(&mut self, window: Value, start: i64, rows: u32) -> Result<(i32, bool)> {
+        let w = self.window(window)?;
+        let (buffer, marker) = (w.buffer, w.start);
+        let window_rows = w.height / self.window_state.line.max(1);
+        let window_start = self.marker_position_value(marker)?.integer_value().unwrap_or(1);
+        let Object::Buffer(b) = self.object(buffer)? else { return Err("buffer required".into()) };
+        let byte = |pos: i64| -> Result<usize> {
+            let pos = (pos.max(1) as usize - 1).min(b.len_chars());
+            Ok(b.byte_of_char(coordinates::CharOffset(pos))?.0)
+        };
+        let (from, to) = (byte(start.min(window_start))?, byte(start.max(window_start))?);
+        let limit = rows.max(window_rows) as usize;
+        let lines = text_animation_lines(&b.as_str().as_bytes()[from..to], limit) as i32;
+        let top = if start <= window_start { -lines } else { lines };
+        Ok((top, -top < rows as i32 && top < window_rows as i32))
     }
     /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
     pub fn frame_snapshot(&mut self, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
