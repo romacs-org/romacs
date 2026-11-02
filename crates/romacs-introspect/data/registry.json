@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "982fd6403b345a88816b5e1a5e8f78022f5a9f0f8a4558a4e20d378275e3c1b2",
+    "input_hash": "48056fdf7f69f8fbb5cbf9088e836baf2b7efb27b7f33805d6c9da72c99623b7",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7717
+    "vm2_universe": 7722
   },
   "schema": 2,
   "vm2": {
-    "count": 1256,
+    "count": 1259,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -811,6 +811,7 @@
       "romacs--get-process",
       "romacs--gnutls-verify",
       "romacs--host-minibuffer",
+      "romacs--indirect-buffers",
       "romacs--insert-file-contents-format",
       "romacs--insert-file-contents-undecide",
       "romacs--insert-printed",
@@ -911,7 +912,9 @@
       "romacs--write-auto-save-list",
       "romacs--write-region-body",
       "romacs-find-buffer-visiting",
+      "romacs-instructions",
       "romacs-json-read",
+      "romacs-native-stack-room",
       "round",
       "run-hook-with-args",
       "run-hook-with-args-until-failure",

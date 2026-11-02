@@ -91,6 +91,17 @@ impl Leaf<'_> {
             _ => Value::NIL,
         }
     }
+    /// BUFFER's live indirect buffers in `buffer-list' order: Fkill_buffer's
+    /// FOR_EACH_LIVE_BUFFER walk for those whose base is BUFFER, from the
+    /// base's own record, so a buffer with none (most) costs no list walk.
+    pub(crate) fn indirect_buffers(&mut self, buffer: Value) -> Value {
+        if !matches!(self.vm.object_if(buffer), Some(Object::Buffer(b)) if !b.indirect.is_empty()) {
+            return Value::NIL;
+        }
+        let order: Vec<Value> = self.vm.buffer_order().into_iter()
+            .filter(|&b| self.buffer_base(b) == buffer && self.vm.buffer_state(b).is_ok_and(|s| s.live)).collect();
+        order.into_iter().rev().fold(Value::NIL, |tail, b| self.cons(b, tail))
+    }
     pub fn lifecycle_killable(&self, buffer: Value) -> bool {
         self.lifecycle_live_p(buffer) && self.vm.minibuffer_window_buffer() != Some(buffer)
     }

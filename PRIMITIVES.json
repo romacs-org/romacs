@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "367ec4edf4cd94459c3e7f2497c8c16f2c6bf9a15753ef5197367fc3b17f150b",
+  "source_fingerprint": "8576ad07ce22df6bac1ec7beadfb20a0433e83f6b753585b872b8ce78a4a8731",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1248,
-  "parsed_vm2_only": 1248
+  "parsed_total": 1251,
+  "parsed_vm2_only": 1251
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -393,7 +393,7 @@
   "barf-if-buffer-read-only": {
    "name": "barf-if-buffer-read-only",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:66"
+   "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:73"
   },
   "base64-decode-region": {
    "name": "base64-decode-region",
@@ -4133,6 +4133,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:429"
   },
+  "romacs--indirect-buffers": {
+   "name": "romacs--indirect-buffers",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:39"
+  },
   "romacs--insert-file-contents-format": {
    "name": "romacs--insert-file-contents-format",
    "implementation": "vm2",
@@ -4639,10 +4644,20 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/file_identity.rs:35"
   },
+  "romacs-instructions": {
+   "name": "romacs-instructions",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/profiler.rs:43"
+  },
   "romacs-json-read": {
    "name": "romacs-json-read",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process_jobs.rs:20"
+  },
+  "romacs-native-stack-room": {
+   "name": "romacs-native-stack-room",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/profiler.rs:52"
   },
   "round": {
    "name": "round",
