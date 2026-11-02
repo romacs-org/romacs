@@ -24,6 +24,13 @@ reduced: setting `romacs-animation' to reduced while the landing turns
 shows its still frame: nothing moves, and on a GPU the mark stands lit and
 posed (the still frame, not the frame it reached); t again.
 
+alpha: in the still frame, `alpha-background' 100, 90 and 70 over a
+coloured backdrop (swaybg from --tools or PATH, when there is one).  The
+landing has no backdrop of its own: on a GPU a row and a column just below
+the wordmark, across the edges of its placement, show one page from end to
+end at every opacity, and the mark stays lit; where the surface composites
+alpha, the page lets the backdrop through below 100.
+
 away: from the landing, C-x b *scratch* RET and typing "hello".  The scene the evaluator
 submitted must show it, and so must the pixels: an animation left over from
 the landing would paint its block over *scratch*, as it once did.
@@ -49,6 +56,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import time
@@ -57,6 +65,8 @@ import fileio_live as fio
 import live_oracle as live
 
 WIDTH, HEIGHT = 1600, 1000
+# The backdrop behind a translucent frame: far from any theme's background.
+BACKDROP = '#3a9d6e'
 
 
 def main():
@@ -96,13 +106,15 @@ def main():
         # Romacs then draws with the host's GPU instead of a software one.
         wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
         stderr_path = a.output / 'binary.stderr'
-        comp = keyboard = proc = None
+        comp = keyboard = proc = backdrop = None
         try:
             with (a.output / 'compositor.log').open('w') as clog, stderr_path.open('w') as blog:
                 comp = subprocess.Popen([tool('labwc'), '-C', str(config)], env=env | wlr, stdout=clog, stderr=clog)
                 fio.wait(lambda: any(s.is_socket() for s in runtime.glob('wayland-*')), a.timeout, 'compositor', comp)
                 env['WAYLAND_DISPLAY'] = next(s for s in runtime.glob('wayland-*') if s.is_socket()).name
                 subprocess.run([tool('wlr-randr'), '--output', 'HEADLESS-1', '--custom-mode', f'{WIDTH}x{HEIGHT}'], env=env, check=True)
+                if shutil.which(tool('swaybg'), path=env['PATH']):
+                    backdrop = subprocess.Popen([tool('swaybg'), '-c', BACKDROP], env=env, stdout=clog, stderr=clog)
                 # A seat keyboard before the window maps, so it gets focus.
                 keyboard = subprocess.Popen(['wtype', '-s', '600000', '-k', 'Shift_L'], env=env, stdout=blog, stderr=blog)
                 time.sleep(0.3)
@@ -225,6 +237,71 @@ def main():
                 if wlr:
                     posed = red(a.output / 'reduced-c.png', whole)
                     check('on a GPU the still frame is the lit mark', posed > 0.04, posed)
+
+                # alpha, in the still frame
+                def pixels(path, region):
+                    """REGION's pixels in PATH, as (r, g, b) bytes."""
+                    out = subprocess.run([tool('magick'), str(path), '-crop', region, '+repage', '-depth', '8', 'txt:-'],
+                                         capture_output=True, text=True, check=True)
+                    found = []
+                    for line in out.stdout.splitlines()[1:]:
+                        rgb = line.split('(', 1)[1].split(')', 1)[0].split(',')[:3]
+                        found.append(tuple(int(v) for v in rgb))
+                    return found
+
+                def bounds(path, region, fx):
+                    """The bounding box (x0, y0, x1, y1) of REGION's pixels in PATH
+                    for which FX holds; empty when none do."""
+                    x, y = (int(v) for v in region.split('+')[1:])
+                    out = subprocess.run([tool('magick'), str(path), '-crop', region, '+repage', '-fx',
+                                          f'{fx} ? 1 : 0', '-format', '%@', 'info:'],
+                                         capture_output=True, text=True, check=True)
+                    size, bx, by = out.stdout.strip().split('+')
+                    w, h = (int(v) for v in size.split('x'))
+                    return x + int(bx), y + int(by), x + int(bx) + w, y + int(by) + h
+
+                def frame_alpha(percent):
+                    keys('-M', 'alt', ':', '-m', 'alt')
+                    keys(f"(set-frame-parameter nil 'alpha-background {percent})")
+                    keys('-k', 'Return')
+                    time.sleep(1.0)
+                    return shot(f'alpha-{percent}')
+
+                opaque = frame_alpha(100)
+                # The lit mark and its glow inside the frame's border, short of
+                # the message corner; then the wordmark below them.
+                _, _, _, lit_y1 = bounds(opaque, f'{WIDTH - 200}x{HEIGHT - 140}+20+20', 'r > 0.35 && r > g + 0.16')
+                wx0, _, wx1, wy1 = bounds(opaque, f'{WIDTH - 40}x{HEIGHT - 120 - lit_y1}+20+{lit_y1}',
+                                          'r > 0.75 && g > 0.75 && b > 0.75')
+                # The placement ends a little below the wordmark, past the glow:
+                # a row there crosses its left and right edges and a column its
+                # bottom edge, and each must show one page from end to end.
+                lines = {'row': f'{WIDTH - 40}x1+20+{wy1 + 6}', 'column': f'1x40+{(wx0 + wx1) // 2}+{wy1 + 3}'}
+                drawn = wx1 > wx0
+                if wlr:
+                    check('on a GPU the wordmark is drawn below the mark', drawn and wy1 + 43 < HEIGHT - 100,
+                          (wx0, wx1, wy1))
+                opaque_alpha = 'frame transparency renders opaque' in stderr_path.read_text(errors='replace')
+                pages = {}
+                for percent in (100, 90, 70):
+                    path = opaque if percent == 100 else frame_alpha(percent)
+                    if drawn:
+                        spread = {}
+                        for name, region in lines.items():
+                            found = pixels(path, region)
+                            spread[name] = max(max(p[c] for p in found) - min(p[c] for p in found) for c in range(3))
+                        check(f'alpha-background {percent}: no edge round the landing', max(spread.values()) <= 2,
+                              {'spread': spread, 'lines': lines})
+                    if wlr:
+                        lit = red(path, whole)
+                        check(f'alpha-background {percent}: the mark is lit', lit > 0.04, lit)
+                    pages[percent] = pixels(path, f'1x1+20+{HEIGHT // 2}')[0]
+                if backdrop is None or opaque_alpha:
+                    report['skipped'] = report.get('skipped', []) + [
+                        'backdrop: ' + ('no swaybg' if backdrop is None else 'the surface composites opaque')]
+                else:
+                    check('below 100 the backdrop shows through the page', pages[70] != pages[100], pages)
+                frame_alpha(100)
                 setq('t')
 
                 # away
@@ -277,7 +354,7 @@ def main():
         except Exception as e:  # noqa: BLE001
             report['error'] = repr(e)
         finally:
-            for p in (proc, keyboard, comp):
+            for p in (proc, keyboard, backdrop, comp):
                 if p is not None and p.poll() is None:
                     p.terminate()
                     try:
