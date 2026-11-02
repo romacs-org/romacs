@@ -105,9 +105,10 @@ thousandth a stack mark."
             (set-face-attribute face nil :foreground (if (cl-oddp k) "red" "blue") :weight 'bold)
             (setq k (1+ k)))))
 
-;; A theme application over N more package faces.  Its cost is the themes
-;; lane's: ~7 G instructions for modus-operandi in a -Q window, and ~16 M
-;; more per defined face, linear but each far above GNU's.
+;; A theme application over N more package faces: loading and enabling
+;; modus-operandi in a -Q window, ~1.3 G instructions, most of it loading
+;; the theme file; nearly flat in the faces, which only the root frame
+;; recomputes (VM2-CHILD-FRAME).
 (scaling-probe faces-theme :gui t :n 50 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces)
@@ -306,6 +307,26 @@ thousandth a stack mark."
            (switch-to-buffer (get-buffer-create "scaling-chrome-shown"))
            (current-buffer))
   :body (with-current-buffer it (insert "x")))
+
+;; Cursor motion in a truncated window, which places point's line for its
+;; hscroll each redisplay: N faces defined, then N distinct faces on
+;; point's line.  Setup returns the buffer: a step's timer runs in whatever
+;; buffer is current then.
+(scaling-probe hscroll-faces-defined :gui t :n 500 :steps 40
+  :setup (progn (dotimes (i n) (custom-declare-face (intern (format "scaling-hs-%d" i)) '((t :weight bold)) "x" :group 'scaling))
+                (switch-to-buffer (get-buffer-create "hs")) (erase-buffer)
+                (insert (make-string 400 ?x) "\n") (setq-local truncate-lines t) (goto-char 10)
+                (current-buffer))
+  :body (with-current-buffer it (if (cl-evenp i) (forward-char 1) (backward-char 1))))
+
+(scaling-probe hscroll-faces-on-line :gui t :n 500 :steps 40
+  :setup (progn (switch-to-buffer (get-buffer-create "hs")) (erase-buffer)
+                (dotimes (i n) (let ((face (intern (format "scaling-hs-%d" i))))
+                                 (custom-declare-face face '((t :weight bold)) "x" :group 'scaling)
+                                 (insert (propertize "x" 'face face))))
+                (insert "\n") (setq-local truncate-lines t) (goto-char 10)
+                (current-buffer))
+  :body (with-current-buffer it (if (cl-evenp i) (forward-char 1) (backward-char 1))))
 
 ;;;; Running
 
