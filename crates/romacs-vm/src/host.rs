@@ -37,6 +37,10 @@ pub enum Mode {
     Off,
     /// A world build: record, classify, refuse.
     Build,
+    /// A compiled-Lisp compile process (`crate::compiled_lisp`): record the
+    /// K facts its compile-time code reads, as a build does, but refuse
+    /// nothing and pin nothing. Its effects happen, as GNU's compile's do.
+    Record,
 }
 
 thread_local! {
@@ -53,7 +57,36 @@ pub fn mode() -> Mode {
 }
 
 fn building() -> bool {
+    mode() != Mode::Off
+}
+
+/// Whether host access is refused and P facts pinned: a world build only.
+fn refusing() -> bool {
     mode() == Mode::Build
+}
+
+/// Start recording a compile process's K facts on this thread
+/// (`Mode::Record`).
+pub fn enter_record() {
+    BUILD.with(|b| *b.borrow_mut() = Some(Build {
+        pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0,
+        site: None, records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
+    }));
+    MODE.with(|m| m.set(Mode::Record));
+}
+
+/// Stop recording: the keyed records and the recorder's own (`record`
+/// of a kind of its caller's, such as compiled Lisp's "loaded"), in
+/// first-occurrence order, without their sites.
+pub fn leave_record() -> Vec<Json> {
+    MODE.with(|m| m.set(Mode::Off));
+    let Some(build) = BUILD.with(|b| b.borrow_mut().take()) else { return vec![] };
+    let written: std::collections::HashSet<Vec<u8>> = build.written.iter().map(|p| p.as_os_str().as_bytes().to_vec()).collect();
+    build.records.into_iter()
+        .filter(|r| keyed(r) || r["kind"] == "loaded" || r["kind"] == "resolved")
+        .filter(|r| !decoded(&r["path"]).is_some_and(|path| written.contains(&path)))
+        .map(|mut r| { r.as_object_mut().map(|o| o.remove("site")); r })
+        .collect()
 }
 
 // Build mode.
@@ -311,6 +344,9 @@ struct Build {
     records: Vec<Json>,
     refusals: Vec<Json>,
     seen: std::collections::HashSet<String>,
+    /// In `Mode::Record`, the paths this process's own effects wrote: a
+    /// later read of one is of the compile's making, not an input.
+    written: std::collections::HashSet<PathBuf>,
 }
 
 impl Build {
@@ -335,7 +371,7 @@ fn with_build<T>(f: impl FnOnce(&mut Build) -> T) -> Option<T> {
 pub fn enter_build(pinned: Pinned) {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
         pinned, phase: Phase::Init, startups: 0, site: None,
-        records: Vec::new(), refusals: Vec::new(), seen: Default::default(),
+        records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
     }));
     MODE.with(|m| m.set(Mode::Build));
 }
@@ -449,6 +485,9 @@ pub(crate) fn refusals() -> usize {
 
 /// List a refusal: KIND with FIELDS and the current site.
 pub(crate) fn refuse(kind: &str, fields: Json) {
+    if !refusing() {
+        return;
+    }
     with_build(|b| {
         let mut item = json!({"kind": kind, "site": b.site()});
         item.as_object_mut().unwrap().extend(fields.as_object().cloned().unwrap_or_default());
@@ -458,6 +497,9 @@ pub(crate) fn refuse(kind: &str, fields: Json) {
 
 /// A P fact WHAT is read: recorded where it is allowed, else refused.
 fn p_read(fact: Fact<'_>, what: String) {
+    if !refusing() {
+        return;
+    }
     // Asked before the build is borrowed: it records, and notes a timer's allowance.
     let reseed = reseed_reads(&what);
     with_build(|b| {
@@ -475,9 +517,29 @@ fn p_read(fact: Fact<'_>, what: String) {
     });
 }
 
+/// F's host queries, unrecorded in `Mode::Record`: for a recorder that
+/// records their outcome as one fact of its own.
+pub fn unrecorded<T>(f: impl FnOnce() -> T) -> T {
+    if mode() != Mode::Record {
+        return f();
+    }
+    MODE.with(|m| m.set(Mode::Off));
+    let result = f();
+    MODE.with(|m| m.set(Mode::Record));
+    result
+}
+
+/// PATH is written by this process's own effect: noted in `Mode::Record`.
+fn wrote(path: &Path) {
+    if mode() == Mode::Record {
+        let path = if path.is_relative() { std::env::current_dir().map(|d| d.join(path)).unwrap_or_else(|_| path.to_owned()) } else { path.to_owned() };
+        with_build(|b| b.written.insert(path));
+    }
+}
+
 /// An effect WHAT: refused, failing with EPERM; Ok outside build mode.
 fn effect(what: impl FnOnce() -> String) -> io::Result<()> {
-    if !building() {
+    if !refusing() {
         return Ok(());
     }
     let what = what();
@@ -1213,7 +1275,7 @@ pub fn current_exe() -> io::Result<PathBuf> {
 }
 
 pub fn pid() -> u32 {
-    if building() {
+    if refusing() {
         p_read(Fact::Pid, "pid".into());
         return with_build(|b| b.pinned.pid).unwrap_or_default();
     }
@@ -1419,7 +1481,7 @@ pub fn zone_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
 
 /// The wall clock; in build mode the build time.
 pub fn clock() -> SystemTime {
-    if building() {
+    if refusing() {
         p_read(Fact::Clock, "clock".into());
         return with_build(|b| b.pinned.clock).unwrap_or(SystemTime::UNIX_EPOCH);
     }
@@ -1438,7 +1500,7 @@ pub fn monotonic() -> Instant {
 
 /// Four bytes of kernel entropy; in build mode the pinned seed.
 pub fn random_seed() -> io::Result<[u8; 4]> {
-    if building() {
+    if refusing() {
         p_read(Fact::Seed, "random seed".into());
         return Ok(with_build(|b| b.pinned.seed).unwrap_or_default());
     }
@@ -1449,6 +1511,7 @@ pub fn random_seed() -> io::Result<[u8; 4]> {
 
 /// PATH opened with OPTIONS for writing only: reads go through `Input`.
 pub fn open_output(path: impl AsRef<Path>, options: &OpenOptions) -> io::Result<File> {
+    wrote(path.as_ref());
     effect(|| format!("write {}", bytes(path.as_ref())))?;
     options.clone().read(false).write(true).open(path)
 }
@@ -1466,43 +1529,52 @@ pub fn clone_file(dest: &File, source: &Input) -> bool {
 }
 
 pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("write {}", self::bytes(path.as_ref())))?;
     std::fs::write(path, bytes)
 }
 
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+    wrote(from.as_ref());
+    wrote(to.as_ref());
     effect(|| format!("rename {} {}", bytes(from.as_ref()), bytes(to.as_ref())))?;
     std::fs::rename(from, to)
 }
 
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("delete {}", bytes(path.as_ref())))?;
     std::fs::remove_file(path)
 }
 
 pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("delete directory {}", bytes(path.as_ref())))?;
     std::fs::remove_dir(path)
 }
 
 /// mkdir with MODE before the umask.
 pub fn create_dir(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("make directory {}", bytes(path.as_ref())))?;
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new().mode(mode).create(path)
 }
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("make directory {}", bytes(path.as_ref())))?;
     std::fs::create_dir_all(path)
 }
 
 pub fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    wrote(link.as_ref());
     effect(|| format!("link {}", bytes(link.as_ref())))?;
     std::fs::hard_link(original, link)
 }
 
 pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    wrote(link.as_ref());
     effect(|| format!("symlink {}", bytes(link.as_ref())))?;
     std::os::unix::fs::symlink(target, link)
 }
@@ -1513,6 +1585,7 @@ pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()>
 
 /// fchmodat: PATH's mode bits, a symlink's own under NOFOLLOW.
 pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
+    wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("chmod {}", String::from_utf8_lossy(path.to_bytes())))?;
     let flags = if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 };
     status(unsafe { libc::fchmodat(libc::AT_FDCWD, path.as_ptr(), mode as libc::mode_t, flags) })
@@ -1520,6 +1593,7 @@ pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
 
 /// renameat2 with RENAME_NOREPLACE: EEXIST rather than replace TO.
 pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
+    wrote(Path::new(OsStr::from_bytes(to.to_bytes())));
     effect(|| format!("rename {}", String::from_utf8_lossy(to.to_bytes())))?;
     status(unsafe { libc::renameat2(libc::AT_FDCWD, from.as_ptr(), libc::AT_FDCWD, to.as_ptr(), libc::RENAME_NOREPLACE) })
 }
@@ -1527,6 +1601,7 @@ pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
 /// utimensat: both of PATH's times set to TIME (seconds, nanoseconds), or
 /// now; a symlink's own under NOFOLLOW.
 pub fn set_times(path: &CStr, time: Option<(i64, i64)>, nofollow: bool) -> io::Result<()> {
+    wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("set times {}", String::from_utf8_lossy(path.to_bytes())))?;
     let stamp = match time {
         Some((seconds, nanos)) => libc::timespec { tv_sec: seconds as libc::time_t, tv_nsec: nanos as _ },

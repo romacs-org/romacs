@@ -31,6 +31,7 @@ mod process_jobs;
 mod subprocess;
 pub mod host;
 pub mod world;
+pub mod compiled_lisp;
 mod environment;
 mod watchers;
 mod user_db;

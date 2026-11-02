@@ -56,6 +56,7 @@ pub fn run(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(),
 /// the chain's end is the batch world's ([`boot`]).
 fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(), String> {
     let (quick, args) = command_line_options(args, quick);
+    configure_compiled_lisp(store.as_deref());
     super::spawn_evaluator(move || -> Result<(), String> {
         let mut vm = boot(store)?;
         vm.set_session_host(Some(Box::new(|code| {
@@ -76,6 +77,51 @@ fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(
             args.join(" ")))?;
         Err("kill-emacs returned".into())
     })?.join().map_err(|_| "batch evaluator panicked".to_owned())?
+}
+
+/// Load compiled Lisp in this process (`romacs_vm::compiled_lisp`) when
+/// ROMACS_COMPILED_LISP=on, worlds are on, the world store (STORE, else
+/// the default one) exists, and a batch world was published in it: the
+/// compile environment a compile process restores. The store is
+/// `lisp/` beside the world store; a process without one reads source,
+/// as GNU does with no `.elc` files.
+pub fn configure_compiled_lisp(store: Option<&Path>) {
+    if !romacs_vm::compiled_lisp::requested() || romacs_vm::world::store::disabled() { return; }
+    let Some(worlds) = store.map(Path::to_owned)
+        .or_else(|| super::world::default_store(|name| std::env::var_os(name)))
+        .filter(|store| store.is_dir()) else { return };
+    let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut runtime = vec![dir.clone()];
+    if let Some(parent) = dir.parent() { runtime.push(parent.join("rlisp")); }
+    runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
+    romacs_vm::compiled_lisp::configure(romacs_vm::compiled_lisp::Config {
+        compiler: vec![exe.into(), "--world-store".into(), worlds.clone().into(), "--compile-lisp".into()],
+        store: worlds.with_file_name("lisp"),
+        environment: Box::new({
+            let (worlds, dir) = (worlds.clone(), dir.clone());
+            move || World::new(worlds.clone(), recipe(&dir)).ok()?.lisp_identity().map(|id| format!("batch world {id}"))
+        }),
+        runtime,
+    });
+}
+
+/// `--compile-lisp FILE`: a compile process. The batch session's VM, with
+/// the session's `load-path` (`compiled_lisp::LOAD_PATH`), compiles FILE
+/// and publishes its artifact, whose path the last line of standard
+/// output names.
+pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String> {
+    configure_compiled_lisp(store.as_deref());
+    super::spawn_evaluator(move || -> Result<(), String> {
+        let mut vm = boot(store)?;
+        if let Ok(path) = std::env::var(romacs_vm::compiled_lisp::LOAD_PATH) {
+            let dirs: Vec<PathBuf> = path.lines().map(PathBuf::from).collect();
+            vm.set_load_path(&dirs)?;
+        }
+        let artifact = vm.compile_lisp_file(&file)?;
+        println!("romacs-compiled: {}", artifact.display());
+        vm.shutdown_background_processes()
+    })?.join().map_err(|_| "compile process panicked".to_owned())?
 }
 
 /// The batch session's VM up to the chain's end: its world restored, then
