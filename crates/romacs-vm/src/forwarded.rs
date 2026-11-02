@@ -467,8 +467,8 @@ pub(crate) enum Init {
     List(&'static [Init]),
     /// make_nil_vector (N).
     NilVector(usize),
-    /// A file name under the runtime root: ROMACS_RUNTIME_ROOT, else this
-    /// checkout (GNU's installation-relative directories). The flag adds a
+    /// A file name under `host::runtime_root` (GNU's installation-relative
+    /// directories). The flag adds a
     /// final slash, as file-name-as-directory does.
     RuntimeFile(&'static str, bool),
     /// init_cmdargs: the running executable's file name (true) or its
@@ -479,6 +479,8 @@ pub(crate) enum Init {
     Cons(&'static Init, &'static Init),
     /// Fmake_char_table (PURPOSE, INIT), then these range writes.
     CharTable(&'static CharTableInit),
+    /// make_float of the seconds every collection so far took.
+    GcElapsed,
 }
 
 #[derive(Debug)]
@@ -520,6 +522,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // percentage internally (DIVERGENCES VM2-GC-PACING).
     CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
     CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
+    // benchmark.el's `benchmark-run' reads both around its body.
+    CVariable { name: "gc-elapsed", gnu: "alloc.c:7536", kind: Kind::Lisp(Init::GcElapsed) },
+    CVariable { name: "gcs-done", gnu: "alloc.c:7539", kind: Kind::Int(0) },
     // cl-generic's dispatcher compiler checks whether GNU is being dumped.
     CVariable { name: "purify-flag", gnu: "alloc.c:7487", kind: Kind::Lisp(Init::Nil) },
     // GNU warning text expands command keys while compiling obsolete method calls.
@@ -745,6 +750,8 @@ pub(crate) struct Forwarded {
     /// `gc-cons-threshold' and `gc-cons-percentage', read by the collector's
     /// pacing (`Vm::collection_due').
     gc_cons: (usize, usize),
+    /// `gcs-done' and `gc-elapsed', which each collection updates.
+    gc_done: (usize, usize),
     /// Per-buffer defaults (`buffer_defaults`).
     defaults: Vec<Value>,
     /// Table index behind each Obj / Buffer payload, for lazy initial values.
@@ -761,7 +768,7 @@ pub(crate) struct Forwarded {
     /// which moves buffers and reclaims bindings.
     pub(super) local_epoch: u64,
 }
-romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, gc_cons, defaults, object_vars, buffer_vars, by_name, eval_limit_symbol, eval_limit_cache, local_epoch });
+romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, gc_cons, gc_done, defaults, object_vars, buffer_vars, by_name, eval_limit_symbol, eval_limit_cache, local_epoch });
 
 impl Default for Forwarded {
     fn default() -> Self {
@@ -776,6 +783,7 @@ impl Default for Forwarded {
             eval_limit_cache: (0, usize::MAX, u64::MAX),
             local_epoch: 0,
             gc_cons: (0, 0),
+            gc_done: (0, 0),
             defaults: vec![],
             object_vars: vec![],
             buffer_vars: vec![],
@@ -808,6 +816,8 @@ impl Default for Forwarded {
         store.eval_limit_index = i as usize;
         let (Some(Fwd::Int(threshold)), Some(Fwd::Obj(percentage))) = (store.lookup("gc-cons-threshold"), store.lookup("gc-cons-percentage")) else { unreachable!() };
         store.gc_cons = (threshold as usize, percentage as usize);
+        let (Some(Fwd::Int(done)), Some(Fwd::Obj(elapsed))) = (store.lookup("gcs-done"), store.lookup("gc-elapsed")) else { unreachable!() };
+        store.gc_done = (done as usize, elapsed as usize);
         store
     }
 }
@@ -951,6 +961,25 @@ const WRONG_VALUE: &str = "forwarded variable error ";
 const UNBINDABLE: &str = "Built-in variable may not be unbound : ";
 
 impl Vm {
+    /// GNU `garbage_collect`'s end (alloc.c:6004): one more `gcs-done';
+    /// while `gc-elapsed' holds a float (or its initial one, not yet
+    /// read), ELAPSED_NS more in the total it reads next time.
+    pub(super) fn count_collection(&mut self, elapsed_ns: u64) {
+        let (done, elapsed) = self.forwarded.gc_done;
+        self.forwarded.ints[done] = self.forwarded.ints[done].saturating_add(1);
+        let value = self.forwarded.objects[elapsed];
+        if value == Value::UNBOUND || matches!(self.object_if(value), Some(data::Object::Float(_))) {
+            self.gc_stats.elapsed_ns += elapsed_ns;
+            self.forwarded.objects[elapsed] = Value::UNBOUND;
+        }
+    }
+    /// GNU `init_alloc', at each process's start: no collection done yet.
+    pub(crate) fn reset_collection_counters(&mut self) {
+        self.gc_stats.elapsed_ns = 0;
+        let (done, elapsed) = self.forwarded.gc_done;
+        self.forwarded.ints[done] = 0;
+        self.forwarded.objects[elapsed] = Value::UNBOUND;
+    }
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
     /// A fenced built-in variable is the forwarding the fence keeps; a
@@ -1064,6 +1093,7 @@ impl Vm {
             // build_string: unibyte unless the text has a non-ASCII char.
             Init::Str(text) => self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii()),
             Init::Float(x) => self.allocate_object(data::Object::Float(x)),
+            Init::GcElapsed => self.allocate_object(data::Object::Float(self.gc_stats.elapsed_ns as f64 / 1e9)),
             Init::Getenv(name, fallback) => {
                 let text = crate::host::getenv(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
@@ -1083,9 +1113,7 @@ impl Vm {
                 self.list_value(&values)
             }
             Init::RuntimeFile(name, slash) => {
-                let root = crate::host::getenv("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
-                    .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
-                let text = format!("{}{}", root.join(name).display(), if slash { "/" } else { "" });
+                let text = format!("{}{}", crate::host::runtime_root().join(name).display(), if slash { "/" } else { "" });
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::Invocation(name) => {

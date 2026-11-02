@@ -1498,6 +1498,33 @@ impl WgpuRenderer {
         surface_width: u32,
         surface_height: u32,
     ) {
+        // Green for good visibility, in linear.
+        self.render_text_badge(view, lines, glyph_atlas, (surface_width, surface_height), BadgePlace::TopRight, [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    /// The evaluator's busy indicator: one quiet line at the bottom right,
+    /// above the echo area.
+    pub fn render_busy_badge(
+        &mut self,
+        view: &wgpu::TextureView,
+        label: &str,
+        glyph_atlas: &mut WgpuGlyphAtlas,
+        surface_width: u32,
+        surface_height: u32,
+    ) {
+        self.render_text_badge(view, &[label.to_owned()], glyph_atlas, (surface_width, surface_height), BadgePlace::BottomRight, [0.8, 0.8, 0.8, 1.0]);
+    }
+
+    /// LINES of text in TEXT_COLOR on a translucent dark badge at PLACE.
+    fn render_text_badge(
+        &mut self,
+        view: &wgpu::TextureView,
+        lines: &[String],
+        glyph_atlas: &mut WgpuGlyphAtlas,
+        (surface_width, surface_height): (u32, u32),
+        place: BadgePlace,
+        text_color: [f32; 4],
+    ) {
         if lines.is_empty() {
             return;
         }
@@ -1522,16 +1549,23 @@ impl WgpuRenderer {
         // Badge size: width = longest line, height = all lines
         let max_text_w = lines
             .iter()
-            .map(|l| l.len() as f32 * char_width)
+            .map(|l| l.chars().count() as f32 * char_width)
             .fold(0.0_f32, f32::max);
         let num_lines = lines.len() as f32;
         let badge_w = max_text_w + padding * 2.0;
         let badge_h = num_lines * line_height + (num_lines - 1.0) * line_spacing + padding * 2.0;
         let badge_x = logical_w - badge_w - 4.0;
-        let badge_y = 4.0;
+        let badge_y = match place {
+            BadgePlace::TopRight => 4.0,
+            BadgePlace::BottomRight => logical_h - badge_h - 2.0 * line_height,
+        };
 
-        // Background badge (semi-transparent dark)
-        let bg = Color::new(0.0, 0.0, 0.0, 0.6);
+        // A translucent dark badge; the busy indicator's covers the text
+        // beneath it.
+        let bg = match place {
+            BadgePlace::TopRight => Color::new(0.0, 0.0, 0.0, 0.6),
+            BadgePlace::BottomRight => Color::new(0.02, 0.02, 0.025, 0.92),
+        };
         let mut rect_vertices: Vec<RectVertex> = Vec::new();
         self.add_rect(&mut rect_vertices, badge_x, badge_y, badge_w, badge_h, &bg);
 
@@ -1545,11 +1579,11 @@ impl WgpuRenderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("FPS Rect Encoder"),
+                label: Some("Badge Rect Encoder"),
             });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("FPS Rect Pass"),
+                label: Some("Badge Rect Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
@@ -1571,8 +1605,6 @@ impl WgpuRenderer {
         }
         self.submit_commands(Some(encoder.finish()));
 
-        // Text glyphs (green for good visibility)
-        let text_color = [0.0_f32, 1.0, 0.0, 1.0]; // green in linear
         let font_size_bits = 0.0_f32.to_bits();
         let mut overlay_glyphs: Vec<(GlyphAtlasHandle, f32, f32, [f32; 4])> = Vec::new();
         for (li, line) in lines.iter().enumerate() {
@@ -2400,3 +2432,10 @@ impl WgpuRenderer {
 #[cfg(test)]
 #[path = "ui_overlays/tests/ui_overlays_test.rs"]
 mod tests;
+
+/// Where a text badge sits on the surface.
+#[derive(Clone, Copy)]
+enum BadgePlace {
+    TopRight,
+    BottomRight,
+}

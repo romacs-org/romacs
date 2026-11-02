@@ -3,11 +3,13 @@
 #
 #   scripts/check-installed-runtime.sh OUT [SRC]
 #
-# OUT is an installed prefix (a Nix output: OUT/share/romacs/...); SRC is the
-# source tree it was built from (default: this checkout). Run at the end of
-# nix/package.nix's postInstall, so a package that drops or alters any runtime
-# file does not build. Written after the package installed 0 of the 229
-# lisp-bundled/ files for a week without anyone noticing.
+# OUT is an installed prefix (a Nix output or an unpacked release tarball:
+# OUT/share/romacs/...); SRC is the source tree it was built from (default:
+# this checkout). Run at the end of nix/package.nix's postInstall, so a
+# package that drops or alters any runtime file does not build, and by
+# scripts/ci/smoke-release on every release tarball. Written after the
+# package installed 0 of the 229 lisp-bundled/ files for a week without anyone
+# noticing.
 #
 # Checks CONTENT, not counts: every regular file under SRC/<dir> must exist
 # under OUT/share/romacs/<dir> byte-for-byte, with no extra file there either
@@ -48,6 +50,17 @@ wrapper=$out/bin/romacs-vm-gui
 if [ ! -x "$wrapper" ]; then
     echo "check-installed-runtime: FAIL no executable wrapper $wrapper" >&2
     status=1
+elif [ "$(head -c 2 "$wrapper")" != '#!' ]; then
+    # An unwrapped binary (a release tarball) finds share/romacs beside its
+    # bin/ (host::runtime_root). Ask it, with no runtime variables set.
+    resolved=$(env -u ROMACS_RUNTIME_ROOT -u ROMACS_LISP_DIR \
+        "$wrapper" -Q --batch --eval '(princ data-directory)' || true)
+    if [ "$resolved" = "$share/etc/" ]; then
+        echo "check-installed-runtime: unwrapped binary resolves data-directory $resolved"
+    else
+        echo "check-installed-runtime: FAIL unwrapped $wrapper resolves data-directory '$resolved', not $share/etc/" >&2
+        status=1
+    fi
 else
     assignment=$(grep -E '^export ROMACS_RUNTIME_ROOT=' "$wrapper" | tail -n 1 || true)
     resolved=$(unset ROMACS_RUNTIME_ROOT; eval "$assignment"; printf '%s' "${ROMACS_RUNTIME_ROOT-}")

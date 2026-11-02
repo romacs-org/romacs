@@ -627,6 +627,28 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
+/// The runtime tree (gnu-lisp/, rlisp/, etc/): `ROMACS_RUNTIME_ROOT` (the Nix
+/// wrapper sets it), else `share/romacs` beside the real executable's `bin/`
+/// (an unpacked release tarball, wherever it lives), else [`build_root`].
+pub fn runtime_root() -> PathBuf {
+    getenv("ROMACS_RUNTIME_ROOT").map(PathBuf::from)
+        .or_else(|| installed_root(&current_exe().ok()?))
+        .unwrap_or_else(build_root)
+}
+
+/// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
+/// `gnu-lisp/` directory.
+pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
+    let root = exe.parent()?.parent()?.join("share/romacs");
+    metadata(root.join("gnu-lisp")).is_ok_and(|m| m.is_dir()).then_some(root)
+}
+
+/// The checkout this crate was built from: a compile-time path that no
+/// installed system has, kept for development binaries under `target/`.
+pub(crate) fn build_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
 /// A read of environment NAME through FORM: a K name is recorded with its
 /// launch VALUE, a P name is a P read.
 fn env_read(form: &str, name: &[u8], value: Option<&OsString>) {
@@ -1496,6 +1518,12 @@ pub fn monotonic() -> Instant {
     Instant::now()
 }
 
+/// When a collection started, for `gc-elapsed'; none in build mode, so a
+/// world's heap never depends on how long its collections took.
+pub fn collection_clock() -> Option<Instant> {
+    (!building()).then(Instant::now)
+}
+
 // Effects.
 
 /// Four bytes of kernel entropy; in build mode the pinned seed.
@@ -2070,6 +2098,37 @@ pub fn catch_isolate_signals() -> io::Result<()> {
 pub fn interrupt_pending() -> bool {
     INTERRUPT.load(std::sync::atomic::Ordering::Relaxed) || TERMINATE.load(std::sync::atomic::Ordering::Relaxed)
 }
+/// keyboard.c handle_user_signal: SIGUSR1 and SIGUSR2 are input, counted
+/// here until read as `sigusr1' and `sigusr2' events, never the end of the
+/// process. An isolate worker gives SIGUSR1 its own meaning afterwards
+/// (`catch_isolate_signals').
+static USER_SIGNALS: [std::sync::atomic::AtomicU32; 2] =
+    [std::sync::atomic::AtomicU32::new(0), std::sync::atomic::AtomicU32::new(0)];
+/// In the order store_user_signal_events reads them: GNU's list holds
+/// SIGUSR2 first, the one registered last.
+const USER_SIGNAL_EVENTS: [(libc::c_int, &str); 2] = [(libc::SIGUSR2, "sigusr2"), (libc::SIGUSR1, "sigusr1")];
+extern "C" fn note_user_signal(signal: libc::c_int) {
+    let index = usize::from(signal == libc::SIGUSR1);
+    USER_SIGNALS[index].fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+pub fn catch_user_signals() -> io::Result<()> {
+    for (signal, _) in USER_SIGNAL_EVENTS {
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = note_user_signal as *const () as usize;
+        action.sa_flags = libc::SA_RESTART;
+        unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+    }
+    Ok(())
+}
+/// A pending user signal's event, SIGUSR2's first, taking it.
+pub fn take_user_signal() -> Option<&'static str> {
+    USER_SIGNALS.iter().zip(USER_SIGNAL_EVENTS).find_map(|(count, (_, event))| {
+        count.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |n| n.checked_sub(1))
+            .ok().map(|_| event)
+    })
+}
+
 /// Take the pending interrupt, if any.
 pub fn take_interrupt() -> bool {
     INTERRUPT.swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -2390,6 +2449,18 @@ mod tests {
         }
     }
     use super::*;
+
+    /// An unpacked release finds its runtime tree beside its `bin/`; a
+    /// development binary under `target/` has none there.
+    #[test]
+    fn installed_root_is_share_romacs_beside_bin() {
+        let prefix = std::env::temp_dir().join(format!("romacs-installed-root-{}", std::process::id()));
+        let exe = prefix.join("bin/romacs-vm-gui");
+        assert_eq!(installed_root(&exe), None);
+        std::fs::create_dir_all(prefix.join("share/romacs/gnu-lisp")).unwrap();
+        assert_eq!(installed_root(&exe), Some(prefix.join("share/romacs")));
+        std::fs::remove_dir_all(&prefix).unwrap();
+    }
 
     #[test]
     fn passwd_keeps_absent_fields_absent() {

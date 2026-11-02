@@ -7,8 +7,6 @@ use romacs_scene::motion::Policy;
 use romacs_scene::node::{Font, ImageSource, SceneId, TextNode};
 use romacs_scene::scene::Scene;
 
-const BACKGROUND: Color = Color::rgb8(0x0a, 0x0a, 0x0a);
-
 fn view() -> romacs_logo::View {
     romacs_logo::View { cols: 110, rows: 36, cell_aspect: 0.45 }
 }
@@ -25,7 +23,7 @@ fn geometry_of() -> Geometry {
 fn scene_at(g: &Geometry, policy: Policy, seconds: f64) -> Scene {
     Scene::new(SceneId(1), 1)
         .tick(Duration::ZERO, true)
-        .apply(&scene(g, BACKGROUND, policy), policy)
+        .apply(&scene(g, policy), policy)
         .expect("the landing scene applies")
         .tick(Duration::from_secs_f64(seconds), true)
 }
@@ -133,7 +131,7 @@ fn reduced_motion_is_the_still_frame_at_once() {
 }
 
 #[test]
-fn the_placement_draws_backdrop_mark_and_wordmark_in_order() {
+fn the_placement_draws_the_mark_then_the_wordmark_over_nothing() {
     let g = geometry_of();
     let list = list_at(&g, &scene_at(&g, Policy::On, 3.0));
     let root = list.targets.last().expect("a root target");
@@ -145,11 +143,11 @@ fn the_placement_draws_backdrop_mark_and_wordmark_in_order() {
         other => format!("{other:?}"),
     }).collect();
     assert_eq!(kinds, [
-        "rect Some(1.0)".to_owned(),
         format!("sample {:?}", romacs_scene::draw::Source::Surface(MARK_SURFACE)),
         "path".to_owned(),
     ]);
-    let drawn = root.items[1].transform.transform_rect_bbox(Rect::from_origin_size((0.0, 0.0), g.mark.size()));
+    assert_eq!(root.clear, Color::TRANSPARENT, "no backdrop: the frame shows through");
+    let drawn = root.items[0].transform.transform_rect_bbox(Rect::from_origin_size((0.0, 0.0), g.mark.size()));
     assert!((drawn.x0 - g.mark.x0).abs() < 1e-3 && (drawn.y1 - g.mark.y1).abs() < 1e-3, "{drawn:?} at {:?}", g.mark);
 }
 
@@ -158,7 +156,7 @@ fn a_refit_moves_the_scene_to_new_geometry_and_keeps_its_motion() {
     let g = geometry_of();
     let small = geometry(romacs_logo::View { cols: 80, rows: 18, cell_aspect: 0.45 }, cell()).expect("fits");
     let before = scene_at(&g, Policy::On, 1.0);
-    let after = before.apply(&refit(&small, BACKGROUND, before.rev()), Policy::On).expect("the refit applies");
+    let after = before.apply(&refit(&small, before.rev()), Policy::On).expect("the refit applies");
     let revision = |s: &Scene| s.node(WORDMARK).map(|n| n.revision);
     assert!(revision(&after) > revision(&before), "the wordmark's tessellation input changed");
     assert_eq!(uniform(&after, 3), uniform(&before, 3), "the assembly runs on from where it was");
@@ -280,11 +278,41 @@ mod gpu {
             lit as f64 / f64::from(self.width * self.height)
         }
 
+        /// This premultiplied picture over an opaque page of sRGB colour
+        /// PAGE, blended in linear light as an sRGB target blends.
+        pub fn over(&self, page: [u8; 3]) -> Self {
+            let rgba = self.rgba.chunks(4).flat_map(|p| {
+                let a = f64::from(p[3]) / 255.0;
+                let mut out = [255; 4];
+                for c in 0..3 {
+                    out[c] = encode(decode(p[c]) + decode(page[c]) * (1.0 - a));
+                }
+                out
+            }).collect();
+            Self { width: self.width, height: self.height, rgba }
+        }
+
+        pub fn at(&self, x: u32, y: u32) -> [u8; 4] {
+            let i = ((y * self.width + x) * 4) as usize;
+            self.rgba[i..i + 4].try_into().expect("a pixel")
+        }
+
         fn differs(&self, other: &Self) -> usize {
             self.rgba.chunks(4).zip(other.rgba.chunks(4))
                 .filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 8))
                 .count()
         }
+    }
+
+    pub(super) fn decode(c: u8) -> f64 {
+        let c = f64::from(c) / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    }
+
+    pub(super) fn encode(linear: f64) -> u8 {
+        let l = linear.clamp(0.0, 1.0);
+        let c = if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+        (c * 255.0).round() as u8
     }
 
     /// Bring the mark surface to SCENE's uniforms, render it, then the
@@ -314,20 +342,26 @@ mod gpu {
                     SceneInputs { atlas: &mut gpu.atlas, fonts: &|_| None, sources: &sources })
             .expect("the landing list is valid");
         assert!(stats.skipped.is_empty(), "skipped {:?}", stats.skipped);
+        gpu.queue.submit([encoder.finish()]);
+        gpu.pass.submitted();
         if !read {
-            gpu.queue.submit([encoder.finish()]);
-            gpu.pass.submitted();
             return None;
         }
         let texture = gpu.pass.texture(list.targets.last()?.id)?.clone();
+        Some(self::read(&gpu.device, &gpu.queue, &texture))
+    }
+
+    /// TEXTURE's pixels, as stored.
+    fn read(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Picture {
         let (width, height) = (texture.width(), texture.height());
         let row = (width * 4).div_ceil(256) * 256;
-        let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("landing readback"),
             size: u64::from(row * height),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
+        let mut encoder = device.create_command_encoder(&Default::default());
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
@@ -336,13 +370,12 @@ mod gpu {
             },
             texture.size(),
         );
-        gpu.queue.submit([encoder.finish()]);
-        gpu.pass.submitted();
+        queue.submit([encoder.finish()]);
         readback.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("map"));
-        wait(&gpu.device);
+        wait(device);
         let mapped = readback.slice(..).get_mapped_range().expect("mapped");
         let rgba = mapped.chunks(row as usize).flat_map(|line| &line[..(width * 4) as usize]).copied().collect();
-        Some(Picture { width, height, rgba })
+        Picture { width, height, rgba }
     }
 
     pub(super) fn write_png(path: &Path, picture: &Picture) {
@@ -398,13 +431,121 @@ mod gpu {
         assert!(turned.differs(&later) > 2000, "the loop moves");
         let path = reference("landing-still");
         if std::env::var_os("ROMACS_SCENE_BLESS").is_some() {
-            write_png(&path, &still);
+            write_png(&path, &still.over([0x0a; 3]));
         }
         let blessed = read_png(&path).unwrap_or_else(|| panic!("no reference at {}", path.display()));
         assert_eq!((blessed.width, blessed.height), (still.width, still.height));
-        let changed = still.differs(&blessed);
+        // The reference is the still frame over an opaque page of 0x0a0a0a,
+        // as it drew with an opaque backdrop: composited over that page the
+        // transparent placement looks the same.
+        let changed = still.over([0x0a; 3]).differs(&blessed);
         assert!(changed as f64 / f64::from(still.width * still.height) < 0.002,
                 "{changed} pixels differ from {}", path.display());
+    }
+
+    /// The still landing as a frame shows it, through the renderer's own
+    /// surface composite on the software adapter, over a translucent page
+    /// far from black: where the scene draws nothing the page shows at its
+    /// opacity, to the placement's edges and past them, and everywhere the
+    /// placement is the scene premultiplied over the page (no backdrop, no
+    /// dark halo round the glow, no holes).
+    #[test]
+    fn the_landing_composites_over_a_translucent_frame() {
+        use crate::render_thread::page_scenes::{block, PageScene};
+        use romacs_display_protocol::text_animation::{TextAnimation, TextAnimationKind};
+        use romacs_display_protocol::types::FaceId;
+        use romacs_renderer_wgpu::WgpuRenderer;
+        use romacs_display_protocol::{DeviceScale, GeometrySize, LogicalPixels, PresentMapping,
+                                      PresentationExtent, SurfaceState};
+        const ALPHA: f32 = 0.7;
+        let Some((device, queue)) = device(true) else {
+            eprintln!("SKIP: no software (lavapipe) Vulkan adapter");
+            return;
+        };
+        let (cols, rows) = (110_u16, 36_u32);
+        let (w, h) = (10 + u32::from(cols) * 9, 40 + rows * 22);
+        let page = romacs_display_protocol::Color::new(0.2, 0.55, 0.45, 1.0);
+        let mut page_frame = super::super::super::tests::frame(1, rows, cols);
+        (page_frame.width, page_frame.height) = (w as f32, h as f32);
+        page_frame.background = page;
+        page_frame.background_alpha = ALPHA;
+        page_frame.set_face(FaceId::new(3), romacs_display_protocol::Color::WHITE, Some(page),
+                       400, false, 0, None, 0, None, 0, None);
+        let animation = TextAnimation { window: 1, top: 0, cols: cols.into(), rows, fps: 25, moving: false, still: true,
+                                        kind: TextAnimationKind::Logo { cell_aspect: 9.0 / 22.0, epoch: 0 } };
+        let mut renderer = WgpuRenderer::with_device(std::sync::Arc::new(device.clone()),
+                                                     std::sync::Arc::new(queue.clone()), w, h, FORMAT, 1.0);
+        let mut atlas = WgpuGlyphAtlas::new(&device);
+        let mut scene = PageScene::new();
+        scene.prepare(&page_frame, &animation, 0.0, &mut renderer);
+        renderer.process_shader_surfaces();
+        scene.draw(&mut renderer, &mut atlas);
+        let at = block(&page_frame, &animation).expect("a block");
+        page_frame.glyphs.push(scene.glyph(&at).expect("the landing draws as a scene"));
+        let placed = scene.shown.expect("a placement") + at.origin.to_vec2();
+
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("landing frame"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let SurfaceState::Drawable(surface) =
+            SurfaceState::from_device_size(w, h, DeviceScale::new(1.0).expect("scale")).expect("surface")
+        else {
+            panic!("an undrawable surface");
+        };
+        let mapping = PresentMapping::top_left_clip(surface, PresentationExtent::new(
+            page_frame.presentation_id,
+            GeometrySize::<LogicalPixels>::from_px(page_frame.width, page_frame.height).expect("size"),
+        ));
+        renderer.render_frame_glyphs(&target.create_view(&Default::default()), &page_frame, &mut atlas, mapping,
+                                     false, None, None, None, None, None);
+        let shown = read(&device, &queue, &target);
+
+        // The page, away from the landing and at the placement's edges.
+        let page_px = shown.at(2, 2);
+        assert!(page_px[3].abs_diff((ALPHA * 255.0).round() as u8) <= 1, "the page is translucent: {page_px:?}");
+        assert!(page_px[1] > 60, "the page is far from black: {page_px:?}");
+        let (x0, y0, x1, y1) = (placed.x0 as u32, placed.y0 as u32, placed.x1 as u32 - 1, placed.y1 as u32 - 1);
+        for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1), (x0.saturating_sub(1), y0 + 4), (x0, y0 + 4)] {
+            let p = shown.at(x, y);
+            assert!(p.iter().zip(page_px).all(|(a, b)| a.abs_diff(b) <= 1),
+                    "({x}, {y}) by the placement's edge shows the page: {p:?} against {page_px:?}");
+        }
+
+        // Inside, the scene premultiplied over the page, pixel for pixel.
+        let g = geometry(romacs_logo::View { cols: usize::from(cols), rows: rows as usize, cell_aspect: 9.0 / 22.0 },
+                         Size::new(9.0, 22.0)).expect("a landing fits");
+        assert_eq!(g.placement.size(), placed.size());
+        let mut gpu = gpu(true).expect("the software adapter");
+        let drawn = frame(&mut gpu, &g, &scene_at(&g, Policy::Reduced, 0.0), true).expect("a picture");
+        let under = page_px.map(|c| f64::from(c));
+        let (mut off, mut solid) = (0, 0);
+        for y in 0..drawn.height {
+            for x in 0..drawn.width {
+                let top = drawn.at(x, y);
+                let a = f64::from(top[3]) / 255.0;
+                let mut want = [0_u8; 4];
+                for c in 0..3 {
+                    want[c] = encode(decode(top[c]) + decode(under[c] as u8) * (1.0 - a));
+                }
+                want[3] = (f64::from(top[3]) + under[3] * (1.0 - a)).round() as u8;
+                let got = shown.at(x0 + x, y0 + y);
+                off += usize::from(got.iter().zip(want).any(|(g, w)| g.abs_diff(w) > 3));
+                solid += usize::from(got[3] == 255);
+            }
+        }
+        let area = f64::from(drawn.width * drawn.height);
+        assert!((off as f64) < area * 0.002, "{off} pixels are not the scene over the page");
+        assert!(solid as f64 > area * 0.05, "the R is opaque over the translucent page: {solid}");
+        if let Some(dir) = std::env::var_os("ROMACS_LANDING_FRAMES") {
+            write_png(&PathBuf::from(dir).join("software-translucent.png"), &shown);
+        }
     }
 
     /// A frame sequence of the open and the loop for review, on the hardware

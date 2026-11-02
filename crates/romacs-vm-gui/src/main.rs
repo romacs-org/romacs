@@ -37,6 +37,7 @@ mod world;
 mod isolate_worker;
 mod exit;
 mod preparing;
+mod quit;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -524,6 +525,7 @@ fn main() {
 }
 /// The session's end, when this process ran one.
 fn run() -> Result<Option<exit::Exit>, String> {
+    romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     let mut args = std::env::args().skip(1);
     let mut socket = None;
     let mut floor = None;
@@ -666,8 +668,11 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // waits for it.
     if live { std::thread::spawn(romacs_font::load_catalog); }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
-    let (host, sender) =
+    let (mut host, sender) =
         PaintHost::wayland(std::path::Path::new(&socket), width, height, if live { "romacs — VM" } else { "VM G1a" }.into())?;
+    // A live session's C-g quits a busy evaluator out of band (quit.rs).
+    let quit = live.then(|| std::sync::Arc::new(romacs_vm::QuitSignal::new()));
+    if let Some(quit) = &quit { host.set_input_interrupt(std::sync::Arc::new(quit::QuitHook(quit.clone()))); }
     if let Some(phases) = &mut phases { phases.mark("window"); }
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let start = phases.as_ref().map(startup::Phases::start);
@@ -716,7 +721,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, worlds, first_presentation, prune)
+                     isolate_world, worlds, first_presentation, quit, prune)
         }));
         let end = match result {
             Ok(Ok(end)) => end,
@@ -1004,6 +1009,7 @@ fn evaluate(
     isolate_world: Option<(std::path::PathBuf, String)>,
     worlds: Option<world::Worlds>,
     first_presentation: u64,
+    quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
     after_first_frame: Option<impl FnOnce()>,
 ) -> Result<exit::Exit, String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
@@ -1016,6 +1022,7 @@ fn evaluate(
         }
         None => (Vm::new(), None),
     };
+    if let Some(quit) = quit { vm.share_quit_signal(quit); }
     startup::mark_phase("vm");
     // How this VM booted, which its worker isolates repeat (rlisp/vm/isolate.el).
     match (&carry, isolate_world, launch) {
@@ -1174,6 +1181,9 @@ fn evaluate(
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
         loop {
+            // read_char returns the quit character for a quit still pending
+            // (keyboard.c:4102), ahead of the keys typed meanwhile.
+            if live && vm.take_quit_key() { batch.push_front(quit::quit_key()); }
             // read_char takes Lisp's unread queues before host input: a key
             // Lisp read and pushed back (sit-for in a timer) starts the next
             // command, which the Lisp command loop reads.
@@ -1261,7 +1271,9 @@ fn evaluate(
             if let Some(first) = translated {
                 let outcome = if live {
                     let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    vm.enter_busy();
                     let (outcome, closed) = lent.run(&host, |live| live.host_command(&mut vm, first.as_ref()));
+                    vm.leave_busy();
                     if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
@@ -1408,6 +1420,7 @@ fn evaluate(
                 let processes = vm.process_wait_fds();
                 // A termination signal whose wake other work took: back to the top.
                 if romacs_vm::host::termination_signal(true).is_some() { continue; }
+                if vm.take_quit_key() { pending.push_back(quit::quit_key()); continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(presentation::render_stall()), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(exit::Exit::new("host-input-closed", "", 1)),

@@ -897,50 +897,8 @@ impl WgpuRenderer {
 
         // Opaque image pipeline — for XRGB/BGRX DMA-BUF textures where alpha=0x00.
         // Uses fs_main_opaque which ignores texture alpha and uses vertex alpha instead.
-        let opaque_image_pipeline = {
-            let device = device.clone();
-            let image_pipeline_layout = image_pipeline_layout.clone();
-            let image_shader = image_shader.clone();
-            DeferredResource::new(move || {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Opaque Image Pipeline"),
-                    layout: Some(&image_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &image_shader,
-                        entry_point: Some("vs_main"),
-                        buffers: &[Some(GlyphVertex::desc())],
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &image_shader,
-                        entry_point: Some("fs_main_opaque"),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: target_format,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    cache: None,
-                    multiview_mask: None,
-                })
-            })
-        };
+        let opaque_image_pipeline =
+            make_image_pipeline(Some(wgpu::BlendState::ALPHA_BLENDING), "fs_main_opaque");
 
         // Stencil state for content pipelines: pass only where stencil==reference
         let stencil_read_state = wgpu::DepthStencilState {
@@ -1037,51 +995,16 @@ impl WgpuRenderer {
             false,
         );
 
-        let stencil_image_pipeline = {
-            let device = device.clone();
-            let stencil_read_state = stencil_read_state.clone();
-            let image_pipeline_layout = image_pipeline_layout.clone();
-            let image_shader = image_shader.clone();
-            DeferredResource::new(move || {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Stencil Image Pipeline"),
-                    layout: Some(&image_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &image_shader,
-                        entry_point: Some("vs_main"),
-                        buffers: &[Some(GlyphVertex::desc())],
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &image_shader,
-                        entry_point: Some("fs_main"),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: target_format,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: Some(stencil_read_state.clone()),
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    cache: None,
-                    multiview_mask: None,
-                })
-            })
-        };
+        let stencil_image_pipeline = make_image_pipeline_with(
+            Some(wgpu::BlendState::ALPHA_BLENDING),
+            "fs_main",
+            Some(stencil_read_state.clone()),
+        );
+        let stencil_composition_pipeline = make_image_pipeline_with(
+            Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            "fs_copy",
+            Some(stencil_read_state.clone()),
+        );
 
         #[cfg(feature = "video")]
         let stencil_bi_planar_video_pipeline = {
@@ -1102,51 +1025,11 @@ impl WgpuRenderer {
         };
 
         // Stencil-read opaque image pipeline
-        let stencil_opaque_image_pipeline = {
-            let device = device.clone();
-            let stencil_read_state = stencil_read_state.clone();
-            let image_pipeline_layout = image_pipeline_layout.clone();
-            let image_shader = image_shader.clone();
-            DeferredResource::new(move || {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Stencil Opaque Image Pipeline"),
-                    layout: Some(&image_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &image_shader,
-                        entry_point: Some("vs_main"),
-                        buffers: &[Some(GlyphVertex::desc())],
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &image_shader,
-                        entry_point: Some("fs_main_opaque"),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: target_format,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: Some(stencil_read_state),
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    cache: None,
-                    multiview_mask: None,
-                })
-            })
-        };
+        let stencil_opaque_image_pipeline = make_image_pipeline_with(
+            Some(wgpu::BlendState::ALPHA_BLENDING),
+            "fs_main_opaque",
+            Some(stencil_read_state),
+        );
 
         // Stencil-write pipeline: writes shape to stencil, no color output
         let stencil_write_pipeline = {
@@ -1276,6 +1159,7 @@ impl WgpuRenderer {
                 stencil_subpixel_glyph: stencil_subpixel_glyph_pipeline,
                 stencil_grayscale_glyph: stencil_grayscale_glyph_pipeline,
                 stencil_image: stencil_image_pipeline,
+                stencil_composition: stencil_composition_pipeline,
                 #[cfg(feature = "video")]
                 stencil_bi_planar_video: stencil_bi_planar_video_pipeline,
                 stencil_opaque_image: stencil_opaque_image_pipeline,

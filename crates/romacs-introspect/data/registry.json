@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "eface1a8073ad6be0e8ff9c63478a93cb9a09ba7f8601ad53a4bc4d6955458da",
+    "input_hash": "45601b1899158ea60b72ff49ff76a9dfdd80251c4f3712dbf0d04099ae97a6d6",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7706
+    "vm2_universe": 7725
   },
   "schema": 2,
   "vm2": {
-    "count": 1254,
+    "count": 1259,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -113,6 +113,7 @@
       "buffer-enable-undo",
       "buffer-encode-utf8",
       "buffer-file-name",
+      "buffer-hash",
       "buffer-list",
       "buffer-live-p",
       "buffer-local-value",
@@ -418,6 +419,7 @@
       "function-equal",
       "functionp",
       "garbage-collect",
+      "garbage-collect-maybe",
       "generate-new-buffer-name",
       "get",
       "get-buffer",
@@ -638,6 +640,7 @@
       "multibyte-char-to-unibyte",
       "multibyte-string-p",
       "narrow-to-region",
+      "native-comp-available-p",
       "native-comp-function-p",
       "natnump",
       "nconc",
@@ -797,6 +800,7 @@
       "romacs--closure-arity",
       "romacs--closure-document",
       "romacs--code-converting-work",
+      "romacs--collection-share",
       "romacs--concat-list",
       "romacs--create-frame",
       "romacs--decode-output",
@@ -896,6 +900,7 @@
       "romacs--sort-by-length-alpha",
       "romacs--startup-phase",
       "romacs--take-doomed-finalizers",
+      "romacs--take-user-signal",
       "romacs--term-close",
       "romacs--term-create",
       "romacs--term-follow",
