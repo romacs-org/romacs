@@ -151,6 +151,26 @@ def gnu_settings():
             f'(load {lisp_string(str(ROOT / "rlisp/romacs-completion-defaults.el"))} nil t)\n')
 
 
+# GNU's completion as it loads rlisp/romacs-completion-defaults.el, for
+# Romacs in a comparison: Romacs's window-system display is its own layer
+# (romacs-complete-mode, DIVERGENCES.md VM2-MINI-COMPLETION-LAYER), which
+# takes the root window's last line, and its styles begin with fzf
+# (VM2-FZF-DEFAULT), which fido then completes with instead of flex; GNU
+# gets `fido-vertical-mode' and the same styles without fzf, and no
+# project-file override, which the defaults add only with fzf.
+GNU_COMPLETION_UI = '''(romacs-complete-mode -1)
+(setq completion-styles (remq 'fzf completion-styles)
+      completion-category-overrides
+      (mapcar (lambda (entry)
+                (cons (car entry)
+                      (mapcar (lambda (prop)
+                                (if (eq (car-safe prop) 'styles) (cons 'styles (remq 'fzf (cdr prop))) prop))
+                              (cdr entry))))
+              (assq-delete-all 'project-file (copy-sequence completion-category-overrides))))
+(fido-vertical-mode 1)
+'''
+
+
 def init_source(engine, lisp, port_file, token, profile, config):
     """ENGINE's init: under PROFILE init the config's blocks from LISP, under
     stock nothing of anyone's, then the MCP endpoint on loopback, its port
@@ -158,7 +178,7 @@ def init_source(engine, lisp, port_file, token, profile, config):
     local socket: Romacs's GUI host refuses local network processes."""
     real = profile == 'init'
     blocks = profile_init(config) if real else ''
-    gnu_setup = gnu_settings() if engine == 'gnu' else ''
+    setup = gnu_settings() if engine == 'gnu' else GNU_COMPLETION_UI
     return f''';; -*- lexical-binding: t -*-
 (defvar bench-init-errors nil "Init blocks that signalled, as (NAME MESSAGE).")
 (defmacro bench-block (name &rest body)
@@ -167,7 +187,7 @@ def init_source(engine, lisp, port_file, token, profile, config):
      (error (push (list ,name (error-message-string err)) bench-init-errors)
             (message "bench init: %s: %s" ,name (error-message-string err)))))
 {f"(setq load-path (cons {lisp_string(str(lisp))} load-path))" if real else ""}
-{gnu_setup}(setq inhibit-startup-screen t)
+{setup}(setq inhibit-startup-screen t)
 {HERMES_REMOTE if real else ""}{blocks}
 {"(setq hermes-dashboard-transport-start-mode 'remote)" if real else ""}
 (defun bench--strings (value)

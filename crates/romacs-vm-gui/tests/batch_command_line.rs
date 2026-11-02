@@ -9,7 +9,8 @@
 //! compares the status, stdout and stderr.
 //! The HOME holds an init file, which a batch session never loads. A
 //! Romacs session boots from its batch world in that HOME's cache
-//! (src/batch.rs), which `--world-build` prepares first.
+//! (src/batch.rs), which a first session prepares in the store
+//! `--world-build` made.
 use std::path::Path;
 use std::process::Command;
 
@@ -98,6 +99,7 @@ fn batch_command_line_matches_pinned_gnu() {
     std::fs::create_dir_all(dir.join(".emacs.d")).unwrap();
     std::fs::write(dir.join(".emacs.d/init.el"), INIT).unwrap();
     world_build(&dir);
+    batch_world(&dir);
     let runs: Vec<_> = cases(&dir.join("lib")).into_iter().map(|case| {
         let (gnu, dir) = (gnu.clone(), dir.clone());
         std::thread::spawn(move || {
@@ -125,17 +127,31 @@ fn batch_command_line_matches_pinned_gnu() {
     let worlds = (stored(&dir, "rwi").len(), stored(&dir, "use").len());
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(worlds, (2, 1), "the sessions restored the batch world --world-build prepared");
+    assert_eq!(worlds, (2, 1), "the sessions restored the batch world the first session prepared");
 }
 
-/// `--world-build` in DIR, the HOME `run` gives: the GUI's world and the
-/// batch world of `run`'s environment.
+/// `--world-build` in DIR, the HOME `run` gives: the store and the GUI's
+/// world, no batch world.
 fn world_build(dir: &Path) {
     let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui")).args(["--loadup", "--world-build"]).current_dir(dir)
         .env("HOME", dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
         .env("XDG_DATA_HOME", dir.join("data")).env("XDG_STATE_HOME", dir.join("state"))
         .env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY").env_remove("ROMACS_WORLD").output().unwrap();
     assert!(output.status.success(), "--world-build: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(stored(dir, "rwi").len(), 1, "--world-build built a batch world");
+}
+
+/// The batch world of `run`'s environment in DIR's store: a first session
+/// boots from source while its builder prepares it, which publishes the
+/// image, then its manifest.
+fn batch_world(dir: &Path) {
+    let (status, _, stderr) = run(env!("CARGO_BIN_EXE_romacs-vm-gui"), dir, &["-Q".into(), "--batch".into()], true);
+    assert_eq!(status, Some(0), "first batch session: {stderr}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    while stored(dir, "rwi").iter().filter(|image| image.with_extension("json").is_file()).count() < 2 {
+        assert!(std::time::Instant::now() < deadline, "no batch world after 600 s");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
 }
 
 /// The files of DIR's default store with SUFFIX, sorted.
