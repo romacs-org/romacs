@@ -41,15 +41,15 @@ romacs_snapshot::snapshot_struct!(Laid { end, visible_end, body_height });
 
 /// A window's text as a snapshot publishes it (`Vm::window_text`): byte
 /// offsets are into TEXT, which starts at buffer byte BASE.
-struct ShownText {
-    text: TextSlice,
+pub(crate) struct ShownText {
+    pub(crate) text: TextSlice,
     start_byte: usize,
-    point_byte: usize,
+    pub(crate) point_byte: usize,
     faces: Vec<Face>,
     base: usize,
     /// TEXT reaches the end of the accessible text, not only the last row
     /// the window can show.
-    at_zv: bool,
+    pub(crate) at_zv: bool,
     table: std::rc::Rc<FaceTable>,
     /// The merged face rows FACES gained, by `face' value.
     merged: std::collections::HashMap<u64, FaceHandle>,
@@ -129,7 +129,7 @@ impl ElementFaces {
 
 impl ShownText {
     /// The buffer byte TEXT's byte DISPLAY shows.
-    fn buffer_byte(&self, display: usize) -> usize {
+    pub(crate) fn buffer_byte(&self, display: usize) -> usize {
         self.segments.as_deref().map_or(self.base + display, |s| shown_byte(s, display))
     }
 }
@@ -317,17 +317,17 @@ impl DisplayState {
 }
 /// The buffer-local variables a window's text, faces, start or mode line
 /// read, besides its buffer's text and the window itself.
-const DISPLAY_VARIABLES: [&str; 23] = [
+const DISPLAY_VARIABLES: [&str; 26] = [
     "mode-line-format", "header-line-format", "truncate-lines", "word-wrap", "tab-width",
     "truncate-partial-width-windows", "mark-active", "transient-mark-mode", "line-spacing",
     "buffer-invisibility-spec", "selective-display", "scroll-margin", "face-remapping-alist",
     "cursor-type", "show-trailing-whitespace", "buffer-display-table", "fontification-functions",
     "display-line-numbers", "display-line-numbers-width", "display-line-numbers-current-absolute",
-    "fringe-indicator-alist", "indicate-empty-lines", "indicate-buffer-boundaries",
+    "fringe-indicator-alist", "indicate-empty-lines", "indicate-buffer-boundaries", "auto-hscroll-mode",
+    "hscroll-margin", "maximum-scroll-margin",
 ];
 const MARK_ACTIVE: usize = 6;
 const TRANSIENT_MARK_MODE: usize = 7;
-const SCROLL_MARGIN: usize = 11;
 
 /// What a window's last full snapshot read, besides its point, its cursor
 /// and its mode line's Lisp: while this is unchanged, so are the window's
@@ -350,6 +350,11 @@ struct ShownKey {
     /// buffer's faces with no modification of its own.
     terminal: Option<(u64, Option<u64>)>,
     geometry: (u32, u32, u32, i64, u32),
+    /// The least hscroll and whether an explicit scroll holds automatic
+    /// hscrolling: under `auto-hscroll-mode' `current-line' they decide
+    /// how far rows other than point's are scrolled.
+    min_hscroll: i64,
+    suspended: bool,
     /// The window's fringe and margin widths and whether the fringes are
     /// outside the margins: what its chrome places.
     chrome: ([u32; 2], [u32; 2], bool),
@@ -363,7 +368,18 @@ struct ShownKey {
     header: Value,
 }
 
-romacs_snapshot::snapshot_struct!(ShownKey { collections, overlays, hosted, buffer, selected, modiff, accessible, start, mark, terminal, geometry, chrome, root, metrics, faces, variables, header });
+impl ShownKey {
+    /// OTHER shows what this showed (GNU's test that a window's current
+    /// matrix is up to date: its buffer's text, overlays and narrowing,
+    /// its start, size, scroll and faces), whatever Lisp ran between.
+    fn same_display(&self, other: &Self) -> bool {
+        (self.buffer, self.modiff, self.accessible, self.start, self.overlays, self.geometry, self.min_hscroll, self.suspended)
+            == (other.buffer, other.modiff, other.accessible, other.start, other.overlays, other.geometry, other.min_hscroll, other.suspended)
+            && (self.chrome, self.root, self.metrics, self.faces) == (other.chrome, other.root, other.metrics, other.faces)
+    }
+}
+
+romacs_snapshot::snapshot_struct!(ShownKey { collections, overlays, hosted, buffer, selected, modiff, accessible, start, mark, terminal, geometry, min_hscroll, suspended, chrome, root, metrics, faces, variables, header });
 
 struct Shown {
     key: ShownKey,
@@ -919,9 +935,11 @@ impl Vm {
             && var("truncate-lines")? == Value::NIL;
         Ok(if !continued { LineWrap::Truncate } else if var("word-wrap")? == Value::NIL { LineWrap::Window } else { LineWrap::Word })
     }
-    /// WINDOW's line wrap for BUFFER.
+    /// WINDOW's line wrap for BUFFER: a horizontally scrolled window
+    /// truncates its lines (init_iterator).
     pub(super) fn window_line_wrap(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::LineWrap> {
         let w = self.window(window)?;
+        if w.hscroll != 0 { return Ok(romacs_layout_input::LineWrap::Truncate); }
         let (x, width) = (w.x, w.width);
         let root = self.root_of(window)?;
         let full_width = self.window(root).is_ok_and(|r| r.x == x && r.width == width);
@@ -934,12 +952,37 @@ impl Vm {
     }
     /// BUFFER's `tab-width' as GNU's SANE_TAB_WIDTH: 1 to 1000, else 8.
     fn buffer_tab_width(&mut self, buffer: Value) -> Result<u32> {
+        let width = self.buffer_variable(buffer, "tab-width")?;
+        Ok(width.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as u32)
+    }
+    /// The value of variable NAME in BUFFER (`buffer-local-value').
+    pub(crate) fn buffer_variable(&mut self, buffer: Value, name: &str) -> Result<Value> {
         let saved = self.slots[self.buffer_slot].value;
         self.slots[self.buffer_slot].value = buffer;
-        let slot = self.slot("tab-width");
-        let width = self.variable_value(slot);
+        let slot = self.slot(name);
+        let value = self.variable_value(slot);
         self.slots[self.buffer_slot].value = saved;
-        Ok(width?.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as u32)
+        value
+    }
+    /// WINDOW's horizontal scroll in pixels for its BUFFER's rows: its
+    /// columns times the frame's column width, limited as
+    /// window_hscroll_limited limits them; under `auto-hscroll-mode'
+    /// `current-line' rows but point's keep `min_hscroll' (init_iterator).
+    pub(crate) fn window_hscroll_px(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::Hscroll> {
+        let w = self.window(window)?;
+        let (hscroll, min) = (w.hscroll, w.min_hscroll);
+        if hscroll == 0 && min == 0 { return Ok(Default::default()); }
+        let column = i64::from(self.window_state.column.max(1));
+        let px = |n: i64| u32::try_from(n.saturating_mul(column).clamp(0, i64::from(i32::MAX) / 2)).unwrap_or(0);
+        let rows = if self.hscrolls_current_line(window, buffer)? { min } else { hscroll };
+        Ok(romacs_layout_input::Hscroll { rows: px(rows), point_row: px(hscroll) })
+    }
+    /// GNU's hscrolling_current_line_p: WINDOW's BUFFER has
+    /// `auto-hscroll-mode' `current-line' and no explicit scroll holds it.
+    pub(crate) fn hscrolls_current_line(&mut self, window: Value, buffer: Value) -> Result<bool> {
+        if self.window(window)?.suspend_auto_hscroll { return Ok(false); }
+        let mode = self.buffer_variable(buffer, "auto-hscroll-mode")?;
+        Ok(mode == self.intern("current-line"))
     }
     fn snapshot_region(&mut self, window: Value, buffer: Value, point: i64) -> Result<Option<std::ops::Range<usize>>> {
         if window != self.selected_window_value()? { return Ok(None); }
@@ -1038,6 +1081,7 @@ impl Vm {
             header_line: bands.header_line.map(|band| band_slice(&table, band)),
             header_line_face: table.handle(&header_face).ok_or("header-line face required")?,
             vscroll_px: self.window(window)?.vscroll_px,
+            hscroll: self.window_hscroll_px(window, buffer)?,
             faces,
             tab_width: self.buffer_tab_width(buffer)?,
             wrap: self.window_line_wrap(window, buffer)?,
@@ -1097,35 +1141,165 @@ impl Vm {
     pub(crate) fn window_layout(&mut self, window: Value) -> Result<Option<Laid>> {
         let (width, height) = self.window_body_size(window)?;
         let key = self.shown_key(window, width, height)?;
+        let id = self.window(window)?.id;
+        let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
+        if let Some((known, laid)) = &shown.laid && *known == key { return Ok(Some(*laid)); }
+        let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
+        let laid = laid(&end, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
+        if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.laid = Some((key, laid)); }
+        Ok(Some(laid))
+    }
+    /// WINDOW laid out from its start as `window_layout' lays it out, every
+    /// row, and the text it showed; not recorded.
+    pub(crate) fn lay_out_window(&mut self, window: Value) -> Result<Option<(romacs_layout_input::WindowEnd, ShownText)>> {
+        let (width, height) = self.window_body_size(window)?;
         let w = self.window(window)?;
         let (id, buffer, vscroll) = (w.id, w.buffer, w.vscroll_px);
         let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
-        if let Some((known, laid)) = &shown.laid && *known == key { return Ok(Some(*laid)); }
-        if shown.key.faces != key.faces || !self.has_layout_host() { return Ok(None); }
+        if shown.key.faces != self.display_state.face_revision || !self.has_layout_host() { return Ok(None); }
         if !self.display_state.previous.contains_key(&id) { return Ok(None) }
         let (mode_line, mode_line_face) = self.painted_band(window, false)?;
         let (header_line, header_line_face) = self.painted_band(window, true)?;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
-        let ShownText { text, start_byte, point_byte, faces, base, at_zv, segments, stretches, line_numbers, .. } = self.window_text(window, height, None)?;
-        let len = text.utf8.len();
+        let shown = self.window_text(window, height, None)?;
         // Laying rows out reads the fringes' widths, not their bitmaps.
         let table = self.display_faces()?;
         let chrome = self.window_chrome(window, &table, false)?;
-        let snapshot = WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: 0, text, mode_line,
-            mode_line_face, header_line, header_line_face, vscroll_px: vscroll, faces, tab_width, wrap, cursor_off: false, stretches, line_numbers, chrome };
-        let end = self.lay_out_alone(snapshot)?;
-        let laid = laid(&end, base, len, at_zv, segments.as_deref());
-        if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.laid = Some((key, laid)); }
-        Ok(Some(laid))
+        let snapshot = WindowSnapshot { id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
+            text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
+            hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false,
+            stretches: shown.stretches.clone(), line_numbers: shown.line_numbers.clone(), chrome };
+        Ok(Some((self.lay_out_alone(snapshot)?, shown)))
+    }
+    /// GNU's Fwindow_line_height (window.c:2048) for live WINDOW over the
+    /// rows painting lays out from its start: LINE nil is point's row,
+    /// `header-line' and `mode-line' the bands, an integer the row counted
+    /// from the top (from the bottom when negative): (HEIGHT VPOS YPOS
+    /// OFFBOT). Nil in batch, before a layout, or with no such row, which
+    /// GNU's callers read as "use pos-visible-in-window-p".
+    pub(crate) fn window_line_height(&mut self, line: Value, window: Value) -> Result<Value> {
+        let noninteractive = self.slot("noninteractive");
+        if self.variable_value(noninteractive)? != Value::NIL || !self.display_state.hosted { return Ok(Value::NIL); }
+        // Only a window displayed as it now is answers (GNU: its current
+        // matrix up to date, its cursor where point is).
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let point = self.window_point_value(window)?.as_integer()?;
+        let id = self.window(window)?.id;
+        if !self.display_state.shown.get(&id).is_some_and(|shown| shown.key.same_display(&key) && shown.point == point) { return Ok(Value::NIL); }
+        let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(Value::NIL) };
+        let list = |vm: &mut Self, items: [i64; 4]| -> Result<Value> {
+            let items = items.map(Value::integer).into_iter().collect::<Result<Vec<_>>>()?;
+            Ok(vm.list_value(&items))
+        };
+        let body = end.body_height;
+        // The bands the window last showed.
+        let id = self.window(window)?.id;
+        let bands = self.display_state.previous.get(&id).map_or((false, false), |s| (s.header_line.is_some(), s.mode_line.is_some()));
+        let header = if bands.0 { self.host_band_height(window, true)? } else { 0 };
+        if line == self.intern("header-line") {
+            return if header > 0 { list(self, [i64::from(header), 0, 0, 0]) } else { Ok(Value::NIL) };
+        }
+        if line == self.intern("mode-line") {
+            if !bands.1 { return Ok(Value::NIL); }
+            let height = self.host_band_height(window, false)?;
+            return list(self, [i64::from(height), 0, i64::from(header) + body as i64, 0]);
+        }
+        // Rows past the text's end are empty rows of the default face's
+        // height, down to the text area's bottom, as GNU's matrix has them.
+        let mut rows: Vec<_> = end.rows.iter().filter(|r| r.y < body).copied().collect();
+        // Point's row is a text row, never the filler below the text.
+        let cursor = rows.iter().rposition(|r| r.start <= shown.point_byte);
+        if shown.at_zv && end.end >= shown.text.utf8.len() {
+            let line = self.min_row_height() as f32;
+            let mut y = rows.last().map_or(0.0, |r| r.y + r.height);
+            while y < body { rows.push(romacs_layout_input::Row { start: shown.text.utf8.len(), y, height: line }); y += line; }
+        }
+        let at = if line == Value::NIL {
+            match cursor { Some(at) => at, None => return Ok(Value::NIL) }
+        } else {
+            let Some(n) = line.integer_value() else { return Ok(Value::NIL) };
+            let mut i = 0usize;
+            while (n < 0 || (i as i64) < n) && i < rows.len() && rows[i].y + rows[i].height < body { i += 1; }
+            if i >= rows.len() { return Ok(Value::NIL); }
+            match i64::try_from(i).unwrap_or(i64::MAX).checked_add(n + 1) {
+                _ if n + 1 >= 0 => i,
+                Some(back) if back >= 0 => back as usize,
+                _ => return Ok(Value::NIL),
+            }
+        };
+        let row = rows[at];
+        let crop = (row.y + row.height - body).max(0.0);
+        list(self, [(row.height + row.y.min(0.0) - crop) as i64, at as i64, row.y as i64, crop as i64])
+    }
+    /// GNU's window_scroll_margin in pixels for WINDOW, whose text area is
+    /// BODY pixels tall: `scroll-margin' lines of the frame's, at most a
+    /// `maximum-scroll-margin' fraction of the window's lines and less
+    /// than half of them.
+    pub(crate) fn scroll_margin_px(&mut self, window: Value, body: f32) -> Result<f32> {
+        let buffer = self.window(window)?.buffer;
+        let margin = self.buffer_variable(buffer, "scroll-margin")?.integer_value().unwrap_or(0);
+        if margin <= 0 { return Ok(0.0); }
+        let line = self.window_state.line.max(1);
+        let lines = (body.max(0.0) as u32 / line) as i64;
+        let ratio = self.buffer_variable(buffer, "maximum-scroll-margin")?;
+        let ratio = match self.object(ratio) { Ok(Object::Float(f)) => f.clamp(0.0, 0.5), _ => 0.25 };
+        let most = ((lines - 1) / 2).min((lines as f64 * ratio) as i64);
+        Ok((margin.clamp(0, most.max(0)) * i64::from(line)) as f32)
+    }
+    /// The buffer bytes point may take in WINDOW without leaving its scroll
+    /// margins, at the rows painting lays out from its start (try_window's
+    /// and try_cursor_movement's check): from the first row below the top
+    /// margin, unless the window starts at BEGV or shows ZV, through the
+    /// last row whose top is above the bottom margin, which a partly shown
+    /// last row moves up. None without a margin or a layout.
+    pub(crate) fn margin_bounds(&mut self, window: Value) -> Result<Option<(usize, usize)>> {
+        // Most windows have none: say so before laying anything out.
+        let buffer = self.window(window)?.buffer;
+        if self.buffer_variable(buffer, "scroll-margin")?.integer_value().is_none_or(|m| m <= 0) { return Ok(None); }
+        let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
+        let margin = self.scroll_margin_px(window, end.body_height)?;
+        if margin == 0.0 { return Ok(None); }
+        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let begv = b.accessible().start.0;
+        let len = shown.text.utf8.len();
+        let at_bob = shown.buffer_byte(shown.start_byte) <= begv;
+        let shows_zv = shown.at_zv && end.end >= len;
+        let body = end.body_height;
+        let partial = end.rows.iter().find(|r| r.y < body && r.y + r.height > body).map_or(0.0, |r| body - r.y);
+        let byte = |row: Option<&romacs_layout_input::Row>| row.map_or(usize::MAX, |r| shown.buffer_byte(r.start));
+        let top = if at_bob || shows_zv { 0 } else { byte(end.rows.iter().find(|r| r.y >= margin)) };
+        let bottom = byte(end.rows.iter().find(|r| r.y > body - partial - margin - 1.0));
+        Ok(Some((top, bottom)))
     }
     /// The rows WINDOW's buffer shows from the line starting at byte FROM
     /// through the end of byte TO's line, laid out as painting lays them
     /// out in a window as wide as WINDOW and tall enough for them all: each
     /// row's buffer byte and height. None as for `window_layout'.
     pub(crate) fn rows_between(&mut self, window: Value, from: usize, to: usize) -> Result<Option<Vec<(usize, f32)>>> {
+        let Some((end, shown)) = self.lay_out_lines(window, from, to, true)? else { return Ok(None) };
+        Ok(Some(end.rows.iter().map(|row| (shown.buffer_byte(row.start), row.height)).collect()))
+    }
+    /// Where point shows on its line in WINDOW, laid out as painting lays
+    /// it out (GNU's cursor on its row, which hscroll_window_tree reads).
+    /// None without a layout host.
+    pub(crate) fn point_place(&mut self, window: Value, point_byte: usize) -> Result<Option<romacs_layout_input::PointPlace>> {
+        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let begv = b.accessible().start.0;
+        let line = b.as_str()[begv..point_byte].rfind('\n').map_or(begv, |newline| begv + newline + 1);
+        // A window's first redisplay places point too.
+        Ok(self.lay_out_lines(window, line, point_byte, false)?.and_then(|(end, _)| end.point))
+    }
+    /// WINDOW's lines from the one holding buffer byte FROM through TO's,
+    /// laid out as painting lays them out in a window as wide as WINDOW and
+    /// tall enough for them all, and the text they showed. None as for
+    /// `window_layout'.
+    /// DISPLAYED: only for a window painted in the current faces.
+    fn lay_out_lines(&mut self, window: Value, from: usize, to: usize, displayed: bool) -> Result<Option<(romacs_layout_input::WindowEnd, ShownText)>> {
         let id = self.window(window)?.id;
         let faces = self.display_state.face_revision;
-        if !self.has_layout_host() || !self.display_state.shown.get(&id).is_some_and(|shown| shown.key.faces == faces) { return Ok(None); }
+        if !self.has_layout_host() { return Ok(None); }
+        if displayed && !self.display_state.shown.get(&id).is_some_and(|shown| shown.key.faces == faces) { return Ok(None); }
         let (width, _) = self.window_body_size(window)?;
         let buffer = self.window(window)?.buffer;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
@@ -1139,13 +1313,13 @@ impl Vm {
         let chrome = self.window_chrome(window, &table, false)?;
         let snapshot = WindowSnapshot { id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-            vscroll_px: 0, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(),
+            vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(),
             line_numbers: shown.line_numbers.clone(), chrome };
         let end = self.lay_out_alone(snapshot)?;
-        Ok(Some(end.rows.iter().map(|row| (shown.buffer_byte(row.start), row.height)).collect()))
+        Ok(Some((end, shown)))
     }
     /// What painting SNAPSHOT alone in a frame of its size would report.
-    fn lay_out_alone(&mut self, snapshot: WindowSnapshot) -> Result<romacs_layout_input::WindowEnd> {
+    pub(crate) fn lay_out_alone(&mut self, snapshot: WindowSnapshot) -> Result<romacs_layout_input::WindowEnd> {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
@@ -1176,6 +1350,9 @@ impl Vm {
     /// WINDOW's text width less its margins, fringes and right divider,
     /// and its height less its bottom divider, as a frame's snapshot gives
     /// them (`snapshot_leaves').
+    pub(crate) fn window_text_width(&self, window: Value) -> Result<u32> {
+        Ok(self.window_body_size(window)?.0)
+    }
     fn window_body_size(&self, window: Value) -> Result<(u32, u32)> {
         let [left, right] = self.window_text_insets(window)?;
         let [_, below] = self.window_dividers(window)?;
@@ -1456,6 +1633,7 @@ impl Vm {
     fn shown_key(&mut self, window: Value, width: u32, height: u32) -> Result<ShownKey> {
         let w = self.window(window)?;
         let (buffer, start, x, hscroll, vscroll) = (w.buffer, w.start, w.x, w.hscroll, w.vscroll_px);
+        let (min_hscroll, suspended) = (w.min_hscroll, w.suspend_auto_hscroll);
         let root = self.window_root_peek(crate::window::ROOT);
         let root = self.window(root).map_or((0, 0), |r| (r.x, r.width));
         let start = self.marker_position_value(start)?.integer_value().unwrap_or(1);
@@ -1490,6 +1668,8 @@ impl Vm {
             mark,
             terminal,
             geometry: (x, width, height, hscroll, vscroll),
+            min_hscroll,
+            suspended,
             chrome: {
                 let w = self.window(window)?;
                 (self.window_fringe_widths(window)?, [w.left_margin, w.right_margin], w.fringes_outside_margins)
@@ -1530,20 +1710,19 @@ impl Vm {
         }
         if point != shown_point {
             let region = key.variables[MARK_ACTIVE] != Value::NIL && key.variables[TRANSIENT_MARK_MODE] != Value::NIL;
-            let margin = key.variables[SCROLL_MARGIN].integer_value().is_some_and(|m| m > 0);
             // Display elements place the cursor, and line numbers count, by
             // what they show there.
-            if region || margin || self.display_state.segments(id).is_some() || snapshot.line_numbers.is_some() {
+            if region || self.display_state.segments(id).is_some() || snapshot.line_numbers.is_some() {
                 return Ok(None);
             }
-            // Point's row must be one the last paint showed whole.
-            let shown = self.display_state.shown.get(&id);
-            let Some(&(_, laid)) = shown.and_then(|s| s.laid.as_ref()).filter(|(laid_key, _)| *laid_key == key) else { return Ok(None) };
+            // Point's row must be one the last paint showed whole, and its
+            // cursor in the text area: the point-visibility step's checks.
             let Object::Buffer(b) = self.object(key.buffer)? else { return Ok(None) };
             let point_byte = b.byte_of_char(crate::coordinates::CharOffset((point - 1).max(0) as usize))?.0;
             let base = self.display_state.base(id);
             let offset = point_byte.wrapping_sub(base);
-            if point_byte < base + snapshot.start_byte || point_byte >= laid.visible_end || offset > snapshot.text.utf8.len() {
+            if offset > snapshot.text.utf8.len() || !self.point_on_visible_rows(window, base + snapshot.start_byte, point_byte)?
+                || self.hscroll_window(window, Some((&snapshot, offset)))? {
                 return Ok(None);
             }
             snapshot.point_byte = offset;
@@ -1639,7 +1818,7 @@ impl Vm {
         let band_height = self.window_state.line * (u32::from(format.is_some()) + u32::from(header.is_some()));
         let text_height = height.saturating_sub(band_height);
         if layout {
-            self.redisplay_point_visibility(self.slots[root].value, text_height)?;
+            self.keep_point_visible(self.slots[root].value, text_height)?;
             if !self.redisplay_window_fontify(root, buffer_slot, text_height)? {
                 return Ok(Bands::default());
             }

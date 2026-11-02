@@ -7,41 +7,58 @@ use super::*;
 
 const LISP_HALF: &str = include_str!("../../../../rlisp/vm/window-scroll.el");
 
-/// Call HELPER of the Lisp half with ARGS, installing the half first.
-fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>) -> Next {
+/// Call HELPER of the Lisp half with ARGS, installing the half first;
+/// then, when FOLLOW is a window, move its old point to its point
+/// (`finish').
+fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>, follow: Value) -> Next {
     let f = cx.intern(helper);
     if cx.symbol_function(f)? != Value::NIL {
-        return Ok(Step::Call { f, args, then: done, saved: vec![] });
+        return Ok(Step::Call { f, args, then: finish, saved: vec![follow] });
     }
     let source = cx.string(LISP_HALF);
     let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
     let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
-    let saved = std::iter::once(f).chain(args).collect();
+    let saved = [follow, f].into_iter().chain(args).collect();
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: installed, saved })
 }
 
 fn installed(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    Ok(Step::Call { f: saved[0], args: saved[1..].to_vec(), then: done, saved: vec![] })
+    Ok(Step::Call { f: saved[1], args: saved[2..].to_vec(), then: finish, saved: vec![saved[0]] })
 }
 
-fn done(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
+/// GNU window_scroll (window.c:6324, :6806): a window whose point was its
+/// old point before the scroll has its old point follow point, so that
+/// scrolling does not end an explicit hscroll's hold. SAVED holds that
+/// window, or nil.
+fn finish(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
+    if saved[0] != Value::NIL { cx.windows().old_point_to_point(saved[0])?; }
+    Ok(Step::Done(value))
+}
+
+/// The selected window when its point is its old point, else nil.
+fn following(cx: &mut Leaf<'_>) -> std::result::Result<Value, Fault> {
+    let window = cx.windows().selected_window()?;
+    Ok(if cx.windows().old_point_is_point(window)? { window } else { Value::NIL })
+}
 
 defsubr! { name = "recenter", gnu = "window.c:7219", effect = Global,
 fn recenter(cx; optional arg: Value, redisplay: Value) -> Step {
-    enter(cx, "romacs--recenter", vec![arg, redisplay])
+    enter(cx, "romacs--recenter", vec![arg, redisplay], Value::NIL)
 }}
 
 defsubr! { name = "scroll-up", gnu = "window.c:7026", effect = Global,
 fn scroll_up(cx; optional arg: Value) -> Step {
-    enter(cx, "romacs--scroll-command", vec![Value::NIL, arg, Value::integer(1).expect("fixnum")])
+    let follow = following(cx)?;
+    enter(cx, "romacs--scroll-command", vec![Value::NIL, arg, Value::integer(1).expect("fixnum")], follow)
 }}
 
 defsubr! { name = "scroll-down", gnu = "window.c:7039", effect = Global,
 fn scroll_down(cx; optional arg: Value) -> Step {
-    enter(cx, "romacs--scroll-command", vec![Value::NIL, arg, Value::integer(-1).expect("fixnum")])
+    let follow = following(cx)?;
+    enter(cx, "romacs--scroll-command", vec![Value::NIL, arg, Value::integer(-1).expect("fixnum")], follow)
 }}
 
 defsubr! { name = "move-to-window-line", gnu = "window.c:7502", effect = Global,
 fn move_to_window_line(cx, arg: Value) -> Step {
-    enter(cx, "romacs--move-to-window-line", vec![arg])
+    enter(cx, "romacs--move-to-window-line", vec![arg], Value::NIL)
 }}

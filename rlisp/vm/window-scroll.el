@@ -25,10 +25,11 @@ of scroll commands began, for `scroll-preserve-screen-position'.")
   "window.c window_scroll_preserve_hpos: point's column then.")
 
 (defun romacs--window-internal-height (window)
-  "window.c window_internal_height: WINDOW's lines less its mode and header lines."
-  (- (window-total-height window)
-     (if (> (window-mode-line-height window) 0) 1 0)
-     (if (> (window-header-line-height window) 0) 1 0)))
+  "WINDOW's text lines: window.c window_internal_height, its lines less
+its mode and header lines, which on a window-system frame's pixel-based
+paths is the text area's height (window_box_height), its bottom divider
+left out."
+  (window-body-height window))
 
 (defun romacs--window-scroll-margin (window)
   "window.c window_scroll_margin in lines: `scroll-margin' within a

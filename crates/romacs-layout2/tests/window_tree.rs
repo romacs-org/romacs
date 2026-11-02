@@ -53,7 +53,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
             id, width: w, height: h, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: romacs_layout_input::TextSlice { utf8: String::new(), face_runs: vec![], raw: vec![] },
             mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-            vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
+            vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
         }
     }
     let mut vm = Vm::new();

@@ -83,6 +83,21 @@ defsubr! { name = "window-hscroll", gnu = "window.c:1278", effect = Reads,
 fn window_hscroll(cx; optional window: Value) { cx.windows().window_hscroll(window) }}
 defsubr! { name = "set-window-hscroll", gnu = "window.c:1313", effect = Global,
 fn set_window_hscroll(cx, window: Value, ncol: Value) { cx.windows().set_window_hscroll(window, ncol) }}
+defsubr! { name = "scroll-left", gnu = "window.c:7101", effect = Global,
+fn scroll_left(cx; optional arg: Value, set_minimum: Value) { scroll_horizontally(cx, arg, set_minimum, true) }}
+defsubr! { name = "scroll-right", gnu = "window.c:7127", effect = Global,
+fn scroll_right(cx; optional arg: Value, set_minimum: Value) { scroll_horizontally(cx, arg, set_minimum, false) }}
+fn scroll_horizontally(cx: &mut Leaf<'_>, arg: Value, set_minimum: Value, left: bool) -> std::result::Result<Value, Fault> {
+    let columns = match arg {
+        Value::NIL => None,
+        _ => { let n = super::callint::prefix_numeric(cx, arg); Some(n.integer_value().ok_or(Fault::Wrong("fixnump", n))?) }
+    };
+    cx.windows().scroll_horizontally(columns, set_minimum, left)
+}
+defsubr! { name = "window-line-height", gnu = "window.c:2048", effect = Reads,
+fn window_line_height(cx; optional line: Value, window: Value) { cx.windows().window_line_height(line, window) }}
+defsubr! { name = "window-old-point", gnu = "window.c:1803", effect = Reads,
+fn window_old_point(cx; optional window: Value) { cx.windows().window_old_point(window) }}
 defsubr! { name = "select-frame", gnu = "frame.c:2103", effect = Global,
 fn select_frame(cx, frame: Value; optional norecord: Value) { cx.windows().select_frame(frame, norecord) }}
 defsubr! { name = "recent-auto-save-p", gnu = "fileio.c:6541", effect = Reads,
