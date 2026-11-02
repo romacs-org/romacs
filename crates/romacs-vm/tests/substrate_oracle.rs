@@ -85,3 +85,14 @@ fn process_table_matches_pinned_gnu() {
 (let ((pids (list-system-processes))) (list (and (memq (emacs-pid) pids) t) (and (memq 1 pids) t) (seq-every-p #'natnump pids)))
 "###);
 }
+
+#[test]
+fn object_intervals_match_pinned_gnu() {
+    matches_pinned_gnu(r###"
+(list (object-intervals "abc") (object-intervals (propertize "abc" 'a 1 'b 2)) (object-intervals (concat "x" (propertize "ab" 'a 1) "y")) (object-intervals ""))
+(let ((s (propertize "ab" 'a 1))) (remove-text-properties 0 2 '(a nil) s) (object-intervals s))
+(with-temp-buffer (insert "foobar") (put-text-property 1 3 'foo 1) (put-text-property 3 6 'bar 2) (put-text-property 2 5 'zot 3) (object-intervals (current-buffer)))
+(with-temp-buffer (insert "héllo") (put-text-property 2 4 'face 'bold) (object-intervals (current-buffer)))
+(list (with-temp-buffer (insert "ab") (object-intervals (current-buffer))) (condition-case e (object-intervals 1) (error e)))
+"###);
+}
