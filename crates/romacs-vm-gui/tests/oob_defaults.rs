@@ -1,7 +1,9 @@
 //! Romacs's interactive defaults (rlisp/romacs-defaults.el, DIVERGENCES
 //! VM2-OOB-DEFAULTS) on the real --loadup chain with a window system: a
-//! session turns them on before the user's init, as standard values:
-//! typing pairs delimiters and C-x o o repeats; `romacs-defaults-mode' off
+//! session turns them on before the user's init, as standard values, the
+//! modes the first frame does not need before its first command (whose
+//! prompt has the saved history) unless the init toggled them: typing
+//! pairs delimiters and C-x o o repeats; `romacs-defaults-mode' off
 //! gives every option GNU's standard value back but one the init set
 //! itself; -Q never turns them on.
 #[path = "../src/command.rs"]
@@ -20,7 +22,8 @@ mod native;
 mod presentation;
 #[path = "../src/startup.rs"]
 mod startup;
-use romacs_vm::{CommandEvent, Vm};
+use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
+use std::collections::VecDeque;
 
 fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
     vm.frame_snapshot(width, height)
@@ -42,12 +45,26 @@ fn typed(vm: &mut Vm, text: &str) {
     }
 }
 
-/// A --loadup session on a window system in a private HOME, up to the
-/// user's init, started with -Q when QUICK; and its HOME.
+/// The keys a prompt reads, as the GUI delivers them.
+struct Keys(VecDeque<HostEvent>);
+impl HostInput for Keys {
+    fn input_pending(&mut self) -> bool { false }
+    fn redisplay(&mut self, _: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> {
+        self.0.pop_front().ok_or_else(|| "oob input exhausted".into())
+    }
+}
+
+/// A --loadup session on a window system in a private HOME, whose saved
+/// minibuffer history holds one command and recent files one file, up to
+/// the user's init, started
+/// with -Q when QUICK; and its HOME.
 fn session(name: &str, quick: bool) -> (Vm, std::path::PathBuf) {
     let home = std::env::temp_dir().join(format!("romacs-oob-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(home.join("config/romacs")).unwrap();
+    std::fs::write(home.join("config/romacs/history"), "(setq extended-command-history '(\"oob-history-command\"))\n").unwrap();
+    std::fs::write(home.join("config/romacs/recentf.eld"), "(setq recentf-list '(\"/oob/kept.txt\"))\n").unwrap();
     let mut vm = Vm::new();
     vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
     vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
@@ -103,9 +120,30 @@ fn an_interactive_session_turns_the_defaults_on_and_the_switch_turns_them_off() 
         let config = format!("{}/", home.join("config/romacs").display());
         let mut report = vec![];
         report.push(printed(&mut vm, "(list window-system romacs-defaults-mode (eval (car (get 'romacs-defaults-mode 'standard-value)) t))"));
+        // The init turns one of the modes the first frame does not need
+        // off; none of them is on before the first command.
+        vm.eval_source("(global-auto-revert-mode -1)").unwrap();
+        // A file the command line visits before the first command.
+        let visited = home.join("visited.txt");
+        std::fs::write(&visited, "visited\n").unwrap();
+        vm.eval_source(&format!("(find-file-noselect {})", quoted(&visited.display().to_string()))).unwrap();
+        report.push(printed(&mut vm, "(list savehist-mode recentf-mode repeat-mode global-auto-revert-mode which-key-mode
+            (mapcar #'car (reverse romacs-defaults--pending)))"));
+        // The first command, M-x, already reads the saved history: M-p RET
+        // runs the command it holds.
+        vm.eval_source("(defun oob-history-command () (interactive) (setq oob-history-ran t))").unwrap();
+        vm.set_host_input(Some(Box::new(Keys(VecDeque::from([
+            HostEvent::Key(CommandEvent::Character((1 << 27) | 'p' as i64)),
+            HostEvent::Key(CommandEvent::Character(10)),
+        ])))));
+        let (mut commands, mut presentation) = (command::Commands::default(), presentation::Presentation::new());
+        presentation.command(&mut vm, &mut commands, CommandEvent::Character((1 << 27) | 'x' as i64)).unwrap();
+        report.push(printed(&mut vm, &format!("(list (bound-and-true-p oob-history-ran) savehist-mode romacs-defaults--pending
+            (and (member (recentf-expand-file-name {}) recentf-list) t))", quoted(&visited.display().to_string()))));
         report.push(printed(&mut vm, SEEN));
-        // Every setting is set, and is its option's standard value.
-        report.push(printed(&mut vm, &format!("(seq-every-p (lambda (s) (and (nth 1 s) (nth 2 s))) {SETTINGS})")));
+        // Every setting is its option's standard value, and set, but the
+        // mode the init turned off.
+        report.push(printed(&mut vm, &format!("(delq nil (mapcar (lambda (s) (unless (and (nth 1 s) (nth 2 s)) (car s))) {SETTINGS}))")));
         // The per-user files and directories are this session's.
         report.push(printed(&mut vm, &format!("(let ((dir {}))
             (list (file-in-directory-p savehist-file dir) (file-in-directory-p recentf-save-file dir)
@@ -125,8 +163,10 @@ fn an_interactive_session_turns_the_defaults_on_and_the_switch_turns_them_off() 
     }).unwrap().join().unwrap();
     assert_eq!(report, [
         "(pgtk t t)",
-        "(t t t t t t t t custom t t command-completion-default-include-p t prefix)",
-        "t",
+        "(nil t nil nil t (savehist-mode repeat-mode global-auto-revert-mode))",
+        "(t t nil t)",
+        "(t t t t t nil t t custom t t command-completion-default-include-p t prefix)",
+        "(global-auto-revert-mode)",
         "(t t t t t t)",
         "(\"(a)\" 3)",
         "(t \"\" nil)",
@@ -135,6 +175,24 @@ fn an_interactive_session_turns_the_defaults_on_and_the_switch_turns_them_off() 
         "(\"(a\" 3)",
         "(nil \"o\" nil)",
     ]);
+}
+
+/// An init that turns the modes off keeps what they keep: the saved recent
+/// files, and the `echo-keystrokes' which-key found.
+#[test]
+fn an_init_turning_the_modes_off_keeps_their_state() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let (mut vm, _) = session("init-off", false);
+        vm.eval_source("(recentf-mode -1) (which-key-mode -1) (setopt savehist-mode nil) (repeat-mode -1)").unwrap();
+        let mut report = vec![printed(&mut vm, "(list (with-temp-buffer (insert-file-contents recentf-save-file)
+            (and (search-forward \"/oob/kept.txt\" nil t) t))
+            (and (numberp echo-keystrokes) (equal echo-keystrokes which-key--echo-keystrokes-backup))
+            recentf-mode which-key-mode)")];
+        typed(&mut vm, "a");
+        report.push(printed(&mut vm, "(list savehist-mode repeat-mode global-auto-revert-mode romacs-defaults--pending)"));
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, ["(t t nil nil)", "(nil nil t nil)"]);
 }
 
 #[test]
@@ -149,7 +207,11 @@ fn a_quick_session_keeps_gnus_values() {
             // The libraries' per-user files are this session's, -Q or not.
             printed(&mut vm, &format!("(seq-every-p (lambda (file) (file-in-directory-p file {}))
                 (list savehist-file save-place-file recentf-save-file))", quoted(&home.join("config/romacs").display().to_string()))),
+            // Turned on and off again before the first command: the
+            // modes it would have turned on later stay off.
+            printed(&mut vm, "(progn (romacs-defaults-mode 1) (romacs-defaults-mode -1) nil)"),
             pair(&mut vm, "quick"),
+            printed(&mut vm, "(list savehist-mode recentf-mode repeat-mode global-auto-revert-mode which-key-mode romacs-defaults--pending)"),
         ]
     }).unwrap().join().unwrap();
     assert_eq!(report, [
@@ -158,6 +220,8 @@ fn a_quick_session_keeps_gnus_values() {
         "nil",
         "nil",
         "t",
+        "nil",
         "(\"(a\" 3)",
+        "(nil nil nil nil nil nil)",
     ]);
 }
