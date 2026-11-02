@@ -165,6 +165,8 @@ craneLib.buildPackage (
       mkdir -p "$out/share/romacs"
       cp -r gnu-lisp rlisp "$out/share/romacs/"
       cp -r etc "$out/share/romacs/"
+      mkdir -p "$out/share/romacs/assets"
+      cp -r assets/fonts "$out/share/romacs/assets/"
 
       # GNU Emacs installs this version-independent site-lisp root.
       # Nixpkgs' emacsPackagesFor wrapper composes its generated site-start

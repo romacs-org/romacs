@@ -631,6 +631,10 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         // Pane chrome, applied to the frame once the session is on its
         // display (romacs-gui-loadup.el).
         vm.eval_source(include_str!("../../../rlisp/romacs-chrome.el"))?;
+        // Its icons and its mode line, off until `romacs-mode-line-mode'
+        // is enabled.
+        vm.eval_source(include_str!("../../../rlisp/romacs-icons.el"))?;
+        vm.eval_source(include_str!("../../../rlisp/romacs-mode-line.el"))?;
         // Vertical completion with the minibuffer in a layer, off until
         // `romacs-complete-mode' is enabled.
         if vm.eval_source("(featurep 'minibuffer)")? != romacs_vm::Fixed::NIL {

@@ -29,6 +29,8 @@ pkgs.mkShell {
     pkgs.llvmPackages.clang
     # Frozen wall clock for date/time-sensitive oracle tests.
     pkgs.libfaketime
+    # scripts/build-icon-font.py builds assets/fonts/RomacsIcons.ttf.
+    (pkgs.python3.withPackages (ps: [ ps.fonttools ]))
   ]
   ++ lib.optionals isLinux [
     # Linux-only reverse debugger for the JIT wild-store hunt.

@@ -1,0 +1,15 @@
+Romacs's icons: the drawings in this directory (*.svg) and the codepoint
+list (codepoints.txt).
+
+Copyright 2026 Thanos Apollo <public@thanosapollo.org>
+
+These drawings are Romacs's own. They are dual-licensed: you may use,
+modify and redistribute them under the GNU General Public License,
+version 3 or (at your option) any later version, as the rest of Romacs
+(see COPYING), OR under the SIL Open Font License, Version 1.1
+(see ../fonts/OFL.txt).
+
+assets/fonts/RomacsIcons.ttf is built from them by
+scripts/build-icon-font.py and is distributed under the SIL Open Font
+License, Version 1.1, with Reserved Font Name "Romacs Icons"
+(../fonts/OFL.txt).
