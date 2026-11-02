@@ -187,7 +187,7 @@ fn leaving_the_minibuffer_shrinks_the_mini_window_at_once() {
     vm.set_frame_geometry(800, 400, LINE, 10).unwrap();
     eval(&mut vm, "(setq c (romacs--create-frame `((parent-frame . ,(selected-frame)) (minibuffer . ,(minibuffer-window))
                      (width . (text-pixels . 798)) (height . (text-pixels . 100)) (child-frame-border-width . 1) (left . 0) (top . 298))))
-                   (romacs--host-minibuffer c 'bottom)
+                   (romacs--host-minibuffer c)
                    (setq resize-mini-windows 'grow-only romacs--minibuf-level 1)");
     let heights = "(list (window-pixel-height (minibuffer-window)) (frame-text-height c))";
     assert_eq!(eval(&mut vm, heights), format!("({LINE} 100)"));

@@ -34,8 +34,9 @@
 ;; `romacs-complete-mode' on, the frame reserves no minibuffer line: the
 ;; minibuffer window is hosted by a child frame (`romacs--host-minibuffer'),
 ;; which shows the prompt and input and, for `completing-read', the
-;; candidates below them in a floating glass panel (`romacs-complete-position'
-;; `center' or `top') or above them in a strip (`bottom').  The minibuffer
+;; candidates below them in a floating glass panel, centred across the
+;; frame near its top, its middle or its bottom (`romacs-complete-position'
+;; places it and changes nothing else).  The minibuffer
 ;; stays GNU's buffer and window, with its contents, prompt, point, hooks,
 ;; history and recursion; only where it is drawn changes.  Messages show
 ;; as toasts in the frame's top-right corner and stay in *Messages*
@@ -109,19 +110,21 @@ The value should lie between 0 and romacs-complete-count/2."
   "Override sort function which overrides the `display-sort-function'."
   :type '(choice (const nil) function))
 
-;; Romacs: where the layer goes: a floating panel near the top, as Zed's
-;; file finder shows one (its proportions: about 11% down, 42% wide), the
-;; same panel centred, or a strip at the frame's bottom.
+;; Romacs: one panel, as Zed's file finder shows one (its proportions:
+;; about 11% down, 42% wide); the position moves it and nothing else.
 (defcustom romacs-complete-position 'top
-  "Where the minibuffer's layer shows.
-`top': a panel near the frame's top, input on top, candidates below.
-`center': the same panel centred on the frame.  `bottom': the frame's
-full width at its bottom edge, candidates above the prompt.  The floating
-panel is glass (`romacs-layer-glass')."
+  "Where the minibuffer's panel shows, vertically.
+`top': near the frame's top.  `center': centred on the frame.
+`bottom': near its bottom, above the mode line of the window the
+minibuffer was entered from.  The panel is the same in each: centred
+across the frame, `romacs-complete-center-width' of it wide, glass
+\(`romacs-layer-glass'), its input on top and its candidates below.
+Its input stays where the tallest panel would start, so it grows
+downward as candidates come and go."
   :type '(choice (const top) (const center) (const bottom)))
 
 (defcustom romacs-complete-center-width 0.42
-  "Width of the floating panel, as a fraction of the frame's width."
+  "Width of the centred panel, as a fraction of the frame's width."
   :type 'number)
 
 (defgroup romacs-complete-faces nil
@@ -585,7 +588,11 @@ The stack trace of an error is shown in the *Messages* buffer."
        (romacs-complete--update 'interruptible)
        (romacs-complete--prompt-selection)
        (romacs-complete--display-count)
-       (romacs-complete--display-candidates (romacs-complete--arrange-candidates))))))
+       ;; Romacs: as many rows as the panel has room for, below the
+       ;; input as it wraps at the panel's width.
+       (romacs--resize-mini-window)
+       (let ((romacs-complete-count (romacs-complete--rows)))
+         (romacs-complete--display-candidates (romacs-complete--arrange-candidates)))))))
 
 (defun romacs-complete--goto (index)
   "Go to candidate with INDEX."
@@ -726,7 +733,7 @@ The stack trace of an error is shown in the *Messages* buffer."
 (defun romacs-complete-scroll-down (&optional n)
   "Go back by N pages."
   (interactive "p")
-  (romacs-complete--goto (max 0 (- romacs-complete--index (* (or n 1) romacs-complete-count)))))
+  (romacs-complete--goto (max 0 (- romacs-complete--index (* (or n 1) (romacs-complete--rows))))))
 
 (defun romacs-complete-scroll-up (&optional n)
   "Go forward by N pages."
@@ -960,10 +967,6 @@ Exit with current input if prefix ARG is given."
                   cursor-type nil cursor-in-non-selected-windows nil))
     buffer))
 
-(defun romacs-complete--edge ()
-  "The edge of the layer where the minibuffer window sits."
-  (if (eq romacs-complete-position 'bottom) 'bottom 'top))
-
 (defun romacs-complete--frame ()
   "The child frame that hosts the minibuffer window, made once."
   (unless (frame-live-p romacs-complete--layer)
@@ -972,6 +975,8 @@ Exit with current input if prefix ARG is given."
            (frame (make-frame `((parent-frame . ,root)
                                 (minibuffer . ,(minibuffer-window root))
                                 (visibility . nil)
+                                ;; It opens from its top and grows downward.
+                                (romacs-layer-edge . top)
                                 ,@romacs-layer-frame-parameters)))
            (window (frame-root-window frame)))
       (set-window-buffer window (romacs-complete--candidates-buffer))
@@ -979,9 +984,7 @@ Exit with current input if prefix ARG is given."
       (set-window-parameter window 'no-delete-other-windows t)
       (setq romacs-complete--layer frame)))
   (romacs-complete--look romacs-complete--layer)
-  (romacs--host-minibuffer romacs-complete--layer (romacs-complete--edge))
-  (unless (eq (frame-parameter romacs-complete--layer 'romacs-layer-edge) (romacs-complete--edge))
-    (set-frame-parameter romacs-complete--layer 'romacs-layer-edge (romacs-complete--edge)))
+  (romacs--host-minibuffer romacs-complete--layer)
   romacs-complete--layer)
 
 (defun romacs-complete--panel-width (room column)
@@ -993,39 +996,69 @@ large font gets a panel as wide as the frame."
                  (min (- room (* 4 column))
                       (round (* romacs-complete-center-width room))))))
 
+(defun romacs-complete--mode-line-top (root)
+  "The top of the mode line of the window the minibuffer was entered
+from, in ROOT's pixels, or ROOT's bottom when that window is elsewhere."
+  (let ((window (minibuffer-selected-window)))
+    (if (and window (eq (window-frame window) root))
+        (- (nth 3 (window-pixel-edges window)) (window-mode-line-height window))
+      (frame-text-height root))))
+
+(defun romacs-complete--panel-top (root tallest ch)
+  "The panel's outer top in ROOT for `romacs-complete-position', the
+panel TALLEST pixels at most, with CH-pixel lines."
+  (let ((height (frame-text-height root)))
+    (pcase romacs-complete-position
+      ('center (/ (- height tallest) 2))
+      ('bottom (- (romacs-complete--mode-line-top root) ch tallest))
+      (_ (max (* 2 ch) (round (* 0.11 height)))))))
+
+(defun romacs-complete--rows ()
+  "Most candidate rows the panel shows: `romacs-complete-count', fewer
+at `bottom' where the panel would otherwise reach the mode line it ends
+above, but at least one."
+  (if (not (eq romacs-complete-position 'bottom))
+      romacs-complete-count
+    (let* ((frame (romacs-complete--frame)) (root (frame-parent frame))
+           (ch (frame-char-height root))
+           (room (- (romacs-complete--mode-line-top root) ch
+                    (window-pixel-height (minibuffer-window root))
+                    (* 2 (or (frame-parameter frame 'child-frame-border-width) 0)))))
+      (max 1 (min romacs-complete-count (/ room ch))))))
+
 (defun romacs-complete--placement (frame rows)
-  "Where FRAME goes with ROWS candidate rows above or below the
-minibuffer window: (LEFT TOP WIDTH HEIGHT) in pixels, the outer position
-in the root frame and the text size."
+  "Where FRAME goes with ROWS candidate rows below the minibuffer
+window: (LEFT TOP WIDTH HEIGHT) in pixels, the outer position in the
+root frame and the text size.  It is placed at its tallest, so it grows
+downward and its input stays put."
   (let* ((root (frame-parent frame))
          (border (or (frame-parameter frame 'child-frame-border-width) 0))
          (ch (frame-char-height root)) (cw (frame-char-width root))
          (mini (window-pixel-height (minibuffer-window root)))
-         (frame-width (- (frame-text-width root) (* 2 border)))
-         (frame-height (frame-text-height root))
-         (height (+ (* rows ch) mini)))
-    (pcase romacs-complete-position
-      ((or 'center 'top)
-       (let* ((width (romacs-complete--panel-width frame-width cw))
-              ;; Centred at its tallest, so it grows downward and stays put.
-              (tallest (+ (* romacs-complete-count ch) mini (* 2 border)))
-              (top (if (eq romacs-complete-position 'top)
-                       (max (* 2 ch) (round (* 0.11 frame-height)))
-                     (/ (- frame-height tallest) 2))))
-         (list (/ (- frame-width width) 2) (max 0 top) width height)))
-      (_ (list 0 (max 0 (- frame-height height (* 2 border))) frame-width height)))))
+         (room (- (frame-text-width root) (* 2 border)))
+         (width (romacs-complete--panel-width room cw))
+         (tallest (+ (* (romacs-complete--rows) ch) mini (* 2 border))))
+    (list (/ (- room width) 2) (max 0 (romacs-complete--panel-top root tallest ch))
+          width (+ (* rows ch) mini))))
 
 (defvar romacs-complete--looks nil
-  "The position and glass setting the layer's look was last made for.")
+  "The frame and glass setting the layer's look was last made for.")
 
 (defun romacs-complete--look (frame)
-  "Make FRAME glass (`romacs-layer-glass') while it floats, else GNU's
-square border, when the position or setting changed."
-  (let ((look (list frame romacs-complete-position romacs-layer-glass)))
+  "Make FRAME glass (`romacs-layer-glass'), else GNU's square border,
+when the setting changed."
+  (let ((look (list frame romacs-layer-glass)))
     (unless (equal look romacs-complete--looks)
       (setq romacs-complete--looks look)
-      (modify-frame-parameters
-       frame (romacs-layer-glass-parameters (and romacs-layer-glass (not (eq romacs-complete-position 'bottom))))))))
+      (modify-frame-parameters frame (romacs-layer-glass-parameters romacs-layer-glass)))))
+
+(defun romacs-complete--place (frame rows)
+  "Move and size FRAME for ROWS candidate rows (`romacs-complete--placement')."
+  (pcase-let ((`(,left ,top ,width ,height) (romacs-complete--placement frame rows)))
+    (unless (equal (frame-position frame) (cons left top))
+      (set-frame-position frame left top))
+    (unless (and (= (frame-text-width frame) width) (= (frame-text-height frame) height))
+      (set-frame-size frame width height t))))
 
 (defun romacs-complete--show (buffer rows &optional selection)
   "Show the minibuffer's layer with BUFFER's ROWS candidate rows,
@@ -1036,11 +1069,10 @@ SELECTION the row of the current one, if any."
       (set-frame-parameter frame 'romacs-layer-selection selection))
     (unless (eq (window-buffer window) buffer)
       (set-window-buffer window buffer))
-    (pcase-let ((`(,left ,top ,width ,height) (romacs-complete--placement frame rows)))
-      (unless (equal (frame-position frame) (cons left top))
-        (set-frame-position frame left top))
-      (unless (and (= (frame-text-width frame) width) (= (frame-text-height frame) height))
-        (set-frame-size frame width height t)))
+    (romacs-complete--place frame rows)
+    ;; The input wraps at the panel's width: place it again for the
+    ;; minibuffer window's new height, before redisplay draws it.
+    (when (romacs--resize-mini-window) (romacs-complete--place frame rows))
     (set-window-start window (with-current-buffer buffer (point-min)))
     (unless (frame-visible-p frame) (make-frame-visible frame))))
 
@@ -1091,8 +1123,8 @@ covers nothing that needs it gone."
 (define-minor-mode romacs-complete-mode
   "Vertical minibuffer completion, with the minibuffer shown in a layer.
 The frame then reserves no minibuffer line: the prompt, the input and
-the candidates show in a child frame over the frame's windows, placed by
-`romacs-complete-position', and messages show briefly as toasts in the
+the candidates show in a panel, a child frame over the frame's windows,
+placed by `romacs-complete-position', and messages show briefly as toasts in the
 frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode' and `fido-vertical-mode' off."
   :global t :group 'romacs-complete
   (dolist (fun '(completing-read-default completing-read-multiple))

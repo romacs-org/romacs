@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "47e4d5739511a2d63f119e143b9f93afc616af45d17504a4a05faa34a6e5297d",
+  "source_fingerprint": "e3592f29c0d1c09f9b736daca3fb16ea19fd79cda3d9fe33b67d59b31fb21a25",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -4482,7 +4482,7 @@
   "romacs--resize-mini-window": {
    "name": "romacs--resize-mini-window",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/minibuffer_depth.rs:23"
+   "registered_at": "crates/romacs-vm/src/prims/minibuffer_depth.rs:24"
   },
   "romacs--restore-excursion": {
    "name": "romacs--restore-excursion",

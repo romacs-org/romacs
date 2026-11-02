@@ -521,7 +521,7 @@ impl Vm {
             let (x, y) = self.frame_origin(frame)?;
             let f = self.frame(frame)?;
             let (width, height, border, root, hosts, background_alpha) =
-                (f.width, f.height, f.border, f.root, f.hosts_minibuffer.is_some(), f.alpha_background);
+                (f.width, f.height, f.border, f.root, f.hosts_minibuffer, f.alpha_background);
             let default = self.display_face("default")?;
             let edge = self.display_face("child-frame-border")?;
             // An unspecified border face draws in the default foreground.
