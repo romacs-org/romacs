@@ -6,16 +6,18 @@
 //! where a layer shows messages (rlisp/romacs-complete.el).
 use romacs_vm::Vm;
 
-/// The echo area's Lisp, defined once per VM by the first form that runs
-/// it. `romacs--echo-display' shows a text, or nothing, in the minibuffer
-/// window's buffer, never selecting that window and restoring the current
-/// buffer and its point; then it runs `romacs-echo-area-functions' with the
-/// text (a failing function leaves the echo area as it is).
+/// The echo area's Lisp, defined once per VM: by `install' when a session
+/// starts, else by the first form that runs it. `romacs--echo-display'
+/// shows a text, or nothing, in the minibuffer window's buffer, never
+/// selecting that window and restoring the current buffer and its point;
+/// then it runs `romacs-echo-area-functions' with the text (a failing
+/// function leaves the echo area as it is).
 /// `romacs--echo-shown' is the message it was current for, so a later one
-/// is new to the display whoever left it: `romacs--echo-sync' shows it, as
-/// the outer loop does after timers and the evaluator's own waits do before
-/// they redisplay (romacs_vm host_input.rs), as GNU's `message' redisplays
-/// the echo area at once (xdisp.c message3_nolog). Not while a minibuffer
+/// is new to the display whoever left it: `romacs--echo-sync' shows it
+/// (non-nil when it did), as the outer loop does after timers and the
+/// evaluator's own waits do before they redisplay, pending input or not
+/// (romacs_vm host_input.rs), as GNU's `message' redisplays the echo area
+/// at once (xdisp.c message3_nolog). Not while a minibuffer
 /// is active: its window shows the minibuffer, and the prompt's next key
 /// clears the message unseen (DIVERGENCES.md VM2-ECHO-LAYER).
 ///
@@ -40,7 +42,8 @@ const LISP: &str = r#"(progn
   (defun romacs--echo-sync ()
     (let ((message (current-message)))
       (unless (or (eq message romacs--echo-shown) (> (minibuffer-depth) 0))
-        (romacs--echo-display (and message (romacs--echo-printable message)))))))"#;
+        (romacs--echo-display (and message (romacs--echo-printable message)))
+        t))))"#;
 
 /// FORM, after LISP the first time. LISP holds strings, which keep a form
 /// from the source cache (source_cache.rs): it is read once per VM, and a
@@ -51,6 +54,15 @@ fn display(vm: &mut Vm, form: &str) -> Result<(), String> {
         vm.eval_source(form)?;
     }
     Ok(())
+}
+
+/// Define the echo area's Lisp now, before the session's own Lisp runs. A
+/// wait inside a timer or the init redisplays the echo area only through
+/// it (host_input.rs), and the first idle check's timers may wait before
+/// the outer loop has shown anything: a message one of them leaves there
+/// must be shown then, as GNU's `message' shows it.
+pub fn install(vm: &mut Vm) -> Result<(), String> {
+    display(vm, "nil")
 }
 
 /// Show `text` in the echo area.

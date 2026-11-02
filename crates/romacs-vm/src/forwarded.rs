@@ -376,6 +376,13 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "tab-bar-truncate", gnu: "xdisp.c:38947", kind: Kind::Bool(false) },
     CVariable { name: "temp-buffer-show-function", gnu: "window.c:9266", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "throw-on-input", gnu: "keyboard.c:14316", kind: Kind::Lisp(Init::Nil) },
+    // init_while_no_input_ignore_events, as built with file notification
+    // and without D-Bus or threads.
+    CVariable { name: "while-no-input-ignore-events", gnu: "keyboard.c:14413", kind: Kind::Lisp(Init::List(&[
+        Init::Symbol("sleep-event"), Init::Symbol("file-notify"), Init::Symbol("select-window"), Init::Symbol("help-echo"),
+        Init::Symbol("move-frame"), Init::Symbol("iconify-frame"), Init::Symbol("make-frame-visible"), Init::Symbol("focus-in"),
+        Init::Symbol("focus-out"), Init::Symbol("config-changed-event"), Init::Symbol("selection-request"),
+        Init::Symbol("monitors-changed"), Init::Symbol("toolkit-theme-changed")])) },
     CVariable { name: "timer-list", gnu: "keyboard.c:14247", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "timer-idle-list", gnu: "keyboard.c:14251", kind: Kind::Lisp(Init::Nil) },
     // Bound in every process, as cus-start expects of a built-in; Romacs

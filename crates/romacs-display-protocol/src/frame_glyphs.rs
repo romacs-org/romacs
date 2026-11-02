@@ -39,6 +39,8 @@ pub enum GlyphRowRole {
     Minibuffer,
     /// Frame-level tab-bar row.
     TabBar,
+    /// Frame-level status bar row (VM2-STATUS-BAR).
+    StatusBar,
 }
 
 impl GlyphRowRole {
@@ -46,7 +48,7 @@ impl GlyphRowRole {
     pub fn is_chrome(self) -> bool {
         matches!(
             self,
-            Self::TabLine | Self::HeaderLine | Self::ModeLine | Self::TabBar
+            Self::TabLine | Self::HeaderLine | Self::ModeLine | Self::TabBar | Self::StatusBar
         )
     }
 }
@@ -1245,6 +1247,9 @@ pub struct FrameGlyphBuffer {
     /// The windows drawn as panes over the glyphs, none in GNU's look.
     pub panes: Vec<Pane>,
 
+    /// The status bar's band, while the frame shows one (VM2-STATUS-BAR).
+    pub status_bar: Option<Rect>,
+
     /// Explicit transition requests emitted by layout producers.
     pub transition_hints: Vec<ContentTransitionHint>,
 
@@ -1615,6 +1620,7 @@ impl FrameGlyphBuffer {
             presented_hit_index: crate::presented_pointer::PresentedHitIndex::default(),
             window_infos: Vec::with_capacity(16),
             panes: Vec::new(),
+            status_bar: None,
             transition_hints: Vec::with_capacity(16),
             window_cursors: Vec::with_capacity(8),
             cursor_blinked_off: false,
@@ -1657,6 +1663,7 @@ impl FrameGlyphBuffer {
             crate::presented_pointer::PresentedHitIndex::empty(self.presentation_id);
         self.window_infos.clear();
         self.panes.clear();
+        self.status_bar = None;
         self.transition_hints.clear();
         self.window_cursors.clear();
         self.cursor_blinked_off = false;

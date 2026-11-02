@@ -15,7 +15,11 @@
 //! A VM with no host attached keeps batch GNU's behaviour: the primitive
 //! returns nil (end of input) and `read-from-minibuffer' still signals
 //! `(end-of-file "Error reading from stdin")' outside a keyboard macro.
-use crate::{CommandEvent, Result, Value, Vm, threaded};
+use crate::{CommandEvent, Result, Value, Vm, quit, threaded};
+
+/// keyboard.c quit_char: C-g. `set-quit-char' changes it only for a text
+/// terminal, which Romacs has none of.
+pub const QUIT_CHAR: i64 = 7;
 
 /// One redisplay request: the frozen frame, the selected window's id, and
 /// how long freezing the frame took (for latency traces).
@@ -128,8 +132,18 @@ impl Vm {
         let Some(mut host) = self.host_input.take() else {
             return Ok(Value::NIL);
         };
-        let outcome = self.read_host_event_with(host.as_mut(), deadline, display);
+        // A C-g that came before the read is the quit character at once, as
+        // read_char returns it.
+        let outcome = match self.read_quit_event() {
+            Some(event) => Ok(event),
+            None => self.read_host_event_with(host.as_mut(), deadline, display),
+        };
         self.host_input = Some(host);
+        // kbd_buffer_store_event: input inside `while-no-input' sets
+        // `quit-flag' to `throw-on-input', for the next safepoint to throw.
+        if let Ok(HostEvent::Key(_)) = outcome {
+            self.note_input_for_throw();
+        }
         match outcome? {
             HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c),
             HostEvent::Key(CommandEvent::Named(name)) => Ok(self.intern(&name)),
@@ -214,37 +228,64 @@ impl Vm {
         Ok(self.variable_value(slot)? != Value::NIL)
     }
 
+    /// The event a keyboard read returns at once for a quit already
+    /// pending (`Vm::take_read_quit'), if any.
+    fn read_quit_event(&mut self) -> Option<HostEvent> {
+        match self.take_read_quit() {
+            quit::ReadQuit::Key => Some(HostEvent::Key(CommandEvent::Character(QUIT_CHAR))),
+            quit::ReadQuit::Thrown => Some(HostEvent::Timeout),
+            quit::ReadQuit::None => None,
+        }
+    }
+
     fn read_host_event_with(&mut self, host: &mut dyn HostInput, deadline: Option<std::time::Instant>, display: bool) -> Result<HostEvent> {
         let mut redraw = display;
         loop {
             redraw |= self.poll_terminal_output()?;
             // GNU redisplay_internal does nothing while `inhibit-redisplay'
-            // is non-nil, as it is around Lisp that redisplay itself calls.
-            if redraw && !host.input_pending() && !self.redisplay_inhibited()? {
+            // is non-nil, as it is around Lisp that redisplay itself calls,
+            // and waits for pending input; but GNU's `message' displays the
+            // echo area at once, input pending or not (xdisp.c
+            // message3_nolog, echo_area_display): a message left during
+            // this wait (a timer's) is shown, and painted, before the input
+            // that may clear it is read.
+            if redraw && !self.redisplay_inhibited()? {
                 // DEADLINE was computed from the timers and the unread
-                // queues; a redisplay's Lisp (a mode-line :eval) may change
-                // them, and then the wait ends for Lisp to compute it again.
+                // queues; the echo area's functions (a toast's expiry) or
+                // a redisplay's Lisp (a mode-line :eval) may change them,
+                // and then the wait ends for Lisp to compute it again.
                 let before = self.host_wait_state()?;
-                // GNU's `message' redisplays the echo area at once (xdisp.c
-                // message3_nolog): a host that renders it shows a message
-                // left during this wait (a timer's) before the snapshot.
-                self.call_prepared_source_raw("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])?;
-                let (width, height) = (self.window_state.width, self.window_state.height);
-                let started = crate::host::monotonic();
-                let frame = self.frame_snapshot(width, height)?;
-                let snapshot = crate::host::monotonic().saturating_duration_since(started);
-                let selected = self.selected_window_value()?;
-                let selected = self.window(selected)?.id;
-                let minibuffer = self.window(self.mini_window())?.id;
-                let text_animations = self.text_animations()?;
-                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
-                self.display_apply_layout(&ends)?;
-                redraw = false;
+                let echoed = self.call_prepared_source_raw("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])? != Value::NIL;
+                if echoed || !host.input_pending() {
+                    let (width, height) = (self.window_state.width, self.window_state.height);
+                    let started = crate::host::monotonic();
+                    let frame = self.frame_snapshot(width, height)?;
+                    let snapshot = crate::host::monotonic().saturating_duration_since(started);
+                    let selected = self.selected_window_value()?;
+                    let selected = self.window(selected)?.id;
+                    let minibuffer = self.window(self.mini_window())?.id;
+                    let text_animations = self.text_animations()?;
+                    let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
+                    self.display_apply_layout(&ends)?;
+                    redraw = false;
+                }
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
             }
             let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
             host.watch_processes(&self.process_wait_fds());
-            match host.next_event(timeout)? {
+            // Blocked for input, the evaluator is not busy: a C-g typed now
+            // is this read's key, not a quit (quit.rs). The Lisp around the
+            // wait (the redisplay's hooks) stays quittable, as GNU's is.
+            let busy = self.quit.busy();
+            for _ in 0..self.quit.set_busy(false) {
+                self.handle_interrupt();
+            }
+            let event = match self.read_quit_event() {
+                Some(event) => Ok(event),
+                None => host.next_event(timeout),
+            };
+            self.quit.set_busy(busy);
+            match event? {
                 HostEvent::Resize { width, height } => {
                     let (line, column) = (self.window_state.line, self.window_state.column);
                     self.resize_root_window(width, height)?;

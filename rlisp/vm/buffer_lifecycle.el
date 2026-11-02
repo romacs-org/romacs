@@ -54,7 +54,7 @@
             ;; A base buffer's indirect buffers die before it, and one that
             ;; survives its kill keeps the base alive (buffer.c:2019).
             (if (and (buffer-live-p buffer) (not (buffer-base-buffer buffer)))
-                (let ((tail (buffer-list)))
+                (let ((tail (romacs--indirect-buffers buffer)))
                   (while tail
                     (let ((other (car tail)))
                       (if (eq (buffer-base-buffer other) buffer)

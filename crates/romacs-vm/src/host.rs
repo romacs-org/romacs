@@ -142,6 +142,10 @@ pub enum Fact<'a> {
     Clock,
     Monotonic,
     Seed,
+    /// The processor counts: affinity, cgroups and hotplug change them
+    /// between processes, so each process asks again, as GNU's
+    /// `num-processors' does.
+    Processors,
     /// Files, the user database, the machine and every other query.
     Other,
     /// A write, child, socket, lock or terminal.
@@ -159,9 +163,11 @@ pub enum Class {
 
 /// The per-process environment names. Every other name is keyed: a wrong K
 /// costs a refused world, a wrong P a wrong one.
-pub const P_ENV: [&str; 15] = [
+pub const P_ENV: [&str; 17] = [
     "PWD", "OLDPWD", "TMPDIR", "TMP", "TEMP", "PATH", "TERM", "COLORTERM", "DISPLAY",
     "WAYLAND_DISPLAY", "INSIDE_EMACS", "SHLVL", "COLUMNS", "LINES", "_",
+    // `num-processors' reads these, a per-process fact (`Fact::Processors`).
+    "OMP_NUM_THREADS", "OMP_THREAD_LIMIT",
 ];
 
 /// The baked site, (file suffix, form head): `emacs-build-time` is the time
@@ -330,7 +336,7 @@ pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
         Fact::Clock if site.is_some_and(|s| s.at(BAKED)) => Class::B,
-        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed => Class::P,
+        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors => Class::P,
         Fact::Other => Class::K,
         Fact::Effect => Class::F,
     }
@@ -1235,9 +1241,6 @@ pub fn replay(record: &Json) -> Option<Json> {
                 "gid" => { gid(); }
                 "egid" => { egid(); }
                 "system-name" => { let _ = system_name(); }
-                "processors Current" => { processors(Processors::Current); }
-                "processors Online" => { processors(Processors::Online); }
-                "processors All" => { processors(Processors::All); }
                 _ => return None,
             },
             "user-db" => {
@@ -1464,12 +1467,10 @@ pub enum Processors {
     All,
 }
 
+/// A per-process fact (`Fact::Processors`): no world is keyed on it.
 pub fn processors(set: Processors) -> u64 {
-    let count = count_processors(set);
-    if building() {
-        host_fact(&format!("processors {set:?}"), json!(count));
-    }
-    count
+    p_read(Fact::Processors, "processors".into());
+    count_processors(set)
 }
 
 fn count_processors(set: Processors) -> u64 {
@@ -1486,6 +1487,52 @@ fn count_processors(set: Processors) -> u64 {
         Processors::All => libc::_SC_NPROCESSORS_CONF,
     };
     u64::try_from(unsafe { libc::sysconf(name) }).ok().filter(|&n| n > 0).unwrap_or(1)
+}
+
+// Performance counters.
+
+/// User-space instructions the calling thread has retired since its first
+/// call: a pinned Linux hardware counter (perf_event_open), opened once per
+/// thread. Unlike time it is load-insensitive and repeatable, so scaling
+/// probes compare work at two sizes by it. None where the kernel refuses
+/// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
+/// counting all the time: a number is always a whole count.
+pub(crate) fn thread_instructions() -> Option<u64> {
+    thread_local! {
+        static COUNTER: std::cell::OnceCell<Option<std::os::fd::OwnedFd>> = const { std::cell::OnceCell::new() };
+    }
+    COUNTER.with(|counter| counter.get_or_init(open_instruction_counter).as_ref().and_then(read_counter))
+}
+
+#[cfg(target_os = "linux")]
+fn open_instruction_counter() -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+    // perf_event_attr, PERF_ATTR_SIZE_VER0: type HARDWARE (0) and size,
+    // config INSTRUCTIONS (1), flags pinned | exclude_kernel | exclude_hv.
+    const PERF_FLAG_FD_CLOEXEC: libc::c_ulong = 8;
+    let mut attr = [0u64; 8];
+    attr[0] = 64 << 32;
+    attr[1] = 1;
+    attr[5] = 1 << 2 | 1 << 5 | 1 << 6;
+    // SAFETY: ATTR is a zeroed PERF_ATTR_SIZE_VER0 struct that outlives the call.
+    let fd = unsafe { libc::syscall(libc::SYS_perf_event_open, attr.as_ptr(), 0, -1, -1, PERF_FLAG_FD_CLOEXEC) };
+    // SAFETY: a non-negative result is a new descriptor this thread owns.
+    (fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd as i32) })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_instruction_counter() -> Option<std::os::fd::OwnedFd> {
+    None
+}
+
+/// The counter's value; none once a pinned counter lost its PMU slot,
+/// which the kernel reports as end of file.
+fn read_counter(fd: &std::os::fd::OwnedFd) -> Option<u64> {
+    use std::os::fd::AsRawFd;
+    let mut count = 0u64;
+    // SAFETY: COUNT is 8 writable bytes; FD is open for the thread's life.
+    let read = unsafe { libc::read(fd.as_raw_fd(), (&raw mut count).cast(), 8) };
+    (read == 8).then_some(count)
 }
 
 // Time.
@@ -1922,6 +1969,49 @@ pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
     let mut bytes = vec![0; len];
     file.read_exact_at(&mut bytes, 0)?;
     Ok(bytes)
+}
+
+// File notification (`prim/leaf/inotify.rs`): GNU inotify.c's one
+// instance per Emacs, whose descriptor the keyboard waits poll.
+
+/// inotify_init1(2), close-on-exec and nonblocking.
+pub fn inotify_init() -> io::Result<OwnedFd> {
+    effect(|| "inotify".into())?;
+    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+    if fd < 0 { return Err(io::Error::last_os_error()); }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// inotify_add_watch(2): PATH's watch descriptor on FD with MASK.
+pub fn inotify_add_watch(fd: std::os::fd::BorrowedFd<'_>, path: &CStr, mask: u32) -> io::Result<i32> {
+    use std::os::fd::AsRawFd;
+    effect(|| format!("inotify watch {}", path.to_string_lossy()))?;
+    let wd = unsafe { libc::inotify_add_watch(fd.as_raw_fd(), path.as_ptr(), mask) };
+    if wd < 0 { Err(io::Error::last_os_error()) } else { Ok(wd) }
+}
+
+/// inotify_rm_watch(2).
+pub fn inotify_rm_watch(fd: std::os::fd::BorrowedFd<'_>, wd: i32) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    status(unsafe { libc::inotify_rm_watch(fd.as_raw_fd(), wd) })
+}
+
+/// The `struct inotify_event' records queued on FD, as their bytes; none
+/// when nothing is queued (FD is nonblocking).
+pub fn inotify_read(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<Vec<u8>> {
+    use std::os::fd::AsRawFd;
+    let mut queued: libc::c_int = 0;
+    status(unsafe { libc::ioctl(fd.as_raw_fd(), libc::FIONREAD, &mut queued) })?;
+    // One record at least, whatever FIONREAD said, so a read never fails
+    // with EINVAL for a buffer too small for the next record.
+    let mut buffer = vec![0u8; (queued.max(0) as usize).max(std::mem::size_of::<libc::inotify_event>() + 256)];
+    let n = unsafe { libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
+    if n < 0 {
+        let e = io::Error::last_os_error();
+        return if e.kind() == io::ErrorKind::WouldBlock { Ok(Vec::new()) } else { Err(e) };
+    }
+    buffer.truncate(n as usize);
+    Ok(buffer)
 }
 
 // Isolates (`isolate.rs`): worker processes, their control sockets, the

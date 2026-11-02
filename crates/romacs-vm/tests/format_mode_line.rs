@@ -98,3 +98,26 @@ fn recursion_brackets_follow_the_command_loop_level() {
     let actual = printed(&mut vm, r#"(progn (defvar romacs--command-loop-level) (mapcar (lambda (level) (let ((noninteractive nil) (romacs--command-loop-level level)) (substring-no-properties (format-mode-line "%[x%]")))) '(0 1 2 5 6)))"#);
     assert_eq!(actual.as_deref(), Ok(r#"("x" "[x]" "[[x]]" "[[[[[x]]]]]" "[[[... x ...]]]")"#));
 }
+
+/// A mode line's keymaps and help reach `format-mode-line''s string
+/// (VM2-G1B): a propertized string's own `local-map', `keymap' and
+/// `help-echo', under an enclosing face too, and those of a `:propertize'
+/// plist, which win over the string's; a symbol not marked
+/// `risky-local-variable' gives its string's none, as in GNU.
+#[test]
+fn keymaps_and_help_reach_the_string() {
+    let mut vm = romacs();
+    vm.eval_source("(setq noninteractive nil)").unwrap();
+    let map = "mode-line-buffer-identification-keymap";
+    for (expression, expected) in [
+        (format!("(eq (get-text-property 0 'local-map (format-mode-line mode-line-buffer-identification t)) {map})"), "t"),
+        (format!("(let ((s (format-mode-line `(:propertize ,mode-line-buffer-identification face bold)))) (list (eq (get-text-property 0 'local-map s) {map}) (memq 'bold (ensure-list (get-text-property 0 'face s))) (stringp (get-text-property 0 'help-echo s))))"), "(t (bold) t)"),
+        ("(get-text-property 1 'local-map (format-mode-line '(\"a\" (:propertize \"x\" local-map (keymap (mouse-1 . ignore))))))".into(), "(keymap (mouse-1 . ignore))"),
+        ("(get-text-property 0 'local-map (format-mode-line `(:propertize ,(propertize \"x\" 'local-map '(keymap)) local-map (keymap (mouse-2 . ignore)))))".into(), "(keymap (mouse-2 . ignore))"),
+        ("(get-text-property 0 'help-echo (format-mode-line (list (propertize \"y\" 'help-echo \"tip\"))))".into(), "\"tip\""),
+        ("(progn (defvar fml-unmarked (propertize \"z\" 'help-echo \"tip\")) (get-text-property 0 'help-echo (format-mode-line 'fml-unmarked)))".into(), "nil"),
+        ("(get-text-property 0 'help-echo (format-mode-line (list (propertize \"%b\" 'help-echo \"tip\"))))".into(), "\"tip\""),
+    ] {
+        assert_eq!(printed(&mut vm, &expression).as_deref(), Ok(expected), "{expression}");
+    }
+}

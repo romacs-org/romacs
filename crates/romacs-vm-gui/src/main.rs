@@ -37,6 +37,7 @@ mod world;
 mod isolate_worker;
 mod exit;
 mod preparing;
+mod quit;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -213,7 +214,7 @@ mod lent_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
         host.borrow_mut().presentation = 3;
-        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3, tab_bar: vec![] };
+        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3, tab_bar: vec![], status_bar: vec![] };
         let mut live = presentation::Presentation::new();
         let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
@@ -341,7 +342,7 @@ mod frame_tests {
         let mut vm = romacs_vm::Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
-        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4, tab_bar: vec![] };
+        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4, tab_bar: vec![], status_bar: vec![] };
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, same, 4).unwrap().is_none(), "an unchanged frame still on screen repaints");
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
@@ -360,7 +361,7 @@ mod frame_tests {
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         painted.snapshot.tab_bar = Some(romacs_layout_input::TabBarSnapshot { height: 20, face: Default::default(), faces: vec![],
             text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
-        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)] };
+        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)], status_bar: vec![] };
         let click = |x, y, button, pressed| super::tab_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
             action: PointerAction::Button { button, pressed, modifiers: 0 } }));
@@ -368,6 +369,29 @@ mod frame_tests {
         assert_eq!(click(3.0, 5.0, 2, false).as_deref(), Some("(romacs--tab-bar-click 0 'mouse-2)"));
         assert_eq!(click(500.0, 5.0, 1, false).as_deref(), Some("(romacs--tab-bar-click 2 'mouse-1)"));
         assert_eq!(click(15.0, 25.0, 1, true), None, "below the tab bar");
+    }
+
+    /// A button over a painted status-bar character runs the shown mode
+    /// line's binding with its index; between or past them, and above the
+    /// band, it is no click.
+    #[test]
+    fn a_click_over_the_status_bar_names_its_character() {
+        use romacs_display_runtime::thread_comm::{InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput};
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
+        painted.snapshot.status_bar = Some(romacs_layout_input::StatusBarSnapshot { x: 6, y: 760, width: 1188, height: 20,
+            text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] },
+            face: Default::default(), faces: vec![], window: 1, focused: true });
+        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![], status_bar: vec![(6.0, 10.0), (16.0, 10.0)] };
+        let click = |x, y, button, pressed| super::status_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
+            position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
+            action: PointerAction::Button { button, pressed, modifiers: 0 } }));
+        assert_eq!(click(17.0, 765.0, 1, false).as_deref(), Some("(romacs--status-bar-click 1 'mouse-1)"));
+        assert_eq!(click(6.0, 779.0, 3, true).as_deref(), Some("(romacs--status-bar-click 0 'down-mouse-3)"));
+        assert_eq!(click(500.0, 765.0, 1, false), None, "past the text");
+        assert_eq!(click(17.0, 759.0, 1, false), None, "above the band");
     }
 
     /// Selecting the buffer a window already shows resets its end, though its
@@ -384,7 +408,7 @@ mod frame_tests {
         vm.display_apply_layout(&ends).unwrap();
         let end = vm.eval_source("(window-end)").unwrap().display().unwrap();
         assert_ne!(end, vm.eval_source("(point-max)").unwrap().display().unwrap(), "the window shows part of the buffer");
-        let shown = super::Shown { frame: painted, ends, presentation: 1, tab_bar: vec![] };
+        let shown = super::Shown { frame: painted, ends, presentation: 1, tab_bar: vec![], status_bar: vec![] };
         vm.eval_source("(romacs-select-buffer (current-buffer))").unwrap();
         let next = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, next, 1).unwrap().is_none(), "the frame did not change");
@@ -437,6 +461,8 @@ struct Shown {
     presentation: u64,
     /// The painted tab bar's characters: each one's left edge and width.
     tab_bar: Vec<(f32, f32)>,
+    /// The painted status bar's characters, likewise.
+    status_bar: Vec<(f32, f32)>,
 }
 
 /// The frame to paint after a batch, or None when the paint on screen still
@@ -474,7 +500,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
             font_alternatives: vm.font_alternative_state()?,
             width: 400, height: 300,
-            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
             }],
         })
@@ -525,6 +551,8 @@ fn main() {
 /// The session's end, when this process ran one.
 fn run() -> Result<Option<exit::Exit>, String> {
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
+    // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
+    fonts::register_icon_font();
     let mut args = std::env::args().skip(1);
     let mut socket = None;
     let mut floor = None;
@@ -667,8 +695,11 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // waits for it.
     if live { std::thread::spawn(romacs_font::load_catalog); }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
-    let (host, sender) =
+    let (mut host, sender) =
         PaintHost::wayland(std::path::Path::new(&socket), width, height, if live { "romacs — VM" } else { "VM G1a" }.into())?;
+    // A live session's C-g quits a busy evaluator out of band (quit.rs).
+    let quit = live.then(|| std::sync::Arc::new(romacs_vm::QuitSignal::new()));
+    if let Some(quit) = &quit { host.set_input_interrupt(std::sync::Arc::new(quit::QuitHook(quit.clone()))); }
     if let Some(phases) = &mut phases { phases.mark("window"); }
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let start = phases.as_ref().map(startup::Phases::start);
@@ -717,7 +748,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, worlds, first_presentation, prune)
+                     isolate_world, worlds, first_presentation, quit, prune)
         }));
         let end = match result {
             Ok(Ok(end)) => end,
@@ -875,6 +906,7 @@ fn paint(
     }).collect();
     let diagnostics_prepare_ns = diagnostic_start.elapsed().as_nanos();
     let tab_bar = romacs_layout2::tab_bar_extents(&frame);
+    let status_bar = romacs_layout2::status_bar_extents(&frame);
     let submit_start = Instant::now();
     sender.submit_scene(frame, children, shown.animations.clone())?;
     let submit_ns = submit_start.elapsed().as_nanos();
@@ -926,7 +958,7 @@ fn paint(
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
-    Ok(Shown { frame: shown, ends, presentation, tab_bar })
+    Ok(Shown { frame: shown, ends, presentation, tab_bar, status_bar })
 }
 
 /// A mouse button event over the root frame's tab bar as the Lisp that
@@ -941,6 +973,22 @@ fn tab_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let column = shown.tab_bar.iter().position(|&(x, width)| position.x >= x && position.x < x + width).unwrap_or(shown.tab_bar.len());
     let kind = if *pressed { "down-mouse" } else { "mouse" };
     Some(format!("(romacs--tab-bar-click {column} '{kind}-{button})"))
+}
+
+/// A mouse button event over the root frame's status bar as the Lisp that
+/// runs the binding of the mode line it shows (`romacs--status-bar-click'):
+/// the index of the painted character under the pointer. Between or past
+/// the characters it is no click.
+fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
+    let InputEvent::PositionedPointer(romacs_display_runtime::thread_comm::PositionedPointerInput {
+        position, action: romacs_display_runtime::thread_comm::PointerAction::Button { button, pressed, .. }, ..
+    }) = event else { return None };
+    let bar = shown.frame.snapshot.status_bar.as_ref()?;
+    let (top, bottom) = (bar.y as f32, (bar.y + bar.height) as f32);
+    if position.target_frame_id != 1 || position.y < top || position.y >= bottom || !(1..=3).contains(button) { return None; }
+    let column = shown.status_bar.iter().position(|&(x, width)| position.x >= x && position.x < x + width)?;
+    let kind = if *pressed { "down-mouse" } else { "mouse" };
+    Some(format!("(romacs--status-bar-click {column} '{kind}-{button})"))
 }
 
 /// No cursor colour cycle in any window of SNAPSHOT, its child frames'
@@ -1005,6 +1053,7 @@ fn evaluate(
     isolate_world: Option<(std::path::PathBuf, String)>,
     worlds: Option<world::Worlds>,
     first_presentation: u64,
+    quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
     after_first_frame: Option<impl FnOnce()>,
 ) -> Result<exit::Exit, String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
@@ -1017,6 +1066,7 @@ fn evaluate(
         }
         None => (Vm::new(), None),
     };
+    if let Some(quit) = quit { vm.share_quit_signal(quit); }
     startup::mark_phase("vm");
     // How this VM booted, which its worker isolates repeat (rlisp/vm/isolate.el).
     match (&carry, isolate_world, launch) {
@@ -1078,13 +1128,12 @@ fn evaluate(
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
         startup::mark_phase("session-lisp");
+        if let Err(error) = echo::install(&mut vm) { eprintln!("romacs: echo area: {error}"); }
         // This process's command log, from before the init (rlisp/romacs-usage-log.el).
         if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
             eprintln!("romacs: usage log: {error}");
         }
-        if quick && launch == startup::Launch::Loadup {
-            vm.eval_source(startup::QUICK_START)?;
-        }
+        startup::before_init(&mut vm, launch, quick)?;
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // What the init loads is its layer's plan (world.rs).
@@ -1103,10 +1152,15 @@ fn evaluate(
             startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
             startup::Launch::GnuOnly => Ok(()),
         };
-        // As GNU's command loop reports an error that ends `command-line-1'.
-        if let Err(error) = finished {
-            eprintln!("romacs: startup after init failed: {error}");
-            let _ = echo::show(&mut vm, &error);
+        // As GNU's command loop reports an error that ends `command-line-1';
+        // else startup's own message is shown, as GNU's first redisplay
+        // shows it before the command loop's first timer runs.
+        match finished {
+            Err(error) => {
+                eprintln!("romacs: startup after init failed: {error}");
+                let _ = echo::show(&mut vm, &error);
+            }
+            Ok(()) => echo::show_current_message(&mut vm)?,
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
@@ -1177,6 +1231,9 @@ fn evaluate(
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
         loop {
+            // read_char returns the quit character for a quit still pending
+            // (keyboard.c:4102), ahead of the keys typed meanwhile.
+            if live && vm.take_quit_key() { batch.push_front(quit::quit_key()); }
             // read_char takes Lisp's unread queues before host input: a key
             // Lisp read and pushed back (sit-for in a timer) starts the next
             // command, which the Lisp command loop reads.
@@ -1217,8 +1274,9 @@ fn evaluate(
                     }
                     continue;
                 }
-                // A click on the tab bar runs its binding there and then.
-                if live && let Some(click) = tab_bar_click(&previous, &event) {
+                // A click on the tab bar or the status bar runs its binding
+                // there and then.
+                if live && let Some(click) = tab_bar_click(&previous, &event).or_else(|| status_bar_click(&previous, &event)) {
                     if let Err(error) = vm.eval_source(&click) { echo::show(&mut vm, &error)?; }
                     live_presentation.changed();
                     continue;
@@ -1264,7 +1322,9 @@ fn evaluate(
             if let Some(first) = translated {
                 let outcome = if live {
                     let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    vm.enter_busy();
                     let (outcome, closed) = lent.run(&host, |live| live.host_command(&mut vm, first.as_ref()));
+                    vm.leave_busy();
                     if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
@@ -1411,6 +1471,7 @@ fn evaluate(
                 let processes = vm.process_wait_fds();
                 // A termination signal whose wake other work took: back to the top.
                 if romacs_vm::host::termination_signal(true).is_some() { continue; }
+                if vm.take_quit_key() { pending.push_back(quit::quit_key()); continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(presentation::render_stall()), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),
                     terminal_wait::Wake::Closed => return Ok(exit::Exit::new("host-input-closed", "", 1)),

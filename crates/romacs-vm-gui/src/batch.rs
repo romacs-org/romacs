@@ -181,9 +181,10 @@ fn world(store: Option<PathBuf>, dir: &Path) -> Option<World> {
 /// locale, the per-user directories), which a world's records bind: keyed
 /// too, so the worlds of each HOME or locale a user runs under sit side by
 /// side, `prune` keeping the most recent few, rather than rebuilding one.
-const STARTUP_ENVIRONMENT: [&str; 15] = ["HOME", "XDG_CONFIG_HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
-    "USER", "LOGNAME", "NAME", "EMAIL", "SHELL", "ROMACS_RUNTIME_ROOT", "HANGUL_KEYBOARD_TYPE",
-    "OMP_NUM_THREADS", "OMP_THREAD_LIMIT"];
+/// The processor count and the OpenMP limits it reads are per-process,
+/// asked again by the restored startup, so they key nothing.
+const STARTUP_ENVIRONMENT: [&str; 13] = ["HOME", "XDG_CONFIG_HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
+    "USER", "LOGNAME", "NAME", "EMAIL", "SHELL", "ROMACS_RUNTIME_ROOT", "HANGUL_KEYBOARD_TYPE"];
 
 /// What keys a batch world beside the executable: the batch chain over
 /// the GNU Lisp in DIR, on GNU batch's initial terminal frame, from this

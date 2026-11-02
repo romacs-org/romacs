@@ -20,6 +20,19 @@ and keep turning after C-x o and after moving the cursor; C-x 1 again.
 
 pause: SPC holds the logo still, SPC again sets it moving.
 
+scroll: M-> then M-<, C-v then M-v, and C-u 0 C-l on the logo's fifth line
+then M-<, each with the logo turning.  Under ROMACS_DIAGNOSTICS=1 the
+render thread says how each window draws its animation (a scene and its
+placement, cells, or hidden) whenever that changes.  Back at the top the
+window must draw it as it did before: on a GPU as the scene, at the same
+placement (never braille cells, never a placement left a screen above);
+elsewhere as cells.  Recentred on its fifth line it is drawn the same way,
+four rows up.  Then the same trip under reduced motion, where the still
+frame must look as it did before scrolling: no braille, no wordmark
+stranded at the top edge.  In a C-x 2 split, scrolling only the selected
+window leaves the other's placement where it was, and M-< brings the
+scrolled one's back.
+
 reduced: setting `romacs-animation' to reduced while the landing turns
 shows its still frame: nothing moves, and on a GPU the mark stands lit and
 posed (the still frame, not the frame it reached); t again.
@@ -99,7 +112,7 @@ def main():
                'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
                'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(runtime), 'WLR_BACKENDS': 'headless',
                'WLR_HEADLESS_OUTPUTS': '1', 'WLR_RENDERER': 'pixman', 'WLR_LIBINPUT_NO_DEVICES': '1',
-               'LIBSEAT_BACKEND': 'noop', 'ROMACS_LAYER_ANIMATION': '1'}
+               'LIBSEAT_BACKEND': 'noop', 'ROMACS_LAYER_ANIMATION': '1', 'ROMACS_DIAGNOSTICS': '1'}
         if a.tools:
             env['PATH'] = f"{a.tools}:{env['PATH']}"
         # The compositor's own renderer on a real GPU (gles2), when asked:
@@ -202,6 +215,88 @@ def main():
                 keys(' ')
                 check('SPC again sets it moving', turning('resumed', whole) > 1000)
 
+                # scroll
+                def drawn(since=0):
+                    """Each window's animation as the render thread last drew it
+                    after stderr offset SINCE: {window: ('scene', (x, y, w, h))},
+                    ('cells', None) or ('hidden', None)."""
+                    found = {}
+                    for line in stderr_path.read_text(errors='replace')[since:].splitlines():
+                        if not line.startswith('romacs-text-animation: '):
+                            continue
+                        fields = dict(f.split('=', 1) for f in line.split()[1:])
+                        rect = tuple(round(float(fields[k])) for k in ('x', 'y', 'width', 'height')) \
+                            if fields['drawn'] == 'scene' else None
+                        found[fields['window']] = (fields['drawn'], rect)
+                    return found
+
+                def mark():
+                    return len(stderr_path.read_text(errors='replace'))
+
+                def until(done, timeout=30.0):
+                    """Whether DONE holds within TIMEOUT seconds: a loaded host
+                    may take seconds to paint a command."""
+                    end = time.monotonic() + timeout
+                    while not done():
+                        if time.monotonic() > end:
+                            return False
+                        time.sleep(0.2)
+                    return True
+
+                way = 'scene' if wlr else 'cells'
+
+                def ctrl(*names):
+                    for name in names:
+                        keys('-M', 'ctrl', name, '-m', 'ctrl')
+
+                def alt(*names):
+                    for name in names:
+                        keys('-M', 'alt', name, '-m', 'alt')
+
+                def trip(name, away, back):
+                    """Keys AWAY then BACK from the top; how the window draws the
+                    landing before, away and after."""
+                    before = drawn()
+                    since = mark()
+                    away()
+                    until(lambda: drawn(since))
+                    there = drawn(since)
+                    back()
+                    until(lambda: drawn() == before)
+                    after = drawn()
+                    report.setdefault('scroll', {})[name] = {'before': before, 'away': there, 'after': after}
+                    return before, there, after
+
+                time.sleep(1.0)
+                start = drawn()
+                check(f'the landing draws as {way}', len(start) == 1 and next(iter(start.values()))[0] == way, start)
+                for name, tag, away, back in (('M-> M-<', 'end', lambda: alt('>'), lambda: alt('<')),
+                                              ('C-v M-v', 'page', lambda: ctrl('v'), lambda: alt('v')),
+                                              ('M-> C-l M-<', 'recenter', lambda: (alt('>'), ctrl('l')), lambda: alt('<'))):
+                    before, there, after = trip(name, away, back)
+                    check(f'{name}: the window scrolled the landing away', any(v[0] != way or v != before.get(k)
+                                                                              for k, v in there.items()), there)
+                    check(f'{name}: back at the top it draws as before', after == before, {'before': before, 'after': after})
+                    check(f'{name}: the landing still turns', turning(f'scroll-{tag}', whole) > 1000)
+                window = next(iter(start), None)
+                at = start.get(window, (None, None))[1]
+                since = mark()
+                ctrl('n', 'n', 'n', 'n')
+                ctrl('u')
+                keys('0')
+                ctrl('l')
+                until(lambda: drawn(since).get(window), 10 if not wlr else 30)
+                moved = drawn(since).get(window)
+                if wlr:
+                    check('C-u 0 C-l on its fifth line: the scene moves four rows up',
+                          at is not None and moved is not None and moved[0] == 'scene' and moved[1][0] == at[0]
+                          and moved[1][2:] == at[2:] and at[1] - moved[1][1] > 40, {'before': at, 'after': moved})
+                else:
+                    check('C-u 0 C-l on its fifth line: still cells', moved is None or moved[0] == 'cells', moved)
+                alt('<')
+                until(lambda: drawn() == start)
+                check('M-< after the recentre: as before', drawn() == start, drawn())
+
                 # split: every window showing the landing turns, whichever is
                 # selected and wherever its cursor goes.  A half window's logo is
                 # a quarter the size; a still one changes 0, a cursor blink ~175.
@@ -211,6 +306,23 @@ def main():
                 time.sleep(1.0)
                 turned = turning('split', top, bottom)
                 check('both landing windows turn after C-x 2', min(turned) > 400, turned)
+                # Scroll only the selected window, the upper one C-x 2 kept,
+                # away and back.
+                # Only this window has shown the landing before the split.
+                pair = drawn()
+                upper = window
+                since = mark()
+                alt('>')
+                left = until(lambda: upper in drawn(since))
+                away = drawn(since)
+                alt('<')
+                returned = left and until(lambda: drawn() == pair)
+                back = drawn()
+                lower = [k for k in pair if k != upper]
+                report.setdefault('scroll', {})['split'] = {'before': pair, 'away': away, 'after': back}
+                check('split: both windows draw the landing', len(pair) == 2 and all(v[0] == way for v in pair.values()), pair)
+                check('split: M-> moves only the selected window', left and set(away) == {upper}, away)
+                check('split: M-< brings it back, the other never moved', returned and back == pair and len(lower) == 1, back)
                 keys('-M', 'ctrl', 'x', '-m', 'ctrl')
                 keys('o')
                 turned = turning('other', top, bottom)
@@ -237,6 +349,25 @@ def main():
                 if wlr:
                     posed = red(a.output / 'reduced-c.png', whole)
                     check('on a GPU the still frame is the lit mark', posed > 0.04, posed)
+                # The still frame after a scroll away and back looks as before.
+                landing = f'{WIDTH * 3 // 4}x{HEIGHT - 80}+0+0'
+                for name, tag, away, back in (('M-> M-<', 'end', lambda: alt('>'), lambda: alt('<')),
+                                              ('C-v M-v', 'page', lambda: ctrl('v'), lambda: alt('v'))):
+                    before_drawn = drawn()
+                    before = shot(f'still-{tag}-before')
+                    since = mark()
+                    away()
+                    left = until(lambda: drawn(since))
+                    time.sleep(0.5)
+                    shot(f'still-{tag}-away')
+                    back()
+                    returned = left and until(lambda: drawn() == before_drawn)
+                    time.sleep(0.5)
+                    after = shot(f'still-{tag}-after')
+                    changed = differ(before, after, landing)
+                    check(f'reduced, {name}: the window scrolled away and back', returned,
+                          {'away': drawn(since), 'before': before_drawn})
+                    check(f'reduced, {name}: the still frame looks as before', changed < 600, changed)
 
                 # alpha, in the still frame
                 def pixels(path, region):

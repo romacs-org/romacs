@@ -12,7 +12,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{ChildFrameSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
+use romacs_layout_input::{ChildFrameSnapshot, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -26,7 +26,7 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-        vscroll_px: 0, tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
     }
 }
 
@@ -161,6 +161,7 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
     if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(&mut frame, tab_bar, snapshot.width as f32, resolver)?; }
+    if let Some(bar) = &snapshot.status_bar { paint_status_bar(&mut frame, bar, resolver)?; }
     frame.panes = panes(snapshot);
     Ok((frame, ends))
 }
@@ -225,6 +226,50 @@ pub fn tab_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
     }).collect()
 }
 
+/// The root frame's status bar (VM2-STATUS-BAR): BAR's band in its face's
+/// background, then each character in its face on that background, as a
+/// window's band paints, in faces published above the windows', clipped
+/// to the band. A click finds its character by these glyphs
+/// (`status_bar_extents'), which are the bar's only ones and in its
+/// text's order.
+fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, resolver: &mut FontResolver) -> Result<(), String> {
+    let text = &bar.text;
+    validate_runs(text, bar.faces.len())?;
+    let face = bar.face.0 as usize;
+    if face >= bar.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid status bar".into()); }
+    let background = bar.faces[face].background;
+    let faces: Vec<Face> = bar.faces.iter().map(|f| Face { background, ..f.clone() }).collect();
+    let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
+    let face_text = face_text(faces.len(), &[(text, face)]);
+    let metrics = realize_faces(&faces, &face_text, |index| index == face, frame, resolver, face_base)?;
+    let bounds = Rect::new(bar.x as f32, bar.y as f32, bar.width as f32, bar.height as f32);
+    frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(background));
+    frame.set_draw_context(DisplayWindowId::new(0), GlyphRowRole::StatusBar, Some(bounds));
+    let mut x = 0.0;
+    for (byte, ch) in text.utf8.char_indices() {
+        let index = face_at(text, byte, face);
+        let id = FaceId::new(face_base + index as u32);
+        let (ascent, height, cell, _) = metrics[index];
+        let advance = advance(frame, id, ch, cell);
+        if x + advance > bounds.width { break; }
+        frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);
+        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing status bar face")? = id;
+        x += advance;
+    }
+    frame.status_bar = Some(bounds);
+    Ok(())
+}
+
+/// The status bar's characters as FRAME paints them: each one's left edge
+/// and width, in its text's order; the characters past the last are
+/// clipped.
+pub fn status_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
+    frame.glyphs.iter().filter_map(|glyph| match glyph {
+        romacs_display_protocol::FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, x, width, .. } => Some((*x, *width)),
+        _ => None,
+    }).collect()
+}
+
 /// CHILD of SNAPSHOT as a frame of its own: its windows inside its border,
 /// on its background, placed over the root frame at stacking Z. A child
 /// window has the cursor only when it is the selected window.
@@ -232,7 +277,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
     if child.id == 1 || child.windows.is_empty() { return Err("invalid child frame".into()); }
     let frame_snapshot = FrameSnapshot {
         font_selection: snapshot.font_selection, font_alternatives: snapshot.font_alternatives.clone(),
-        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![], tab_bar: None, chrome: Default::default(),
+        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None,
     };
     let cursor = cursor.filter(|(id, _)| child.windows.iter().any(|w| w.snapshot.id == *id));
     let (mut frame, ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, resolver)?;
@@ -383,7 +428,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // repaired to prevent. A window whose *total* geometry does not fit its
     // parent is still rejected, by layout_frame's placement check.
     if snapshot.width == 0 {
-        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![] });
+        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], point: None });
     }
     validate_runs(&snapshot.text, snapshot.faces.len())?;
     if snapshot.stretches.windows(2).any(|w| w[0].byte >= w[1].byte)
@@ -439,12 +484,21 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // Rows are laid out from the start of the window start's line, so a
     // window starting on a continuation line breaks its rows, and stops
     // its TABs, as from the line start.
-    let truncate = snapshot.wrap == LineWrap::Truncate;
+    // A horizontally scrolled window truncates its lines (init_iterator).
+    let truncate = snapshot.wrap == LineWrap::Truncate || !snapshot.hscroll.is_zero();
     let special = if truncate { '$' } else { '\\' };
     let default_id = FaceId::new(face_base);
     let glyphs_mark = snapshot.chrome.right_fringe == 0;
     let last_x = snapshot.width as f32 - if glyphs_mark { advance(frame, default_id, special, metrics[0].2) } else { 0.0 };
     let line_start = text[..snapshot.start_byte].rfind('\n').map_or(0, |at| at + 1);
+    // Each line shows from its first visible x (GNU's first_visible_x):
+    // point's line from the hscroll of point's row. Its rows are truncated.
+    let point_line = text[..snapshot.point_byte].rfind('\n').map_or(0, |at| at + 1);
+    let shift_of = |line: usize| if line == point_line { snapshot.hscroll.point_row } else { snapshot.hscroll.rows } as f32;
+    // A scrolled row's left truncation glyph, without a left fringe
+    // (insert_left_trunc_glyphs): it hides the glyphs it covers.
+    let dollar = if snapshot.chrome.left_fringe == 0 { advance(frame, default_id, '$', metrics[0].2) } else { 0.0 };
+    let left_mark = |shift: f32| if shift > 0.0 { dollar } else { 0.0 };
     // Line numbers take each row's first glyphs, its line's label or as
     // many blanks, in cells of their face.
     // (x, the label when the row starts its line, whether point's line).
@@ -460,6 +514,18 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     };
     let mut x0 = gutter(line_start).0;
     let mut x = x0;
+    let mut shift = shift_of(line_start);
+    // Where point is (`PointPlace'), and where the row being built was
+    // truncated on the right, unscrolled.
+    let mut place: Option<PointPlace> = None;
+    let mut cut = 0.0f32;
+    // The cursor's x on a row scrolled by SHIFT for a position at
+    // unscrolled X: on the truncation glyph past the row's last position,
+    // or on its first glyph when scrolled out on the left
+    // (set_cursor_from_row's glyph_after and glyph_before).
+    let cursor_x = |x: f32, x0: f32, shift: f32, hidden: bool, cut: f32| {
+        if hidden { cut - shift } else if x < x0 + shift { x0 } else { x - shift }
+    };
     let mut y = -(snapshot.vscroll_px as f32);
     let mut row_height = metrics[0].1;
     let mut end_byte = snapshot.start_byte;
@@ -493,17 +559,28 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         if drawing && y >= body_height { break; }
         if drawing || starting { end_byte = byte + ch.len_utf8(); }
         let at_point = (drawing || starting) && byte == snapshot.point_byte;
-        if at_point { point_rect = (!hidden).then_some((x, y, metrics[0].2, row_height, metrics[0].0)); }
+        if at_point && ch == '\n' {
+            point_rect = Some((cursor_x(x, x0, shift, hidden, cut), y, metrics[0].2, row_height, metrics[0].0));
+            place = Some(PointPlace { x: cursor_x(x, x0, shift, hidden, cut), line_x: x + continued, gutter: x0,
+                truncated_left: shift > 0.0, truncated_right: hidden, at_eol: true });
+        }
         if ch == '\n' {
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte + 1; }
                 rows.push(Row { start: row_start, y, height: row_height });
-                marks.push(RowMarks { continued: false, continuation, truncated: hidden });
+                marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: shift > 0.0 });
+                if shift > 0.0 && left_mark(shift) > 0.0 && y < body_height && y + metrics[0].1 > 0.0 {
+                    glyph(frame, '$', ox + x0, oy + y, metrics[0], default_id)?;
+                }
+                if let Some(place) = place.as_mut().filter(|_| row_start <= snapshot.point_byte && snapshot.point_byte <= byte) {
+                    place.truncated_right = hidden;
+                }
                 row_start = byte + 1;
             }
             continuation = false;
             x0 = gutter(byte + 1).0;
             x = x0;
+            shift = shift_of(byte + 1);
             y += row_height;
             row_height = metrics[0].1;
             (continued, hpos, hidden) = (0.0, 0, false);
@@ -511,7 +588,15 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         }
         while stretches.next_if(|s| s.byte < byte).is_some() {}
         let stretch = stretches.next_if(|s| s.byte == byte).map(|s| s.width);
-        if hidden { continue; }
+        // Past the truncation, only point's x on its line still counts.
+        let measuring = hidden && drawing && row_start >= point_line && byte < snapshot.point_byte;
+        if hidden && !measuring {
+            if at_point {
+                point_rect = Some((cut - shift, y, metrics[0].2, row_height, metrics[0].0));
+                place = Some(PointPlace { x: cut - shift, line_x: x + continued, gutter: x0, truncated_left: shift > 0.0, truncated_right: true, at_eol: false });
+            }
+            continue;
+        }
         let index = face_at(&snapshot.text, byte, 0);
         let id = FaceId::new(face_base + index as u32);
         let (ascent, height, cell, space) = metrics[index];
@@ -524,12 +609,13 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             Shown::Glyphs(glyphs) => glyphs.chars().map(|glyph| advance(frame, id, glyph, cell)).sum(),
         };
         let mut advance_px = width(frame, x, x + continued, x0);
+        if measuring { x += advance_px; continue; }
         if !truncate && hpos > 0 && x + advance_px > last_x {
             if glyphs_mark && drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
                 rows.push(Row { start: row_start, y, height: row_height });
-                marks.push(RowMarks { continued: true, continuation, truncated: false });
+                marks.push(RowMarks { continued: true, continuation, truncated: false, truncated_left: false });
                 row_start = byte;
             }
             continuation = true;
@@ -552,13 +638,23 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }
         row_height = row_height.max(height);
-        let visible = drawing && body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32;
-        if truncate && x + advance_px > last_x {
-            if visible && glyphs_mark { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
-            hidden = true;
-            if at_point { point_rect = Some((x, y, metrics[0].2, row_height, ascent)); }
+        let visible = drawing && body_height > 0.0 && y < body_height && y + height > 0.0 && x - shift < snapshot.width as f32;
+        if truncate && x + advance_px > last_x + shift {
+            if visible && glyphs_mark { glyph(frame, special, ox + x - shift, oy + y, metrics[0], default_id)?; }
+            (hidden, cut) = (true, x);
+            if at_point {
+                point_rect = Some((x - shift, y, metrics[0].2, row_height, ascent));
+                place = Some(PointPlace { x: x - shift, line_x: x + continued, gutter: x0, truncated_left: shift > 0.0, truncated_right: true, at_eol: false });
+            }
+            // The rest of the line still counts toward point's x on it.
+            x += advance_px;
             continue;
         }
+        // Scrolled out on the left, or under the left truncation glyph; a
+        // glyph partly out shows its rest, but none overlaps a line number.
+        let left_edge = x0 + shift + left_mark(shift);
+        let visible = visible && x + advance_px > x0 + shift && (x >= left_edge || (snapshot.line_numbers.is_none() && left_mark(shift) == 0.0));
+        let ox = ox - shift;
         let cursor = match &shown {
             Shown::Tab => {
                 if visible { frame.add_stretch(ox + x, oy + y, advance_px, height, color(snapshot.faces[index].background), id, false); }
@@ -575,27 +671,38 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 let (mut at, mut first) = (x, None);
                 for c in glyphs.chars() {
                     let width = advance(frame, id, c, cell);
-                    if visible && at < snapshot.width as f32 { glyph_of(frame, c, ox + at, oy + y, width, (ascent, height), id)?; }
+                    if visible && at - shift < snapshot.width as f32 { glyph_of(frame, c, ox + at, oy + y, width, (ascent, height), id)?; }
                     first.get_or_insert(width);
                     at += width;
                 }
                 first.unwrap_or(cell)
             }
         };
-        if at_point { point_rect = Some((x, y, cursor, row_height, ascent)); }
+        if at_point {
+            let at = cursor_x(x, x0, shift, false, cut);
+            point_rect = Some((at, y, if at == x - shift { cursor } else { metrics[0].2 }, row_height, ascent));
+            place = Some(PointPlace { x: at, line_x: x + continued, gutter: x0, truncated_left: shift > 0.0, truncated_right: false, at_eol: false });
+        }
         if !matches!(shown, Shown::Stretch(_)) || advance_px > 0.0 { hpos += 1; }
         x += advance_px;
     }
     if snapshot.point_byte == text.len() && end_byte == text.len() {
-        point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0));
+        let at = cursor_x(x, x0, shift, hidden, cut);
+        point_rect = Some((at, y, metrics[0].2, row_height, metrics[0].0));
+        // An empty last row shows no character: GNU truncates it on neither side.
+        let empty = row_start == text.len();
+        place = Some(PointPlace { x: at, line_x: x + continued, gutter: x0, truncated_left: shift > 0.0 && !empty, truncated_right: hidden, at_eol: true });
     }
+    if let Some(place) = place.as_mut().filter(|_| row_start <= snapshot.point_byte) { place.truncated_right |= hidden; }
     // The last row holds the text's end position too, when layout reached it.
     if end_byte == text.len() && visible_end == row_start && fully_visible(y, row_height) {
         visible_end = text.len() + 1;
     }
     if end_byte == text.len() && y < body_height {
+        let scrolled = shift > 0.0 && row_start < text.len();
         rows.push(Row { start: row_start, y, height: row_height });
-        marks.push(RowMarks { continued: false, continuation, truncated: hidden });
+        marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: scrolled });
+        if scrolled && left_mark(shift) > 0.0 && y + metrics[0].1 > 0.0 { glyph(frame, '$', ox + x0, oy + y, metrics[0], default_id)?; }
     }
     fringe::paint(frame, snapshot, &rows, &marks, fringe::Area { ox, oy, body_height, line: metrics[0].1, text_len: text.len(), reached_end: end_byte == text.len(), face_base })?;
     // A row starting a numbered line shows its label; any other, blanks,
@@ -647,7 +754,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let bounds = Rect::new(band_x, oy + body_height, band_width, snapshot.height as f32 - header_height - body_height);
         paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, GlyphRowRole::ModeLine, (face_base, copy), &metrics)?;
     }
-    Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows })
+    Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows, point: place })
 }
 
 /// Paint BAND, a header or mode line, in BOUNDS: its FACE's background,

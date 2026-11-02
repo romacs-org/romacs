@@ -30,6 +30,10 @@ pub(crate) struct SavedWindow {
     fringes_persistent: bool,
     vscroll_px: u32,
     hscroll: i64,
+    min_hscroll: i64,
+    suspend_auto_hscroll: bool,
+    /// GNU `p->old_pointm`: a copy of the window's old point marker.
+    old_point: Value,
     combination_limit: Value,
     /// GNU `p->dedicated`.
     dedicated: Value,
@@ -37,7 +41,7 @@ pub(crate) struct SavedWindow {
     /// makes persistent, VALUE nil where the window had none.
     parameters: Vec<(Value, Value)>,
 }
-romacs_snapshot::snapshot_struct!(SavedWindow { window, buffer, start, point, parent, children, horizontal, x, y, width, height, normal_lines, normal_cols, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, hscroll, combination_limit, dedicated, parameters });
+romacs_snapshot::snapshot_struct!(SavedWindow { window, buffer, start, point, parent, children, horizontal, x, y, width, height, normal_lines, normal_cols, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, hscroll, min_hscroll, suspend_auto_hscroll, old_point, combination_limit, dedicated, parameters });
 
 /// GNU `struct save_window_data`: one frame's windows, and the frame
 /// selected when they were saved.
@@ -69,7 +73,7 @@ impl WindowConfiguration {
             f(v);
         }
         for w in &mut self.windows {
-            for v in [&mut w.window, &mut w.buffer, &mut w.start, &mut w.point, &mut w.parent,
+            for v in [&mut w.window, &mut w.buffer, &mut w.start, &mut w.point, &mut w.old_point, &mut w.parent,
                       &mut w.normal_lines, &mut w.normal_cols, &mut w.combination_limit, &mut w.dedicated] {
                 f(v);
             }
@@ -117,12 +121,17 @@ impl Vm {
     /// GNU save_window_save: WINDOW and its subtree, preorder.
     fn save_window(&mut self, window: Value, persistent: &[Value], out: &mut Vec<SavedWindow>) -> Result<()> {
         let w = self.window(window)?.clone();
-        let (start, point) = if w.children.is_empty() && w.buffer != Value::NIL {
+        let (start, point, old_point) = if w.children.is_empty() && w.buffer != Value::NIL {
             let point = self.window_point_value(window)?;
             let start = self.marker_position_value(w.start)?;
-            (self.window_marker(w.buffer, start)?, self.window_marker(w.buffer, point)?)
+            let old = if w.old_point == Value::NIL { point } else { self.marker_position_value(w.old_point)? };
+            let old = self.window_marker(w.buffer, old)?;
+            // window.c:8372: the copy inserts as window points do.
+            let bias = self.window_point_bias(w.buffer)?;
+            self.set_marker_bias(old, bias)?;
+            (self.window_marker(w.buffer, start)?, self.window_marker(w.buffer, point)?, old)
         } else {
-            (Value::NIL, Value::NIL)
+            (Value::NIL, Value::NIL, Value::NIL)
         };
         let parameters = persistent.iter().map(|&p| {
             (p, w.parameters.iter().find(|(k, _)| *k == p).map_or(Value::NIL, |(_, v)| *v))
@@ -148,6 +157,9 @@ impl Vm {
             fringes_persistent: w.fringes_persistent,
             vscroll_px: w.vscroll_px,
             hscroll: w.hscroll,
+            min_hscroll: w.min_hscroll,
+            suspend_auto_hscroll: w.suspend_auto_hscroll,
+            old_point,
             combination_limit: w.combination_limit,
             dedicated: w.dedicated,
             parameters,
@@ -289,7 +301,7 @@ impl Vm {
                 w.right_margin = p.right_margin;
                 (w.fringes, w.fringes_outside_margins, w.fringes_persistent) = (p.fringes, p.fringes_outside_margins, p.fringes_persistent);
                 w.vscroll_px = p.vscroll_px;
-                w.hscroll = p.hscroll;
+                (w.hscroll, w.min_hscroll, w.suspend_auto_hscroll) = (p.hscroll, p.min_hscroll, p.suspend_auto_hscroll);
                 w.combination_limit = p.combination_limit;
                 // Saved parameters are restored; a nil one only resets an
                 // existing non-nil value. Others are left alone.
@@ -310,6 +322,8 @@ impl Vm {
             if (dont_set_miniwindow == Value::NIL || !mini) && self.config_buffer_live(p.buffer) {
                 let previous = kept.get(&p.window.0).copied().unwrap_or(Value::NIL);
                 self.config_show(p.window, p.buffer, p.start, p.point, previous)?;
+                let old_point = self.config_restricted(p.buffer, if p.old_point == Value::NIL { p.point } else { p.old_point })?;
+                self.set_window_old_point(p.window, old_point, p.buffer)?;
                 // Point is not restored in the buffer current when the
                 // configuration was recorded.
                 if p.buffer != new_current && p.buffer == current {
