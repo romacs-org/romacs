@@ -22,6 +22,8 @@ mod command;
 mod interpreted_closure;
 mod oclosure;
 mod host_input;
+mod quit;
+pub use quit::QuitSignal;
 mod bidi;
 mod layout_host;
 mod display_host;
@@ -34,12 +36,13 @@ mod html;
 mod html_entities;
 pub mod host;
 pub mod world;
+pub mod compiled_lisp;
 mod environment;
 mod watchers;
 mod user_db;
 mod locale_info;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
-pub use host_input::{HostEvent, HostFrame, HostInput};
+pub use host_input::{HostEvent, HostFrame, HostInput, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
 pub use display_host::{DisplayHost, FontEntity, FontQuery, OpenedFont, OtfTable};
@@ -1247,6 +1250,13 @@ pub struct Vm {
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     idle_since: Option<std::time::Instant>,
+    /// The host's `C-g', shared with its input thread (quit.rs).
+    quit: std::sync::Arc<quit::QuitSignal>,
+    /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
+    force_quit_count: u8,
+    /// `quit-flag', `inhibit-quit' and `throw-on-input''s symbol slots, for
+    /// the evaluator's quit polls (quit.rs).
+    quit_slots: [usize; 3],
     /// Counts keymap stores and parent changes, GNU's two flushes of the
     /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
     keymap_generation: u64,
@@ -1529,7 +1539,9 @@ romacs_snapshot::snapshot_fields!(Vm {
     conditions,
     rooted,
     spread_reserve,
-
+    quit,
+    force_quit_count,
+    quit_slots,
 } at_rest {
     regexp_cache,
     suspended_code,
@@ -1621,6 +1633,9 @@ impl Vm {
             display: None,
             session_host: None,
             idle_since: None,
+            quit: std::sync::Arc::default(),
+            force_quit_count: 0,
+            quit_slots: [0; 3],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
@@ -1741,6 +1756,7 @@ impl Vm {
         // already-read forms compile their bindings dynamically.
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
+        vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
@@ -2034,11 +2050,8 @@ impl Vm {
             // lambda parameter. Verified on live GNU 32.0.50 interpreted with
             // `lexical-binding: t`: the parameter form signals `void-variable`
             // while the `let` form answers 18.
-            if let Some(source) = name
-                .source()
-                .filter(|n| self.dynamic_scope || self.specials.contains(*n) || self.pending_specials.contains(*n))
-            {
-                let slot = self.slot(source);
+            if self.binds_dynamically(&b, &name, false) {
+                let slot = self.name_slot(&name);
                 b.emit(Op::Bind(slot, reg));
                 dynamic += 1;
             } else {
@@ -2662,9 +2675,7 @@ impl Vm {
                             };
                             let reg = b.reg();
                             b.emit(Op::Move(reg, value));
-                            let cell = !name.source().is_some_and(|n| {
-                                self.dynamic_scope || self.specials.contains(n) || self.pending_specials.contains(n) || b.local_specials.contains(n)
-                            });
+                            let cell = !self.binds_dynamically(b, &name, true);
                             if cell {
                                 b.emit(Op::Cell(reg));
                             }
@@ -2856,9 +2867,7 @@ impl Vm {
         } else {
             let reg = b.reg();
             b.emit(Op::Move(reg, payload));
-            let cell = !variable.source().is_some_and(|name| self.dynamic_scope
-                || self.specials.contains(name)
-                || self.pending_specials.contains(name));
+            let cell = !self.binds_dynamically(b, variable, false);
             if cell {
                 b.emit(Op::Cell(reg));
             }
@@ -2875,12 +2884,28 @@ impl Vm {
         b.env = saved;
         Ok(())
     }
+    /// Whether a binding of NAME is dynamic: every binding of a symbol
+    /// under dynamic scope, an uninterned one's too, as GNU's specbind binds
+    /// the symbol object; otherwise a special variable's, B's local specials
+    /// counting when LOCAL. A compiler temporary is no Lisp symbol, so it
+    /// stays a local and never takes a symbol slot.
+    fn binds_dynamically(&self, b: &Builder, name: &Name, local: bool) -> bool {
+        match name {
+            Name::Generated(id) => self.dynamic_scope && self.generated_symbols.contains_key(id),
+            Name::Source(n) => self.dynamic_scope || self.specials.contains(n.as_str()) || self.pending_specials.contains(n.as_str())
+                || (local && b.local_specials.contains(n.as_str())),
+        }
+    }
+    /// The symbol slot of NAME.
+    fn name_slot(&mut self, name: &Name) -> usize {
+        match name {
+            Name::Source(source) => self.slot(source),
+            Name::Generated(id) => self.generated_symbol(*id).index(7).expect("a generated symbol") - 1,
+        }
+    }
     fn bind(&mut self, b: &mut Builder, (name, binding): &(Name, Binding)) -> usize {
-        if let Some(source) = name
-            .source()
-            .filter(|n| self.dynamic_scope || self.specials.contains(*n) || self.pending_specials.contains(*n) || b.local_specials.contains(*n))
-        {
-            let slot = self.slot(source);
+        if self.binds_dynamically(b, name, true) {
+            let slot = self.name_slot(name);
             b.emit(Op::Bind(slot, binding.reg));
             1
         } else {

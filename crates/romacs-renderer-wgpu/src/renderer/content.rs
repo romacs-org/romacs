@@ -1274,6 +1274,11 @@ impl WgpuRenderer {
         } else {
             &self.pipelines.image
         };
+        let premultiplied_image_pl = if use_stencil {
+            &self.pipelines.stencil_composition
+        } else {
+            &self.pipelines.composition
+        };
         #[cfg(feature = "video")]
         let bi_planar_video_pl = if use_stencil {
             &self.pipelines.stencil_bi_planar_video
@@ -1701,7 +1706,8 @@ impl WgpuRenderer {
                 }
             }
 
-            // --- Draw inline shader surfaces (inherit the image pipeline) ---
+            // --- Draw inline shader surfaces: straight alpha through the image
+            // pipeline, a premultiplied one through the composition pipeline ---
             {
                 let mut surface_quads = Vec::new();
                 for glyph in &frame.glyphs {
@@ -1744,6 +1750,11 @@ impl WgpuRenderer {
                     pass.set_vertex_buffer(0, upload.buffer_slice());
                     for (i, quad) in surface_quads.iter().enumerate() {
                         if let Some(cached) = self.caches.surface.get(quad.id) {
+                            pass.set_pipeline(if cached.premultiplied {
+                                premultiplied_image_pl
+                            } else {
+                                image_pl
+                            });
                             pass.set_bind_group(1, &cached.composite_bind_group, &[]);
                             pass.draw((i * 6) as u32..(i * 6 + 6) as u32, 0..1);
                         }

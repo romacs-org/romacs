@@ -998,7 +998,6 @@
   "prin1/0114": "SIGNAL-VS-VALUE",
   "prin1/0136": "VALUE",
   "prin1/0149": "SIGNAL-VS-VALUE",
-  "prin1/0153": "SIGNAL-VS-VALUE",
-  "prin1/0156": "SIGNAL-VS-VALUE"
+  "prin1/0153": "SIGNAL-VS-VALUE"
  }
 }

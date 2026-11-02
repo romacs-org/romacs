@@ -186,7 +186,7 @@ impl Vm {
     /// `Fload (FILE, NOERROR, Qt, Qnil, MUST-SUFFIX)`, VM2's source loader.
     fn load_source_named(&mut self, file: Value, noerror: bool, must_suffix: bool) -> Result<std::path::PathBuf> {
         let name = self.source_string(file)?.to_owned();
-        let Some(path) = self.source_path(&name, false)? else {
+        let Some((path, suffixed)) = self.source_path(&name, false)? else {
             if noerror {
                 return Ok(std::path::PathBuf::new());
             }
@@ -197,7 +197,7 @@ impl Vm {
         if must_suffix && path.extension().is_none() {
             return Err("load mustsuffix requires a source suffix".into());
         }
-        self.load_file_raw(&path)?;
+        self.load_file_kind(&path, suffixed)?;
         Ok(crate::host::canonicalize(&path).unwrap_or(path))
     }
     /// GNU `un_autoload`: undo the current level's records, newest first.

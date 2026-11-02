@@ -551,7 +551,7 @@ impl WideTranslationMemo {
     fn new(tick: u64) -> Self {
         Self {
             tick: std::cell::Cell::new(tick),
-            slots: std::array::from_fn(|_| std::cell::Cell::new(WIDE_TRANSLATION_EMPTY)),
+            slots: [const { std::cell::Cell::new(WIDE_TRANSLATION_EMPTY) }; WIDE_TRANSLATION_SLOTS],
         }
     }
 
@@ -719,7 +719,10 @@ impl CaseTranslation {
                 byte
             };
         }
-        let byte = STANDARD_BYTE.with(|b| std::array::from_fn(|i| std::cell::Cell::new(b[i])));
+        // A copy loop, not `from_fn': its closure, called out of line for
+        // each byte, cost more than many searches that build this.
+        let byte = [const { std::cell::Cell::new(0) }; 256];
+        STANDARD_BYTE.with(|b| byte.iter().zip(b).for_each(|(cell, &code)| cell.set(code)));
         Self {
             byte,
             table: None,
@@ -746,7 +749,7 @@ impl CaseTranslation {
     /// table; this path was simply missed.
     pub fn from_case_table(table: std::rc::Rc<dyn CaseTable>) -> Self {
         Self {
-            byte: std::array::from_fn(|_| std::cell::Cell::new(CASE_TRANSLATION_UNFILLED)),
+            byte: [const { std::cell::Cell::new(CASE_TRANSLATION_UNFILLED) }; 256],
             table: Some(table),
             wide: std::cell::OnceCell::new(),
             ascii_preimage_memo: std::cell::Cell::new(None),

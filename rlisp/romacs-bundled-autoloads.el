@@ -58,6 +58,11 @@
 (register-definition-prefixes "romacs-companion-receipts" '("romacs-companion-"))
 
 
+;;; Generated autoloads from romacs-compile.el
+
+(register-definition-prefixes "romacs-compile" '("romacs-compile--"))
+
+
 ;;; Generated autoloads from romacs-complete.el
 
 (defvar romacs-complete-mode nil
@@ -158,11 +163,6 @@ This function is part of the `fzf' completion style.
 (fn STRING TABLE PRED POINT)")
 (add-to-list 'completion-styles-alist '(fzf romacs-fzf-try-completion romacs-fzf-all-completions "fzf's extended search: terms in any order, best match first."))
 (register-definition-prefixes "romacs-fzf" '("romacs-fzf-"))
-
-
-;;; Generated autoloads from romacs-gnu-ert-bootstrap.el
-
-(register-definition-prefixes "romacs-gnu-ert-bootstrap" '("shortdoc--groups"))
 
 
 ;;; Generated autoloads from romacs-gradients.el
