@@ -61,21 +61,38 @@ pub(super) fn emit_text(
         emit_cluster(cx, font, size, text, pen, color, transform, scissor, batch)
     };
     let mut pen = paint.origin;
-    if shapes_whole_line(&paint.text) {
-        if emit(cx, &paint.text, pen).is_some() {
-            return;
-        }
-        // A line too long for one atlas raster: shape it word by word, so
-        // letters still join and the line stays visible; words then follow
-        // in logical order.
-        for word in paint.text.split(' ') {
-            pen.x += emit(cx, word, pen).unwrap_or(0.0) + space;
-        }
+    if !shapes_whole_line(&paint.text) {
+        clusters(&mut emit, cx, &paint.text, pen, space);
         return;
     }
-    for cluster in paint.text.graphemes(true) {
-        pen.x += emit(cx, cluster, pen).unwrap_or(space);
+    if emit(cx, &paint.text, pen).is_some() {
+        return;
     }
+    // A line too long for one atlas raster: shape it word by word, so
+    // letters still join and the line stays visible; words then follow in
+    // logical order. A word too long itself is set cluster by cluster.
+    for word in paint.text.split(' ') {
+        let advance = match emit(cx, word, pen) {
+            Some(advance) => advance,
+            None => clusters(&mut emit, cx, word, pen, space),
+        };
+        pen.x += advance + space;
+    }
+}
+
+/// Lay `text` grapheme cluster by grapheme cluster from `pen`; returns the
+/// advance. A cluster with no raster advances by `space`.
+fn clusters(
+    emit: &mut impl FnMut(&mut GlyphContext<'_>, &str, Point) -> Option<f64>,
+    cx: &mut GlyphContext<'_>,
+    text: &str,
+    pen: Point,
+    space: f64,
+) -> f64 {
+    text.graphemes(true).fold(0.0, |advance, cluster| {
+        let at = Point::new(pen.x + advance, pen.y);
+        advance + emit(cx, cluster, at).unwrap_or(space)
+    })
 }
 
 /// Draw a character grid: one glyph per cell on the row's baseline.
