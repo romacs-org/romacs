@@ -142,6 +142,10 @@ pub enum Fact<'a> {
     Clock,
     Monotonic,
     Seed,
+    /// The processor counts: affinity, cgroups and hotplug change them
+    /// between processes, so each process asks again, as GNU's
+    /// `num-processors' does.
+    Processors,
     /// Files, the user database, the machine and every other query.
     Other,
     /// A write, child, socket, lock or terminal.
@@ -159,9 +163,11 @@ pub enum Class {
 
 /// The per-process environment names. Every other name is keyed: a wrong K
 /// costs a refused world, a wrong P a wrong one.
-pub const P_ENV: [&str; 15] = [
+pub const P_ENV: [&str; 17] = [
     "PWD", "OLDPWD", "TMPDIR", "TMP", "TEMP", "PATH", "TERM", "COLORTERM", "DISPLAY",
     "WAYLAND_DISPLAY", "INSIDE_EMACS", "SHLVL", "COLUMNS", "LINES", "_",
+    // `num-processors' reads these, a per-process fact (`Fact::Processors`).
+    "OMP_NUM_THREADS", "OMP_THREAD_LIMIT",
 ];
 
 /// The baked site, (file suffix, form head): `emacs-build-time` is the time
@@ -330,7 +336,7 @@ pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
         Fact::Clock if site.is_some_and(|s| s.at(BAKED)) => Class::B,
-        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed => Class::P,
+        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors => Class::P,
         Fact::Other => Class::K,
         Fact::Effect => Class::F,
     }
@@ -1235,9 +1241,6 @@ pub fn replay(record: &Json) -> Option<Json> {
                 "gid" => { gid(); }
                 "egid" => { egid(); }
                 "system-name" => { let _ = system_name(); }
-                "processors Current" => { processors(Processors::Current); }
-                "processors Online" => { processors(Processors::Online); }
-                "processors All" => { processors(Processors::All); }
                 _ => return None,
             },
             "user-db" => {
@@ -1464,12 +1467,10 @@ pub enum Processors {
     All,
 }
 
+/// A per-process fact (`Fact::Processors`): no world is keyed on it.
 pub fn processors(set: Processors) -> u64 {
-    let count = count_processors(set);
-    if building() {
-        host_fact(&format!("processors {set:?}"), json!(count));
-    }
-    count
+    p_read(Fact::Processors, "processors".into());
+    count_processors(set)
 }
 
 fn count_processors(set: Processors) -> u64 {
