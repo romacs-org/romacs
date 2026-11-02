@@ -275,6 +275,7 @@ fn role_name(role: GlyphRowRole) -> &'static str {
         GlyphRowRole::ModeLine => "mode-line",
         GlyphRowRole::Minibuffer => "minibuffer",
         GlyphRowRole::TabBar => "tab-bar",
+        GlyphRowRole::StatusBar => "status-bar",
     }
 }
 

@@ -94,6 +94,9 @@ pub struct FrameSnapshot {
     pub tab_bar: Option<TabBarSnapshot>,
     /// How the panes are drawn around their windows' boxes.
     pub chrome: FrameChrome,
+    /// The status bar between the windows and the mini-window, while
+    /// `romacs-status-bar-lines' shows one.
+    pub status_bar: Option<StatusBarSnapshot>,
 }
 
 /// The paint-only pane chrome of the root frame's windows but the
@@ -130,6 +133,7 @@ impl FrameSnapshot {
             && self.font_alternatives == other.font_alternatives
             && self.tab_bar == other.tab_bar
             && self.chrome == other.chrome
+            && self.status_bar == other.status_bar
             && windows_lay_out_like(&self.windows, &other.windows)
     }
 }
@@ -342,6 +346,25 @@ pub struct TabBarSnapshot {
     pub text: TextSlice,
     pub face: FaceHandle,
     pub faces: Vec<Face>,
+}
+
+/// The root frame's status bar (VM2-STATUS-BAR): one row of TEXT, the
+/// expanded mode line of WINDOW (the window GNU's mode-line face rule
+/// treats as selected), HEIGHT pixels tall at X, Y and WIDTH wide in the
+/// frame, on FACE's background, its faces indexing FACES. FOCUSED says
+/// whether WINDOW holds the input focus rather than a child frame's
+/// window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StatusBarSnapshot {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub text: TextSlice,
+    pub face: FaceHandle,
+    pub faces: Vec<Face>,
+    pub window: u64,
+    pub focused: bool,
 }
 
 /// GNU's line numbers (xdisp.c maybe_produce_line_number): every row

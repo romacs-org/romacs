@@ -12,7 +12,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{ChildFrameSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
+use romacs_layout_input::{ChildFrameSnapshot, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -161,6 +161,7 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
     if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(&mut frame, tab_bar, snapshot.width as f32, resolver)?; }
+    if let Some(bar) = &snapshot.status_bar { paint_status_bar(&mut frame, bar, resolver)?; }
     frame.panes = panes(snapshot);
     Ok((frame, ends))
 }
@@ -225,6 +226,50 @@ pub fn tab_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
     }).collect()
 }
 
+/// The root frame's status bar (VM2-STATUS-BAR): BAR's band in its face's
+/// background, then each character in its face on that background, as a
+/// window's band paints, in faces published above the windows', clipped
+/// to the band. A click finds its character by these glyphs
+/// (`status_bar_extents'), which are the bar's only ones and in its
+/// text's order.
+fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, resolver: &mut FontResolver) -> Result<(), String> {
+    let text = &bar.text;
+    validate_runs(text, bar.faces.len())?;
+    let face = bar.face.0 as usize;
+    if face >= bar.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid status bar".into()); }
+    let background = bar.faces[face].background;
+    let faces: Vec<Face> = bar.faces.iter().map(|f| Face { background, ..f.clone() }).collect();
+    let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
+    let face_text = face_text(faces.len(), &[(text, face)]);
+    let metrics = realize_faces(&faces, &face_text, |index| index == face, frame, resolver, face_base)?;
+    let bounds = Rect::new(bar.x as f32, bar.y as f32, bar.width as f32, bar.height as f32);
+    frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(background));
+    frame.set_draw_context(DisplayWindowId::new(0), GlyphRowRole::StatusBar, Some(bounds));
+    let mut x = 0.0;
+    for (byte, ch) in text.utf8.char_indices() {
+        let index = face_at(text, byte, face);
+        let id = FaceId::new(face_base + index as u32);
+        let (ascent, height, cell, _) = metrics[index];
+        let advance = advance(frame, id, ch, cell);
+        if x + advance > bounds.width { break; }
+        frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);
+        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing status bar face")? = id;
+        x += advance;
+    }
+    frame.status_bar = Some(bounds);
+    Ok(())
+}
+
+/// The status bar's characters as FRAME paints them: each one's left edge
+/// and width, in its text's order; the characters past the last are
+/// clipped.
+pub fn status_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
+    frame.glyphs.iter().filter_map(|glyph| match glyph {
+        romacs_display_protocol::FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, x, width, .. } => Some((*x, *width)),
+        _ => None,
+    }).collect()
+}
+
 /// CHILD of SNAPSHOT as a frame of its own: its windows inside its border,
 /// on its background, placed over the root frame at stacking Z. A child
 /// window has the cursor only when it is the selected window.
@@ -232,7 +277,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
     if child.id == 1 || child.windows.is_empty() { return Err("invalid child frame".into()); }
     let frame_snapshot = FrameSnapshot {
         font_selection: snapshot.font_selection, font_alternatives: snapshot.font_alternatives.clone(),
-        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![], tab_bar: None, chrome: Default::default(),
+        width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None,
     };
     let cursor = cursor.filter(|(id, _)| child.windows.iter().any(|w| w.snapshot.id == *id));
     let (mut frame, ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, resolver)?;

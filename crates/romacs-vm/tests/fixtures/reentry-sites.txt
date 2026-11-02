@@ -26,6 +26,7 @@ bootstrap.rs bootstrap_primitive set_variable_value 1 held  # defalias's LOADHIS
 command.rs command_event eval_form_raw 6 clean  # events become forms and the binding a name before each call
 command.rs command_event set_variable_value 1 held  # this-command := the binding: a native writer, its watchers hold collection (rooted_write unset)
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
+display.rs ml_prop_value eval_datum_raw 1 rooted  # a `:propertize' datum quoted, its objects form objects; mode_line_string keeps the string in a #: slot and reads it back
 eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
 eval_form.rs eval_primitive compile_request 1 held  # an open compiler builder holds collection
 eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environment are converted to forms first

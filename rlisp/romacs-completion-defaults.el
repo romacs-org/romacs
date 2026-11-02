@@ -59,7 +59,10 @@
              ;; GNU's `completion-category-defaults' entry, fzf first.
              '((project-file (styles fzf substring))))))
     ;; A layer is a child frame, which only a window system makes.
-    ,(if (and window-system (fboundp 'romacs-complete-mode)) '(romacs-complete-mode t) '(fido-vertical-mode t)))
+    ,(if (and window-system (fboundp 'romacs-complete-mode)) '(romacs-complete-mode t) '(fido-vertical-mode t))
+    ;; The status bar is a band of a window-system frame (romacs-chrome.el,
+    ;; DIVERGENCES.md VM2-STATUS-BAR).
+    ,@(and window-system (fboundp 'romacs-status-bar-mode) '((romacs-status-bar-mode t))))
   "Romacs's standard value for each completion option, in the order set.")
 
 (defun romacs-completion-defaults-apply (defaults)

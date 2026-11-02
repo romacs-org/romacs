@@ -17,10 +17,19 @@ a screenshot (grim) is probed:
   corner   the selected window's top-left corner pixel, outside its
            rounded corner, is the frame background (modern only);
 
+  bar      a pixel at the right end of the status bar's band, below its
+           top, is the `mode-line-active' background (modern only;
+           DIVERGENCES.md VM2-STATUS-BAR);
+
 and the run checks that `romacs-chrome-state' reports gap 6, radius 6,
-dim 0.12 (or classic and 0 with --classic) and that the exit's frame
-counters (ROMACS_FRAME_STATS) drew pane chrome quads (none with
---classic).  With --slowdown N the window animations run N times
+dim 0.12, status bar 1 and pane label `name' (or classic, 0, no bar and
+`full' with --classic) and that the exit's frame counters
+(ROMACS_FRAME_STATS) drew pane chrome quads and status-bar bands (none
+with --classic).
+
+With --scenes the session then shows, each in a screenshot: a file of
+a Git repository (vc), that buffer modified, the buffer in
+`flymake-mode' with an error and a warning, and an M-x prompt.  With --slowdown N the window animations run N times
 longer and a screenshot is taken a third into the second split.
 
 With --gpu-frames N (at least 200) the three panes then show N edits,
@@ -58,20 +67,37 @@ INIT = r'''
   "Record the chrome and the windows' edges in NAME, a JSON file."
   (let ((state (romacs-chrome-state)))
     (with-temp-file (expand-file-name (concat name ".json") chrome-live-dir)
-      (insert (format "{\"classic\": %s, \"gap\": %d, \"radius\": %d, \"dim\": %s, \"right_divider\": %d, \"internal_border\": %d, \"focus\": %S, \"background\": %S, \"windows\": [%s]}"
+      (insert (format "{\"classic\": %s, \"gap\": %d, \"radius\": %d, \"dim\": %s, \"right_divider\": %d, \"internal_border\": %d, \"focus\": %S, \"background\": %S, \"windows\": [%s], \"status_bar\": %d, \"label\": \"%s\", \"bar_top\": %d, \"bar_background\": %S, \"native_width\": %d, \"border\": %d}"
                       (if (plist-get state :classic) "true" "false") (plist-get state :gap) (plist-get state :pane-radius)
                       (plist-get state :pane-dim) (plist-get state :right-divider) (plist-get state :internal-border)
                       (or (plist-get state :focus) "") (chrome-live--hex (face-background 'default nil t))
                       (mapconcat (lambda (w) (format "{\"edges\": [%s], \"selected\": %s}"
                                                      (mapconcat #'number-to-string (window-edges w nil nil t) ", ")
                                                      (if (eq w (selected-window)) "true" "false")))
-                                 (window-list nil 'never (frame-first-window)) ", "))))))
+                                 (window-list nil 'never (frame-first-window)) ", ")
+                      (plist-get state :status-bar) (plist-get state :label)
+                      (romacs-chrome-bottom) (chrome-live--hex (face-background 'mode-line-active nil t))
+                      (frame-native-width) (frame-internal-border-width))))))
 '''
 
 STEPS = r'''
 (run-at-time 4 nil (lambda () (chrome-live--note "1")))
 (run-at-time 7 nil (lambda () (split-window-right) (chrome-live--note "2")))
 (run-at-time 10 nil (lambda () (split-window-below) (chrome-live--note "3")))
+'''
+SCENES = r'''
+(setq trusted-content :all)
+(defun chrome-live-flymake (report &rest _)
+  (funcall report (list (flymake-make-diagnostic (current-buffer) 1 3 :error "an error")
+                        (flymake-make-diagnostic (current-buffer) 4 6 :warning "a warning"))))
+(run-at-time 13 nil (lambda () (find-file (expand-file-name "repo/a.el" "~")) (chrome-live--note "vc")))
+(run-at-time 16 nil (lambda () (with-current-buffer "a.el" (goto-char (point-max)) (insert ";; more\n"))
+                      (chrome-live--note "modified")))
+(run-at-time 19 nil (lambda () (with-current-buffer "a.el"
+                                 (setq-local flymake-diagnostic-functions '(chrome-live-flymake))
+                                 (flymake-mode 1) (flymake-start))
+                      (run-at-time 1 nil (lambda () (chrome-live--note "flymake")))))
+(run-at-time 23 nil (lambda () (chrome-live--note "prompt")))
 '''
 LOAD = r'''
 (blink-cursor-mode -1)
@@ -141,6 +167,7 @@ def main():
     ap.add_argument('--timeout', type=float, default=120)
     ap.add_argument('--gpu-frames', type=int, default=0)
     ap.add_argument('--light', action='store_true')
+    ap.add_argument('--scenes', action='store_true')
     ap.add_argument('--labwc', default=live.LABWC)
     ap.add_argument('--wlr-randr', default=live.RANDR)
     args = ap.parse_args()
@@ -170,6 +197,14 @@ def main():
             if args.slowdown != 1:
                 init += f'(setopt romacs-window-animations-slowdown {args.slowdown})\n'
             end = LOAD.replace('{frames}', str(args.gpu_frames)) if args.gpu_frames else '(run-at-time 13 nil (lambda () (kill-emacs 0)))\n'
+            if args.scenes:
+                end = SCENES + '(run-at-time 30 nil (lambda () (kill-emacs 0)))\n'
+                repo = home / 'repo'
+                repo.mkdir()
+                (repo / 'a.el').write_text(';;; a.el --- a file  -*- lexical-binding: t -*-\n(defun a () 1)\n')
+                git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
+                for command in (['init', '-q', '-b', 'main'], ['add', 'a.el'], ['commit', '-q', '-m', 'a']):
+                    subprocess.run(git + command, check=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home)})
             (home / 'config' / 'romacs' / 'init.el').write_text(init + STEPS + end)
             stats = out / 'frame-stats.txt'
             if stats.exists():
@@ -229,17 +264,33 @@ def main():
                         fx, fy = round(left * s), round((top + bottom) / 2 * s)
                         checks[f'focus-{step}'] = [pixel(png, fx, fy), state['focus']]
                         checks[f'corner-{step}'] = [pixel(png, round(left * s), round(top * s)), state['background']]
+                        bx = round((state['native_width'] - state['border'] - 3) * s)
+                        checks[f'bar-{step}'] = [pixel(png, bx, round((state['bar_top'] + 2) * s)), state['bar_background']]
+                for scene in (('vc', 'modified', 'flymake', 'prompt') if args.scenes else ()):
+                    note = notes / f'{scene}.json'
+                    wait(note.exists, args.timeout, f'record {scene}', proc)
+                    if scene == 'prompt':
+                        subprocess.run(['/usr/bin/wtype', '-M', 'alt', 'x', '-m', 'alt'], env=env, timeout=10)
+                    time.sleep(1.5)
+                    shot(f'scene-{scene}')
+                    report[f'state-{scene}'] = json.loads(note.read_text())
+                    if scene == 'prompt':
+                        subprocess.run(['/usr/bin/wtype', '-M', 'ctrl', 'g', '-m', 'ctrl'], env=env, timeout=10)
                 wait(lambda: proc.poll() is not None, 30 + args.gpu_frames * .1, 'exit', None)
             if args.gpu_frames:
                 report['gpu'] = gpu_times(log_path.read_text(errors='replace'), out / 'trace.jsonl', MEASURED)
             text = stats.read_text() if stats.exists() else ''
             quads = re.search(r'chrome_divider_quads: (\d+)', text)
             report['chrome_divider_quads'] = int(quads.group(1)) if quads else None
+            bands = re.search(r'chrome_bar_bands: (\d+)', text)
+            report['chrome_bar_bands'] = int(bands.group(1)) if bands else None
             state = report['state-1']
             wanted = (True, 0, 0, 0.0) if args.classic else (False, 6, 6, 0.12)
             ok = (state['classic'], state['gap'] if not args.classic else state['right_divider'], state['radius'],
                   float(state['dim'])) == wanted
             ok = ok and (report['chrome_divider_quads'] == 0 if args.classic else (report['chrome_divider_quads'] or 0) > 0)
+            ok = ok and (state['status_bar'], state['label']) == ((0, 'full') if args.classic else (1, 'name'))
+            ok = ok and (report['chrome_bar_bands'] == 0 if args.classic else (report['chrome_bar_bands'] or 0) > 0)
             for name, (got, want) in checks.items():
                 ok = ok and near(got, want)
             if args.gpu_frames:
