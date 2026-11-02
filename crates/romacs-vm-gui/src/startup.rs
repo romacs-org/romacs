@@ -304,17 +304,13 @@ impl Phases {
 
 /// GNU's `lisp/` for this process; see [`lisp_dir_from`].
 pub fn lisp_dir() -> std::path::PathBuf {
-    lisp_dir_from(std::env::var_os("ROMACS_LISP_DIR"), std::env::var_os("ROMACS_RUNTIME_ROOT"))
+    lisp_dir_from(std::env::var_os("ROMACS_LISP_DIR"), romacs_vm::host::runtime_root)
 }
 
-/// `ROMACS_LISP_DIR`, else `ROMACS_RUNTIME_ROOT/gnu-lisp` (an installed
-/// `share/romacs`, which the Nix wrapper sets), else the checkout this binary
-/// was built from. The last is a compile-time path: in a Nix build it names
-/// the builder's `/build/source`, which no installed system has.
-fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: Option<std::ffi::OsString>) -> std::path::PathBuf {
-    lisp_dir.map(Into::into)
-        .or_else(|| runtime_root.map(|root| std::path::PathBuf::from(root).join("gnu-lisp")))
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp"))
+/// `ROMACS_LISP_DIR`, else the runtime tree's `gnu-lisp/`
+/// (`romacs_vm::host::runtime_root`).
+fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: impl FnOnce() -> std::path::PathBuf) -> std::path::PathBuf {
+    lisp_dir.map(Into::into).unwrap_or_else(|| runtime_root().join("gnu-lisp"))
 }
 
 /// Where the bundled Lisp lives beside gnu-lisp/, declared once for
@@ -1926,13 +1922,12 @@ mod tests {
 
     #[test]
     fn installed_runtime_root_selects_its_gnu_lisp() {
-        // The Nix wrapper sets only ROMACS_RUNTIME_ROOT=$out/share/romacs. The
-        // compile-time checkout path does not exist on an installed system.
-        let root = std::ffi::OsString::from("/nix/store/x-romacs/share/romacs");
-        assert_eq!(lisp_dir_from(None, Some(root.clone())), std::path::Path::new("/nix/store/x-romacs/share/romacs/gnu-lisp"));
+        // An installed runtime tree (the Nix wrapper's ROMACS_RUNTIME_ROOT, or a
+        // release tarball's share/romacs) supplies gnu-lisp/.
+        let root = || std::path::PathBuf::from("/opt/romacs/share/romacs");
+        assert_eq!(lisp_dir_from(None, root), std::path::Path::new("/opt/romacs/share/romacs/gnu-lisp"));
         // The more specific override still wins.
-        assert_eq!(lisp_dir_from(Some("/elsewhere/lisp".into()), Some(root)), std::path::Path::new("/elsewhere/lisp"));
-        assert_eq!(lisp_dir_from(None, None), std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp"));
+        assert_eq!(lisp_dir_from(Some("/elsewhere/lisp".into()), root), std::path::Path::new("/elsewhere/lisp"));
     }
 
     #[test]
@@ -1954,10 +1949,8 @@ mod tests {
 
     #[test]
     fn runtime_root_resolves_gnu_lisp_before_bundled_lisp() {
-        let root = std::env::var_os("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
-            .canonicalize().unwrap();
-        let dir = lisp_dir_from(None, Some(root.clone().into_os_string())).canonicalize().unwrap();
+        let root = romacs_vm::host::runtime_root().canonicalize().unwrap();
+        let dir = lisp_dir_from(None, || root.clone()).canonicalize().unwrap();
         let mut vm = Vm::new();
         vm.set_load_path(&runtime_load_path(&dir).unwrap()).unwrap();
         let locate = |vm: &mut Vm, name: &str| printed(vm, &format!("(locate-file-internal {} load-path '(\".elc\" \".el\"))", lisp_string(name)));

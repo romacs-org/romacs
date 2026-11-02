@@ -15,8 +15,10 @@
 ;; With ELEMENT-FN the display draws the motion itself, frame after frame,
 ;; over the text FRAME-FN left: no Lisp runs per frame.  ELEMENT-FN runs
 ;; with BUFFER current and the window showing it, and returns what the
-;; display draws there, a plist of :top, :cols, :rows and :kind, or nil
-;; for nothing.  The scheduler keeps it in `romacs-animate--elements',
+;; display draws there, a plist of :start, :cols, :rows and :kind, or nil
+;; for nothing.  :start is the buffer position where the block's first
+;; row begins; the evaluator finds its row in the window each frame, from
+;; the start that frame's redisplay chose, so scrolling needs no Lisp.  The scheduler keeps it in `romacs-animate--elements',
 ;; which every frame the evaluator freezes carries to the display while
 ;; the window shows BUFFER, and FRAME-FN draws only still frames.
 ;; Without ELEMENT-FN, or where the display draws no
@@ -80,7 +82,7 @@ either way, unless the environment variable ROMACS_LAYER_ANIMATION is 1."
 
 (defvar romacs-animate--elements nil
   "The text animations the display draws by itself, a list of (KEY WINDOW
-BUFFER TOP COLS ROWS FPS MOVING KIND), one for each window that
+BUFFER START COLS ROWS FPS MOVING KIND), one for each window that
 shows an animation, as `romacs-animate--sync' keeps it.  MOVING is t,
 nil while it holds where it is, or `still' while motion is off, when
 it shows its still frame.  Each frame the
@@ -185,7 +187,7 @@ it, else none."
         (let ((element (with-current-buffer buffer
                          (funcall (romacs-animate--slot animation :element) window))))
           (when element
-            (push (list key window buffer (plist-get element :top) (plist-get element :cols)
+            (push (list key window buffer (plist-get element :start) (plist-get element :cols)
                         (plist-get element :rows) (romacs-animate--slot animation :fps) moving
                         (plist-get element :kind))
                   entries)))))
@@ -263,7 +265,7 @@ FRAME-FN is called with BUFFER current and the seconds of motion since
 its last frame, 0 for a still frame.  With ELEMENT-FN the display draws
 the motion over FRAME-FN's still frames: called with BUFFER current and
 the window showing it, it returns the display's element, a plist of
-:top, :cols, :rows and :kind (see `romacs-animate--elements'),
+:start, :cols, :rows and :kind (see `romacs-animate--elements'),
 or nil.  A running ID is replaced.  The first frame comes once BUFFER is
 shown; ID stops when BUFFER is killed."
   (romacs-animate-stop id)

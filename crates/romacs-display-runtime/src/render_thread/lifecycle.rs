@@ -497,6 +497,15 @@ impl RenderApp {
             self.frame_windows.mark_top_level_dirty();
         }
 
+        // The busy indicator appears or goes on the last frame, which the
+        // evaluator does not repaint while it runs.
+        if self.busy_toast.update(now, self.comms.evaluator_busy_span()) {
+            let shown = self.busy_toast.shown();
+            self.frame_windows.for_each_top_level_window_mut(|window_state| {
+                window_state.render.overlays.busy = shown;
+                window_state.render.compositor.dirty = true;
+            });
+        }
         self.frame_windows.mark_active_top_level_visuals_dirty();
 
         #[cfg(feature = "webview")]
@@ -576,6 +585,10 @@ impl RenderApp {
         }
         if let Some(tooltip_deadline) = self.tooltips.deadline() {
             deadline = Some(deadline.map_or(tooltip_deadline, |d| d.min(tooltip_deadline)));
+        }
+        if let Some(busy) = self.busy_toast.deadline(now) {
+            let busy = busy.into_instant();
+            deadline = Some(deadline.map_or(busy, |d| d.min(busy)));
         }
         if let Some(tooltip_deadline) = self.menus.tooltip_deadline() {
             deadline = Some(deadline.map_or(tooltip_deadline, |d| d.min(tooltip_deadline)));

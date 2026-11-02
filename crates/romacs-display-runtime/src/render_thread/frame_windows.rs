@@ -388,6 +388,8 @@ pub(crate) struct OverlayState {
     pub(super) fps: FpsCounter,
     pub(super) typing_speed: TypingSpeedState,
     pub(super) idle_dim: IdleDimState,
+    /// The evaluator has been busy long enough to say so (busy_toast.rs).
+    pub busy: bool,
 }
 
 /// One complete native input-method preedit update.
@@ -551,6 +553,7 @@ impl GuiFrameRenderState {
                 },
                 typing_speed: TypingSpeedState::default(),
                 idle_dim: IdleDimState::new(at),
+                busy: false,
             },
             frame_post_src: None,
             native_content_src: None,

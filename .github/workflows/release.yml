@@ -1,0 +1,85 @@
+# Linux release tarballs, published with the GitHub CLI.
+#
+# A push to master replaces the assets of the rolling `nightly` prerelease
+# with a build of that commit and moves its tag there; a newer push cancels an
+# older run. A pushed `v*` tag, which must name the workspace version, creates
+# a permanent release marked latest. Both publish romacs-x86_64-linux.tar.gz
+# and its SHA256SUMS, after scripts/ci/smoke-release has run the tarball.
+name: release
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+jobs:
+  linux-x86_64:
+    # The runner's glibc (2.39) is the oldest a user can run; its FreeType
+    # also meets freetype-sys's minimum, which ubuntu-22.04's does not.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ASSET: romacs-x86_64-linux.tar.gz
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the tag names the workspace version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match workspace version $version" >&2
+            exit 1
+          fi
+
+      # The libraries the binary links (fontconfig, freetype, zlib); every
+      # other native library is loaded at run time. DejaVu gives the smoke
+      # test's world build a font.
+      - name: Install build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libfontconfig-dev libfreetype-dev zlib1g-dev fonts-dejavu-core
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref_type == 'branch' }}
+
+      - name: Build
+        run: cargo build --release --locked -p romacs-vm-gui -p romacs-mcp
+
+      - name: Package
+        run: |
+          scripts/package-release romacs-x86_64-linux target/release dist
+          (cd dist && sha256sum "$ASSET" > SHA256SUMS)
+
+      - name: Smoke-test the tarball
+        run: scripts/ci/smoke-release "dist/$ASSET" "$RUNNER_TEMP/smoke"
+
+      - name: Publish nightly
+        if: github.ref_type == 'branch'
+        run: |
+          gh release view nightly >/dev/null 2>&1 ||
+            gh release create nightly --prerelease --latest=false \
+              --target "$GITHUB_SHA" --title "Romacs nightly" --notes "First nightly."
+          gh release upload nightly "dist/$ASSET" dist/SHA256SUMS --clobber
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" \
+            -f sha="$GITHUB_SHA" -F force=true
+          gh release edit nightly --notes "Built from $GITHUB_SHA, the latest push to master. Install steps: README.org."
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        run: |
+          gh release create "$GITHUB_REF_NAME" "dist/$ASSET" dist/SHA256SUMS \
+            --verify-tag --latest --title "Romacs $GITHUB_REF_NAME" --generate-notes

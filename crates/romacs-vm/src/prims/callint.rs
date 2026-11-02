@@ -91,7 +91,7 @@ fn prefix_numeric_value(cx, raw: Value) {
 }}
 
 /// GNU `Fprefix_numeric_value` (callint.c:810-823).
-fn prefix_numeric(cx: &mut Leaf<'_>, raw: Value) -> Value {
+pub(super) fn prefix_numeric(cx: &mut Leaf<'_>, raw: Value) -> Value {
     if raw == Value::NIL {
         return fixnum(1);
     }
@@ -225,7 +225,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region" | "base64-decode-region" => "r",
         "upcase-region" | "downcase-region" | "capitalize-region" | "upcase-initials-region" => "(list (region-beginning) (region-end) (region-noncontiguous-p))",
         "widen" | "garbage-collect" | "redraw-display" | "unix-sync" | "do-auto-save" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
-        "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" | "start-kbd-macro" => "P", "end-kbd-macro" | "call-last-kbd-macro" => "p", "kill-buffer" => "bKill buffer: ",
+        "erase-buffer" => "*", "scroll-up" | "scroll-down" => "^P", "scroll-left" | "scroll-right" => "^P\np", "recenter" => "P\np", "move-to-window-line" | "kill-emacs" | "start-kbd-macro" => "P", "end-kbd-macro" | "call-last-kbd-macro" => "p", "kill-buffer" => "bKill buffer: ",
         "search-forward" => "MSearch: ", "lossage-size" => "(list (read-number \"Set maximum keystrokes to: \" (lossage-size)))",
         "re-search-forward" => "sRE search: ",
         "re-search-backward" => "sRE search backward: ",

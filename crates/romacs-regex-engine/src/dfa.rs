@@ -914,7 +914,10 @@ impl ClassContext {
         nfa: &Nfa,
         syntax: &dyn SyntaxLookup,
     ) -> Option<Self> {
-        let reads_lookup = pattern.uses_syntax || nfa.uses_categories;
+        // The NFA's own record, not the pattern's `uses_syntax`, which any
+        // bracket class sets: `[:alnum:]' and the other classes but
+        // `[:space:]', `[:word:]' and `[:punct:]' read no table.
+        let reads_lookup = nfa.reads_syntax || nfa.uses_categories;
         let lookup = if reads_lookup {
             Some(syntax.class_cache_key()?)
         } else {
@@ -2291,6 +2294,14 @@ fn register_stats_report() {
 
 /// Failed matcher entries a pattern's search sees before it builds a DFA.
 pub const COLD_THRESHOLD: u32 = 16;
+
+/// Whether a cold slot counts a failure under SYNTAX toward a build: not
+/// when KEYLESS and SYNTAX, too, has no class identity to key one by.
+#[inline]
+fn cold_counts(keyless: bool, syntax: &dyn SyntaxLookup) -> bool {
+    !keyless || syntax.class_cache_key().is_some()
+}
+
 /// Decisions per adaptive-bypass window.
 const BYPASS_WINDOW: u32 = 64;
 /// A window in which more than this share (percent) of the verdicts are
@@ -2325,8 +2336,13 @@ impl LiveDfa {
 /// The state of a pattern's existence DFA.
 pub enum DfaSlot {
     /// Not built yet: admitted failed matcher entries seen so far.
+    /// KEYLESS: a build found that the pattern reads the lookup and the
+    /// search's lookup had no class identity ([`ClassContext::of_search`]).
+    /// Failures under such a lookup do not count toward another build,
+    /// which would only find the same; a lookup with one counts again.
     Cold {
         failed: u32,
+        keyless: bool,
     },
     Live(Box<LiveDfa>),
     /// The reasons are kept for tests and debugging.
@@ -2351,7 +2367,7 @@ pub struct DfaCell {
 impl Default for DfaCell {
     fn default() -> Self {
         Self {
-            slot: RefCell::new(DfaSlot::Cold { failed: 0 }),
+            slot: RefCell::new(DfaSlot::Cold { failed: 0, keyless: false }),
             initialized: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -2562,9 +2578,12 @@ impl<'p> DfaLease<'p> {
         debug_assert!((1..=2).contains(&failed_candidates));
         {
             let mut slot = pattern.dfa.slot.try_borrow_mut().ok()?;
-            let DfaSlot::Cold { failed } = &mut *slot else {
+            let DfaSlot::Cold { failed, keyless } = &mut *slot else {
                 return None;
             };
+            if !cold_counts(*keyless, syntax) {
+                return None;
+            }
             *failed += failed_candidates;
             if *failed < COLD_THRESHOLD {
                 return None;
@@ -2672,9 +2691,9 @@ impl<'p> DfaLease<'p> {
         }
         // A pattern whose candidates keep matching never leaves the cold
         // state: it costs one branch more than the matcher alone.
-        if let DfaSlot::Cold { failed } = &mut *self.slot {
+        if let DfaSlot::Cold { failed, keyless } = &mut *self.slot {
             let found = classic_candidate(scratch, pattern, text, pos, stop, syntax, point, regs);
-            if found.is_none() && !matcher_overflow_pending() {
+            if found.is_none() && !matcher_overflow_pending() && cold_counts(*keyless, syntax) {
                 *failed += 1;
                 if *failed >= COLD_THRESHOLD {
                     self.build(pattern, syntax);
@@ -2738,9 +2757,9 @@ impl<'p> DfaLease<'p> {
         };
         let live = match &mut *self.slot {
             DfaSlot::Live(live) => live,
-            DfaSlot::Cold { failed } => {
+            DfaSlot::Cold { failed, keyless } => {
                 let found = classic(scratch, regs);
-                if found.is_none() && !matcher_overflow_pending() {
+                if found.is_none() && !matcher_overflow_pending() && cold_counts(*keyless, syntax) {
                     *failed += 1;
                     if *failed >= COLD_THRESHOLD {
                         self.build(pattern, syntax);
@@ -2810,9 +2829,10 @@ impl<'p> DfaLease<'p> {
             Ok(nfa) => {
                 let mut dfa = ExistenceDfa::new(nfa);
                 // A lookup with no table identity cannot key the classes: stay
-                // cold, and count the failures toward another try from zero.
+                // cold, and count failures toward another try from zero only
+                // under a lookup that has one.
                 let Some(context) = ClassContext::of_search(pattern, dfa.nfa(), syntax) else {
-                    *self.slot = DfaSlot::Cold { failed: 0 };
+                    *self.slot = DfaSlot::Cold { failed: 0, keyless: true };
                     return;
                 };
                 dfa.classes.sync(context);

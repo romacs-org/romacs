@@ -83,7 +83,9 @@ ORDERED_BOOTSTRAP_CHAIN = [
     'emacs-lisp/debug', 'emacs-lisp/backtrace', 'emacs-lisp/ewoc',
     'emacs-lisp/find-func', 'emacs-lisp/pp', 'emacs-lisp/map', 'help-mode',
 ]
-ERT_SOURCE_BOOTSTRAP = ['rlisp/romacs-gnu-ert-bootstrap.el']
+# The gnu-ert regime: GNU's whole preloaded world, as the dumped Emacs the
+# GNU tests assume has it (rlisp/romacs-loadup-bootstrap.el).
+ERT_SOURCE_BOOTSTRAP = ['rlisp/romacs-loadup-bootstrap.el']
 ERT_REPORT_BOOTSTRAP = ['gnu-lisp/help-fns.el', 'rlisp/romacs-cl-print.el']
 
 
@@ -611,8 +613,9 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
         for d in [str((RUN_TESTS / rel).parent)]:
             cmd += ['--load-path', d]
         if bootstrap == 'ert':
-            cmd += ['--bootstrap-regime', 'gnu-ert', '--load-path', str(ROOT / 'rlisp'),
-                    '--preload', str(ROOT / 'rlisp/romacs-gnu-ert-bootstrap.el')]
+            cmd += ['--bootstrap-regime', 'gnu-ert', '--load-path', str(ROOT / 'rlisp')]
+            for link in ERT_SOURCE_BOOTSTRAP:
+                cmd += ['--preload', str(ROOT / link)]
         else:
             for link in BOOTSTRAP_CHAIN:
                 cmd += ['--preload', str(ROOT / 'gnu-lisp' / f'{link}.el')]

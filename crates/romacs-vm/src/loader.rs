@@ -13,8 +13,13 @@ pub(super) struct Loader {
     completed_forms: usize,
     /// The init's loads, while they are recorded (`world::layer`).
     pub(super) recording: Option<crate::world::layer::Recording>,
+    /// Each compiled load's file (an index in `files`) and the artifact
+    /// it ran (`compiled_lisp`), in load order.
+    compiled: Vec<(usize, PathBuf)>,
+    /// How many compiled loads are running their units.
+    in_artifact: usize,
 }
-romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms, recording });
+romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms, recording, compiled, in_artifact });
 impl Loader {
     /// How many source loads are in progress.
     pub(super) fn active_depth(&self) -> usize {
@@ -115,7 +120,11 @@ impl Vm {
             if let Some(source) = &step.source { json["source"] = source.clone().into(); }
             json
         }).collect();
-        serde_json::json!({"completed_files":self.loader.completed_files,"completed_forms":self.loader.completed_forms,"steps":steps})
+        let compiled: Vec<serde_json::Value> = self.loader.compiled.iter()
+            .map(|(file, artifact)| serde_json::json!({"file": self.loader.files[*file], "artifact": artifact}))
+            .collect();
+        serde_json::json!({"completed_files":self.loader.completed_files,"completed_forms":self.loader.completed_forms,"steps":steps,
+                           "compiled":compiled})
     }
     /// Every top-level form the loader has read this session, in order.
     pub fn load_steps(&self) -> &[Step] {
@@ -150,8 +159,21 @@ impl Vm {
         if !matches!(feature.tag(), 7) && feature != Value::NIL && feature != Value::TRUE {
             return Err("symbol required".into());
         }
-        let slot = self.names["features"];
-        Ok(self.list_values(self.slots[slot].value)?.contains(&feature))
+        // Fmemq: stop at the first match, without copying the list; the
+        // copy, bounds-checked per element, made each featurep linear in
+        // `features' at ~80 instructions an element.
+        let (limit, mut tail) = (self.list_limit(), self.slots[self.names["features"]].value);
+        for _ in 0..=limit {
+            if tail == Value::NIL {
+                return Ok(false);
+            }
+            let (head, next) = self.cons_pair(tail)?;
+            if head == feature {
+                return Ok(true);
+            }
+            tail = next;
+        }
+        Err("circular list".into())
     }
     // Fmember's equal comparison and FOR_EACH_TAIL semantics. This read-only
     // helper is also used to recover a typed fault at the legacy call boundary.
@@ -178,7 +200,24 @@ impl Vm {
         if tail != Value::NIL { return Err(Fault::Wrong("listp", list)); }
         Ok(false)
     }
-    pub(super) fn source_path(&mut self, name: &str, nosuffix: bool) -> Result<Option<PathBuf>> {
+    /// NAME's source file on `load-path`, and whether it was found by adding `.el`: a
+    /// load GNU would satisfy with an `.elc` first when there is one
+    /// (lread.c openp over `load-suffixes`).
+    pub(super) fn source_path(&mut self, name: &str, nosuffix: bool) -> Result<Option<(PathBuf, bool)>> {
+        // A compile process records each resolution, not its probes: a
+        // load of its artifact resolves the name again on the `load-path'
+        // then in force (`compiled_lisp').
+        if crate::host::mode() != crate::host::Mode::Record {
+            return self.resolve_source(name, nosuffix);
+        }
+        let found = crate::host::unrecorded(|| self.resolve_source(name, nosuffix))?;
+        {
+            crate::host::record("resolved", serde_json::json!({"name": name, "nosuffix": nosuffix,
+                "path": found.as_ref().map(|(p, _)| p.to_string_lossy())}));
+        }
+        Ok(found)
+    }
+    fn resolve_source(&mut self, name: &str, nosuffix: bool) -> Result<Option<(PathBuf, bool)>> {
         // lread.c openp: a name under `~' is absolute, expanded through
         // the user's home, never looked up along `load-path'.
         let expanded = self.expand_home_name(name)?;
@@ -206,9 +245,9 @@ impl Vm {
             } else {
                 vec![PathBuf::from(format!("{}.el", base.display())), base]
             };
-            for p in candidates {
+            for (i, p) in candidates.into_iter().enumerate() {
                 if crate::host::probe(crate::host::Probe::IsFile, &p) {
-                    return Ok(Some(p));
+                    return Ok(Some((p, !nosuffix && i == 0)));
                 }
             }
         }
@@ -255,7 +294,7 @@ impl Vm {
                 let noerror = args.get(1).is_some_and(|v| *v != Value::NIL);
                 let nosuffix = args.get(3).is_some_and(|v| *v != Value::NIL);
                 let path = self.source_path(&name, nosuffix)?;
-                let Some(path) = path else {
+                let Some((path, suffixed)) = path else {
                     return if noerror {
                         Ok(Value::NIL)
                     } else {
@@ -265,7 +304,7 @@ impl Vm {
                 if args.get(4).is_some_and(|v| *v != Value::NIL) && path.extension().is_none() {
                     return Err("load mustsuffix requires a source suffix".into());
                 }
-                self.load_file_raw(&path)?;
+                self.load_file_kind(&path, suffixed)?;
                 Ok(Value::TRUE)
             }
             Primitive::Require => {
@@ -393,6 +432,12 @@ impl Vm {
     }
 
     pub(crate) fn load_file_raw(&mut self, path: &Path) -> Result<Value> {
+        self.load_file_kind(path, false)
+    }
+    /// Load PATH; COMPILED when its name was found by adding `.el`, so the
+    /// load is compiled when the file has a compiled form
+    /// (`compiled_lisp`).
+    pub(crate) fn load_file_kind(&mut self, path: &Path, compiled: bool) -> Result<Value> {
         if path.extension().is_some_and(|s| s == "elc") {
             return Err("compiled .elc input is not supported".into());
         }
@@ -419,18 +464,31 @@ impl Vm {
             self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
             return Err(format!("Recursive load: {}", path.display()));
         }
+        if compiled && let Some(compiled) = self.compiled_load(&path)? {
+            if crate::host::mode() == crate::host::Mode::Record {
+                self.note_loaded(&path);
+                compiled.inherit_inputs();
+            }
+            return self.load_artifact(named, path, compiled);
+        }
         let bytes =
             crate::host::read_file(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;
+        if crate::host::mode() == crate::host::Mode::Record {
+            self.note_loaded(&path);
+        }
         let source = match decode_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))? {
             Some(source) => source,
             None => self.detected_source(&bytes).map_err(|e| format!("{}: {e}", path.display()))?,
         };
         // Each public variable binds as a `let' does, in pinned GNU's order:
-        // Fload's lread--unescaped-character-literals, then
+        // Fload's `lexical-binding' (lread.c:1323), bound t only in a source
+        // load inside a compiled one, which binds it nil: VM2 reads every
+        // file lexically (VM2-LEXBIND1), elsewhere under its default t; then
+        // its lread--unescaped-character-literals, then
         // load-with-code-conversion's load-in-progress (held over the
         // after-load forms) and file names, then readevalloop's. GNU's
-        // bindings of the reading buffer (standard-input, eval-buffer-list,
-        // lexical-binding) have no counterpart: VM2 reads the file's bytes.
+        // bindings of the reading buffer (standard-input, eval-buffer-list)
+        // have no counterpart: VM2 reads the file's bytes.
         let shorthands = self.file_shorthands(&source)?;
         // The source cache keys a form by its text; shorthands read that
         // text to other symbols, so such a file's forms are compiled afresh.
@@ -438,7 +496,9 @@ impl Vm {
         let file = self.literal(&Form::String(named.clone()))?;
         let history_slot = self.slot("current-load-list");
         let outer = self.dynamic.len();
-        let bound = self.bind_named(&[("lread--unescaped-character-literals", Value::NIL), ("load-in-progress", Value::TRUE)]);
+        let lexical: &[(&str, Value)] = if self.loader.in_artifact > 0 { &[("lexical-binding", Value::TRUE)] } else { &[] };
+        let bound = self.bind_named(lexical)
+            .and_then(|()| self.bind_named(&[("lread--unescaped-character-literals", Value::NIL), ("load-in-progress", Value::TRUE)]));
         let inner = self.dynamic.len();
         // loadhist_initialize (lread.c:1031): `load' binds current-load-list
         // to (FILE), so LOADHIST_ATTACH conses this file's definitions before
@@ -484,6 +544,10 @@ impl Vm {
             // from the start for each form made a file's load quadratic.
             let (mut line, mut counted) = (1, 0);
             loop {
+                // readevalloop's maybe_quit between forms: a form that
+                // reaches no safepoint of its own still lets C-g end the load,
+                // the forms before it kept.
+                self.poll_quit()?;
                 let read = self.read_internal_span(&source[at..]);
                 let Some((value, begin, used)) = read.map_err(|e| {
                     format!(
@@ -578,6 +642,103 @@ impl Vm {
         let result = self.unbind_after(self.dynamic.len() - outer, result);
         self.loader.active.pop();
         result
+    }
+    /// In a compile process, record that it loaded PATH, with its digest
+    /// (`compiled_lisp`): a change to it changes what the compile saw.
+    fn note_loaded(&self, path: &Path) {
+        if let Some(store) = crate::compiled_lisp::store_dir()
+            && let Ok(digest) = crate::compiled_lisp::store::source_digest(store, path)
+        {
+            crate::host::record("loaded", serde_json::json!({"path": path.to_string_lossy(),
+                "sha256": crate::compiled_lisp::store::hex(&digest)}));
+        }
+    }
+    /// GNU's load of a compiled file (lread.c Fload with `compiled'),
+    /// running COMPILED's units in order. NAMED is the file's name as
+    /// openp found it, PATH its resolved one. Its bindings are Fload's,
+    /// in its order: the loads in progress, `lexical-binding' nil (the
+    /// variable; each unit keeps the dialect it was compiled in), the
+    /// unescaped-literal list, the file names, `load-in-progress', then
+    /// readevalloop's `current-load-list' and `macroexp--dynvars'. All of
+    /// them unwind before the file's after-load forms run (lread.c:1536),
+    /// where a source load keeps them (load-with-code-conversion).
+    fn load_artifact(&mut self, named: String, path: PathBuf, compiled: crate::compiled_lisp::Compiled) -> Result<Value> {
+        let file = self.literal(&Form::String(named.clone()))?;
+        let history_slot = self.slot("current-load-list");
+        let outer = self.dynamic.len();
+        self.loader.active.push(path.clone());
+        let bound = self.bind_named(&[("lexical-binding", Value::NIL), ("lread--unescaped-character-literals", Value::NIL),
+            ("load-file-name", file), ("load-true-file-name", file), ("inhibit-file-name-operation", Value::NIL),
+            ("load-in-progress", Value::TRUE)]).and_then(|()| {
+            let dynvars = self.slot("macroexp--dynvars");
+            let dynvars = self.variable_value(dynvars)?;
+            let history = self.list_value(&[file]);
+            self.bind_named(&[("current-load-list", history), ("macroexp--dynvars", dynvars)])
+        });
+        if let Err(error) = bound {
+            self.unwind(self.dynamic.len() - outer);
+            self.loader.active.pop();
+            return Err(error);
+        }
+        // An `.elc' carries no `(defvar X)' for readevalloop to see.
+        let saved_file_specials = std::mem::take(&mut self.file_specials);
+        let last = self.root_frame(&[Value::NIL]);
+        let step_file = self.loader.file_index(&path);
+        self.loader.compiled.push((step_file, compiled.artifact.clone()));
+        let slots = self.compiled_slots(&compiled);
+        let units: Vec<_> = compiled.units().collect();
+        self.loader.in_artifact += 1;
+        let result = (|| {
+            for (index, &(ordinal, byte, end, line)) in units.iter().enumerate() {
+                self.poll_quit()?;
+                let step = self.loader.steps.len();
+                self.loader.steps.push(Step { file: step_file, ordinal, byte, line, status: StepStatus::Entered, error: None, source: None });
+                let evaluated = self.install_compiled_unit(&compiled, &slots, index).and_then(|entry| {
+                    self.propagate_next |= self.loader.propagate != 0;
+                    let outcome = self.execute_raw(entry);
+                    self.release_request_entry(entry);
+                    outcome
+                });
+                match evaluated {
+                    Ok(v) => {
+                        self.set_rooted(&last, 0, v);
+                        self.loader.completed_forms += 1;
+                        self.loader.steps[step].status = StepStatus::Ok;
+                    }
+                    Err(e) => {
+                        // The form's text, for the report, from the source.
+                        let text = crate::host::read_file(&path).ok()
+                            .and_then(|bytes| decode_source(&bytes).ok().flatten())
+                            .and_then(|source| source.get(byte..end).map(|b| String::from_utf8_lossy(b).into_owned()))
+                            .unwrap_or_default();
+                        let failed = &mut self.loader.steps[step];
+                        failed.status = StepStatus::Error;
+                        failed.error = Some(e.clone());
+                        failed.source = Some(text.clone());
+                        return Err(format!("{}: line {line} form {ordinal}: {}: {e}", path.display(),
+                                           text.trim().chars().take(180).collect::<String>()));
+                    }
+                }
+            }
+            self.loader.completed_files += 1;
+            self.build_load_history(history_slot)
+        })();
+        self.loader.in_artifact -= 1;
+        let [value] = self.release_frame(last);
+        self.file_specials = saved_file_specials;
+        let result = self.unbind_after(self.dynamic.len() - outer, result.map(|()| value));
+        self.loader.active.pop();
+        result.and_then(|result| {
+            let hook_slot = self.slot("do-after-load-evaluation");
+            let hook = self.slots[hook_slot].function;
+            if hook == Value::UNBOUND || hook == Value::NIL {
+                return Ok(result);
+            }
+            let call = Form::List(vec![Form::Sym("do-after-load-evaluation".into()), Form::String(named)]);
+            let rooted = handle::FormObject::new(self, result);
+            self.eval_load_toplevel(&call, None, false, 0)?;
+            rooted.value(self)
+        })
     }
     /// load-with-code-conversion's `read-symbol-shorthands' for SOURCE (mule.el):
     /// what `hack-read-symbol-shorthands-function' finds with the file's text

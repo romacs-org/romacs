@@ -1445,11 +1445,19 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     if engine.vm.stress_due() && engine.vm.may_collect(1) {
         poll_collect(&mut engine);
     }
-    if crate::host::interrupt_pending() {
+    // GNU's eval_sub and funcall run maybe_quit before the body: a quit
+    // already due ends the entry before its first instruction.
+    let quit = if crate::host::interrupt_pending() || engine.vm.quit_due() {
         engine.budget = 0;
-    }
+        interrupt_quit(&mut engine)
+    } else {
+        None
+    };
     // SAFETY: storage and lowered code satisfy the module invariants above.
-    let mut value = unsafe { next(&mut engine, regs, std::ptr::null()) };
+    let mut value = match quit {
+        Some(value) => value,
+        None => unsafe { next(&mut engine, regs, std::ptr::null()) },
+    };
     // Unoptimized Rust does not perform sibling-call elimination. Drive the
     // exact same handlers one at a time in dev builds, keeping debug safe.
     loop {
@@ -1840,15 +1848,17 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if e.vm.collection_due() && e.vm.may_collect(1) {
         poll_collect(e);
     }
-    // An isolate's interrupt (SIGUSR1, `isolate.rs`) is GNU's C-g here:
-    // `quit` at this safepoint unless `inhibit-quit' is bound.
-    if crate::host::interrupt_pending() && let Some(value) = interrupt_quit(e) {
+    // GNU's maybe_quit: a host's C-g (quit.rs) or an isolate's interrupt
+    // (SIGUSR1, `isolate.rs`) is `quit` at this safepoint unless
+    // `inhibit-quit' is bound.
+    if (crate::host::interrupt_pending() || e.vm.quit_poll_due()) && let Some(value) = interrupt_quit(e) {
         return value;
     }
     unsafe { next(e, r, pc) }
 }
-/// The pending interrupt as a `quit` signal, taken unless `inhibit-quit'
-/// is non-nil, in which case it stays pending for a later safepoint.
+/// GNU maybe_quit at a safepoint: an isolate's pending interrupt as a
+/// `quit` signal, else the host's C-g or `quit-flag' (`Vm::maybe_quit').
+/// Either is held while `inhibit-quit' is non-nil, for a later safepoint.
 #[cold]
 #[inline(never)]
 fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
@@ -1858,19 +1868,26 @@ fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
     if e.vm.compile_depth > 0 || !e.vm.expanding.is_empty() {
         return None;
     }
+    if crate::host::interrupt_pending() && isolate_quit(e) {
+        // A signal, not an engine failure: `condition-case' catches it.
+        return Some(raise(e, "quit", &[]));
+    }
+    let escape = e.vm.maybe_quit()?;
+    e.escape = Some(escape);
+    Some(Value::UNBOUND)
+}
+/// Whether an isolate's interrupt or termination quits here.
+fn isolate_quit(e: &mut Engine<'_>) -> bool {
     // A termination quits once, whatever `inhibit-quit' says: the worker's
     // loop then ends (`romacs--isolate-terminated-p').
-    if !crate::host::take_terminate_quit() {
-        let slot = e.vm.slot("inhibit-quit");
-        if e.vm.variable_value(slot).is_ok_and(|v| v != Value::NIL && v != Value::UNBOUND) {
-            return None;
-        }
-        if !crate::host::take_interrupt() || !e.vm.isolate_interrupt_targets_running() {
-            return None;
-        }
+    if crate::host::take_terminate_quit() {
+        return true;
     }
-    // A signal, not an engine failure: `condition-case' catches it.
-    Some(raise(e, "quit", &[]))
+    let slot = e.vm.slot("inhibit-quit");
+    if e.vm.variable_value(slot).is_ok_and(|v| v != Value::NIL && v != Value::UNBOUND) {
+        return false;
+    }
+    crate::host::take_interrupt() && e.vm.isolate_interrupt_targets_running()
 }
 #[cold]
 #[inline(never)]
@@ -3606,8 +3623,10 @@ unsafe fn nested_then(e: &mut Engine<'_>, r: *mut Value, run: impl FnOnce(&mut V
     }
 }
 // eval, load, require, macroexpand, autoload-do-load and the host read run
-// Lisp with this frame suspended (`call_suspended`). ARGS are a copy taken
-// before the call; the primitive roots whatever it keeps across Lisp.
+// Lisp with this frame suspended (`call_suspended`). The work, and the copy of
+// ARGS it owns, live in `reentrant_step`, so this handler keeps its sibling-call
+// dispatch: a frame kept here per call grew the native stack with every `eval`
+// a Lisp loop made (eval-buffer's readevalloop, one per top-level form).
 #[cold]
 unsafe fn reentrant_load(
     e: &mut Engine<'_>,
@@ -3617,6 +3636,23 @@ unsafe fn reentrant_load(
     start: usize,
     argc: usize,
 ) -> Value {
+    unsafe {
+        let to = reentrant_step(e, r, pc, p, start, argc);
+        continue_at(e, to)
+    }
+}
+/// `reentrant_load`'s call: Continue::At the next instruction with the
+/// value stored, or Stop with the condition pending.
+#[cold]
+#[inline(never)]
+unsafe fn reentrant_step(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    p: Primitive,
+    start: usize,
+    argc: usize,
+) -> Continue {
     unsafe {
         let args = e.vm.stack[start..start + argc].to_vec();
         e.vm.execution_fatal = false;
@@ -3633,13 +3669,14 @@ unsafe fn reentrant_load(
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         let Some(r) = r else {
-            return fail(e, "register storage overflow");
+            fail(e, "register storage overflow");
+            return Continue::Stop;
         };
         match result {
             Ok(value) => {
                 leave_native(e);
                 *r.add((*pc).a) = value;
-                advance(e, r, pc)
+                Continue::At(r, pc.add(1))
             }
             Err(error) => {
                 // An `eval` form's own signal or throw crosses back unchanged;
@@ -3648,16 +3685,17 @@ unsafe fn reentrant_load(
                     e.escape = Some(escape);
                     e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
                     e.failed_eval_depth = e.vm.propagated_eval_depth.take();
-                    return Value::UNBOUND;
+                    return Continue::Stop;
                 }
                 if error == "native stack exhausted while compiling Lisp" {
-                    return native_stack_failure(e, &error);
+                    native_stack_failure(e, &error);
+                    return Continue::Stop;
                 }
                 if let Some((condition, data)) = e.vm.primitive_condition(p, start, argc, &error) {
                     e.escape = Some(Escape::Signal(condition, data));
                 }
                 e.error = Some(error);
-                Value::UNBOUND
+                Continue::Stop
             }
         }
     }

@@ -157,3 +157,31 @@ fn finalizers_run_once_after_the_collection_that_finds_them_unreachable() {
     let printed = vm.eval_source(&format!("(prin1-to-string {check})")).unwrap().display().unwrap();
     assert_eq!(printed, serde_json::to_string(expected).unwrap(), "candidate");
 }
+
+/// `gcs-done' and `gc-elapsed' count every collection, `garbage-collect'
+/// and automatic ones (alloc.c:6004); `garbage-collect-maybe' collects only
+/// past 1/FACTOR of the automatic trigger's allocation (alloc.c:6110).
+/// benchmark.el's `benchmark-run' reads both counters; Lisp that stores a
+/// non-float in `gc-elapsed' stops its updates, as GNU's.
+#[test]
+fn collection_counters_and_garbage_collect_maybe() {
+    let check = "(let* ((g gcs-done) (e gc-elapsed) (stats (garbage-collect)) (g1 gcs-done) (e1 gc-elapsed) \
+                       (none (garbage-collect-maybe 1)) (g2 gcs-done)) \
+                  (let ((i 0)) (while (< i 200000) (cons 1 2) (setq i (1+ i)))) \
+                  (let ((some (garbage-collect-maybe 1000000)) (g3 gcs-done)) \
+                    (list (consp stats) (- g1 g) (floatp e1) (>= e1 e) none (- g2 g1) some (> g3 g2) \
+                          (condition-case err (garbage-collect-maybe -1) (error err)) \
+                          (garbage-collect-maybe 0) \
+                          (progn (setq gc-elapsed 'off) (garbage-collect) gc-elapsed))))";
+    let expected = "(t 1 t t nil 0 t t (wrong-type-argument wholenump -1) nil off)";
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", &format!("(prin1 {check})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "pinned GNU");
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.install_lisp_prelude().unwrap();
+    let printed = vm.eval_source(&format!("(prin1-to-string {check})")).unwrap().display().unwrap();
+    assert_eq!(printed, serde_json::to_string(expected).unwrap(), "candidate");
+}

@@ -23,29 +23,43 @@ pub struct Idle {
     pub delay: Option<Duration>,
 }
 
+/// One idle pass: file notification events (read_char's special events),
+/// process output, ripe timers, the idle auto-save (SAVE),
+/// then, on a pass where none of those ran and no message waits to be
+/// shown, whether to collect (`romacs--idle-collect', rlisp/vm/keyboard.el).
+macro_rules! idle_form {
+    ($save:literal) => {
+        concat!("(let* ((notified (romacs--file-notify-idle))
+                  (output (or (romacs--process-idle) (romacs--isolate-idle) notified)) (check (romacs--timer-check-idle))
+                  (save ", $save, ")
+                  (ran (or output (car check) (eq save t)))
+                  (message (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown))))
+                  (collect (and (not ran) (not message) (fboundp 'romacs--idle-collect) (romacs--idle-collect)))
+                  (delays (delq nil (list (and (numberp save) save) (cdr check) (and (numberp collect) collect)))))
+             (list ran message (and delays (ceiling (* (apply #'min delays) 1e6))) (eq collect t)))")
+    };
+}
+const IDLE: &str = idle_form!("nil");
+const IDLE_AUTO_SAVE: &str = idle_form!("(and (fboundp 'romacs--idle-auto-save) (romacs--idle-auto-save))");
+
 /// With AUTO_SAVE, the idle auto-save (rlisp/vm/keyboard.el) is checked
 /// too, once the command loop's Lisp half is installed, and its delay joins
 /// the timers'. A save that ran is redisplayed, as read_char's is: its
 /// hooks may change buffers. The loop leaves it out while a paint it has
 /// not retired is in flight, which it polls every millisecond: GNU
-/// auto-saves after redisplay.
+/// auto-saves after redisplay. An idle collection the Lisp asks for is
+/// made here, after it returned: no request is running, so the request
+/// code it compiled retires too.
 pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
-    let (ran, rest) = vm.eval_source(if auto_save {
-        "(let* ((output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle))
-                (save (and (fboundp 'romacs--idle-auto-save) (romacs--idle-auto-save)))
-                (delay (if (numberp save) (if (cdr check) (min save (cdr check)) save) (cdr check))))
-           (list (or output (car check) (eq save t)) (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown)))
-                 (and delay (ceiling (* delay 1e6)))))"
-    } else {
-        "(let* ((output (or (romacs--process-idle) (romacs--isolate-idle))) (check (romacs--timer-check-idle)))
-           (list (or output (car check)) (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown)))
-                 (and (cdr check) (ceiling (* (cdr check) 1e6)))))"
-    })?.cons_pair()?;
+    let (ran, rest) = vm.eval_source(if auto_save { IDLE_AUTO_SAVE } else { IDLE })?.cons_pair()?;
     let ran = !ran.is_nil();
     let (message, rest) = rest.cons_pair()?;
     let message = !message.is_nil();
-    let micros = rest.cons_pair()?.0;
+    let (micros, rest) = rest.cons_pair()?;
     let delay = if micros.is_nil() { None } else { Some(Duration::from_micros(micros.as_integer()?.max(0) as u64)) };
+    if !rest.cons_pair()?.0.is_nil() {
+        vm.collect_garbage();
+    }
     Ok(Idle { ran, message, delay })
 }
 
@@ -86,7 +100,8 @@ mod tests {
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
-        printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil) (message nil)");
+        // The idle collection has its own test below.
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil romacs-gc-idle-delay nil) (message nil)");
         assert_eq!(idle(&mut vm, true).unwrap(), Idle { ran: false, message: false, delay: None });
         vm.timer_stop_idle();
         // Ordinary timers: the ripe one runs once; the next delay is the far one's.
@@ -184,6 +199,49 @@ mod tests {
         assert_eq!(outcome.command.as_deref(), Some("self-insert-command"));
         assert_eq!(printed(&mut vm, "(list (buffer-string) unread-command-events)"), "(\"x\" nil)");
         assert!(!crate::command::unread_pending(&mut vm).unwrap());
+    }
+
+    /// The idle collection (rlisp/vm/keyboard.el): nothing is scheduled
+    /// until enough was allocated; then one collection once the session has
+    /// been idle for the delay, on a pass where nothing else ran, made by
+    /// the host outside any request.
+    #[test]
+    fn idle_collects_after_its_delay_once_enough_was_allocated() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(idle_collect_body).unwrap().join().unwrap();
+    }
+    fn idle_collect_body() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_echo_area_host(true);
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        // The command loop's Lisp half, as a session's first key installs it.
+        printed(&mut vm, "(read-event nil nil 0)");
+        // A trigger of a million objects, 16 bytes each: the idle collection
+        // waits for a tenth of that.
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil gc-cons-threshold 16000000 gc-cons-percentage nil
+                                romacs-gc-idle-delay 0.05 romacs-gc-idle-factor 10)
+                          (message nil)");
+        vm.collect_garbage();
+        vm.timer_stop_idle();
+        let quiet = idle(&mut vm, true).unwrap();
+        assert_eq!(quiet, Idle { ran: false, message: false, delay: None }, "nothing to collect, no wake-up");
+        let done = printed(&mut vm, "(progn (dotimes (_ 20000) (make-list 10 nil)) gcs-done)");
+        vm.timer_stop_idle();
+        let waiting = idle(&mut vm, true).unwrap();
+        assert!(!waiting.ran && waiting.delay.is_some_and(|d| d <= Duration::from_millis(50)), "{waiting:?}");
+        assert_eq!(printed(&mut vm, "gcs-done"), done, "not before the delay");
+        std::thread::sleep(waiting.delay.unwrap());
+        let collected = idle(&mut vm, true).unwrap();
+        assert_eq!(collected, Idle { ran: false, message: false, delay: None }, "a collection is not a redisplay");
+        let after: i64 = printed(&mut vm, "gcs-done").parse().unwrap();
+        assert_eq!(after, done.parse::<i64>().unwrap() + 1, "one idle collection");
+        assert_eq!(printed(&mut vm, "(< (romacs--collection-share) 0.01)"), "t", "made at a request boundary: request code retired");
+        // Off: nil never collects at idle.
+        printed(&mut vm, "(progn (setq romacs-gc-idle-delay nil) (dotimes (_ 20000) (make-list 10 nil)))");
+        vm.timer_stop_idle();
+        assert_eq!(idle(&mut vm, true).unwrap().delay, None);
     }
 
     /// Work that runs during a command-key wait and schedules a timer,

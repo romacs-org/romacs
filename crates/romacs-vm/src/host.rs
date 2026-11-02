@@ -37,6 +37,10 @@ pub enum Mode {
     Off,
     /// A world build: record, classify, refuse.
     Build,
+    /// A compiled-Lisp compile process (`crate::compiled_lisp`): record the
+    /// K facts its compile-time code reads, as a build does, but refuse
+    /// nothing and pin nothing. Its effects happen, as GNU's compile's do.
+    Record,
 }
 
 thread_local! {
@@ -53,7 +57,36 @@ pub fn mode() -> Mode {
 }
 
 fn building() -> bool {
+    mode() != Mode::Off
+}
+
+/// Whether host access is refused and P facts pinned: a world build only.
+fn refusing() -> bool {
     mode() == Mode::Build
+}
+
+/// Start recording a compile process's K facts on this thread
+/// (`Mode::Record`).
+pub fn enter_record() {
+    BUILD.with(|b| *b.borrow_mut() = Some(Build {
+        pinned: Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] }, phase: Phase::Recipe, startups: 0,
+        site: None, records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
+    }));
+    MODE.with(|m| m.set(Mode::Record));
+}
+
+/// Stop recording: the keyed records and the recorder's own (`record`
+/// of a kind of its caller's, such as compiled Lisp's "loaded"), in
+/// first-occurrence order, without their sites.
+pub fn leave_record() -> Vec<Json> {
+    MODE.with(|m| m.set(Mode::Off));
+    let Some(build) = BUILD.with(|b| b.borrow_mut().take()) else { return vec![] };
+    let written: std::collections::HashSet<Vec<u8>> = build.written.iter().map(|p| p.as_os_str().as_bytes().to_vec()).collect();
+    build.records.into_iter()
+        .filter(|r| keyed(r) || r["kind"] == "loaded" || r["kind"] == "resolved")
+        .filter(|r| !decoded(&r["path"]).is_some_and(|path| written.contains(&path)))
+        .map(|mut r| { r.as_object_mut().map(|o| o.remove("site")); r })
+        .collect()
 }
 
 // Build mode.
@@ -109,6 +142,10 @@ pub enum Fact<'a> {
     Clock,
     Monotonic,
     Seed,
+    /// The processor counts: affinity, cgroups and hotplug change them
+    /// between processes, so each process asks again, as GNU's
+    /// `num-processors' does.
+    Processors,
     /// Files, the user database, the machine and every other query.
     Other,
     /// A write, child, socket, lock or terminal.
@@ -126,9 +163,11 @@ pub enum Class {
 
 /// The per-process environment names. Every other name is keyed: a wrong K
 /// costs a refused world, a wrong P a wrong one.
-pub const P_ENV: [&str; 15] = [
+pub const P_ENV: [&str; 17] = [
     "PWD", "OLDPWD", "TMPDIR", "TMP", "TEMP", "PATH", "TERM", "COLORTERM", "DISPLAY",
     "WAYLAND_DISPLAY", "INSIDE_EMACS", "SHLVL", "COLUMNS", "LINES", "_",
+    // `num-processors' reads these, a per-process fact (`Fact::Processors`).
+    "OMP_NUM_THREADS", "OMP_THREAD_LIMIT",
 ];
 
 /// The baked site, (file suffix, form head): `emacs-build-time` is the time
@@ -297,7 +336,7 @@ pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
         Fact::Clock if site.is_some_and(|s| s.at(BAKED)) => Class::B,
-        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed => Class::P,
+        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors => Class::P,
         Fact::Other => Class::K,
         Fact::Effect => Class::F,
     }
@@ -311,6 +350,9 @@ struct Build {
     records: Vec<Json>,
     refusals: Vec<Json>,
     seen: std::collections::HashSet<String>,
+    /// In `Mode::Record`, the paths this process's own effects wrote: a
+    /// later read of one is of the compile's making, not an input.
+    written: std::collections::HashSet<PathBuf>,
 }
 
 impl Build {
@@ -335,7 +377,7 @@ fn with_build<T>(f: impl FnOnce(&mut Build) -> T) -> Option<T> {
 pub fn enter_build(pinned: Pinned) {
     BUILD.with(|b| *b.borrow_mut() = Some(Build {
         pinned, phase: Phase::Init, startups: 0, site: None,
-        records: Vec::new(), refusals: Vec::new(), seen: Default::default(),
+        records: Vec::new(), refusals: Vec::new(), seen: Default::default(), written: Default::default(),
     }));
     MODE.with(|m| m.set(Mode::Build));
 }
@@ -449,6 +491,9 @@ pub(crate) fn refusals() -> usize {
 
 /// List a refusal: KIND with FIELDS and the current site.
 pub(crate) fn refuse(kind: &str, fields: Json) {
+    if !refusing() {
+        return;
+    }
     with_build(|b| {
         let mut item = json!({"kind": kind, "site": b.site()});
         item.as_object_mut().unwrap().extend(fields.as_object().cloned().unwrap_or_default());
@@ -458,6 +503,9 @@ pub(crate) fn refuse(kind: &str, fields: Json) {
 
 /// A P fact WHAT is read: recorded where it is allowed, else refused.
 fn p_read(fact: Fact<'_>, what: String) {
+    if !refusing() {
+        return;
+    }
     // Asked before the build is borrowed: it records, and notes a timer's allowance.
     let reseed = reseed_reads(&what);
     with_build(|b| {
@@ -475,9 +523,29 @@ fn p_read(fact: Fact<'_>, what: String) {
     });
 }
 
+/// F's host queries, unrecorded in `Mode::Record`: for a recorder that
+/// records their outcome as one fact of its own.
+pub fn unrecorded<T>(f: impl FnOnce() -> T) -> T {
+    if mode() != Mode::Record {
+        return f();
+    }
+    MODE.with(|m| m.set(Mode::Off));
+    let result = f();
+    MODE.with(|m| m.set(Mode::Record));
+    result
+}
+
+/// PATH is written by this process's own effect: noted in `Mode::Record`.
+fn wrote(path: &Path) {
+    if mode() == Mode::Record {
+        let path = if path.is_relative() { std::env::current_dir().map(|d| d.join(path)).unwrap_or_else(|_| path.to_owned()) } else { path.to_owned() };
+        with_build(|b| b.written.insert(path));
+    }
+}
+
 /// An effect WHAT: refused, failing with EPERM; Ok outside build mode.
 fn effect(what: impl FnOnce() -> String) -> io::Result<()> {
-    if !building() {
+    if !refusing() {
         return Ok(());
     }
     let what = what();
@@ -563,6 +631,28 @@ pub fn getenv(name: &str) -> Option<OsString> {
         env_read("host", name.as_bytes(), value.as_ref());
     }
     value
+}
+
+/// The runtime tree (gnu-lisp/, rlisp/, etc/): `ROMACS_RUNTIME_ROOT` (the Nix
+/// wrapper sets it), else `share/romacs` beside the real executable's `bin/`
+/// (an unpacked release tarball, wherever it lives), else [`build_root`].
+pub fn runtime_root() -> PathBuf {
+    getenv("ROMACS_RUNTIME_ROOT").map(PathBuf::from)
+        .or_else(|| installed_root(&current_exe().ok()?))
+        .unwrap_or_else(build_root)
+}
+
+/// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
+/// `gnu-lisp/` directory.
+pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
+    let root = exe.parent()?.parent()?.join("share/romacs");
+    metadata(root.join("gnu-lisp")).is_ok_and(|m| m.is_dir()).then_some(root)
+}
+
+/// The checkout this crate was built from: a compile-time path that no
+/// installed system has, kept for development binaries under `target/`.
+pub(crate) fn build_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 /// A read of environment NAME through FORM: a K name is recorded with its
@@ -1151,9 +1241,6 @@ pub fn replay(record: &Json) -> Option<Json> {
                 "gid" => { gid(); }
                 "egid" => { egid(); }
                 "system-name" => { let _ = system_name(); }
-                "processors Current" => { processors(Processors::Current); }
-                "processors Online" => { processors(Processors::Online); }
-                "processors All" => { processors(Processors::All); }
                 _ => return None,
             },
             "user-db" => {
@@ -1213,7 +1300,7 @@ pub fn current_exe() -> io::Result<PathBuf> {
 }
 
 pub fn pid() -> u32 {
-    if building() {
+    if refusing() {
         p_read(Fact::Pid, "pid".into());
         return with_build(|b| b.pinned.pid).unwrap_or_default();
     }
@@ -1380,12 +1467,10 @@ pub enum Processors {
     All,
 }
 
+/// A per-process fact (`Fact::Processors`): no world is keyed on it.
 pub fn processors(set: Processors) -> u64 {
-    let count = count_processors(set);
-    if building() {
-        host_fact(&format!("processors {set:?}"), json!(count));
-    }
-    count
+    p_read(Fact::Processors, "processors".into());
+    count_processors(set)
 }
 
 fn count_processors(set: Processors) -> u64 {
@@ -1404,6 +1489,52 @@ fn count_processors(set: Processors) -> u64 {
     u64::try_from(unsafe { libc::sysconf(name) }).ok().filter(|&n| n > 0).unwrap_or(1)
 }
 
+// Performance counters.
+
+/// User-space instructions the calling thread has retired since its first
+/// call: a pinned Linux hardware counter (perf_event_open), opened once per
+/// thread. Unlike time it is load-insensitive and repeatable, so scaling
+/// probes compare work at two sizes by it. None where the kernel refuses
+/// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
+/// counting all the time: a number is always a whole count.
+pub(crate) fn thread_instructions() -> Option<u64> {
+    thread_local! {
+        static COUNTER: std::cell::OnceCell<Option<std::os::fd::OwnedFd>> = const { std::cell::OnceCell::new() };
+    }
+    COUNTER.with(|counter| counter.get_or_init(open_instruction_counter).as_ref().and_then(read_counter))
+}
+
+#[cfg(target_os = "linux")]
+fn open_instruction_counter() -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+    // perf_event_attr, PERF_ATTR_SIZE_VER0: type HARDWARE (0) and size,
+    // config INSTRUCTIONS (1), flags pinned | exclude_kernel | exclude_hv.
+    const PERF_FLAG_FD_CLOEXEC: libc::c_ulong = 8;
+    let mut attr = [0u64; 8];
+    attr[0] = 64 << 32;
+    attr[1] = 1;
+    attr[5] = 1 << 2 | 1 << 5 | 1 << 6;
+    // SAFETY: ATTR is a zeroed PERF_ATTR_SIZE_VER0 struct that outlives the call.
+    let fd = unsafe { libc::syscall(libc::SYS_perf_event_open, attr.as_ptr(), 0, -1, -1, PERF_FLAG_FD_CLOEXEC) };
+    // SAFETY: a non-negative result is a new descriptor this thread owns.
+    (fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd as i32) })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_instruction_counter() -> Option<std::os::fd::OwnedFd> {
+    None
+}
+
+/// The counter's value; none once a pinned counter lost its PMU slot,
+/// which the kernel reports as end of file.
+fn read_counter(fd: &std::os::fd::OwnedFd) -> Option<u64> {
+    use std::os::fd::AsRawFd;
+    let mut count = 0u64;
+    // SAFETY: COUNT is 8 writable bytes; FD is open for the thread's life.
+    let read = unsafe { libc::read(fd.as_raw_fd(), (&raw mut count).cast(), 8) };
+    (read == 8).then_some(count)
+}
+
 // Time.
 
 /// The kernel's clock ticks per second (`_SC_CLK_TCK`), the unit of
@@ -1419,7 +1550,7 @@ pub fn zone_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
 
 /// The wall clock; in build mode the build time.
 pub fn clock() -> SystemTime {
-    if building() {
+    if refusing() {
         p_read(Fact::Clock, "clock".into());
         return with_build(|b| b.pinned.clock).unwrap_or(SystemTime::UNIX_EPOCH);
     }
@@ -1434,11 +1565,17 @@ pub fn monotonic() -> Instant {
     Instant::now()
 }
 
+/// When a collection started, for `gc-elapsed'; none in build mode, so a
+/// world's heap never depends on how long its collections took.
+pub fn collection_clock() -> Option<Instant> {
+    (!building()).then(Instant::now)
+}
+
 // Effects.
 
 /// Four bytes of kernel entropy; in build mode the pinned seed.
 pub fn random_seed() -> io::Result<[u8; 4]> {
-    if building() {
+    if refusing() {
         p_read(Fact::Seed, "random seed".into());
         return Ok(with_build(|b| b.pinned.seed).unwrap_or_default());
     }
@@ -1449,6 +1586,7 @@ pub fn random_seed() -> io::Result<[u8; 4]> {
 
 /// PATH opened with OPTIONS for writing only: reads go through `Input`.
 pub fn open_output(path: impl AsRef<Path>, options: &OpenOptions) -> io::Result<File> {
+    wrote(path.as_ref());
     effect(|| format!("write {}", bytes(path.as_ref())))?;
     options.clone().read(false).write(true).open(path)
 }
@@ -1466,43 +1604,52 @@ pub fn clone_file(dest: &File, source: &Input) -> bool {
 }
 
 pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("write {}", self::bytes(path.as_ref())))?;
     std::fs::write(path, bytes)
 }
 
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+    wrote(from.as_ref());
+    wrote(to.as_ref());
     effect(|| format!("rename {} {}", bytes(from.as_ref()), bytes(to.as_ref())))?;
     std::fs::rename(from, to)
 }
 
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("delete {}", bytes(path.as_ref())))?;
     std::fs::remove_file(path)
 }
 
 pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("delete directory {}", bytes(path.as_ref())))?;
     std::fs::remove_dir(path)
 }
 
 /// mkdir with MODE before the umask.
 pub fn create_dir(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("make directory {}", bytes(path.as_ref())))?;
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new().mode(mode).create(path)
 }
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+    wrote(path.as_ref());
     effect(|| format!("make directory {}", bytes(path.as_ref())))?;
     std::fs::create_dir_all(path)
 }
 
 pub fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    wrote(link.as_ref());
     effect(|| format!("link {}", bytes(link.as_ref())))?;
     std::fs::hard_link(original, link)
 }
 
 pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    wrote(link.as_ref());
     effect(|| format!("symlink {}", bytes(link.as_ref())))?;
     std::os::unix::fs::symlink(target, link)
 }
@@ -1513,6 +1660,7 @@ pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()>
 
 /// fchmodat: PATH's mode bits, a symlink's own under NOFOLLOW.
 pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
+    wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("chmod {}", String::from_utf8_lossy(path.to_bytes())))?;
     let flags = if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 };
     status(unsafe { libc::fchmodat(libc::AT_FDCWD, path.as_ptr(), mode as libc::mode_t, flags) })
@@ -1520,6 +1668,7 @@ pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
 
 /// renameat2 with RENAME_NOREPLACE: EEXIST rather than replace TO.
 pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
+    wrote(Path::new(OsStr::from_bytes(to.to_bytes())));
     effect(|| format!("rename {}", String::from_utf8_lossy(to.to_bytes())))?;
     status(unsafe { libc::renameat2(libc::AT_FDCWD, from.as_ptr(), libc::AT_FDCWD, to.as_ptr(), libc::RENAME_NOREPLACE) })
 }
@@ -1527,6 +1676,7 @@ pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
 /// utimensat: both of PATH's times set to TIME (seconds, nanoseconds), or
 /// now; a symlink's own under NOFOLLOW.
 pub fn set_times(path: &CStr, time: Option<(i64, i64)>, nofollow: bool) -> io::Result<()> {
+    wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("set times {}", String::from_utf8_lossy(path.to_bytes())))?;
     let stamp = match time {
         Some((seconds, nanos)) => libc::timespec { tv_sec: seconds as libc::time_t, tv_nsec: nanos as _ },
@@ -1808,6 +1958,49 @@ pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+// File notification (`prim/leaf/inotify.rs`): GNU inotify.c's one
+// instance per Emacs, whose descriptor the keyboard waits poll.
+
+/// inotify_init1(2), close-on-exec and nonblocking.
+pub fn inotify_init() -> io::Result<OwnedFd> {
+    effect(|| "inotify".into())?;
+    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+    if fd < 0 { return Err(io::Error::last_os_error()); }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// inotify_add_watch(2): PATH's watch descriptor on FD with MASK.
+pub fn inotify_add_watch(fd: std::os::fd::BorrowedFd<'_>, path: &CStr, mask: u32) -> io::Result<i32> {
+    use std::os::fd::AsRawFd;
+    effect(|| format!("inotify watch {}", path.to_string_lossy()))?;
+    let wd = unsafe { libc::inotify_add_watch(fd.as_raw_fd(), path.as_ptr(), mask) };
+    if wd < 0 { Err(io::Error::last_os_error()) } else { Ok(wd) }
+}
+
+/// inotify_rm_watch(2).
+pub fn inotify_rm_watch(fd: std::os::fd::BorrowedFd<'_>, wd: i32) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    status(unsafe { libc::inotify_rm_watch(fd.as_raw_fd(), wd) })
+}
+
+/// The `struct inotify_event' records queued on FD, as their bytes; none
+/// when nothing is queued (FD is nonblocking).
+pub fn inotify_read(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<Vec<u8>> {
+    use std::os::fd::AsRawFd;
+    let mut queued: libc::c_int = 0;
+    status(unsafe { libc::ioctl(fd.as_raw_fd(), libc::FIONREAD, &mut queued) })?;
+    // One record at least, whatever FIONREAD said, so a read never fails
+    // with EINVAL for a buffer too small for the next record.
+    let mut buffer = vec![0u8; (queued.max(0) as usize).max(std::mem::size_of::<libc::inotify_event>() + 256)];
+    let n = unsafe { libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
+    if n < 0 {
+        let e = io::Error::last_os_error();
+        return if e.kind() == io::ErrorKind::WouldBlock { Ok(Vec::new()) } else { Err(e) };
+    }
+    buffer.truncate(n as usize);
+    Ok(buffer)
+}
+
 // Isolates (`isolate.rs`): worker processes, their control sockets, the
 // descriptors they pass, and the signals between them.
 
@@ -1995,6 +2188,37 @@ pub fn catch_isolate_signals() -> io::Result<()> {
 pub fn interrupt_pending() -> bool {
     INTERRUPT.load(std::sync::atomic::Ordering::Relaxed) || TERMINATE.load(std::sync::atomic::Ordering::Relaxed)
 }
+/// keyboard.c handle_user_signal: SIGUSR1 and SIGUSR2 are input, counted
+/// here until read as `sigusr1' and `sigusr2' events, never the end of the
+/// process. An isolate worker gives SIGUSR1 its own meaning afterwards
+/// (`catch_isolate_signals').
+static USER_SIGNALS: [std::sync::atomic::AtomicU32; 2] =
+    [std::sync::atomic::AtomicU32::new(0), std::sync::atomic::AtomicU32::new(0)];
+/// In the order store_user_signal_events reads them: GNU's list holds
+/// SIGUSR2 first, the one registered last.
+const USER_SIGNAL_EVENTS: [(libc::c_int, &str); 2] = [(libc::SIGUSR2, "sigusr2"), (libc::SIGUSR1, "sigusr1")];
+extern "C" fn note_user_signal(signal: libc::c_int) {
+    let index = usize::from(signal == libc::SIGUSR1);
+    USER_SIGNALS[index].fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+pub fn catch_user_signals() -> io::Result<()> {
+    for (signal, _) in USER_SIGNAL_EVENTS {
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = note_user_signal as *const () as usize;
+        action.sa_flags = libc::SA_RESTART;
+        unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        status(unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) })?;
+    }
+    Ok(())
+}
+/// A pending user signal's event, SIGUSR2's first, taking it.
+pub fn take_user_signal() -> Option<&'static str> {
+    USER_SIGNALS.iter().zip(USER_SIGNAL_EVENTS).find_map(|(count, (_, event))| {
+        count.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |n| n.checked_sub(1))
+            .ok().map(|_| event)
+    })
+}
+
 /// Take the pending interrupt, if any.
 pub fn take_interrupt() -> bool {
     INTERRUPT.swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -2315,6 +2539,18 @@ mod tests {
         }
     }
     use super::*;
+
+    /// An unpacked release finds its runtime tree beside its `bin/`; a
+    /// development binary under `target/` has none there.
+    #[test]
+    fn installed_root_is_share_romacs_beside_bin() {
+        let prefix = std::env::temp_dir().join(format!("romacs-installed-root-{}", std::process::id()));
+        let exe = prefix.join("bin/romacs-vm-gui");
+        assert_eq!(installed_root(&exe), None);
+        std::fs::create_dir_all(prefix.join("share/romacs/gnu-lisp")).unwrap();
+        assert_eq!(installed_root(&exe), Some(prefix.join("share/romacs")));
+        std::fs::remove_dir_all(&prefix).unwrap();
+    }
 
     #[test]
     fn passwd_keeps_absent_fields_absent() {

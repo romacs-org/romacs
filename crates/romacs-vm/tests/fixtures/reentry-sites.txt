@@ -18,13 +18,18 @@
 #   collector  a collection point; its caller passes every root.
 autoload.rs autoload_do_load load_with_autoload_queue 1 rooted  # FUNDEF is rooted in the PENDING binding and read back; FUNNAME is a symbol
 autoload.rs autoload_do_load unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
-autoload.rs load_source_named load_file_raw 1 clean  # FILE is read before the load
+autoload.rs load_source_named load_file_kind 1 clean  # FILE is read before the load
 autoload.rs load_with_autoload_queue load_source_named 1 rooted  # the queue and saved match data are bindings, read back from their slots
 autoload.rs load_with_autoload_queue unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 bootstrap.rs bootstrap_primitive call_lisp_at_write 1 held  # defalias-fset-function from a legacy primitive call: its engine is not suspended
 bootstrap.rs bootstrap_primitive set_variable_value 1 held  # defalias's LOADHIST_ATTACH to current-load-list: a native writer, its watchers hold collection (rooted_write unset)
 command.rs command_event eval_form_raw 6 clean  # events become forms and the binding a name before each call
 command.rs command_event set_variable_value 1 held  # this-command := the binding: a native writer, its watchers hold collection (rooted_write unset)
+compiled_lisp/mod.rs compile_lisp_file compile_walk 1 clean  # the source, key and names are Rust data; nothing heap is used after the walk
+compiled_lisp/mod.rs compile_unit compile_request 1 clean  # FORM is Rust data; the result is a function id the encoder reads afterwards
+compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rust form before any unit compiles; :eof is a symbol, which never moves
+compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is a symbol, which never moves
+compiled_lisp/unit.rs function force_lazy 1 held  # an open compiler builder holds collection
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
 display.rs ml_prop_value eval_datum_raw 1 rooted  # a `:propertize' datum quoted, its objects form objects; mode_line_string keeps the string in a #: slot and reads it back
 eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
@@ -67,12 +72,18 @@ loader.rs eval_load_toplevel expand_macro 1 clean  # FORM's objects are rooted; 
 loader.rs eval_load_toplevel set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 loader.rs file_shorthands eval_source_raw 1 rooted  # TEXT is a form object and FUNCTION its variable, both read back after
 loader.rs file_shorthands reader_call 1 clean  # nothing is used after the call but its value
-loader.rs load_file_raw eval_load_toplevel 2 rooted  # the last form's value is a frame; the after-load call roots it as a form object
-loader.rs load_file_raw unbind_after 2 held  # native unbinding: watchers hold collection (rooted_write unset)
-loader.rs load_file_raw unwind 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+loader.rs load_artifact eval_load_toplevel 1 rooted  # the last unit's value is a form object, read back after the after-load call
+loader.rs load_artifact execute_raw 1 rooted  # each unit's value goes into the LAST root frame; the unit data and slots are Rust data
+loader.rs load_artifact unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+loader.rs load_artifact unwind 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+loader.rs load_file_kind eval_load_toplevel 2 rooted  # the last form's value is a frame; the after-load call roots it as a form object
+loader.rs load_file_kind load_artifact 1 clean  # the file names and the artifact are Rust data
+loader.rs load_file_kind unbind_after 2 held  # native unbinding: watchers hold collection (rooted_write unset)
+loader.rs load_file_kind unwind 1 held  # native unbinding: watchers hold collection (rooted_write unset)
+loader.rs load_file_raw load_file_kind 1 clean  # PATH is Rust data
 loader.rs loader_primitive autoload_do_load 1 clean  # ARGS are not used after the load
 loader.rs loader_primitive eval_primitive 1 clean  # ARGS are not used after the evaluation
-loader.rs loader_primitive load_file_raw 1 clean  # ARGS are read before the load
+loader.rs loader_primitive load_file_kind 1 clean  # ARGS are read before the load
 loader.rs loader_primitive load_with_autoload_queue 1 clean  # FEATURE, used after, is a symbol, which never moves
 loader.rs loader_primitive macroexpand_primitive 1 clean  # ARGS are not used after the expansion
 loader.rs loader_primitive read_host_event 1 clean  # SECONDS is read before the wait
@@ -87,7 +98,7 @@ mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms wit
 prim.rs attach_variable_history set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs default_cell_set notify 2 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs detected_source variable_set 1 held  # a native writer: its watchers hold collection (rooted_write unset)
-prim.rs install_lisp_prelude_raw eval_source_raw 3 boundary  # VM setup: no caller Values
+prim.rs install_lisp_prelude_raw eval_source_raw 4 boundary  # VM setup: no caller Values
 prim.rs make_variable_alias notify 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs notify notify_watchers_at 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
@@ -191,8 +202,9 @@ threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
 threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended
 threaded.rs reader_call compile_request 1 held  # an open compiler builder holds collection
 threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are quoted objects; the caller's registers are set aside
-threaded.rs reentrant_load call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
-threaded.rs reentrant_load loader_primitive 1 suspended  # inside call_suspended
+threaded.rs reentrant_load reentrant_step 1 suspended  # the step does the call; the handler only dispatches its Continue
+threaded.rs reentrant_step call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
+threaded.rs reentrant_step loader_primitive 1 suspended  # inside call_suspended
 threaded.rs resolve_entry force_lazy 1 suspended  # registers are rebased from the result
 threaded.rs return_unbind checked_unbind 1 suspended  # the return value is read from its register after
 threaded.rs route_escape checked_unbind 2 suspended  # the exit and its control stay engine state across the restores

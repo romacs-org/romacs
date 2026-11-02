@@ -16,11 +16,12 @@ const ENTRIES: &[&str] = &[
     "unbind_after", "unbind_forwarded", "checked_unbind", "loader_primitive", "eval_primitive",
     "macroexpand_primitive", "macroexpand_value", "read_host_event", "force_lazy", "autoload_then",
     "lambda_list_then", "lambda_list_raise", "nested_then", "bind_special",
-    "reentrant_load", "signal_hook", "call_debugger", "call_in_signal", "handler_callback", "load_with_autoload_queue",
+    "reentrant_load", "reentrant_step", "signal_hook", "call_debugger", "call_in_signal", "handler_callback", "load_with_autoload_queue",
     "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request", "cached_source_form",
     "finish_request", "poll_collect", "collect_garbage", "watched_write", "call_suspended",
     "load_source_named", "variable_set", "notify", "prepared_function",
     "prepare_source", "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
+    "load_file_kind", "load_artifact", "compile_walk", "compile_unit",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];

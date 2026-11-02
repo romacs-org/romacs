@@ -193,6 +193,14 @@ mod leaf {
         pub(in crate::prim) fn new(vm: &'a mut Vm) -> Self {
             Leaf { vm }
         }
+        /// The automatic collection's trigger (`Vm::collection_budget').
+        pub(crate) fn collection_budget(&self) -> (f64, f64) {
+            self.vm.collection_budget()
+        }
+        /// `Vm::collection_share'.
+        pub(crate) fn collection_share(&self) -> f64 {
+            self.vm.collection_share()
+        }
         pub(crate) fn set_font_alternative_families(&mut self, raw: Value, names: Vec<Vec<String>>) {
             let slot = self.vm.slot(super::FONT_ALTERNATIVE_FAMILIES);
             self.vm.slots[slot].value = raw;
@@ -1727,6 +1735,7 @@ mod leaf {
     mod insdel;
     mod sqlite;
     pub(crate) mod treesit;
+    pub(crate) mod inotify;
     mod process;
     mod gnutls;
     pub(crate) use process::{CallOutput, Target};
@@ -2195,6 +2204,7 @@ impl Vm {
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
         self.eval_source_raw(prims::PRELUDE)?;
         self.eval_source_raw(prims::PROCESS_PRELUDE)?;
+        self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
         self.eval_source_raw(prims::ISOLATE_PRELUDE)
     }
 }

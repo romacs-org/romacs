@@ -74,14 +74,14 @@ frame that shows it (romacs-animate)."
         (setq romacs-landing--drawn (list cols rows aspect))
         (romacs-landing--replace (romacs--logo-frame cols rows aspect))))))
 
-(defun romacs-landing--element (window)
-  "What the display draws in WINDOW (romacs-animate): the still frame's
-block and the logo's motion; nil once WINDOW starts below the logo."
-  (let ((start (window-start window)))
-    (when (and romacs-landing--drawn (< start romacs-landing--end))
-      (list :top (- (count-lines (point-min) start))
-            :cols (nth 0 romacs-landing--drawn) :rows (nth 1 romacs-landing--drawn)
-            :kind (list 'logo (nth 2 romacs-landing--drawn) romacs-landing--epoch)))))
+(defun romacs-landing--element (_window)
+  "What the display draws in a window that shows the landing
+\(romacs-animate): the still frame's block, which starts the buffer, and
+the logo's motion.  The display places it wherever the window scrolls."
+  (when romacs-landing--drawn
+    (list :start (point-min)
+          :cols (nth 0 romacs-landing--drawn) :rows (nth 1 romacs-landing--drawn)
+          :kind (list 'logo (nth 2 romacs-landing--drawn) romacs-landing--epoch))))
 
 (defun romacs-landing-pause ()
   "Stop or restart the logo's motion."

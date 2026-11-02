@@ -23,6 +23,10 @@ impl RenderApp {
         let result = self.comms.send_key_input_with_receipt(event);
         if pressed {
             self.key_repeats.queued(window, key, result.0.clone());
+            // The key may start a long command: look at the evaluator later.
+            if self.comms.input_interrupt.is_some() {
+                self.busy_toast.arm(romacs_display_protocol::frame_time::observe_platform_now());
+            }
         }
         (result.1, result.2)
     }

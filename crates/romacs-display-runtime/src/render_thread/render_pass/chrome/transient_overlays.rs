@@ -1,6 +1,6 @@
 //! The overlays that exist because of something that just happened: the
 //! IME pre-edit box, the visual-bell flash, the FPS
-//! readout and the typing-speed readout.
+//! readout, the typing-speed readout and the busy indicator.
 //!
 //! Owns: how each one is drawn, and the small pieces of state three of them
 //! carry across frames — the bell's start time, the FPS counter's smoothed
@@ -214,4 +214,19 @@ pub(super) fn draw_typing_speed(
     if keep_redrawing {
         render.compositor.dirty = true;
     }
+}
+
+/// Say that the evaluator is busy and how to quit it (busy_toast.rs).
+pub(super) fn draw_busy(
+    renderer: &mut WgpuRenderer,
+    render: &mut GuiFrameRenderState,
+    surface_view: &wgpu::TextureView,
+    width: u32,
+    height: u32,
+) {
+    if !render.overlays.busy {
+        return;
+    }
+    let glyph_atlas = render.compositor.glyph_atlas.as_mut().unwrap();
+    renderer.render_busy_badge(surface_view, crate::render_thread::busy_toast::LABEL, glyph_atlas, width, height);
 }

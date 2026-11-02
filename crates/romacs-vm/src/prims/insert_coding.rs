@@ -209,8 +209,13 @@ fn prepare(cx: &mut Leaf<'_>, mut r: Vec<Value>, resume: i64) -> Next {
     }
     if prepared.before {
         let undoable = if prepared.undoable { Value::TRUE } else { Value::NIL };
-        let args = vec![cx.current_buffer()?, fixnum(point)?, fixnum(point)?, Value::NIL, undoable];
-        return Ok(Step::Call { f: cx.intern("romacs--before-change"), args, then: before_changed, saved: r });
+        let mut args = vec![cx.current_buffer()?, fixnum(point)?, fixnum(point)?, Value::NIL, undoable];
+        let mut f = cx.intern("romacs--before-change");
+        if resume == RESUME_REPLACE && unvisited(cx, &r)? {
+            args.insert(0, f);
+            f = cx.intern("romacs--unvisited");
+        }
+        return Ok(Step::Call { f, args, then: before_changed, saved: r });
     }
     resume_read(cx, r)
 }
@@ -538,8 +543,32 @@ fn replace(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
     r[MIDDLE] = cx.cons(fixnum(from)?, middle);
     r[CODING] = name;
     r[PREPARED] = fixnum(RESUME_REPLACE)?;
-    let args = vec![fixnum(from)?, fixnum(to)?];
-    Ok(Step::Call { f: cx.intern("delete-region"), args, then: replace_deleted, saved: r })
+    replace_delete(cx, Value::NIL, &r)
+}
+
+/// fileio.c:4828-4833: a visiting REPLACE of the whole buffer deletes, and
+/// inserts, with `buffer-file-name' bound to nil (`romacs--unvisited'):
+/// around the deletion, and the insertion's before- and after-change hooks.
+fn unvisited(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<bool, Fault> {
+    let shape = cx.buffer_shape()?;
+    Ok(r[VISIT] != Value::NIL && shape.begv == 1 && shape.zv == shape.z)
+}
+
+/// The deletion of a REPLACE's old middle: FROM from MIDDLE's register,
+/// TO the last of POINT's (MARKER POINT TO).
+fn replace_delete(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let r = saved.to_vec();
+    let (from, _) = cx.pair(r[MIDDLE]).expect("replace middle register");
+    let to = cx.pair(r[POINT]).and_then(|(_, rest)| cx.pair(rest)).and_then(|(_, rest)| cx.pair(rest))
+        .map(|(to, _)| to).expect("replace end register");
+    let delete = cx.intern("delete-region");
+    if !unvisited(cx, &r)? {
+        return Ok(Step::Call { f: delete, args: vec![from, to], then: replace_deleted, saved: r });
+    }
+    if super::insdel::half_missing(cx)? {
+        return super::insdel::install_half(cx, replace_delete, r);
+    }
+    Ok(Step::Call { f: cx.intern("romacs--unvisited"), args: vec![delete, from, to], then: replace_deleted, saved: r })
 }
 
 fn replace_deleted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
@@ -676,9 +705,14 @@ fn replacing(r: &[Value]) -> bool { r[PREPARED].integer_value() == Some(RESUME_R
 fn signal_inserted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let point = cx.point_char()?;
     let start = if replacing(saved) { point - count(saved) } else { point };
-    let args = vec![cx.current_buffer()?, fixnum(start)?, fixnum(start + count(saved))?, fixnum(0)?,
-                    saved[BEHIND], saved[IN_FRONT], saved[OVERLAYS]];
-    Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: signalled, saved: saved.to_vec() })
+    let mut args = vec![cx.current_buffer()?, fixnum(start)?, fixnum(start + count(saved))?, fixnum(0)?,
+                        saved[BEHIND], saved[IN_FRONT], saved[OVERLAYS]];
+    let mut f = cx.intern("romacs--after-change");
+    if replacing(saved) && unvisited(cx, saved)? {
+        args.insert(0, f);
+        f = cx.intern("romacs--unvisited");
+    }
+    Ok(Step::Call { f, args, then: signalled, saved: saved.to_vec() })
 }
 
 fn signalled(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
