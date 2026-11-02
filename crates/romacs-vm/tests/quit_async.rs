@@ -197,7 +197,8 @@ fn a_quit_in_a_nested_eval_leaves_the_outer_expansion() {
 /// expansion, which does not run again (GNU `(quit (outer-ran))'); and a
 /// `throw-on-input' throw stays a throw through a cleanup (GNU `t'), while
 /// a `no-catch' a cleanup signals stays a signal though a throw elsewhere
-/// made one meanwhile (GNU `caught').
+/// made one meanwhile, or though it carries a caught throw's very data
+/// (GNU `caught', both).
 #[test]
 fn quit_flag_in_an_expansion_raises_what_gnu_does() {
     let (mut vm, _signal) = busy_vm();
@@ -209,7 +210,9 @@ fn quit_flag_in_an_expansion_raises_what_gnu_does() {
       (defmacro rt-nq () (push 'outer-ran rt-log) (eval '(rt-q0) t))
       (defmacro rt-ti () (unwind-protect (progn (setq quit-flag 'done) (while t)) nil))
       (defmacro rt-swallow () (condition-case nil (throw 'missing 1) (no-catch nil)))
-      (defmacro rt-stale () (unwind-protect (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch '(done 7))) (eval '(rt-swallow) t))))");
+      (defmacro rt-stale () (unwind-protect (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch '(done 7))) (eval '(rt-swallow) t)))
+      (defvar rt-saved (condition-case e (eval '(throw 'done 7) t) (no-catch e)))
+      (defmacro rt-resignal () (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch (cdr rt-saved)))))");
     let cases = [
         ("(eval '(let ((rt-phase 'inner)) (condition-case e (rt-cq) (error e))) t)", "(error inner)"),
         ("(eval '(catch 'done (condition-case nil (rt-nc) (no-catch 'caught))) t)", "caught"),
@@ -217,6 +220,7 @@ fn quit_flag_in_an_expansion_raises_what_gnu_does() {
         ("(progn (setq rt-log nil) (list (eval '(condition-case nil (rt-nq) (quit 'quit)) t) rt-log))", "(quit (outer-ran))"),
         ("(let ((throw-on-input 'done)) (eval '(catch 'done (list 'body (rt-ti))) t))", "t"),
         ("(eval '(catch 'done (condition-case nil (rt-stale) (no-catch 'caught))) t)", "caught"),
+        ("(eval '(catch 'done (condition-case nil (rt-resignal) (no-catch 'caught))) t)", "caught"),
     ];
     for (form, gnu) in cases {
         assert_eq!(eval(&mut vm, form), gnu, "{form}");

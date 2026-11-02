@@ -170,6 +170,18 @@ mod tests {
     // The escape an `eval` engine hands to its caller holds heap Values. It is
     // a collector root while present: garbage allocated before it is reclaimed,
     // its payload moves, and the stored handles must follow the move.
+    // A throw's no-catch is marked by its error object while it escapes
+    // (`Vm::thrown_no_catch', a root); caught, the mark retires, so the
+    // thrown value is garbage once nothing else holds it.
+    #[test]
+    fn a_caught_thrown_no_catch_retires_its_mark() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let value = vm.eval_source("(condition-case nil (eval '(throw 'missing (make-vector 3 nil)) t) (no-catch 'caught))").unwrap();
+        assert_eq!(value.display().unwrap(), "caught");
+        assert_eq!(vm.thrown_no_catch, Value::NIL);
+    }
+
     #[test]
     fn propagated_escape_is_traced_across_a_moving_collection() {
         let mut vm = Vm::new();

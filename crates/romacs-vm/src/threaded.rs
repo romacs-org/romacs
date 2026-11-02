@@ -932,9 +932,8 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
         // Marked a throw only if no handler-bind or debugger replaced it.
         if !prepare_signal(e, false, None)
             && let Some(Escape::Error { object, .. }) = e.escape
-            && let Ok((_, data)) = e.vm.cons_pair(object)
         {
-            e.vm.thrown_no_catch = data;
+            e.vm.thrown_no_catch = object;
         }
         escape = e.escape.take().unwrap();
     }
@@ -985,8 +984,12 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                     });
                 }
                 ControlKind::Catch(_) | ControlKind::Condition(_) => {
-                    // Caught: a quit from C-g unwinding to here ends here.
+                    // Caught: a quit from C-g unwinding to here ends here,
+                    // and a throw's no-catch caught here retires its mark.
                     e.vm.quit_unwinding = false;
+                    if matches!(escape, Escape::Error { object, .. } if object == e.vm.thrown_no_catch) {
+                        e.vm.thrown_no_catch = Value::NIL;
+                    }
                     if matches!(control.kind, ControlKind::Condition(_)) {
                         while e.controls.len() > e.controls_base
                             && e.controls.last().is_some_and(|previous| {

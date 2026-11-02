@@ -1298,9 +1298,11 @@ pub struct Vm {
     /// what leaves an expansion it began in is told apart from an error the
     /// macro raised after catching a quit (`quit_watched').
     quit_unwinding: bool,
-    /// The data of the last `no-catch' made from a throw that found no live
-    /// catch: a `no-catch' carrying this very object is that throw, not one
-    /// Lisp signalled (`signal_form' raises it again as the throw). A root.
+    /// The error object (CONDITION . DATA) of the `no-catch' a throw that
+    /// found no live catch made, while that error escapes: the error with
+    /// this very object, made afresh for each signal, is that throw, not one
+    /// Lisp signalled (`signal_form' raises it again as the throw). A root,
+    /// retired when the error is caught.
     thrown_no_catch: Value,
     /// The next form compiled is a deferred call reached (`force_lazy'): its
     /// own expansion signals there, the forms inside it defer as ever.
@@ -2428,27 +2430,32 @@ impl Vm {
     /// macro again; otherwise F expands again at its reach.
     fn expansion_failed(&mut self, b: &mut Builder, f: &Form, quit: bool) -> Result<usize> {
         let escape = self.propagated_escape.take();
-        if quit
-            && let Some(raised) = escape.and_then(|escape| self.signal_form(escape))
-        {
-            return self.expr_now(b, &raised);
+        let ends_throw = matches!(escape, Some(threaded::Escape::Error { object, .. }) if object == self.thrown_no_catch);
+        let raised = escape.filter(|_| quit).and_then(|escape| self.signal_form(escape));
+        if ends_throw {
+            // The escape ends here, so its throw's mark retires.
+            self.thrown_no_catch = Value::NIL;
         }
-        self.reach_thunk(b, f)
+        match raised {
+            Some(raised) => self.expr_now(b, &raised),
+            None => self.reach_thunk(b, f),
+        }
     }
     /// `(signal CONDITION DATA)' for the signal ESCAPE carries, or `(throw
     /// TAG VALUE)' for a throw, which the expansion's `Boundary' made a
     /// `no-catch' (a `while-no-input' around the form catches it there).
     fn signal_form(&mut self, escape: threaded::Escape) -> Option<Form> {
         let call = |vm: &Self, head: &str, a, b| Form::List(vec![Form::Sym(head.into()), vm.eval_quoted_form(a), vm.eval_quoted_form(b)]);
-        let (condition, data) = match escape {
-            threaded::Escape::Signal(condition, data) => (condition, data),
-            threaded::Escape::Error { object, .. } => self.cons_pair(object).ok()?,
+        let (condition, data, thrown) = match escape {
+            threaded::Escape::Signal(condition, data) => (condition, data, false),
+            threaded::Escape::Error { object, .. } => {
+                let (condition, data) = self.cons_pair(object).ok()?;
+                (condition, data, object == self.thrown_no_catch)
+            }
             threaded::Escape::Throw(tag, value) => return Some(call(self, "throw", tag, value)),
             threaded::Escape::Normal(_) => return None,
         };
-        let no_catch = self.intern("no-catch");
-        if condition == no_catch
-            && data == self.thrown_no_catch
+        if thrown
             && let Ok((tag, rest)) = self.cons_pair(data)
             && let Ok((value, Value::NIL)) = self.cons_pair(rest)
         {
