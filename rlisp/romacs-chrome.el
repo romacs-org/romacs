@@ -104,6 +104,21 @@ default background lifted 15% toward the default foreground."
 
 (defvar romacs-classic-chrome)
 (defvar romacs-status-bar-mode)
+(defvar romacs-mode-line-mode)
+
+(defvar romacs-chrome--mode-line nil
+  "Whether `romacs-mode-line-mode' was on when classic chrome turned it off.")
+
+(defun romacs-chrome--classic-mode-line (classic)
+  "Turn Romacs's mode line off for CLASSIC chrome, and on again after it
+when classic chrome turned it off."
+  (when (fboundp 'romacs-mode-line-mode)
+    (cond ((and classic (bound-and-true-p romacs-mode-line-mode))
+           (setq romacs-chrome--mode-line t)
+           (romacs-mode-line-mode -1))
+          ((and (not classic) romacs-chrome--mode-line)
+           (setq romacs-chrome--mode-line nil)
+           (romacs-mode-line-mode 1)))))
 
 (defcustom romacs-pane-label 'name
   "What each window's own mode-line band shows while the status bar
@@ -144,6 +159,7 @@ again."
   :group 'romacs-chrome
   (when (and romacs-classic-chrome (bound-and-true-p window-divider-mode))
     (window-divider-mode -1))
+  (romacs-chrome--classic-mode-line romacs-classic-chrome)
   (romacs-chrome-apply))
 
 (define-minor-mode romacs-status-bar-mode

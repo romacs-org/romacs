@@ -109,6 +109,11 @@ disabled.
 (register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-"))
 
 
+;;; Generated autoloads from romacs-defaults.el
+
+(register-definition-prefixes "romacs-defaults" '("romacs-defaults-"))
+
+
 ;;; Generated autoloads from romacs-dired.el
 
 (register-definition-prefixes "romacs-dired" '("dired" "romacs-dired-"))
@@ -173,6 +178,11 @@ This function is part of the `fzf' completion style.
 ;;; Generated autoloads from romacs-gui-loadup.el
 
 (register-definition-prefixes "romacs-gui-loadup" '("romacs-gui-"))
+
+
+;;; Generated autoloads from romacs-icons.el
+
+(register-definition-prefixes "romacs-icons" '("romacs-icon"))
 
 
 ;;; Generated autoloads from romacs-image.el
@@ -247,6 +257,11 @@ Preserve trusted owner eval and the separate companion claim/receipt authority."
 ;;; Generated autoloads from romacs-menu.el
 
 (register-definition-prefixes "romacs-menu" '("romacs-menu--" "x-popup-"))
+
+
+;;; Generated autoloads from romacs-mode-line.el
+
+(register-definition-prefixes "romacs-mode-line" '("romacs-mode-line-"))
 
 
 ;;; Generated autoloads from romacs-model.el

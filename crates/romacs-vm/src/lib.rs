@@ -1790,6 +1790,9 @@ impl Vm {
         vm.specials.insert("yank-excluded-properties".into());
         vm.specials.insert("yank-handled-properties".into());
         vm.declare_special_raw("font-lock-defaults", Value::NIL);
+        // keyboard.c:13843: the command that entered the innermost
+        // minibuffer, which read_minibuf binds (rlisp/vm/minibuf.el).
+        vm.declare_special_raw("current-minibuffer-command", Value::NIL);
         for name in [
             "kill-ring",
             "kill-buffer-hook",

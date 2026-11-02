@@ -201,6 +201,73 @@ mod tests {
         assert!(!crate::command::unread_pending(&mut vm).unwrap());
     }
 
+    /// The session's first idle check runs an ordinary timer that outlasts
+    /// an idle timer's delay, then reads with a time limit: the idle timer
+    /// runs in that read, and its message is shown to the echo area's
+    /// functions while the read waits, as GNU's `message' shows it at once,
+    /// though nothing was shown before, input (a focus change) may be
+    /// pending, and the message is gone before the command loop looks
+    /// (gnosis-feed's dwell probe, read_char's wipe); a timer those
+    /// functions add runs within the read; the loop then shows it cleared.
+    #[test]
+    fn a_message_left_in_the_first_idle_checks_wait_is_shown() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(first_wait_body).unwrap().join().unwrap();
+    }
+    fn first_wait_body() {
+        let mut vm = Vm::new();
+        vm.set_echo_area_host(true);
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        // As the session does once its Lisp is ready (main.rs).
+        crate::echo::install(&mut vm).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        let painted = std::rc::Rc::new(std::cell::Cell::new(0));
+        let hosts: [Box<dyn romacs_vm::HostInput>; 2] =
+            [Box::new(Paced([Step::Pause(Duration::from_secs(10))].into())), Box::new(Pending(painted.clone()))];
+        for host in hosts {
+            vm.set_host_input(Some(host));
+            printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil
+                  romacs-echo-area-functions
+                  (list (lambda (text)
+                          (push (and text (string-to-multibyte text)) probe)
+                          ;; As a toast's expiry: due long before the read's limit.
+                          (when (equal text \"idle\")
+                            (let ((shown (float-time)))
+                              (run-with-timer 0.03 nil (lambda () (push (list 'expired (current-message) (< (- (float-time) shown) 0.5))
+                                                                        probe))))))))
+                (run-with-idle-timer 0.05 nil (lambda () (message \"idle\")))
+                (run-with-timer 0 nil (lambda ()
+                  (let ((end (+ (float-time) 0.1))) (while (< (float-time) end)))
+                  (read-event nil nil 1)
+                  (message nil)))");
+            vm.timer_stop_idle();
+            let first = idle(&mut vm, true).unwrap();
+            assert!(first.ran && first.message, "{first:?}");
+            assert_eq!(printed(&mut vm, "(list (reverse probe) (current-message))"),
+                       "((\"idle\" (expired \"idle\" t)) nil)", "a timer the echo area's functions add runs on time");
+            // The loop then shows that it was cleared.
+            crate::echo::sync_current_message(&mut vm).unwrap();
+            assert_eq!(printed(&mut vm, "(reverse probe)"), "(\"idle\" (expired \"idle\" t) nil)");
+        }
+        assert_eq!(painted.get(), 1, "with input pending, the message alone repaints");
+    }
+
+    /// A keyboard whose pending event (a focus change) never comes within a
+    /// read's time limit; it counts the frames it is given.
+    struct Pending(std::rc::Rc<std::cell::Cell<usize>>);
+
+    impl romacs_vm::HostInput for Pending {
+        fn input_pending(&mut self) -> bool { true }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
+            self.0.set(self.0.get() + 1);
+            Ok(vec![])
+        }
+        fn next_event(&mut self, timeout: Option<Duration>) -> Result<romacs_vm::HostEvent, String> {
+            std::thread::sleep(timeout.ok_or("an untimed read")?);
+            Ok(romacs_vm::HostEvent::Timeout)
+        }
+    }
+
     /// The idle collection (rlisp/vm/keyboard.el): nothing is scheduled
     /// until enough was allocated; then one collection once the session has
     /// been idle for the delay, on a pass where nothing else ran, made by

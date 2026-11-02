@@ -551,6 +551,8 @@ fn main() {
 /// The session's end, when this process ran one.
 fn run() -> Result<Option<exit::Exit>, String> {
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
+    // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
+    fonts::register_icon_font();
     let mut args = std::env::args().skip(1);
     let mut socket = None;
     let mut floor = None;
@@ -1127,13 +1129,12 @@ fn evaluate(
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
         startup::mark_phase("session-lisp");
+        if let Err(error) = echo::install(&mut vm) { eprintln!("romacs: echo area: {error}"); }
         // This process's command log, from before the init (rlisp/romacs-usage-log.el).
         if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
             eprintln!("romacs: usage log: {error}");
         }
-        if quick && launch == startup::Launch::Loadup {
-            vm.eval_source(startup::QUICK_START)?;
-        }
+        startup::before_init(&mut vm, launch, quick)?;
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // What the init loads is its layer's plan (world.rs).
@@ -1152,10 +1153,15 @@ fn evaluate(
             startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
             startup::Launch::GnuOnly => Ok(()),
         };
-        // As GNU's command loop reports an error that ends `command-line-1'.
-        if let Err(error) = finished {
-            eprintln!("romacs: startup after init failed: {error}");
-            let _ = echo::show(&mut vm, &error);
+        // As GNU's command loop reports an error that ends `command-line-1';
+        // else startup's own message is shown, as GNU's first redisplay
+        // shows it before the command loop's first timer runs.
+        match finished {
+            Err(error) => {
+                eprintln!("romacs: startup after init failed: {error}");
+                let _ = echo::show(&mut vm, &error);
+            }
+            Ok(()) => echo::show_current_message(&mut vm)?,
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
