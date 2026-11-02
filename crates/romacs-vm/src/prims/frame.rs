@@ -214,7 +214,9 @@ fn alpha_lower_limit(cx: &mut Leaf<'_>) -> std::result::Result<f32, Fault> {
 /// frame.c:6047) is an opacity or a cons of the active and inactive ones,
 /// nil leaving the window's alone; `alpha-background' (frame.c:6098) the
 /// opacity of the backgrounds the frame paints; `left-fringe' and
-/// `right-fringe' its fringes; `tab-bar-lines' its tab bar. Other parameters, and
+/// `right-fringe' its fringes; `right-divider-width', `bottom-divider-width'
+/// and `internal-border-width' the gaps between and around its windows;
+/// `tab-bar-lines' its tab bar. Other parameters, and
 /// every parameter of a frame without a window system, are only stored.
 fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
     if cx.kind(key) != leaf::Kind::Symbol || cx.windows().window_system(frame)? == Value::NIL { return Ok(()); }
@@ -223,6 +225,10 @@ fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Va
         // gui_set_left_fringe (frame.c:5800): a fixnum's magnitude, else 8.
         let width = value.integer_value().map_or(crate::frame::DEFAULT_FRINGE, |n| n.unsigned_abs().min(i32::MAX as u64) as u32);
         cx.windows().set_frame_fringe(frame, side, width)
+    } else if let Some(side) = [cx.intern("right-divider-width"), cx.intern("bottom-divider-width")].iter().position(|&k| k == key) {
+        cx.windows().set_frame_divider(frame, side, natnum(value)?)
+    } else if key == cx.intern("internal-border-width") {
+        cx.windows().set_frame_internal_border(frame, natnum(value)?)
     } else if key == cx.intern("tab-bar-lines") {
         // pgtk_set_tab_bar_lines (pgtkfns.c:444): an integer >= 0, else 0.
         let lines = value.integer_value().filter(|&n| n >= 0).map_or(0, |n| n.min(i64::from(i32::MAX)) as u32);
@@ -235,6 +241,13 @@ fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Va
         let limit = alpha_lower_limit(cx)?;
         cx.windows().set_frame_alpha(frame, alpha, limit)
     } else { Ok(()) }
+}
+
+/// check_int_nonnegative (bignum.c:506): an integer, 0 when negative.
+fn natnum(value: Value) -> std::result::Result<u32, Fault> {
+    let n = value.integer_value().ok_or(Fault::Wrong("integerp", value))?;
+    u32::try_from(n.max(0)).ok().filter(|&n| n <= i32::MAX as u32)
+        .ok_or_else(|| Fault::Range(Value::integer(0).unwrap(), Value::integer(i64::from(i32::MAX)).unwrap()))
 }
 
 /// `alpha' VALUE as gui_set_alpha reads it: the opacity while active and
@@ -518,8 +531,8 @@ fn set_frame_height(cx, frame: Value, height: Value; optional _pretend: Value, p
     Ok(Value::NIL)
 }}
 // frame.c:4447-4490: the text area in pixels and in characters, without
-// the fringes and the tab bar; the total columns and lines count them too
-// (Romacs draws no scroll bars).
+// the fringes, the tab bar and the internal border; the total columns and
+// lines are the native size's (Romacs draws no scroll bars).
 fn text_extent(cx: &mut Leaf<'_>, frame: Value, horizontal: bool, chars: bool) -> super::Out {
     let (width, height) = cx.windows().frame_text_area(frame)?;
     let pixels = if horizontal { width } else { height };
@@ -536,13 +549,13 @@ defsubr! { name = "frame-text-lines", gnu = "frame.c:4454", effect = Reads,
 fn frame_text_lines(cx; optional frame: Value) { text_extent(cx, frame, false, true) }}
 defsubr! { name = "frame-total-cols", gnu = "frame.c:4461", effect = Reads,
 fn frame_total_cols(cx; optional frame: Value) {
-    let (width, _) = cx.windows().frame_text_pixels(frame)?;
-    Ok(Value::integer(i64::from(width / char_size(cx, true)?)).unwrap())
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::integer(i64::from(native(cx, frame, true)? / char_size(cx, true)?)).unwrap())
 }}
 defsubr! { name = "frame-total-lines", gnu = "frame.c:4468", effect = Reads,
 fn frame_total_lines(cx; optional frame: Value) {
-    let (_, height) = cx.windows().frame_text_pixels(frame)?;
-    Ok(Value::integer(i64::from(height / char_size(cx, false)?)).unwrap())
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::integer(i64::from(native(cx, frame, false)? / char_size(cx, false)?)).unwrap())
 }}
 defsubr! { name = "window-system", gnu = "frame.c:415", effect = Reads,
 fn window_system(cx; optional frame: Value) { cx.windows().window_system(frame) }}

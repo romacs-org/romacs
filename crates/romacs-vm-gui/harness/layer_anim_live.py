@@ -30,15 +30,25 @@ present call), as p50/p95/max in ms, and the draws during idle.  With
 anything draws while idle; with --expect-none it fails when any
 animation frame draws (the default, unforced software renderer).
 
+With --idle-draws N the idle phase starts 2 s after the close, once every
+animation it demanded has ended, and the run fails when more than N draws
+happen in it; the session then starts without the startup screen, whose
+logo animates for as long as it shows, and without `blink-cursor-mode',
+whose blinks redisplay twice a second for ten blinks.  With --chrome the run also fails unless the session's
+`romacs-chrome-state' reports the pane chrome (gap 6, radius 6, dim
+0.12) and the exit's frame counters (ROMACS_FRAME_STATS) drew its quads.
+
 usage: layer_anim_live.py --binary BIN --output DIR [--renderer gles2]
        [--mesa MESA_DIR] [--input file-1] [--idle 3] [--budget-ms 4] [--no-force]
        [--expect-none] [--init FILE] [--slowdown N] [--shots]
+       [--idle-draws N] [--chrome]
 """
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import statistics
 import subprocess
 import tempfile
@@ -48,6 +58,8 @@ import live_oracle as live
 
 KEYSYMS = {'-': 'minus', '/': 'slash', ' ': 'space'}
 INIT = "(romacs-complete-mode 1)\n"
+CHROME_STATE = ("(run-at-time 1 nil (lambda () (with-temp-file (getenv \"CHROME_STATE\")"
+                " (prin1 (romacs-chrome-state) (current-buffer)))))\n")
 
 
 def wait(pred, timeout, what, proc):
@@ -107,6 +119,8 @@ def main():
     ap.add_argument('--budget-ms', type=float)
     ap.add_argument('--no-force', action='store_true', help='do not set ROMACS_LAYER_ANIMATION=1')
     ap.add_argument('--expect-none', action='store_true')
+    ap.add_argument('--idle-draws', type=int)
+    ap.add_argument('--chrome', action='store_true')
     ap.add_argument('--init', type=Path)
     ap.add_argument('--font-size', default='15')
     ap.add_argument('--mode', default='2560x1440')
@@ -134,7 +148,12 @@ def main():
                 (work / f'file-{n:04}.txt').write_text('x\n')
             (config / 'rc.xml').write_text(live.RC_XML)
             (home / 'config' / 'romacs').mkdir(parents=True)
-            (home / 'config' / 'romacs' / 'init.el').write_text(args.init.read_text() if args.init else INIT)
+            (home / 'config' / 'romacs' / 'init.el').write_text((args.init.read_text() if args.init else INIT)
+                                                                 + (CHROME_STATE if args.chrome else '')
+                                                                 + ('(setq inhibit-startup-screen t)\n(blink-cursor-mode -1)\n' if args.idle_draws is not None else ''))
+            chrome_state, stats = root / 'chrome-state', out / 'frame-stats.txt'
+            if stats.exists():
+                stats.unlink()
             env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
                    'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
@@ -142,7 +161,8 @@ def main():
                    'WLR_BACKENDS': 'headless', 'WLR_RENDERER': args.renderer, 'WLR_HEADLESS_OUTPUTS': '1',
                    'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
                    'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': args.font_size,
-                   'ROMACS_PRESENT_TRACE': str(trace)}
+                   'ROMACS_PRESENT_TRACE': str(trace), 'ROMACS_DIAGNOSTICS': '1', 'CHROME_STATE': str(chrome_state),
+                   'ROMACS_FRAME_STATS': str(stats)}
             if not args.no_force:
                 env['ROMACS_LAYER_ANIMATION'] = str(args.slowdown)
             for k in ('CARGO_HOME', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_WORLD'):
@@ -209,6 +229,8 @@ def main():
                 for _ in range(3):
                     phase('move', lambda: ctrl('n'), .5)
                 phase('close', lambda: ctrl('g'))
+                if args.idle_draws is not None:
+                    time.sleep(2.0)
                 phase('idle', lambda: None, args.idle)
                 time.sleep(.5)
                 all_draws = draws(trace)
@@ -229,10 +251,21 @@ def main():
                 if args.budget_ms is not None:
                     p95 = report['motion']['p95_ms']
                     ok = ok and p95 is not None and p95 <= args.budget_ms and idle_draws == 0
-                report['status'] = 'PASS' if ok else 'FAIL'
+                if args.idle_draws is not None:
+                    ok = ok and idle_draws <= args.idle_draws
+                if args.chrome:
+                    state = chrome_state.read_text() if chrome_state.exists() else ''
+                    report['chrome_state'] = state
+                    ok = ok and all(f'{key} {value}' in state for key, value in
+                                    ((':classic', 'nil'), (':gap', 6), (':pane-radius', 6), (':pane-dim', 0.12)))
                 ctrl('x')
                 ctrl('c')
-                time.sleep(1)
+                wait(lambda: proc.poll() is not None, 30, 'exit', None)
+                if args.chrome:
+                    quads = re.search(r'chrome_divider_quads: (\d+)', stats.read_text() if stats.exists() else '')
+                    report['chrome_divider_quads'] = int(quads.group(1)) if quads else None
+                    ok = ok and (report['chrome_divider_quads'] or 0) > 0
+                report['status'] = 'PASS' if ok else 'FAIL'
     except Exception as error:
         report.update(status='FAIL', error=repr(error))
     finally:

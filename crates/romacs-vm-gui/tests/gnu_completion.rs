@@ -327,9 +327,14 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
     }).unwrap().join().unwrap();
     assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#,
                         r##"(top 8 t "#d48a20" 10 t top t)"##,
-                        "(780 ((top 322 88 600 80 8 top) (center 322 260 600 80 8 top) (bottom 322 480 600 80 8 top)))",
-                        "(180 6 0)", "(\"cand-06\" (5 5 40 160 180) 2 t)",
+                        // Under the pane gap (VM2-PANE-CHROME) the room and the mode
+                        // line are the text area's, inside the 6-pixel internal border;
+                        // placing layers against it is L2's (romacs-chrome-bottom).
+                        "(774 ((top 316 87 600 80 8 top) (center 316 254 600 80 8 top) (bottom 316 474 600 80 8 top)))",
+                        "(186 6 6)", "(\"cand-06\" (5 5 40 166 186) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
-                        "(8 (nil 1))", "(600 840 480 1260)", "(0 484 484)", "(140 200 360 t)"]);
+                        // 500 pixels less the fringes and the pane gap's
+                        // internal border (VM2-PANE-CHROME).
+                        "(8 (nil 1))", "(600 840 480 1260)", "(0 472 472)", "(140 200 354 t)"]);
 }

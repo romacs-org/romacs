@@ -1150,6 +1150,19 @@ pub enum ContentTransitionHint {
     },
 }
 
+/// A root-frame window drawn as a pane (DIVERGENCES.md VM2-PANE-CHROME),
+/// over its glyphs: BOUNDS its box in logical pixels, its corners rounded
+/// to RADIUS into the frame background, an EDGE one device pixel wide
+/// round it, and its paint blended DIM of the way toward the frame
+/// background.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Pane {
+    pub bounds: Rect,
+    pub radius: f32,
+    pub edge: Option<Color>,
+    pub dim: f32,
+}
+
 /// Buffer collecting glyphs for current frame.
 ///
 /// With matrix-based rendering, this buffer is cleared and rebuilt from scratch
@@ -1228,6 +1241,9 @@ pub struct FrameGlyphBuffer {
 
     /// Per-window metadata for animation detection
     pub window_infos: Vec<WindowInfo>,
+
+    /// The windows drawn as panes over the glyphs, none in GNU's look.
+    pub panes: Vec<Pane>,
 
     /// Explicit transition requests emitted by layout producers.
     pub transition_hints: Vec<ContentTransitionHint>,
@@ -1598,6 +1614,7 @@ impl FrameGlyphBuffer {
             presented_pointer_source: None,
             presented_hit_index: crate::presented_pointer::PresentedHitIndex::default(),
             window_infos: Vec::with_capacity(16),
+            panes: Vec::new(),
             transition_hints: Vec::with_capacity(16),
             window_cursors: Vec::with_capacity(8),
             cursor_blinked_off: false,
@@ -1639,6 +1656,7 @@ impl FrameGlyphBuffer {
         self.presented_hit_index =
             crate::presented_pointer::PresentedHitIndex::empty(self.presentation_id);
         self.window_infos.clear();
+        self.panes.clear();
         self.transition_hints.clear();
         self.window_cursors.clear();
         self.cursor_blinked_off = false;

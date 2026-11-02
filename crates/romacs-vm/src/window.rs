@@ -171,8 +171,10 @@ pub(super) struct WindowState {
     pub mini_reserved: u32,
     /// The last frame identity or stacking rank handed out (frame.rs).
     pub next_frame: u64,
+    /// The host frame's text area at its last layout, tab bar included.
+    pub text_area: [u32; 2],
 }
-romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame });
+romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame, text_area });
 impl Default for WindowState {
     fn default() -> Self {
         Self {
@@ -185,6 +187,7 @@ impl Default for WindowState {
             mini_lines: 1,
             mini_reserved: 0,
             next_frame: 1,
+            text_area: [640, 480],
         }
     }
 }
@@ -869,6 +872,7 @@ impl Vm {
         width: u32,
         height: u32,
     ) -> Result<Vec<(u32, u32, romacs_layout_input::WindowSnapshot)>> {
+        self.resize_root_window(width, height)?;
         self.set_frame_geometry(
             width,
             height,
@@ -885,7 +889,9 @@ impl Vm {
         // Redisplay sizes the mini-window to its display before laying out.
         if self.resize_mini_window(mini)? { self.refit_mini_window(width, height)?; }
         self.reconcile_terminal_geometry()?;
-        let outcome = self.snapshot_leaves(ids);
+        // Painted inside the internal border (frame.h:1796).
+        let border = self.host_border();
+        let outcome = self.snapshot_leaves(ids).map(|leaves| leaves.into_iter().map(|(x, y, s)| (x + border, y + border, s)).collect());
         self.display_state.width = width;
         self.display_state.height = height;
         outcome
@@ -930,12 +936,40 @@ impl Vm {
         Ok(changed)
     }
     /// The pixels of V left and right of its text area: its margins and
-    /// fringes, GNU's window box less TEXT_AREA.
+    /// fringes, and its right divider, GNU's window box less TEXT_AREA.
     pub(crate) fn window_text_insets(&self, v: Value) -> Result<[u32; 2]> {
         let fringes = self.window_fringe_widths(v)?;
+        let [divider, _] = self.window_dividers(v)?;
         let w = self.window(v)?;
         let column = self.window_state.column;
-        Ok([w.left_margin * column + fringes[0], w.right_margin * column + fringes[1]])
+        Ok([w.left_margin * column + fringes[0], w.right_margin * column + fringes[1] + divider])
+    }
+    /// GNU WINDOW_RIGHT_DIVIDER_WIDTH and WINDOW_BOTTOM_DIVIDER_WIDTH
+    /// (window.h:707-718) of V: its frame's divider widths, but no right
+    /// divider on a window at the root window's right edge, and no bottom
+    /// divider on the mini-window or, on a frame without its own
+    /// mini-window (a child frame), on a window at the root's bottom edge.
+    /// Derived from position, never stored.
+    pub(crate) fn window_dividers(&self, v: Value) -> Result<[u32; 2]> {
+        let w = self.window(v)?;
+        let Ok(f) = self.frame(w.frame) else { return Ok([0, 0]) };
+        if w.mini || f.dividers == [0, 0] { return Ok([0, 0]); }
+        let root = self.window(f.root)?;
+        let rightmost = w.x + w.width >= root.x + root.width;
+        let bottommost = w.y + w.height >= root.y + root.height;
+        let below = !bottommost || f.parent == Value::NIL;
+        Ok([if rightmost { 0 } else { f.dividers[0] }, if below { f.dividers[1] } else { 0 }])
+    }
+    /// The host frame's internal border (`internal-border-width'), between
+    /// its native edges and its text area (frame.h:1796-1814).
+    pub(crate) fn host_border(&self) -> u32 {
+        self.frame(self.host_frame_peek()).map_or(0, |f| f.border)
+    }
+    /// The host frame's text area for a native WIDTH by HEIGHT, its tab
+    /// bar included: what GNU's window coordinates span.
+    fn host_inner(&self, width: u32, height: u32) -> Option<(u32, u32)> {
+        let border = 2 * self.host_border();
+        Some((width.checked_sub(border)?, height.checked_sub(border)?))
     }
     /// The live windows IDS name, frozen and placed in their frame. Lisp
     /// run by one window's redisplay may delete a later one, or its own.
@@ -949,8 +983,9 @@ impl Vm {
             // A hosting child frame's root window may have no lines.
             if w.height == 0 { continue; }
             let [left, right] = self.window_text_insets(v)?;
+            let [_, below] = self.window_dividers(v)?;
             let w = self.window(v)?;
-            let (x, y, width, height) = (w.x + left, w.y, w.width.saturating_sub(left + right), w.height);
+            let (x, y, width, height) = (w.x + left, w.y, w.width.saturating_sub(left + right), w.height.saturating_sub(below));
             match self.snapshot_window(v, width, height) {
                 Ok(snapshot) => snapshots.push((x, y, snapshot)),
                 Err(_) if live(self, id).is_none() => {}
@@ -992,20 +1027,22 @@ impl Vm {
     pub(crate) fn stable_window_body(&self, window: Value) -> Result<Option<(u16, u16)>> {
         let state = &self.window_state;
         let (line, column) = (state.line, state.column);
-        if line == 0 || column == 0 || state.height < 2 * line { return Ok(None); }
+        let Some((frame_width, frame_height)) = self.host_inner(state.width, state.height) else { return Ok(None) };
+        if line == 0 || column == 0 || frame_height < 2 * line { return Ok(None); }
         let mut geometry = vec![];
         let root = self.window_root_peek(ROOT);
         let now = self.mini_growth()?;
         let reserved = if self.minibuffer_host().is_some() { 0 } else { line };
-        let tab_bar = (self.tab_bar_lines() * line).min(state.height.saturating_sub(reserved + line));
-        if self.plan_window_geometry(root, 0, tab_bar, state.width, state.height - reserved - tab_bar, (now, 0), line, column, &mut geometry).is_err() {
+        let tab_bar = (self.tab_bar_lines() * line).min(frame_height.saturating_sub(reserved + line));
+        if self.plan_window_geometry(root, 0, tab_bar, frame_width, frame_height - reserved - tab_bar, (now, 0), line, column, &mut geometry).is_err() {
             return Ok(None);
         }
         let Some(&(_, _, _, width, height)) = geometry.iter().find(|g| g.0 == window) else { return Ok(None) };
         let [left, right] = self.window_text_insets(window)?;
+        let [_, below] = self.window_dividers(window)?;
         let width = width.saturating_sub(left + right);
         let columns = (width / column).clamp(2, u32::from(u16::MAX)) as u16;
-        let rows = (height / line).saturating_sub(1).clamp(1, u32::from(u16::MAX)) as u16;
+        let rows = (height.saturating_sub(below) / line).saturating_sub(1).clamp(1, u32::from(u16::MAX)) as u16;
         Ok(Some((columns, rows)))
     }
     /// The root window's growth now: minus the rows past one line that
@@ -1062,6 +1099,10 @@ impl Vm {
         line_height: u32,
         column_width: u32,
     ) -> Result<()> {
+        self.ensure_windows()?;
+        // GNU's windows tile the text area, inside the internal border.
+        let (native_width, native_height) = (width, height);
+        let (width, height) = self.host_inner(width, height).unwrap_or((0, 0));
         if line_height == 0
             || column_width == 0
             || u64::from(height) < 2 * u64::from(line_height)
@@ -1069,7 +1110,6 @@ impl Vm {
         {
             return Err("frame geometry is below safe window minimum".into());
         }
-        self.ensure_windows()?;
         let root = self.window_root(ROOT);
         // A hosted mini-window takes none of the root windows' lines.
         let hosted = self.minibuffer_host().is_some();
@@ -1107,12 +1147,50 @@ impl Vm {
             window.width = w;
             window.height = h;
         }
-        self.window_state.width = width;
-        self.window_state.height = height;
+        self.window_state.width = native_width;
+        self.window_state.height = native_height;
+        self.window_state.text_area = [width, height];
         self.window_state.line = line_height;
         self.window_state.column = column_width;
-        self.display_state.width = width;
-        self.display_state.height = height;
+        self.display_state.width = native_width;
+        self.display_state.height = native_height;
+        Ok(())
+    }
+    /// GNU resize_frame_windows (window.c:5046) where window.el is loaded,
+    /// before the host frame is laid out WIDTH by HEIGHT native pixels:
+    /// along each axis its text area changed on, an internal root window
+    /// resizes its children proportionally by `window--resize-root-window',
+    /// with "normal" and then "reasonable" minimum sizes, and keeps the
+    /// sizes when they tile it; `set_frame_geometry' then places them. A
+    /// leaf root, a runtime without window.el, or sizes that do not fit
+    /// are left to the planner. Runs Lisp, so only where the host resizes
+    /// the frame, with no heap value held (`frame_window_snapshots', a
+    /// host's resize event); a parameter's re-layout uses the planner.
+    pub(crate) fn resize_root_window(&mut self, width: u32, height: u32) -> Result<()> {
+        self.ensure_windows()?;
+        let Some((width, height)) = self.host_inner(width, height) else { return Ok(()) };
+        let [old_width, old_height] = self.window_state.text_area;
+        self.resize_root_along(i64::from(width) - i64::from(old_width), true)?;
+        self.resize_root_along(i64::from(height) - i64::from(old_height), false)
+    }
+    fn resize_root_along(&mut self, delta: i64, horizontal: bool) -> Result<()> {
+        let w = self.window(self.window_root_peek(ROOT))?;
+        let size = i64::from(if horizontal { w.width } else { w.height }) + delta;
+        let edge = if horizontal { w.x } else { w.y };
+        let (Ok(size), false, false) = (u32::try_from(size), delta == 0, w.live()) else { return Ok(()) };
+        const RESIZE: &str = "(lambda (root delta horizontal ignore) (and (fboundp 'window--resize-root-window) (progn (window--resize-root-window root delta horizontal ignore t) t)))";
+        let axis = if horizontal { Value::TRUE } else { Value::NIL };
+        for ignore in [Value::NIL, Value::TRUE] {
+            let root = self.window_root_peek(ROOT);
+            match self.call_prepared_source_raw(RESIZE, &[root, Value::integer(delta)?, axis, ignore]) {
+                Ok(called) if called != Value::NIL => {}
+                _ => return Ok(()),
+            }
+            let root = self.window_root_peek(ROOT);
+            if self.window(root)?.new_pixel == size && self.prepared_check(root, horizontal, Value::NIL)? {
+                return self.apply_prepared(root, horizontal, edge);
+            }
+        }
         Ok(())
     }
     /// Plan V's subtree in the rect. Along the vertical axis a window's
@@ -1686,11 +1764,16 @@ impl<'a> Windows<'a> {
         self.vm.display_state.free_realized_faces();
         Ok(Value::NIL)
     }
-    /// Decorations VM2 does not draw: tab lines, scroll bars and
-    /// dividers are 0 pixels (window.c:1224-1269 on a live window).
+    /// Decorations VM2 does not draw: tab lines and scroll bars are 0
+    /// pixels (window.c:1224-1269 on a live window).
     pub(crate) fn live_zero(&mut self, window: Value) -> Out {
         self.live(window)?;
         Ok(Value::integer(0).unwrap())
+    }
+    /// window.c:1242/1251: a live WINDOW's right (SIDE 0) or bottom divider.
+    pub(crate) fn window_divider_width(&mut self, window: Value, side: usize) -> Out {
+        let w = self.live(window)?;
+        Self::int(i64::from(self.vm.window_dividers(w).map_err(internal)?[side]))
     }
     /// window.c:1215 `WINDOW_MODE_LINE_HEIGHT` over `window_wants_mode_line`
     /// (window.c:6037): a live non-minibuffer window whose `mode-line-format`
@@ -1832,10 +1915,11 @@ impl<'a> Windows<'a> {
         let root = self.vm.root_of(w).map_err(internal)?;
         let (root_x, root_width) = self.vm.window(root).map_or((0, 0), |r| (i64::from(r.x), i64::from(r.width)));
         let fringes = self.vm.window_fringe_widths(w).map_err(internal)?;
+        let [right_divider, bottom_divider] = self.vm.window_dividers(w).map_err(internal)?.map(i64::from);
         let x = self.get(w)?;
         let (left, width) = (i64::from(x.x), i64::from(x.width));
-        let body_width = (width - i64::from(x.left_margin + x.right_margin) * column - i64::from(fringes[0] + fringes[1])).max(0);
-        let body_height = (i64::from(x.height) - mode_line - header_line).max(0);
+        let body_width = (width - i64::from(x.left_margin + x.right_margin) * column - i64::from(fringes[0] + fringes[1]) - right_divider).max(0);
+        let body_height = (i64::from(x.height) - mode_line - header_line - bottom_divider).max(0);
         Ok(TextArea {
             window: w,
             buffer: x.buffer,
@@ -1903,12 +1987,14 @@ impl<'a> Windows<'a> {
             let window_system = self.vm.window_system_open();
             let bar = if !rightmost && !window_system { column } else { 0 };
             let fringes = self.vm.window_fringe_widths(w).map_err(internal)?;
-            let px = pixels - bar - margins - i64::from(fringes[0] + fringes[1]);
+            let [divider, _] = self.vm.window_dividers(w).map_err(internal)?;
+            let px = pixels - bar - margins - i64::from(fringes[0] + fringes[1] + divider);
             if chars { px / column } else { px }
         } else {
             let mode_line = self.window_mode_line_height(window)?.integer_value().unwrap_or(0);
             let header_line = self.window_header_line_height(window)?.integer_value().unwrap_or(0);
-            let px = i64::from(self.get(w)?.height) - mode_line - header_line;
+            let [_, divider] = self.vm.window_dividers(w).map_err(internal)?;
+            let px = i64::from(self.get(w)?.height) - mode_line - header_line - i64::from(divider);
             if chars { px / line } else { px }
         };
         Self::int(size.max(0))
@@ -1937,11 +2023,49 @@ impl<'a> Windows<'a> {
         let unit = if horizontal { self.vm.window_state.column } else { self.vm.window_state.line };
         Self::int(i64::from(unit))
     }
-    /// frame.c:4524/4531/4538: VM2 frames draw no window dividers and no
-    /// internal border.
-    pub(crate) fn frame_absent_width(&mut self, frame: Value) -> Out {
+    /// frame.c:4531/4538: FRAME's right (SIDE 0) or bottom divider width.
+    pub(crate) fn frame_divider_width(&mut self, frame: Value, side: usize) -> Out {
         self.any_frame(frame)?;
-        Ok(Value::integer(0).unwrap())
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        Self::int(i64::from(self.vm.frame(frame).map_err(internal)?.dividers[side]))
+    }
+    /// frame.c:4524: the host frame's internal border. A child frame's
+    /// windows are placed inside its border already (VM2-CHILD-FRAME), so
+    /// it answers 0 as before.
+    pub(crate) fn frame_internal_border_width(&mut self, frame: Value) -> Out {
+        self.any_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        Self::int(i64::from(if self.is_child_frame(frame)? { 0 } else { self.vm.frame(frame).map_err(internal)?.border }))
+    }
+    /// gui_set_right_divider_width / gui_set_bottom_divider_width
+    /// (frame.c:5862): FRAME's divider on SIDE (0 right) becomes WIDTH and
+    /// its windows' bodies are laid out again; the native size stays.
+    pub(crate) fn set_frame_divider(&mut self, frame: Value, side: usize, width: u32) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        let f = self.vm.frame_mut(frame).map_err(internal)?;
+        if f.dividers[side] == width { return Ok(()); }
+        f.dividers[side] = width;
+        self.vm.frame_changed().map_err(internal)
+    }
+    /// x_set_internal_border_width (xfns.c:1997) on the host frame: its
+    /// windows are laid out again inside BORDER, the native size kept as
+    /// a tiled or maximized frame keeps it. A child frame applies its
+    /// border with its geometry (VM2-CHILD-FRAME).
+    pub(crate) fn set_frame_internal_border(&mut self, frame: Value, border: u32) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        if self.is_child_frame(frame)? { return Ok(()); }
+        let old = std::mem::replace(&mut self.vm.frame_mut(frame).map_err(internal)?.border, border);
+        if old == border { return Ok(()); }
+        // A border its windows cannot fit inside is refused, the old one and
+        // a grown mini-window's lines kept (set_frame_geometry runs no Lisp,
+        // so FRAME stays valid).
+        let mini_lines = self.vm.window_state.mini_lines;
+        self.vm.frame_changed().or_else(|error| {
+            self.vm.frame_mut(frame).map_err(internal)?.border = old;
+            self.vm.window_state.mini_lines = mini_lines;
+            self.vm.frame_changed().map_err(internal)?;
+            Err(internal(error))
+        })
     }
     /// frame.c:327: VM2 returns the initial/termcap type t, but retains
     /// graphical character metrics (documented hybrid, VM2-WIN5).

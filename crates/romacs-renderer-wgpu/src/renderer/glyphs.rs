@@ -1817,6 +1817,9 @@ impl WgpuRenderer {
             self.draw_cursor_layer(&mut ctx, &chrome);
 
             self.draw_post_content_effects(&mut ctx.pass, &ectx, faces);
+
+            // The panes over everything the windows drew (VM2-PANE-CHROME).
+            self.pane_quads += self.draw_panes(&mut ctx.pass, frame_glyphs, &draw);
         }
 
         stats.unique_single_glyph_keys = seen_single_keys.len();
@@ -2068,7 +2071,7 @@ impl WgpuRenderer {
             .retain(|e| self.frame_sample.since_at_presentation(e.started) < e.duration);
     }
 
-    fn prepare_frame_uniforms(
+    pub(super) fn prepare_frame_uniforms(
         &mut self,
         mapping: romacs_display_protocol::PresentMapping,
     ) -> (f32, f32, super::draw::DrawParameters) {

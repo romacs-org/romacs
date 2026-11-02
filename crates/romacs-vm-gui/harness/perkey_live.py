@@ -35,9 +35,18 @@ boundary timer; the timer's later firing (armed by the first self-insert,
 second idle it must be quiet again, once blink-cursor-mode has stopped
 blinking after the last phase's keys.
 
+With --classic the same M-: also turns `romacs-classic-chrome' on, so
+the session draws GNU's look instead of its panes (VM2-PANE-CHROME).
+With --state, a `post-command-hook' installed by --eval records after
+every command the collections so far and their seconds (`gcs-done',
+`gc-elapsed') and the selected window's start, end, point and body and
+total heights in pixels, and writes them to the session's state.el at
+C-x C-s; --mode sets the output's size (default 1600x1000).
+
 usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
-                      [--record PHASE] [--tools DIR:DIR]
+                      [--record PHASE] [--tools DIR:DIR] [--classic] [--state]
+                      [--mode WxH]
 """
 import argparse
 import hashlib
@@ -237,13 +246,14 @@ class Session:
         self.wait(lambda: any(p.is_socket() for p in self.root.glob('wayland-*')), 20, 'compositor')
         env['WAYLAND_DISPLAY'] = next(p.name for p in self.root.glob('wayland-*') if p.is_socket())
         subprocess.run([shutil.which('wlr-randr', path=env['PATH']) or 'wlr-randr', '--output', 'HEADLESS-1',
-                        '--custom-mode', '1600x1000'], env=env, check=True, timeout=15)
+                        '--custom-mode', self.args.mode], env=env, check=True, timeout=15)
         # A held key gives the seat a keyboard before the client starts.
         self.keyboard = subprocess.Popen(['wtype', '-s', '600000', '-k', 'Shift_L'], env=env,
                                          stdout=log, stderr=log)
         time.sleep(.3)
         argv = [str(self.args.binary), '-Q'] + (['--loadup'] if self.args.regime == 'loadup' else []) \
-            + (['--trace-latency'] if self.latency else []) + [str(self.file)]
+            + (['--trace-latency'] if self.latency else []) \
+            + (['--eval', self.state_form()] if self.args.state else []) + [str(self.file)]
         self.process = subprocess.Popen(argv, env=env, cwd=work, stdin=subprocess.DEVNULL,
                                         stdout=self.stdout.open('w'), stderr=self.stderr.open('w'))
         self.wait(lambda: any(r.get('ready') for r in records(self.stdout)), self.args.timeout, 'ready')
@@ -256,6 +266,22 @@ class Session:
         self.renderer = next((l[len('romacs: gpu '):] for l in stderr_text.splitlines()
                               if l.startswith('romacs: gpu ')), None)
 
+    def setup_form(self):
+        forms = ['(setq auto-save-timeout nil)']
+        if self.args.classic:
+            forms.append('(romacs-classic-chrome 1)')
+        return f"(progn {' '.join(forms)})"
+
+    def state_form(self):
+        """--state's hook: a record per command, written out at C-x C-s."""
+        path = self.root / 'state.el'
+        return ('(progn (defvar perkey--states nil) (add-hook (quote post-command-hook) (lambda ()'
+                ' (push (list this-command gcs-done gc-elapsed (window-start) (window-end) (point)'
+                ' (window-body-height nil t) (window-pixel-height)) perkey--states)'
+                ' (when (memq this-command (quote (save-buffer romacs-gui-save-buffer)))'
+                f' (with-temp-file "{path}"'
+                ' (dolist (s (reverse perkey--states)) (prin1 s (current-buffer)) (terpri (current-buffer))))))))')
+
     def no_idle_auto_save(self):
         """M-: (setq auto-save-timeout nil).  read_char's idle auto-save of the
         typed text, about 30 s after the last key, would land in the second
@@ -263,7 +289,7 @@ class Session:
         so the session sets it through its own command loop."""
         before = len(records(self.stdout))
         self.type(['-M', 'alt', ':', '-m', 'alt'])
-        self.type(['(setq auto-save-timeout nil)'])
+        self.type([self.setup_form()])
         self.type(['-k', 'Return'])
         done = lambda: [r for r in records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
         self.wait(done, self.args.timeout, 'M-: (setq auto-save-timeout nil)')
@@ -427,7 +453,7 @@ def session(args, index, latency):
             live_session.stop()
             kept = args.output / f"{'latency' if latency else 'counted'}-{index}"
             kept.mkdir()
-            for name in ('binary.stdout', 'binary.stderr', 'compositor.log'):
+            for name in ('binary.stdout', 'binary.stderr', 'compositor.log', 'state.el'):
                 if (root / name).exists():
                     shutil.copy(root / name, kept / name)
     return result
@@ -492,6 +518,9 @@ def main():
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--record', choices=PHASES, help='after the first counted session, profile this phase')
     parser.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
+    parser.add_argument('--classic', action='store_true', help="measure under `romacs-classic-chrome'")
+    parser.add_argument('--state', action='store_true', help='record collections and the window around each phase')
+    parser.add_argument('--mode', default='1600x1000', help="the output's size")
     args = parser.parse_args()
     args.binary = args.binary.resolve()
     args.output = args.output.resolve()

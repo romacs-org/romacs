@@ -64,7 +64,8 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
               :lines (count-lines (point-min) (point-max))
               :window-pixel-height (window-pixel-height window)
               :window-body-pixel-height (window-body-height window t)
-              :window-pixel-top (window-pixel-top window)
+              ;; Its top as painted: past the frame's internal border.
+              :window-pixel-top (nth 1 (window-edges window nil nil t))
               :text-left (car (window-inside-pixel-edges window))
               :frame-char-height (frame-char-height)
               :text-size (condition-case error (window-text-pixel-size window nil t nil nil t)
@@ -78,7 +79,7 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
                            (error (error-message-string error)))
               :dashboard-posn (condition-case error (popup-live--posn dashboard (window-point dashboard))
                                 (error (error-message-string error)))
-              :dashboard-top (window-pixel-top dashboard)
+              :dashboard-top (nth 1 (window-edges dashboard nil nil t))
               :dashboard-text-left (car (window-inside-pixel-edges dashboard))
               :line-starts (condition-case error
                                (save-excursion

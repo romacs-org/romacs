@@ -2,21 +2,28 @@
 //! GNU pgtk's answers on a 1216x876 frame of 10x25 cells (no scroll bars,
 //! as the parity harnesses run it): 8-pixel fringes, a split of 606 and 610
 //! pixels whose bodies are 59 columns each, and a tab bar of one line that
-//! puts the root window 25 pixels down.
+//! puts the root window 25 pixels down. Window dividers and the internal
+//! border (romacs-chrome.el's pane gap) against pinned GNU X11's answers
+//! on the same frame (frame_chrome.el, frame_chrome.gnu).
 use romacs_vm::Vm;
+use std::path::Path;
+#[path = "support/gui_probe.rs"]
+mod gui_probe;
+use gui_probe::{Pgtk, gnu_session};
 
-/// A window system that answers nothing about fonts.
-struct Pgtk;
-impl romacs_vm::DisplayHost for Pgtk {
-    fn window_system(&self) -> &str { "pgtk" }
-    fn display_name(&self) -> String { String::new() }
-    fn list_fonts(&mut self, _: &romacs_vm::FontQuery) -> Vec<romacs_vm::FontEntity> { vec![] }
-    fn font_families(&mut self) -> Vec<String> { vec![] }
-    fn open_font(&mut self, _: &romacs_vm::FontEntity, _: i64) -> Option<romacs_vm::OpenedFont> { None }
-    fn char_font(&mut self, _: &str, _: f32, _: char) -> Option<(romacs_vm::OpenedFont, u32)> { None }
+fn probe(section: &str, after: impl Fn(&mut Vm, &str)) -> Vec<String> {
+    gui_probe::probe(include_str!("frame_chrome.el"), include_str!("frame_chrome.gnu"), section, after)
+}
+
+
+thread_local! {
+    /// Whether `session' gives a window-system frame under
+    /// `romacs-classic-chrome' (classic_chrome_is_todays_geometry).
+    static CLASSIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn session(display: bool) -> Vm {
+    if display && CLASSIC.get() { return classic_session(); }
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     vm.set_frame_geometry(1216, 876, 25, 10).unwrap();
@@ -183,4 +190,155 @@ fn the_total_lines_count_the_tab_bar() {
     let mut vm = session(true);
     eval(&mut vm, "(modify-frame-parameters nil '((tab-bar-lines . 1)))");
     assert_eq!(eval(&mut vm, "(list (frame-total-lines) (frame-text-lines) (frame-total-cols) (frame-text-cols))"), "(35 34 121 120)");
+}
+
+/// `gnu_session' with romacs-chrome.el's panes, then `romacs-classic-chrome'.
+fn classic_session() -> Vm {
+    let mut vm = gnu_session();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    eval(&mut vm, "(defface romacs-layer-glow '((t :foreground \"#d48a20\")) \"\")");
+    vm.load_file(&root.join("rlisp/romacs-chrome.el")).unwrap();
+    eval(&mut vm, "(romacs-chrome-apply)");
+    assert_eq!(eval(&mut vm, "(list (frame-internal-border-width) (frame-right-divider-width) (window-pixel-width))"), "(6 6 1204)");
+    eval(&mut vm, "(romacs-classic-chrome 1)");
+    assert_eq!(eval(&mut vm, "(list (plist-get (romacs-chrome-state) :classic) (frame-internal-border-width) (frame-right-divider-width) (frame-parameter nil 'romacs-pane-radius))"), "(t 0 0 0)");
+    vm
+}
+
+#[test]
+fn dividers_and_border_follow_gnu_on_a_three_way_split() {
+    let failures = probe("dividers_and_border_follow_gnu_on_a_three_way_split", |_, _| {});
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn the_mini_window_has_no_bottom_divider_and_ordinary_windows_do() {
+    let failures = probe("the_mini_window_has_no_bottom_divider_and_ordinary_windows_do", |_, _| {});
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// window.c's prepared_check: along a combination's axis its children sum
+/// to it, across it each is as large; each body is its window less its
+/// divider, fringes, margins, header and mode line; the root window fills
+/// the text area above the mini-window.
+const INVARIANTS: &str = r#"(progn
+  (defun probe-invariants (w)
+    (let ((child (window-child w)) (bad nil))
+      (if (null child)
+          (let ((margins (window-margins w)) (fringes (window-fringes w)))
+            (unless (= (window-body-width w t) (- (window-pixel-width w) (window-right-divider-width w) (car fringes) (cadr fringes) (* (frame-char-width) (+ (or (car margins) 0) (or (cdr margins) 0)))))
+              (push (list 'body-width w) bad))
+            (unless (= (window-body-height w t) (- (window-pixel-height w) (window-bottom-divider-width w) (window-header-line-height w) (window-mode-line-height w)))
+              (push (list 'body-height w) bad))
+            (unless (and (>= (window-body-width w t) 0) (>= (window-body-height w t) 0)) (push (list 'negative w) bad)))
+        (let ((horizontal (window-combined-p child t)) (sum 0))
+          (while child
+            (setq sum (+ sum (if horizontal (window-pixel-width child) (window-pixel-height child))))
+            (unless (= (if horizontal (window-pixel-height child) (window-pixel-width child)) (if horizontal (window-pixel-height w) (window-pixel-width w)))
+              (push (list 'across child) bad))
+            (setq bad (append (probe-invariants child) bad) child (window-next-sibling child)))
+          (unless (= sum (if horizontal (window-pixel-width w) (window-pixel-height w))) (push (list 'sum w) bad))))
+      bad))
+  (let* ((b (frame-internal-border-width)) (r (frame-root-window)))
+    (append (probe-invariants r)
+            (unless (equal (list (window-pixel-left r) (window-pixel-top r) (window-pixel-width r) (window-pixel-height r))
+                           (list 0 0 (- (frame-native-width) b b) (- (frame-native-height) b b (window-pixel-height (minibuffer-window)))))
+              (list 'root)))))"#;
+
+#[test]
+fn uneven_resize_cycles_keep_sibling_sums_and_bodies() {
+    let failures = probe("uneven_resize_cycles_keep_sibling_sums_and_bodies", |vm, line| {
+        assert_eq!(eval(vm, INVARIANTS), "nil", "after {line}");
+    });
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn balance_windows_with_dividers_matches_gnu() {
+    let failures = probe("balance_windows_with_dividers_matches_gnu", |vm, line| {
+        assert_eq!(eval(vm, INVARIANTS), "nil", "after {line}");
+    });
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Under `romacs-classic-chrome' every value is 0 again, and every
+/// assertion above about a window-system frame's geometry holds as it does
+/// without the chrome. (The bitmap numbers of
+/// `defined_fringe_bitmaps_take_numbers_above_the_standard_ones' count
+/// the bitmaps GNU's fringe.el defines in this session, so it is not run.)
+#[test]
+fn classic_chrome_is_todays_geometry() {
+    CLASSIC.set(true);
+    a_window_system_frame_gives_windows_eight_pixel_fringes();
+    fringe_parameters_and_set_window_fringes_resize_the_body();
+    a_buffer_shown_in_a_window_gives_it_its_fringe_widths();
+    the_tab_bar_takes_the_top_line_of_the_frame();
+    snapshots_publish_the_fringes_and_their_indicators();
+    a_child_frame_keeps_its_columns_beside_its_fringes();
+    reused_snapshots_follow_bitmaps_and_margins();
+    the_total_lines_count_the_tab_bar();
+    CLASSIC.set(false);
+}
+
+/// A divider width change keeps every allocation and changes bodies, so
+/// the next redisplay runs `window-size-change-functions', and the one
+/// after it none.
+#[test]
+fn a_divider_change_runs_the_size_change_functions() {
+    let mut vm = gnu_session();
+    vm.eval_source(include_str!("../../../rlisp/vm/window-change.el")).unwrap();
+    eval(&mut vm, "(progn (split-window-right) (setq probe-log nil))");
+    vm.frame_snapshot(1216, 876).unwrap();
+    eval(&mut vm, "(add-hook 'window-size-change-functions (lambda (_) (push 'size probe-log)))");
+    for (parameter, mark) in [("right-divider-width", "right"), ("bottom-divider-width", "bottom")] {
+        eval(&mut vm, &format!("(modify-frame-parameters nil '(({parameter} . 6)))"));
+        vm.frame_snapshot(1216, 876).unwrap();
+        eval(&mut vm, &format!("(push '{mark} probe-log)"));
+    }
+    vm.frame_snapshot(1216, 876).unwrap();
+    assert_eq!(eval(&mut vm, "(reverse probe-log)"), "(size right size bottom)");
+}
+
+/// A border the split windows cannot fit inside is refused and the frame
+/// keeps its layout, a grown mini-window's lines included; it redisplays
+/// as before.
+#[test]
+fn a_border_the_windows_cannot_fit_is_refused() {
+    let mut vm = gnu_session();
+    eval(&mut vm, "(progn (split-window-below) (modify-frame-parameters nil '((internal-border-width . 6))))");
+    eval(&mut vm, "(progn (setq resize-mini-windows t) (with-current-buffer (window-buffer (minibuffer-window)) (insert \"1\\n2\\n3\")))");
+    vm.frame_snapshot(1216, 876).unwrap();
+    let edges = "(list (frame-internal-border-width) (mapcar (lambda (w) (window-edges w nil nil t)) (window-list nil t)))";
+    assert_eq!(eval(&mut vm, "(window-pixel-height (minibuffer-window))"), "75");
+    let before = eval(&mut vm, edges);
+    assert!(vm.eval_source("(modify-frame-parameters nil '((internal-border-width . 401)))").is_err());
+    assert_eq!(eval(&mut vm, edges), before);
+    vm.frame_snapshot(1216, 876).unwrap();
+    assert_eq!(eval(&mut vm, edges), before);
+}
+
+/// WCAG 2's relative luminance of an sRGB colour.
+fn luminance(rgb: [f64; 3]) -> f64 {
+    let linear = rgb.map(|c| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) });
+    0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+}
+
+/// An inactive pane's default text, blended toward the frame background
+/// (the default background) by the largest `romacs-pane-dim', 0.3, keeps
+/// WCAG AA contrast (4.5) on the shipped palette, whether the blend is in
+/// sRGB values or in linear light (an sRGB surface's).
+#[test]
+fn a_dimmed_pane_keeps_aa_contrast() {
+    let face = Vm::new().display_default_face().unwrap();
+    let [fg, bg] = [face.foreground, face.background].map(|c| c.map(|v| f64::from(v) / 255.0));
+    let to_linear = |c: f64| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    let to_srgb = |c: f64| if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+    let dim = 0.3;
+    let srgb: [f64; 3] = std::array::from_fn(|i| fg[i] * (1.0 - dim) + bg[i] * dim);
+    let light: [f64; 3] = std::array::from_fn(|i| to_srgb(to_linear(fg[i]) * (1.0 - dim) + to_linear(bg[i]) * dim));
+    for dimmed in [srgb, light] {
+        let (a, b) = (luminance(dimmed), luminance(bg));
+        let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+        assert!(contrast >= 4.5, "{:?} on {:?}: {contrast:.2}", face.foreground, face.background);
+    }
 }

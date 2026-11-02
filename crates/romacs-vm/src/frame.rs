@@ -30,7 +30,9 @@ pub(super) struct Frame {
     pub top: i32,
     pub width: u32,
     pub height: u32,
-    /// The internal border a child frame draws (`child-frame-border-width').
+    /// GNU `FRAME_INTERNAL_BORDER_WIDTH': the border a child frame draws
+    /// (`child-frame-border-width'), or the host frame's
+    /// `internal-border-width' around its text area (frame.h:1796).
     pub border: u32,
     pub visible: bool,
     /// Stacking among siblings: a higher one is drawn above a lower one.
@@ -51,8 +53,12 @@ pub(super) struct Frame {
     /// GNU `FRAME_TAB_BAR_LINES': the lines of the tab bar above the root
     /// window, as `tab-bar-lines' set them (pgtkfns.c pgtk_set_tab_bar_lines).
     pub tab_bar_lines: u32,
+    /// GNU `FRAME_RIGHT_DIVIDER_WIDTH' and `FRAME_BOTTOM_DIVIDER_WIDTH':
+    /// the pixels `right-divider-width' and `bottom-divider-width' give
+    /// the dividers between its windows (frame.c gui_set_right_divider_width).
+    pub dividers: [u32; 2],
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines });
+romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines, dividers });
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         for v in [&mut self.root, &mut self.selected, &mut self.minibuffer,
@@ -156,7 +162,7 @@ impl Vm {
             root, selected: root, minibuffer, terminal,
             parameters: vec![name], live: true, id: 1, parent: Value::NIL,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: 0, focus: Value::NIL,
-            alpha_background: 1.0, hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0,
+            alpha_background: 1.0, hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2],
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
@@ -183,7 +189,7 @@ impl Vm {
         let frame = self.allocate_object(Object::Frame(Box::new(Frame {
             root, selected: root, minibuffer, terminal, parameters, live: true, id, parent,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL, alpha_background: 1.0,
-            hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0,
+            hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2],
         })));
         self.window_mut(root)?.frame = frame;
         let mut frames = self.frames();

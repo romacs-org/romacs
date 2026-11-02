@@ -92,6 +92,33 @@ pub struct FrameSnapshot {
     pub children: Vec<ChildFrameSnapshot>,
     /// The tab bar above the windows, while `tab-bar-lines' shows one.
     pub tab_bar: Option<TabBarSnapshot>,
+    /// How the panes are drawn around their windows' boxes.
+    pub chrome: FrameChrome,
+}
+
+/// The paint-only pane chrome of the root frame's windows but the
+/// mini-window MINIBUFFER (`romacs-pane-*' frame parameters): corners of
+/// RADIUS, a one-device-pixel hairline in BORDER round each window's box
+/// and the window SELECTED's edge in FOCUS instead, and every other
+/// window's colours blended DIM of the way toward the frame background.
+/// INTERNAL_BORDER is the gap the windows are placed inside. The default
+/// (classic) draws none of it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FrameChrome {
+    pub internal_border: u32,
+    pub radius: u32,
+    pub dim: f32,
+    pub focus: Option<[u8; 3]>,
+    pub border: Option<[u8; 3]>,
+    pub selected: u64,
+    pub minibuffer: u64,
+}
+
+impl FrameChrome {
+    /// Whether it draws anything: GNU's look draws none of it.
+    pub fn drawn(&self) -> bool {
+        self.radius > 0 || self.dim > 0.0 || self.focus.is_some() || self.border.is_some()
+    }
 }
 
 impl FrameSnapshot {
@@ -102,6 +129,7 @@ impl FrameSnapshot {
         (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
             && self.font_alternatives == other.font_alternatives
             && self.tab_bar == other.tab_bar
+            && self.chrome == other.chrome
             && windows_lay_out_like(&self.windows, &other.windows)
     }
 }
@@ -234,8 +262,10 @@ romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte
 /// fringes between the margins and the text or, when OUTSIDE_MARGINS,
 /// outside the margins, painted in FRINGE_FACE; the vertical border GNU
 /// draws at a window's left edge when another window is left of it
-/// (gui_draw_vertical_border), in BORDER's foreground; and the bitmaps the
-/// fringes show. A window with neither margins nor fringes has the default.
+/// (gui_draw_vertical_border), in BORDER's foreground; the bitmaps the
+/// fringes show; and the window's right and bottom dividers (window.h:707),
+/// right of and below its box, outside the snapshot's width and height. A
+/// window with neither margins nor fringes has the default.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WindowChrome {
     pub left_margin: u32,
@@ -246,11 +276,14 @@ pub struct WindowChrome {
     pub fringe_face: FaceHandle,
     pub border: Option<FaceHandle>,
     pub indicators: Indicators,
+    pub right_divider: u32,
+    pub bottom_divider: u32,
 }
-romacs_snapshot::snapshot_struct!(WindowChrome { left_margin, right_margin, left_fringe, right_fringe, outside_margins, fringe_face, border, indicators });
+romacs_snapshot::snapshot_struct!(WindowChrome { left_margin, right_margin, left_fringe, right_fringe, outside_margins, fringe_face, border, indicators, right_divider, bottom_divider });
 
 impl WindowChrome {
-    /// The pixels left and right of the text area.
+    /// The pixels left and right of the text area inside the window's box:
+    /// its margins and fringes, not its divider.
     pub fn insets(&self) -> (u32, u32) {
         (self.left_margin + self.left_fringe, self.right_margin + self.right_fringe)
     }

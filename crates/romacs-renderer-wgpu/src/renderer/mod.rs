@@ -32,6 +32,7 @@ mod dynamic_buffer;
 mod frame_submission;
 pub use draw::DrawContext;
 mod paint;
+mod panes;
 mod target;
 pub use target::{NativeContentPlacement, NativePlacementError, RenderTarget, SnapshotRegion};
 mod effect_common;
@@ -210,6 +211,8 @@ pub struct WgpuRenderer {
     #[cfg(feature = "video")]
     pub(super) gpu_frame_timer: crate::gpu_frame_timing::GpuFrameTimer,
     pub(super) root_gpu_timer: crate::root_gpu_timing::RootGpuTimer,
+    /// Pane chrome quads the root passes drew since the last take.
+    pub(super) pane_quads: usize,
     /// Per-frame reusable vertex upload arenas
     pub(super) arenas: VertexArenas,
     pub(super) width: u32,
@@ -1293,6 +1296,7 @@ impl WgpuRenderer {
             #[cfg(feature = "video")]
             gpu_frame_timer,
             root_gpu_timer,
+            pane_quads: 0,
             arenas: VertexArenas::new(),
             models: models::ModelCache::new(),
             scene_placements: Default::default(),
@@ -2122,6 +2126,11 @@ impl WgpuRenderer {
     }
 
     /// Get the current display scale factor.
+    /// The pane chrome quads drawn since the last call (VM2-PANE-CHROME).
+    pub fn take_pane_quads(&mut self) -> usize {
+        std::mem::take(&mut self.pane_quads)
+    }
+
     pub fn scale_factor(&self) -> f32 {
         self.scale_factor
     }

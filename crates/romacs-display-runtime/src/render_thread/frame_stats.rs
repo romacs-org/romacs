@@ -40,6 +40,9 @@ pub(super) static REDRAW_EVENTS: AtomicU64 = AtomicU64::new(0);
 pub(super) static SCENE_COMMITS: AtomicU64 = AtomicU64::new(0);
 /// Root glyph build/render passes (the expensive static-scene path).
 pub(super) static ROOT_GLYPH_PASSES: AtomicU64 = AtomicU64::new(0);
+/// Quads the root frame's pane chrome drew (VM2-PANE-CHROME): its dims,
+/// corners and edges. Zero in GNU's look (`romacs-classic-chrome').
+pub(super) static CHROME_DIVIDER_QUADS: AtomicU64 = AtomicU64::new(0);
 /// Surface submissions on top-level frame windows.
 pub(super) static SURFACE_SUBMISSIONS: AtomicU64 = AtomicU64::new(0);
 /// Frame plans by render work class (frame scheduling plan, Stage 2).
@@ -129,6 +132,11 @@ fn tick_us(now: EventTime) -> u64 {
 
 pub(super) fn count(counter: &AtomicU64) {
     counter.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Add N to COUNTER.
+pub(super) fn add(counter: &AtomicU64, n: u64) {
+    counter.fetch_add(n, Ordering::Relaxed);
 }
 
 /// Per-native-window demand attribution (frame scheduling plan,
@@ -228,6 +236,7 @@ pub struct FrameSchedSnapshot {
     pub redraw_events: u64,
     pub scene_commits: u64,
     pub root_glyph_passes: u64,
+    pub chrome_divider_quads: u64,
     /// Surface submissions; historical field name retained for diagnostics.
     pub presents: u64,
     pub plan_none: u64,
@@ -300,6 +309,7 @@ pub fn snapshot() -> FrameSchedSnapshot {
         redraw_events: REDRAW_EVENTS.load(Ordering::Relaxed),
         scene_commits: SCENE_COMMITS.load(Ordering::Relaxed),
         root_glyph_passes: ROOT_GLYPH_PASSES.load(Ordering::Relaxed),
+        chrome_divider_quads: CHROME_DIVIDER_QUADS.load(Ordering::Relaxed),
         presents: SURFACE_SUBMISSIONS.load(Ordering::Relaxed),
         plan_none: PLAN_NONE.load(Ordering::Relaxed),
         plan_composite_only: PLAN_COMPOSITE_ONLY.load(Ordering::Relaxed),

@@ -38,6 +38,11 @@
 (register-definition-prefixes "romacs-bytecomp" '("romacs-bytecomp--"))
 
 
+;;; Generated autoloads from romacs-chrome.el
+
+(register-definition-prefixes "romacs-chrome" '("romacs-"))
+
+
 ;;; Generated autoloads from romacs-coding.el
 
 (register-definition-prefixes "romacs-coding" '("default-file-name-coding-system" "romacs-unsafe-coding" "select-safe-coding-system-interactively"))

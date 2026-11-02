@@ -32,6 +32,10 @@ impl Exit {
 /// Say END's line and end the process with its status.
 pub fn finish(end: Exit) -> ! {
     eprintln!("{}", end.line());
+    // The render thread's counters, for a harness that names a file.
+    if let Some(path) = std::env::var_os("ROMACS_FRAME_STATS") {
+        let _ = std::fs::write(path, format!("{:#?}\n", romacs_display_runtime::frame_metrics_snapshot()));
+    }
     std::process::exit(end.status)
 }
 
@@ -106,8 +110,14 @@ pub fn install() {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
+    // The root glyph pass's GPU durations, which ROMACS_GPU_FRAME_TIMING asks for.
+    let gpu_timing = (std::env::var_os("ROMACS_GPU_FRAME_TIMING").as_deref() == Some(std::ffi::OsStr::new("1"))).then(|| {
+        tracing_subscriber::fmt::layer().with_writer(std::io::stderr).with_ansi(false)
+            .with_filter(tracing_subscriber::filter::Targets::new().with_target("romacs_gpu_frame_timing", tracing::Level::WARN))
+    });
     let _ = tracing_subscriber::registry()
         .with(ErrorLines.with_filter(tracing_subscriber::filter::LevelFilter::ERROR))
+        .with(gpu_timing)
         .try_init();
 }
 

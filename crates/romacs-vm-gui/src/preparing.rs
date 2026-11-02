@@ -64,7 +64,7 @@ fn snapshot(face: &Face, width: u32, height: u32, cell: (u32, u32), t: f64) -> F
     let utf8 = format!("{}\n\n{indent}{MESSAGE}", romacs_logo::text(&cells, view.cols));
     FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), width, height,
-        background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
+        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot {
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { utf8, face_runs, raw: vec![] }, mode_line: None,
             mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, tab_width: 8,

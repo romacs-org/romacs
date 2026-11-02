@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "d9f4b2a0fdbbf56da57ce0700829f880e6b386ed4d8ba54a88598f4833105f44",
+  "input_hash": "8eaf00460d576db16e1e5de3e48dd12e35bd1465994d1eda61b6ad0b92595155",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 326,
-  "symbols": 913,
+  "rows": 327,
+  "symbols": 928,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -21,13 +21,13 @@
    98
   ],
   "$": [
-   244
+   245
   ],
   "(max)": [
    58
   ],
   "(max-char)": [
-   254
+   255
   ],
   "+": [
    58,
@@ -41,7 +41,7 @@
   ],
   "1+": [
    58,
-   269
+   270
   ],
   "1-": [
    58
@@ -69,10 +69,10 @@
    83
   ],
   "[:class:]": [
-   325
+   326
   ],
   "\\": [
-   244
+   245
   ],
   "abort-minibuffers": [
    77
@@ -90,12 +90,12 @@
    7
   ],
   "add-text-properties": [
-   268,
-   311
+   269,
+   312
   ],
   "add-variable-watcher": [
-   281,
-   282
+   282,
+   283
   ],
   "advice-add": [
    58,
@@ -108,17 +108,17 @@
    189
   ],
   "after-insert-file-set-coding": [
-   312
+   313
   ],
   "after-load-alist": [
-   297
+   298
   ],
   "after-string": [
-   306
+   307
   ],
   "all-completions": [
-   307,
-   308
+   308,
+   309
   ],
   "ange-ftp": [
    130
@@ -130,7 +130,7 @@
    58,
    127,
    152,
-   275
+   276
   ],
   "aref": [
    58,
@@ -151,18 +151,18 @@
    58
   ],
   "autoload": [
-   285,
-   315
+   286,
+   316
   ],
   "autoload-do-load": [
-   285,
-   298
+   286,
+   299
   ],
   "b->last_window_start": [
    215
   ],
   "backtrace--locals": [
-   310
+   311
   ],
   "backward-char": [
    163
@@ -180,39 +180,42 @@
    189
   ],
   "before-string": [
-   306
+   307
   ],
   "beginning-of-line": [
    163
   ],
   "bidi-display-reordering": [
-   241
+   242
   ],
   "bidi-paragraph-separate-re": [
-   241
+   242
   ],
   "bidi-paragraph-start-re": [
-   241
+   242
   ],
   "blink-cursor-mode": [
-   280
+   281
   ],
   "bool-vector": [
    96,
-   266
+   267
   ],
   "bool-vector-p": [
    96
   ],
+  "bottom-divider-width": [
+   220
+  ],
   "boundp": [
-   293
+   294
   ],
   "buffer-chars-modified-tick": [
    117
   ],
   "buffer-file-coding-system": [
    116,
-   312
+   313
   ],
   "buffer-file-name": [
    116
@@ -246,7 +249,7 @@
    23
   ],
   "buffer-text-pixel-size": [
-   244
+   245
   ],
   "buffer-undo-list": [
    189
@@ -254,7 +257,7 @@
   "byte-code-function-p": [
    48,
    49,
-   290
+   291
   ],
   "byte-compile": [
    49,
@@ -288,7 +291,7 @@
   ],
   "car": [
    58,
-   277
+   278
   ],
   "ccl-execute": [
    188
@@ -300,14 +303,14 @@
    58
   ],
   "ceiling": [
-   248
+   249
   ],
   "char-after": [
    58,
    194
   ],
   "char-category-set": [
-   274
+   275
   ],
   "char-code-property-description": [
    50
@@ -322,7 +325,7 @@
    64
   ],
   "char-property-alias-alist": [
-   244
+   245
   ],
   "char-syntax": [
    177
@@ -334,7 +337,7 @@
    89
   ],
   "char-width-table": [
-   244
+   245
   ],
   "characterp": [
    98
@@ -344,10 +347,10 @@
    60
   ],
   "cl-print-object": [
-   310
+   311
   ],
   "cl-type-of": [
-   309
+   310
   ],
   "clear-buffer-auto-save-failure": [
    11
@@ -392,7 +395,7 @@
    86
   ],
   "command-line-1": [
-   252
+   253
   ],
   "command-line-args": [
    101
@@ -401,13 +404,13 @@
    123
   ],
   "compare-strings": [
-   308
+   309
   ],
   "compiled-function-p": [
-   290
+   291
   ],
   "completion-styles completion-category-overrides romacs-completion--fido-fzf": [
-   232
+   233
   ],
   "compose-region-internal": [
    187
@@ -416,7 +419,7 @@
    187
   ],
   "composition": [
-   244
+   245
   ],
   "composition-function-table": [
    187
@@ -424,14 +427,14 @@
   "concat": [
    27,
    58,
-   255,
    256,
    257,
-   296
+   258,
+   297
   ],
   "condition-case": [
-   291,
-   298
+   292,
+   299
   ],
   "configure-info-directory": [
    109
@@ -451,7 +454,7 @@
   "copy-sequence": [
    89,
    124,
-   296
+   297
   ],
   "copy-syntax-table": [
    176
@@ -463,7 +466,7 @@
    161
   ],
   "current-bidi-paragraph-direction": [
-   241
+   242
   ],
   "current-buffer": [
    58
@@ -485,10 +488,10 @@
    3
   ],
   "current-load-list": [
-   297
+   298
   ],
   "current-message": [
-   237
+   238
   ],
   "current-prefix-arg": [
    86
@@ -513,7 +516,7 @@
    216
   ],
   "custom-reevaluate-setting": [
-   315
+   316
   ],
   "custom-set": [
    157
@@ -562,22 +565,22 @@
    60,
    119,
    122,
-   285,
-   287,
-   289
+   286,
+   288,
+   290
   ],
   "default-boundp": [
-   292
+   293
   ],
   "default-directory": [
    108
   ],
   "default-file-name-coding-system": [
-   312
+   313
   ],
   "default-value": [
-   292,
-   293
+   293,
+   294
   ],
   "defcustom": [
    157
@@ -590,30 +593,30 @@
    147,
    172,
    202,
-   317,
-   321
+   318,
+   322
   ],
   "define-category": [
-   274
+   275
   ],
   "define-ccl-program": [
    188
   ],
   "define-charset-internal": [
    185,
-   271
-  ],
-  "define-coding-system": [
-   312
-  ],
-  "define-coding-system-alias": [
    272
   ],
+  "define-coding-system": [
+   313
+  ],
+  "define-coding-system-alias": [
+   273
+  ],
   "define-error": [
-   286
+   287
   ],
   "define-fringe-bitmap": [
-   222
+   223
   ],
   "define-hash-table-test": [
    153
@@ -627,7 +630,7 @@
   ],
   "defun": [
    159,
-   287
+   288
   ],
   "defvar": [
    16,
@@ -636,11 +639,11 @@
    160
   ],
   "defvaralias": [
-   281,
-   284
+   282,
+   285
   ],
   "delete": [
-   296
+   297
   ],
   "delete-backward-char": [
    163
@@ -649,14 +652,14 @@
    163
   ],
   "delete-frame": [
-   225
+   226
   ],
   "delete-other-windows-internal": [
    218,
-   220
+   221
   ],
   "destroy-fringe-bitmap": [
-   222
+   223
   ],
   "ding": [
    164
@@ -674,7 +677,7 @@
    78
   ],
   "display": [
-   244
+   245
   ],
   "display-color-cells": [
    201,
@@ -696,16 +699,16 @@
    207
   ],
   "display-line-numbers": [
-   244
+   245
   ],
   "display-line-numbers-current-absolute": [
-   244
+   245
   ],
   "display-line-numbers-disable": [
-   244
+   245
   ],
   "display-line-numbers-width": [
-   244
+   245
   ],
   "display-mm-height": [
    201,
@@ -742,10 +745,10 @@
    207
   ],
   "display-warning": [
-   284
+   285
   ],
   "do-after-load-evaluation": [
-   297
+   298
   ],
   "do-auto-save": [
    11
@@ -755,10 +758,10 @@
   ],
   "downcase": [
    58,
-   308
+   309
   ],
   "downcase_char_code_emacs_compat": [
-   324
+   325
   ],
   "elt": [
    30,
@@ -767,16 +770,16 @@
    58
   ],
   "emacs-build-time": [
-   313
+   314
   ],
   "emacs-lisp-mode": [
    180
   ],
   "emacs_downcase_compat": [
-   324
+   325
   ],
   "enable-recursive-minibuffers": [
-   294
+   295
   ],
   "encode-coding-string": [
    13
@@ -803,28 +806,28 @@
   "error-message-string": [
    165,
    166,
-   276
+   277
   ],
   "ert--run-test-internal": [
-   310
+   311
   ],
   "esc-map": [
    161
   ],
   "escape-glyph": [
-   244
+   245
   ],
   "esh-util": [
    130
   ],
   "eval": [
    58,
-   277,
    278,
-   288
+   279,
+   289
   ],
   "eval-after-load": [
-   297
+   298
   ],
   "eval-buffer": [
    129,
@@ -844,7 +847,7 @@
   ],
   "eval-when-compile": [
    130,
-   278
+   279
   ],
   "eval_sub": [
    58
@@ -878,7 +881,7 @@
    58
   ],
   "face": [
-   244
+   245
   ],
   "face-attribute": [
    121,
@@ -889,23 +892,23 @@
    144,
    145,
    146,
-   317,
    318,
-   321
+   319,
+   322
   ],
   "face-family": [
    142,
-   320
+   321
   ],
   "face-font": [
    141,
-   319
+   320
   ],
   "face-remapping-alist": [
    136,
    145,
    146,
-   323
+   324
   ],
   "face-spec-set-match-display": [
    202
@@ -917,8 +920,8 @@
   ],
   "features": [
    101,
-   285,
-   299
+   286,
+   300
   ],
   "file-accessible-directory-p": [
    39
@@ -952,13 +955,13 @@
    115
   ],
   "find-auto-coding": [
-   312
+   313
   ],
   "find-composition": [
-   246
+   247
   ],
   "find-composition-internal": [
-   246
+   247
   ],
   "find-file": [
    0,
@@ -969,7 +972,7 @@
   ],
   "find-file-name-handler": [
    61,
-   305
+   306
   ],
   "find-file-noselect": [
    0
@@ -978,7 +981,7 @@
    209
   ],
   "fit-window-to-buffer": [
-   234
+   235
   ],
   "float-output-format": [
    183
@@ -990,7 +993,7 @@
    64
   ],
   "floor": [
-   248
+   249
   ],
   "font-at": [
    209
@@ -1017,7 +1020,7 @@
    209
   ],
   "fontification-functions": [
-   240
+   241
   ],
   "fontp": [
    209
@@ -1026,7 +1029,7 @@
    180
   ],
   "force-window-update": [
-   280
+   281
   ],
   "format": [
    83,
@@ -1035,17 +1038,17 @@
    107,
    125,
    132,
-   255,
-   304
+   256,
+   305
   ],
   "format-message": [
    87,
    125,
-   304
+   305
   ],
   "format-mode-line": [
    168,
-   279
+   280
   ],
   "format-time-string": [
    97
@@ -1057,52 +1060,58 @@
    177
   ],
   "frame--set-was-invisible": [
-   225
+   226
   ],
   "frame-after-make-frame": [
-   225
+   226
   ],
   "frame-ancestor-p": [
-   225
+   226
+  ],
+  "frame-bottom-divider-width": [
+   220
   ],
   "frame-char-height": [
-   221
-  ],
-  "frame-char-width": [
-   221
-  ],
-  "frame-focus": [
-   225
-  ],
-  "frame-fringe-width": [
    222
   ],
+  "frame-char-width": [
+   222
+  ],
+  "frame-focus": [
+   226
+  ],
+  "frame-fringe-width": [
+   223
+  ],
   "frame-initial-p": [
-   221
+   222
+  ],
+  "frame-internal-border-width": [
+   220
   ],
   "frame-list": [
-   224
+   225
   ],
   "frame-live-p": [
-   221
+   222
   ],
   "frame-native-height": [
-   221
+   222
   ],
   "frame-native-width": [
-   221
+   222
   ],
   "frame-notice-user-settings": [
    171
   ],
   "frame-parameter": [
-   283
+   284
   ],
   "frame-parameters": [
-   283
+   284
   ],
   "frame-parent": [
-   225
+   226
   ],
   "frame-pixel-height": [
    172
@@ -1111,49 +1120,52 @@
    172
   ],
   "frame-position": [
-   225
+   226
+  ],
+  "frame-right-divider-width": [
+   220
   ],
   "frame-root-window": [
-   234
+   235
   ],
   "frame-set-background-mode": [
    201,
    207
   ],
   "frame-terminal": [
-   224,
-   247
+   225,
+   248
   ],
   "frame-text-cols": [
-   225
+   226
   ],
   "frame-text-height": [
-   225
+   226
   ],
   "frame-text-lines": [
-   225
+   226
   ],
   "frame-text-width": [
-   225
+   226
   ],
   "frame-total-cols": [
-   225
+   226
   ],
   "frame-total-lines": [
-   225
+   226
   ],
   "frame-visible-p": [
-   228
+   229
   ],
   "framep": [
-   221,
-   224
+   222,
+   225
   ],
   "freeze": [
    17
   ],
   "fringe-bitmaps-at-pos": [
-   222
+   223
   ],
   "frozen-p": [
    17
@@ -1170,8 +1182,8 @@
    127,
    152,
    159,
-   275,
-   277
+   276,
+   278
   ],
   "funcall-interactively": [
    86
@@ -1184,7 +1196,7 @@
    153
   ],
   "function-history": [
-   285
+   286
   ],
   "function-key-map": [
    161
@@ -1196,7 +1208,7 @@
    44
   ],
   "gc-cons-threshold": [
-   294
+   295
   ],
   "gc-cons-threshold gc-cons-percentage garbage-collect": [
    42
@@ -1210,7 +1222,7 @@
   "get": [
    58,
    98,
-   286
+   287
   ],
   "get-buffer": [
    196,
@@ -1220,7 +1232,7 @@
    196
   ],
   "get-buffer-window": [
-   224
+   225
   ],
   "get-char-code-property": [
    50
@@ -1230,21 +1242,21 @@
   ],
   "get-load-suffixes": [
    88,
-   293,
-   295
+   294,
+   296
   ],
   "get-text-property": [
-   256,
-   257
+   257,
+   258
   ],
   "get-variable-watchers": [
-   282
+   283
   ],
   "global-map": [
    161
   ],
   "glyphless-char-display": [
-   244
+   245
   ],
   "gnu-lisp/": [
    58
@@ -1292,7 +1304,7 @@
    139
   ],
   "gui_produce_glyphs": [
-   244
+   245
   ],
   "handler-bind": [
    103
@@ -1307,7 +1319,7 @@
    219
   ],
   "iconify-frame": [
-   228
+   229
   ],
   "identity": [
    65
@@ -1322,16 +1334,16 @@
    119
   ],
   "indirect-variable": [
-   281
+   282
   ],
   "inhibit-debugger": [
    28
   ],
   "inhibit-file-name-handlers": [
-   305
+   306
   ],
   "inhibit-file-name-operation": [
-   305
+   306
   ],
   "inhibit-mouse-event-check": [
    86
@@ -1349,7 +1361,7 @@
    171
   ],
   "inline": [
-   289
+   290
   ],
   "input-pending-p": [
    78
@@ -1372,28 +1384,31 @@
    86
   ],
   "intern": [
-   258,
-   300,
+   259,
    301,
+   302,
+   303,
+   304
+  ],
+  "intern-soft": [
    302,
    303
   ],
-  "intern-soft": [
-   301,
-   302
+  "internal-border-width": [
+   220
   ],
   "internal-char-font": [
    209
   ],
   "internal-delete-indirect-variable": [
-   281
+   282
   ],
   "internal-interpreter-environment": [
    160
   ],
   "internal-macroexpand-for-load": [
-   287,
-   288
+   288,
+   289
   ],
   "internal-set-alternative-font-family-alist": [
    24,
@@ -1409,24 +1424,24 @@
    121
   ],
   "internal-show-cursor": [
-   280,
-   283
+   281,
+   284
   ],
   "internal-when-entered-debugger": [
    28
   ],
   "interpreted-function-p": [
    49,
-   290
+   291
   ],
   "invalid-function": [
    127
   ],
   "invocation-directory": [
-   252
+   253
   ],
   "invocation-name": [
-   252
+   253
   ],
   "isolate-await": [
    17
@@ -1463,7 +1478,7 @@
    19
   ],
   "jit-lock-function": [
-   240
+   241
   ],
   "kbd": [
    167
@@ -1494,10 +1509,10 @@
   ],
   "kill-emacs": [
    9,
-   252
+   253
   ],
   "kill-emacs-hook": [
-   252
+   253
   ],
   "kill-local-variable": [
    52,
@@ -1506,13 +1521,13 @@
   "lambda": [
    158,
    159,
-   275,
-   287,
-   291
+   276,
+   288,
+   292
   ],
   "last-coding-system-used": [
    116,
-   312
+   313
   ],
   "last-command": [
    86
@@ -1522,10 +1537,10 @@
    167
   ],
   "last-nonminibuffer-frame": [
-   224
+   225
   ],
   "latin-extra-code-table": [
-   312
+   313
   ],
   "length": [
    58,
@@ -1535,7 +1550,7 @@
    111,
    158,
    160,
-   293
+   294
   ],
   "let*": [
    111
@@ -1556,16 +1571,16 @@
    190
   ],
   "line-move-visual": [
-   242
+   243
   ],
   "line-number": [
-   244
+   245
   ],
   "line-number-display-width": [
-   244
+   245
   ],
   "line-pixel-height": [
-   242
+   243
   ],
   "lisp-eval-depth-reserve": [
    103
@@ -1588,9 +1603,9 @@
    120,
    133,
    160,
-   288,
-   298,
-   299
+   289,
+   299,
+   300
   ],
   "load eval-buffer eval-region": [
    34
@@ -1599,26 +1614,26 @@
    33
   ],
   "load-file-rep-suffixes": [
-   293,
-   295
+   294,
+   296
   ],
   "load-history": [
    129,
-   281,
-   285,
-   297
+   282,
+   286,
+   298
   ],
   "load-path": [
    101,
    102,
    112,
-   315
+   316
   ],
   "load-source-file-function": [
    120
   ],
   "load-suffixes": [
-   293
+   294
   ],
   "load-with-code-conversion": [
    120
@@ -1628,7 +1643,7 @@
   ],
   "locate-file-internal": [
    108,
-   305
+   306
   ],
   "locate-library": [
    102,
@@ -1651,15 +1666,15 @@
    178
   ],
   "lower-frame": [
-   225,
-   228
+   226,
+   229
   ],
   "macroexp--pending-eager-loads": [
-   288
+   289
   ],
   "macroexpand": [
-   278,
-   287
+   279,
+   288
   ],
   "main-thread": [
    199,
@@ -1674,33 +1689,33 @@
    70,
    95,
    96,
-   266
+   267
   ],
   "make-char-table": [
    89,
-   266
+   267
   ],
   "make-finalizer": [
    44
   ],
   "make-frame": [
-   225
+   226
   ],
   "make-frame-invisible": [
-   228
+   229
   ],
   "make-frame-visible": [
-   228
+   229
   ],
   "make-hash-table": [
    153
   ],
   "make-interpreted-closure": [
-   309
+   310
   ],
   "make-local-variable": [
    179,
-   294
+   295
   ],
   "make-lock-file-name": [
    9
@@ -1732,11 +1747,11 @@
   ],
   "make-string": [
    124,
-   296
+   297
   ],
   "make-symbol": [
    99,
-   300
+   301
   ],
   "make-symbolic-link": [
    7
@@ -1748,16 +1763,16 @@
   ],
   "make-variable-buffer-local": [
    179,
-   292,
-   294
+   293,
+   295
   ],
   "make-vector": [
-   266,
    267,
-   269
+   268,
+   270
   ],
   "makunbound": [
-   293
+   294
   ],
   "map-char-table": [
    89
@@ -1766,10 +1781,10 @@
    89
   ],
   "mapatoms": [
-   301
+   302
   ],
   "mapbacktrace": [
-   310
+   311
   ],
   "mapc": [
    65,
@@ -1819,16 +1834,16 @@
   ],
   "max-lisp-eval-depth": [
    103,
-   294
+   295
   ],
   "max-mini-window-height": [
-   306
+   307
   ],
   "member": [
    58
   ],
   "memory-signal-data": [
-   267
+   268
   ],
   "memq": [
    58
@@ -1849,20 +1864,20 @@
   "message": [
    132,
    164,
-   237
+   238
   ],
   "min": [
    58,
    83
   ],
   "minibuffer--sort-by-length-alpha minibuffer--sort-by-position": [
-   238
+   239
   ],
   "minibuffer-history": [
    77
   ],
   "minibuffer-local-map": [
-   293
+   294
   ],
   "minibuffer-prompt-properties": [
    77
@@ -1871,17 +1886,17 @@
    77
   ],
   "minibuffer-selected-window": [
-   226
+   227
   ],
   "minibuffer-window": [
-   234
+   235
   ],
   "mode-line-format": [
    156,
    168,
    170,
    219,
-   279
+   280
   ],
   "mode-line-in-non-selected-windows": [
    168
@@ -1890,25 +1905,25 @@
    168
   ],
   "modify-category-entry": [
-   274
+   275
   ],
   "modify-frame-parameters": [
-   283
+   284
   ],
   "modify-syntax-entry": [
    176
   ],
   "move-overlay": [
-   244
+   245
   ],
   "move-to-column": [
    3
   ],
   "move-to-window-line": [
-   251
+   252
   ],
   "move_it_to": [
-   244
+   245
   ],
   "native-comp-function-p": [
    62
@@ -1920,19 +1935,19 @@
    58
   ],
   "next-line": [
-   242
+   243
   ],
   "next-overlay-change": [
    148
   ],
   "next-property-change": [
-   311
+   312
   ],
   "next-single-char-property-change": [
-   311
+   312
   ],
   "nobreak-char-display": [
-   244
+   245
   ],
   "normal-top-level-add-to-load-path": [
    102
@@ -1941,10 +1956,10 @@
    58
   ],
   "not-unicode-string": [
-   258,
    259,
    260,
-   261
+   261,
+   262
   ],
   "notmuch": [
    114
@@ -1970,25 +1985,25 @@
    64
   ],
   "obarray-make": [
-   303
+   304
   ],
   "obarrayp": [
-   301
+   302
   ],
   "oclosure-type": [
-   309
+   310
   ],
   "optimize-char-table": [
    186
   ],
   "orderless-all-completions orderless-try-completion orderless-compile orderless-filter orderless--highlight": [
-   230
+   231
   ],
   "org-ellipsis": [
-   244
+   245
   ],
   "overlay-arrow-string": [
-   294
+   295
   ],
   "overlays-at": [
    148
@@ -1999,7 +2014,7 @@
    150
   ],
   "overriding-plist-environment": [
-   286
+   287
   ],
   "overwrite-mode": [
    189
@@ -2072,20 +2087,20 @@
    210
   ],
   "pos-visible-in-window-p": [
-   243
+   244
   ],
   "position-symbol": [
    63
   ],
   "posn-at-point": [
-   234,
-   243
+   235,
+   244
   ],
   "prefix-numeric-value": [
    86
   ],
   "previous-line": [
-   242
+   243
   ],
   "previous-overlay-change": [
    148
@@ -2095,8 +2110,8 @@
    182,
    183,
    184,
-   247,
-   300
+   248,
+   301
   ],
   "prin1-to-string": [
    66,
@@ -2105,16 +2120,16 @@
    181,
    183,
    184,
-   247,
-   265,
-   300
+   248,
+   266,
+   301
   ],
   "princ": [
    181,
    182,
    183,
    184,
-   265
+   266
   ],
   "print": [
    181,
@@ -2161,7 +2176,7 @@
    204
   ],
   "produce_glyphs": [
-   244
+   245
   ],
   "profiler-cpu-log": [
    59
@@ -2209,25 +2224,25 @@
    22
   ],
   "propertize": [
-   257,
-   268
+   258,
+   269
   ],
   "provide": [
-   285,
-   297,
-   299
+   286,
+   298,
+   300
   ],
   "purify-flag": [
-   309
+   310
   ],
   "push macroexp-let2 gv-letplace": [
    35
   ],
   "put": [
-   286
+   287
   ],
   "put-text-property": [
-   257
+   258
   ],
   "puthash": [
    18
@@ -2236,8 +2251,8 @@
    79
   ],
   "raise-frame": [
-   225,
-   228
+   226,
+   229
   ],
   "re-search-backward": [
    176,
@@ -2254,7 +2269,7 @@
    93,
    94,
    133,
-   256
+   257
   ],
   "read-char": [
    78
@@ -2281,8 +2296,8 @@
    93,
    94,
    133,
-   256,
-   303
+   257,
+   304
   ],
   "read-key-sequence": [
    78
@@ -2307,10 +2322,10 @@
    78
   ],
   "recenter": [
-   251
+   252
   ],
   "record": [
-   266
+   267
   ],
   "recordp": [
    37
@@ -2319,26 +2334,26 @@
    78
   ],
   "redirect-frame-focus": [
-   225
+   226
   ],
   "redisplay": [
    164,
-   239
+   240
   ],
   "redisplay-adhoc-scroll-in-resize-mini-windows": [
-   306
+   307
   ],
   "register-ccl-program": [
    188
   ],
   "relative": [
-   244
+   245
   ],
   "remhash": [
    18
   ],
   "remove-variable-watcher": [
-   282
+   283
   ],
   "rename-buffer": [
    196
@@ -2357,43 +2372,46 @@
   ],
   "require": [
    101,
-   285,
-   297,
+   286,
    298,
    299,
-   315
+   300,
+   316
   ],
   "reset": [
    144,
-   316
+   317
   ],
   "resize-mini-windows": [
-   306
+   307
   ],
   "restore-buffer-modified-p": [
    9
   ],
   "reverse": [
    70,
-   266
+   267
+  ],
+  "right-divider-width": [
+   220
   ],
   "rlisp/": [
    58
   ],
   "romacs--create-frame": [
-   225
+   226
   ],
   "romacs--host-input": [
    79
   ],
   "romacs--host-minibuffer": [
-   234
+   235
   ],
   "romacs--minibuffer-host": [
-   234
+   235
   ],
   "romacs--oclosure-type": [
-   309
+   310
   ],
   "romacs--read-host-event": [
    79
@@ -2402,41 +2420,65 @@
    53
   ],
   "romacs-animate--elements romacs--display-animates romacs--logo-frame romacs-animate-start": [
-   233
-  ],
-  "romacs-complete-mode": [
    234
   ],
-  "romacs-complete-mode fido-vertical-mode": [
+  "romacs-chrome-apply": [
+   220
+  ],
+  "romacs-chrome-state": [
+   220
+  ],
+  "romacs-classic-chrome": [
+   220
+  ],
+  "romacs-complete-mode": [
    235
+  ],
+  "romacs-complete-mode fido-vertical-mode": [
+   236
   ],
   "romacs-display": [
    201,
    207
   ],
   "romacs-echo-area-functions": [
-   237
+   238
   ],
   "romacs-fzf-all-completions romacs-fzf-try-completion romacs-completion-candidates": [
-   231
+   232
   ],
   "romacs-gui-install-command": [
    118
   ],
   "romacs-layer-animation romacs-layer-show": [
-   236
-  ],
-  "romacs-layer-toast": [
    237
   ],
+  "romacs-layer-toast": [
+   238
+  ],
+  "romacs-pane-border": [
+   220
+  ],
+  "romacs-pane-dim": [
+   220
+  ],
+  "romacs-pane-focus": [
+   220
+  ],
+  "romacs-pane-gap": [
+   220
+  ],
+  "romacs-pane-radius": [
+   220
+  ],
   "romacs-term": [
-   229
+   230
   ],
   "romacs-unsafe-coding": [
-   312
+   313
   ],
   "round": [
-   248
+   249
   ],
   "run-window-configuration-change-hook": [
    113
@@ -2461,7 +2503,7 @@
    169
   ],
   "scroll-down": [
-   251
+   252
   ],
   "scroll-margin": [
    169
@@ -2470,36 +2512,36 @@
    169
   ],
   "scroll-up": [
-   251
+   252
   ],
   "secure-hash": [
-   270
+   271
   ],
   "secure-hash-algorithms": [
-   270
+   271
   ],
   "select-frame": [
-   225
+   226
   ],
   "select-safe-coding-system": [
-   312
+   313
   ],
   "select-safe-coding-system-function": [
    116
   ],
   "select-safe-coding-system-interactively": [
-   312
+   313
   ],
   "selected-frame": [
    172,
-   224,
-   247
+   225,
+   248
   ],
   "selected-window": [
    172
   ],
   "selective-display": [
-   244
+   245
   ],
   "self-insert-command": [
    163,
@@ -2512,10 +2554,10 @@
   "set": [
    58,
    98,
-   293
+   294
   ],
   "set-auto-coding": [
-   312
+   313
   ],
   "set-buffer": [
    58
@@ -2530,7 +2572,7 @@
    194
   ],
   "set-buffer-redisplay": [
-   282
+   283
   ],
   "set-case-table": [
    67
@@ -2540,24 +2582,24 @@
    89
   ],
   "set-charset-priority": [
-   271
+   272
   ],
   "set-coding-system-priority": [
-   272,
-   312
+   273,
+   313
   ],
   "set-default": [
-   293
+   294
   ],
   "set-face-attribute": [
    121,
    140,
    141,
    142,
-   318,
    319,
    320,
-   322
+   321,
+   323
   ],
   "set-file-acl": [
    10
@@ -2569,19 +2611,19 @@
    7
   ],
   "set-frame-height": [
-   225
+   226
   ],
   "set-frame-position": [
-   225
+   226
   ],
   "set-frame-size": [
-   225
+   226
   ],
   "set-frame-width": [
-   225
+   226
   ],
   "set-fringe-bitmap-face": [
-   222
+   223
   ],
   "set-match-data": [
    85
@@ -2611,12 +2653,12 @@
    197
   ],
   "set-window-fringes": [
-   222,
-   225
+   223,
+   226
   ],
   "set-window-hscroll": [
-   227,
-   245
+   228,
+   246
   ],
   "set-window-new-total": [
    217
@@ -2628,11 +2670,11 @@
    216
   ],
   "set-window-scroll-bars": [
-   225
+   226
   ],
   "set-window-start": [
    169,
-   249
+   250
   ],
   "set-window-vscroll": [
    156,
@@ -2649,26 +2691,26 @@
    58
   ],
   "setf": [
-   291
+   292
   ],
   "setplist": [
-   286
+   287
   ],
   "setq": [
-   293
+   294
   ],
   "signal": [
-   298
+   299
   ],
   "signal-hook-function": [
    28,
    103
   ],
   "skip-chars-backward": [
-   325
+   326
   ],
   "skip-chars-forward": [
-   325
+   326
   ],
   "sleep-for": [
    198,
@@ -2678,21 +2720,21 @@
    26
   ],
   "source_string": [
-   259,
-   260
+   260,
+   261
   ],
   "special-event-map": [
    161
   ],
   "special-form-p": [
-   289
+   290
   ],
   "special-variable-p": [
    100,
-   293
+   294
   ],
   "split-window-internal": [
-   253
+   254
   ],
   "standard-case-table": [
    47
@@ -2713,7 +2755,7 @@
    104
   ],
   "string-glyph-split": [
-   246
+   247
   ],
   "string-match": [
    176,
@@ -2756,7 +2798,7 @@
   "substring": [
    58,
    124,
-   296
+   297
   ],
   "supports": [
    139
@@ -2776,16 +2818,16 @@
    131
   ],
   "symbol-name": [
-   302
+   303
   ],
   "symbol-plist": [
    16,
-   286
+   287
   ],
   "symbol-value": [
    29,
    58,
-   293
+   294
   ],
   "symbol-with-pos-p": [
    63
@@ -2806,40 +2848,40 @@
    58
   ],
   "tab-bar-height": [
-   223
+   224
   ],
   "tab-width": [
    3,
-   244
+   245
   ],
   "terminal-list": [
-   224
+   225
   ],
   "terminal-live-p": [
-   221,
-   224,
-   273
+   222,
+   225,
+   274
   ],
   "terminal-parameter": [
-   273
+   274
   ],
   "terpri": [
    182
   ],
   "test-completion": [
-   307,
-   308
+   308,
+   309
   ],
   "text": [
-   244
+   245
   ],
   "text-properties-at": [
    93,
-   257,
-   268
+   258,
+   269
   ],
   "text-quoting-style": [
-   304
+   305
   ],
   "thaw": [
    17
@@ -2887,41 +2929,41 @@
    192
   ],
   "truncate": [
-   248
+   249
   ],
   "truncate-lines": [
    180
   ],
   "try-completion": [
-   307,
-   308
+   308,
+   309
   ],
   "tty-color-alist": [
    201,
    207
   ],
   "tty-top-frame": [
-   224
+   225
   ],
   "undefined": [
    78,
    164
   ],
   "undo-limit": [
-   294
+   295
   ],
   "unibyte-display-via-language-environment": [
-   244
+   245
   ],
   "unicode-property-table-internal": [
    50
   ],
   "unify-charset": [
-   271
+   272
   ],
   "unintern": [
-   301,
-   302
+   302,
+   303
   ],
   "unlock-file": [
    9
@@ -2932,7 +2974,7 @@
   ],
   "upcase": [
    58,
-   308
+   309
   ],
   "upcase-initials": [
    67
@@ -2952,7 +2994,7 @@
    26
   ],
   "vconcat": [
-   266
+   267
   ],
   "vector": [
    124
@@ -2964,11 +3006,11 @@
    116
   ],
   "vertical-motion": [
-   242
+   243
   ],
   "visible-frame-list": [
-   225,
-   228
+   226,
+   229
   ],
   "visited-file-modtime": [
    106,
@@ -2981,13 +3023,14 @@
    128
   ],
   "window": [
-   244
+   245
   ],
   "window-at": [
-   234
+   235
   ],
   "window-bottom-divider-width": [
-   219
+   219,
+   220
   ],
   "window-buffer": [
    172
@@ -2996,7 +3039,7 @@
    113
   ],
   "window-combination-limit": [
-   224
+   225
   ],
   "window-configuration-change-hook": [
    113
@@ -3010,21 +3053,24 @@
   "window-display-table": [
    197
   ],
+  "window-divider-mode": [
+   220
+  ],
   "window-end": [
-   250
+   251
   ],
   "window-fringes": [
-   222
+   223
   ],
   "window-header-line-height": [
    219
   ],
   "window-hscroll": [
-   227,
-   245
+   228,
+   246
   ],
   "window-list": [
-   224
+   225
   ],
   "window-mode-line-height": [
    219
@@ -3036,7 +3082,7 @@
    113
   ],
   "window-persistent-parameters": [
-   293
+   294
   ],
   "window-point": [
    172,
@@ -3049,7 +3095,8 @@
    217
   ],
   "window-right-divider-width": [
-   219
+   219,
+   220
   ],
   "window-scroll-bar-height": [
    219
@@ -3067,7 +3114,7 @@
    169,
    172,
    215,
-   220
+   221
   ],
   "window-state-change-functions": [
    113
@@ -3078,13 +3125,13 @@
   "window-system": [
    203,
    208,
-   221
+   222
   ],
   "window-tab-line-height": [
    219
   ],
   "window-text-pixel-size": [
-   244
+   245
   ],
   "window-total-height": [
    217
@@ -3094,13 +3141,13 @@
    168
   ],
   "window_text_pixel_size": [
-   244
+   245
   ],
   "with-eval-after-load": [
-   297
+   298
   ],
   "with-output-to-string": [
-   265
+   266
   ],
   "with-snapshot-buffer": [
    17
@@ -3109,10 +3156,10 @@
    214
   ],
   "word-wrap": [
-   244
+   245
   ],
   "word-wrap-by-category": [
-   244
+   245
   ],
   "write-char": [
    182
@@ -3125,10 +3172,10 @@
    131
   ],
   "wrong-type-argument": [
-   276
+   277
   ],
   "x-focus-frame": [
-   228
+   229
   ],
   "x-gtk-launch-uri": [
    208
@@ -7091,7 +7138,7 @@
    "planned": false,
    "mechanism": "`window-mode-line-height`, `window-header-line-height`, decoration widths",
    "gnu": "GNU `window_wants_mode_line` (`src/window.c:6037`) reads WINDOW's buffer's `mode-line-format`, whose C default is `\"%-\"` (`src/buffer.c`), and `window_wants_header_line` likewise reads `header-line-format`; a header line is one line tall",
-   "romacs": "VM2 answers from what its display draws: a mode line one canonical line tall from WINDOW's buffer's `mode-line-format` (as `display.rs` paints it), honouring the window's `mode-line-format` parameter and `none`; a header line as GNU's `window_wants_header_line` decides it, from the window's `header-line-format` parameter or its buffer's value, one canonical line tall, or once a host lays the frame out the height the host paints it (`tests/header_line.rs` against pinned GNU, `romacs-vm-gui` `measure.rs` against the paint); no tab line, scroll bars or dividers (all 0). `mode-line-format` has buffer.c's default `\"%-\"`, so a bare VM2's windows want a mode line as GNU's do. Pin `window-header-line-height/0010` (VALUE: the backend line's pixels, VM2-WIN5)",
+   "romacs": "VM2 answers from what its display draws: a mode line one canonical line tall from WINDOW's buffer's `mode-line-format` (as `display.rs` paints it), honouring the window's `mode-line-format` parameter and `none`; a header line as GNU's `window_wants_header_line` decides it, from the window's `header-line-format` parameter or its buffer's value, one canonical line tall, or once a host lays the frame out the height the host paints it (`tests/header_line.rs` against pinned GNU, `romacs-vm-gui` `measure.rs` against the paint); no tab line or scroll bars (both 0). Window dividers and the internal border are GNU's: a window-system frame's `right-divider-width`, `bottom-divider-width` and `internal-border-width` parameters, `window-right-divider-width` and `window-bottom-divider-width` by GNU's position rule (window.h:707: no right divider at the root's right edge; every ordinary window of the root frame keeps a bottom divider, the mini-window none), subtracted from bodies, and the windows tiling the text area inside the border (VM2-PANE-CHROME). `mode-line-format` has buffer.c's default `\"%-\"`, so a bare VM2's windows want a mode line as GNU's do. Pin `window-header-line-height/0010` (VALUE: the backend line's pixels, VM2-WIN5)",
    "why": "**Package-observable**: body sizes computed from these heights match what VM2 draws, not what GNU would draw, in a bare VM",
    "symbols": [
     "window-mode-line-height",
@@ -7103,6 +7150,37 @@
     "window-bottom-divider-width",
     "mode-line-format",
     "header-line-format"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-PANE-CHROME",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "How the root frame's windows look; frame resizes",
+   "gnu": "GNU draws window dividers in the `window-divider` faces and the internal border in `internal-border`, with square windows; `frame-inhibit-implied-resize` or the window manager decides whether a parameter change keeps the native size; a frame resize resizes the root window's children through window.el's `window--resize-root-window` (window.c:5046)",
+   "romacs": "On a window system the root frame's windows are panes (`rlisp/romacs-chrome.el`, modern by default, never in batch): `romacs-pane-gap` (6) sets GNU's `right-divider-width`, `bottom-divider-width` and `internal-border-width` on the root frame, so every window edge, body, minimum size, split, balance and fit is GNU's answer for a GNU frame with those parameters (`tests/frame_chrome.rs` and `tests/window_text_pixel_size.rs` against pinned GNU X11, `frame_chrome.gnu`, `window_dividers.gnu`); the gap shows the frame background, not the divider faces. Paint only, inside each window's box and changing no number any primitive returns: corners rounded by `romacs-pane-radius` (6), a one-device-pixel hairline in `romacs-pane-border` (the background lifted 15% toward the foreground), the selected window's edge in `romacs-pane-focus` (`romacs-layer-glow`'s colour) instead, and every other window but the mini-window blended `romacs-pane-dim` (0.12, at most 0.3) toward the frame background; while the mini-window is selected the edge stays on the window selected last. They reach the display as the root frame's `romacs-pane-radius`, `romacs-pane-dim`, `romacs-pane-focus` and `romacs-pane-border` parameters; `romacs-chrome-state` reports them. `romacs-classic-chrome` sets every value to 0 and turns `window-divider-mode` off: GNU's look, with the geometry of a GNU frame without dividers or border (`classic_chrome_is_todays_geometry`). The root frame keeps its native size when a parameter changes, as a tiled or maximized GNU frame does. A change of the text area resizes the root window's children through GNU's `window--resize-root-window` where window.el is loaded, then Romacs places them (`uneven_resize_cycles_keep_sibling_sums_and_bodies`). The chrome is drawn from the layout's rectangles; the GUI host publishes no pane motion yet, so nothing animates a pane. Romacs has no `posn-at-x-y` and delivers no pointer events to windows, so a divider's `right-divider` / `bottom-divider` posn area and dragging a divider are not available. Each window's mode line keeps GNU's `mode-line-active` / `-inactive` cue",
+   "why": "**User-observable** (the look) and **package-observable** only through GNU's own divider and border parameters, whose values GNU frames take too",
+   "symbols": [
+    "romacs-pane-gap",
+    "romacs-pane-radius",
+    "romacs-pane-dim",
+    "romacs-pane-focus",
+    "romacs-pane-border",
+    "romacs-classic-chrome",
+    "romacs-chrome-state",
+    "romacs-chrome-apply",
+    "frame-right-divider-width",
+    "frame-bottom-divider-width",
+    "frame-internal-border-width",
+    "window-right-divider-width",
+    "window-bottom-divider-width",
+    "window-divider-mode",
+    "right-divider-width",
+    "bottom-divider-width",
+    "internal-border-width"
    ],
    "symbols_derived": false
   },
@@ -7213,8 +7291,8 @@
    "observable": true,
    "planned": false,
    "mechanism": "Child frames (`make-frame` with `parent-frame`)",
-   "gnu": "A window system's `x-create-frame` (pgtkfns.c:1197) makes top-level and child frames; a child frame is a window-system window inside its parent's, with its own minibuffer unless told otherwise, fringes, scroll bars and tool bars as its parameters say, placed and stacked by the toolkit (`z-group` above or below its siblings), receiving pointer events; `delete-frame` runs `delete-frame-functions` for each descendant it deletes; a child frame's text area is at least `window-min-height` lines unless its `min-height` parameter is a number; X applies size requests asynchronously",
-   "romacs": "Every frame `make-frame` makes is a child frame (`romacs--create-frame`, reached through romacs-pgtk.el's `frame-creation-function` method; without a `parent-frame` it signals), painted by the host as a separate layer over the root frame in creation order (raise/lower restack siblings; `z-group` is stored, not read), with its text inside its `child-frame-border-width` (else `internal-border-width`) border on its `background-color` (a `#RRGGBB` parameter) or the default face's background. It shares its parent's minibuffer window, which one child frame may host and draw (`romacs--host-minibuffer`, VM2-MINI-COMPLETION-LAYER), and has no scroll bars, menu, tool or tab bar of its own (its fringes are its `left-fringe` and `right-fringe` parameters'); its size is in the session's character cell, at least one line of two columns; position parameters take integers (negative from the far edge), `(+ N)`, `(- N)` and fractions. The queries packages observe match pinned GNU X11 (`frame-list` newest first, `visible-frame-list`, `frame-parent`, `frame-ancestor-p`, `frame-root-window`, `frame-selected-window`, `selected-window` per frame, `select-frame`/`select-window` across frames, `window-frame`, `window-list`, `next-window`/`previous-window`, `get-buffer-window` ALL-FRAMES, `frame-parameter(s)`, `frame-position`, `set-frame-position`, `set-frame-size`, `modify-frame-parameters` geometry and visibility, `delete-frame` and its hooks, `redirect-frame-focus`): `crates/romacs-vm/tests/child_frames.rs` against `child_frames.gnu` (pinned GNU X11 on Xvfb, `child_frames_oracle.py`). Showing, moving, resizing or hiding a child frame never resizes a window of its parent or a terminal; window configurations are the host frame's. A child frame's cursor is drawn only while one of its windows is selected. A child frame starts with a copy of each of its parent's faces (`romacs--create-frame`), what `x-create-frame-with-faces` computes for a frame on the same display, so `copy-face` and `face-attribute` work on it; the bare primitive therefore answers for named faces where GNU's bare `x-create-frame` has only `default` (`tests/child_frames.rs` `a_child_frame_has_its_parents_faces`). A child frame's `background-color` is its default face's background, so text with an unspecified background shows it (frame.c `gui_set_background_color`); `face-remapping-alist` is not applied to any frame yet. Romacs's own parameters `romacs-layer-radius`, `romacs-layer-glow` and `romacs-layer-shadow` round a layer's corners (leaving its border as unpainted padding) and light it (VM2-ECHO-LAYER, VM2-MINI-COMPLETION-LAYER). Pointer events over a child frame are not delivered to it (the GUI host delivers no pointer events to Lisp yet), descendants are deleted without their own `delete-frame-functions`, and `window-size-change-functions` and `window-configuration-change-hook` do not run for a child frame (Romacs runs `window-size-change-functions` from redisplay when a window's size changed, as GNU does: `rlisp/vm/window-change.el`)",
+   "gnu": "A window system's `x-create-frame` (pgtkfns.c:1197) makes top-level and child frames; a child frame is a window-system window inside its parent's, with its own minibuffer unless told otherwise, fringes, scroll bars and tool bars as its parameters say, placed and stacked by the toolkit (`z-group` above or below its siblings) relative to its parent's native origin, receiving pointer events; `delete-frame` runs `delete-frame-functions` for each descendant it deletes; a child frame's text area is at least `window-min-height` lines unless its `min-height` parameter is a number; X applies size requests asynchronously",
+   "romacs": "Every frame `make-frame` makes is a child frame (`romacs--create-frame`, reached through romacs-pgtk.el's `frame-creation-function` method; without a `parent-frame` it signals), painted by the host as a separate layer over the root frame in creation order, placed from the root frame's native origin, outside its internal border (VM2-PANE-CHROME), as GNU places it (raise/lower restack siblings; `z-group` is stored, not read), with its text inside its `child-frame-border-width` (else `internal-border-width`) border on its `background-color` (a `#RRGGBB` parameter) or the default face's background. It shares its parent's minibuffer window, which one child frame may host and draw (`romacs--host-minibuffer`, VM2-MINI-COMPLETION-LAYER), and has no scroll bars, menu, tool or tab bar of its own (its fringes are its `left-fringe` and `right-fringe` parameters'); its size is in the session's character cell, at least one line of two columns; position parameters take integers (negative from the far edge), `(+ N)`, `(- N)` and fractions. The queries packages observe match pinned GNU X11 (`frame-list` newest first, `visible-frame-list`, `frame-parent`, `frame-ancestor-p`, `frame-root-window`, `frame-selected-window`, `selected-window` per frame, `select-frame`/`select-window` across frames, `window-frame`, `window-list`, `next-window`/`previous-window`, `get-buffer-window` ALL-FRAMES, `frame-parameter(s)`, `frame-position`, `set-frame-position`, `set-frame-size`, `modify-frame-parameters` geometry and visibility, `delete-frame` and its hooks, `redirect-frame-focus`): `crates/romacs-vm/tests/child_frames.rs` against `child_frames.gnu` (pinned GNU X11 on Xvfb, `child_frames_oracle.py`). Showing, moving, resizing or hiding a child frame never resizes a window of its parent or a terminal; window configurations are the host frame's. A child frame's cursor is drawn only while one of its windows is selected. A child frame starts with a copy of each of its parent's faces (`romacs--create-frame`), what `x-create-frame-with-faces` computes for a frame on the same display, so `copy-face` and `face-attribute` work on it; the bare primitive therefore answers for named faces where GNU's bare `x-create-frame` has only `default` (`tests/child_frames.rs` `a_child_frame_has_its_parents_faces`). A child frame's `background-color` is its default face's background, so text with an unspecified background shows it (frame.c `gui_set_background_color`); `face-remapping-alist` is not applied to any frame yet. Romacs's own parameters `romacs-layer-radius`, `romacs-layer-glow` and `romacs-layer-shadow` round a layer's corners (leaving its border as unpainted padding) and light it (VM2-ECHO-LAYER, VM2-MINI-COMPLETION-LAYER). Pointer events over a child frame are not delivered to it (the GUI host delivers no pointer events to Lisp yet), descendants are deleted without their own `delete-frame-functions`, and `window-size-change-functions` and `window-configuration-change-hook` do not run for a child frame (Romacs runs `window-size-change-functions` from redisplay when a window's size changed, as GNU does: `rlisp/vm/window-change.el`)",
    "why": "**Package-observable:** posframe-style and keymap-popup's child-frame code runs and paints (`harness/popup_live.py --child-frame`, `--which-key` through `romacs-layer.el`), but a top-level frame cannot be made, a popup can be smaller than GNU allows, and it cannot be clicked",
    "symbols": [
     "make-frame",
@@ -7307,7 +7385,7 @@
    "planned": false,
    "mechanism": "Terminal pty size under a grown mini-window",
    "gnu": "`term.el` and eat resize their pty through `window-adjust-process-window-size-function` on every window size change, so a minibuffer that grows for fido-vertical or icomplete candidates shrinks the shell's grid and restores it on exit (pinned GNU `-nw` with `term` in a 40-row tty: `stty size` 37, then 29 during `C-x C-f`, then 37)",
-   "romacs": "`romacs-term`'s pty follows its controlling window's stable body: its size with a one-line mini-window, or with none while a layer hosts the minibuffer (VM2-MINI-COMPLETION-LAYER) (`window.rs` `stable_window_body`), reconciled at every geometry publication for every terminal (`terminal_host.rs` `reconcile_terminal_geometry`). The controlling window is the selected window (the one a minibuffer was entered from, while it is selected) when it shows the terminal, else the first window showing it in tree order; a hidden terminal keeps its size. The pty changes size on a host resize, a split, a delete or a switch of controlling window, never for the mini-window. While a grown mini-window covers the grid's bottom rows, the window shows the grid from the row that keeps the cursor's row last, and from the grid's first row again once restored. `tests/terminal_host.rs`; `harness/terminal_live.py --prompt-grow`",
+   "romacs": "`romacs-term`'s pty follows its controlling window's stable body: its size with a one-line mini-window, or with none while a layer hosts the minibuffer (VM2-MINI-COMPLETION-LAYER) (`window.rs` `stable_window_body`), less its bottom divider (VM2-PANE-CHROME), reconciled at every geometry publication for every terminal (`terminal_host.rs` `reconcile_terminal_geometry`). The controlling window is the selected window (the one a minibuffer was entered from, while it is selected) when it shows the terminal, else the first window showing it in tree order; a hidden terminal keeps its size. The pty changes size on a host resize, a split, a delete or a switch of controlling window, never for the mini-window. While a grown mini-window covers the grid's bottom rows, the window shows the grid from the row that keeps the cursor's row last, and from the grid's first row again once restored. `tests/terminal_host.rs`; `harness/terminal_live.py --prompt-grow`",
    "why": "**User-observable** (the shell sees no SIGWINCH for a prompt, as in Alacritty), and to a package only through `stty size`/`LINES` in the child",
    "symbols": [
     "romacs-term"
