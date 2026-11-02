@@ -125,10 +125,14 @@ impl Vm {
         // form made are retired once unreachable, as for any request. Code
         // compiled per call and never retired grew every collection's walk.
         let saved = std::mem::replace(&mut self.dynamic_scope, lexical == Value::NIL);
-        // GNU's `eval' interprets: macros expand as evaluation reaches them.
-        let saved_reach = std::mem::replace(&mut self.reach_expansion, true);
+        // GNU's `eval' interprets, expanding each macro call at its reach:
+        // an expansion that escapes defers there, and a definition's body
+        // compiles at its first call.
+        let saved_evaluating = std::mem::replace(&mut self.evaluating, true);
+        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
         let compiled = self.compile_request(&form);
-        self.reach_expansion = saved_reach;
+        self.defer_expansion_errors = saved_defer;
+        self.evaluating = saved_evaluating;
         self.dynamic_scope = saved;
         let (function, _) = compiled?;
         self.propagate_next = true;

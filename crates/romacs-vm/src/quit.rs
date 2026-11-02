@@ -158,6 +158,7 @@ impl Vm {
             return Some(Escape::Throw(flag, Value::TRUE));
         }
         let quit = self.intern("quit");
+        self.async_quit = true;
         Some(Escape::Signal(quit, Value::NIL))
     }
 

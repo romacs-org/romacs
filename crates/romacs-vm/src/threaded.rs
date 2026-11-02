@@ -1864,6 +1864,7 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
 fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
     if crate::host::interrupt_pending() && isolate_quit(e) {
         // A signal, not an engine failure: `condition-case' catches it.
+        e.vm.async_quit = true;
         return Some(raise(e, "quit", &[]));
     }
     let escape = e.vm.maybe_quit()?;
