@@ -2018,10 +2018,6 @@ pub fn catch_user_signals() -> io::Result<()> {
     }
     Ok(())
 }
-/// Whether a user signal waits to be read.
-pub fn user_signal_pending() -> bool {
-    USER_SIGNALS.iter().any(|count| count.load(std::sync::atomic::Ordering::SeqCst) > 0)
-}
 /// A pending user signal's event, SIGUSR2's first, taking it.
 pub fn take_user_signal() -> Option<&'static str> {
     USER_SIGNALS.iter().zip(USER_SIGNAL_EVENTS).find_map(|(count, (_, event))| {
