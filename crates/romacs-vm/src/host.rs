@@ -627,6 +627,28 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
+/// The runtime tree (gnu-lisp/, rlisp/, etc/): `ROMACS_RUNTIME_ROOT` (the Nix
+/// wrapper sets it), else `share/romacs` beside the real executable's `bin/`
+/// (an unpacked release tarball, wherever it lives), else [`build_root`].
+pub fn runtime_root() -> PathBuf {
+    getenv("ROMACS_RUNTIME_ROOT").map(PathBuf::from)
+        .or_else(|| installed_root(&current_exe().ok()?))
+        .unwrap_or_else(build_root)
+}
+
+/// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
+/// `gnu-lisp/` directory.
+pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
+    let root = exe.parent()?.parent()?.join("share/romacs");
+    metadata(root.join("gnu-lisp")).is_ok_and(|m| m.is_dir()).then_some(root)
+}
+
+/// The checkout this crate was built from: a compile-time path that no
+/// installed system has, kept for development binaries under `target/`.
+pub(crate) fn build_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
 /// A read of environment NAME through FORM: a K name is recorded with its
 /// launch VALUE, a P name is a P read.
 fn env_read(form: &str, name: &[u8], value: Option<&OsString>) {
@@ -2396,6 +2418,18 @@ mod tests {
         }
     }
     use super::*;
+
+    /// An unpacked release finds its runtime tree beside its `bin/`; a
+    /// development binary under `target/` has none there.
+    #[test]
+    fn installed_root_is_share_romacs_beside_bin() {
+        let prefix = std::env::temp_dir().join(format!("romacs-installed-root-{}", std::process::id()));
+        let exe = prefix.join("bin/romacs-vm-gui");
+        assert_eq!(installed_root(&exe), None);
+        std::fs::create_dir_all(prefix.join("share/romacs/gnu-lisp")).unwrap();
+        assert_eq!(installed_root(&exe), Some(prefix.join("share/romacs")));
+        std::fs::remove_dir_all(&prefix).unwrap();
+    }
 
     #[test]
     fn passwd_keeps_absent_fields_absent() {

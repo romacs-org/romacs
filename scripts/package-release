@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# package-release -- assemble and archive a relocatable Linux release.
+#
+#   scripts/package-release NAME BIN_DIR OUT_DIR
+#
+# BIN_DIR holds builds of romacs-vm-gui and romacs-mcp. Writes
+# OUT_DIR/NAME.tar.gz, which unpacks to NAME/:
+#
+#   bin/romacs-vm-gui  bin/romacs -> romacs-vm-gui  bin/romacs-mcp
+#   share/romacs/{gnu-lisp,rlisp,etc}  share/applications  share/icons
+#
+# The binary finds share/romacs beside its bin/ (host::runtime_root), so the
+# tree works wherever it is unpacked. scripts/ci/smoke-release checks the
+# archive itself.
+set -euo pipefail
+
+if (($# != 3)); then
+    echo "usage: $0 NAME BIN_DIR OUT_DIR" >&2
+    exit 2
+fi
+name=$1
+bin_dir=$(cd "$2" && pwd)
+mkdir -p "$3"
+out_dir=$(cd "$3" && pwd)
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+stage=$out_dir/$name
+
+if [ -e "$stage" ] || [ -e "$stage.tar.gz" ]; then
+    echo "package-release: $stage or its archive already exists" >&2
+    exit 1
+fi
+
+install -D -m 0755 "$bin_dir/romacs-vm-gui" "$stage/bin/romacs-vm-gui"
+install -D -m 0755 "$bin_dir/romacs-mcp" "$stage/bin/romacs-mcp"
+ln -s romacs-vm-gui "$stage/bin/romacs"
+mkdir -p "$stage/share/romacs"
+cp -r "$repo/gnu-lisp" "$repo/rlisp" "$repo/etc" "$stage/share/romacs/"
+bash "$repo/scripts/install-linux-desktop-assets.sh" "$stage"
+cp "$repo/COPYING" "$stage/"
+
+tar -C "$out_dir" --sort=name --owner=0 --group=0 --numeric-owner \
+    -czf "$stage.tar.gz" "$name"
+echo "package-release: wrote $stage.tar.gz"
