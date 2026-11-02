@@ -5,6 +5,8 @@ use crate::{coordinates::ByteOffset, data::Object, overlay_order::SortItem, *};
 mod tests;
 #[path = "mode_line.rs"]
 mod mode_line;
+#[path = "status_bar.rs"]
+mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
 pub(crate) use mini_window::buffer_of;
@@ -177,8 +179,10 @@ pub(super) struct DisplayState {
     pub(super) height: u32,
     building_band: bool,
     diagnostics: std::cell::RefCell<Vec<String>>,
+    /// The text the status bar last showed (`romacs-status-bar-string').
+    pub(super) status_bar_text: Option<String>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, version, hosted, width, height, building_band, diagnostics });
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, version, hosted, width, height, building_band, diagnostics, status_bar_text });
 impl DisplayState {
     /// The theme with every pending face edit applied: built once for them
     /// all, or, when that fails, one edit at a time, so an edit the theme
@@ -312,6 +316,7 @@ impl DisplayState {
             height: 0,
             building_band: false,
             diagnostics: Default::default(),
+            status_bar_text: None,
         }
     }
 }
@@ -489,7 +494,15 @@ impl Vm {
         if !self.redisplay_inhibited()? { self.run_window_change_functions()?; }
         let font_alternatives = self.font_alternative_state()?;
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
-        let windows = self.frame_window_snapshots(width, height)?.into_iter().map(place).collect();
+        let mut windows = self.frame_window_snapshots(width, height)?;
+        // The bar is laid out around once more when its row's height changed.
+        let mut status_bar = self.status_bar_snapshot()?;
+        if self.refit_status_bar(status_bar.as_ref())? {
+            windows = self.frame_window_snapshots(width, height)?;
+            status_bar = self.status_bar_snapshot()?;
+        }
+        let status_bar = self.status_bar_shown(status_bar);
+        let windows = windows.into_iter().map(place).collect();
         let children = self.child_frame_snapshots();
         // Child windows measured with their own sizes; the frame's stand.
         self.display_state.width = width;
@@ -497,13 +510,13 @@ impl Vm {
         let background_alpha = self.frame_background_alpha()?;
         let tab_bar = self.tab_bar_snapshot()?;
         let chrome = self.pane_chrome()?;
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome })
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar })
     }
     /// The host frame's pane chrome, from its `romacs-pane-radius',
     /// `romacs-pane-dim', `romacs-pane-focus' and `romacs-pane-border'
     /// parameters (rlisp/romacs-chrome.el): the window with the focus edge
-    /// is the frame's selected window, or while the mini-window is
-    /// selected the ordinary window selected last (VM2-PANE-CHROME).
+    /// is the one the status bar shows (`status_bar_owner'), whether or
+    /// not the frame shows one (VM2-PANE-CHROME).
     fn pane_chrome(&mut self) -> Result<romacs_layout_input::FrameChrome> {
         let frame = self.host_frame_peek();
         let radius = self.frame_parameter_of(frame, "romacs-pane-radius")?
@@ -514,12 +527,8 @@ impl Vm {
         }.clamp(0.0, 1.0);
         let focus = self.frame_hex_parameter(frame, "romacs-pane-focus")?;
         let border = self.frame_hex_parameter(frame, "romacs-pane-border")?;
-        let selected = self.frame(frame)?.selected;
-        let selected = if self.window(selected)?.mini {
-            self.leaf_windows()?.into_iter().filter_map(|w| self.window(w).ok()).max_by_key(|w| w.use_time).map_or(0, |w| w.id)
-        } else {
-            self.window(selected)?.id
-        };
+        let selected = self.status_bar_owner()?.0;
+        let selected = self.window(selected)?.id;
         let minibuffer = self.window(self.mini_window())?.id;
         Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, selected, minibuffer })
     }
@@ -1053,16 +1062,18 @@ impl Vm {
         self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None });
         Ok(snapshot)
     }
-    /// WINDOW, showing BUFFER, paints a mode line: it is no mini-window and
-    /// BUFFER's `mode-line-format' is non-nil (redisplay_window_inner).
-    fn window_has_mode_line(&mut self, window: Value, buffer: Value) -> Result<bool> {
-        if self.window(window)?.mini { return Ok(false); }
-        let saved = self.slots[self.buffer_slot].value;
-        self.slots[self.buffer_slot].value = buffer;
-        let slot = self.slot("mode-line-format");
-        let format = self.variable_value(slot);
-        self.slots[self.buffer_slot].value = saved;
-        Ok(!matches!(format?, Value::NIL | Value::UNBOUND))
+    /// The format WINDOW's mode-line band expands, converted: GNU's
+    /// (`window_mode_line_format') for a window that wants one, or under
+    /// the pane label `name' `romacs-pane-label-format' (VM2-STATUS-BAR).
+    fn window_band_format(&mut self, window: Value) -> Result<Option<Form>> {
+        if !self.window_wants_mode_line(window)? { return Ok(None); }
+        let value = if self.pane_label(window) == crate::frame::PaneLabel::Name {
+            let slot = self.slot("romacs-pane-label-format");
+            match self.variable_value(slot)? { Value::UNBOUND => return Ok(Some(Form::String("%b".into()))), label => label }
+        } else {
+            self.window_mode_line_format(window)?.unwrap_or(Value::NIL)
+        };
+        Ok(Some(self.mode_line_form(value)))
     }
     /// The mode line, or with HEADER the header line, WINDOW paints now
     /// and its face: the last painted band while it still has one, else one
@@ -1070,11 +1081,11 @@ impl Vm {
     /// CURRENT_HEADER_LINE_HEIGHT).
     fn painted_band(&mut self, window: Value, header: bool) -> Result<(Option<TextSlice>, FaceHandle)> {
         let w = self.window(window)?;
-        let (id, buffer) = (w.id, w.buffer);
+        let id = w.id;
         let wants = if header {
             crate::window::Windows::new(self).header_line_format(window).map_err(crate::forwarded::fault_text)? != Value::NIL
         } else {
-            self.window_has_mode_line(window, buffer)?
+            self.window_wants_mode_line(window)?
         };
         let shown = self.display_state.previous.get(&id)
             .map(|p| if header { (p.header_line.clone(), p.header_line_face) } else { (p.mode_line.clone(), p.mode_line_face) });
@@ -1149,7 +1160,7 @@ impl Vm {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
-            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
     /// The least height a painted row can have: the default face's row
@@ -1620,20 +1631,14 @@ impl Vm {
         if self.window(self.slots[root].value)?.mini {
             return if layout { self.redisplay_window_fontify(root, buffer_slot, height).map(|_| Bands::default()) } else { Ok(Bands::default()) };
         }
-        let format_slot = self.slot("mode-line-format");
-        let value = self.variable_value(format_slot)?;
         // Convert before entering Lisp: neither traversal tails nor environments
         // are retained as untraced heap Values across a collecting :eval. An
         // object with no source spelling displays as GNU's *invalid* where it
         // is itself an element (`mode_line_form`).
-        let format = if value == Value::UNBOUND || value == Value::NIL {
-            None
-        } else {
-            Some(self.mode_line_form(value))
-        };
+        let window = self.slots[root].value;
+        let format = self.window_band_format(window)?;
         // The header line window_wants_header_line gives the window, its
         // parameter's or its buffer's format.
-        let window = self.slots[root].value;
         let header = crate::window::Windows::new(self).header_line_format(window).map_err(crate::forwarded::fault_text)?;
         let header = (header != Value::NIL).then(|| self.mode_line_form(header));
         let band_height = self.window_state.line * (u32::from(format.is_some()) + u32::from(header.is_some()));
@@ -1646,6 +1651,15 @@ impl Vm {
         }
         if format.is_none() && header.is_none() { return Ok(Bands::default()); }
         let state = self.mode_line_state(root, buffer_slot, text_height)?;
+        let [header_line, mode_line] = self.expand_bands(root, buffer_slot, &state, [header.as_ref(), format.as_ref()])?;
+        Ok(Bands { header_line, mode_line })
+    }
+    /// The mode-line FORMS (header line, mode line) of the window in ROOT
+    /// showing the buffer in BUFFER_SLOT, the current one, expanded over
+    /// STATE as GNU's display_mode_lines expands them: with the window's
+    /// point in its buffer and the window selected.
+    fn expand_bands(&mut self, root: usize, buffer_slot: usize, state: &mode_line::SpecState,
+                               forms: [Option<&Form>; 2]) -> Result<[Option<mode_line::Band>; 2]> {
         // GNU redisplay_window installs a non-selected window's point before
         // display_mode_lines (xdisp.c:20620-20641), then restores buffer point
         // (21626-21645). Do this after visibility has finalized window-point:
@@ -1671,10 +1685,10 @@ impl Vm {
         self.slots[saved].value = real_selected;
         self.frame_mut(self.frame_value_peek())?.selected = self.slots[root].value;
         // display_mode_lines builds the header line before the mode line.
-        let outcome = (|| Ok(Bands {
-            header_line: header.as_ref().map(|form| self.mode_line_band(form, &state)).transpose()?,
-            mode_line: format.as_ref().map(|form| self.mode_line_band(form, &state)).transpose()?,
-        }))();
+        let outcome = (|| Ok([
+            forms[0].map(|form| self.mode_line_band(form, state)).transpose()?,
+            forms[1].map(|form| self.mode_line_band(form, state)).transpose()?,
+        ]))();
         self.frame_mut(self.frame_value_peek())?.selected = self.slots[saved].value;
         self.slots[saved].value = Value::UNBOUND;
         // Resolve the traced buffer again after collecting :eval, restoring
@@ -1879,7 +1893,37 @@ impl Vm {
             if let Some(n) = elt { string.properties.put(range.clone(), "mode-line-elt-no", Value::integer(n)?); }
             if own.is_some() && let Some(face) = added { string.properties.put(range, "face", face); }
         }
-        Ok(self.allocate_object(Object::String(Box::new(string))))
+        let string = self.allocate_object(Object::String(Box::new(string)));
+        if band.props.is_empty() { return Ok(string); }
+        // The projected properties (VM2-G1B). A value may be made by Lisp
+        // that collects, so the string is rooted while each is put.
+        let slot = self.slot("#:vm2-mode-line-string");
+        self.slots[slot].value = string;
+        let outcome = (|| {
+            for (range, projected) in &band.props {
+                for (name, form) in projected.iter() {
+                    self.intern(name);
+                    let value = self.ml_prop_value(form)?;
+                    let Object::String(s) = self.object_mut(self.slots[slot].value)? else { return Err("mode-line string required".into()) };
+                    s.properties.put(ByteOffset(range.start)..ByteOffset(range.end), name, value);
+                }
+            }
+            Ok(())
+        })();
+        let string = self.slots[slot].value;
+        self.slots[slot].value = Value::UNBOUND;
+        outcome.map(|()| string)
+    }
+    /// A projected property's value from its form: the object a string
+    /// carried, or a `:propertize' plist's datum.
+    fn ml_prop_value(&mut self, form: &Form) -> Result<Value> {
+        match form {
+            Form::Object(object) => object.value(self),
+            Form::Sym(name) => Ok(self.intern(name)),
+            Form::Int(n) => Value::integer(*n),
+            Form::String(text) => Ok(self.make_lisp_string(text.clone().into_bytes(), !text.is_ascii())),
+            datum => self.eval_datum_raw(&Form::List(vec![Form::Sym("quote".into()), datum.clone()])),
+        }
     }
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
@@ -1947,14 +1991,17 @@ impl Vm {
             modified: b.state.modified(),
             frame_cols,
             command_loop_level,
+            clip: None,
         })
     }
-    /// GNU's `CURRENT_MODE_LINE_ACTIVE_FACE_ID`: the selected window draws
-    /// `mode-line-active`, others `mode-line-inactive` while
+    /// GNU's `CURRENT_MODE_LINE_ACTIVE_FACE_ID`: the selected window
+    /// (`real_selected_window`) draws `mode-line-active`, others `mode-line-inactive` while
     /// `mode-line-in-non-selected-windows` is non-nil (its C default). Without
     /// faces.el's definitions a missing face falls back to `mode-line`.
+    /// A pane label draws in `mode-line-inactive': the status bar is the
+    /// active line (VM2-STATUS-BAR).
     fn mode_line_face_name(&mut self, window: Value) -> Result<String> {
-        let selected = window == self.selected_window_value()?;
+        let selected = window == self.real_selected_window()? && self.pane_label(window) != crate::frame::PaneLabel::Name;
         let slot = self.slot("mode-line-in-non-selected-windows");
         let distinguish = self.variable_value(slot)? != Value::NIL;
         let wanted = if selected || !distinguish { "mode-line-active" } else { "mode-line-inactive" };
@@ -1965,7 +2012,7 @@ impl Vm {
     /// or `-inactive' as the mode line chooses, else the `header-line' they
     /// inherit, else the mode line's face.
     fn header_line_face_name(&mut self, window: Value) -> Result<String> {
-        let selected = window == self.selected_window_value()?;
+        let selected = window == self.real_selected_window()?;
         let slot = self.slot("mode-line-in-non-selected-windows");
         let distinguish = self.variable_value(slot)? != Value::NIL;
         let wanted = if selected || !distinguish { "header-line-active" } else { "header-line-inactive" };
@@ -2150,8 +2197,11 @@ impl Vm {
                 (table.faces.clone(), vec![index])
             }
         };
-        // A space in each face asks the host for that face's row height.
-        let mut runs = runs;
+        self.face_row_height(faces, runs)
+    }
+    /// The height of a row in FACES whose characters are in the faces RUNS
+    /// index: a space in each face asks the host for that face's row height.
+    pub(crate) fn face_row_height(&mut self, faces: Vec<Face>, mut runs: Vec<usize>) -> Result<u32> {
         runs.sort_unstable();
         runs.dedup();
         let face_runs = runs.iter().enumerate().map(|(at, &face)| FaceRun { bytes: at..at + 1, face: FaceHandle(face as u32) }).collect();

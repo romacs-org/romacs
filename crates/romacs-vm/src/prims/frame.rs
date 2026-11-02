@@ -216,7 +216,8 @@ fn alpha_lower_limit(cx: &mut Leaf<'_>) -> std::result::Result<f32, Fault> {
 /// opacity of the backgrounds the frame paints; `left-fringe' and
 /// `right-fringe' its fringes; `right-divider-width', `bottom-divider-width'
 /// and `internal-border-width' the gaps between and around its windows;
-/// `tab-bar-lines' its tab bar. Other parameters, and
+/// `tab-bar-lines' its tab bar; `romacs-status-bar-lines' its status bar
+/// and `romacs-pane-label' its windows' mode-line bands (VM2-STATUS-BAR). Other parameters, and
 /// every parameter of a frame without a window system, are only stored.
 fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
     if cx.kind(key) != leaf::Kind::Symbol || cx.windows().window_system(frame)? == Value::NIL { return Ok(()); }
@@ -233,6 +234,15 @@ fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Va
         // pgtk_set_tab_bar_lines (pgtkfns.c:444): an integer >= 0, else 0.
         let lines = value.integer_value().filter(|&n| n >= 0).map_or(0, |n| n.min(i64::from(i32::MAX)) as u32);
         cx.windows().set_frame_tab_bar_lines(frame, lines)
+    } else if key == cx.intern("romacs-status-bar-lines") {
+        // Like `tab-bar-lines': an integer >= 1 shows the bar, else none.
+        let lines = u32::from(value.integer_value().is_some_and(|n| n > 0));
+        cx.windows().set_frame_status_bar_lines(frame, lines)
+    } else if key == cx.intern("romacs-pane-label") {
+        let label = if value == Value::NIL { crate::frame::PaneLabel::None }
+            else if value == cx.intern("name") { crate::frame::PaneLabel::Name }
+            else { crate::frame::PaneLabel::Full };
+        cx.windows().set_frame_pane_label(frame, label)
     } else if key == cx.intern("alpha-background") {
         let background = opacity(cx, value)?.unwrap_or(1.0);
         cx.windows().set_frame_background_alpha(frame, background)
@@ -429,6 +439,18 @@ fn romacs_create_frame(cx, parms: Value) {
 defsubr! { name = "romacs--host-minibuffer", gnu = "romacs:frame", effect = Global,
 fn romacs_host_minibuffer(cx, frame: Value) {
     cx.windows().host_minibuffer(frame)
+}}
+defsubr! { name = "romacs-status-bar-window", gnu = "romacs:frame", effect = Reads,
+fn romacs_status_bar_window(cx) {
+    cx.windows().status_bar_window()
+}}
+defsubr! { name = "romacs-status-bar-height", gnu = "romacs:frame", effect = Reads,
+fn romacs_status_bar_height(cx) {
+    Ok(Value::integer(i64::from(cx.windows().status_bar_height())).unwrap())
+}}
+defsubr! { name = "romacs--status-bar-text", gnu = "romacs:frame", effect = Reads,
+fn romacs_status_bar_text(cx) {
+    Ok(cx.windows().status_bar_text())
 }}
 defsubr! { name = "romacs--minibuffer-host", gnu = "romacs:frame", effect = Reads,
 fn romacs_minibuffer_host(cx) {

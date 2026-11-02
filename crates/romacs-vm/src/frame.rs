@@ -57,8 +57,27 @@ pub(super) struct Frame {
     /// the pixels `right-divider-width' and `bottom-divider-width' give
     /// the dividers between its windows (frame.c gui_set_right_divider_width).
     pub dividers: [u32; 2],
+    /// The lines of the status bar between the root window and the
+    /// mini-window, as `romacs-status-bar-lines' set them (0 or 1), like
+    /// the tab bar's (VM2-STATUS-BAR).
+    pub status_bar_lines: u32,
+    /// What the frame's ordinary windows show in their mode-line bands,
+    /// as `romacs-pane-label' set it.
+    pub pane_label: PaneLabel,
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines, dividers });
+romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines, dividers, status_bar_lines, pane_label });
+
+/// What the host frame's ordinary windows show in their mode-line bands
+/// (`romacs-pane-label', VM2-STATUS-BAR): GNU's mode line (`full', also
+/// any other value and the default), `romacs-pane-label-format' in
+/// `mode-line-inactive' (`name'), or no band at all (nil).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaneLabel { #[default] Full, Name, None }
+romacs_snapshot::snapshot_enum!(PaneLabel {
+    PaneLabel::Full => (),
+    PaneLabel::Name => (),
+    PaneLabel::None => (),
+});
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         for v in [&mut self.root, &mut self.selected, &mut self.minibuffer,
@@ -162,7 +181,7 @@ impl Vm {
             root, selected: root, minibuffer, terminal,
             parameters: vec![name], live: true, id: 1, parent: Value::NIL,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: 0, focus: Value::NIL,
-            alpha_background: 1.0, hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2],
+            alpha_background: 1.0, hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2], status_bar_lines: 0, pane_label: PaneLabel::Full,
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
@@ -189,7 +208,7 @@ impl Vm {
         let frame = self.allocate_object(Object::Frame(Box::new(Frame {
             root, selected: root, minibuffer, terminal, parameters, live: true, id, parent,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL, alpha_background: 1.0,
-            hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2],
+            hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2], status_bar_lines: 0, pane_label: PaneLabel::Full,
         })));
         self.window_mut(root)?.frame = frame;
         let mut frames = self.frames();

@@ -82,7 +82,7 @@ fn a_window_below_and_right_of_the_frame_corner_shows_its_block() {
     snapshot.id = 9;
     let frame_snapshot = romacs_layout_input::FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), width: 1200, height: 900,
-        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(),
+        background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None,
         windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 300, y: 400, snapshot }],
     };
     let (mut frame, _) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&frame_snapshot, 1, None).unwrap();

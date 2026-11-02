@@ -233,13 +233,14 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         let outcome = keys(&mut vm, &[(1 << 27) | 'x' as i64]);
         report.push(format!("{:?}", outcome.and_then(|o| o.signal).map(|s| s.condition)));
         report.push(printed(&mut vm, "(list (bound-and-true-p rc-ahead-ran) (car extended-command-history))"));
-        // The panel floats centred, glass: rounded, lit, padded, its own background.
+        // The panel floats centred on the frame, glass: rounded, lit, padded,
+        // its own background.
         report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
             (list romacs-complete-position (frame-parameter f 'romacs-layer-radius) (frame-parameter f 'romacs-layer-shadow)
                   (frame-parameter f 'romacs-layer-glow) (frame-parameter f 'child-frame-border-width)
                   (stringp (frame-parameter f 'background-color)) (frame-parameter f 'romacs-layer-edge)
                   (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
-                    (= (+ l (/ w 2)) (/ (- (frame-text-width) (* 2 (frame-parameter f 'child-frame-border-width))) 2)))))"));
+                    (= (+ l (frame-parameter f 'child-frame-border-width) (/ w 2)) (/ (frame-native-width) 2)))))"));
         // Each position moves the same panel, glass, centred and as wide,
         // and nothing else: `bottom' ends a line above the mode line of the
         // window the minibuffer was entered from, at the panel's tallest.
@@ -288,7 +289,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                     (equal tops (sort (copy-sequence tops) #'<)))
                   (let ((f (romacs-layer--frame (caar romacs-layer--toasts))))
                     (list (frame-parameter f 'romacs-layer-edge)
-                          (= (+ (car (frame-position f)) (frame-pixel-width f) 12) (frame-text-width))))
+                          (= (+ (car (frame-position f)) (frame-pixel-width f) 12 (frame-internal-border-width)) (frame-native-width))))
                   (current-message)))"));
         // Only the characters fzf matched carry the match face; a file shows
         // its name, then its directory, muted.
@@ -327,14 +328,15 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
     }).unwrap().join().unwrap();
     assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#,
                         r##"(top 8 t "#d48a20" 10 t top t)"##,
-                        // Under the pane gap (VM2-PANE-CHROME) the room and the mode
-                        // line are the text area's, inside the 6-pixel internal border;
-                        // placing layers against it is L2's (romacs-chrome-bottom).
-                        "(774 ((top 316 87 600 80 8 top) (center 316 254 600 80 8 top) (bottom 316 474 600 80 8 top)))",
-                        "(186 6 6)", "(\"cand-06\" (5 5 40 166 186) 2 t)",
+                        // Layers are placed in the frame's native pixels, outside the
+                        // 6-pixel internal border of the pane gap (VM2-PANE-CHROME),
+                        // centred on the frame, and the status bar takes a line above
+                        // the minibuffer (VM2-STATUS-BAR).
+                        "(748 ((top 330 93 600 80 8 top) (center 330 260 600 80 8 top) (bottom 330 448 600 80 8 top)))",
+                        "(180 6 0)", "(\"cand-06\" (5 5 40 160 180) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
-                        // 500 pixels less the fringes and the pane gap's
-                        // internal border (VM2-PANE-CHROME).
-                        "(8 (nil 1))", "(600 840 480 1260)", "(0 472 472)", "(140 200 354 t)"]);
+                        // 500 pixels less the fringes and the pane gap's internal
+                        // border (VM2-PANE-CHROME), centred on the native 500.
+                        "(8 (nil 1))", "(600 840 480 1260)", "(14 486 472)", "(140 200 328 t)"]);
 }

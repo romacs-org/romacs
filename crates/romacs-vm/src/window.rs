@@ -173,8 +173,13 @@ pub(super) struct WindowState {
     pub next_frame: u64,
     /// The host frame's text area at its last layout, tab bar included.
     pub text_area: [u32; 2],
+    /// The status bar's height as the host measured its row (0 before
+    /// one did: a canonical line), and the pixels the last layout left
+    /// for it between the root window and the mini-window (VM2-STATUS-BAR).
+    pub status_height: u32,
+    pub status_reserved: u32,
 }
-romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame, text_area });
+romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame, text_area, status_height, status_reserved });
 impl Default for WindowState {
     fn default() -> Self {
         Self {
@@ -188,6 +193,8 @@ impl Default for WindowState {
             mini_reserved: 0,
             next_frame: 1,
             text_area: [640, 480],
+            status_height: 0,
+            status_reserved: 0,
         }
     }
 }
@@ -1033,8 +1040,9 @@ impl Vm {
         let root = self.window_root_peek(ROOT);
         let now = self.mini_growth()?;
         let reserved = if self.minibuffer_host().is_some() { 0 } else { line };
-        let tab_bar = (self.tab_bar_lines() * line).min(frame_height.saturating_sub(reserved + line));
-        if self.plan_window_geometry(root, 0, tab_bar, frame_width, frame_height - reserved - tab_bar, (now, 0), line, column, &mut geometry).is_err() {
+        let status = self.status_bar_reservation(frame_height, reserved, line);
+        let tab_bar = (self.tab_bar_lines() * line).min(frame_height.saturating_sub(reserved + status + line));
+        if self.plan_window_geometry(root, 0, tab_bar, frame_width, frame_height - reserved - status - tab_bar, (now, 0), line, column, &mut geometry).is_err() {
             return Ok(None);
         }
         let Some(&(_, _, _, width, height)) = geometry.iter().find(|g| g.0 == window) else { return Ok(None) };
@@ -1042,7 +1050,8 @@ impl Vm {
         let [_, below] = self.window_dividers(window)?;
         let width = width.saturating_sub(left + right);
         let columns = (width / column).clamp(2, u32::from(u16::MAX)) as u16;
-        let rows = (height.saturating_sub(below) / line).saturating_sub(1).clamp(1, u32::from(u16::MAX)) as u16;
+        let band = u32::from(self.pane_label(window) != crate::frame::PaneLabel::None);
+        let rows = (height.saturating_sub(below) / line).saturating_sub(band).clamp(1, u32::from(u16::MAX)) as u16;
         Ok(Some((columns, rows)))
     }
     /// The root window's growth now: minus the rows past one line that
@@ -1091,6 +1100,49 @@ impl Vm {
         if !self.window_system_open() { return 0; }
         self.frame(self.host_frame_peek()).map_or(0, |f| f.tab_bar_lines)
     }
+    /// Whether the host frame shows a status bar where it fits:
+    /// `romacs-status-bar-lines' on a window system.
+    pub(crate) fn status_bar_wanted(&self) -> bool {
+        self.window_system_open() && self.frame(self.host_frame_peek()).is_ok_and(|f| f.status_bar_lines > 0)
+    }
+    /// The pixels the host frame's status bar takes above a mini-window
+    /// MINI tall in a text area HEIGHT tall (VM2-STATUS-BAR): its measured
+    /// row, else a canonical LINE, while it is wanted and the tab bar and
+    /// two lines of the root window fit beside it; else none.
+    pub(crate) fn status_bar_reservation(&self, height: u32, mini: u32, line: u32) -> u32 {
+        let bar = if self.window_state.status_height > 0 { self.window_state.status_height } else { line };
+        let needed = [mini, bar, self.tab_bar_lines() * line, 2 * line].map(u64::from).iter().sum::<u64>();
+        if !self.status_bar_wanted() || u64::from(height) < needed { 0 } else { bar }
+    }
+    /// What WINDOW's mode-line band shows (`romacs-pane-label'): GNU's
+    /// mode line, except for the host frame's ordinary windows while the
+    /// frame's label says otherwise.
+    pub(crate) fn pane_label(&self, window: Value) -> crate::frame::PaneLabel {
+        let Ok(w) = self.window(window) else { return crate::frame::PaneLabel::Full };
+        if w.mini || w.frame != self.host_frame_peek() { return crate::frame::PaneLabel::Full; }
+        self.frame(w.frame).map_or(crate::frame::PaneLabel::Full, |f| f.pane_label)
+    }
+    /// GNU window_wants_mode_line (window.c:6037): a live non-minibuffer
+    /// window whose `mode-line-format' parameter is not `none', with that
+    /// parameter or its buffer's `mode-line-format' non-nil, taller than
+    /// one canonical line; and, in Romacs, a band its pane label keeps.
+    pub(crate) fn window_wants_mode_line(&mut self, window: Value) -> Result<bool> {
+        if self.pane_label(window) == crate::frame::PaneLabel::None { return Ok(false); }
+        Ok(self.window_mode_line_format(window)?.is_some_and(|_| self.window(window).is_ok_and(|w| w.height > self.window_state.line)))
+    }
+    /// The mode-line format WINDOW shows (xdisp.c:28149): its
+    /// `mode-line-format' parameter when non-nil, else its buffer's; none
+    /// for a mini-window, a parameter `none', or a nil format.
+    pub(crate) fn window_mode_line_format(&mut self, window: Value) -> Result<Option<Value>> {
+        let (key, none, slot) = (self.intern("mode-line-format"), self.intern("none"), self.slot("mode-line-format"));
+        let w = self.window(window)?;
+        if w.mini || !w.live() { return Ok(None); }
+        let parameter = w.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
+        if parameter == none { return Ok(None); }
+        if parameter != Value::NIL { return Ok(Some(parameter)); }
+        let format = self.value_in_buffer(slot, w.buffer)?;
+        Ok((format != Value::NIL && format != Value::UNBOUND).then_some(format))
+    }
     /// Install canonical font metrics before startup Lisp observes window sizes.
     pub fn set_frame_geometry(
         &mut self,
@@ -1119,14 +1171,16 @@ impl Vm {
         let mut geometry = vec![];
         let now = self.mini_growth()?;
         let wanted = if hosted { 0 } else { i64::from(line_height) - i64::from(mini_height) };
-        // The tab bar takes the top of the frame (FRAME_TOP_MARGIN), as
-        // far as a line is left for the root window.
-        let tab_bar = (self.tab_bar_lines() * line_height).min(height.saturating_sub(mini_height + line_height));
-        let planned = self.plan_window_geometry(root, 0, tab_bar, width, height - mini_height - tab_bar, (now, wanted), line_height, column_width, &mut geometry);
+        // The status bar takes a band above the mini-window, and the tab
+        // bar the top of the frame (FRAME_TOP_MARGIN), as far as a line is
+        // left for the root window.
+        let status = self.status_bar_reservation(height, mini_height, line_height);
+        let tab_bar = (self.tab_bar_lines() * line_height).min(height.saturating_sub(mini_height + status + line_height));
+        let planned = self.plan_window_geometry(root, 0, tab_bar, width, height - mini_height - status - tab_bar, (now, wanted), line_height, column_width, &mut geometry);
         let mini_height = if planned.is_err() && mini_height > line_height {
             self.window_state.mini_lines = 1;
             geometry.clear();
-            self.plan_window_geometry(root, 0, tab_bar, width, height - line_height - tab_bar, (now, 0), line_height, column_width, &mut geometry)?;
+            self.plan_window_geometry(root, 0, tab_bar, width, height - line_height - status - tab_bar, (now, 0), line_height, column_width, &mut geometry)?;
             line_height
         } else {
             planned?;
@@ -1137,6 +1191,7 @@ impl Vm {
             geometry.push((mini, 0, height - mini_height, width, mini_height));
         }
         self.window_state.mini_reserved = mini_height;
+        self.window_state.status_reserved = status;
         for (v, x, y, w, h) in geometry {
             let window = self.window_mut(v)?;
             if (window.x, window.y, window.width, window.height) != (x, y, w, h) {
@@ -1783,17 +1838,8 @@ impl<'a> Windows<'a> {
     /// canonical line tall (DIVERGENCES.md VM2-WIN3).
     pub(crate) fn window_mode_line_height(&mut self, window: Value) -> Out {
         let w = self.live(window)?;
-        let line = self.vm.window_state.line;
-        let (key, none, slot) = (self.vm.intern("mode-line-format"), self.vm.intern("none"), self.vm.slot("mode-line-format"));
-        let buffer = self.get(w)?.buffer;
-        let format = self.vm.value_in_buffer(slot, buffer).map_err(internal)?;
-        let x = self.get(w)?;
-        let parameter = x.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
-        let wants = !x.mini
-            && parameter != none
-            && (parameter != Value::NIL || (format != Value::UNBOUND && format != Value::NIL))
-            && x.height > line;
-        Self::int(if wants { i64::from(line) } else { 0 })
+        let wants = self.vm.window_wants_mode_line(w).map_err(internal)?;
+        Self::int(if wants { i64::from(self.vm.window_state.line) } else { 0 })
     }
     /// The header line window_wants_header_line (window.c:6067) gives W, a
     /// live window: its `header-line-format' parameter, else its buffer's
@@ -2166,6 +2212,27 @@ impl<'a> Windows<'a> {
         let f = self.vm.frame_mut(frame).map_err(internal)?;
         if f.tab_bar_lines == lines { return Ok(()); }
         f.tab_bar_lines = lines;
+        self.vm.frame_changed().map_err(internal)
+    }
+    /// The host frame's status bar becomes LINES (0 or 1) lines and its
+    /// windows are laid out above it. A child frame keeps the parameter
+    /// only.
+    pub(crate) fn set_frame_status_bar_lines(&mut self, frame: Value, lines: u32) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        if self.is_child_frame(frame)? { return Ok(()); }
+        let f = self.vm.frame_mut(frame).map_err(internal)?;
+        if f.status_bar_lines == lines { return Ok(()); }
+        f.status_bar_lines = lines;
+        self.vm.frame_changed().map_err(internal)
+    }
+    /// The host frame's windows' mode-line bands show LABEL; a band that
+    /// comes or goes changes their bodies.
+    pub(crate) fn set_frame_pane_label(&mut self, frame: Value, label: crate::frame::PaneLabel) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        if self.is_child_frame(frame)? { return Ok(()); }
+        let f = self.vm.frame_mut(frame).map_err(internal)?;
+        if f.pane_label == label { return Ok(()); }
+        f.pane_label = label;
         self.vm.frame_changed().map_err(internal)
     }
     /// The host frame's tab bar lines as the display shows them.

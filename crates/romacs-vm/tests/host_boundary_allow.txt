@@ -25,8 +25,8 @@ crates/romacs-vm/src/bin/romacs-vm-census.rs:63 std::fs bin adapter that builds 
 crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:42 std::fs bin adapter that builds no worlds
-crates/romacs-vm/src/display.rs:322 delayed-variable the window record's display variables, read through variable_value, which checks the fence
-crates/romacs-vm/src/display.rs:950 delayed-variable reads through variable_value, which checks the fence
+crates/romacs-vm/src/display.rs:327 delayed-variable the window record's display variables, read through variable_value, which checks the fence
+crates/romacs-vm/src/display.rs:959 delayed-variable reads through variable_value, which checks the fence
 crates/romacs-vm/src/forwarded.rs:709 delayed-variable declares the variable; reads no slot
 crates/romacs-vm/src/forwarded.rs:1417 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/forwarded.rs:1611 delayed-variable declares the variable; reads no slot
