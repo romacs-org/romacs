@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "60e7b98fbe50ba2edd97e43d2e22a36bd48794d4c1e7fdd1ce367a7c52383134",
+  "source_fingerprint": "53a73036b901180cd1f1b810d7969e5d050dea3c9c3e6cf1e851e5e20fe76c22",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1246,
-  "parsed_vm2_only": 1246
+  "parsed_total": 1248,
+  "parsed_vm2_only": 1248
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4062,6 +4062,16 @@
    "name": "romacs--code-converting-work",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:420"
+  },
+  "romacs--compiled-lisp-candidates": {
+   "name": "romacs--compiled-lisp-candidates",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/compiled_lisp.rs:9"
+  },
+  "romacs--compiled-lisp-compile-command": {
+   "name": "romacs--compiled-lisp-compile-command",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/compiled_lisp.rs:17"
   },
   "romacs--concat-list": {
    "name": "romacs--concat-list",

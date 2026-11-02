@@ -218,12 +218,14 @@ pub(super) fn publish(store: &Path, key: &[u8; 32], inputs: &[u8; 32], bytes: &[
     Ok(path)
 }
 
-/// Note that the artifact at PATH was used, for pruning.
-pub(super) fn note_use(store: &Path, path: &Path) {
+/// Note that the artifact at PATH, of the source file SOURCE, was used:
+/// for pruning, and for what a background compile does first (`history`).
+/// A line is the artifact's path in its generation, a tab, the source's.
+pub(super) fn note_use(store: &Path, path: &Path, source: &Path) {
     use std::io::Write;
     let log = generation(store).join("use.log");
     if let Ok(mut file) = host::open_store_file(&log, host::StoreOpen::Write { create: true, truncate: false }) {
-        let line = format!("{}\n", path.strip_prefix(generation(store)).unwrap_or(path).display());
+        let line = format!("{}\t{}\n", path.strip_prefix(generation(store)).unwrap_or(path).display(), source.display());
         let _ = file.seek_end().and_then(|()| file.write_all(line.as_bytes()));
     }
 }
@@ -296,10 +298,11 @@ pub(super) fn prune(store: &Path, budget: u64) -> std::io::Result<Vec<PathBuf>> 
     let log = read(&current.join("use.log")).unwrap_or_default();
     let mut last_use = std::collections::HashMap::new();
     for (i, line) in String::from_utf8_lossy(&log).lines().enumerate() {
-        last_use.insert(current.join(line), i);
+        let artifact = line.split('\t').next().unwrap_or(line);
+        last_use.insert(current.join(artifact), (i, line.to_owned()));
     }
     let mut files = artifacts(&current);
-    files.sort_by_key(|(path, _)| last_use.get(path).copied().map_or(0, |i| i + 1));
+    files.sort_by_key(|(path, _)| last_use.get(path).map_or(0, |(i, _)| i + 1));
     for (path, size) in files {
         if total <= budget * 9 / 10 {
             break;
@@ -310,15 +313,37 @@ pub(super) fn prune(store: &Path, budget: u64) -> std::io::Result<Vec<PathBuf>> 
             removed.push(path);
         }
     }
-    let mut kept: Vec<(usize, PathBuf)> = last_use.into_iter().map(|(p, i)| (i, p)).collect();
+    let mut kept: Vec<(usize, String)> = last_use.into_values().collect();
     kept.sort();
-    let text: String = kept.iter()
-        .filter_map(|(_, p)| Some(format!("{}\n", p.strip_prefix(&current).ok()?.display())))
-        .collect();
+    let text: String = kept.iter().map(|(_, line)| format!("{line}\n")).collect();
     let temporary = current.join(format!(".use.log.{}", host::pid()));
     host::write_store_file(&temporary, text)?;
     host::rename(&temporary, current.join("use.log"))?;
     Ok(removed)
+}
+
+/// The source files compiled loads used, most recent first, from the use
+/// logs of every generation in the store: a new compiler's generation
+/// starts from what the one before it served.
+pub(super) fn history(store: &Path) -> Vec<PathBuf> {
+    let mut logs: Vec<(std::time::SystemTime, PathBuf)> = host::read_dir(store).into_iter().flatten().flatten()
+        .map(|e| e.path().join("use.log"))
+        .filter_map(|log| Some((host::metadata(&log).ok()?.modified().ok()?, log)))
+        .collect();
+    logs.sort();
+    let mut sources: Vec<PathBuf> = vec![];
+    let mut seen = std::collections::HashSet::new();
+    for (_, log) in logs.iter().rev() {
+        let text = read(log).unwrap_or_default();
+        for line in String::from_utf8_lossy(&text).lines().rev() {
+            if let Some((_, source)) = line.split_once('\t')
+                && seen.insert(source.to_owned())
+            {
+                sources.push(PathBuf::from(source));
+            }
+        }
+    }
+    sources
 }
 
 /// SOURCE's content digest, memoised by its identity and change times in

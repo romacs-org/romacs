@@ -1700,6 +1700,7 @@ mod leaf {
     mod buffer_locals;
     mod frozen;
     mod isolate;
+    mod compiled_lisp;
     mod casetab;
     mod casing;
     pub(crate) use casing::RegionCase;
