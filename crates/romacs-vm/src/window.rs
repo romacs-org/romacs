@@ -44,9 +44,18 @@ pub(super) struct Window {
     pub vscroll_px: u32,
     /// Deferred scroll, applied after the frozen frame paints (D-ML1).
     pub pending_vscroll: Option<u32>,
-    /// GNU `w->hscroll`, in columns. The display does not apply it yet
-    /// (VM2-HSCROLL1).
+    /// GNU `w->hscroll`, in columns: how far the window's lines are
+    /// scrolled left. Redisplay keeps point in view with it
+    /// (`hscroll_window`), never below `min_hscroll`, which `scroll-left'
+    /// and `scroll-right' set when called interactively.
     pub hscroll: i64,
+    pub min_hscroll: i64,
+    /// GNU `w->suspend_auto_hscroll`: an explicit scroll holds automatic
+    /// hscrolling until point moves from `old_point`, GNU's
+    /// `w->old_pointm`, a marker at the window's point at its last
+    /// redisplay, which edits move as they move point.
+    pub suspend_auto_hscroll: bool,
+    pub old_point: Value,
     pub parameters: Vec<(Value, Value)>,
     /// GNU `w->display_table` (`set-window-display-table`); the display
     /// reads the buffer's and the standard table only (VM2-DISPTAB1).
@@ -76,7 +85,7 @@ pub(super) struct Window {
     pub end_valid: bool,
     pub force_start: bool,
 }
-romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, pending_vscroll, hscroll, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
+romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, pending_vscroll, hscroll, min_hscroll, suspend_auto_hscroll, old_point, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
 impl Window {
     fn new(id: u64, buffer: Value) -> Self {
         Self {
@@ -103,6 +112,9 @@ impl Window {
             vscroll_px: 0,
             pending_vscroll: None,
             hscroll: 0,
+            min_hscroll: 0,
+            suspend_auto_hscroll: false,
+            old_point: Value::NIL,
             right_margin: 0,
             parameters: vec![],
             display_table: Value::NIL,
@@ -127,6 +139,7 @@ impl Window {
             &mut self.buffer,
             &mut self.point,
             &mut self.start,
+            &mut self.old_point,
             &mut self.parent,
             &mut self.new_total,
             &mut self.new_normal,
@@ -251,6 +264,23 @@ impl Vm {
     pub(super) fn root_of(&self, v: Value) -> Result<Value> {
         Ok(self.frame(self.window(v)?.frame)?.root)
     }
+    /// Put window V's old point at POSITION in BUFFER, making its marker if
+    /// it has none.
+    pub(crate) fn set_window_old_point(&mut self, v: Value, position: Value, buffer: Value) -> Result<()> {
+        let marker = self.window(v)?.old_point;
+        if marker == Value::NIL {
+            let marker = self.window_marker(buffer, position)?;
+            self.window_mut(v)?.old_point = marker;
+            return Ok(());
+        }
+        self.set_marker_object(marker, position, buffer).map(drop)
+    }
+    /// How text inserted at a window's point moves its old point:
+    /// `window-point-insertion-type' in the window's BUFFER.
+    pub(crate) fn window_point_bias(&mut self, buffer: Value) -> Result<anchors::Bias> {
+        let slot = self.slot("window-point-insertion-type");
+        Ok(if self.value_in_buffer(slot, buffer)? == Value::NIL { anchors::Bias::Left } else { anchors::Bias::Right })
+    }
     fn window_marker(&mut self, buffer: Value, position: Value) -> Result<Value> {
         let v = self.allocate_object(Object::Marker(Box::new(annotations::Marker {
             buffer: Value::NIL,
@@ -274,6 +304,9 @@ impl Vm {
         if buffer != Value::NIL {
             w.point = self.window_marker(buffer, Value::integer(1)?)?;
             w.start = self.window_marker(buffer, Value::integer(1)?)?;
+            w.old_point = self.window_marker(buffer, Value::integer(1)?)?;
+            let bias = self.window_point_bias(buffer)?;
+            self.set_marker_bias(w.old_point, bias)?;
         }
         Ok(self.allocate_object(Object::Window(Box::new(w))))
     }
@@ -416,7 +449,16 @@ impl Vm {
             // per-buffer last window start, so it starts at 1. See
             // DIVERGENCES.md VM2-WB1.
             self.set_marker_object(st, Value::integer(1)?, buffer)?;
-            self.window_mut(v)?.hscroll = 0;
+            self.set_window_old_point(v, pos, buffer)?;
+            let w = self.window_mut(v)?;
+            (w.hscroll, w.min_hscroll, w.suspend_auto_hscroll) = (0, 0, false);
+        }
+        // window.c:4395, whatever KEEP-MARGINS kept: the old point inserts
+        // as the buffer's window points do.
+        let old = self.window(v)?.old_point;
+        if old != Value::NIL {
+            let bias = self.window_point_bias(buffer)?;
+            self.set_marker_bias(old, bias)?;
         }
         self.discard_buffer_from_window(buffer, v)?;
         let w = self.window_mut(v)?;
@@ -560,8 +602,8 @@ impl Vm {
         // live-byte assertion can observe this leak.
         let retired_id = self.window(v)?.id;
         self.display_state.forget_window(retired_id);
-        let (point, start) = (self.window(v)?.point, self.window(v)?.start);
-        for marker in [point, start] {
+        let (point, start, old) = (self.window(v)?.point, self.window(v)?.start, self.window(v)?.old_point);
+        for marker in [point, start, old] {
             if marker != Value::NIL {
                 self.set_marker_object(marker, Value::NIL, Value::NIL)?;
             }
@@ -571,6 +613,7 @@ impl Vm {
         w.buffer = Value::NIL;
         w.point = Value::NIL;
         w.start = Value::NIL;
+        w.old_point = Value::NIL;
         w.parent = Value::NIL;
         w.children = vec![];
         w.end_valid = false;
@@ -1621,7 +1664,11 @@ pub(crate) struct TextArea {
     pub right_margin: i64,
     pub rightmost: bool,
     pub full_width: bool,
+    /// GNU `w->hscroll`, and the columns init_iterator hides at each
+    /// line's left (first_visible_x): `min_hscroll` under
+    /// `auto-hscroll-mode' `current-line', else the hscroll.
     pub hscroll: i64,
+    pub first_visible: i64,
     pub mode_line: i64,
     pub header_line: i64,
     pub column: i64,
@@ -1962,7 +2009,10 @@ impl<'a> Windows<'a> {
         let (root_x, root_width) = self.vm.window(root).map_or((0, 0), |r| (i64::from(r.x), i64::from(r.width)));
         let fringes = self.vm.window_fringe_widths(w).map_err(internal)?;
         let [right_divider, bottom_divider] = self.vm.window_dividers(w).map_err(internal)?.map(i64::from);
+        let buffer = self.get(w)?.buffer;
+        let current_line = self.vm.hscrolls_current_line(w, buffer).map_err(internal)?;
         let x = self.get(w)?;
+        let first_visible = if current_line { x.min_hscroll } else { x.hscroll };
         let (left, width) = (i64::from(x.x), i64::from(x.width));
         let body_width = (width - i64::from(x.left_margin + x.right_margin) * column - i64::from(fringes[0] + fringes[1]) - right_divider).max(0);
         let body_height = (i64::from(x.height) - mode_line - header_line - bottom_divider).max(0);
@@ -1975,6 +2025,7 @@ impl<'a> Windows<'a> {
             rightmost: left + width >= root_x + root_width,
             full_width: left == root_x && width == root_width,
             hscroll: x.hscroll,
+            first_visible,
             mode_line,
             header_line,
             column,
@@ -2544,16 +2595,68 @@ impl<'a> Windows<'a> {
         let window = self.live(window)?;
         Self::int(self.get(window)?.hscroll)
     }
-    /// GNU window.c:1313 and set_window_hscroll: clipped to 0..most-positive-fixnum.
+    /// GNU window.c:1313.
     pub(crate) fn set_window_hscroll(&mut self, window: Value, ncol: Value) -> Out {
         let n = ncol.integer_value().ok_or(Fault::Wrong("fixnump", ncol))?;
         let window = self.live(window)?;
+        self.scroll_to(window, n)
+    }
+    /// GNU set_window_hscroll: WINDOW scrolled N columns, clipped to
+    /// 0..most-positive-fixnum, holding automatic hscrolling.
+    fn scroll_to(&mut self, window: Value, n: i64) -> Out {
         let n = n.clamp(0, Value::MAX_FIXNUM);
         let w = self.get_mut(window)?;
         if w.hscroll != n { w.end_valid = false; }
-        w.hscroll = n;
+        (w.hscroll, w.suspend_auto_hscroll) = (n, true);
         self.vm.display_state.version += 1;
         Self::int(n)
+    }
+    /// GNU `scroll-left' (LEFT) and `scroll-right' (window.c:7101): the
+    /// selected window COLUMNS further, by default its body's width in
+    /// columns less 2; with SET-MINIMUM the result bounds automatic
+    /// hscrolling from below.
+    pub(crate) fn scroll_horizontally(&mut self, columns: Option<i64>, set_minimum: Value, left: bool) -> Out {
+        let window = self.vm.selected_window_value().map_err(Fault::Error)?;
+        let columns = match columns {
+            Some(n) => n,
+            None => self.window_body_size(window, Value::NIL, true)?.integer_value().unwrap_or(0) - 2,
+        };
+        let hscroll = self.get(window)?.hscroll;
+        let result = self.scroll_to(window, if left { hscroll.saturating_add(columns) } else { hscroll.saturating_sub(columns) })?;
+        let w = self.get_mut(window)?;
+        if set_minimum != Value::NIL { w.min_hscroll = w.hscroll; }
+        Ok(result)
+    }
+    /// GNU window.c:2048 (`Vm::window_line_height').
+    pub(crate) fn window_line_height(&mut self, line: Value, window: Value) -> Out {
+        let window = self.live(window)?;
+        let bands = ["tab-line", "header-line", "mode-line"].map(|name| self.vm.intern(name));
+        if line != Value::NIL && line.integer_value().is_none() && !bands.contains(&line) { return Err(Fault::Wrong("fixnump", line)); }
+        // VM2 draws no tab line (DIVERGENCES.md VM2-WIN3).
+        if line == bands[0] { return Ok(Value::NIL); }
+        self.vm.window_line_height(line, window).map_err(Fault::Error)
+    }
+    pub(crate) fn selected_window(&mut self) -> Out {
+        self.vm.selected_window_value().map_err(Fault::Error)
+    }
+    /// Whether live WINDOW's point is at its old point.
+    pub(crate) fn old_point_is_point(&mut self, window: Value) -> std::result::Result<bool, Fault> {
+        let old = self.window_old_point(window)?;
+        let point = self.vm.window_point_value(window).map_err(Fault::Error)?;
+        Ok(old == point)
+    }
+    /// Move live WINDOW's old point to its point.
+    pub(crate) fn old_point_to_point(&mut self, window: Value) -> std::result::Result<(), Fault> {
+        let window = self.live(window)?;
+        let (point, buffer) = (self.vm.window_point_value(window).map_err(Fault::Error)?, self.get(window)?.buffer);
+        self.vm.set_window_old_point(window, point, buffer).map_err(Fault::Error)
+    }
+    /// GNU window.c:1803: WINDOW's point at its last redisplay.
+    pub(crate) fn window_old_point(&mut self, window: Value) -> Out {
+        let window = self.live(window)?;
+        let marker = self.get(window)?.old_point;
+        if marker == Value::NIL { return Ok(Value::NIL); }
+        self.vm.marker_position_value(marker).map_err(internal)
     }
     pub(crate) fn window_combination_limit(&mut self, window: Value) -> Out {
         if window == Value::NIL { return Err(Fault::Wrong("window-valid-p", window)); }

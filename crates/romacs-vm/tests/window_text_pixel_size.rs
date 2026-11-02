@@ -19,6 +19,7 @@ const CASES: &str = r###"
 (mapcar (lambda (n) (erase-buffer) (insert (make-string n ?x)) (list n (window-text-pixel-size) (progn (insert "\n") (window-text-pixel-size)) (progn (insert "y") (window-text-pixel-size)))) '(0 1 78 79 80 81 157 158 159 160 237 238))
 (progn (insert (make-string 200 ?x)) (list (window-text-pixel-size nil nil nil t) (window-text-pixel-size nil nil nil 1000) (window-text-pixel-size nil nil nil 3) (window-text-pixel-size nil nil nil 0) (window-text-pixel-size nil nil nil -5) (window-text-pixel-size nil nil nil 'x)))
 (progn (insert (make-string 200 ?x)) (setq truncate-lines t) (list (window-text-pixel-size) (window-text-pixel-size nil nil nil 1000) (window-text-pixel-size nil nil nil 50)))
+(progn (insert "abc\n" (make-string 120 ?x)) (set-window-hscroll nil 1) (list (window-text-pixel-size) (window-hscroll) (window-text-pixel-size nil 5 50)))
 (progn (insert "a\tb\n\C-a\n\177x\n") (list (window-text-pixel-size) (progn (setq ctl-arrow nil) (window-text-pixel-size)) (progn (setq tab-width 4) (window-text-pixel-size))))
 (progn (insert "日本語\néé́z") (list (window-text-pixel-size) (window-text-pixel-size nil 1 3) (window-text-pixel-size nil 5 8)))
 (progn (insert "ab\ncdef\ngh") (list (window-text-pixel-size nil 2 6) (window-text-pixel-size nil 4 5) (window-text-pixel-size nil 5 5) (window-text-pixel-size nil 3 3) (window-text-pixel-size nil '(4 . 0)) (window-text-pixel-size nil '(4 . 1)) (window-text-pixel-size nil '(8 . -1)) (window-text-pixel-size nil '(1 . 5)) (window-text-pixel-size nil '(11 . -20))))
@@ -168,7 +169,6 @@ fn unsupported_display_features_refuse() {
         ("(insert (propertize \"b\" 'composition '(0 1 [?a])))", "of composed text (the `composition' property)"),
         ("(insert \"a\\rb\") (setq selective-display t)", "with `selective-display'"),
         ("(insert \"a\") (setq display-line-numbers t)", "with line numbers"),
-        ("(insert \"abc\") (set-window-hscroll nil 1)", "in a horizontally scrolled window"),
         ("(insert \"a b\") (setq word-wrap t word-wrap-by-category t)", "with `word-wrap-by-category'"),
     ] {
         assert_eq!(refusal(&mut vm, body), format!("\"VM2 window-text-pixel-size {what} is unsupported\""), "{body}");
