@@ -172,8 +172,8 @@ impl Compiled {
     /// observed: the compile loading it uses what that compile-time code
     /// read (a macro's expansion, say), so it holds only while that does.
     pub(crate) fn inherit_inputs(&self) {
-        for text in &self.artifact_data.inputs {
-            if let Ok(Json::Object(mut record)) = serde_json::from_str::<Json>(text)
+        for range in &self.artifact_data.inputs {
+            if let Ok(Json::Object(mut record)) = serde_json::from_str::<Json>(self.artifact_data.text(range))
                 && let Some(Json::String(kind)) = record.remove("kind")
             {
                 host::record(&kind, Json::Object(record));
@@ -182,21 +182,33 @@ impl Compiled {
     }
 }
 
-/// Facts a load found holding already, by their record's text: each is
-/// asked of the host once per process.
-static HOLDING: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+/// Facts a load found holding already, by the digest of their record's
+/// text (`input_memo`): each is asked of the host once per process.
+static HOLDING: std::sync::Mutex<Option<rustc_hash::FxHashSet<u128>>> = std::sync::Mutex::new(None);
+
+/// The memo of an input's record TEXT: its digest, seeded for a library
+/// resolution by PATH_SEED, the `load-path' it is checked on.
+fn input_memo(text: &str, path_seed: u64) -> u128 {
+    let seed = if text.starts_with("{\"kind\":\"resolved\"") { path_seed } else { 0 };
+    twox_hash::XxHash3_128::oneshot_with_seed(seed, text.as_bytes())
+}
 
 impl Vm {
-/// Whether every observed input of an artifact, each a record's text,
-/// holds now. A library resolution holds on the `load-path' in force,
-/// LOAD_PATH, which keys its memo.
-fn inputs_hold(&mut self, store: &Path, inputs: &[String], load_path: &str) -> bool {
-    inputs.iter().all(|text| {
-        let resolution = text.starts_with("{\"kind\":\"resolved\"");
-        let memo = if resolution { format!("{text}\0{load_path}") } else { text.clone() };
-        if HOLDING.lock().unwrap().get_or_insert_default().contains(&memo) {
-            return true;
-        }
+/// Whether every observed input of ARTIFACT holds now. A library
+/// resolution holds on the `load-path' in force, LOAD_PATH, which keys
+/// its memo. Records held already are not parsed again.
+fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &str) -> bool {
+    let path_seed = twox_hash::XxHash3_128::oneshot(load_path.as_bytes()) as u64;
+    let unknown: Vec<(&str, u128)> = {
+        let mut held = HOLDING.lock().unwrap();
+        let held = held.get_or_insert_default();
+        artifact.inputs.iter()
+            .map(|range| artifact.text(range))
+            .map(|text| (text, input_memo(text, path_seed)))
+            .filter(|(_, memo)| !held.contains(memo))
+            .collect()
+    };
+    unknown.into_iter().all(|(text, memo)| {
         let Ok(record) = serde_json::from_str::<Json>(text) else { return false };
         let record = &record;
         let holds = match record["kind"].as_str() {
@@ -280,7 +292,7 @@ fn inputs_hold(&mut self, store: &Path, inputs: &[String], load_path: &str) -> b
         let joined = load_path.join("\n");
         Ok(configured.identity().and_then(|identity| {
             let key = store::key(identity, path, &digest);
-            store::lookup(&config.store, &key, |inputs| self.inputs_hold(&config.store, inputs, &joined))
+            store::lookup(&config.store, &key, |artifact| self.inputs_hold(&config.store, artifact, &joined))
         }))
     }
 
@@ -368,11 +380,11 @@ fn inputs_hold(&mut self, store: &Path, inputs: &[String], load_path: &str) -> b
 
     /// Install unit INDEX of a compiled load, with SLOTS for its names:
     /// the entry function to run.
-    pub(crate) fn install_compiled_unit(&mut self, compiled: &Compiled, slots: &[usize], index: usize) -> Result<usize> {
+    pub(crate) fn install_compiled_unit(&mut self, compiled: &Compiled, slots: &Arc<Vec<usize>>, index: usize) -> Result<usize> {
         let unit = &compiled.artifact_data.units[index];
-        let data = &compiled.artifact_data.bytes[unit.range.clone()];
-        let mut reader = codec::Reader::new(data);
-        let entry = unit::Install { slots }.unit(self, &mut reader)?;
+        let bytes = &compiled.artifact_data.bytes;
+        let mut reader = codec::Reader::new(&bytes[unit.range.clone()]);
+        let entry = unit::Install { bytes, slots }.unit(self, &mut reader)?;
         if !reader.done() {
             return Err("compiled Lisp artifact: unit has trailing data".into());
         }
@@ -380,8 +392,9 @@ fn inputs_hold(&mut self, store: &Path, inputs: &[String], load_path: &str) -> b
     }
 
     /// The slots of a compiled load's names, interned.
-    pub(crate) fn compiled_slots(&mut self, compiled: &Compiled) -> Vec<usize> {
-        compiled.artifact_data.names.iter().map(|name| self.slot(name)).collect()
+    pub(crate) fn compiled_slots(&mut self, compiled: &Compiled) -> Arc<Vec<usize>> {
+        let artifact = &compiled.artifact_data;
+        Arc::new(artifact.names.iter().map(|name| self.slot(artifact.text(name))).collect())
     }
 
     /// The compile process: compile SOURCE, publish its artifact in the

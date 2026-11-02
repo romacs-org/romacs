@@ -699,6 +699,11 @@ impl Vm {
                         }
                     }
                 }
+                // A pending compiled-Lisp body: what its code will name.
+                if let Some(body) = &self.functions[id].pending {
+                    pending.extend(body.values.iter().copied());
+                    code_pending.extend(body.children.iter().copied());
+                }
                 // The lambda list, which slot 0 answers, outlives the lazy body.
                 let function = &self.functions[id];
                 let mut nested = Vec::new();
@@ -1091,6 +1096,9 @@ impl Vm {
             // every body still present was marked through its function.
             if let Some(lazy) = &mut f.lazy {
                 rewrite(&mut Arc::get_mut(lazy).expect("lazy body is private at a wait point").body);
+            }
+            if let Some(body) = &mut f.pending {
+                body.values.iter_mut().for_each(|v| rewrite(v));
             }
         }
         for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {

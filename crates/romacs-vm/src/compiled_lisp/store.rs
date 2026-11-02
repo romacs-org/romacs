@@ -15,9 +15,9 @@ use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const MAGIC: &[u8] = b"RLC2\n";
+const MAGIC: &[u8] = b"RLC3\n";
 /// What a key binds besides its inputs: this format and the compiler.
-const FORMAT: &str = concat!("romacs-compiled-lisp 2\n", env!("VM2_COMPILER_ID"));
+const FORMAT: &str = concat!("romacs-compiled-lisp 3\n", env!("VM2_COMPILER_ID"));
 /// The default cap on the store's artifacts, in bytes.
 pub(super) const BUDGET: u64 = 256 << 20;
 
@@ -61,12 +61,21 @@ pub(super) struct UnitEntry {
 }
 
 pub(super) struct Artifact {
-    pub(super) bytes: Vec<u8>,
+    /// Shared with the bodies a load leaves pending (`PendingBody`).
+    pub(super) bytes: std::sync::Arc<Vec<u8>>,
     pub(super) status: Status,
-    /// The observed inputs, each a record's text.
-    pub(super) inputs: Vec<String>,
-    pub(super) names: Vec<String>,
+    /// The observed inputs, each a record's text, and the names, as
+    /// places in BYTES (`text`).
+    pub(super) inputs: Vec<std::ops::Range<usize>>,
+    pub(super) names: Vec<std::ops::Range<usize>>,
     pub(super) units: Vec<UnitEntry>,
+}
+
+impl Artifact {
+    /// The text at RANGE, one of `inputs` or `names`: UTF-8, as `decode` checked.
+    pub(super) fn text(&self, range: &std::ops::Range<usize>) -> &str {
+        std::str::from_utf8(&self.bytes[range.clone()]).unwrap_or_default()
+    }
 }
 
 /// An artifact's bytes, its inputs part's digest naming it.
@@ -134,10 +143,14 @@ pub(super) fn decode(bytes: Vec<u8>) -> crate::Result<Artifact> {
         _ => return Err("compiled Lisp artifact: bad status".into()),
     };
     let _source = r.str()?;
+    let place = |s: &str| {
+        let start = s.as_ptr() as usize - bytes.as_ptr() as usize;
+        start..start + s.len()
+    };
     let n = r.count()?;
-    let inputs = (0..n).map(|_| r.str().map(str::to_owned)).collect::<crate::Result<Vec<_>>>()?;
+    let inputs = (0..n).map(|_| r.str().map(place)).collect::<crate::Result<Vec<_>>>()?;
     let n = r.count()?;
-    let names = (0..n).map(|_| r.str().map(str::to_owned)).collect::<crate::Result<Vec<_>>>()?;
+    let names = (0..n).map(|_| r.str().map(place)).collect::<crate::Result<Vec<_>>>()?;
     let n = r.count()?;
     let mut units = Vec::with_capacity(n);
     for _ in 0..n {
@@ -149,7 +162,7 @@ pub(super) fn decode(bytes: Vec<u8>) -> crate::Result<Artifact> {
     if !r.done() {
         return Err("compiled Lisp artifact: trailing data".into());
     }
-    Ok(Artifact { bytes, status, inputs, names, units })
+    Ok(Artifact { bytes: std::sync::Arc::new(bytes), status, inputs, names, units })
 }
 
 /// A store directory, made private when missing.
@@ -169,7 +182,7 @@ fn read(path: &Path) -> std::io::Result<Vec<u8>> {
 
 /// The first artifact for KEY whose inputs VALID accepts. A damaged one
 /// is deleted: its generation fixes its format, so it can never load.
-pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&[String]) -> bool) -> Option<(PathBuf, Artifact)> {
+pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&Artifact) -> bool) -> Option<(PathBuf, Artifact)> {
     let dir = generation(store).join(hex(key));
     let mut candidates: Vec<PathBuf> = host::read_dir(&dir).ok()?
         .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -181,7 +194,7 @@ pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&[Strin
             let _ = host::remove_file(&path);
             return None;
         };
-        valid(&artifact.inputs).then_some((path, artifact))
+        valid(&artifact).then_some((path, artifact))
     })
 }
 

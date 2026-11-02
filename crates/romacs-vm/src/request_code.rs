@@ -160,6 +160,7 @@ impl Vm {
                 rest: false,
                 sites: Vec::new(),
                 lazy: None,
+                pending: None,
                 dynamic: None,
                 params: None,
             },
@@ -173,7 +174,7 @@ impl Vm {
 
     pub(super) fn reserve_request_artifact(
         &mut self,
-        functions: &[Function],
+        functions: impl IntoIterator<Item = Function>,
         caches: usize,
     ) -> (Vec<usize>, Vec<usize>) {
         // Request-owned placeholders: they still hold the artifact's own cache
@@ -183,11 +184,11 @@ impl Vm {
         // restored here, so an unwinding failure leaves only unreachable
         // placeholders and unclaimed slots, which a collection reclaims.
         let ids = functions
-            .iter()
+            .into_iter()
             .map(|f| {
                 #[cfg(test)]
                 artifact_fault(ArtifactFault::Installing);
-                self.install_slot(f.clone(), true)
+                self.install_slot(f, true)
             })
             .collect();
         let cache_ids = (0..caches).map(|_| self.install_cache_slot(true)).collect();
@@ -227,19 +228,25 @@ impl Vm {
     }
 
     pub(super) fn release_request_entry(&mut self, id: usize) {
-        for op in &self.functions[id].code {
-            if let Op::Direct(_, _, cache, _, _) = *op {
-                self.caches[cache] = Cache {
-                    version: 0,
-                    target: Value::UNBOUND,
-                };
-                self.request_code.free_caches.push(cache);
-            }
+        // A compiled-Lisp entry whose run failed before its first call still
+        // holds its body pending, and the caches that body names.
+        let function = &self.functions[id];
+        let caches: Vec<usize> = function.code.iter()
+            .filter_map(|op| match *op { Op::Direct(_, _, cache, _, _) => Some(cache), _ => None })
+            .chain(function.pending.iter().flat_map(|body| body.caches.iter().copied()))
+            .collect();
+        for cache in caches {
+            self.caches[cache] = Cache {
+                version: 0,
+                target: Value::UNBOUND,
+            };
+            self.request_code.free_caches.push(cache);
         }
         let f = Arc::get_mut(&mut self.functions[id]).expect("request entry is private");
         f.code = Vec::new();
         f.sites = Vec::new();
         f.capture_mutations = Vec::new();
+        f.pending = None;
         self.request_code.live[id] = false;
         self.request_code.free.push(id);
         self.request_code.since_collection = self.request_code.since_collection.saturating_sub(1);
@@ -308,14 +315,18 @@ impl Vm {
                         used_caches[cache] = true;
                     }
                 }
+                for &cache in self.functions[id].pending.iter().flat_map(|body| &body.caches) {
+                    used_caches[cache] = true;
+                }
             } else {
                 let f = Arc::get_mut(&mut self.functions[id])
                     .expect("request code is private at a wait point");
                 f.code = Vec::new();
                 f.sites = Vec::new();
                 f.capture_mutations = Vec::new();
-                // An unreachable lazy body is garbage with its function.
+                // An unreachable lazy or pending body is garbage with its function.
                 f.lazy = None;
+                f.pending = None;
                 self.request_code.live[id] = false;
                 self.request_code.free.push(id);
             }

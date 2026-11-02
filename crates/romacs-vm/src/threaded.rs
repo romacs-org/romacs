@@ -409,7 +409,7 @@ struct InlineBody {
 #[inline(never)]
 fn inline_body(vm: &Vm, function: usize) -> Option<InlineBody> {
     let f = &vm.functions[function];
-    if f.captures != 0 || f.rest || f.required != f.arity || f.code.len() > 8 {
+    if f.pending.is_some() || f.captures != 0 || f.rest || f.required != f.arity || f.code.len() > 8 {
         return None;
     }
     let mut operands = vec![None; f.regs];
