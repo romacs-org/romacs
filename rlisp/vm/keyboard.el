@@ -681,6 +681,15 @@ Return nil at the end of an executing keyboard macro."
   (while (romacs--command-loop-step))
   nil)
 
+(defun romacs--dispatch-user-signals ()
+  "kbd_buffer_get_event's user signals, for a host whose own loop waits
+for input (the GUI): each pending one's event, a special one running its
+`special-event-map' binding at once, any other queued as input."
+  (let (event)
+    (while (setq event (romacs--take-user-signal))
+      (unless (romacs--special-event event)
+        (setq unread-command-events (append unread-command-events (list event)))))))
+
 (defun romacs--special-event (event)
   "keyboard.c read_char for a special EVENT such as (focus-in FRAME): run
 its `special-event-map' binding at once, outside any key sequence, with

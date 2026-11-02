@@ -1169,6 +1169,9 @@ fn evaluate(
             // read_char takes Lisp's unread queues before host input: a key
             // Lisp read and pushed back (sit-for in a timer) starts the next
             // command, which the Lisp command loop reads.
+            if live && romacs_vm::host::user_signal_pending() {
+                command::dispatch_user_signals(&mut vm)?;
+            }
             let unread = live && command::unread_pending(&mut vm)?;
             let event = if unread { None } else {
                 match batch.pop_front() { Some(event) => Some(event), None => break }

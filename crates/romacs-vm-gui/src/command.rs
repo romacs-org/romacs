@@ -21,6 +21,12 @@ pub fn unread_pending(vm: &mut Vm) -> Result<bool, String> {
     Ok(!vm.eval_source("(or unread-post-input-method-events unread-command-events unread-input-method-events)")?.is_nil())
 }
 
+/// A user signal arrived while the host waited: its special binding runs,
+/// or it waits in `unread-command-events' for the command loop.
+pub fn dispatch_user_signals(vm: &mut Vm) -> Result<(), String> {
+    vm.eval_source("(romacs--dispatch-user-signals)").map(|_| ())
+}
+
 /// Run one command through the Lisp command loop, which reads its whole
 /// key sequence: what ran and what it signalled.
 pub fn run(vm: &mut Vm) -> Result<CommandOutcome, String> {

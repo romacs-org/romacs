@@ -2001,9 +2001,11 @@ pub fn interrupt_pending() -> bool {
 /// (`catch_isolate_signals').
 static USER_SIGNALS: [std::sync::atomic::AtomicU32; 2] =
     [std::sync::atomic::AtomicU32::new(0), std::sync::atomic::AtomicU32::new(0)];
-const USER_SIGNAL_EVENTS: [(libc::c_int, &str); 2] = [(libc::SIGUSR1, "sigusr1"), (libc::SIGUSR2, "sigusr2")];
+/// In the order store_user_signal_events reads them: GNU's list holds
+/// SIGUSR2 first, the one registered last.
+const USER_SIGNAL_EVENTS: [(libc::c_int, &str); 2] = [(libc::SIGUSR2, "sigusr2"), (libc::SIGUSR1, "sigusr1")];
 extern "C" fn note_user_signal(signal: libc::c_int) {
-    let index = usize::from(signal == libc::SIGUSR2);
+    let index = usize::from(signal == libc::SIGUSR1);
     USER_SIGNALS[index].fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 pub fn catch_user_signals() -> io::Result<()> {
@@ -2016,7 +2018,11 @@ pub fn catch_user_signals() -> io::Result<()> {
     }
     Ok(())
 }
-/// A pending user signal's event, SIGUSR1's first, taking it.
+/// Whether a user signal waits to be read.
+pub fn user_signal_pending() -> bool {
+    USER_SIGNALS.iter().any(|count| count.load(std::sync::atomic::Ordering::SeqCst) > 0)
+}
+/// A pending user signal's event, SIGUSR2's first, taking it.
 pub fn take_user_signal() -> Option<&'static str> {
     USER_SIGNALS.iter().zip(USER_SIGNAL_EVENTS).find_map(|(count, (_, event))| {
         count.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |n| n.checked_sub(1))
