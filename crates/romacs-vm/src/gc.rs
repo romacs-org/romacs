@@ -634,6 +634,7 @@ impl Vm {
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| pending.push(*v));
         }
+        pending.push(self.thrown_no_catch);
         for handler in &mut self.signal_handlers {
             handler.visit_values(&mut |v| pending.push(*v));
         }
@@ -1014,6 +1015,7 @@ impl Vm {
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| rewrite(v));
         }
+        rewrite(&mut self.thrown_no_catch);
         for handler in &mut self.signal_handlers {
             handler.visit_values(&mut |v| rewrite(v));
         }

@@ -1298,9 +1298,10 @@ pub struct Vm {
     /// what leaves an expansion it began in is told apart from an error the
     /// macro raised after catching a quit (`quit_watched').
     quit_unwinding: bool,
-    /// The pending `no-catch' is a throw that found no live catch, not one
-    /// Lisp signalled (`signal_form' raises it again as the throw).
-    thrown_no_catch: bool,
+    /// The data of the last `no-catch' made from a throw that found no live
+    /// catch: a `no-catch' carrying this very object is that throw, not one
+    /// Lisp signalled (`signal_form' raises it again as the throw). A root.
+    thrown_no_catch: Value,
     /// The next form compiled is a deferred call reached (`force_lazy'): its
     /// own expansion signals there, the forms inside it defer as ever.
     strict_root: bool,
@@ -1680,7 +1681,7 @@ impl Vm {
             defer_expansion_errors: false,
             evaluating: false,
             quit_unwinding: false,
-            thrown_no_catch: false,
+            thrown_no_catch: Value::NIL,
             strict_root: false,
             loader_order_request: false,
             keep_captures: false,
@@ -2447,7 +2448,7 @@ impl Vm {
         };
         let no_catch = self.intern("no-catch");
         if condition == no_catch
-            && self.thrown_no_catch
+            && data == self.thrown_no_catch
             && let Ok((tag, rest)) = self.cons_pair(data)
             && let Ok((value, Value::NIL)) = self.cons_pair(rest)
         {
