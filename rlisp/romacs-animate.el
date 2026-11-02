@@ -25,19 +25,31 @@
 ;;
 ;; Either way an animation moves only while its buffer is shown in the
 ;; selected frame, that frame has focus, it is not paused, and motion is
-;; allowed (`romacs-animate-motion-p').  Otherwise nothing runs for it:
+;; allowed (`romacs-animate-motion-p', `romacs-animation').  Otherwise
+;; nothing runs for it:
 ;; there is no timer, and the display holds its last frame.  A command, a
 ;; focus change or `romacs-animate-redraw' looks again; the display itself
 ;; also stops the moment its window loses focus or is hidden.  Where motion
 ;; is not allowed an animation still gets a still frame when it becomes
-;; visible or its window resizes.
+;; visible or its window resizes, and a display that draws animations still
+;; gets its element, not moving: on a GPU the landing draws its still frame
+;; there.
 ;;
 ;; `romacs-animate-statistics' reports the evaluator time FRAME-FNs take.
 ;; rlisp/romacs-landing.el, the *Romacs* landing, is the first client.
 
 ;;; Code:
 
-(defvar romacs-layer-animation)         ; rlisp/romacs-layer.el
+(defcustom romacs-animation t
+  "How Romacs's own pages animate, the *Romacs* landing first.
+t: they move.  `reduced' and nil: they stand still, each in its still
+frame (on a GPU the landing's lit mark, posed).  Batch sessions and a
+display on a software renderer (headless test displays) draw no motion
+either way, unless the environment variable ROMACS_LAYER_ANIMATION is 1."
+  :type '(choice (const :tag "Motion" t)
+                 (const :tag "Still frames" reduced)
+                 (const :tag "None" nil))
+  :group 'romacs)
 
 (defvar romacs-animate-max-dt 0.08
   "Most seconds of motion one frame advances, however long it was late.")
@@ -69,7 +81,9 @@
 (defvar romacs-animate--elements nil
   "The text animations the display draws by itself, a list of (KEY WINDOW
 BUFFER TOP COLS ROWS FPS MOVING KIND), one for each window that
-shows an animation, as `romacs-animate--sync' keeps it.  Each frame the
+shows an animation, as `romacs-animate--sync' keeps it.  MOVING is t,
+nil while it holds where it is, or `still' while motion is off, when
+it shows its still frame.  Each frame the
 evaluator freezes carries those whose WINDOW still shows BUFFER
 \(`Vm::text_animations' in the VM), so the display draws exactly the
 animations of the frame it shows.")
@@ -80,20 +94,22 @@ animations of the frame it shows.")
 (defvar romacs-animate--display nil
   "Whether the display animates, as it last said (`romacs--display-animates').")
 
-(defun romacs-animate-motion-p ()
-  "Whether animations move here.
-Not in batch, nor where `romacs-layer-animation' is nil or `reduced',
-nor on a display that draws no animation (`romacs--display-animates':
-a software rasterizer, every headless harness's, unless the environment
-variable ROMACS_LAYER_ANIMATION is 1).  While the display cannot say,
-its last answer stands.  A void `romacs-layer-animation' counts as its
-default, t."
+(defun romacs-animate--display-p ()
+  "Whether the display draws animation frame by frame.
+Not in batch, nor on a software rasterizer, every headless harness's,
+unless the environment variable ROMACS_LAYER_ANIMATION is 1
+\=(`romacs--display-animates').  While the display cannot say, its last
+answer stands."
   (and (not noninteractive)
-       (eq (if (boundp 'romacs-layer-animation) romacs-layer-animation t) t)
        (fboundp 'romacs--display-animates)
        (let ((animates (romacs--display-animates)))
          (unless (eq animates 'unknown) (setq romacs-animate--display animates))
          (eq romacs-animate--display t))))
+
+(defun romacs-animate-motion-p ()
+  "Whether animations move here: `romacs-animation' is t and the display
+draws animation (`romacs-animate--display-p')."
+  (and (eq romacs-animation t) (romacs-animate--display-p)))
 
 (defun romacs-animate--get (id)
   (let ((found nil))
@@ -150,10 +166,10 @@ are not the ones its last frame was drawn for."
       (romacs-animate--set animation :size size)
       (romacs-animate--draw animation 0))))
 
-(defun romacs-animate--hosted-p (animation motion)
-  "Whether the display draws ANIMATION's motion: it has an element and
-MOTION is allowed."
-  (and motion (romacs-animate--slot animation :element)))
+(defun romacs-animate--hosted-p (animation)
+  "Whether the display draws ANIMATION: it has an element and the display
+draws animation, moving or not."
+  (and (romacs-animate--slot animation :element) (romacs-animate--display-p)))
 
 (defun romacs-animate--sync (animation motion)
   "Make ANIMATION's entries in `romacs-animate--elements' its elements as
@@ -161,9 +177,10 @@ they now are: one for each window that shows it where the display draws
 it, else none."
   (let* ((key (romacs-animate--slot animation :key))
          (buffer (romacs-animate--slot animation :buffer))
-         (moving (and (romacs-animate--moving-p animation motion) t))
+         (moving (cond ((romacs-animate--moving-p animation motion) t)
+                       ((not motion) 'still)))
          (entries nil))
-    (when (romacs-animate--hosted-p animation motion)
+    (when (romacs-animate--hosted-p animation)
       (dolist (window (romacs-animate--windows animation))
         (let ((element (with-current-buffer buffer
                          (funcall (romacs-animate--slot animation :element) window))))
@@ -187,7 +204,7 @@ draw whose period has passed; stop the clock when none moves."
         (motion (romacs-animate-motion-p))
         (moving nil))
     (dolist (animation romacs-animate--animations)
-      (if (or (romacs-animate--hosted-p animation motion)
+      (if (or (romacs-animate--hosted-p animation)
               (not (romacs-animate--moving-p animation motion)))
           (romacs-animate--set animation :last nil)
         (setq moving t)
@@ -217,7 +234,7 @@ date, and run the Lisp clock if a Lisp-drawn animation moves.  On
         (fps nil))
     (dolist (animation romacs-animate--animations)
       (if (and (romacs-animate--moving-p animation motion)
-               (not (romacs-animate--hosted-p animation motion)))
+               (not (romacs-animate--hosted-p animation)))
           (setq fps (max (or fps 0) (romacs-animate--slot animation :fps)))
         ;; Stopped: its next motion starts from a still frame.
         (romacs-animate--set animation :last nil)

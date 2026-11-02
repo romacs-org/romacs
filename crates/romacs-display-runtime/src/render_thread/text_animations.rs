@@ -8,13 +8,23 @@
 //! window has focus and is not occluded.  Motion stops at once, and starts
 //! again with a still first frame: a pause, a hidden workspace or a lost
 //! focus costs nothing and is never caught up.
+//!
+//! Where the renderer allows dynamic effects (a GPU), an animation is drawn
+//! as a page scene (page_scenes.rs) over its blanked cells, at the display's
+//! rate; elsewhere, and if the GPU refuses the scene, as its cells.
 use romacs_display_protocol::FrameGlyphBuffer;
 use romacs_display_protocol::text_animation::{paint, TextAnimation};
+use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use super::page_scenes::{self, PageScene};
+
 /// Most motion one frame advances, however late it is.
 const MAX_STEP: Duration = Duration::from_millis(80);
+
+/// Frames a second of an animation drawn as a page scene.
+const SCENE_FPS: u32 = 60;
 
 struct Running {
     animation: TextAnimation,
@@ -24,6 +34,18 @@ struct Running {
     last: Option<Instant>,
     /// The cells for `moved`, computed once per frame reached.
     cells: Option<(f64, Vec<romacs_logo::Cell>)>,
+    /// The scene drawing it on the GPU.
+    scene: Option<PageScene>,
+}
+
+impl Running {
+    fn drawn_as_scene(&self) -> bool {
+        self.scene.as_ref().is_some_and(|s| s.shown.is_some() && !s.failed)
+    }
+
+    fn fps(&self) -> u32 {
+        if self.drawn_as_scene() { SCENE_FPS } else { self.animation.fps }
+    }
 }
 
 #[derive(Default)]
@@ -31,19 +53,51 @@ pub(crate) struct TextAnimations {
     running: BTreeMap<u64, Running>,
     unfocused: bool,
     occluded: bool,
+    /// Scenes of animations that ended, for the renderer to free.
+    retired: Vec<PageScene>,
 }
 
 impl TextAnimations {
     /// The animations a new frame names, by key: these and no others.
-    /// One that continues its motion keeps its motion time.
+    /// One that continues its motion keeps its motion time; one under the
+    /// same key keeps its scene, which starts its motion over by itself.
     pub(crate) fn replace(&mut self, animations: Vec<(u64, TextAnimation)>) {
         let mut previous = std::mem::take(&mut self.running);
         for (id, animation) in animations {
-            let before = previous.remove(&id).filter(|r| r.animation.continues(&animation));
+            let (scene, before) = match previous.remove(&id) {
+                Some(mut r) => (r.scene.take(), Some(r).filter(|r| r.animation.continues(&animation))),
+                None => (None, None),
+            };
             let moved = before.as_ref().map_or(0.0, |r| r.moved);
             let last = before.as_ref().and_then(|r| r.last).filter(|_| animation.moving);
             let cells = before.filter(|r| r.animation == animation).and_then(|r| r.cells);
-            self.running.insert(id, Running { animation, moved, last, cells });
+            self.running.insert(id, Running { animation, moved, last, cells, scene });
+        }
+        self.retired.extend(previous.into_values().filter_map(|r| r.scene));
+    }
+
+    /// Scenes to free.
+    pub(crate) fn take_retired(&mut self) -> Vec<PageScene> {
+        std::mem::take(&mut self.retired)
+    }
+
+    /// Bring the scene of every animation to its motion time in FRAME, where
+    /// GPU allows it; the others are drawn as cells.
+    pub(crate) fn prepare_scenes(&mut self, frame: &FrameGlyphBuffer, gpu: bool, renderer: &mut WgpuRenderer) {
+        for running in self.running.values_mut() {
+            if !gpu {
+                if let Some(scene) = running.scene.take() { self.retired.push(scene); }
+                continue;
+            }
+            let scene = running.scene.get_or_insert_with(PageScene::new);
+            if !scene.failed { scene.prepare(frame, &running.animation, running.moved, renderer); }
+        }
+    }
+
+    /// Draw the scenes [`Self::prepare_scenes`] left to draw.
+    pub(crate) fn draw_scenes(&mut self, renderer: &mut WgpuRenderer, atlas: &mut WgpuGlyphAtlas) {
+        for scene in self.running.values_mut().filter_map(|r| r.scene.as_mut()) {
+            if !scene.failed { scene.draw(renderer, atlas); }
         }
     }
 
@@ -62,7 +116,7 @@ impl TextAnimations {
     pub(crate) fn deadline(&self, now: Instant) -> Option<Instant> {
         let halted = self.halted();
         self.running.values().filter(|r| moves(&r.animation, halted))
-            .map(|r| r.last.map_or(now, |last| last + Duration::from_secs(1) / r.animation.fps))
+            .map(|r| r.last.map_or(now, |last| last + Duration::from_secs(1) / r.fps()))
             .min()
     }
 
@@ -73,7 +127,7 @@ impl TextAnimations {
         let halted = self.halted();
         for running in self.running.values_mut() {
             if !moves(&running.animation, halted) { continue; }
-            let period = Duration::from_secs(1) / running.animation.fps;
+            let period = Duration::from_secs(1) / running.fps();
             match running.last {
                 Some(last) if now < last + period => {}
                 Some(last) => {
@@ -88,13 +142,23 @@ impl TextAnimations {
         advanced
     }
 
-    /// Paint every animation over FRAME, the copy about to be drawn. Its
-    /// glyphs then differ from the producer's, so it no longer promises to
-    /// paint as another frame of its layout identity does (a retained root
-    /// picture would show a still animation).
+    /// Paint every animation over FRAME, the copy about to be drawn: a
+    /// scene's surface over blank cells, or its cells. Its glyphs then
+    /// differ from the producer's, so it no longer promises to paint as
+    /// another frame of its layout identity does (a retained root picture
+    /// would show a still animation).
     pub(crate) fn paint(&mut self, frame: &mut FrameGlyphBuffer) {
         if !self.running.is_empty() { frame.layout_identity = 0; }
         for running in self.running.values_mut() {
+            let shown = running.scene.as_ref().filter(|_| running.drawn_as_scene())
+                .zip(page_scenes::block(frame, &running.animation))
+                .and_then(|(scene, block)| scene.glyph(&block));
+            if let Some(glyph) = shown {
+                let blank = vec![(' ', None); (running.animation.cols * running.animation.rows) as usize];
+                paint(frame, &running.animation, &blank);
+                frame.glyphs.push(glyph);
+                continue;
+            }
             let moved = running.moved;
             if running.cells.as_ref().is_none_or(|(at, _)| *at != moved) {
                 running.cells = Some((moved, running.animation.cells(moved)));

@@ -439,7 +439,9 @@ impl Vm {
     /// (romacs_display_protocol::text_animation): `romacs-animate--elements',
     /// which rlisp/romacs-animate.el keeps, a list of (KEY WINDOW BUFFER
     /// TOP COLS ROWS FPS MOVING KIND), each while WINDOW is live and shows
-    /// BUFFER, keyed by KEY and WINDOW.  KIND is (logo CELL-ASPECT EPOCH).
+    /// BUFFER, keyed by KEY and WINDOW.  MOVING is t, nil (held where it
+    /// is) or `still' (motion is off: its still frame).  KIND is (logo
+    /// CELL-ASPECT EPOCH).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
     pub fn text_animations(&mut self) -> Result<Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>> {
@@ -449,6 +451,7 @@ impl Vm {
         if list == Value::NIL || list == Value::UNBOUND { return Ok(vec![]); }
         let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
         let logo = self.intern("logo");
+        let still = self.intern("still");
         let mut animations = vec![];
         for entry in self.list_values(list)? {
             let fields = self.list_values(entry)?;
@@ -475,7 +478,7 @@ impl Vm {
             let window = self.window(window)?.id;
             animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
                 window, top, cols: natural(cols)? as u32, rows: natural(rows)? as u32,
-                fps: natural(fps)? as u32, moving: moving != Value::NIL, kind,
+                fps: natural(fps)? as u32, moving: moving != Value::NIL && moving != still, still: moving == still, kind,
             }));
         }
         Ok(animations)

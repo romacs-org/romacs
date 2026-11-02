@@ -56,6 +56,7 @@ mod pattern_effects;
 mod pointer_override;
 mod resources;
 mod row_reuse;
+mod scene_placements;
 mod scissor;
 mod snapshot_pool;
 pub use snapshot_pool::{
@@ -203,6 +204,8 @@ pub struct WgpuRenderer {
     pub(super) caches: RenderCaches,
     /// Uploaded native models and their GPU budget (model/store.rs).
     pub(super) models: models::ModelCache,
+    /// Scene placements drawn into surfaces (scene_placements.rs).
+    pub(super) scene_placements: scene_placements::ScenePlacements,
     /// Bounded asynchronous timestamp queries for frame-content passes.
     #[cfg(feature = "video")]
     pub(super) gpu_frame_timer: crate::gpu_frame_timing::GpuFrameTimer,
@@ -1292,6 +1295,7 @@ impl WgpuRenderer {
             root_gpu_timer,
             arenas: VertexArenas::new(),
             models: models::ModelCache::new(),
+            scene_placements: Default::default(),
             frame_post: None,
             media_budget: crate::media_budget::MediaBudget::new(),
             snapshots: SnapshotPool::new(GpuBudget::new()),

@@ -101,13 +101,40 @@ fn bezier(points: &[(f64, f64)], t: f64) -> (f64, f64) {
     p[0]
 }
 
-/// Each `d="..."` of SVG, with the `fill` before it, in order.
-fn paths(svg: &str) -> Vec<(Option<u32>, Vec<Polygon>)> {
+/// Each `<path>` of SVG in order: its `fill` and its `d`.
+fn path_data(svg: &str) -> Vec<(Option<u32>, &str)> {
     svg.split("<path").skip(1).map(|element| {
         let attribute = |name: &str| element.split(&format!("{name}=\"")).nth(1).and_then(|rest| rest.split('"').next());
         let fill = attribute("fill").and_then(|f| f.strip_prefix('#')).and_then(|hex| u32::from_str_radix(hex, 16).ok());
-        (fill, attribute("d").map(outlines).unwrap_or_default())
+        (fill, attribute("d").unwrap_or_default())
     }).collect()
+}
+
+/// Each `d="..."` of SVG, with the `fill` before it, in order.
+fn paths(svg: &str) -> Vec<(Option<u32>, Vec<Polygon>)> {
+    path_data(svg).into_iter().map(|(fill, d)| (fill, outlines(d))).collect()
+}
+
+/// The mark's SVG paths, each its colour and `d`: the R (with its counter,
+/// filled even-odd), then the crescent.
+pub fn mark_paths() -> Vec<(u32, &'static str)> {
+    path_data(MARK).into_iter().filter_map(|(fill, d)| Some((fill?, d))).collect()
+}
+
+/// The wordmark's SVG paths' `d`, in the wordmark's own units.
+pub fn wordmark_paths() -> Vec<&'static str> {
+    path_data(WORDMARK).into_iter().map(|(_, d)| d).collect()
+}
+
+/// The wordmark's colour.
+pub const WORDMARK_COLOUR: u32 = WORD;
+
+/// Where a view puts the mark and the wordmark: each `(x, y, width, height)`
+/// in cell heights from the view's top left (a cell is `cell_aspect` wide).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    pub mark: (f64, f64, f64, f64),
+    pub word: (f64, f64, f64, f64),
 }
 
 /// The shapes drawn, each its colour and outlines: the R, the crescent,
@@ -145,14 +172,19 @@ fn layout(view: View) -> Arc<Layout> {
     made
 }
 
-/// The mark centred in the upper part of VIEW, the wordmark under it,
-/// rasterised to dots: dot (i, j) lies at x (i + .5) / 2 and y (j + .5) / 4
-/// cells, a cell being CELL_ASPECT wide and 1 high.
-fn lay_out(view: View) -> Layout {
+/// A box: least x and y, greatest x and y.
+type Bounds = (f64, f64, f64, f64);
+
+/// The outlines' bounds: the mark's, then the wordmark's.
+fn shape_bounds() -> (Bounds, Bounds) {
     let (mark, word) = shapes();
+    (bounds(&mark.iter().flat_map(|(_, p)| p.iter().cloned()).collect::<Vec<_>>()), bounds(word))
+}
+
+/// The mark centred in the upper part of VIEW, the wordmark under it.
+pub fn placement(view: View) -> Placement {
+    let (mark_bounds, word_bounds) = shape_bounds();
     let (width, height) = (view.cols as f64 * view.cell_aspect, view.rows as f64);
-    let mark_bounds = bounds(&mark.iter().flat_map(|(_, p)| p.iter().cloned()).collect::<Vec<_>>());
-    let word_bounds = bounds(word);
     let (mw, mh) = (mark_bounds.2 - mark_bounds.0, mark_bounds.3 - mark_bounds.1);
     let (ww, wh) = (word_bounds.2 - word_bounds.0, word_bounds.3 - word_bounds.1);
     // Heights in cells: the mark, a gap, the wordmark; within the width.
@@ -161,16 +193,28 @@ fn lay_out(view: View) -> Layout {
     let word_h = (mark_h * 0.2).min(width * 0.6 * wh / ww);
     let gap = mark_h * 0.12;
     let top = (height - (mark_h + gap + word_h)) / 2.0;
-    let place = |bounds: (f64, f64, f64, f64), h: f64, y: f64| {
+    let centred = |w: f64, h: f64, y: f64| ((width - w) / 2.0, y, w, h);
+    Placement {
+        mark: centred(mark_h * mw / mh, mark_h, top),
+        word: centred(word_h * ww / wh, word_h, top + mark_h + gap),
+    }
+}
+
+/// VIEW's placement rasterised to dots: dot (i, j) lies at x (i + .5) / 2 and y (j + .5) / 4
+/// cells, a cell being CELL_ASPECT wide and 1 high.
+fn lay_out(view: View) -> Layout {
+    let (mark, word) = shapes();
+    let (mark_bounds, word_bounds) = shape_bounds();
+    let placed = placement(view);
+    let place = |bounds: (f64, f64, f64, f64), (x, y, _, h): (f64, f64, f64, f64)| {
         let scale = h / (bounds.3 - bounds.1);
-        let x = (width - (bounds.2 - bounds.0) * scale) / 2.0;
         move |(px, py): (f64, f64)| (x + (px - bounds.0) * scale, y + (py - bounds.1) * scale)
     };
     let mut drawn: Vec<(u32, Vec<Polygon>)> = mark.iter().map(|(colour, polygons)| {
-        let at = place(mark_bounds, mark_h, top);
+        let at = place(mark_bounds, placed.mark);
         (*colour, polygons.iter().map(|p| p.iter().map(|&q| at(q)).collect()).collect())
     }).collect();
-    let at = place(word_bounds, word_h, top + mark_h + gap);
+    let at = place(word_bounds, placed.word);
     drawn.push((WORD, word.iter().map(|p| p.iter().map(|&q| at(q)).collect()).collect()));
     let (dots_w, dots_h) = (view.cols * 2, view.rows * 4);
     let mut dots = vec![0u32; dots_w * dots_h];

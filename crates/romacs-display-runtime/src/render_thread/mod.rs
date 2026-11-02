@@ -32,6 +32,7 @@ mod legacy_ready_native_test;
 mod lifecycle;
 mod media;
 mod models;
+mod page_scenes;
 #[cfg(test)]
 #[path = "tests/modifier_policy_cooking_test.rs"]
 mod modifier_policy_cooking_test;
