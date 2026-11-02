@@ -96,3 +96,13 @@ fn object_intervals_match_pinned_gnu() {
 (list (with-temp-buffer (insert "ab") (object-intervals (current-buffer))) (condition-case e (object-intervals 1) (error e)))
 "###);
 }
+
+#[test]
+fn unencodable_char_position_matches_pinned_gnu() {
+    matches_pinned_gnu(r###"
+(list (unencodable-char-position 1 1 'utf-8 nil "aé") (unencodable-char-position 0 nil 'latin-1 nil "aé€x€") (unencodable-char-position 0 nil 'latin-1 0 "aé€x€") (unencodable-char-position 0 nil 'latin-1 1 "aé€x€") (unencodable-char-position 0 nil 'raw-text nil "€") (unencodable-char-position 0 nil 'us-ascii nil "abc") (unencodable-char-position -2 nil 'us-ascii 5 "abéc"))
+(with-temp-buffer (insert "xé€") (list (unencodable-char-position 1 4 'latin-1) (unencodable-char-position 4 1 'iso-latin-1 2) (unencodable-char-position 1 4 'utf-8)))
+(list (unencodable-char-position 0 nil 'utf-8 nil (string-to-multibyte (unibyte-string 97 200))) (unencodable-char-position 0 nil 'latin-1 nil (unibyte-string 97 200)))
+(list (condition-case e (unencodable-char-position 0 9 'utf-8 nil "ab") (error e)) (condition-case e (unencodable-char-position 0 1 'no-such nil "ab") (error e)) (condition-case e (unencodable-char-position 0 1 'utf-8 -1 "aé") (error e)))
+"###);
+}

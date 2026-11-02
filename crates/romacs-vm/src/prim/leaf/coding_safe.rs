@@ -142,6 +142,55 @@ impl Leaf<'_> {
             _ => unreachable!("a live buffer"),
         }
     }
+    /// Funencodable_char_position (coding.c:9209) once CODING is defined:
+    /// the positions of the first COUNT characters (one when COUNT is nil,
+    /// then the position alone) of the current buffer's START..END, or of
+    /// STRING's START..END as `substring' takes them, that CODING cannot
+    /// encode; nil for raw-text, unibyte text, or ASCII text in an
+    /// ASCII-compatible coding.
+    pub(crate) fn unencodable_char_position(&mut self, start: Value, end: Value, coding: Value, count: Value, string: Value) -> super::super::Out {
+        self.coding_check(coding)?;
+        let coding = if coding == Value::NIL { self.intern("undecided") } else { coding };
+        let spec = self.coding_spec(coding)?;
+        let field = |leaf: &mut Self, v: Value, i: i64| leaf.vector_get(v, Value::integer(i).expect("index"));
+        let attrs = field(self, spec, 0)?;
+        if field(self, attrs, 3)? == self.intern("raw-text") { return Ok(Value::NIL); }
+        let ascii_compatible = field(self, attrs, 5)? != Value::NIL;
+        let charsets = field(self, attrs, 4)?;
+        let charsets: Vec<usize> = self.coding_items(charsets)?.iter().filter_map(|id| id.integer_value()).map(|id| id as usize).collect();
+        let tables = self.coding_encode_translation(attrs)?;
+        let (codes, from) = if string == Value::NIL {
+            let text = self.text_span(start, end, true)?;
+            if !text.multibyte || (ascii_compatible && text.ascii()) { return Ok(Value::NIL); }
+            let from = self.vm.text_property_position(start)?.min(self.vm.text_property_position(end)?);
+            (text.view().chars().collect::<Vec<u32>>(), from)
+        } else {
+            let view = self.string_view(string)?;
+            let size = view.chars as i64;
+            let index = |v: Value, default: i64| -> std::result::Result<i64, Fault> {
+                if v == Value::NIL { return Ok(default); }
+                let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
+                Ok(if n < 0 { n + size } else { n })
+            };
+            let (f, t) = (index(start, 0)?, index(end, size)?);
+            if !(0 <= f && f <= t && t <= size) { return Err(Fault::Range3(string, start, end)); }
+            if !view.multibyte { return Ok(Value::NIL); }
+            let codes: Vec<u32> = view.chars().skip(f as usize).take((t - f) as usize).collect();
+            if ascii_compatible && codes.iter().all(|&c| c < 0x80) { return Ok(Value::NIL); }
+            (codes, f)
+        };
+        let mut wanted = if count == Value::NIL { 1 } else {
+            count.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", count))?
+        };
+        let mut positions = Vec::new();
+        for (i, &c) in codes.iter().enumerate() {
+            if (c < 0x80 && ascii_compatible) || self.coding_encodable(&charsets, &tables, c)? { continue; }
+            positions.push(Value::integer(from + i as i64).map_err(Fault::Error)?);
+            wanted -= 1;
+            if wanted == 0 { break; }
+        }
+        Ok(if count == Value::NIL { positions.first().copied().unwrap_or(Value::NIL) } else { self.coding_list(&positions) })
+    }
     /// Ffind_coding_systems_region_internal: t when the text needs no
     /// encoding (unibyte or ASCII), else the base coding systems of
     /// `coding-system-list', less EXCLUDE, that encode every character,
