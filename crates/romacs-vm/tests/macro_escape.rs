@@ -35,7 +35,7 @@ const EVALUATED: [&str; 9] = [
 /// Forms evaluated as they are, each around an `eval' of its own: what the
 /// eval'd form's own handlers catch, no handler around the `eval' sees, and
 /// a deferred call's expansion defers the calls inside it in turn.
-const AROUND: [&str; 7] = [
+const AROUND: [&str; 11] = [
     r#"(catch 'rt-tag (list 'outer (eval '(catch 'rt-tag (rt-t)) t)))"#,
     r#"(progn (setq rt-log nil) (list (catch 'rt-tag (eval '(unwind-protect (rt-t) (push 'cleanup rt-log)) t)) rt-log))"#,
     r#"(progn (setq rt-log nil) (list (handler-bind ((error (lambda (e) (push e rt-log)))) (eval '(condition-case nil (rt-m) (error 'inner)) t)) rt-log))"#,
@@ -44,6 +44,14 @@ const AROUND: [&str; 7] = [
     r#"(progn (setq rt-log nil) (list (let ((signal-hook-function (lambda (c _) (push c rt-log)))) (eval '(catch 'rt-tag (rt-t)) t)) rt-log))"#,
     // The hook hears an error a handler-bind inside the macro leaves.
     r#"(progn (setq rt-log nil) (list (let ((signal-hook-function (lambda (c _) (push c rt-log)))) (eval '(rt-hb) t)) rt-log))"#,
+    // A call whose function is undefined when reached signals
+    // void-function before any argument runs, alone, after what ran
+    // before it, and inside the form's own handler; one a form before it
+    // defines runs with its arguments.
+    r#"(progn (setq rt-log nil) (list (condition-case e (eval '(rt-undefined (push 'arg rt-log)) t) (error e)) rt-log))"#,
+    r#"(progn (setq rt-log nil) (list (condition-case e (eval '(progn (push 'before rt-log) (rt-undefined (push 'arg rt-log))) t) (error e)) rt-log))"#,
+    r#"(progn (setq rt-log nil) (list (eval '(condition-case e (rt-undefined (push 'arg rt-log)) (void-function (list 'inner e))) t) rt-log))"#,
+    r#"(progn (setq rt-log nil) (list (eval '(progn (defun rt-late (x) (list 'late x)) (rt-late (push 'arg rt-log))) t) rt-log))"#,
     // No debugger for an error the form's own handler catches.
     r#"(progn (setq rt-log nil) (list (let ((debug-on-error t) (debugger (lambda (&rest _) (push 'debugged rt-log) nil))) (eval '(condition-case nil (rt-m) (error 'caught)) t)) rt-log))"#,
 ];
