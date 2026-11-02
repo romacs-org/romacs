@@ -38,6 +38,7 @@ mod isolate_worker;
 mod exit;
 mod preparing;
 mod quit;
+mod client;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -525,8 +526,13 @@ fn main() {
 }
 /// The session's end, when this process ran one.
 fn run() -> Result<Option<exit::Exit>, String> {
+    // `--server NAME': a client of that server (client.rs), not a session.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if client::selected(&argv) { std::process::exit(client::main(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
-    let mut args = std::env::args().skip(1);
+    let mut args = argv.into_iter();
+    let mut serve = None;
+    let mut serve_frame = false;
     let mut socket = None;
     let mut floor = None;
     let mut force_gc = false;
@@ -548,6 +554,11 @@ fn run() -> Result<Option<exit::Exit>, String> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--world-build" => world_build = true,
+            // The server a client started (client.rs): no window until a client asks.
+            "--serve" => serve = Some(client::server_name(&args.next().ok_or("--serve needs a NAME")?)?),
+            // The client that starts a server and asks for its window: the
+            // window comes up while the world restores, as a session's does.
+            "--serve-frame" => serve_frame = true,
             // A layer builder's: the init, the plan digest and the entries left out (world.rs).
             "--init-layer" => {
                 let mut word = || args.next().ok_or("--init-layer needs INIT DIGEST EXCLUDED");
@@ -668,14 +679,28 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // waits for it.
     if live { std::thread::spawn(romacs_font::load_catalog); }
     let socket = socket.or_else(|| std::env::var("WAYLAND_DISPLAY").ok()).unwrap_or_else(|| "wayland-0".into());
-    let (mut host, sender) =
-        PaintHost::wayland(std::path::Path::new(&socket), width, height, if live { "romacs — VM" } else { "VM G1a" }.into())?;
+    if serve.is_some() && !live { return Err("--serve needs a live session".into()); }
+    // A server runs GNU's server.el and its own Lisp on GNU's (romacs-server.el).
+    if serve.is_some() && launch == startup::Launch::Workspace {
+        return Err("--serve needs GNU's Lisp: --loadup or --gnu-lisp".into());
+    }
+    let title = if live { "romacs — VM" } else { "VM G1a" };
+    let (mut host, sender) = if serve.is_some() {
+        PaintHost::wayland_server(std::path::Path::new(&socket), width, height, title.into())?
+    } else {
+        PaintHost::wayland(std::path::Path::new(&socket), width, height, title.into())?
+    };
     // A live session's C-g quits a busy evaluator out of band (quit.rs).
     let quit = live.then(|| std::sync::Arc::new(romacs_vm::QuitSignal::new()));
     if let Some(quit) = &quit { host.set_input_interrupt(std::sync::Arc::new(quit::QuitHook(quit.clone()))); }
     if let Some(phases) = &mut phases { phases.mark("window"); }
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let start = phases.as_ref().map(startup::Phases::start);
+    let serving = serve.is_some();
+    let early_window = match &serve {
+        Some(_) if serve_frame => Some(sender.show_primary(width, height, "romacs".into())?),
+        _ => None,
+    };
     let worker = spawn_evaluator(move || {
         if let Some(start) = start { startup::begin_phases(start); }
         let sender = std::sync::Arc::new(sender);
@@ -698,6 +723,8 @@ fn run() -> Result<Option<exit::Exit>, String> {
         let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
             // Said first, so a launcher sees it whether or not a window can.
             eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": preparing::MESSAGE}));
+            // A server has no window to show it in.
+            if serving { return; }
             let painted = preparing::start(sender.clone(), width, height);
             eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing-frame", "painted": painted.is_ok(),
                                                                "error": painted.as_ref().err()}));
@@ -721,7 +748,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, worlds, first_presentation, quit, prune)
+                     isolate_world, worlds, first_presentation, quit, prune, serve, early_window)
         }));
         let end = match result {
             Ok(Ok(end)) => end,
@@ -1011,6 +1038,8 @@ fn evaluate(
     first_presentation: u64,
     quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
     after_first_frame: Option<impl FnOnce()>,
+    serve: Option<String>,
+    early_window: Option<crossbeam_channel::Receiver<Result<(), String>>>,
 ) -> Result<exit::Exit, String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
     startup::mark_phase("layout-engine");
@@ -1144,16 +1173,32 @@ fn evaluate(
     if live {
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
     }
+    // A server listens before its first window, which a client asks for
+    // (rlisp/romacs-server.el); one that cannot listen ends here.
+    if let Some(name) = &serve {
+        host.borrow_mut().server = Some(prompt::ServerWindow { shown: false, size: (width, height), title: "romacs".into() });
+        vm.eval_source(&format!("(progn (require 'romacs-server) (romacs-server-start {}))", startup::lisp_string(name)))
+            .map_err(|error| format!("server {name}: {error}"))?;
+    }
     let initial = frame(&mut vm, g1, width, height)?;
     startup::mark_phase("initial-frame");
     let mut pending = std::collections::VecDeque::new();
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
     let first_submitted = Instant::now();
-    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending,
-                             if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?;
+    // A window asked for at the server's start is the session's first: it
+    // gets the first paint, as a session's window does.
+    let early = early_window.map(|ready| ready.recv_timeout(std::time::Duration::from_secs(30)).map_err(|e| e.to_string()).and_then(|r| r));
+    if let Some(Err(error)) = &early { eprintln!("romacs: server window: {error}"); }
+    if let (Some(Ok(())), Some(server)) = (&early, host.borrow_mut().server.as_mut()) { server.shown = true; }
+    let mut previous = if serve.is_some() && !host.borrow().window_shown() {
+        Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new() }
+    } else {
+        paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending,
+              if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?
+    };
     let mut live_presentation = presentation::Presentation::new();
-    if live && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
+    if live && host.borrow().window_shown() && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
         // Not drawn (hidden as it starts): the loop waits for it, stalled.
         live_presentation.submitted(previous.presentation, first_submitted);
     }
@@ -1202,6 +1247,8 @@ fn evaluate(
             } else {
                 let event = event.expect("host input");
                 if matches!(event, InputEvent::WindowClose { .. }) {
+                    // A server's closed window may report its end twice.
+                    if !host.borrow().window_shown() { continue; }
                     if !live || close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
@@ -1218,6 +1265,7 @@ fn evaluate(
                 if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
                     if w > 0 && h > 0 && (width, height) != (w, h) {
                         width = w; height = h;
+                        if let Some(server) = host.borrow_mut().server.as_mut() { server.size = (w, h); }
                         let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
                         vm.set_frame_geometry(width, height, lh, cw)?;
                         // The repaint's redisplay runs `window-size-change-functions'
@@ -1370,6 +1418,8 @@ fn evaluate(
                 for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
             }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
+                // A server with no window paints nothing until one shows.
+                if !host.borrow().window_shown() { return Ok(None); }
                 let snapshot_start = Instant::now();
                 let next = frame(&mut vm, g1, width, height)?;
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
@@ -1472,6 +1522,14 @@ fn next_presentation(host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>) -> 
 /// confirmation may read input. Whether to shut down.
 fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, mut lent: Lent<'_>) -> Result<bool, String> {
     terminate(vm, host, Lent { queue: &mut *lent.queue, live: &mut *lent.live, width: &mut *lent.width, height: &mut *lent.height })?;
+    // A server's window is a resource of the session: closing it ends the
+    // session only when Lisp says so (rlisp/romacs-server.el).
+    if host.borrow().server.is_some() {
+        return lent.run(host, |live| {
+            live.changed();
+            vm.eval_source("(romacs-server-window-closed)").map(|end| !end.is_nil())
+        }).0;
+    }
     lent.run(host, |live| live.window_close(vm)).0
 }
 
@@ -1509,6 +1567,13 @@ impl Lent<'_> {
         };
         let value = run(self.live);
         let mut shared = host.borrow_mut();
+        // A server's window shown or hidden meanwhile: the new one is
+        // painted whole under a fresh presentation; the old one's in-flight
+        // paint will never draw.
+        if std::mem::take(&mut shared.window_changed) {
+            *self.live = presentation::Presentation::new();
+            shared.presentation += 1;
+        }
         *self.queue = std::mem::take(&mut shared.pending);
         if shared.presentation != before { self.live.changed(); }
         if let Some((settled, at)) = shared.settled.take() { self.live.completed(settled, at); }

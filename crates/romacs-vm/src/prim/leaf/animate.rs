@@ -14,3 +14,19 @@ impl Leaf<'_> {
         })
     }
 }
+
+impl Leaf<'_> {
+    /// `romacs--native-window': ACTION `query', `show' or `hide' asked of
+    /// the host; t when its window shows after the request, nil when it
+    /// does not or the host has no native windows.
+    pub(crate) fn native_window(&mut self, action: Value) -> Out {
+        let action = match self.symbol_name(action).ok().as_deref() {
+            Some("query") => crate::NativeWindow::Query,
+            Some("show") => crate::NativeWindow::Show,
+            Some("hide") => crate::NativeWindow::Hide,
+            _ => return Err(crate::prim::Fault::Error("romacs--native-window: ACTION is query, show or hide".into())),
+        };
+        let shown = self.vm.host_input.as_mut().and_then(|host| host.native_window(action));
+        Ok(if shown == Some(true) { Value::TRUE } else { Value::NIL })
+    }
+}

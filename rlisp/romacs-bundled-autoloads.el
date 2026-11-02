@@ -327,6 +327,15 @@ a value in `ivy-re-builders-alist'.
 (register-definition-prefixes "romacs-project" '("romacs-project-"))
 
 
+;;; Generated autoloads from romacs-server.el
+
+(autoload 'romacs-server-start "romacs-server"
+"Serve this session as NAME: the native socket, and GNU's for emacsclient.
+
+(fn NAME)")
+(register-definition-prefixes "romacs-server" '("romacs-server-"))
+
+
 ;;; Generated autoloads from romacs-shader-playground.el
 
 (autoload 'romacs-shader-playground "romacs-shader-playground"

@@ -69,6 +69,16 @@ export ROMACS_LISP_DIR="$root/gnu-lisp"
 # A lane's RUST_MIN_STACK must not hide the evaluator's own 64 MiB reservation.
 unset RUST_MIN_STACK
 
+# Server-first (rlisp/romacs-server.el, DIVERGENCES.md SERVER2): connect to
+# the server named ROMACS_SERVER (default romacs), starting it as a user
+# unit when none runs, and ask it for a window; ROMACS_SERVER=off runs a
+# standalone session as before. Batch and installer runs stay standalone.
+server=${ROMACS_SERVER-romacs}
+case " $* " in *" --batch "*|*" --world-build "*|*" --help "*|*" --world-reset"*) server=off ;; esac
+if [ "$server" != off ]; then
+    exec "$bin" --server "$server" "$@"
+fi
+
 echo "romacs: $bin on $WAYLAND_DISPLAY" >&2
 # stdout carries only machine-readable command replies, stderr per-frame
 # diagnostics; keep both out of the terminal, and show the log on failure.

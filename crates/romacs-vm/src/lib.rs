@@ -42,7 +42,7 @@ mod watchers;
 mod user_db;
 mod locale_info;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
-pub use host_input::{HostEvent, HostFrame, HostInput, QUIT_CHAR};
+pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
 pub use display_host::{DisplayHost, FontEntity, FontQuery, OpenedFont, OtfTable};

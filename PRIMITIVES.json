@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "a9644193743e117f7c70deaf661f1d7f03fe9fb534d36e31ba401e9b5aadd8fa",
+  "source_fingerprint": "d3e9c81abc7372441c5fc677338264eccb1e1c363312b503b3236489983adbf2",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1251,
-  "parsed_vm2_only": 1251
+  "parsed_total": 1252,
+  "parsed_vm2_only": 1252
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4282,6 +4282,11 @@
    "name": "romacs--minibuffer-host",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:433"
+  },
+  "romacs--native-window": {
+   "name": "romacs--native-window",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/animate.rs:17"
   },
   "romacs--nconc-list": {
    "name": "romacs--nconc-list",
