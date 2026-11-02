@@ -282,6 +282,38 @@ mod tests {
         assert!(scrolls > 20, "{scrolls} scrolls");
     }
 
+    /// With the pane gap's bottom divider and internal border
+    /// (VM2-PANE-CHROME), moving point down a line at a time keeps the
+    /// cursor on a whole row above the mode line: the visibility check lays
+    /// the window out at the height the painted snapshot has, its bottom
+    /// divider excluded, and so scrolls when the painted window does.
+    #[test]
+    fn point_below_a_window_with_a_bottom_divider_scrolls_it() {
+        let mut h = hosted();
+        h.vm.set_display_host(Some(Box::new(crate::fonts::Display::new().unwrap())));
+        assert!(h.vm.open_display());
+        // A body 3 pixels short of 20 whole rows: with its 6-pixel divider
+        // counted, it would seem to hold 20.
+        let [line, column] = ["(frame-char-height)", "(frame-char-width)"].map(|form| h.eval(form).parse::<u32>().unwrap());
+        h.height = 22 * line + 15;
+        h.vm.set_frame_geometry(h.width, h.height, line, column).unwrap();
+        h.eval(r#"(progn (modify-frame-parameters nil '((bottom-divider-width . 6) (internal-border-width . 6)))
+          (erase-buffer) (let ((i 0)) (while (< i 100) (insert (format "line %d\n" i)) (setq i (1+ i))))
+          (goto-char 1) (set-window-start nil 1))"#);
+        assert_eq!(h.eval("(list (window-bottom-divider-width) (- (window-body-height nil t) (* 20 (frame-char-height))))"), "(6 -3)");
+        h.paint();
+        let mut scrolled = false;
+        for step in 0..30 {
+            h.eval("(forward-line 1)");
+            let paint = h.paint();
+            let band = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map(|g| g.2).unwrap();
+            let (_, y, _, height) = paint.cursor.unwrap_or_else(|| panic!("step {step}: no cursor on a whole row"));
+            assert!(y + height <= band, "step {step}: cursor at {y}+{height} past the mode line at {band}");
+            scrolled |= h.eval("(window-start)") != "1";
+        }
+        assert!(scrolled, "the window scrolled");
+    }
+
     /// A default face shrunk live, with no frame resize, makes rows shorter
     /// than the frame's line: the window still fills with text, and point
     /// moved below its last whole row still scrolls it, the text it has

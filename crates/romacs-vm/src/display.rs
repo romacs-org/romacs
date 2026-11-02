@@ -1170,12 +1170,14 @@ impl Vm {
         (chrome.indicators.bob, chrome.indicators.eob) = (base <= begv, at_zv);
         Ok(chrome)
     }
-    /// WINDOW's text width less its margins and fringes, and its height,
-    /// as a frame's snapshot gives them.
+    /// WINDOW's text width less its margins, fringes and right divider,
+    /// and its height less its bottom divider, as a frame's snapshot gives
+    /// them (`snapshot_leaves').
     fn window_body_size(&self, window: Value) -> Result<(u32, u32)> {
         let [left, right] = self.window_text_insets(window)?;
+        let [_, below] = self.window_dividers(window)?;
         let w = self.window(window)?;
-        Ok((w.width.saturating_sub(left + right), w.height))
+        Ok((w.width.saturating_sub(left + right), w.height.saturating_sub(below)))
     }
     /// The text WINDOW shows from its start, as a snapshot publishes it:
     /// for any window but the mini-window, only the bytes the rows of a
@@ -1825,7 +1827,8 @@ impl Vm {
         self.slots[saved_buffer].value = self.slots[self.buffer_slot].value;
         let format = self.mode_line_form(format);
         let outcome = (|| {
-            let height = self.window(window)?.height.saturating_sub(self.window_state.line);
+            let [_, below] = self.window_dividers(window)?;
+            let height = self.window(window)?.height.saturating_sub(self.window_state.line + below);
             // Fselect_window (WINDOW, t): its point becomes its buffer's.
             self.select_window_value(window, false)?;
             self.slots[self.buffer_slot].value = buffer;
