@@ -2342,6 +2342,9 @@ impl Vm {
         let (env, local_specials) = (b.env.clone(), b.local_specials.clone());
         match self.expr_now(b, f) {
             Ok(r) => Ok(r),
+            // A quit during the expansion, or a throw to a catch around it,
+            // is no failure of this form: it leaves now, as GNU's would.
+            Err(error) if self.expansion_escape_leaves() => Err(error),
             Err(_) => {
                 // GNU expands this form only when evaluation reaches it, and
                 // signals then (eval.c eval_sub). Discard the partial code and
@@ -2358,6 +2361,14 @@ impl Vm {
                 Ok(r)
             }
         }
+    }
+    /// Whether the escape a failed expansion left is a quit or a throw to a
+    /// live catch, which unwind to their handler rather than defer the form.
+    fn expansion_escape_leaves(&mut self) -> bool {
+        let quit = self.intern("quit");
+        matches!(self.propagated_escape, Some(threaded::Escape::Throw(..)))
+            || matches!(self.propagated_escape, Some(threaded::Escape::Signal(condition, _)) if condition == quit)
+            || matches!(self.propagated_escape, Some(threaded::Escape::Error { condition, .. }) if condition == quit)
     }
     /// Whether F expands only when reached in `reach_expansion': a call of a
     /// macro, or of a symbol with no function yet, which a form evaluated

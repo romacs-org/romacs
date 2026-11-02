@@ -1862,12 +1862,6 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
 #[cold]
 #[inline(never)]
 fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
-    // Not while compiling (a lazy body's first call, a macro expansion): a
-    // compile-time escape unwinds past the Lisp handlers of the code being
-    // compiled. The signal stays pending for the next safepoint in Lisp.
-    if e.vm.compile_depth > 0 || !e.vm.expanding.is_empty() {
-        return None;
-    }
     if crate::host::interrupt_pending() && isolate_quit(e) {
         // A signal, not an engine failure: `condition-case' catches it.
         return Some(raise(e, "quit", &[]));

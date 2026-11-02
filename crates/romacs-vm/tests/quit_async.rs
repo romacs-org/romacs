@@ -95,6 +95,48 @@ fn eval_buffer_and_load_quit_between_forms_keeping_what_ran() {
     assert!(n > 0 && n < FORMS, "load ran {n} forms");
 }
 
+// A macro whose expansion never ends quits like any loop, to the handler
+// around the expansion: in `eval' at the call's reach, inside a function
+// `eval' defined, through `macroexpand', and during `load''s expansion of
+// a top-level form (a quit is no error, so no "Eager macro-expansion
+// failure" wraps it).
+fn endless_macro_vm() -> (Vm, Arc<QuitSignal>) {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(defmacro quit-async-endless () (while t) nil)");
+    (vm, signal)
+}
+
+#[test]
+fn an_endless_expansion_in_eval_quits_to_its_handler() {
+    let (mut vm, signal) = endless_macro_vm();
+    assert_eq!(quit_into(&mut vm, &signal, "(eval '(condition-case nil (quit-async-endless) (quit 'quit)) t)"), "quit");
+    assert_eq!(eval(&mut vm, "(list quit-flag (input-pending-p))"), "(nil nil)");
+}
+
+#[test]
+fn an_endless_expansion_in_a_function_eval_defined_quits() {
+    let (mut vm, signal) = endless_macro_vm();
+    eval(&mut vm, "(eval '(defun quit-async-g () (quit-async-endless)) t)");
+    assert_eq!(quit_into(&mut vm, &signal, "(condition-case nil (quit-async-g) (quit 'quit))"), "quit");
+}
+
+#[test]
+fn an_endless_macroexpand_quits() {
+    let (mut vm, signal) = endless_macro_vm();
+    assert_eq!(quit_into(&mut vm, &signal, "(condition-case nil (macroexpand '(quit-async-endless)) (quit 'quit))"), "quit");
+}
+
+#[test]
+fn an_endless_expansion_during_load_quits_unwrapped() {
+    let (mut vm, signal) = endless_macro_vm();
+    let file = std::env::temp_dir().join(format!("quit-async-macro-{}.el", std::process::id()));
+    std::fs::write(&file, ";;; -*- lexical-binding: t -*-\n(quit-async-endless)\n").unwrap();
+    let load = format!("(condition-case nil (progn (load {:?} nil t t) 'done) (quit 'quit))", file.display().to_string());
+    let value = quit_into(&mut vm, &signal, &load);
+    std::fs::remove_file(&file).unwrap();
+    assert_eq!(value, "quit");
+}
+
 #[test]
 fn inhibit_quit_holds_the_quit_until_it_is_unbound() {
     let (mut vm, signal) = busy_vm();
