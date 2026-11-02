@@ -690,6 +690,8 @@ struct Frame {
     mark: usize,
 }
 const NO_MARK: usize = usize::MAX;
+/// The throws' `no-catch' marks kept (`Vm::thrown_no_catch').
+const THROWN_NO_CATCH_KEPT: usize = 16;
 pub(super) enum Escape {
     Normal(Value),
     Throw(Value, Value),
@@ -933,7 +935,9 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
         if !prepare_signal(e, false, None)
             && let Some(Escape::Error { object, .. }) = e.escape
         {
-            e.vm.thrown_no_catch = object;
+            let marks = &mut e.vm.thrown_no_catch;
+            if marks.len() == THROWN_NO_CATCH_KEPT { marks.remove(0); }
+            marks.push(object);
         }
         escape = e.escape.take().unwrap();
     }
@@ -987,8 +991,8 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                     // Caught: a quit from C-g unwinding to here ends here,
                     // and a throw's no-catch caught here retires its mark.
                     e.vm.quit_unwinding = false;
-                    if matches!(escape, Escape::Error { object, .. } if object == e.vm.thrown_no_catch) {
-                        e.vm.thrown_no_catch = Value::NIL;
+                    if let Escape::Error { object, .. } = &escape {
+                        e.vm.retire_thrown_no_catch(*object);
                     }
                     if matches!(control.kind, ControlKind::Condition(_)) {
                         while e.controls.len() > e.controls_base

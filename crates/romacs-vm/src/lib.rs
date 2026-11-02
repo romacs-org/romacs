@@ -1298,12 +1298,13 @@ pub struct Vm {
     /// what leaves an expansion it began in is told apart from an error the
     /// macro raised after catching a quit (`quit_watched').
     quit_unwinding: bool,
-    /// The error object (CONDITION . DATA) of the `no-catch' a throw that
-    /// found no live catch made, while that error escapes: the error with
-    /// this very object, made afresh for each signal, is that throw, not one
-    /// Lisp signalled (`signal_form' raises it again as the throw). A root,
-    /// retired when the error is caught.
-    thrown_no_catch: Value,
+    /// The error objects (CONDITION . DATA) of the `no-catch'es throws that
+    /// found no live catch made, while those errors escape, the newest last:
+    /// an error with one of these very objects, made afresh for each signal,
+    /// is that throw, not one Lisp signalled (`signal_form' raises it again
+    /// as the throw). Roots, each retired when its error is caught; one a
+    /// Rust caller discards stays until `THROWN_NO_CATCH_KEPT' newer ones.
+    thrown_no_catch: Vec<Value>,
     /// The next form compiled is a deferred call reached (`force_lazy'): its
     /// own expansion signals there, the forms inside it defer as ever.
     strict_root: bool,
@@ -1683,7 +1684,7 @@ impl Vm {
             defer_expansion_errors: false,
             evaluating: false,
             quit_unwinding: false,
-            thrown_no_catch: Value::NIL,
+            thrown_no_catch: Vec::new(),
             strict_root: false,
             loader_order_request: false,
             keep_captures: false,
@@ -2430,11 +2431,14 @@ impl Vm {
     /// macro again; otherwise F expands again at its reach.
     fn expansion_failed(&mut self, b: &mut Builder, f: &Form, quit: bool) -> Result<usize> {
         let escape = self.propagated_escape.take();
-        let ends_throw = matches!(escape, Some(threaded::Escape::Error { object, .. }) if object == self.thrown_no_catch);
+        let ended = match &escape {
+            Some(threaded::Escape::Error { object, .. }) => Some(*object),
+            _ => None,
+        };
         let raised = escape.filter(|_| quit).and_then(|escape| self.signal_form(escape));
-        if ends_throw {
-            // The escape ends here, so its throw's mark retires.
-            self.thrown_no_catch = Value::NIL;
+        // The escape ends here, so its throw's mark retires.
+        if let Some(object) = ended {
+            self.retire_thrown_no_catch(object);
         }
         match raised {
             Some(raised) => self.expr_now(b, &raised),
@@ -2450,7 +2454,7 @@ impl Vm {
             threaded::Escape::Signal(condition, data) => (condition, data, false),
             threaded::Escape::Error { object, .. } => {
                 let (condition, data) = self.cons_pair(object).ok()?;
-                (condition, data, object == self.thrown_no_catch)
+                (condition, data, self.thrown_no_catch.contains(&object))
             }
             threaded::Escape::Throw(tag, value) => return Some(call(self, "throw", tag, value)),
             threaded::Escape::Normal(_) => return None,
@@ -2462,6 +2466,10 @@ impl Vm {
             return Some(call(self, "throw", tag, value));
         }
         Some(call(self, "signal", condition, data))
+    }
+    /// OBJECT's error has ended: no throw's mark is kept for it.
+    pub(crate) fn retire_thrown_no_catch(&mut self, object: Value) {
+        self.thrown_no_catch.retain(|&marked| marked != object);
     }
     /// A call of a closure, made here, whose body is F, compiled when the
     /// call is reached (GNU expands F then, eval.c eval_sub).

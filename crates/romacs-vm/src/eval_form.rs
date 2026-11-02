@@ -179,7 +179,7 @@ mod tests {
         vm.install_lisp_prelude().unwrap();
         let value = vm.eval_source("(condition-case nil (eval '(throw 'missing (make-vector 3 nil)) t) (no-catch 'caught))").unwrap();
         assert_eq!(value.display().unwrap(), "caught");
-        assert_eq!(vm.thrown_no_catch, Value::NIL);
+        assert!(vm.thrown_no_catch.is_empty());
     }
 
     #[test]

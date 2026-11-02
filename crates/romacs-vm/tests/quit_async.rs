@@ -198,7 +198,8 @@ fn a_quit_in_a_nested_eval_leaves_the_outer_expansion() {
 /// `throw-on-input' throw stays a throw through a cleanup (GNU `t'), while
 /// a `no-catch' a cleanup signals stays a signal though a throw elsewhere
 /// made one meanwhile, or though it carries a caught throw's very data
-/// (GNU `caught', both).
+/// (GNU `caught', both); and a throw stays a throw though its cleanup
+/// catches another throw's `no-catch' (GNU `t').
 #[test]
 fn quit_flag_in_an_expansion_raises_what_gnu_does() {
     let (mut vm, _signal) = busy_vm();
@@ -212,7 +213,8 @@ fn quit_flag_in_an_expansion_raises_what_gnu_does() {
       (defmacro rt-swallow () (condition-case nil (throw 'missing 1) (no-catch nil)))
       (defmacro rt-stale () (unwind-protect (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch '(done 7))) (eval '(rt-swallow) t)))
       (defvar rt-saved (condition-case e (eval '(throw 'done 7) t) (no-catch e)))
-      (defmacro rt-resignal () (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch (cdr rt-saved)))))");
+      (defmacro rt-resignal () (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch (cdr rt-saved))))
+      (defmacro rt-ti-nested () (unwind-protect (progn (setq quit-flag 'done) (while t)) (eval '(rt-swallow) t))))");
     let cases = [
         ("(eval '(let ((rt-phase 'inner)) (condition-case e (rt-cq) (error e))) t)", "(error inner)"),
         ("(eval '(catch 'done (condition-case nil (rt-nc) (no-catch 'caught))) t)", "caught"),
@@ -221,6 +223,7 @@ fn quit_flag_in_an_expansion_raises_what_gnu_does() {
         ("(let ((throw-on-input 'done)) (eval '(catch 'done (list 'body (rt-ti))) t))", "t"),
         ("(eval '(catch 'done (condition-case nil (rt-stale) (no-catch 'caught))) t)", "caught"),
         ("(eval '(catch 'done (condition-case nil (rt-resignal) (no-catch 'caught))) t)", "caught"),
+        ("(let ((throw-on-input 'done)) (eval '(catch 'done (condition-case nil (rt-ti-nested) (no-catch 'wrong-handler))) t))", "t"),
     ];
     for (form, gnu) in cases {
         assert_eq!(eval(&mut vm, form), gnu, "{form}");
