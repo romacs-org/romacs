@@ -12,7 +12,9 @@
 //! Where the renderer allows dynamic effects (a GPU), an animation is drawn
 //! as a page scene (page_scenes.rs) over its blanked cells, at the display's
 //! rate; elsewhere, and if the GPU refuses the scene, as its cells.
-use romacs_display_protocol::FrameGlyphBuffer;
+//! Under ROMACS_DIAGNOSTICS=1 each change of how an animation is drawn
+//! (scene and where, cells, or out of view) is a line on stderr.
+use romacs_display_protocol::{FrameGlyph, FrameGlyphBuffer};
 use romacs_display_protocol::text_animation::{paint, TextAnimation};
 use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
 use std::collections::BTreeMap;
@@ -36,6 +38,19 @@ struct Running {
     cells: Option<(f64, Vec<romacs_logo::Cell>)>,
     /// The scene drawing it on the GPU.
     scene: Option<PageScene>,
+    /// How the last painted frame drew it.
+    drawn: Option<Drawn>,
+}
+
+/// How a frame draws an animation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Drawn {
+    /// As its scene's placement, at this frame rectangle.
+    Scene(kurbo::Rect),
+    /// As its cells.
+    Cells,
+    /// Not at all: its block is out of its window's view.
+    Hidden,
 }
 
 impl Running {
@@ -64,14 +79,14 @@ impl TextAnimations {
     pub(crate) fn replace(&mut self, animations: Vec<(u64, TextAnimation)>) {
         let mut previous = std::mem::take(&mut self.running);
         for (id, animation) in animations {
-            let (scene, before) = match previous.remove(&id) {
-                Some(mut r) => (r.scene.take(), Some(r).filter(|r| r.animation.continues(&animation))),
-                None => (None, None),
+            let (scene, drawn, before) = match previous.remove(&id) {
+                Some(mut r) => (r.scene.take(), r.drawn, Some(r).filter(|r| r.animation.continues(&animation))),
+                None => (None, None, None),
             };
             let moved = before.as_ref().map_or(0.0, |r| r.moved);
             let last = before.as_ref().and_then(|r| r.last).filter(|_| animation.moving);
             let cells = before.filter(|r| r.animation == animation).and_then(|r| r.cells);
-            self.running.insert(id, Running { animation, moved, last, cells, scene });
+            self.running.insert(id, Running { animation, moved, last, cells, scene, drawn });
         }
         self.retired.extend(previous.into_values().filter_map(|r| r.scene));
     }
@@ -150,9 +165,16 @@ impl TextAnimations {
     pub(crate) fn paint(&mut self, frame: &mut FrameGlyphBuffer) {
         if !self.running.is_empty() { frame.layout_identity = 0; }
         for running in self.running.values_mut() {
+            let block = page_scenes::block(frame, &running.animation);
             let shown = running.scene.as_ref().filter(|_| running.drawn_as_scene())
-                .zip(page_scenes::block(frame, &running.animation))
+                .zip(block)
                 .and_then(|(scene, block)| scene.glyph(&block));
+            running.report(match (&shown, block) {
+                (Some(FrameGlyph::Surface { x, y, width, height, .. }), _) =>
+                    Drawn::Scene(kurbo::Rect::new(f64::from(*x), f64::from(*y), f64::from(x + width), f64::from(y + height))),
+                (_, Some(_)) => Drawn::Cells,
+                (_, None) => Drawn::Hidden,
+            });
             if let Some(glyph) = shown {
                 let blank = vec![(' ', None); (running.animation.cols * running.animation.rows) as usize];
                 paint(frame, &running.animation, &blank);
@@ -169,6 +191,32 @@ impl TextAnimations {
 
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool { self.running.is_empty() }
+
+    /// How the last painted frame drew animation ID.
+    #[cfg(test)]
+    pub(crate) fn drawn(&self, id: u64) -> Option<Drawn> { self.running.get(&id).and_then(|r| r.drawn) }
+}
+
+impl Running {
+    /// Keep how this frame draws it; say so when that changed.
+    fn report(&mut self, drawn: Drawn) {
+        if self.drawn == Some(drawn) { return; }
+        self.drawn = Some(drawn);
+        if !diagnostics() { return; }
+        let window = self.animation.window;
+        match drawn {
+            Drawn::Scene(r) => eprintln!("romacs-text-animation: window={window} drawn=scene x={} y={} width={} height={}",
+                                         r.x0, r.y0, r.width(), r.height()),
+            Drawn::Cells => eprintln!("romacs-text-animation: window={window} drawn=cells"),
+            Drawn::Hidden => eprintln!("romacs-text-animation: window={window} drawn=hidden"),
+        }
+    }
+}
+
+/// Whether ROMACS_DIAGNOSTICS=1 asks for diagnostics on stderr.
+fn diagnostics() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1"))
 }
 
 impl super::state::RenderApp {

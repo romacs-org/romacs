@@ -262,27 +262,32 @@ impl Vm {
         loop {
             redraw |= self.poll_terminal_output()?;
             // GNU redisplay_internal does nothing while `inhibit-redisplay'
-            // is non-nil, as it is around Lisp that redisplay itself calls.
-            if redraw && !host.input_pending() && !self.redisplay_inhibited()? {
+            // is non-nil, as it is around Lisp that redisplay itself calls,
+            // and waits for pending input; but GNU's `message' displays the
+            // echo area at once, input pending or not (xdisp.c
+            // message3_nolog, echo_area_display): a message left during
+            // this wait (a timer's) is shown, and painted, before the input
+            // that may clear it is read.
+            if redraw && !self.redisplay_inhibited()? {
                 // DEADLINE was computed from the timers and the unread
-                // queues; a redisplay's Lisp (a mode-line :eval) may change
-                // them, and then the wait ends for Lisp to compute it again.
+                // queues; the echo area's functions (a toast's expiry) or
+                // a redisplay's Lisp (a mode-line :eval) may change them,
+                // and then the wait ends for Lisp to compute it again.
                 let before = self.host_wait_state()?;
-                // GNU's `message' redisplays the echo area at once (xdisp.c
-                // message3_nolog): a host that renders it shows a message
-                // left during this wait (a timer's) before the snapshot.
-                self.call_prepared_source_raw("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])?;
-                let (width, height) = (self.window_state.width, self.window_state.height);
-                let started = crate::host::monotonic();
-                let frame = self.frame_snapshot(width, height)?;
-                let snapshot = crate::host::monotonic().saturating_duration_since(started);
-                let selected = self.selected_window_value()?;
-                let selected = self.window(selected)?.id;
-                let minibuffer = self.window(self.mini_window())?.id;
-                let text_animations = self.text_animations()?;
-                let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
-                self.display_apply_layout(&ends)?;
-                redraw = false;
+                let echoed = self.call_prepared_source_raw("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])? != Value::NIL;
+                if echoed || !host.input_pending() {
+                    let (width, height) = (self.window_state.width, self.window_state.height);
+                    let started = crate::host::monotonic();
+                    let frame = self.frame_snapshot(width, height)?;
+                    let snapshot = crate::host::monotonic().saturating_duration_since(started);
+                    let selected = self.selected_window_value()?;
+                    let selected = self.window(selected)?.id;
+                    let minibuffer = self.window(self.mini_window())?.id;
+                    let text_animations = self.text_animations()?;
+                    let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
+                    self.display_apply_layout(&ends)?;
+                    redraw = false;
+                }
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
             }
             let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));

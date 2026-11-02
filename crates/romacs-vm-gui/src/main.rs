@@ -215,7 +215,7 @@ mod lent_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
         host.borrow_mut().presentation = 3;
-        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3, tab_bar: vec![] };
+        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3, tab_bar: vec![], status_bar: vec![] };
         let mut live = presentation::Presentation::new();
         let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
@@ -343,7 +343,7 @@ mod frame_tests {
         let mut vm = romacs_vm::Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
-        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4, tab_bar: vec![] };
+        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4, tab_bar: vec![], status_bar: vec![] };
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, same, 4).unwrap().is_none(), "an unchanged frame still on screen repaints");
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
@@ -362,7 +362,7 @@ mod frame_tests {
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         painted.snapshot.tab_bar = Some(romacs_layout_input::TabBarSnapshot { height: 20, face: Default::default(), faces: vec![],
             text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
-        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)] };
+        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)], status_bar: vec![] };
         let click = |x, y, button, pressed| super::tab_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
             action: PointerAction::Button { button, pressed, modifiers: 0 } }));
@@ -370,6 +370,29 @@ mod frame_tests {
         assert_eq!(click(3.0, 5.0, 2, false).as_deref(), Some("(romacs--tab-bar-click 0 'mouse-2)"));
         assert_eq!(click(500.0, 5.0, 1, false).as_deref(), Some("(romacs--tab-bar-click 2 'mouse-1)"));
         assert_eq!(click(15.0, 25.0, 1, true), None, "below the tab bar");
+    }
+
+    /// A button over a painted status-bar character runs the shown mode
+    /// line's binding with its index; between or past them, and above the
+    /// band, it is no click.
+    #[test]
+    fn a_click_over_the_status_bar_names_its_character() {
+        use romacs_display_runtime::thread_comm::{InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput};
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
+        painted.snapshot.status_bar = Some(romacs_layout_input::StatusBarSnapshot { x: 6, y: 760, width: 1188, height: 20,
+            text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] },
+            face: Default::default(), faces: vec![], window: 1, focused: true });
+        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![], status_bar: vec![(6.0, 10.0), (16.0, 10.0)] };
+        let click = |x, y, button, pressed| super::status_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
+            position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
+            action: PointerAction::Button { button, pressed, modifiers: 0 } }));
+        assert_eq!(click(17.0, 765.0, 1, false).as_deref(), Some("(romacs--status-bar-click 1 'mouse-1)"));
+        assert_eq!(click(6.0, 779.0, 3, true).as_deref(), Some("(romacs--status-bar-click 0 'down-mouse-3)"));
+        assert_eq!(click(500.0, 765.0, 1, false), None, "past the text");
+        assert_eq!(click(17.0, 759.0, 1, false), None, "above the band");
     }
 
     /// Selecting the buffer a window already shows resets its end, though its
@@ -386,7 +409,7 @@ mod frame_tests {
         vm.display_apply_layout(&ends).unwrap();
         let end = vm.eval_source("(window-end)").unwrap().display().unwrap();
         assert_ne!(end, vm.eval_source("(point-max)").unwrap().display().unwrap(), "the window shows part of the buffer");
-        let shown = super::Shown { frame: painted, ends, presentation: 1, tab_bar: vec![] };
+        let shown = super::Shown { frame: painted, ends, presentation: 1, tab_bar: vec![], status_bar: vec![] };
         vm.eval_source("(romacs-select-buffer (current-buffer))").unwrap();
         let next = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, next, 1).unwrap().is_none(), "the frame did not change");
@@ -439,6 +462,8 @@ struct Shown {
     presentation: u64,
     /// The painted tab bar's characters: each one's left edge and width.
     tab_bar: Vec<(f32, f32)>,
+    /// The painted status bar's characters, likewise.
+    status_bar: Vec<(f32, f32)>,
 }
 
 /// The frame to paint after a batch, or None when the paint on screen still
@@ -476,7 +501,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
             font_alternatives: vm.font_alternative_state()?,
             width: 400, height: 300,
-            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
             }],
         })
@@ -530,6 +555,8 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if client::selected(&argv) { std::process::exit(client::main(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
+    // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
+    fonts::register_icon_font();
     let mut args = argv.into_iter();
     let mut serve = None;
     let mut serve_frame = false;
@@ -906,6 +933,7 @@ fn paint(
     }).collect();
     let diagnostics_prepare_ns = diagnostic_start.elapsed().as_nanos();
     let tab_bar = romacs_layout2::tab_bar_extents(&frame);
+    let status_bar = romacs_layout2::status_bar_extents(&frame);
     let submit_start = Instant::now();
     sender.submit_scene(frame, children, shown.animations.clone())?;
     let submit_ns = submit_start.elapsed().as_nanos();
@@ -957,7 +985,7 @@ fn paint(
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
-    Ok(Shown { frame: shown, ends, presentation, tab_bar })
+    Ok(Shown { frame: shown, ends, presentation, tab_bar, status_bar })
 }
 
 /// A mouse button event over the root frame's tab bar as the Lisp that
@@ -972,6 +1000,22 @@ fn tab_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let column = shown.tab_bar.iter().position(|&(x, width)| position.x >= x && position.x < x + width).unwrap_or(shown.tab_bar.len());
     let kind = if *pressed { "down-mouse" } else { "mouse" };
     Some(format!("(romacs--tab-bar-click {column} '{kind}-{button})"))
+}
+
+/// A mouse button event over the root frame's status bar as the Lisp that
+/// runs the binding of the mode line it shows (`romacs--status-bar-click'):
+/// the index of the painted character under the pointer. Between or past
+/// the characters it is no click.
+fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
+    let InputEvent::PositionedPointer(romacs_display_runtime::thread_comm::PositionedPointerInput {
+        position, action: romacs_display_runtime::thread_comm::PointerAction::Button { button, pressed, .. }, ..
+    }) = event else { return None };
+    let bar = shown.frame.snapshot.status_bar.as_ref()?;
+    let (top, bottom) = (bar.y as f32, (bar.y + bar.height) as f32);
+    if position.target_frame_id != 1 || position.y < top || position.y >= bottom || !(1..=3).contains(button) { return None; }
+    let column = shown.status_bar.iter().position(|&(x, width)| position.x >= x && position.x < x + width)?;
+    let kind = if *pressed { "down-mouse" } else { "mouse" };
+    Some(format!("(romacs--status-bar-click {column} '{kind}-{button})"))
 }
 
 /// No cursor colour cycle in any window of SNAPSHOT, its child frames'
@@ -1113,13 +1157,12 @@ fn evaluate(
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
         startup::mark_phase("session-lisp");
+        if let Err(error) = echo::install(&mut vm) { eprintln!("romacs: echo area: {error}"); }
         // This process's command log, from before the init (rlisp/romacs-usage-log.el).
         if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
             eprintln!("romacs: usage log: {error}");
         }
-        if quick && launch == startup::Launch::Loadup {
-            vm.eval_source(startup::QUICK_START)?;
-        }
+        startup::before_init(&mut vm, launch, quick)?;
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // What the init loads is its layer's plan (world.rs).
@@ -1138,10 +1181,15 @@ fn evaluate(
             startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
             startup::Launch::GnuOnly => Ok(()),
         };
-        // As GNU's command loop reports an error that ends `command-line-1'.
-        if let Err(error) = finished {
-            eprintln!("romacs: startup after init failed: {error}");
-            let _ = echo::show(&mut vm, &error);
+        // As GNU's command loop reports an error that ends `command-line-1';
+        // else startup's own message is shown, as GNU's first redisplay
+        // shows it before the command loop's first timer runs.
+        match finished {
+            Err(error) => {
+                eprintln!("romacs: startup after init failed: {error}");
+                let _ = echo::show(&mut vm, &error);
+            }
+            Ok(()) => echo::show_current_message(&mut vm)?,
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
@@ -1192,7 +1240,7 @@ fn evaluate(
     if let Some(Err(error)) = &early { eprintln!("romacs: server window: {error}"); }
     if let (Some(Ok(())), Some(server)) = (&early, host.borrow_mut().server.as_mut()) { server.shown = true; }
     let mut previous = if serve.is_some() && !host.borrow().window_shown() {
-        Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new() }
+        Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Vec::new() }
     } else {
         paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending,
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?
@@ -1274,8 +1322,9 @@ fn evaluate(
                     }
                     continue;
                 }
-                // A click on the tab bar runs its binding there and then.
-                if live && let Some(click) = tab_bar_click(&previous, &event) {
+                // A click on the tab bar or the status bar runs its binding
+                // there and then.
+                if live && let Some(click) = tab_bar_click(&previous, &event).or_else(|| status_bar_click(&previous, &event)) {
                     if let Err(error) = vm.eval_source(&click) { echo::show(&mut vm, &error)?; }
                     live_presentation.changed();
                     continue;

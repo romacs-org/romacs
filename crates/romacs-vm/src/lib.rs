@@ -1303,6 +1303,9 @@ pub struct Vm {
     region_collect: bool,
     /// Worker isolates and, in a worker, the parent peer (`isolate.rs`).
     isolates: isolate::Isolates,
+    /// GNU inotify.c inotifyfd: the file notification instance, made by
+    /// the first watch and closed with the last (`prim/leaf/inotify.rs`).
+    inotify: Option<std::os::fd::OwnedFd>,
     buffer_slot: usize,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
@@ -1557,6 +1560,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     region_free,
     region_collect,
     isolates,
+    inotify,
     fence,
     execution,
     spare_programs,
@@ -1661,6 +1665,7 @@ impl Vm {
             region_free: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
+            inotify: None,
             buffer_slot: 0,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
@@ -1766,6 +1771,9 @@ impl Vm {
         vm.specials.insert("yank-excluded-properties".into());
         vm.specials.insert("yank-handled-properties".into());
         vm.declare_special_raw("font-lock-defaults", Value::NIL);
+        // keyboard.c:13843: the command that entered the innermost
+        // minibuffer, which read_minibuf binds (rlisp/vm/minibuf.el).
+        vm.declare_special_raw("current-minibuffer-command", Value::NIL);
         for name in [
             "kill-ring",
             "kill-buffer-hook",

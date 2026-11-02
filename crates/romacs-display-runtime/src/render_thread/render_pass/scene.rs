@@ -38,6 +38,7 @@ pub(super) fn render_frame_root_glyphs(
     retain_scroll_body: bool,
 ) {
     frame_stats::count(&frame_stats::ROOT_GLYPH_PASSES);
+    if frame.status_bar.is_some() { frame_stats::count(&frame_stats::CHROME_BAR_BANDS); }
     let raster = super::retained_scroll::prepare(
         renderer,
         render,

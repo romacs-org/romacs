@@ -29,6 +29,14 @@ PROP with the overlay, AFTER, BEG and END, and after a change LENGTH."
             (setq functions (cdr functions)))))
     (setq overlays (cdr overlays))))
 
+(defun romacs--unvisited (function &rest args)
+  "Apply FUNCTION to ARGS with `buffer-file-name' bound to nil: fileio.c's
+binding around a visiting REPLACE's deletion and insertion, so the change
+neither locks the file nor asks about a supersession threat; it makes the
+buffer more like the file, not less."
+  (let ((buffer-file-name nil))
+    (apply function args)))
+
 (defun romacs--relocated (positions function)
   "Call FUNCTION, then return POSITIONS where markers at them moved.
 A nil position stays nil.  These are GNU's preserve and start/end markers

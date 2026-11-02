@@ -97,6 +97,42 @@ fn buffer_read_handlers_run_in_constant_native_stack() {
     }).unwrap().join().expect("BUFFER_READ_TAIL_CALL_CHILD");
 }
 
+/// `eval', `load' and the other primitives that run Lisp with the caller
+/// suspended return to their loop by a tail call too: a loop of evals, and
+/// eval-buffer's readevalloop, which evals once per top-level form, run in
+/// constant native stack whatever the count.
+#[test]
+fn eval_in_a_loop_runs_in_constant_native_stack() {
+    std::thread::Builder::new().stack_size(2 * 1024 * 1024).spawn(|| {
+        check("(let ((n 0)) (while (< n 200000) (setq n (+ n (eval '(+ 0 1) t)))) n)", "200000", "EVAL_LOOP_TAIL_CALL");
+    }).unwrap().join().expect("EVAL_LOOP_TAIL_CALL_CHILD");
+}
+
+/// A generated file of 20,000 top-level defuns, each with a body worth
+/// expanding, loads and evaluates as a buffer on the evaluator's stack. (A
+/// buffer-local `lexical-binding' names the dialect, as eval-buffer allows,
+/// since the prelude alone does not parse the cookie.)
+#[test]
+fn a_file_of_20000_forms_loads_and_evaluates_as_a_buffer() {
+    let dir = std::env::temp_dir().join(format!("romacs-forms-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("forms.el");
+    let forms: String = (0..20_000).map(|i| format!(
+        "(defun gen-f{i} (x) (let ((a x) (b {i})) (setq a (if (> a 0) (* b 2) (- b 1))) (list a \"s{i}\" '(q . {i}))))\n")).collect();
+    std::fs::write(&file, format!(";;; -*- lexical-binding: t -*-\n{forms}")).unwrap();
+    let file = file.display().to_string();
+    std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(move || {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let mut eval = |source: String| vm.eval_source(&source).and_then(|v| v.display());
+        assert_eq!(eval(format!(r#"(progn (load "{file}" nil t) (list (gen-f19999 1) (fboundp 'gen-f0)))"#)),
+            Ok("((39998 \"s19999\" (q . 19999)) t)".into()), "LOAD_20000_FORMS");
+        assert_eq!(eval(format!(r#"(progn (fmakunbound 'gen-f19999) (with-temp-buffer (set (make-local-variable (quote lexical-binding)) t) (insert-file-contents "{file}") (eval-buffer)) (gen-f19999 0))"#)),
+            Ok("(19998 \"s19999\" (q . 19999))".into()), "EVAL_BUFFER_20000_FORMS");
+    }).unwrap().join().expect("FORMS_20000_CHILD");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn t2_native_dispatch_is_bounded_without_lto() {
     let out = std::process::Command::new(std::env::current_exe().unwrap())

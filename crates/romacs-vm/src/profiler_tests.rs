@@ -154,3 +154,33 @@ fn a_function_equal_key_survives_its_body_moving() {
           (list junk (gethash f h 'missing))))"#;
     assert_eq!(eval(&mut vm, source), "(nil 99)");
 }
+
+/// `romacs-instructions' counts the evaluating thread's work: a longer
+/// loop retires more instructions than a shorter one, and a repeat of the
+/// same loop costs about the same. Where the kernel refuses counters it is
+/// nil, never a made-up number.
+#[test]
+fn romacs_instructions_counts_the_threads_work() {
+    let mut vm = Vm::new();
+    let source = "(let ((cost (lambda (n) (let ((a (romacs-instructions)) (i 0)) (while (< i n) (setq i (1+ i))) (- (romacs-instructions) a)))))
+                    (and (romacs-instructions) (list (funcall cost 1000) (funcall cost 10000) (funcall cost 10000))))";
+    let value = vm.eval_source_raw(source).unwrap();
+    let text = vm.display(value).unwrap();
+    if text == "nil" {
+        assert!(crate::host::thread_instructions().is_none(), "nil only without a counter");
+        return;
+    }
+    let counts: Vec<f64> = text.trim_matches(['(', ')']).split(' ').map(|n| n.parse().unwrap()).collect();
+    assert!(counts[1] > 5.0 * counts[0], "10x the loop is more work: {counts:?}");
+    assert!((counts[2] / counts[1] - 1.0).abs() < 0.05, "the same loop costs the same: {counts:?}");
+}
+
+/// `romacs-native-stack-room' is the evaluating thread's remaining native
+/// stack: less inside a nested Lisp recursion than at its top.
+#[test]
+fn romacs_native_stack_room_shrinks_inside_recursion() {
+    let mut vm = Vm::new();
+    let source = "(progn (defun room-at (n) (if (= n 0) (romacs-native-stack-room) (eval (list 'room-at (1- n)))))
+                    (let ((top (romacs-native-stack-room)) (deep (room-at 40))) (list (integerp top) (< deep top))))";
+    assert_eq!(eval(&mut vm, source), "(t t)");
+}

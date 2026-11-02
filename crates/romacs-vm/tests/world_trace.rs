@@ -66,7 +66,7 @@ fn class_is_the_closed_p_set() {
     for name in ["HOME", "SHELL", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ", "XDG_CONFIG_HOME", "ROMACS_RUNTIME_ROOT", "UNLISTED"] {
         assert_eq!(host::class(Fact::Env(name.as_bytes()), None), Class::K, "{name}");
     }
-    for fact in [Fact::Environment, Fact::CurrentDir, Fact::Pid, Fact::Clock, Fact::Monotonic, Fact::Seed] {
+    for fact in [Fact::Environment, Fact::CurrentDir, Fact::Pid, Fact::Clock, Fact::Monotonic, Fact::Seed, Fact::Processors] {
         assert_eq!(host::class(fact, None), Class::P, "{fact:?}");
     }
     assert_eq!(host::class(Fact::Other, None), Class::K);
@@ -82,10 +82,10 @@ fn class_is_the_closed_p_set() {
 #[test]
 fn p_reads_outside_startup_refuse_with_their_site() {
     let dir = scratch("p-reads");
-    let file = write(&dir.join("preload.el"), "(defvar x1 (getenv-internal \"TMPDIR\"))\n(defvar x2 (getenv-internal \"PWD\" initial-environment))\n(defvar x3 (emacs-pid))\n(defvar x4 (current-time))\n(defvar x5 (getenv-internal \"HOME\"))\n");
+    let file = write(&dir.join("preload.el"), "(defvar x1 (getenv-internal \"TMPDIR\"))\n(defvar x2 (getenv-internal \"PWD\" initial-environment))\n(defvar x3 (emacs-pid))\n(defvar x4 (current-time))\n(defvar x5 (getenv-internal \"HOME\"))\n(defvar x6 (list (num-processors) (num-processors (quote current))))\n");
     let (mut vm, trace) = build(&[file.clone()]);
     let refused = refusals(&trace);
-    for (what, line) in [("env TMPDIR (process)", 1), ("env PWD (explicit)", 2), ("pid", 3), ("clock", 4)] {
+    for (what, line) in [("env TMPDIR (process)", 1), ("env PWD (explicit)", 2), ("pid", 3), ("clock", 4), ("processors", 6), ("env OMP_NUM_THREADS (host)", 6)] {
         assert!(refused.contains(&(what.into(), line)), "{what} at line {line}: {refused:?}");
     }
     let site = &trace["refusals"][0]["site"];
@@ -193,13 +193,12 @@ fn keyed_environment_reads_record_form_and_value() {
 #[test]
 fn machine_and_user_facts_are_host_records() {
     let dir = scratch("host");
-    let file = write(&dir.join("host.el"), "(system-name)\n(user-uid)\n(user-real-uid)\n(group-gid)\n(group-real-gid)\n(num-processors)\ninvocation-name\n");
+    let file = write(&dir.join("host.el"), "(system-name)\n(user-uid)\n(user-real-uid)\n(group-gid)\n(group-real-gid)\ninvocation-name\n");
     let (_, trace) = build(&[file]);
     let facts: Vec<_> = items(&trace, "records", "host").iter().map(|r| r["fact"].as_str().unwrap().to_owned()).collect();
     for fact in ["system-name", "euid", "uid", "egid", "gid", "exe"] {
         assert!(facts.iter().any(|f| f == fact), "{fact}: {facts:?}");
     }
-    assert!(facts.iter().any(|f| f.starts_with("processors")), "{facts:?}");
 }
 
 #[test]

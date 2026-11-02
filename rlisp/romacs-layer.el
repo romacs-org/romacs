@@ -141,13 +141,13 @@ border, there padding, unpainted."
           (forward-line 1))
         (cons (max columns 1) (max lines 1))))))
 
+(declare-function romacs-chrome-bottom "romacs-chrome" (&optional frame except))
+
 (defun romacs-layer--bottom (root)
-  "Where a `bottom' layer of ROOT ends: above the minibuffer line, or at
-ROOT's bottom edge when a child frame hosts the minibuffer window
-\(`romacs--host-minibuffer')."
-  (if (romacs--minibuffer-host)
-      (frame-text-height root)
-    (window-pixel-top (minibuffer-window root))))
+  "Where a `bottom' layer of ROOT ends: above the status bar and the
+minibuffer line, or the layer hosting the minibuffer window
+\(`romacs-chrome-bottom')."
+  (romacs-chrome-bottom root))
 
 (defun romacs-layer--placement (position columns lines border)
   "Where POSITION puts a layer of COLUMNS by LINES with BORDER pixels:
@@ -155,6 +155,9 @@ ROOT's bottom edge when a child frame hosts the minibuffer window
 text size, in pixels."
   (let* ((root (romacs-layer--root-frame))
          (cw (frame-char-width root)) (ch (frame-char-height root))
+         ;; Child frames are placed from the native origin, outside the
+         ;; internal border round the windows.
+         (inset (frame-internal-border-width root))
          (frame-width (- (frame-text-width root) (* 2 border)))
          (width (min (* columns cw) frame-width))
          (height (* lines ch))
@@ -162,12 +165,12 @@ text size, in pixels."
     (pcase position
       ('bottom
        (let ((top (- (romacs-layer--bottom root) outer-height)))
-         (list 0 (max 0 top) frame-width height)))
+         (list inset (max inset top) frame-width height)))
       ('center
        (let ((width (min width (- frame-width (* 4 cw)))))
-         (list (/ (- frame-width width) 2) (/ (- (frame-text-height root) outer-height) 2) width height)))
+         (list (+ inset (/ (- frame-width width) 2)) (+ inset (/ (- (frame-text-height root) outer-height) 2)) width height)))
       ('point
-       (let* ((edges (window-inside-pixel-edges))
+       (let* ((edges (window-edges nil t nil t))
               (posn (posn-x-y (posn-at-point)))
               (x (+ (nth 0 edges) (or (car posn) 0)))
               (y (+ (nth 1 edges) (or (cdr posn) 0) ch)))
@@ -269,10 +272,13 @@ columns and lines."
     (cons width (min 6 (apply #'+ (mapcar (lambda (l) (max 1 (ceiling (string-width l) (float width)))) lines))))))
 
 (defun romacs-layer--toast-stack ()
-  "Place the shown toasts at the top right, newest on top."
+  "Place the shown toasts at the top right, newest on top; a toast that
+would reach below `romacs-chrome-bottom' waits hidden."
   (let* ((root (romacs-layer--root-frame))
          (cw (frame-char-width root)) (ch (frame-char-height root))
-         (margin 12) (gap 8) (top margin))
+         (inset (frame-internal-border-width root))
+         (bottom (romacs-chrome-bottom root))
+         (margin 12) (gap 8) (top (+ inset margin)))
     (dolist (toast romacs-layer--toasts)
       (let* ((frame (romacs-layer--frame (car toast)))
              (border (or (frame-parameter frame 'child-frame-border-width) 0))
@@ -280,10 +286,12 @@ columns and lines."
              ;; One column more: a window's last holds its continuation glyph.
              (width (* (1+ (car size)) cw)) (height (* (cdr size) ch)))
         (set-frame-size frame width height t)
-        (set-frame-position frame (- (frame-text-width root) width (* 2 border) margin) top)
+        (set-frame-position frame (- (frame-native-width root) inset width (* 2 border) margin) top)
         (set-frame-parameter frame 'romacs-layer-edge 'top)
-        ;; A new toast shows above every other layer, the panel too.
-        (unless (frame-visible-p frame) (make-frame-visible frame) (raise-frame frame))
+        (if (> (+ top height (* 2 border)) bottom)
+            (when (frame-visible-p frame) (make-frame-invisible frame))
+          ;; A new toast shows above every other layer, the panel too.
+          (unless (frame-visible-p frame) (make-frame-visible frame) (raise-frame frame)))
         (setq top (+ top height (* 2 border) gap))))))
 
 (defun romacs-layer--toast-expire (buffer)
