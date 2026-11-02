@@ -58,6 +58,9 @@
     ;; check every listed file and say so in a message.
     (recentf-auto-cleanup 300)
     (recentf-mode t)
+    ;; A pending repeat shows in the mode line, not as a message, which
+    ;; would show as a toast after every repeatable command.
+    (repeat-echo-function #'repeat-echo-mode-line)
     (repeat-mode t idle)
     (global-auto-revert-mode t idle)
     (column-number-mode t)
