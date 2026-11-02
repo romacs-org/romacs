@@ -908,6 +908,18 @@ impl PerBuffer {
         self.3 = None;
     }
     pub(crate) fn set_editor_mark(&mut self, marker: Value) { self.4 = Some(marker); }
+    /// buffer-swap-text: exchange the bindings at SLOTS and the mark
+    /// marker with OTHER's, as GNU swaps them with the text.
+    pub(crate) fn swap_text_slots(&mut self, other: &mut Self, slots: &[u16]) {
+        for &i in slots {
+            let i = i as usize;
+            let len = (i + 1).max(self.0.len()).max(other.0.len());
+            self.0.resize(len, None);
+            other.0.resize(len, None);
+            std::mem::swap(&mut self.0[i], &mut other.0[i]);
+        }
+        std::mem::swap(&mut self.4, &mut other.4);
+    }
     pub(crate) fn get(&self, i: u16) -> Option<Value> {
         self.0.get(i as usize).copied().flatten()
     }

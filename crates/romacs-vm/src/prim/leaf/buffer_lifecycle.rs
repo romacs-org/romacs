@@ -22,6 +22,11 @@ impl Leaf<'_> {
         Ok(if mini && (live == Value::NIL || active) { Value::TRUE } else { Value::NIL })
     }
 
+    /// buffer-swap-text (buffer.c:2573) with BUFFER.
+    pub fn swap_buffer_text(&mut self, buffer: Value) -> Out {
+        self.vm.buffer_swap_text(buffer)?;
+        Ok(Value::NIL)
+    }
     pub fn lifecycle_buffer_p(&self, value: Value) -> bool {
         matches!(
             self.vm.object_if(value),

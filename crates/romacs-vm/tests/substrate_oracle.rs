@@ -106,3 +106,12 @@ fn unencodable_char_position_matches_pinned_gnu() {
 (list (condition-case e (unencodable-char-position 0 9 'utf-8 nil "ab") (error e)) (condition-case e (unencodable-char-position 0 1 'no-such nil "ab") (error e)) (condition-case e (unencodable-char-position 0 1 'utf-8 -1 "aé") (error e)))
 "###);
 }
+
+#[test]
+fn buffer_swap_text_matches_pinned_gnu() {
+    matches_pinned_gnu(r###"
+(let ((a (generate-new-buffer "swap-a")) (b (generate-new-buffer "swap-b"))) (with-current-buffer a (insert "hello") (goto-char 3) (narrow-to-region 2 4) (setq-local swap-local 1)) (with-current-buffer b (set-buffer-multibyte nil) (insert "xyz") (goto-char 2)) (let ((m (with-current-buffer a (copy-marker 4)))) (with-current-buffer a (buffer-swap-text b) (list (buffer-string) (point) (point-min) (point-max) enable-multibyte-characters (buffer-local-value 'swap-local a) (eq (marker-buffer m) b) (marker-position m) (buffer-name) (buffer-modified-p) (with-current-buffer b (list (buffer-string) (point) (point-min) (point-max) enable-multibyte-characters (buffer-modified-p)))))))
+(let ((a (generate-new-buffer "swap-c")) (b (generate-new-buffer "swap-d"))) (with-current-buffer b (insert "other")) (with-current-buffer a (buffer-enable-undo) (insert "one two") (set-mark 2) (let ((o (make-overlay 1 3))) (overlay-put o 'face 'bold) (buffer-swap-text b) (list (eq (overlay-buffer o) b) (overlay-start o) (mark t) (with-current-buffer b (list (mark t) (and buffer-undo-list t))) (and buffer-undo-list t) (overlays-in (point-min) (point-max)) (with-current-buffer b (length (overlays-in (point-min) (point-max))))))))
+(list (condition-case e (buffer-swap-text 'x) (error e)) (let ((b (generate-new-buffer "swap-dead"))) (kill-buffer b) (condition-case e (buffer-swap-text b) (error e))) (with-temp-buffer (insert "same") (buffer-swap-text (current-buffer)) (buffer-string)))
+"###);
+}
