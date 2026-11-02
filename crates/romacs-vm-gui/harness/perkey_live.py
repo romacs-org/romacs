@@ -35,9 +35,12 @@ boundary timer; the timer's later firing (armed by the first self-insert,
 second idle it must be quiet again, once blink-cursor-mode has stopped
 blinking after the last phase's keys.
 
+With --classic the same M-: also turns `romacs-classic-chrome' on, so
+the session draws GNU's look instead of its panes (VM2-PANE-CHROME).
+
 usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
-                      [--record PHASE] [--tools DIR:DIR]
+                      [--record PHASE] [--tools DIR:DIR] [--classic]
 """
 import argparse
 import hashlib
@@ -256,6 +259,9 @@ class Session:
         self.renderer = next((l[len('romacs: gpu '):] for l in stderr_text.splitlines()
                               if l.startswith('romacs: gpu ')), None)
 
+    def setup_form(self):
+        return '(progn (setq auto-save-timeout nil) (romacs-classic-chrome 1))' if self.args.classic else '(setq auto-save-timeout nil)'
+
     def no_idle_auto_save(self):
         """M-: (setq auto-save-timeout nil).  read_char's idle auto-save of the
         typed text, about 30 s after the last key, would land in the second
@@ -263,7 +269,7 @@ class Session:
         so the session sets it through its own command loop."""
         before = len(records(self.stdout))
         self.type(['-M', 'alt', ':', '-m', 'alt'])
-        self.type(['(setq auto-save-timeout nil)'])
+        self.type([self.setup_form()])
         self.type(['-k', 'Return'])
         done = lambda: [r for r in records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
         self.wait(done, self.args.timeout, 'M-: (setq auto-save-timeout nil)')
@@ -492,6 +498,7 @@ def main():
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--record', choices=PHASES, help='after the first counted session, profile this phase')
     parser.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
+    parser.add_argument('--classic', action='store_true', help="measure under `romacs-classic-chrome'")
     args = parser.parse_args()
     args.binary = args.binary.resolve()
     args.output = args.output.resolve()

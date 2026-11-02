@@ -107,8 +107,12 @@ pub(super) fn render_frame_root_glyphs(
             ))
             .blit_snapshot_region(region);
         frame_stats::count(&frame_stats::SCROLL_RASTER_BLITS);
+        // The blit replaced the panes the root pass drew there.
+        renderer.render_panes_within(surface_view, &raster.frame, present_mapping, raster.destination.raw());
         tracing::debug!(target: "romacs_display_runtime::retained_scroll", "composited retained scroll raster");
     }
+    // The root pass draws the panes (VM2-PANE-CHROME).
+    frame_stats::add(&frame_stats::CHROME_DIVIDER_QUADS, renderer.take_pane_quads() as u64);
 }
 
 #[allow(clippy::too_many_arguments)]

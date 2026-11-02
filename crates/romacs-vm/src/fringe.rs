@@ -64,14 +64,17 @@ impl Vm {
         let (x, frame, buffer, mini) = (w.x, w.frame, w.buffer, w.mini);
         let root_x = self.frame(frame).ok().and_then(|f| self.window(f.root).ok()).map_or(0, |r| r.x);
         let fringe_face = table.handle("fringe").unwrap_or_default();
-        let border = if x > root_x { table.handle("vertical-border") } else { None };
+        let [right_divider, bottom_divider] = self.window_dividers(window)?;
+        // A frame with right dividers draws them instead (gui_draw_vertical_border).
+        let dividers = self.frame(frame).map_or(0, |f| f.dividers[0]);
+        let border = if x > root_x && dividers == 0 { table.handle("vertical-border") } else { None };
         let indicators = if left_fringe + right_fringe == 0 || !indicators {
             Indicators::default()
         } else {
             self.fringe_indicators(buffer, mini, [left_fringe, right_fringe], fringe_face, table)?
         };
         Ok(romacs_layout_input::WindowChrome { left_margin, right_margin, left_fringe, right_fringe, outside_margins,
-                                               fringe_face, border, indicators })
+                                               fringe_face, border, indicators, right_divider, bottom_divider })
     }
 
     /// update_window_fringes's choices for BUFFER's rows: each logical

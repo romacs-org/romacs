@@ -8,6 +8,8 @@ use romacs_vm::Vm;
 use std::path::Path;
 #[path = "support/gnu_ert_vm.rs"]
 mod gnu_ert_vm;
+#[path = "support/gui_probe.rs"]
+mod gui_probe;
 
 const SETUP: &str = r#"(progn (let ((ignore-window-parameters t)) (delete-other-windows)) (setq truncate-partial-width-windows 50) (dolist (b (quote ("*w*" "*side*"))) (when (get-buffer b) (kill-buffer b))) (set-buffer (get-buffer-create "*w*")) (set-window-buffer nil (current-buffer)))"#;
 
@@ -135,6 +137,16 @@ fn window_el_fits_side_windows_as_pinned_gnu() {
 }
 
 /// keymap-popup shows its popup in a bottom side window and fits it.
+/// The same callers on a window-system frame with window dividers and an
+/// internal border, which a batch frame never has (frame.c:5862), against
+/// pinned GNU X11 on the same frame (window_dividers.el and .gnu).
+#[test]
+fn window_el_fits_windows_with_dividers_as_pinned_gnu() {
+    let failures = gui_probe::probe(include_str!("window_dividers.el"), include_str!("window_dividers.gnu"),
+                                    "window_el_fits_windows_with_dividers_as_pinned_gnu", |_, _| {});
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn keymap_popup_window_matches_pinned_gnu() {
     let library = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/emacs-lisp/keymap-popup.el");

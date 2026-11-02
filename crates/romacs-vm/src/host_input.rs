@@ -176,7 +176,8 @@ impl Vm {
     /// frame, and each frame with its selected window and its windows'
     /// buffers, pixel boxes and what their body sizes also depend on (their
     /// parameters, whether their buffers show a mode or header line, the
-    /// faces' revision and the frame's line and column). Its words are heap
+    /// frame's divider widths, the faces' revision and the frame's line and
+    /// column). Its words are heap
     /// indices, which a collection may reuse, so the count of collections
     /// is part of it.
     fn window_change_signature(&mut self) -> Result<Vec<u64>> {
@@ -185,7 +186,7 @@ impl Vm {
         let lines = [self.slot("mode-line-format"), self.slot("header-line-format")];
         for frame in self.frames() {
             let Ok(f) = self.frame(frame) else { continue };
-            out.extend([frame.0, f.selected.0]);
+            out.extend([frame.0, f.selected.0, u64::from(f.dividers[0]), u64::from(f.dividers[1])]);
             let mut pending = vec![f.root, f.minibuffer];
             while let Some(window) = pending.pop() {
                 let Ok(w) = self.window(window) else { continue };
@@ -246,6 +247,7 @@ impl Vm {
             match host.next_event(timeout)? {
                 HostEvent::Resize { width, height } => {
                     let (line, column) = (self.window_state.line, self.window_state.column);
+                    self.resize_root_window(width, height)?;
                     self.set_frame_geometry(width, height, line, column)?;
                     redraw = true;
                 }

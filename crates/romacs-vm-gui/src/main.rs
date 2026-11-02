@@ -474,7 +474,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
             font_alternatives: vm.font_alternative_state()?,
             width: 400, height: 300,
-            background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
             }],
         })

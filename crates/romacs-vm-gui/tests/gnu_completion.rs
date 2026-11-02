@@ -278,5 +278,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         r##"(top 8 t "#d48a20" 10 t t)"##,
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
-                        "(8 (nil 1))", "(600 840 480 1260)", "(0 484 484)"]);
+                        // 500 pixels less the fringes and the pane gap's
+                        // internal border (VM2-PANE-CHROME).
+                        "(8 (nil 1))", "(600 840 480 1260)", "(0 472 472)"]);
 }

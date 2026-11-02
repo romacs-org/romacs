@@ -493,7 +493,32 @@ impl Vm {
         self.display_state.height = height;
         let background_alpha = self.frame_background_alpha()?;
         let tab_bar = self.tab_bar_snapshot()?;
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar })
+        let chrome = self.pane_chrome()?;
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome })
+    }
+    /// The host frame's pane chrome, from its `romacs-pane-radius',
+    /// `romacs-pane-dim', `romacs-pane-focus' and `romacs-pane-border'
+    /// parameters (rlisp/romacs-chrome.el): the window with the focus edge
+    /// is the frame's selected window, or while the mini-window is
+    /// selected the ordinary window selected last (VM2-PANE-CHROME).
+    fn pane_chrome(&mut self) -> Result<romacs_layout_input::FrameChrome> {
+        let frame = self.host_frame_peek();
+        let radius = self.frame_parameter_of(frame, "romacs-pane-radius")?
+            .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
+        let dim = match self.frame_parameter_of(frame, "romacs-pane-dim")? {
+            Some(v) => match self.object_if(v) { Some(Object::Float(f)) => *f as f32, _ => v.integer_value().unwrap_or(0) as f32 },
+            None => 0.0,
+        }.clamp(0.0, 1.0);
+        let focus = self.frame_hex_parameter(frame, "romacs-pane-focus")?;
+        let border = self.frame_hex_parameter(frame, "romacs-pane-border")?;
+        let selected = self.frame(frame)?.selected;
+        let selected = if self.window(selected)?.mini {
+            self.leaf_windows()?.into_iter().filter_map(|w| self.window(w).ok()).max_by_key(|w| w.use_time).map_or(0, |w| w.id)
+        } else {
+            self.window(selected)?.id
+        };
+        let minibuffer = self.window(self.mini_window())?.id;
+        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, selected, minibuffer })
     }
     /// FRAME's parameter NAME, if it has one.
     fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
@@ -1121,7 +1146,7 @@ impl Vm {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
-            background_alpha: 1.0, children: vec![], tab_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
     /// The least height a painted row can have: the default face's row

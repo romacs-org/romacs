@@ -34,7 +34,7 @@ fn frame(snapshot: WindowSnapshot, tab_bar: Option<TabBarSnapshot>) -> FrameSnap
     let y = tab_bar.as_ref().map_or(0, |t| t.height);
     FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), width: 116, height: 200 + y,
-        windows: vec![PlacedWindowSnapshot { x: 8, y, snapshot }], background_alpha: 1.0, children: vec![], tab_bar,
+        windows: vec![PlacedWindowSnapshot { x: 8, y, snapshot }], background_alpha: 1.0, children: vec![], tab_bar, chrome: Default::default(),
     }
 }
 
@@ -125,4 +125,27 @@ fn the_tab_bar_paints_its_row_above_the_windows() {
     assert_eq!(extents.len(), 6);
     assert_eq!(extents[0].0, 0.0);
     assert!(extents.windows(2).all(|w| w[0].0 + w[0].1 == w[1].0));
+}
+
+/// Panes (VM2-PANE-CHROME): each window's box, fringes included, but the
+/// mini-window's; the selected window's edge in the focus colour, the
+/// others' in the hairline's and dimmed; none in GNU's look.
+#[test]
+fn every_window_but_the_mini_window_is_a_pane() {
+    let mut snapshot = frame(window("a", LineWrap::Window), None);
+    snapshot.width = 300;
+    let mut other = window("b", LineWrap::Window);
+    other.id = 2;
+    let mut mini = window("", LineWrap::Window);
+    mini.id = 3;
+    snapshot.windows.push(PlacedWindowSnapshot { x: 160, y: 0, snapshot: other });
+    snapshot.windows.push(PlacedWindowSnapshot { x: 8, y: 0, snapshot: mini });
+    assert!(lay_out(snapshot.clone()).panes.is_empty(), "GNU_LOOK_DRAWS_NO_PANES");
+    snapshot.chrome = romacs_layout_input::FrameChrome { internal_border: 6, radius: 6, dim: 0.12, focus: Some([212, 138, 32]),
+                                                         border: Some([40, 40, 40]), selected: 1, minibuffer: 3 };
+    let panes = lay_out(snapshot).panes;
+    let accent = romacs_display_protocol::Color::from_pixel(0xd48a20);
+    let line = romacs_display_protocol::Color::from_pixel(0x282828);
+    assert_eq!(panes.iter().map(|p| (p.bounds.x, p.bounds.width, p.bounds.height, p.radius, p.edge, p.dim)).collect::<Vec<_>>(),
+               [(0.0, 116.0, 200.0, 6.0, Some(accent), 0.0), (152.0, 116.0, 200.0, 6.0, Some(line), 0.12)]);
 }

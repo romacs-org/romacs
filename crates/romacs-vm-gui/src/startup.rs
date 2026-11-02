@@ -628,6 +628,9 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     // Layers are child frames, which GNU's frame.el makes.
     if launch == Launch::Loadup && vm.eval_source("(fboundp 'make-frame)")? != romacs_vm::Fixed::NIL {
         vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
+        // Pane chrome, applied to the frame once the session is on its
+        // display (romacs-gui-loadup.el).
+        vm.eval_source(include_str!("../../../rlisp/romacs-chrome.el"))?;
         // Vertical completion with the minibuffer in a layer, off until
         // `romacs-complete-mode' is enabled.
         if vm.eval_source("(featurep 'minibuffer)")? != romacs_vm::Fixed::NIL {
