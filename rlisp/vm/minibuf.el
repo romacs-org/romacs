@@ -68,11 +68,13 @@ innermost-loop checks, which need recursive minibuffers)."
   ;; at end of file. With a host keyboard (the GUI) it is interactive GNU.
   (unless (or executing-kbd-macro (romacs--host-input-p))
     (signal 'end-of-file '("Error reading from stdin")))
-  ;; read_minibuf specbinds `minibuffer-default' and increments
-  ;; minibuf_level; both are restored by the unwind below. (setq, not let:
+  ;; read_minibuf specbinds `minibuffer-default' and
+  ;; `current-minibuffer-command' and increments
+  ;; minibuf_level; all are restored by the unwind below. (setq, not let:
   ;; this whole file is compiled as one form, before its defvars run.)
   (let* ((outer-prefix current-prefix-arg)
          (outer-default minibuffer-default)
+         (outer-command current-minibuffer-command)
          (outer-level romacs--minibuf-level)
          ;; minibuf_save_list and the specbind of
          ;; `minibuffer-completing-file-name' (minibuf.c:602, 727).
@@ -97,7 +99,8 @@ innermost-loop checks, which need recursive minibuffers)."
          val)
     ;; minibuf.c:794: an unbound history variable starts as nil.
     (unless (boundp histvar) (set histvar nil))
-    (setq minibuffer-default default romacs--minibuf-level level
+    (setq minibuffer-default default current-minibuffer-command this-command
+          romacs--minibuf-level level
           romacs--minibuf-prompts (cons (copy-sequence prompt) outer-prompts)
           romacs--minibuf-loop-levels (cons romacs--command-loop-level outer-loop-levels)
           minibuffer-history-variable histvar minibuffer-history-position 0)
@@ -186,6 +189,7 @@ innermost-loop checks, which need recursive minibuffers)."
       ;; restores the buffer only if it is live).
       (setq current-prefix-arg outer-prefix prefix-arg nil
             minibuffer-default outer-default romacs--minibuf-level outer-level
+            current-minibuffer-command outer-command
             romacs--minibuf-selected-window outer-selected
             romacs--minibuf-prompts outer-prompts romacs--minibuf-loop-levels outer-loop-levels
             romacs--command-keys outer-keys
