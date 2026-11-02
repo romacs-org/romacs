@@ -930,6 +930,7 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
         let data = e.vm.list_value(&[tag, value]);
         e.escape = Some(Escape::Signal(Value::reference(slot + 1, 7), data));
         prepare_signal(e, false, None);
+        e.vm.thrown_no_catch = true;
         escape = e.escape.take().unwrap();
     }
     leave_native(e);
@@ -979,6 +980,8 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                     });
                 }
                 ControlKind::Catch(_) | ControlKind::Condition(_) => {
+                    // Caught: a quit from C-g unwinding to here ends here.
+                    e.vm.quit_unwinding = false;
                     if matches!(control.kind, ControlKind::Condition(_)) {
                         while e.controls.len() > e.controls_base
                             && e.controls.last().is_some_and(|previous| {
@@ -1865,7 +1868,7 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
 fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
     if crate::host::interrupt_pending() && isolate_quit(e) {
         // A signal, not an engine failure: `condition-case' catches it.
-        e.vm.async_quits += 1;
+        e.vm.quit_unwinding = true;
         return Some(raise(e, "quit", &[]));
     }
     let escape = e.vm.maybe_quit()?;

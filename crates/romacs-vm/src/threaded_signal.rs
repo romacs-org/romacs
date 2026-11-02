@@ -66,6 +66,7 @@ pub(super) fn release_control(e: &mut Engine<'_>, control: &Control) {
 /// A normalized error has already completed its non-unwinding search.  Carry
 /// its selected condition target through eval/load and cleanup unchanged.
 pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Option<usize>) -> bool {
+    e.vm.thrown_no_catch = false;
     let mut replaced = false;
     if !hooked && let Some(Escape::Signal(condition, data)) = e.escape.as_ref()
         && let Some(replacement) = signal_hook(e, *condition, *data, failed_depth)
@@ -102,6 +103,9 @@ pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Opt
 fn debugger_wanted(e: &mut Engine<'_>) -> bool {
     let Some(Escape::Error { conditions, target, .. }) = e.escape.as_ref() else { return false; };
     let (conditions, clause) = match target.and_then(|at| e.vm.signal_handlers.get(at)) {
+        // A compile-time expansion's escape: GNU signals it at the form's
+        // reach, where the debugger is considered then.
+        Some(SignalHandler::Boundary) => return false,
         Some(SignalHandler::Condition(choices)) => (*conditions, *choices),
         _ => (*conditions, Value::NIL),
     };

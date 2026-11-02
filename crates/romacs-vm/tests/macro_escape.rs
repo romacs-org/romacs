@@ -34,11 +34,13 @@ const EVALUATED: [&str; 9] = [
 /// Forms evaluated as they are, each around an `eval' of its own: what the
 /// eval'd form's own handlers catch, no handler around the `eval' sees, and
 /// a deferred call's expansion defers the calls inside it in turn.
-const AROUND: [&str; 4] = [
+const AROUND: [&str; 5] = [
     r#"(catch 'rt-tag (list 'outer (eval '(catch 'rt-tag (rt-t)) t)))"#,
     r#"(progn (setq rt-log nil) (list (catch 'rt-tag (eval '(unwind-protect (rt-t) (push 'cleanup rt-log)) t)) rt-log))"#,
     r#"(progn (setq rt-log nil) (list (handler-bind ((error (lambda (e) (push e rt-log)))) (eval '(condition-case nil (rt-m) (error 'inner)) t)) rt-log))"#,
     r#"(eval '(progn (defmacro rt-new () '(condition-case nil (rt-m) (error 'inner))) (rt-new)) t)"#,
+    // No debugger for an error the form's own handler catches.
+    r#"(progn (setq rt-log nil) (list (let ((debug-on-error t) (debugger (lambda (&rest _) (push 'debugged rt-log) nil))) (eval '(condition-case nil (rt-m) (error 'caught)) t)) rt-log))"#,
 ];
 
 /// Files `load' reads after the macros, and the variable each sets.
@@ -72,6 +74,11 @@ fn macro_expansion_escapes_reach_gnus_handlers() {
         let load = format!("(progn (setq rt-log nil) (list (handler-bind ((arith-error (lambda (_) (push 'outer-bind rt-log)))) (condition-case e (load {:?} nil t t) (error (list 'load-error e)) (quit (list 'load-quit e)))) (prog1 (bound-and-true-p rt-r) (setq rt-r nil)) rt-log))", file.to_str().unwrap());
         cases.push(escape(&load));
     }
+    // The loader's clause is `(debug error)': the debugger sees the
+    // expansion's error before it is wrapped.
+    let file = scratch.join("case-debug.el");
+    std::fs::write(&file, ";;; -*- lexical-binding: t -*-\n(setq rt-r (rt-a))\n").unwrap();
+    cases.push(escape(&format!("(progn (setq rt-log nil) (list (let ((debug-on-error t) (debugger (lambda (&rest a) (push (cons 'debugged (cdr a)) rt-log) nil))) (condition-case e (load {:?} nil t t) (error (list 'load-error e)))) rt-log))", file.to_str().unwrap())));
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = vec![];
     for case in &cases {

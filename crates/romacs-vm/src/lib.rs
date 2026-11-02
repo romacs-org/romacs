@@ -1292,10 +1292,15 @@ pub struct Vm {
     /// still define, defers to its reach (`defer_expansion_errors'), and a
     /// `lambda' with nothing to capture compiles at its first call.
     evaluating: bool,
-    /// The quits `maybe_quit' has raised from C-g or `quit-flag', not from
-    /// Lisp's own `signal': one raised while a macro expanded is told apart
-    /// from the escape that left the expansion.
-    async_quits: u64,
+    /// A quit (or `throw-on-input' throw) `maybe_quit' raised from C-g or
+    /// `quit-flag' is unwinding: no `catch' or `condition-case' has ended it
+    /// since. An unwind-protect cleanup that replaces it keeps it set, so
+    /// what leaves an expansion it began in is told apart from an error the
+    /// macro raised after catching a quit (`quit_watched').
+    quit_unwinding: bool,
+    /// The pending `no-catch' is a throw that found no live catch, not one
+    /// Lisp signalled (`signal_form' raises it again as the throw).
+    thrown_no_catch: bool,
     /// The next form compiled is a deferred call reached (`force_lazy'): its
     /// own expansion signals there, the forms inside it defer as ever.
     strict_root: bool,
@@ -1494,7 +1499,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     lazy_regime,
     defer_expansion_errors,
     evaluating,
-    async_quits,
+    quit_unwinding,
+    thrown_no_catch,
     strict_root,
     loader_order_request,
     keep_captures,
@@ -1673,7 +1679,8 @@ impl Vm {
             lazy_regime: false,
             defer_expansion_errors: false,
             evaluating: false,
-            async_quits: 0,
+            quit_unwinding: false,
+            thrown_no_catch: false,
             strict_root: false,
             loader_order_request: false,
             keep_captures: false,
@@ -2354,8 +2361,8 @@ impl Vm {
         }
         let (code, next, sites) = (b.code.len(), b.next, b.sites.len());
         let (env, local_specials) = (b.env.clone(), b.local_specials.clone());
-        let quits = self.async_quits;
-        match self.expr_now(b, f) {
+        let (result, quit) = self.quit_watched(|vm| vm.expr_now(b, f));
+        match result {
             Ok(r) => Ok(r),
             // A throw to a catch around the compilation is no failure of
             // this form: it leaves now, as GNU's eager expansion's would.
@@ -2369,7 +2376,7 @@ impl Vm {
                 b.sites.truncate(sites);
                 b.env = env;
                 b.local_specials = local_specials;
-                self.expansion_failed(b, f, quits)
+                self.expansion_failed(b, f, quit)
             }
         }
     }
@@ -2390,11 +2397,11 @@ impl Vm {
         if self.names.get(head).is_none_or(|&slot| self.slots[slot].function == Value::UNBOUND) {
             return self.reach_thunk(b, f);
         }
-        let quits = self.async_quits;
-        match self.expanding_alone(|vm| vm.expand_macro(f)) {
+        let (expanded, quit) = self.quit_watched(|vm| vm.expanding_alone(|vm| vm.expand_macro(f)));
+        match expanded {
             Ok(Some(expansion)) => self.expr(b, &expansion),
             Ok(None) => self.expr_unexpanded(b, f),
-            Err(_) => self.expansion_failed(b, f, quits),
+            Err(_) => self.expansion_failed(b, f, quit),
         }
     }
     /// RUN with a `Boundary' innermost on the handler stack: no handler or
@@ -2406,12 +2413,21 @@ impl Vm {
         self.signal_handlers.truncate(mark);
         result
     }
-    /// F, whose expansion just escaped. When C-g quit it (async quits past
-    /// QUITS), what left it is raised at F's reach, as it left, without
-    /// running the macro again; otherwise F expands again at its reach.
-    fn expansion_failed(&mut self, b: &mut Builder, f: &Form, quits: u64) -> Result<usize> {
+    /// RUN's result, and whether it failed with a quit from C-g still
+    /// unwinding out of it (`quit_unwinding'), which then still unwinds.
+    fn quit_watched<T>(&mut self, run: impl FnOnce(&mut Self) -> Result<T>) -> (Result<T>, bool) {
+        let saved = std::mem::replace(&mut self.quit_unwinding, false);
+        let result = run(self);
+        let quit = result.is_err() && self.quit_unwinding;
+        self.quit_unwinding = saved || quit;
+        (result, quit)
+    }
+    /// F, whose expansion just escaped. When a quit from C-g left it (QUIT),
+    /// what left it is raised at F's reach, as it left, without running the
+    /// macro again; otherwise F expands again at its reach.
+    fn expansion_failed(&mut self, b: &mut Builder, f: &Form, quit: bool) -> Result<usize> {
         let escape = self.propagated_escape.take();
-        if self.async_quits != quits
+        if quit
             && let Some(raised) = escape.and_then(|escape| self.signal_form(escape))
         {
             return self.expr_now(b, &raised);
@@ -2431,6 +2447,7 @@ impl Vm {
         };
         let no_catch = self.intern("no-catch");
         if condition == no_catch
+            && self.thrown_no_catch
             && let Ok((tag, rest)) = self.cons_pair(data)
             && let Ok((value, Value::NIL)) = self.cons_pair(rest)
         {
@@ -3756,4 +3773,3 @@ mod capture_tests {
 mod orderless;
 mod fzf;
 pub use fzf::advance_completion_generation;
-

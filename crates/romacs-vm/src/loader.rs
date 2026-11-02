@@ -437,13 +437,15 @@ impl Vm {
         result
     }
     /// RUN, which expands a top-level form, under macroexp.el
-    /// internal-macroexpand-for-load's `condition-case' for `error': no
+    /// internal-macroexpand-for-load's `condition-case' clause `(debug
+    /// error)': the debugger is considered as GNU's would, and no
     /// handler around the load sees an error the expansion signals, which
     /// `eager_expansion_failure' wraps.
     fn expanding_for_load<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
         let mark = self.signal_handlers.len();
-        let error = self.intern("error");
-        self.signal_handlers.push(threaded::SignalHandler::Condition(error));
+        let (debug, error) = (self.intern("debug"), self.intern("error"));
+        let clause = self.list_value(&[debug, error]);
+        self.signal_handlers.push(threaded::SignalHandler::Condition(clause));
         let result = run(self);
         self.signal_handlers.truncate(mark);
         result

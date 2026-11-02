@@ -154,7 +154,7 @@ impl Vm {
         }
         // process_quit_flag.
         self.set_quit_variable("quit-flag", Value::NIL);
-        self.async_quits += 1;
+        self.quit_unwinding = true;
         if flag == throw_on_input {
             return Some(Escape::Throw(flag, Value::TRUE));
         }

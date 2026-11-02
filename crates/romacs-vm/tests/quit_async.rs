@@ -188,6 +188,33 @@ fn a_quit_in_a_nested_eval_leaves_the_outer_expansion() {
     assert_eq!(quit_into(&mut vm, &signal, "(eval '(condition-case nil (quit-async-outer) (quit 'quit)) t)"), "quit");
 }
 
+/// Quits `quit-flag' raises inside a macro's expansion, against pinned GNU
+/// batch: a quit the macro catches itself leaves nothing to raise, so its
+/// later error expands again at the reach, under the form's own binding
+/// (GNU `(error inner)'); a `no-catch' a cleanup signals stays a signal
+/// (GNU `caught'); a cleanup's error replaces the quit (GNU `(error (error
+/// "cleanup"))'); and a quit through a nested `eval' leaves the outer
+/// expansion, which does not run again (GNU `(quit (outer-ran))').
+#[test]
+fn quit_flag_in_an_expansion_raises_what_gnu_does() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(progn (defvar rt-log nil) (defvar rt-phase 'outer)
+      (defmacro rt-cq () (condition-case nil (progn (setq quit-flag t) (while t)) (quit nil)) (signal 'error (list rt-phase)))
+      (defmacro rt-nc () (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch '(done 7))))
+      (defmacro rt-cu () (unwind-protect (progn (setq quit-flag t) (while t)) (error \"cleanup\")))
+      (defmacro rt-q0 () (setq quit-flag t) (while t))
+      (defmacro rt-nq () (push 'outer-ran rt-log) (eval '(rt-q0) t)))");
+    let cases = [
+        ("(eval '(let ((rt-phase 'inner)) (condition-case e (rt-cq) (error e))) t)", "(error inner)"),
+        ("(eval '(catch 'done (condition-case nil (rt-nc) (no-catch 'caught))) t)", "caught"),
+        ("(eval '(condition-case e (rt-cu) (error (list 'error e)) (quit 'quit)) t)", r#"(error (error "cleanup"))"#),
+        ("(progn (setq rt-log nil) (list (eval '(condition-case nil (rt-nq) (quit 'quit)) t) rt-log))", "(quit (outer-ran))"),
+    ];
+    for (form, gnu) in cases {
+        assert_eq!(eval(&mut vm, form), gnu, "{form}");
+    }
+}
+
 #[test]
 fn inhibit_quit_holds_the_quit_until_it_is_unbound() {
     let (mut vm, signal) = busy_vm();
