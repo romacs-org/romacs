@@ -73,3 +73,15 @@ fn string_collation_matches_pinned_gnu() {
 (list (condition-case e (string-collate-lessp "a" "b" "no_SUCH.locale") (error e)) (condition-case e (string-collate-lessp 1 "b") (error e)) (condition-case e (string-collate-equalp "a" "b" 'x) (error e)))
 "###);
 }
+
+#[test]
+fn process_table_matches_pinned_gnu() {
+    // Values that differ between two processes (times, sizes, the
+    // command) are compared by kind; init's are compared as values.
+    matches_pinned_gnu(r###"
+(let ((a (process-attributes (emacs-pid)))) (list (mapcar #'car a) (mapcar (lambda (k) (type-of (alist-get k a))) '(euid user egid group comm state ppid ttname minflt utime start etime pcpu pri nice thcount vsize rss pmem args)) (equal (alist-get 'euid a) (user-uid)) (equal (alist-get 'user a) (user-login-name)) (> (alist-get 'thcount a) 0)))
+(let ((a (process-attributes 1))) (mapcar (lambda (k) (alist-get k a)) '(euid user egid group comm ppid pgrp sess ttname tpgid args)))
+(list (process-attributes 999999999) (condition-case e (process-attributes "1") (error e)) (condition-case e (process-attributes 1.5) (error e)) (car (process-attributes 1.0)) (condition-case e (process-attributes (expt 2 70)) (error e)))
+(let ((pids (list-system-processes))) (list (and (memq (emacs-pid) pids) t) (and (memq 1 pids) t) (seq-every-p #'natnump pids)))
+"###);
+}

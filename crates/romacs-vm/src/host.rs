@@ -1496,6 +1496,19 @@ pub fn clock_ticks_per_second() -> u64 {
     u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok().filter(|&n| n > 0).unwrap_or(100)
 }
 
+/// The time since boot, suspended time included (`CLOCK_BOOTTIME`), as
+/// GNU's get_host_uptime reads it; None where the clock is missing.
+pub fn boot_clock() -> Option<std::time::Duration> {
+    let mut t: libc::timespec = unsafe { std::mem::zeroed() };
+    let ok = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut t) } == 0;
+    ok.then(|| std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32))
+}
+
+/// The memory page size in bytes (`getpagesize`).
+pub fn page_size() -> u64 {
+    u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok().filter(|&n| n > 0).unwrap_or(4096)
+}
+
 /// A time-zone file's bytes: `/etc/localtime`, a TZ file or a zoneinfo entry.
 pub fn zone_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     read_file(path)
