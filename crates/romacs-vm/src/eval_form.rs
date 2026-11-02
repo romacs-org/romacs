@@ -185,9 +185,15 @@ mod tests {
         vm.thrown_no_catch.push(object);
         vm.collect_marked(&mut []);
         assert!(vm.thrown_no_catch.is_empty());
+        // Garbage first, so the kept error moves when the cons space compacts.
+        for i in 0..64 {
+            vm.list_value(&[Value::integer(i).unwrap()]);
+        }
         let mut kept = [vm.list_value(&[Value::NIL])];
+        let before = kept[0];
         vm.thrown_no_catch.push(kept[0]);
         vm.collect_marked(&mut kept);
+        assert_ne!(kept[0], before, "the kept error moved");
         assert_eq!(vm.thrown_no_catch, kept.to_vec(), "a live error keeps its mark, moved with it");
     }
 

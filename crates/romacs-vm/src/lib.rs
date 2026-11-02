@@ -2355,8 +2355,16 @@ impl Vm {
     }
     fn expr_inner(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
         // A deferred call reached: its expansion signals here, at its reach.
+        // With no function yet, it signals void-function before any argument
+        // runs, so nothing inside it is reached to defer.
         if std::mem::take(&mut self.strict_root) {
-            return self.expr_now(b, f);
+            let unbound = matches!(f, Form::List(items) if matches!(items.first(), Some(Form::Sym(head))
+                if self.names.get(head).is_none_or(|&slot| self.slots[slot].function == Value::UNBOUND)));
+            let saved = self.defer_expansion_errors;
+            self.defer_expansion_errors = saved && !unbound;
+            let result = self.expr_now(b, f);
+            self.defer_expansion_errors = saved;
+            return result;
         }
         if self.evaluating && self.defer_expansion_errors {
             return self.expr_evaluated(b, f);
