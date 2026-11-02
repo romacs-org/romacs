@@ -922,7 +922,8 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
     escape = e.escape.take().unwrap();
     if let Escape::Throw(tag, value) = escape
         && (!e.propagate || e.depth_base > 1)
-        && !e.vm.signal_handlers.iter()
+        && !e.vm.signal_handlers.iter().rev()
+            .take_while(|h| !matches!(h, SignalHandler::Boundary))
             .any(|h| matches!(h, SignalHandler::Catch(wanted) if *wanted != Value::NIL && *wanted == tag))
     {
         let slot = e.vm.slot("no-catch");
@@ -1864,7 +1865,7 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
 fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
     if crate::host::interrupt_pending() && isolate_quit(e) {
         // A signal, not an engine failure: `condition-case' catches it.
-        e.vm.async_quit = true;
+        e.vm.async_quits += 1;
         return Some(raise(e, "quit", &[]));
     }
     let escape = e.vm.maybe_quit()?;

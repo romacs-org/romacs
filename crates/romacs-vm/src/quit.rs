@@ -154,11 +154,11 @@ impl Vm {
         }
         // process_quit_flag.
         self.set_quit_variable("quit-flag", Value::NIL);
+        self.async_quits += 1;
         if flag == throw_on_input {
             return Some(Escape::Throw(flag, Value::TRUE));
         }
         let quit = self.intern("quit");
-        self.async_quit = true;
         Some(Escape::Signal(quit, Value::NIL))
     }
 

@@ -137,6 +137,27 @@ fn an_endless_expansion_during_load_quits_unwrapped() {
     assert_eq!(value, "quit");
 }
 
+/// The escape that leaves a quit expansion is raised at the form's reach,
+/// whatever the quit became on its way out, and the macro does not run
+/// again: here the macro's cleanup replaces the quit with its own error,
+/// as GNU's unwind-protect lets it.
+#[test]
+fn a_quit_expansion_raises_what_left_it() {
+    let (mut vm, signal) = endless_macro_vm();
+    eval(&mut vm, "(defmacro quit-async-cleanup () (unwind-protect (while t) (error \"cleanup\")) nil)");
+    let form = "(eval '(condition-case e (quit-async-cleanup) (error (list 'error e)) (quit 'quit)) t)";
+    assert_eq!(quit_into(&mut vm, &signal, form), r#"(error (error "cleanup"))"#);
+}
+
+/// A quit taken by an `eval' nested in a macro's expansion leaves the
+/// outer expansion too: one C-g, and the outer macro does not run again.
+#[test]
+fn a_quit_in_a_nested_eval_leaves_the_outer_expansion() {
+    let (mut vm, signal) = endless_macro_vm();
+    eval(&mut vm, "(defmacro quit-async-outer () (eval '(quit-async-endless) t) nil)");
+    assert_eq!(quit_into(&mut vm, &signal, "(eval '(condition-case nil (quit-async-outer) (quit 'quit)) t)"), "quit");
+}
+
 #[test]
 fn inhibit_quit_holds_the_quit_until_it_is_unbound() {
     let (mut vm, signal) = busy_vm();

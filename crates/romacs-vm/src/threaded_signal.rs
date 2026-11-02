@@ -7,12 +7,18 @@ pub(crate) enum SignalHandler {
     Catch(Value),
     Bind { conditions: Value, function: Value, group: usize },
     Mask(usize),
+    /// A compile-time macro expansion (`Vm::expanding_alone'): every signal
+    /// it raises stops here and no catch beneath it is live, so no handler
+    /// around the compilation sees an escape GNU would raise at the form's
+    /// reach, inside the form's own handlers.
+    Boundary,
 }
 romacs_snapshot::snapshot_enum!(SignalHandler {
     SignalHandler::Condition(f0) => (f0),
     SignalHandler::Catch(f0) => (f0),
     SignalHandler::Bind { conditions, function, group } => (conditions, function, group),
     SignalHandler::Mask(f0) => (f0),
+    SignalHandler::Boundary => (),
 });
 
 impl SignalHandler {
@@ -20,7 +26,7 @@ impl SignalHandler {
         match self {
             Self::Condition(value) | Self::Catch(value) => visit(value),
             Self::Bind { conditions, function, .. } => { visit(conditions); visit(function); }
-            Self::Mask(_) => {}
+            Self::Mask(_) | Self::Boundary => {}
         }
     }
 }
@@ -125,6 +131,10 @@ fn search(e: &mut Engine<'_>) -> bool {
         let (condition, conditions, object) = (*condition, *conditions, *object);
         match handler {
             SignalHandler::Mask(skip) => at = skip,
+            SignalHandler::Boundary => {
+                if let Some(Escape::Error { target, .. }) = e.escape.as_mut() { *target = Some(at); }
+                break;
+            }
             SignalHandler::Condition(choices) if matches(e.vm, conditions, choices) => {
                 if let Some(Escape::Error { target, .. }) = e.escape.as_mut() { *target = Some(at); }
                 break;

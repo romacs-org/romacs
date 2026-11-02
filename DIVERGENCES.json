@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "b302bb8e4c0787daf82adbd41f9072aa16ac3231b9d6cb5bd6f0011a1a0c88db",
+  "input_hash": "b546b1d47e1616a8a39969b878253e97d52be0d3272199681e76edd3e8e14456",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -3806,7 +3806,7 @@
    "planned": false,
    "mechanism": "When the macro calls `eval` runs expand",
    "gnu": "GNU's `eval` interprets: each macro call expands when evaluation reaches it, again at each reach (`src/eval.c` eval_sub), inside the handlers around it; `load` expands each top-level form first (`internal-macroexpand-for-load`)",
-   "romacs": "Romacs compiles what `eval` runs. A macro call expands as the form compiles, once, and its expansion is kept; one whose expansion signals (or throws to no catch) is compiled to expand at its reach instead, so the handlers around it see what the macro signals, and so is a call whose function is not yet defined, which a form run before it may define; a `lambda` with nothing to capture compiles at its first call. Different: a successful expansion runs before the form runs and only once; a failing one runs while compiling and again at its reach, so its side effects happen twice, the first before the form's own (pinned GNU `(handled (body cleanup (caught (error \"uw\"))))`, Romacs `(handled (cleanup body cleanup (caught (error \"uw\"))))`); C-g during the compile-time expansion quits at the form's reach",
+   "romacs": "Romacs compiles what `eval` runs. A macro call expands as the form compiles, once, and its expansion is kept. It expands alone: no handler or catch around the compilation sees what it signals or throws. One whose expansion signals or throws is compiled to expand at its reach instead, so the form's own handlers see what the macro raises, and the calls inside a deferred call's expansion defer in turn, and so is a call whose function is not yet defined, which a form run before it may define; a `lambda` with nothing to capture compiles at its first call. Different: a successful expansion runs before the form runs and only once; a failing one runs while compiling and again at its reach, so its side effects happen twice, the first before the form's own (pinned GNU `(handled (body cleanup (caught (error \"uw\"))))`, Romacs `(handled (cleanup body cleanup (caught (error \"uw\"))))`); C-g during the compile-time expansion raises what left the expansion (the quit, or what a cleanup replaced it with) at the form's reach, without running the macro again",
    "why": "**Observable** only through a macro's own side effects or the dynamic state it reads while expanding; what an expansion signals, throws or quits reaches GNU's handlers. Tests: `crates/romacs-vm/tests/macro_escape.rs` (against pinned GNU), `crates/romacs-vm/tests/quit_async.rs`",
    "symbols": [
     "eval",

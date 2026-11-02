@@ -363,7 +363,7 @@ impl Vm {
         self.expanded_macros.clear();
         self.expanded_symbols.clear();
         self.propagated_escape = None;
-        let expanded = match self.expand_macro(form) {
+        let expanded = match self.expanding_for_load(|vm| vm.expand_macro(form)) {
             Ok(expanded) => expanded,
             Err(error) => return Err(self.eager_expansion_failure(error)),
         };
@@ -390,11 +390,11 @@ impl Vm {
             value
         } else {
             self.seed_file_specials = true;
-            let compiled = if !lazy && let Some(source) = source {
-                self.cached_source_form(source, form)
+            let compiled = self.expanding_for_load(|vm| if !lazy && let Some(source) = source {
+                vm.cached_source_form(source, form)
             } else {
-                self.compile_request(form).map(|(function, _)| function)
-            };
+                vm.compile_request(form).map(|(function, _)| function)
+            });
             self.seed_file_specials = false;
             let compiled = match compiled {
                 Ok(function) => Ok(function),
@@ -421,6 +421,18 @@ impl Vm {
             let declared = self.keymap_cons(symbol, declared);
             self.set_variable_value(dynvars, declared)?;
         }
+        result
+    }
+    /// RUN, which expands a top-level form, under macroexp.el
+    /// internal-macroexpand-for-load's `condition-case' for `error': no
+    /// handler around the load sees an error the expansion signals, which
+    /// `eager_expansion_failure' wraps.
+    fn expanding_for_load<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.signal_handlers.len();
+        let error = self.intern("error");
+        self.signal_handlers.push(threaded::SignalHandler::Condition(error));
+        let result = run(self);
+        self.signal_handlers.truncate(mark);
         result
     }
     /// macroexp.el internal-macroexpand-for-load: an error that expanding a

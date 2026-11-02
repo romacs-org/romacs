@@ -15,7 +15,8 @@ const MACROS: &str = r#"(progn
   (defmacro rt-m () (error "boom"))
   (defmacro rt-t () (throw 'rt-tag 7))
   (defmacro rt-u () (unwind-protect (error "uw") (push 'cleanup rt-log)))
-  (defmacro rt-s () (signal 'quit nil)))"#;
+  (defmacro rt-s () (signal 'quit nil))
+  (defmacro rt-a () (/ 1 0)))"#;
 
 /// Forms `eval' runs lexically, each one's value or its escape printed.
 const EVALUATED: [&str; 9] = [
@@ -30,12 +31,23 @@ const EVALUATED: [&str; 9] = [
     r#"(condition-case e (macroexpand-all '(progn (rt-m))) (error (list 'caught e)))"#,
 ];
 
+/// Forms evaluated as they are, each around an `eval' of its own: what the
+/// eval'd form's own handlers catch, no handler around the `eval' sees, and
+/// a deferred call's expansion defers the calls inside it in turn.
+const AROUND: [&str; 4] = [
+    r#"(catch 'rt-tag (list 'outer (eval '(catch 'rt-tag (rt-t)) t)))"#,
+    r#"(progn (setq rt-log nil) (list (catch 'rt-tag (eval '(unwind-protect (rt-t) (push 'cleanup rt-log)) t)) rt-log))"#,
+    r#"(progn (setq rt-log nil) (list (handler-bind ((error (lambda (e) (push e rt-log)))) (eval '(condition-case nil (rt-m) (error 'inner)) t)) rt-log))"#,
+    r#"(eval '(progn (defmacro rt-new () '(condition-case nil (rt-m) (error 'inner))) (rt-new)) t)"#,
+];
+
 /// Files `load' reads after the macros, and the variable each sets.
-const LOADED: [&str; 4] = [
+const LOADED: [&str; 5] = [
     "(setq rt-r (condition-case e (rt-m) (error (list 'caught e))))",
     "(defun rt-f () (rt-m))\n(setq rt-r 'defined)",
     "(setq rt-r (catch 'rt-tag (rt-t)))",
     "(setq rt-r (condition-case e (rt-s) (quit (list 'quit-caught e))))",
+    "(setq rt-r (rt-a))",
 ];
 
 fn escape(form: &str) -> String {
@@ -50,10 +62,14 @@ fn macro_expansion_escapes_reach_gnus_handlers() {
     let scratch = std::env::temp_dir().join(format!("macro-escape-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
     let mut cases: Vec<String> = EVALUATED.iter().map(|form| escape(&format!("(eval '{form} t)"))).collect();
+    cases.extend(AROUND.iter().map(|form| escape(form)));
     for (index, body) in LOADED.iter().enumerate() {
         let file = scratch.join(format!("case-{index}.el"));
         std::fs::write(&file, format!(";;; -*- lexical-binding: t -*-\n{body}\n")).unwrap();
-        let load = format!("(list (condition-case e (load {:?} nil t t) (error (list 'load-error e)) (quit (list 'load-quit e))) (prog1 (bound-and-true-p rt-r) (setq rt-r nil)))", file.to_str().unwrap());
+        // The loader's own handler stops an expansion's error before any
+        // handler around the load sees it (macroexp.el
+        // internal-macroexpand-for-load).
+        let load = format!("(progn (setq rt-log nil) (list (handler-bind ((arith-error (lambda (_) (push 'outer-bind rt-log)))) (condition-case e (load {:?} nil t t) (error (list 'load-error e)) (quit (list 'load-quit e)))) (prog1 (bound-and-true-p rt-r) (setq rt-r nil)) rt-log))", file.to_str().unwrap());
         cases.push(escape(&load));
     }
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");

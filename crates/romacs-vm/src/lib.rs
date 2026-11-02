@@ -1292,9 +1292,13 @@ pub struct Vm {
     /// still define, defers to its reach (`defer_expansion_errors'), and a
     /// `lambda' with nothing to capture compiles at its first call.
     evaluating: bool,
-    /// The quit `maybe_quit' raised last came from C-g or `quit-flag', not
-    /// from Lisp's own `signal'.
-    async_quit: bool,
+    /// The quits `maybe_quit' has raised from C-g or `quit-flag', not from
+    /// Lisp's own `signal': one raised while a macro expanded is told apart
+    /// from the escape that left the expansion.
+    async_quits: u64,
+    /// The next form compiled is a deferred call reached (`force_lazy'): its
+    /// own expansion signals there, the forms inside it defer as ever.
+    strict_root: bool,
     /// Set for the builder about to be created (`Builder::loader_order`).
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
@@ -1487,7 +1491,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     lazy_regime,
     defer_expansion_errors,
     evaluating,
-    async_quit,
+    async_quits,
+    strict_root,
     loader_order_request,
     keep_captures,
     lambda_depth,
@@ -1664,7 +1669,8 @@ impl Vm {
             lazy_regime: false,
             defer_expansion_errors: false,
             evaluating: false,
-            async_quit: false,
+            async_quits: 0,
+            strict_root: false,
             loader_order_request: false,
             keep_captures: false,
             lambda_depth: 0,
@@ -2286,7 +2292,8 @@ impl Vm {
             .map(|(reg, (name, &cell))| (name.clone(), Binding { reg, cell }))
             .collect();
         let saved_regime = std::mem::replace(&mut self.lazy_regime, true);
-        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, !lazy.deferred);
+        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
+        let saved_strict = std::mem::replace(&mut self.strict_root, lazy.deferred);
         let saved_scope = std::mem::replace(&mut self.dynamic_scope, lazy.dynamic_scope);
         let saved_pending = std::mem::replace(&mut self.pending_specials, lazy.pending_specials.clone());
         let saved_evaluating = std::mem::replace(&mut self.evaluating, lazy.evaluated);
@@ -2304,6 +2311,7 @@ impl Vm {
         self.compile_depth -= 1;
         self.lazy_regime = saved_regime;
         self.defer_expansion_errors = saved_defer;
+        self.strict_root = saved_strict;
         self.dynamic_scope = saved_scope;
         self.pending_specials = saved_pending;
         self.evaluating = saved_evaluating;
@@ -2326,6 +2334,10 @@ impl Vm {
         self.expr_inner(b, f)
     }
     fn expr_inner(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
+        // A deferred call reached: its expansion signals here, at its reach.
+        if std::mem::take(&mut self.strict_root) {
+            return self.expr_now(b, f);
+        }
         if self.evaluating && self.defer_expansion_errors {
             return self.expr_evaluated(b, f);
         }
@@ -2334,47 +2346,33 @@ impl Vm {
         }
         let (code, next, sites) = (b.code.len(), b.next, b.sites.len());
         let (env, local_specials) = (b.env.clone(), b.local_specials.clone());
-        self.async_quit = false;
+        let quits = self.async_quits;
         match self.expr_now(b, f) {
             Ok(r) => Ok(r),
             // A throw to a catch around the compilation is no failure of
-            // this form: it leaves now, as GNU's would.
+            // this form: it leaves now, as GNU's eager expansion's would.
             Err(error) if matches!(self.propagated_escape, Some(threaded::Escape::Throw(..))) => Err(error),
-            // C-g while the expansion ran: GNU would have been expanding at
-            // the form's reach, so the quit is raised there, once reached,
-            // inside the handlers around it; the expansion is not run again.
-            Err(_) if std::mem::take(&mut self.async_quit) => {
-                self.propagated_escape = None;
-                b.code.truncate(code);
-                b.next = next;
-                b.sites.truncate(sites);
-                b.env = env;
-                b.local_specials = local_specials;
-                self.expr_now(b, &quit_form())
-            }
             Err(_) => {
                 // GNU expands this form only when evaluation reaches it, and
                 // signals then (eval.c eval_sub). Discard the partial code and
-                // compile a reach-time expansion instead.
-                self.propagated_escape = None;
+                // compile the escape, or a reach-time expansion, instead.
                 b.code.truncate(code);
                 b.next = next;
                 b.sites.truncate(sites);
                 b.env = env;
                 b.local_specials = local_specials;
-                let thunk = self.lazy_lambda(b, &[], std::slice::from_ref(f), true)?;
-                let r = b.reg();
-                b.emit(Op::Call(r, thunk, b.next, 0));
-                Ok(r)
+                self.expansion_failed(b, f, quits)
             }
         }
     }
     /// F compiled for `eval', which GNU interprets. A macro call expands
     /// now, before anything is emitted for it, and compiles its expansion;
-    /// an expansion that signals defers the call to its reach, which runs
-    /// the macro again there. A call whose function is not yet defined
-    /// defers too: a form evaluated before it may define it, even as a
-    /// macro. Every other form compiles as it is, its own forms in turn.
+    /// an expansion that escapes defers the call to its reach, which runs
+    /// the macro again there. The expansion runs alone (`expanding_alone'),
+    /// as nothing of the form around it has run yet. A call whose function
+    /// is not yet defined defers too: a form evaluated before it may define
+    /// it, even as a macro. Every other form compiles as it is, its own
+    /// forms in turn.
     fn expr_evaluated(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
         let Form::List(items) = f else { return self.expr_now(b, f) };
         let Some(Form::Sym(head)) = items.first() else { return self.expr_now(b, f) };
@@ -2384,23 +2382,53 @@ impl Vm {
         if self.names.get(head).is_none_or(|&slot| self.slots[slot].function == Value::UNBOUND) {
             return self.reach_thunk(b, f);
         }
-        self.async_quit = false;
-        match self.expand_macro(f) {
+        let quits = self.async_quits;
+        match self.expanding_alone(|vm| vm.expand_macro(f)) {
             Ok(Some(expansion)) => self.expr(b, &expansion),
             Ok(None) => self.expr_unexpanded(b, f),
-            // A throw to a catch around the compilation leaves now.
-            Err(error) if matches!(self.propagated_escape, Some(threaded::Escape::Throw(..))) => Err(error),
-            // C-g while the macro ran: raised at the form's reach instead,
-            // inside the handlers around it, without running the macro again.
-            Err(_) if std::mem::take(&mut self.async_quit) => {
-                self.propagated_escape = None;
-                self.expr_now(b, &quit_form())
-            }
-            Err(_) => {
-                self.propagated_escape = None;
-                self.reach_thunk(b, f)
-            }
+            Err(_) => self.expansion_failed(b, f, quits),
         }
+    }
+    /// RUN with a `Boundary' innermost on the handler stack: no handler or
+    /// catch around the compilation sees what it signals or throws.
+    fn expanding_alone<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.signal_handlers.len();
+        self.signal_handlers.push(threaded::SignalHandler::Boundary);
+        let result = run(self);
+        self.signal_handlers.truncate(mark);
+        result
+    }
+    /// F, whose expansion just escaped. When C-g quit it (async quits past
+    /// QUITS), what left it is raised at F's reach, as it left, without
+    /// running the macro again; otherwise F expands again at its reach.
+    fn expansion_failed(&mut self, b: &mut Builder, f: &Form, quits: u64) -> Result<usize> {
+        let escape = self.propagated_escape.take();
+        if self.async_quits != quits
+            && let Some(raised) = escape.and_then(|escape| self.signal_form(escape))
+        {
+            return self.expr_now(b, &raised);
+        }
+        self.reach_thunk(b, f)
+    }
+    /// `(signal CONDITION DATA)' for the signal ESCAPE carries, or `(throw
+    /// TAG VALUE)' for a throw, which the expansion's `Boundary' made a
+    /// `no-catch' (a `while-no-input' around the form catches it there).
+    fn signal_form(&mut self, escape: threaded::Escape) -> Option<Form> {
+        let call = |vm: &Self, head: &str, a, b| Form::List(vec![Form::Sym(head.into()), vm.eval_quoted_form(a), vm.eval_quoted_form(b)]);
+        let (condition, data) = match escape {
+            threaded::Escape::Signal(condition, data) => (condition, data),
+            threaded::Escape::Error { object, .. } => self.cons_pair(object).ok()?,
+            threaded::Escape::Throw(tag, value) => return Some(call(self, "throw", tag, value)),
+            threaded::Escape::Normal(_) => return None,
+        };
+        let no_catch = self.intern("no-catch");
+        if condition == no_catch
+            && let Ok((tag, rest)) = self.cons_pair(data)
+            && let Ok((value, Value::NIL)) = self.cons_pair(rest)
+        {
+            return Some(call(self, "throw", tag, value));
+        }
+        Some(call(self, "signal", condition, data))
     }
     /// A call of a closure, made here, whose body is F, compiled when the
     /// call is reached (GNU expands F then, eval.c eval_sub).
@@ -3721,7 +3749,3 @@ mod orderless;
 mod fzf;
 pub use fzf::advance_completion_generation;
 
-/// `(signal 'quit nil)': C-g taken while a macro expanded, raised at its reach.
-fn quit_form() -> Form {
-    Form::List(vec![Form::Sym("signal".into()), Form::List(vec![Form::Sym("quote".into()), Form::Sym("quit".into())]), Form::Sym("nil".into())])
-}
