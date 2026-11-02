@@ -58,6 +58,11 @@
 (register-definition-prefixes "romacs-companion-receipts" '("romacs-companion-"))
 
 
+;;; Generated autoloads from romacs-compile.el
+
+(register-definition-prefixes "romacs-compile" '("romacs-compile--"))
+
+
 ;;; Generated autoloads from romacs-complete.el
 
 (defvar romacs-complete-mode nil

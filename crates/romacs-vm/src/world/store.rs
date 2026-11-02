@@ -406,6 +406,24 @@ impl World {
         }
     }
 
+    /// The identity of this world's Lisp, from its published manifest
+    /// alone (no record is checked): its key, which binds the executable
+    /// and the recipe, and the content of every file its build read. What
+    /// a compile process restores, for the compiled-Lisp key
+    /// (`crate::compiled_lisp`); a rebuild for another host fact, the
+    /// environment's say, keeps it. None when no world was published.
+    pub fn lisp_identity(&self) -> Option<String> {
+        let text = host::read_store_file(self.file(".json")).ok()?;
+        let manifest: Json = serde_json::from_str(&text).ok()?;
+        let mut files: Vec<String> = manifest["records"].as_array()?.iter()
+            .filter(|r| r["kind"] == "file-read")
+            .map(|r| format!("{} {}", r["path"], r["sha256"]))
+            .collect();
+        files.sort();
+        files.dedup();
+        Some(format!("{} {}", hex(&self.key), hex(&sha256(files.join("\n").as_bytes()))))
+    }
+
     /// Whether a launch would restore this world now: its manifest holds
     /// and its image is the one bound.
     pub fn ready(&self) -> bool {
