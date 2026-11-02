@@ -2868,14 +2868,17 @@ impl Vm {
         b.env = saved;
         Ok(())
     }
-    /// Whether a binding of NAME is dynamic: every binding under dynamic
-    /// scope, an uninterned symbol's too, as GNU's specbind binds the symbol
-    /// object; otherwise a special variable's, B's local specials counting
-    /// when LOCAL.
+    /// Whether a binding of NAME is dynamic: every binding of a symbol
+    /// under dynamic scope, an uninterned one's too, as GNU's specbind binds
+    /// the symbol object; otherwise a special variable's, B's local specials
+    /// counting when LOCAL. A compiler temporary is no Lisp symbol, so it
+    /// stays a local and never takes a symbol slot.
     fn binds_dynamically(&self, b: &Builder, name: &Name, local: bool) -> bool {
-        self.dynamic_scope || name.source().is_some_and(|n| {
-            self.specials.contains(n) || self.pending_specials.contains(n) || (local && b.local_specials.contains(n))
-        })
+        match name {
+            Name::Generated(id) => self.dynamic_scope && self.generated_symbols.contains_key(id),
+            Name::Source(n) => self.dynamic_scope || self.specials.contains(n.as_str()) || self.pending_specials.contains(n.as_str())
+                || (local && b.local_specials.contains(n.as_str())),
+        }
     }
     /// The symbol slot of NAME.
     fn name_slot(&mut self, name: &Name) -> usize {
