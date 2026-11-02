@@ -127,7 +127,10 @@ runs no timers."
           ;; schedules a timer or requeues input ends the wait
           ;; (`romacs--wait-state').
           (let* ((background (romacs--dispatch-background))
-                 (dispatched (or (and timers (romacs--process-idle)) (and (fboundp (quote romacs--isolate-idle)) (romacs--isolate-idle)) background))
+                 ;; read_char's special events: file notification events
+                 ;; run here, never input; an error ends the read.
+                 (notified (and (fboundp 'romacs--file-notify-dispatch) (romacs--file-notify-dispatch)))
+                 (dispatched (or (and timers (romacs--process-idle)) (and (fboundp (quote romacs--isolate-idle)) (romacs--isolate-idle)) background notified))
                  left)
             (and timers (romacs--timer-check))
             (when (and save-at (<= save-at (float-time)) (not (romacs--unread-p)) (not (input-pending-p)))
@@ -153,6 +156,19 @@ runs no timers."
                 (setq waiting (null c))))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
+
+(defun romacs--read-batch-wait (seconds)
+  "kbd_buffer_get_event's wait with no terminal to read: run timers,
+process output and file notification events until SECONDS pass, input is
+requeued, or, without SECONDS, no watch is left."
+  (let ((end (and seconds (+ (float-time) seconds))) (waiting t))
+    (while waiting
+      (when (fboundp 'romacs--file-notify-dispatch) (romacs--file-notify-dispatch))
+      (let ((left (and end (- end (float-time)))))
+        (if (or (romacs--unread-p) (and left (<= left 0))
+                (and (null end) (not (romacs--file-notify-watching-p))))
+            (setq waiting nil)
+          (romacs--wait-reading-process-output (or left 'forever) nil 0 t))))))
 
 (defun romacs--host-event (seconds display)
   "`romacs--read-host-event', whose `quit' once the frame has closed leaves
@@ -326,6 +342,15 @@ reports it, raised from the innermost recursive edit when there is one."
                    (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
           (when (boundp 'echo-area-clear-hook) (romacs--safe-run-hooks 'echo-area-clear-hook))
           (message nil))))
+     ((and (fboundp 'romacs--wait-reading-process-output)
+           (or seconds (and (fboundp 'romacs--file-notify-watching-p) (romacs--file-notify-watching-p))))
+      ;; Batch GNU built with file notification (GNU/Linux) waits here, in
+      ;; kbd_buffer_get_event: timers, process output and file
+      ;; notification events run until SECONDS pass or, without SECONDS,
+      ;; for as long as a watch is live.  Input a timer requeued is read
+      ;; next; with no watch left, end of input comes as below.
+      (romacs--read-batch-wait seconds)
+      (when (or (romacs--unread-p) (null seconds)) (setq again t)))
      (seconds)
      ;; Batch GNU blocks for the terminal here. With no input left, VM2
      ;; leaves the innermost recursive edit or minibuffer instead, so a

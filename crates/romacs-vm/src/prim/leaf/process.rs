@@ -386,7 +386,10 @@ impl Leaf<'_> {
     /// process whose channel is readable (round robin), (connect PROC ERRNO
     /// REMOTE LOCAL) for a finished :nowait connection, t when something
     /// else woke the wait or a status changed, or nil on timeout.
-    pub(crate) fn process_select(&mut self, wait_proc: Value, just_this: bool, seconds: Option<f64>) -> Out {
+    /// With READ_KBD, as wait_reading_process_output's READ_KBD, the
+    /// keyboard's other sources wake it too: queued file notification
+    /// events end it with `input', unread, for read_char to handle.
+    pub(crate) fn process_select(&mut self, wait_proc: Value, just_this: bool, seconds: Option<f64>, read_kbd: bool) -> Out {
         // Reaping closes a child's pidfd and stops reading it, so nothing
         // would wake the poll for its status change: hand that change to
         // status_notify before blocking, as GNU's SIGCHLD wakeup does.
@@ -396,7 +399,9 @@ impl Leaf<'_> {
             self.vm.subprocesses.activity += 1;
             return Ok(Value::TRUE);
         }
-        let (fds, owners) = self.select_set(wait_proc, just_this);
+        let (mut fds, owners) = self.select_set(wait_proc, just_this);
+        let keyboard = read_kbd.then(|| self.vm.file_notify_fd()).flatten();
+        fds.extend(keyboard.map(|fd| (fd, libc::POLLIN)));
         if wait_proc != Value::NIL && just_this && !self.process_infd(wait_proc) {
             return Ok(self.sym("terminated"));
         }
@@ -413,6 +418,9 @@ impl Leaf<'_> {
         let revents = sp::poll(&fds, timeout).map_err(|e| self.file_errno("Failed select", &e))?;
         if revents.iter().all(|&r| r == 0) {
             return Ok(Value::NIL);
+        }
+        if keyboard.is_some() && revents.last().is_some_and(|&r| r != 0) {
+            return Ok(self.sym("input"));
         }
         self.vm.subprocesses.activity += 1;
         self.reap_children();
@@ -1235,8 +1243,10 @@ impl Vm {
     /// open while the VM runs no Lisp.
     pub fn process_wait_fds(&mut self) -> Vec<(RawFd, i16)> {
         let mut fds = Leaf::new(self).select_set(Value::NIL, false).0;
-        // The isolates' sockets and workers' pidfds wake the same wait.
+        // The isolates' sockets and workers' pidfds wake the same wait,
+        // and so do file notification events, the keyboard's.
         fds.extend(self.isolate_fds());
+        fds.extend(self.file_notify_fd().map(|fd| (fd, libc::POLLIN)));
         fds
     }
 }

@@ -1911,6 +1911,49 @@ pub fn read_sealed(file: &File) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+// File notification (`prim/leaf/inotify.rs`): GNU inotify.c's one
+// instance per Emacs, whose descriptor the keyboard waits poll.
+
+/// inotify_init1(2), close-on-exec and nonblocking.
+pub fn inotify_init() -> io::Result<OwnedFd> {
+    effect(|| "inotify".into())?;
+    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+    if fd < 0 { return Err(io::Error::last_os_error()); }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// inotify_add_watch(2): PATH's watch descriptor on FD with MASK.
+pub fn inotify_add_watch(fd: std::os::fd::BorrowedFd<'_>, path: &CStr, mask: u32) -> io::Result<i32> {
+    use std::os::fd::AsRawFd;
+    effect(|| format!("inotify watch {}", path.to_string_lossy()))?;
+    let wd = unsafe { libc::inotify_add_watch(fd.as_raw_fd(), path.as_ptr(), mask) };
+    if wd < 0 { Err(io::Error::last_os_error()) } else { Ok(wd) }
+}
+
+/// inotify_rm_watch(2).
+pub fn inotify_rm_watch(fd: std::os::fd::BorrowedFd<'_>, wd: i32) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    status(unsafe { libc::inotify_rm_watch(fd.as_raw_fd(), wd) })
+}
+
+/// The `struct inotify_event' records queued on FD, as their bytes; none
+/// when nothing is queued (FD is nonblocking).
+pub fn inotify_read(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<Vec<u8>> {
+    use std::os::fd::AsRawFd;
+    let mut queued: libc::c_int = 0;
+    status(unsafe { libc::ioctl(fd.as_raw_fd(), libc::FIONREAD, &mut queued) })?;
+    // One record at least, whatever FIONREAD said, so a read never fails
+    // with EINVAL for a buffer too small for the next record.
+    let mut buffer = vec![0u8; (queued.max(0) as usize).max(std::mem::size_of::<libc::inotify_event>() + 256)];
+    let n = unsafe { libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
+    if n < 0 {
+        let e = io::Error::last_os_error();
+        return if e.kind() == io::ErrorKind::WouldBlock { Ok(Vec::new()) } else { Err(e) };
+    }
+    buffer.truncate(n as usize);
+    Ok(buffer)
+}
+
 // Isolates (`isolate.rs`): worker processes, their control sockets, the
 // descriptors they pass, and the signals between them.
 
