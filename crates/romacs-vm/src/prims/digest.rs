@@ -31,8 +31,8 @@ fn buffer_hash(cx; optional buffer_or_name: Value) {
         // nsberror (buffer.c:408)
         return Err(Fault::Error(format!("No buffer named {}", cx.string_text(buffer_or_name)?)));
     }
-    let bytes = cx.buffer_internal_bytes(buffer)?;
-    Ok(cx.make_string(hex(&crate::digest::digest("sha1", &bytes).expect("sha1 is an algorithm")), false))
+    let digest = cx.with_buffer_internal_bytes(buffer, |bytes| crate::digest::digest("sha1", bytes))?;
+    Ok(cx.make_string(hex(&digest.expect("sha1 is an algorithm")), false))
 }}
 
 fn hex(digest: &[u8]) -> Vec<u8> {

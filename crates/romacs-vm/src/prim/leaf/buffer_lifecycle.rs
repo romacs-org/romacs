@@ -31,11 +31,11 @@ impl Leaf<'_> {
     pub fn lifecycle_live_p(&self, value: Value) -> bool {
         self.vm.live_buffer_value(value)
     }
-    /// BUFFER's whole text in GNU's internal form, as its gap holds it.
-    pub fn buffer_internal_bytes(&self, buffer: Value) -> std::result::Result<Vec<u8>, Fault> {
+    /// F of BUFFER's whole text in GNU's internal form, as its gap holds it.
+    pub fn with_buffer_internal_bytes<T>(&self, buffer: Value, f: impl FnOnce(&[u8]) -> T) -> std::result::Result<T, Fault> {
         match self.vm.object_if(buffer) {
-            Some(Object::Buffer(t)) => Ok(t.bytes().to_vec()),
-            Some(Object::ByteBuffer(b)) => Ok(b.bytes.clone()),
+            Some(Object::Buffer(t)) => Ok(f(t.bytes())),
+            Some(Object::ByteBuffer(b)) => Ok(f(&b.bytes)),
             _ => Err(Fault::Wrong("bufferp", buffer)),
         }
     }
