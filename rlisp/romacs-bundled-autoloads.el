@@ -72,8 +72,8 @@ or call the function `romacs-complete-mode'.")
 "Vertical minibuffer completion, with the minibuffer shown in a layer.
 
 The frame then reserves no minibuffer line: the prompt, the input and
-the candidates show in a child frame over the frame's windows, placed by
-`romacs-complete-position', and messages show briefly as toasts in the
+the candidates show in a panel, a child frame over the frame's windows,
+placed by `romacs-complete-position', and messages show briefly as toasts in the
 frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode' and `fido-vertical-mode' off.
 
 This is a global minor mode.  If called interactively, toggle the

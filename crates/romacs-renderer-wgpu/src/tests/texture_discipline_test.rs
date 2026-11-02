@@ -87,6 +87,16 @@ fn allowlist() -> BTreeMap<&'static str, &'static str> {
              bounded by media_budget's Surface accounting and its eviction driver.",
         ),
         (
+            "src/scene_graph/targets.rs",
+            "Scene-graph target textures and their MSAA attachments, sized to \
+             the target sizes in the draw list. romacs_scene's Host reserves \
+             each showing's target bytes (resolve plus MSAA) in its budget Pool \
+             (crates/romacs-scene/src/budget.rs, DEFAULT_POOL_BYTES) when it \
+             presents a frame, before the list reaches this pass; \
+             TargetPool::retain frees targets a list omits and \
+             TargetPool::resident_bytes reports the rest.",
+        ),
+        (
             "src/model/gpu.rs",
             "Native model colour, depth, MSAA and pick targets, sized to the \
              model glyph's logical size times the device scale and clamped to \

@@ -41,10 +41,10 @@ pub(super) struct Frame {
     pub focus: Value,
     /// What the `alpha-background' setter last applied (frame.c:6098).
     pub alpha_background: f32,
-    /// For the child frame that hosts the minibuffer window
-    /// (`romacs--host-minibuffer'), the edge of its text area the window
-    /// sits on; its root window takes the rest.
-    pub hosts_minibuffer: Option<MiniEdge>,
+    /// Whether this child frame hosts the minibuffer window
+    /// (`romacs--host-minibuffer'): the window sits on the top edge of its
+    /// text area and its root window takes the rest.
+    pub hosts_minibuffer: bool,
     /// GNU `FRAME_LEFT_FRINGE_WIDTH' and `FRAME_RIGHT_FRINGE_WIDTH': the
     /// pixels a window without its own fringe widths gives each fringe on
     /// a window-system frame, 8 until `left-fringe' or `right-fringe' sets
@@ -59,10 +59,6 @@ pub(super) struct Frame {
     pub dividers: [u32; 2],
 }
 romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines, dividers });
-/// Where a child frame hosting the minibuffer window keeps it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MiniEdge { Top, Bottom }
-romacs_snapshot::snapshot_enum!(MiniEdge { MiniEdge::Top => (), MiniEdge::Bottom => () });
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         for v in [&mut self.root, &mut self.selected, &mut self.minibuffer,
@@ -166,7 +162,7 @@ impl Vm {
             root, selected: root, minibuffer, terminal,
             parameters: vec![name], live: true, id: 1, parent: Value::NIL,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: 0, focus: Value::NIL,
-            alpha_background: 1.0, hosts_minibuffer: None, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2],
+            alpha_background: 1.0, hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2],
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
@@ -193,7 +189,7 @@ impl Vm {
         let frame = self.allocate_object(Object::Frame(Box::new(Frame {
             root, selected: root, minibuffer, terminal, parameters, live: true, id, parent,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL, alpha_background: 1.0,
-            hosts_minibuffer: None, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2],
+            hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2],
         })));
         self.window_mut(root)?.frame = frame;
         let mut frames = self.frames();
@@ -211,8 +207,8 @@ impl Vm {
     pub(super) fn set_child_geometry(&mut self, frame: Value, geometry: ChildGeometry) -> Result<()> {
         let (line, column) = (self.window_state.line.max(1), self.window_state.column.max(1));
         let ChildGeometry { left, top, width, height, border } = geometry;
-        let edge = self.frame(frame)?.hosts_minibuffer;
-        let mini_height = if edge.is_some() { self.window_state.mini_lines.max(1) * line } else { 0 };
+        let hosts = self.frame(frame)?.hosts_minibuffer;
+        let mini_height = if hosts { self.window_state.mini_lines.max(1) * line } else { 0 };
         // A child frame keeps at least one line of two columns.
         let [left_fringe, right_fringe] = self.frame_fringes(frame)?;
         let (width, height) = (width.max(2 * column) + left_fringe + right_fringe, height.max(line).max(mini_height));
@@ -224,15 +220,15 @@ impl Vm {
         };
         let mut geometry = vec![];
         let rest = height - mini_height;
-        let (root_y, mini_y) = match edge { Some(MiniEdge::Top) => (border + mini_height, border), _ => (border, border + rest) };
-        if rest >= line || edge.is_none() {
+        let (root_y, mini_y) = (border + mini_height, border);
+        if rest >= line || !hosts {
             self.plan_window_geometry(root, border, root_y, width, rest, (0, 0), line, column, &mut geometry)?;
         } else if self.window(root)?.live() {
             geometry.push((root, border, root_y, width, 0));
         } else {
             return Err("a split child frame cannot give the minibuffer all its lines".into());
         }
-        if edge.is_some() {
+        if hosts {
             let (x, y) = self.frame_origin(frame)?;
             let to = |n: i32, by: u32| u32::try_from(i64::from(n) + i64::from(by)).unwrap_or(0);
             geometry.push((self.mini_window(), to(x, border), to(y, mini_y), width, mini_height));
@@ -269,7 +265,7 @@ impl Vm {
     /// minibuffer window a deleted frame hosted returns to its line.
     pub(super) fn delete_child_frame(&mut self, frame: Value) -> Result<()> {
         if !self.frame(frame)?.live { return Ok(()); }
-        if self.frame(frame)?.hosts_minibuffer.is_some() { self.host_minibuffer(None)?; }
+        if self.frame(frame)?.hosts_minibuffer { self.host_minibuffer(None)?; }
         if self.frame(frame)?.parent == Value::NIL {
             return Err("Attempt to delete the sole visible or iconified frame".into());
         }
@@ -320,20 +316,20 @@ impl Vm {
         out.sort_by_key(|&f| key(self, f));
         out
     }
-    /// The live child frame hosting the minibuffer window, and its edge.
-    pub(crate) fn minibuffer_host(&self) -> Option<(Value, MiniEdge)> {
-        self.frames().into_iter().find_map(|f| self.frame(f).ok().filter(|x| x.live).and_then(|x| x.hosts_minibuffer).map(|edge| (f, edge)))
+    /// The live child frame hosting the minibuffer window.
+    pub(crate) fn minibuffer_host(&self) -> Option<Value> {
+        self.frames().into_iter().find(|&f| self.frame(f).is_ok_and(|x| x.live && x.hosts_minibuffer))
     }
-    /// Let child frame HOST (frame and edge) show the minibuffer window, or
+    /// Let child frame HOST show the minibuffer window on its top edge, or
     /// with None give the window back its line at the host frame's bottom.
     /// Either way the root frame's windows are laid out again: a hosted
     /// minibuffer takes none of their lines.
-    pub(super) fn host_minibuffer(&mut self, host: Option<(Value, MiniEdge)>) -> Result<()> {
+    pub(super) fn host_minibuffer(&mut self, host: Option<Value>) -> Result<()> {
         let old = self.minibuffer_host();
         if old == host { return Ok(()); }
-        for f in self.frames() { self.frame_mut(f)?.hosts_minibuffer = None; }
-        if let Some((frame, edge)) = host { self.frame_mut(frame)?.hosts_minibuffer = Some(edge); }
-        for (frame, _) in old.into_iter().chain(host) {
+        for f in self.frames() { self.frame_mut(f)?.hosts_minibuffer = false; }
+        if let Some(frame) = host { self.frame_mut(frame)?.hosts_minibuffer = true; }
+        for frame in old.into_iter().chain(host) {
             let geometry = self.child_geometry(frame)?;
             self.set_child_geometry(frame, geometry)?;
         }
@@ -343,16 +339,14 @@ impl Vm {
         self.display_state.version += 1;
         Ok(())
     }
-    /// Keep a hosting FRAME's EDGE side in place as the minibuffer window's
-    /// lines change: the frame grows or shrinks by the difference at the
-    /// opposite side (a bottom strip upward, a box downward).
-    pub(super) fn refit_minibuffer_host(&mut self, frame: Value, edge: MiniEdge) -> Result<()> {
+    /// Keep a hosting FRAME's top in place as the minibuffer window's lines
+    /// change: the frame grows or shrinks by the difference downward.
+    pub(super) fn refit_minibuffer_host(&mut self, frame: Value) -> Result<()> {
         let line = self.window_state.line.max(1);
         let wanted = i64::from(self.window_state.mini_lines.max(1) * line);
         let delta = wanted - i64::from(self.window(self.mini_window())?.height);
         let mut geometry = self.child_geometry(frame)?;
         geometry.height = u32::try_from(i64::from(geometry.height) + delta).unwrap_or(0);
-        if edge == MiniEdge::Bottom { geometry.top -= i32::try_from(delta).unwrap_or(0); }
         self.set_child_geometry(frame, geometry)
     }
     /// Raise (or lower) child FRAME above (below) its siblings.
@@ -453,13 +447,11 @@ impl crate::window::Windows<'_> {
         matches!(self.vm.object_if(v), Some(Object::Frame(_)))
     }
     /// `romacs--host-minibuffer': child FRAME shows the minibuffer window
-    /// at EDGE (`top', else its bottom), or with FRAME nil the window
+    /// on the top edge of its text area, or with FRAME nil the window
     /// returns to its line at the frame's bottom.
-    pub(crate) fn host_minibuffer(&mut self, frame: Value, edge: Value) -> Out {
+    pub(crate) fn host_minibuffer(&mut self, frame: Value) -> Out {
         let host = if frame == Value::NIL { None } else {
-            let Some(frame) = self.child(frame)? else { return Err(Fault::Error("Only a child frame hosts the minibuffer window".into())) };
-            let top = self.vm.intern("top");
-            Some((frame, if edge == top { crate::frame::MiniEdge::Top } else { crate::frame::MiniEdge::Bottom }))
+            Some(self.child(frame)?.ok_or_else(|| Fault::Error("Only a child frame hosts the minibuffer window".into()))?)
         };
         self.vm.host_minibuffer(host).map_err(internal)?;
         Ok(frame)
@@ -467,7 +459,7 @@ impl crate::window::Windows<'_> {
     /// `romacs--minibuffer-host': the child frame hosting the minibuffer
     /// window, or nil.
     pub(crate) fn minibuffer_host(&mut self) -> Out {
-        Ok(self.vm.minibuffer_host().map_or(Value::NIL, |(frame, _)| frame))
+        Ok(self.vm.minibuffer_host().unwrap_or(Value::NIL))
     }
     /// Whether FRAME (nil, the selected one) is a live child frame.
     pub(crate) fn is_child_frame(&mut self, frame: Value) -> std::result::Result<bool, Fault> {

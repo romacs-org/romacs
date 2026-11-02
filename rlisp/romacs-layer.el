@@ -7,7 +7,8 @@
 ;; the root frame.  Showing, moving or hiding it changes no window of the
 ;; frame below and no terminal's size (DIVERGENCES.md VM2-CHILD-FRAME).
 ;; Where a layer goes is policy, here: a full-width strip directly above
-;; the minibuffer line (or the minibuffer's own layer) by default, a centred box, or below point.  A
+;; the minibuffer line (or the frame's bottom while the minibuffer is in
+;; its own layer) by default, a centred box, or below point.  A
 ;; layer's frame is kept for its buffer's next show and deleted once the
 ;; buffer is killed.
 ;; `romacs-layers' lists what is shown, for agents and tests.  The
@@ -141,13 +142,12 @@ border, there padding, unpainted."
         (cons (max columns 1) (max lines 1))))))
 
 (defun romacs-layer--bottom (root)
-  "Where a `bottom' layer of ROOT ends: above the minibuffer line, or above
-the minibuffer's layer when a child frame hosts the minibuffer window
-\(`romacs--host-minibuffer'), else at ROOT's bottom edge."
-  (let ((host (romacs--minibuffer-host)))
-    (cond ((null host) (window-pixel-top (minibuffer-window root)))
-          ((frame-visible-p host) (cdr (frame-position host)))
-          (t (frame-text-height root)))))
+  "Where a `bottom' layer of ROOT ends: above the minibuffer line, or at
+ROOT's bottom edge when a child frame hosts the minibuffer window
+\(`romacs--host-minibuffer')."
+  (if (romacs--minibuffer-host)
+      (frame-text-height root)
+    (window-pixel-top (minibuffer-window root))))
 
 (defun romacs-layer--placement (position columns lines border)
   "Where POSITION puts a layer of COLUMNS by LINES with BORDER pixels:
@@ -282,7 +282,8 @@ columns and lines."
         (set-frame-size frame width height t)
         (set-frame-position frame (- (frame-text-width root) width (* 2 border) margin) top)
         (set-frame-parameter frame 'romacs-layer-edge 'top)
-        (unless (frame-visible-p frame) (make-frame-visible frame))
+        ;; A new toast shows above every other layer, the panel too.
+        (unless (frame-visible-p frame) (make-frame-visible frame) (raise-frame frame))
         (setq top (+ top height (* 2 border) gap))))))
 
 (defun romacs-layer--toast-expire (buffer)

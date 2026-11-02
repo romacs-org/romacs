@@ -861,7 +861,7 @@ impl Vm {
     /// windows, WIDTH by HEIGHT, make room for it.
     fn refit_mini_window(&mut self, width: u32, height: u32) -> Result<()> {
         match self.minibuffer_host() {
-            Some((frame, edge)) => self.refit_minibuffer_host(frame, edge),
+            Some(frame) => self.refit_minibuffer_host(frame),
             None => self.set_frame_geometry(width, height, self.window_state.line, self.window_state.column),
         }
     }
@@ -903,7 +903,7 @@ impl Vm {
     pub(crate) fn window_fringe_widths(&self, v: Value) -> Result<[u32; 2]> {
         if !self.window_system_open() { return Ok([0, 0]); }
         let w = self.window(v)?;
-        let shown_in = match self.minibuffer_host() { Some((host, _)) if w.mini => host, _ => w.frame };
+        let shown_in = match self.minibuffer_host() { Some(host) if w.mini => host, _ => w.frame };
         let frame = self.frame(shown_in).map_or([0, 0], |f| f.fringes);
         Ok([w.fringes[0].unwrap_or(frame[0]), w.fringes[1].unwrap_or(frame[1])])
     }
