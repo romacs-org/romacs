@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "b634be25da47195679e33fddfedbf05e605831eb66181b2e7297b781d428f44d",
+  "source_fingerprint": "5d027ac0c52975a70501b225996fd34240974a723f404f9aeeb731f115cda126",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1257,
-  "parsed_vm2_only": 1257
+  "parsed_total": 1261,
+  "parsed_vm2_only": 1261
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4076,7 +4076,7 @@
   "romacs--code-converting-work": {
    "name": "romacs--code-converting-work",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:420"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:425"
   },
   "romacs--collection-share": {
    "name": "romacs--collection-share",
@@ -4148,15 +4148,35 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:39"
   },
+  "romacs--inotify-add-watch": {
+   "name": "romacs--inotify-add-watch",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/inotify.rs:7"
+  },
+  "romacs--inotify-close": {
+   "name": "romacs--inotify-close",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/inotify.rs:27"
+  },
+  "romacs--inotify-read": {
+   "name": "romacs--inotify-read",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/inotify.rs:21"
+  },
+  "romacs--inotify-rm-watch": {
+   "name": "romacs--inotify-rm-watch",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/inotify.rs:14"
+  },
   "romacs--insert-file-contents-format": {
    "name": "romacs--insert-file-contents-format",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:843"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:877"
   },
   "romacs--insert-file-contents-undecide": {
    "name": "romacs--insert-file-contents-undecide",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:410"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:415"
   },
   "romacs--insert-printed": {
    "name": "romacs--insert-printed",

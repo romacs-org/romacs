@@ -1002,20 +1002,24 @@ seconds until the next timer, or nil."
 
 ;;;; Waiting
 
-(defun romacs--wait-reading-process-output (limit wait-proc just-wait-proc)
-  "process.c wait_reading_process_output, with READ_KBD 0, no redisplay
-and no WAIT_FOR_CELL.  LIMIT is a positive number of seconds, `minimum'
-or `forever', or `idle': one round, which reads what is ready once and
+(defun romacs--wait-reading-process-output (limit wait-proc just-wait-proc &optional read-kbd)
+  "process.c wait_reading_process_output, with no redisplay and no
+WAIT_FOR_CELL.  LIMIT is a positive number of seconds, `minimum' or
+`forever', or `idle': one round, which reads what is ready once and
 returns, as read_char's call returns when keyboard input or a timer is
 due, so its caller checks those between reads.  JUST-WAIT-PROC is 0, 1
-\(read only WAIT-PROC) or -1 (and run no timers).  Return GNU's
-got_some_output."
+\(read only WAIT-PROC) or -1 (and run no timers).  READ-KBD non-nil is
+GNU's READ_KBD -1 without a terminal: the wait ends once special
+events (file notification's among them) or requeued input wait for
+read_char, as it does on detect_input_pending, or once a timer ran, so the
+reader sees what the timer changed.  Return GNU's got_some_output."
   (let* ((wait (cond ((memq limit '(minimum forever idle)) limit) (t 'timeout)))
          (end-time (if (eq wait 'timeout) (+ (float-time) limit)))
          (got-some-output -1)
          (prev-nbytes (if wait-proc (romacs--proc-get wait-proc 'nbytes-read) 0))
          (got-output-end-time nil)
          (timer-delay nil)
+         (timers-run romacs--timers-run)
          (done nil))
     (while (not done)
       (let ((timeout nil))
@@ -1025,6 +1029,11 @@ got_some_output."
           (setq timeout (if (memq wait '(minimum idle)) 0 100000)))
         (if (and (not done) (>= just-wait-proc 0))
             (setq timer-delay (romacs--timer-check)))
+        ;; A timer may have queued input or ended the last watch: the
+        ;; reader checks again (keyboard.el `romacs--read-batch-wait').
+        (if (and read-kbd (or unread-command-events romacs--special-events
+                              (/= timers-run romacs--timers-run)))
+            (setq done t))
         (if (and (not done) (romacs--proc-ticks-pending)
                  (not (romacs--proc-input-pending)))
             (setq got-some-output (romacs--status-notify nil wait-proc)))
@@ -1052,9 +1061,9 @@ got_some_output."
                         (setq got-output-end-time timeout-abs))
                     (setq timeout timer-delay))
                 (setq got-output-end-time nil))
-              (let ((ready (romacs--proc-select wait-proc (/= just-wait-proc 0) timeout)))
+              (let ((ready (romacs--proc-select wait-proc (/= just-wait-proc 0) timeout read-kbd)))
                 (cond
-                 ((eq ready 'terminated) (setq done t))
+                 ((memq ready '(terminated input)) (setq done t))
                  ((null ready)
                   (if (romacs--proc-ticks-pending)
                       (setq got-some-output (romacs--status-notify nil wait-proc)))
