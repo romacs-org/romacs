@@ -14,7 +14,8 @@ use romacs_scene::layout::{self, Content};
 use romacs_scene::lower;
 use romacs_scene::motion::{Animate, Policy, Repeat};
 use romacs_scene::node::{
-    AnchorId, Channel, Dim, Kind, NodeId, NodeSpec, RectNode, SceneId, ShaderNode, TextNode,
+    AnchorId, Channel, Dim, Kind, NodeId, NodeSpec, RectNode, SceneId, SceneRef, ShaderNode,
+    TextNode,
 };
 use romacs_scene::prop::{Prop, Value};
 use romacs_scene::scene::Scene;
@@ -29,10 +30,12 @@ fn check_contract(list: &DrawList) {
     for t in &list.targets {
         for item in &t.items {
             assert!((0.0..=1.0).contains(&item.opacity));
-            if let Paint::Sample(s) = &item.paint
-                && let Source::Target(id) = s.source
-            {
-                assert!(seen.contains(&id), "{id:?} sampled before it was rendered");
+            if let Paint::Sample(s) = &item.paint {
+                for input in std::iter::once(&Some(s.source)).chain(s.channels.iter()) {
+                    if let Some(Source::Target(id)) = input {
+                        assert!(seen.contains(id), "{id:?} sampled before it was rendered");
+                    }
+                }
             }
         }
         assert!(seen.insert(t.id), "{:?} appears twice", t.id);
@@ -65,7 +68,7 @@ fn a_target_sampled_by_an_earlier_sibling_renders_first() {
     assert_eq!(word.transform.translation(), kurbo::Vec2::new(30.0, 80.0));
     let composite = list.targets[1].items.iter().find(|i| i.node == 21).unwrap();
     assert!(
-        matches!(composite.paint, Paint::Sample(s) if s.source == Source::Target(TargetId(21)))
+        matches!(&composite.paint, Paint::Sample(s) if s.source == Source::Target(TargetId(21)))
     );
     assert_eq!(
         composite.transform.translation(),
@@ -322,6 +325,87 @@ fn path_revision_is_stable_and_changes_with_its_node() {
     );
     let wider = set(&s, Prop::StrokeWidth, Value::Num(4.0));
     assert_ne!(revision(&wider), r0);
+}
+
+#[test]
+fn a_colour_motion_keeps_the_path_revision() {
+    let s = scene(&fixtures::per_kind()[1].1).tick(Duration::ZERO, true);
+    let s = s
+        .apply(
+            &Diff {
+                base: s.rev(),
+                ops: vec![Op::Set {
+                    id: NodeId(4),
+                    prop: Prop::Fill,
+                    value: Some(Value::Color(fixtures::FOREGROUND)),
+                    animate: Some(Animate::Motion {
+                        spec: linear(100),
+                        repeat: Repeat::Once,
+                    }),
+                }],
+            },
+            Policy::On,
+        )
+        .unwrap();
+    let path_at = |steps| {
+        let s = s.tick(STEP * steps, true);
+        let solved = layout::solve(&s, PLACEMENT, &BTreeMap::new(), &mut FixedMeasure);
+        let list = lower::lower(&s, &solved, &mut FixtureResources);
+        list.targets[0]
+            .items
+            .iter()
+            .find_map(|i| match &i.paint {
+                Paint::Path(p) if i.node == 4 => Some(p.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let (early, late) = (path_at(1), path_at(4));
+    assert_ne!(early.fill, late.fill, "the fill is mid-motion");
+    assert_eq!(early.revision, late.revision, "colours are not tessellated");
+}
+
+#[test]
+fn a_shader_binds_its_channels_in_order() {
+    let (_, diff) = fixtures::per_kind()
+        .into_iter()
+        .find(|(n, _)| *n == "target")
+        .unwrap();
+    let s = scene(&diff);
+    let other = SceneRef {
+        scene: SceneId(9),
+        generation: 1,
+        node: NodeId::ROOT,
+    };
+    let s = s
+        .apply(
+            &Diff {
+                base: s.rev(),
+                ops: vec![Op::Set {
+                    id: NodeId(20),
+                    prop: Prop::Channels,
+                    value: Some(Value::Channels(
+                        [Channel::Scene(other), Channel::Local(NodeId(21))].into(),
+                    )),
+                    animate: None,
+                }],
+            },
+            Policy::On,
+        )
+        .unwrap();
+    let solved = layout::solve(&s, PLACEMENT, &BTreeMap::new(), &mut FixedMeasure);
+    let list = lower::lower(&s, &solved, &mut FixtureResources);
+    check_contract(&list);
+    let shader = list.targets[1].items.iter().find(|i| i.node == 20).unwrap();
+    let Paint::Sample(sample) = &shader.paint else {
+        panic!("{:?}", shader.paint)
+    };
+    assert_eq!(sample.source, Source::Surface(1020));
+    assert_eq!(
+        &*sample.channels,
+        &[Some(Source::Surface(2)), Some(Source::Target(TargetId(21)))],
+        "another scene binds as its surface, a local group as its target"
+    );
 }
 
 #[test]

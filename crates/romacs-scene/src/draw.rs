@@ -106,8 +106,11 @@ pub struct Glow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PathPaint {
     pub path: Arc<BezPath>,
-    /// Changes whenever `path`, `fill` or `stroke` changes; the renderer keeps
-    /// the tessellation per `(node, revision)`.
+    /// Changes whenever the tessellation's inputs change: `path`, whether
+    /// there is a fill and its rule, whether there is a stroke and its
+    /// geometry. Colours are not inputs: the renderer applies them per frame,
+    /// so an animated colour reuses the tessellation it keeps per
+    /// `(node, revision)`.
     pub revision: u64,
     pub fill: Option<Fill>,
     pub stroke: Option<PathStroke>,
@@ -192,11 +195,15 @@ pub struct CellsPaint {
 }
 
 /// A texture drawn into `rect`, clipped to `radius` rounded corners.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SamplePaint {
     pub source: Source,
     pub rect: Rect,
     pub radius: f64,
+    /// What a [`Source::Surface`] shader samples, by channel (`iChannel0`
+    /// first); `None` is an unbound channel. A target named here comes
+    /// earlier in the list, as a sampled one does. Empty for other sources.
+    pub channels: Arc<[Option<Source>]>,
 }
 
 /// What a [`SamplePaint`] draws.

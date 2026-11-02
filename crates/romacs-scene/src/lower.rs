@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use kurbo::{Rect, Size};
 
@@ -15,7 +16,7 @@ use crate::draw::{
 };
 use crate::graph;
 use crate::layout::{Content, Solved};
-use crate::node::{Color, Fit, ImageSource, Kind, NodeId, SceneId};
+use crate::node::{Channel, Color, Fit, ImageSource, Kind, NodeId, SceneId};
 use crate::scene::Scene;
 use crate::walk::{Placed, walk};
 
@@ -100,6 +101,7 @@ fn paints(
             source,
             rect,
             radius: 0.0,
+            channels: Arc::default(),
         })
     };
     match &p.node.kind {
@@ -214,11 +216,44 @@ fn paints(
             })
             .into_iter()
             .collect(),
-        Kind::Shader(_) | Kind::Model(_) => resolve
+        Kind::Shader(s) => resolve
+            .surface(scene, p.id)
+            .map(|id| {
+                let paint = Paint::Sample(SamplePaint {
+                    source: Source::Surface(id),
+                    rect: bounds,
+                    radius: 0.0,
+                    channels: s
+                        .channels
+                        .iter()
+                        .map(|c| channel(scene, p.id, c, resolve))
+                        .collect(),
+                });
+                (paint, None)
+            })
+            .into_iter()
+            .collect(),
+        Kind::Model(_) => resolve
             .surface(scene, p.id)
             .map(|id| (sample(Source::Surface(id), bounds), None))
             .into_iter()
             .collect(),
+    }
+}
+
+/// The texture a shader channel binds: a target group of this scene, or
+/// another scene's texture as an `image` of it would sample.
+fn channel(
+    scene: SceneId,
+    node: NodeId,
+    channel: &Channel,
+    resolve: &mut dyn Resolve,
+) -> Option<Source> {
+    match channel {
+        Channel::Local(target) => Some(Source::Target(TargetId(target.0))),
+        Channel::Scene(r) => resolve
+            .image(scene, node, &ImageSource::Scene(*r))
+            .map(|(source, _)| source),
     }
 }
 
@@ -243,8 +278,8 @@ pub fn fit(fit: Fit, natural: Size, size: Size) -> Rect {
 }
 
 /// Identifies a path's tessellation inputs: the node's last property change
-/// plus the sampled fill and stroke, so a settling stroke-width motion also
-/// changes it.
+/// plus the sampled fill rule and stroke geometry, so a settling stroke-width
+/// motion changes it and a colour motion does not.
 fn tessellation_revision(
     node_revision: u64,
     fill: Option<&Fill>,
@@ -252,24 +287,17 @@ fn tessellation_revision(
 ) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     node_revision.hash(&mut h);
-    if let Some(f) = fill {
-        [f.color.r, f.color.g, f.color.b, f.color.a]
-            .map(f32::to_bits)
-            .hash(&mut h);
-        (f.rule as u8).hash(&mut h);
-    }
-    if let Some(s) = stroke {
-        [s.color.r, s.color.g, s.color.b, s.color.a]
-            .map(f32::to_bits)
-            .hash(&mut h);
-        s.width.to_bits().hash(&mut h);
-        (s.join as u8, s.cap as u8).hash(&mut h);
-        s.dash
-            .iter()
-            .map(|d| d.to_bits())
-            .collect::<Vec<_>>()
-            .hash(&mut h);
-        s.dash_offset.to_bits().hash(&mut h);
-    }
+    fill.map(|f| f.rule as u8).hash(&mut h);
+    stroke
+        .map(|s| {
+            (
+                s.width.to_bits(),
+                s.join as u8,
+                s.cap as u8,
+                s.dash.iter().map(|d| d.to_bits()).collect::<Vec<_>>(),
+                s.dash_offset.to_bits(),
+            )
+        })
+        .hash(&mut h);
     h.finish()
 }

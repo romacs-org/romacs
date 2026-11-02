@@ -868,6 +868,7 @@ fn group_fixture(badge_color: Color) -> DrawList {
                     source: Source::Target(BADGE),
                     rect: Rect::new(204.0, 64.0, 300.0, 104.0),
                     radius: 0.0,
+                    channels: Arc::default(),
                 }),
             ),
         ],
@@ -884,6 +885,7 @@ fn group_fixture(badge_color: Color) -> DrawList {
             source: Source::Target(PANEL),
             rect: shown,
             radius: 14.0,
+            channels: Arc::default(),
         }),
     };
     let mut reflection = sample(3, mirror, 0.18);
@@ -974,6 +976,7 @@ fn media_fixture() -> DrawList {
                 source,
                 rect: Rect::new(x, 48.0, x + 200.0, 228.0),
                 radius: 14.0,
+                channels: Arc::default(),
             }),
         )
     };
@@ -1331,6 +1334,7 @@ fn straight_alpha_sources_filter_without_dark_fringes() {
                 source: Source::Surface(SURFACE_ID),
                 rect: Rect::new(0.0, 0.0, 200.0, 60.0),
                 radius: 0.0,
+                channels: Arc::default(),
             }),
         )],
     );
@@ -1414,6 +1418,7 @@ fn unresolved_inputs_skip_only_their_item() {
             source: Source::Image(12345),
             rect: Rect::new(0.0, 0.0, 10.0, 10.0),
             radius: 0.0,
+            channels: Arc::default(),
         }),
     ));
     let image = render(&mut gpu, &list, 1.0, &());

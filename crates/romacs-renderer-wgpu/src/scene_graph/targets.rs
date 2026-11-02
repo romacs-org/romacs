@@ -33,10 +33,17 @@ pub(super) fn validate(
             });
         }
         for item in &target.items {
-            if let Paint::Sample(sample) = &item.paint
-                && let Source::Target(source) = sample.source
-                && !done.contains(&source)
-            {
+            let Paint::Sample(sample) = &item.paint else {
+                continue;
+            };
+            // A shader surface's channels must be ready before it renders.
+            let unrendered = std::iter::once(&Some(sample.source))
+                .chain(sample.channels.iter())
+                .find_map(|input| match input {
+                    Some(Source::Target(id)) if !done.contains(id) => Some(*id),
+                    _ => None,
+                });
+            if let Some(source) = unrendered {
                 return Err(SceneError::SampleOrder {
                     target: target.id,
                     node: item.node,
@@ -178,6 +185,7 @@ mod tests {
     use super::*;
     use crate::scene_graph::draw::{Color, Item, SamplePaint, Target};
     use kurbo::{Affine, Rect, Size};
+    use std::sync::Arc;
 
     fn target(id: u32, samples: &[u32]) -> Target {
         Target {
@@ -195,10 +203,43 @@ mod tests {
                         source: Source::Target(TargetId(*s)),
                         rect: Rect::new(0.0, 0.0, 10.0, 10.0),
                         radius: 0.0,
+                        channels: Arc::default(),
                     }),
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn a_shader_channel_may_bind_only_earlier_targets() {
+        let shader = |channel: u32| Item {
+            node: 7,
+            transform: Affine::IDENTITY,
+            opacity: 1.0,
+            clip: None,
+            paint: Paint::Sample(SamplePaint {
+                source: Source::Surface(3),
+                rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+                radius: 0.0,
+                channels: [None, Some(Source::Target(TargetId(channel)))].into(),
+            }),
+        };
+        let with = |first: Target, channel| {
+            let mut root = target(0, &[]);
+            root.items.push(shader(channel));
+            DrawList {
+                targets: vec![first, root],
+            }
+        };
+        assert!(validate(&with(target(1, &[]), 1), 1.0, 4096).is_ok());
+        assert!(matches!(
+            validate(&with(target(1, &[]), 2), 1.0, 4096),
+            Err(SceneError::SampleOrder {
+                target: TargetId(0),
+                node: 7,
+                sampled: TargetId(2)
+            })
+        ));
     }
 
     #[test]
