@@ -61,7 +61,7 @@ impl Home {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|x| x == "rwi") {
                 let manifest = std::fs::read_to_string(path.with_extension("json")).unwrap();
-                // `--world-build`'s batch world (src/batch.rs) is neither.
+                // A batch session's world (src/batch.rs) is neither.
                 if manifest.contains("\"launch batch\"") { continue; }
                 let kind = if manifest.contains("\"init-layer\"") { "layer" } else { "base" };
                 images.push((kind, std::fs::metadata(&path).unwrap().modified().unwrap()));
