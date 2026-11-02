@@ -155,11 +155,6 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-fzf" '("romacs-fzf-"))
 
 
-;;; Generated autoloads from romacs-gnu-ert-bootstrap.el
-
-(register-definition-prefixes "romacs-gnu-ert-bootstrap" '("shortdoc--groups"))
-
-
 ;;; Generated autoloads from romacs-gradients.el
 
 (register-definition-prefixes "romacs-gradients" '("romacs-"))

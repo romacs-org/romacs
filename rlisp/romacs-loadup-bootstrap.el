@@ -9,10 +9,9 @@
 ;; keymap layers load where GNU's C would already be in place.  Each Romacs
 ;; adaptation is commented where it happens.
 ;;
-;; This is the regime for package suites (Gnosis, emacs-hermes), which
-;; assume a dumped GNU Emacs.  The GNU ERT ratchet keeps the smaller
-;; romacs-gnu-ert-bootstrap.el: this chain costs about a minute per fresh
-;; VM, which its per-file budgets do not hold.
+;; This is the regime for package suites (Gnosis, emacs-hermes) and for
+;; GNU's own test suite (gnu-tests/run.py, the gnu-ert regime), which
+;; assume a dumped GNU Emacs.
 
 ;;; Code:
 
@@ -123,6 +122,8 @@
 (load "font-lock.el" nil t t)
 (load "jit-lock.el" nil t t)
 (load "mouse.el" nil t t)
+;; loadup.el:268: a toolkit build (pinned GNU's PGTK) defines scroll bars.
+(load "scroll-bar.el" nil t t)
 (load "select.el" nil t t)
 (load "emacs-lisp/timer.el" nil t t)
 (load "emacs-lisp/easymenu.el" nil t t)
@@ -142,9 +143,17 @@
 (load "replace.el" nil t t)
 (load "emacs-lisp/tabulated-list.el" nil t t)
 (load "buff-menu.el" nil t t)
-;; loadup.el's window-system block: Romacs is a graphical machine, and
-;; pinned GNU, a graphical build, preloads fringe.el in batch too.
+;; loadup.el's window-system block (loadup.el:290-298): Romacs is a
+;; graphical machine, and pinned GNU, a graphical build, preloads it in
+;; batch too.  Then dynamic-setting (loadup.el:300), which GNU's
+;; xsettings.c provides in that build.
 (load "fringe.el" nil t t)
+(load "emacs-lisp/regexp-opt.el" nil t t)
+(load "image.el" nil t t)
+(load "international/fontset.el" nil t t)
+(load "dnd.el" nil t t)
+(load "tool-bar.el" nil t t)
+(load "dynamic-setting.el" nil t t)
 ;; loadup.el's PGTK block (loadup.el:357).  GNU's C provides `pgtk' in a
 ;; pure-GTK build (pgtkterm.c:7550), which pinned GNU is; Romacs's
 ;; Wayland-native display stands where that window system would.  Its
@@ -160,6 +169,8 @@
 (load "romacs-pgtk.el" nil t t)
 ;; menu.c's popup menus and dialogs, as GNU's text menus (VM2-MENU1).
 (load "romacs-menu.el" nil t t)
+;; loadup.el:363, after the window system's file.
+(load "mwheel.el" nil t t)
 (load "progmodes/elisp-mode.el" nil t t)
 (load "emacs-lisp/float-sup.el" nil t t)
 (load "vc/vc-hooks.el" nil t t)

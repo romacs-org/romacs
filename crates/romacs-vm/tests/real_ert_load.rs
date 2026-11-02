@@ -5,7 +5,7 @@ mod gnu_ert_vm;
 use gnu_ert_vm::bootstrapped_with;
 
 fn bootstrapped(root: &Path) -> Vm {
-    bootstrapped_with(root, "rlisp/romacs-gnu-ert-bootstrap.el")
+    bootstrapped_with(root, "rlisp/romacs-loadup-bootstrap.el")
 }
 
 #[test]
