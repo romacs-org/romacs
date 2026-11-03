@@ -237,7 +237,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         // its own background.
         report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
             (list romacs-complete-position (frame-parameter f 'romacs-layer-radius) (frame-parameter f 'romacs-layer-shadow)
-                  (frame-parameter f 'romacs-layer-glow) (frame-parameter f 'child-frame-border-width)
+                  (frame-parameter f 'romacs-layer-face) (frame-parameter f 'child-frame-border-width)
                   (stringp (frame-parameter f 'background-color)) (frame-parameter f 'romacs-layer-edge)
                   (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
                     (= (+ l (frame-parameter f 'child-frame-border-width) (/ w 2)) (/ (frame-native-width) 2)))))"));
@@ -327,7 +327,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, ["(pgtk t t nil nil pgtk)", "None", r#"(ran "rc-ahead-target")"#,
-                        r##"(top 8 t "#d48a20" 10 t top t)"##,
+                        "(top 8 t romacs-layer-glass 10 t top t)",
                         // Layers are placed in the frame's native pixels, outside the
                         // 6-pixel internal border of the pane gap (VM2-PANE-CHROME),
                         // centred on the frame, and the status bar takes a line above
@@ -339,4 +339,132 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         // 500 pixels less the fringes and the pane gap's internal
                         // border (VM2-PANE-CHROME), centred on the native 500.
                         "(8 (nil 1))", "(600 840 480 1260)", "(14 486 472)", "(140 200 328 t)"]);
+}
+
+/// Every chrome colour follows the theme (romacs-chrome.el
+/// `romacs-chrome-derived-faces'): a theme's own Romacs face wins (the
+/// stock theme's, a theme setting `romacs-pane-focus'), the rest are derived from
+/// the faces every theme sets, light or dark, and the display paints the
+/// root frame's edge and hairline and a shown glass layer's glow and
+/// background from them on the next frame, with no parameter changed.
+/// With no theme the built-in palette's accent shows.
+#[test]
+fn chrome_colours_follow_the_theme() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        // The default background; the panel's selected row and matches; then
+        // as painted, the root frame's focus edge and hairline, and a toast's
+        // glow and glass, the same toast each time (the same text extends
+        // the toast shown).
+        vm.eval_source("(defun tc-probe ()
+            (romacs-layer-toast \"toast\")
+            (let ((hex (lambda (face background)
+                         (romacs-chrome--hex (if background (face-background face nil t) (face-foreground face nil t))))))
+              (format \"%S %S %S %S\" custom-enabled-themes (funcall hex 'default t)
+                      (funcall hex 'romacs-complete-current t) (funcall hex 'romacs-complete-match nil))))").unwrap();
+        let hex = |c: Option<[u8; 3]>| c.map_or("nil".into(), |[r, g, b]| format!("\"#{r:02x}{g:02x}{b:02x}\""));
+        let probe = |vm: &mut Vm| {
+            let lisp = vm.eval_source("(tc-probe)").unwrap().display().unwrap();
+            let lisp = lisp[1..lisp.len() - 1].replace("\\\"", "\"");
+            let frame = vm.frame_snapshot(1280, 800).unwrap();
+            let toast = frame.children.iter().rev().find(|c| c.radius > 0).expect("a glass toast");
+            format!("{lisp} {} {} {} {}", hex(frame.chrome.focus), hex(frame.chrome.border), hex(toast.glow), hex(Some(toast.background)))
+        };
+        let mut report = vec![probe(&mut vm)];
+        for step in ["(load-theme 'modus-operandi t)",
+                     "(progn (disable-theme 'modus-operandi) (load-theme 'tango-dark t))",
+                     "(progn (deftheme tc-focus) (custom-theme-set-faces 'tc-focus '(romacs-pane-focus ((t :foreground \"#ff0000\")))) (enable-theme 'tc-focus))",
+                     "(mapc #'disable-theme custom-enabled-themes)",
+                     "(enable-theme 'default)"] {
+            vm.eval_source(step).unwrap();
+            report.push(probe(&mut vm));
+        }
+        report
+    }).unwrap().join().unwrap();
+    // Themes, default bg, selected row, match; painted edge, hairline, glow, glass.
+    assert_eq!(report, [
+        // The stock theme, `default': Rum's look, its own chrome colours.
+        r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
+        // A colour scheme replaces the stock theme. Light: the cursor is
+        // black, so the accent is the link colour; the hairline 15%, glass 8%
+        // and selection 20% toward black.
+        r##"(modus-operandi) "#ffffff" "#cccccc" "#3548cf" "#3548cf" "#d9d9d9" "#3548cf" "#ebebeb""##,
+        // Dark: the cursor's butter yellow.
+        r##"(tango-dark) "#2e3436" "#54595a" "#fce94f" "#fce94f" "#4b5051" "#fce94f" "#3d4345""##,
+        // A theme that sets the focus edge alone changes it alone.
+        r##"(tc-focus tango-dark) "#2e3436" "#54595a" "#fce94f" "#ff0000" "#4b5051" "#fce94f" "#3d4345""##,
+        // No theme: GNU's stock faces, and the built-in accent.
+        r##"nil "#ffffff" "#cccccc" "#d48a20" "#d48a20" "#d9d9d9" "#d48a20" "#ebebeb""##,
+        r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##]);
+}
+
+/// A theme switch recomputes the frame's background mode as GNU's does
+/// (xfaces.c update_face_from_frame_parameter -> frame-set-background-mode),
+/// so a dark theme after a light one gets the dark defface specs; and a
+/// shown layer keeps showing the root frame's faces throughout
+/// (VM2-CHILD-FRAME). Pinned GNU X11 on Xvfb, the same switches from -Q:
+/// modus-operandi `light' "#595959", then tango-dark `dark' "grey70", and
+/// with no theme `light' "grey50".
+#[test]
+fn a_theme_switch_recomputes_the_background_mode() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        vm.eval_source("(defun bm-probe ()
+            (romacs-layer-toast \"toast\")
+            (let ((toast (romacs-layer--frame (caar romacs-layer--toasts))))
+              (list custom-enabled-themes (frame-parameter nil 'background-mode)
+                    (romacs-chrome--hex (face-foreground 'shadow nil t)) (romacs--frame-shares-faces-p toast))))").unwrap();
+        let mut report = vec![printed(&mut vm, "(bm-probe)")];
+        // A terminal's "unspecified-bg", which an alist read on the initial
+        // terminal carries, names no colour: the default face keeps its own.
+        report.push(printed(&mut vm, "(progn (modify-frame-parameters nil '((background-color . \"unspecified-bg\") (foreground-color . \"unspecified-fg\")))
+            (list (face-background 'default nil t) (face-foreground 'default nil t)))"));
+        // A plain child frame shares the root's default colours, asked about
+        // by name or as the selected frame.
+        report.push(printed(&mut vm, "(let* ((after-make-frame-functions nil) (c (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil)))))
+            (prog1 (list (romacs--frame-shares-faces-p c) (equal (frame-parameter c 'background-color) (frame-parameter nil 'background-color))
+                         (equal (with-selected-frame c (frame-parameter nil 'background-color)) (frame-parameter nil 'background-color)))
+              (delete-frame c)))"));
+        for step in ["(load-theme 'modus-operandi t)",
+                     "(progn (disable-theme 'modus-operandi) (load-theme 'tango-dark t))",
+                     "(mapc #'disable-theme custom-enabled-themes)"] {
+            report.push(printed(&mut vm, &format!("(progn {step} (bm-probe))")));
+        }
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, [
+        // The stock theme, `default', is dark.
+        r##"((default) dark "#756b59" t)"##,
+        r##"("#000000" "#d4c5a0")"##,
+        "(t t t)",
+        r##"((modus-operandi) light "#595959" t)"##,
+        r##"((tango-dark) dark "#b3b3b3" t)"##,
+        // No theme: GNU's stock faces, light, as pinned GNU's -Q frame.
+        r##"(nil light "#7f7f7f" t)"##]);
+}
+
+/// rlisp/romacs-theme.el's themes under Custom (tests/romacs-theme-custom-test.el):
+/// the session starts in the stock theme `default', Rum's look exactly;
+/// defining a theme changes no face; a colour scheme replaces the stock
+/// theme once; disabling it gives GNU's faces.
+#[test]
+fn romacs_theme_lisp_tests_pass() {
+    let summary = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for file in ["rlisp/romacs-test.el", "crates/romacs-vm-gui/tests/romacs-theme-custom-test.el"] {
+            vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+        }
+        printed(&mut vm, "(let ((s (romacs-test-run t))) (format \"%S\" s))")
+    }).unwrap().join().unwrap();
+    assert!(summary.contains(":failed 0") && summary.contains(":errors 0"), "{summary}");
 }

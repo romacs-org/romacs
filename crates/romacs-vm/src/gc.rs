@@ -308,7 +308,8 @@ impl Vm {
     /// (at least 80000 bytes) or, when `gc-cons-percentage' is a float, that
     /// fraction (scaled, PERCENTAGE_SCALE, and clamped, MAX_SCALED_PERCENTAGE)
     /// of the live heap plus half the allocation since. Allocation is counted
-    /// in objects charged CONS_BYTES each; the live heap is what a collection
+    /// in objects charged CONS_BYTES each, plus the payload bytes (string
+    /// text, vector slots) made since; the live heap is what a collection
     /// traverses, retained objects and compiled code units. Both variables
     /// are read live, so binding them takes effect at once.
     pub(crate) fn collection_due(&self) -> bool {
@@ -324,7 +325,8 @@ impl Vm {
     /// rule `A >= S (L + A/2)' over the live heap L is `A >= S L / (1 - S/2)',
     /// S being below 2.
     pub(crate) fn collection_budget(&self) -> (f64, f64) {
-        let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64;
+        let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64
+            + (self.gc_payload_bytes / CONS_BYTES as usize) as f64;
         // An embedder's floor overrides, as GNU's memory-full state does.
         if let Some(floor) = self.gc_floor {
             return (allocated, self.gc_retained.saturating_mul(2).max(floor).saturating_sub(self.gc_retained) as f64);
@@ -339,7 +341,9 @@ impl Vm {
         };
         let proportional = percentage.map_or(0.0, |p| {
             let s = scaled_percentage(p);
-            s * (self.gc_retained + self.gc_code) as f64 / (1.0 - s / 2.0)
+            // A cons, the unit, traces two slots.
+            let live = self.gc_retained + self.gc_code + self.gc_retained_slots / 2;
+            s * live as f64 / (1.0 - s / 2.0)
         });
         (allocated, threshold.max(proportional))
     }
@@ -351,6 +355,13 @@ impl Vm {
         let (allocated, budget) = self.collection_budget();
         let code = self.request_code.since_collection as f64 / self.code_collection_threshold() as f64;
         (allocated / budget).max(code)
+    }
+    /// After a collection: no payload charged since, no poll pending, and the
+    /// vector slots the live heap keeps, for the proportional rule.
+    fn settle_payload(&mut self) {
+        self.gc_payload_bytes = 0;
+        self.collect_poll = false;
+        self.gc_retained_slots = self.objects.iter().map(crate::data::traced_slots).sum();
     }
     /// A forced stress collection is due at this Lisp entry.
     pub(crate) fn stress_due(&mut self) -> bool {
@@ -720,6 +731,11 @@ impl Vm {
                         }
                     }
                 }
+                // A pending compiled-Lisp body: what its code will name.
+                if let Some(body) = &self.functions[id].pending {
+                    pending.extend(body.values.iter().copied());
+                    code_pending.extend(body.children.iter().copied());
+                }
                 // The lambda list, which slot 0 answers, outlives the lazy body.
                 let function = &self.functions[id];
                 let mut nested = Vec::new();
@@ -925,6 +941,7 @@ impl Vm {
         // A completely live arena needs no forwarding table or rewrite pass.
         if pads == 0 && marked == private_before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
             self.gc_retained = self.heap_objects();
+            self.settle_payload();
             self.gc_stats.collections += 1;
             return;
         }
@@ -1113,6 +1130,9 @@ impl Vm {
             if let Some(lazy) = &mut f.lazy {
                 rewrite(&mut Arc::get_mut(lazy).expect("lazy body is private at a wait point").body);
             }
+            if let Some(body) = &mut f.pending {
+                body.values.iter_mut().for_each(|v| rewrite(v));
+            }
         }
         for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {
             program.visit_values(&mut |v| rewrite(v));
@@ -1141,6 +1161,7 @@ impl Vm {
         self.closures
             .shrink_to(self.closures.len().saturating_mul(2).max(1024));
         self.gc_retained = self.heap_objects();
+        self.settle_payload();
         self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
     }

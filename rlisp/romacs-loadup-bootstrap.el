@@ -426,5 +426,12 @@ definition, in the order the libraries loaded them."
   (dolist (entry (reverse romacs--world-reseed-forms))
     (romacs--world-reseed-form entry)))
 
+;; The stock look is a theme: `default' (etc/themes/default-theme.el),
+;; enabled once Custom and the faces are loaded, so every world built from
+;; this chain starts in it and `disable-theme' gives GNU's faces.  A colour
+;; scheme enabled over it replaces it (romacs-theme.el).
+(require 'romacs-theme)
+(romacs-theme-start)
+
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

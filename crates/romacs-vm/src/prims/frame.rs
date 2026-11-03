@@ -105,9 +105,15 @@ fn recent_auto_save_p(cx) {
     let state = cx.buffer_modification(Value::NIL)?;
     Ok(if state.save_modiff < state.autosave_modiff { Value::TRUE } else { Value::NIL })
 }}
+/// The parameters only the frame's font gives, which realizing the default
+/// face computes: what `frame-parameter' computes the font for.
+const FONT_PARAMETERS: [&str; 3] = ["font", "font-backend", "window-system"];
+
 /// Fframe_parameters for a frame without a window system: the stored alist
-/// plus the entries GNU computes, each added as store_in_alist would.
-fn frame_alist(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<Vec<(Value, Value)>, Fault> {
+/// plus the entries GNU computes, each added as store_in_alist would; the
+/// font's entries (FONT_PARAMETERS) only when FONT, since realizing the
+/// default face applies every pending face edit.
+fn frame_alist(cx: &mut Leaf<'_>, frame: Value, font: bool) -> std::result::Result<Vec<(Value, Value)>, Fault> {
     let stored = cx.windows().frame_parameter_entries(frame)?;
     let name_key = cx.intern("name");
     let name = stored.iter().find(|(k, _)| *k == name_key).map_or(Value::NIL, |(_, v)| *v);
@@ -116,27 +122,35 @@ fn frame_alist(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<Vec<(Valu
         Some(entry) => entry.1 = value,
         None => alist.insert(0, (key, value)),
     };
-    // tty_color_name of the initial terminal's unspecified default pixels.
+    // A child frame showing another's faces has that frame's default
+    // colours; else tty_color_name of the initial terminal's unspecified
+    // default pixels.
+    let live = cx.windows().decode_live_frame(frame)?;
+    let owner = cx.face_owner(live)?;
+    let shown = if owner == live { vec![] } else { cx.windows().frame_parameter_entries(owner)? };
     for (key, unspecified) in [("foreground-color", "unspecified-fg"), ("background-color", "unspecified-bg")] {
         let key = cx.intern(key);
-        if !alist.iter().any(|(k, v)| *k == key && matches!(cx.kind(*v), leaf::Kind::String | leaf::Kind::Bytes)) {
-            let value = cx.string(unspecified);
+        let colour = |cx: &Leaf<'_>, (k, v): &(Value, Value)| *k == key && matches!(cx.kind(*v), leaf::Kind::String | leaf::Kind::Bytes);
+        if !alist.iter().any(|e| colour(cx, e)) {
+            let value = match shown.iter().find(|e| colour(cx, e)) { Some(&(_, v)) => v, None => cx.string(unspecified) };
             store(&mut alist, key, value);
         }
     }
     // The frame's font: the initial terminal's "tty", else the display's
     // font for the default face, named as GNU's pgtk names it.
-    match super::font::frame_font(cx)? {
-        Some(name) => {
-            let name = cx.string(&name);
-            store(&mut alist, cx.intern("font"), name);
-            let backend = cx.intern(super::font::BACKEND);
-            let backends = cx.cons(backend, Value::NIL);
-            store(&mut alist, cx.intern("font-backend"), backends);
-            let window_system = cx.windows().window_system(Value::NIL)?;
-            store(&mut alist, cx.intern("window-system"), window_system);
+    if font {
+        match super::font::frame_font(cx)? {
+            Some(name) => {
+                let name = cx.string(&name);
+                store(&mut alist, cx.intern("font"), name);
+                let backend = cx.intern(super::font::BACKEND);
+                let backends = cx.cons(backend, Value::NIL);
+                store(&mut alist, cx.intern("font-backend"), backends);
+                let window_system = cx.windows().window_system(Value::NIL)?;
+                store(&mut alist, cx.intern("window-system"), window_system);
+            }
+            None => { let tty = cx.string("tty"); store(&mut alist, cx.intern("font"), tty); }
         }
-        None => { let tty = cx.string("tty"); store(&mut alist, cx.intern("font"), tty); }
     }
     store(&mut alist, name_key, name);
     let (cols, lines) = cx.windows().frame_text_size(frame)?;
@@ -265,7 +279,23 @@ fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Va
         let alpha = alpha_pair(cx, value)?;
         let limit = alpha_lower_limit(cx)?;
         cx.windows().set_frame_alpha(frame, alpha, limit)
+    } else if let Some(attribute) = [(cx.intern("foreground-color"), ":foreground"), (cx.intern("background-color"), ":background")]
+        .iter().find(|(k, _)| *k == key).map(|&(_, attribute)| attribute)
+        && matches!(cx.kind(value), leaf::Kind::String) && !unspecified_colour(cx, value) && super::face::displayed_faces(cx, frame)? {
+        // update_face_from_frame_parameter (xfaces.c:3887): the frame's
+        // default face takes the colour, and a new background its
+        // background mode. A child frame's colours paint only it
+        // (VM2-CHILD-FRAME). The initial terminal's "unspecified-fg" and
+        // "unspecified-bg", which an alist read there carries, name no colour.
+        let (default, attribute) = (cx.intern("default"), cx.intern(attribute));
+        super::face::set_lisp_face_attribute(cx, default, attribute, value, frame).map(|_| ())
     } else { Ok(()) }
+}
+
+/// Whether VALUE is "unspecified-fg" or "unspecified-bg": a terminal's
+/// default colour, not a colour (tty-colors.el).
+fn unspecified_colour(cx: &Leaf<'_>, value: Value) -> bool {
+    cx.string_view(value).is_ok_and(|s| matches!(s.bytes(), b"unspecified-fg" | b"unspecified-bg"))
 }
 
 /// check_int_nonnegative (bignum.c:506): an integer, 0 when negative.
@@ -289,14 +319,15 @@ fn alpha_pair(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<[f32; 2], 
 defsubr! { name = "frame-parameters", gnu = "frame.c:4083", effect = Reads,
 fn frame_parameters(cx; optional frame: Value) {
     // A fresh alist with fresh conses.
-    let entries = frame_alist(cx, frame)?;
+    let entries = frame_alist(cx, frame, true)?;
     Ok(entries.into_iter().rev().fold(Value::NIL, |tail, (k, v)| { let entry = cx.cons(k, v); cx.cons(entry, tail) }))
 }}
 defsubr! { name = "frame-parameter", gnu = "frame.c:4172", effect = Reads,
 fn frame_parameter(cx, frame: Value, parameter: Value) {
     cx.windows().frame_parameter_entries(frame)?;
     if cx.kind(parameter) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", parameter)); }
-    Ok(frame_alist(cx, frame)?.into_iter().find(|(k, _)| *k == parameter).map_or(Value::NIL, |(_, v)| v))
+    let font = cx.symbol_name(parameter).is_ok_and(|name| FONT_PARAMETERS.contains(&name.as_str()));
+    Ok(frame_alist(cx, frame, font)?.into_iter().find(|(k, _)| *k == parameter).map_or(Value::NIL, |(_, v)| v))
 }}
 defsubr! { name = "modify-frame-parameters", gnu = "frame.c:4243", effect = Global,
 fn modify_frame_parameters(cx, frame: Value, alist: Value) {
@@ -435,8 +466,9 @@ fn romacs_create_frame(cx, parms: Value) {
         stored.retain(|(k, _)| *k != name_key);
         stored.insert(0, (name_key, name));
     }
+    // Its faces are its parent's until something sets one on it alone
+    // (`face_own').
     let frame = cx.windows().create_child_frame(parent, geometry, stored)?;
-    cx.face_copy_frame(parent, frame)?;
     // gui_default_parameter (pgtkfns.c:1599) on the frame already listed:
     // a refused value leaves it, not yet visible, as x_create_frame does.
     for name in ["alpha", "alpha-background", "left-fringe", "right-fringe"] {

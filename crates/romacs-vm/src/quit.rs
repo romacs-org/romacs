@@ -34,9 +34,12 @@ romacs_snapshot::snapshot_struct!(QuitSignal { word });
 const QUIT_SLICE: std::time::Duration = std::time::Duration::from_millis(40);
 
 const BUSY: u32 = 1 << 31;
+/// A call's deadline passed (`arm_deadline'): taken, like a press, at the
+/// evaluator's next safepoint while it is busy, and only for that call.
+const DEADLINE: u32 = 1 << 30;
 const PRESSES: u32 = 0xffff;
 const SPAN_ONE: u32 = 1 << 16;
-const SPANS: u32 = !(BUSY | PRESSES);
+const SPANS: u32 = !(BUSY | DEADLINE | PRESSES);
 
 impl QuitSignal {
     /// A signal for an evaluator that is busy: in batch every evaluation may
@@ -59,8 +62,8 @@ impl QuitSignal {
     pub fn set_busy(&self, busy: bool) -> u32 {
         let previous = self.word.fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| Some(match (busy, word & BUSY != 0) {
             (true, true) | (false, false) => word,
-            (true, false) => BUSY | (word & SPANS).wrapping_add(SPAN_ONE) & SPANS | (word & PRESSES),
-            (false, true) => word & SPANS,
+            (true, false) => BUSY | (word & SPANS).wrapping_add(SPAN_ONE) & SPANS | (word & (PRESSES | DEADLINE)),
+            (false, true) => word & (SPANS | DEADLINE),
         })).expect("the update always answers");
         if busy { 0 } else { previous & PRESSES }
     }
@@ -81,12 +84,29 @@ impl QuitSignal {
     #[inline(always)]
     pub(crate) fn state(&self) -> (bool, bool) {
         let word = self.word.load(Ordering::Relaxed);
-        (word & PRESSES != 0, word & BUSY != 0)
+        (word & (PRESSES | DEADLINE) != 0, word & BUSY != 0)
     }
 
     #[inline(always)]
     pub(crate) fn pressed(&self) -> bool {
         self.word.load(Ordering::Relaxed) & PRESSES != 0
+    }
+
+    /// A press, or a call's deadline passed: what a safepoint polls for.
+    #[inline(always)]
+    pub(crate) fn due(&self) -> bool {
+        self.word.load(Ordering::Relaxed) & (PRESSES | DEADLINE) != 0
+    }
+
+    /// Take a passed deadline: whether it was the current call's.
+    pub(crate) fn take_deadline(&self) -> bool {
+        self.word.fetch_and(!DEADLINE, Ordering::AcqRel) & DEADLINE != 0 && crate::host::call_deadline::expired_is_current()
+    }
+
+    /// A call's deadline passed (host.rs `call_deadline'), or with false
+    /// one no longer counts.
+    pub(crate) fn set_deadline(&self, passed: bool) {
+        if passed { self.word.fetch_or(DEADLINE, Ordering::AcqRel); } else { self.word.fetch_and(!DEADLINE, Ordering::AcqRel); }
     }
 
     /// Take the presses counted so far.
@@ -129,7 +149,7 @@ impl Vm {
     /// kbd_buffer_store_event sets `quit-flag' to `throw-on-input').
     pub(crate) fn quit_poll_due(&self) -> bool {
         let [flag, _, throw_on_input] = self.quit_variables();
-        self.quit.pressed() || (self.quit.busy() && (flag != Value::NIL || throw_on_input != Value::NIL))
+        self.quit.due() || (self.quit.busy() && (flag != Value::NIL || throw_on_input != Value::NIL))
     }
 
     /// GNU maybe_quit at a safepoint, with handle_interrupt for each press
@@ -143,6 +163,10 @@ impl Vm {
         }
         for _ in 0..self.quit.take() {
             self.handle_interrupt();
+        }
+        // A call's budget spent is its C-g (`romacs--call-deadline').
+        if self.quit.take_deadline() {
+            self.set_quit_variable("quit-flag", Value::TRUE);
         }
         let [flag, inhibit, throw_on_input] = self.quit_variables();
         if flag == Value::NIL && throw_on_input != Value::NIL && self.host_input_pending() {
@@ -349,5 +373,51 @@ mod tests {
         taken += signal.set_busy(false);
         let refused = presser.join().unwrap();
         assert_eq!(taken + refused, 20_000);
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn wait_due(signal: &QuitSignal) -> bool {
+        (0..100).any(|_| { std::thread::sleep(Duration::from_millis(5)); signal.due() })
+    }
+
+    /// One test, as the deadline is one per process: the current call's
+    /// passed deadline is taken once; a call that ended first leaves none;
+    /// one that passed while not taken is retired at the call's end.
+    #[test]
+    fn a_deadline_reaches_only_its_own_call() {
+        let signal = std::sync::Arc::new(QuitSignal::new());
+        crate::host::call_deadline::arm(signal.clone(), 1, Duration::from_millis(10));
+        assert!(wait_due(&signal), "the deadline passed");
+        assert!(!signal.pressed(), "a deadline is no key press");
+        assert!(signal.take_deadline(), "taken by its call");
+        assert!(!signal.due(), "taken once");
+        crate::host::call_deadline::disarm(&signal);
+
+        crate::host::call_deadline::arm(signal.clone(), 2, Duration::from_millis(30));
+        crate::host::call_deadline::disarm(&signal);
+        assert!(!wait_due(&signal), "an ended call's deadline never fires");
+
+        crate::host::call_deadline::arm(signal.clone(), 3, Duration::from_millis(5));
+        assert!(wait_due(&signal));
+        crate::host::call_deadline::disarm(&signal);
+        assert!(!signal.due(), "retired with its call");
+        crate::host::call_deadline::arm(signal.clone(), 4, Duration::from_secs(60));
+        assert!(!signal.take_deadline(), "a later call takes nothing of an earlier one's");
+        crate::host::call_deadline::disarm(&signal);
+    }
+
+    #[test]
+    fn leaving_busy_keeps_a_passed_deadline_for_the_call() {
+        let signal = QuitSignal::new();
+        signal.set_deadline(true);
+        signal.set_busy(false);
+        assert!(signal.due(), "a wait inside the call keeps it");
+        signal.set_busy(true);
+        assert!(signal.due(), "and the call has it when it runs again");
     }
 }

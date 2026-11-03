@@ -1092,7 +1092,7 @@ thread_local! {
 fn regexp_quit_probe() -> bool {
     // SAFETY: set only for the extent of one search by the VM that owns the
     // signal (`ArmedQuit`), which outlives the search.
-    REGEXP_QUIT.with(|signal| { let signal = signal.get(); !signal.is_null() && unsafe { (*signal).pressed() } })
+    REGEXP_QUIT.with(|signal| { let signal = signal.get(); !signal.is_null() && unsafe { (*signal).due() } })
 }
 
 /// A search's armed quit probe, disarmed when dropped.
@@ -1122,7 +1122,7 @@ impl Vm {
     fn regexp_quit(&mut self, armed: ArmedQuit) -> std::result::Result<(), Fault> {
         let polled = armed.0;
         drop(armed);
-        if !polled || !self.quit.pressed() {
+        if !polled || !self.quit.due() {
             return Ok(());
         }
         match self.maybe_quit() {

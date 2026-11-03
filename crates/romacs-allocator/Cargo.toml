@@ -9,6 +9,7 @@ description = "Target-aware default allocator selection for Romacs"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemallocator = { version = "0.7", default-features = false }
+tikv-jemalloc-sys = { version = "0.7", default-features = false, features = ["stats"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }

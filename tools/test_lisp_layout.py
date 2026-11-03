@@ -98,6 +98,11 @@ class LispLayoutTests(unittest.TestCase):
                     self.assertIn(';; Portions Copyright (C) 2021-2026 Free Software Foundation, Inc.,', source)
                     self.assertIn('derived from vertico.el by', source)
                     self.assertIn('vertico commit c60d802', source)
+                elif file == ROOT / 'rlisp/romacs-theme.el':
+                    # Ports color.el's sRGB, CIE XYZ and Oklab conversions and
+                    # retains its notice.
+                    self.assertIn(';; Copyright (C) 2010-2026 Free Software Foundation, Inc.', (ROOT / 'gnu-lisp/color.el').read_text())
+                    self.assertIn(';; Portions Copyright (C) 2010-2026 Free Software Foundation, Inc., from\n;; GNU Emacs lisp/color.el', source)
                 else:
                     self.assertNotRegex(source, copyright_pattern)
                 self.assertNotIn('This file is part of GNU Emacs.', source)

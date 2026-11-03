@@ -485,12 +485,22 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     Ok(started)
 }
 
+/// The stock look where there is no Custom, the workspace: romacs-theme.el
+/// declares the `default' theme's faces as the faces' own specs. A launch
+/// with Custom enables the theme itself, at the end of its chain
+/// (romacs-loadup-bootstrap.el); `--gnu-lisp' shows GNU's Lisp alone.
+fn declare_stock_theme(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
+    policy(vm, root, "romacs-theme.el", include_str!("../../../rlisp/romacs-theme.el"))?;
+    policy(vm, root, "../etc/themes/default-theme.el", include_str!("../../../etc/themes/default-theme.el"))
+}
+
 /// The workspace with its showcase when SHOWCASE, before any file is visited.
 fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool) -> Result<Started, String> {
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
     vm.install_lisp_prelude()?;
     install_window_change(vm)?;
     policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
+    declare_stock_theme(vm, root)?;
     policy(vm, root, "romacs-find-file.el", include_str!("../../../rlisp/romacs-find-file.el"))?;
     policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     initialize_editing_from_sources(vm, root)?;
@@ -621,12 +631,17 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     if launch == Launch::Loadup {
         vm.eval_source(include_str!("../../../rlisp/romacs-usage-log.el"))?;
     }
+    // Compiled Lisp made ahead while the session is idle, so a first
+    // `require' finds its artifact (`romacs-precompile-start').
+    if launch == Launch::Loadup && vm.eval_source("(fboundp 'add-hook)")? != romacs_vm::Fixed::NIL {
+        vm.eval_source(include_str!("../../../rlisp/romacs-precompile.el"))?;
+    }
     // Layers are child frames, which GNU's frame.el makes.
     if launch == Launch::Loadup && vm.eval_source("(fboundp 'make-frame)")? != romacs_vm::Fixed::NIL {
-        vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
         // Pane chrome, applied to the frame once the session is on its
-        // display (romacs-gui-loadup.el).
+        // display (romacs-gui-loadup.el), and the chrome colours layers use.
         vm.eval_source(include_str!("../../../rlisp/romacs-chrome.el"))?;
+        vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
         // Its icons and its mode line, off until `romacs-mode-line-mode'
         // is enabled.
         vm.eval_source(include_str!("../../../rlisp/romacs-icons.el"))?;
@@ -644,6 +659,12 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         && vm.eval_source("(and (fboundp 'buffer-disable-undo) (fboundp 'add-function) (fboundp 'run-at-time) (fboundp 'make-composed-keymap))")? != romacs_vm::Fixed::NIL {
         vm.eval_source(include_str!("../../../rlisp/romacs-animate.el"))?;
         vm.eval_source(include_str!("../../../rlisp/romacs-landing.el"))?;
+    }
+    // Romacs's interactive defaults and the GNU libraries they set, which
+    // [`before_init`] turns on, where the chain's tree has those libraries
+    // (elec-pair, the first, standing for them; a test's scratch tree may not).
+    if launch == Launch::Loadup && vm.eval_source("(require 'elec-pair nil t)")? != romacs_vm::Fixed::NIL {
+        vm.eval_source(include_str!("../../../rlisp/romacs-defaults.el"))?;
     }
     mark_phase("session-definitions");
     Ok(())
@@ -718,6 +739,20 @@ pub fn open_workspace(vm: &mut Vm, started: Started, files: &[std::path::PathBuf
 /// user's init would load, by the GUI's --loadup and the batch session.
 pub const QUICK_START: &str = "(progn (setq init-file-user nil site-run-file nil inhibit-x-resources t)
   (put 'site-run-file 'standard-value '(nil)))";
+
+/// A --loadup session's last steps before the user's init: -Q's settings
+/// ([`QUICK_START`]), then the session's start of rlisp/romacs-defaults.el:
+/// its libraries' per-user files, and Romacs's interactive defaults unless
+/// -Q, which keeps GNU's values; the init may override them or turn them
+/// off with `romacs-defaults-mode'.
+pub fn before_init(vm: &mut Vm, launch: Launch, quick: bool) -> Result<(), String> {
+    if launch == Launch::Loadup {
+        if quick { vm.eval_source(QUICK_START)?; }
+        vm.eval_source(&format!("(when (fboundp 'romacs-defaults-start) (romacs-defaults-start {}))",
+                                if quick { "t" } else { "nil" }))?;
+    }
+    Ok(())
+}
 
 /// The buffer --loadup shows where GNU shows its "*GNU Emacs*" startup
 /// screen.  *scratch* stays GNU's: `initial-scratch-message' and whatever

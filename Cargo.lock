@@ -4194,6 +4194,7 @@ name = "romacs-allocator"
 version = "0.0.19"
 dependencies = [
  "mimalloc",
+ "tikv-jemalloc-sys",
  "tikv-jemallocator",
 ]
 
@@ -4452,6 +4453,9 @@ version = "0.1.0"
 [[package]]
 name = "romacs-mcp"
 version = "0.0.19"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "romacs-mem"
@@ -4704,6 +4708,7 @@ dependencies = [
  "md-5",
  "num-bigint",
  "rayon",
+ "romacs-allocator",
  "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",

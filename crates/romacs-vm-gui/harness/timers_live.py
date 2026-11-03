@@ -2,18 +2,21 @@
 """Lisp timers in a native --loadup session, in a private headless compositor.
 
 A private init.el installs probes that append to a state file: an ordinary
-timer due 2s after init, a repeating 1s idle timer that records
-`current-idle-time' and messages, and at 3s gnosis-feed's dwell probe (a timed
-read that a timer's queued input must wake).  The session then sits idle (the idle probe
-must fire once, at >= 1s of idleness, the ordinary one once), and its CPU time
-over an idle window is read from /proc.  Real keys then run
-M-x gnosis-dashboard, whose statistics arrive by `run-with-timer' and whose
-link audit follows by `run-with-idle-timer': "Loading statistics..." must give
-way to them, and a second key must start a new idle period (one more idle
-probe).  That session runs with --trace-scene, whose scene dump on every
-repaint the checks read; idle CPU is measured in a second session with the
-same init and keys but no dumps, once the evaluator is quiet after startup
-and again after the dashboard.
+timer due 2s after init, at 3s gnosis-feed's dwell probe (a timed read that a
+timer's queued input must wake), and once that returns a repeating 1s idle
+timer that records `current-idle-time' and messages.  The session then sits
+idle (the idle probe must fire once, at >= 1s of idleness, the ordinary one
+once), and its CPU time over an idle window is read from /proc.  Real keys
+then run M-x gnosis-dashboard, whose statistics arrive by `run-with-timer'
+and whose link audit follows by `run-with-idle-timer': "Loading
+statistics..." must give way to them, and the command's end must start a new idle period (one more
+idle probe after it).  The M-x prompt's own wait for a key is idle too, as
+GNU's read_char is: a probe may fire there, inside the minibuffer, however
+long the keys take to come, but never while a command runs.  That session
+runs with --trace-scene, whose scene dump on every repaint the checks read;
+idle CPU is measured in a second session with the same init and keys but no
+dumps, once the evaluator is quiet after startup and again after the
+dashboard.
 
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY; DISPLAY is never set.  labwc, wlr-randr, wtype and grim come
@@ -36,6 +39,10 @@ import live_oracle as live
 
 INIT = '''(setq gnosis-dir {gnosis})
 (defvar timers-live-idle 0)
+;; Commands begun so far: a key ends an idle period by running one, so a
+;; probe's count names its idle period.
+(defvar timers-live-commands 0)
+(add-hook 'pre-command-hook (lambda () (setq timers-live-commands (1+ timers-live-commands))))
 (defun timers-live-record (form)
   (write-region (concat (prin1-to-string form) "\\n") nil {state} 'append 'silent))
 (timers-live-record '(init))
@@ -44,12 +51,19 @@ INIT = '''(setq gnosis-dir {gnosis})
 (add-hook 'romacs-echo-area-functions
           (lambda (text) (when text (timers-live-record (list 'echo text (current-message))))))
 (run-with-timer 2 nil (lambda () (timers-live-record (list 'ordinary (and (current-idle-time) t)))))
-(run-with-timer 3 nil (lambda () (require 'gnosis-feed) (timers-live-record (list 'dwell (gnosis-feed--dwell-supported-p)))))
-(run-with-idle-timer 1 t
-  (lambda ()
-    (setq timers-live-idle (1+ timers-live-idle))
-    (timers-live-record (list 'idle timers-live-idle (float-time (current-idle-time))))
-    (message "Idle probe %d" timers-live-idle)))
+(defun timers-live-idle-probe ()
+  (setq timers-live-idle (1+ timers-live-idle))
+  (timers-live-record (list 'idle timers-live-idle (float-time (current-idle-time)) (minibuffer-depth)
+                            timers-live-commands))
+  (message "Idle probe %d" timers-live-idle))
+;; The idle probe starts once the dwell probe's read has returned: inside
+;; that read its message could be wiped by the read's own event within one
+;; timer pass, never painted (DIVERGENCES.md VM2-REDISPLAY1).  Registered
+;; while idle, it fires at 1s of this idle period (timer.el's DONT-WAIT).
+(run-with-timer 3 nil (lambda () (require 'gnosis-feed) (timers-live-record (list 'dwell (gnosis-feed--dwell-supported-p)))
+                        (run-with-idle-timer 1 t #'timers-live-idle-probe)))
+(add-hook 'post-command-hook
+          (lambda () (when (eq this-command 'gnosis-dashboard) (timers-live-record '(dashboard-done)))))
 '''
 
 
@@ -163,6 +177,18 @@ def records(state):
     return [line for line in state.read_text().splitlines()] if state.exists() else []
 
 
+def idle_probes(lines):
+    """Each idle probe in LINES: (count, idleness, minibuffer depth,
+    commands begun before it, which names its idle period)."""
+    return [(int(n), float(idleness), int(depth), int(commands.rstrip(')')))
+            for n, idleness, depth, commands in (line.split()[1:] for line in lines if line.startswith('(idle '))]
+
+
+def after_dashboard(lines):
+    """LINES from the end of M-x gnosis-dashboard on, or None before it."""
+    return lines[lines.index('(dashboard-done)') + 1:] if '(dashboard-done)' in lines else None
+
+
 def evaluator_ticks(pid):
     """CPU ticks of PID's evaluator thread."""
     for task in Path(f'/proc/{pid}/task').iterdir():
@@ -216,18 +242,19 @@ def checked(binary, args, output, report):
         fio.wait(rows, args.timeout, 'first frame', process)
         # Idle probe: fires once at >= 1s of idleness; the ordinary timer once.
         # Not fio.wait: a binary without timers still reaches its checks.
-        deadline = time.monotonic() + 15
+        # Each wait ends at its event; the bound only ends a failing one,
+        # however late a loaded host runs the timers.
+        deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline and not (any(r.startswith('(idle 1 ') for r in records(state))
                                                    and any(r.startswith('(ordinary') for r in records(state))):
             time.sleep(.1)
         time.sleep(.5)
         capture('idle-probe')
         first = records(state)
-        idle_lines = [r for r in first if r.startswith('(idle')]
-        check('idle probe fired once with >= 1s idleness', len(idle_lines) == 1
-              and float(idle_lines[0].split()[2].rstrip(')')) >= 1.0, first)
+        probes = idle_probes(first)
+        check('idle probe fired once with >= 1s idleness', len(probes) == 1 and probes[0][1] >= 1.0, first)
         check('ordinary timer fired once, while idle', first.count('(ordinary t)') == 1, first)
-        fio.wait(lambda: any(r.startswith('(dwell') for r in records(state)), 15, 'dwell probe', process)
+        fio.wait(lambda: any(r.startswith('(dwell') for r in records(state)), args.timeout, 'dwell probe', process)
         check("a timer's queued input wakes a read (gnosis-feed--dwell-supported-p)",
               '(dwell t)' in records(state), records(state))
         # The display received it (whatever draws it, the echo line or a
@@ -239,15 +266,14 @@ def checked(binary, args, output, report):
             return any('Idle probe 1' in row for scene in scenes(log_path.read_text(errors='replace'))
                        for row in fio.scene_rows(scene))
         try:
-            fio.wait(lambda: shown in records(state) and drawn(), 15, 'idle probe shown', process)
+            fio.wait(lambda: shown in records(state) and drawn(), args.timeout, 'idle probe shown', process)
         except Exception:
             pass
         check('echo area shows the idle probe', shown in records(state),
               [r for r in records(state) if r.startswith('(echo')])
         check('a frame shows the idle probe before any key', drawn(), rows())
         time.sleep(args.cpu_window)
-        check('no more idle probes without input', len([r for r in records(state) if r.startswith('(idle')]) == 1,
-              records(state))
+        check('no more idle probes without input', len(idle_probes(records(state))) == 1, records(state))
 
         keys(env, '-M', 'alt', 'x', '-m', 'alt')
         fio.wait(lambda: ff.prompt_shown(rows(), 'M-x '), args.timeout, 'M-x prompt', process)
@@ -257,7 +283,7 @@ def checked(binary, args, output, report):
         try:
             fio.wait(lambda: any('Studied today' in row for row in rows())
                      and not any('Loading statistics' in row for row in rows()),
-                     15, 'dashboard statistics', process)
+                     args.timeout, 'dashboard statistics', process)
         finally:
             time.sleep(2)
             capture('gnosis-dashboard')
@@ -265,8 +291,25 @@ def checked(binary, args, output, report):
         check('dashboard shows statistics, not the loading line',
               any('Studied today' in r for r in shown) and any('Review streak' in r for r in shown)
               and not any('Loading statistics' in r for r in shown), shown)
-        after_command = [r for r in records(state) if r.startswith('(idle')]
-        check('the command started a new idle period (one more idle probe)', len(after_command) == 2, records(state))
+        # The command's idle period: its probe, then time for a second one
+        # (a repeating idle timer runs once per idle period).
+        try:
+            fio.wait(lambda: idle_probes(after_dashboard(records(state)) or []), args.timeout, 'idle probe after the command', process)
+            time.sleep(1.5)
+        except AssertionError:
+            pass
+        # The keys' own idle periods: only the M-x prompt's waits for a key,
+        # each at >= 1s of idleness and once per idle period.
+        lines = records(state)
+        done = after_dashboard(lines)
+        between = idle_probes(lines[:len(lines) - len(done) if done is not None else len(lines)])[1:]
+        periods = [commands for *_, commands in idle_probes(lines)]
+        check('idle probes between the keys come only from the M-x prompt, once per idle period',
+              done is not None and all(depth == 1 and idleness >= 1.0 for _, idleness, depth, _ in between)
+              and len(set(periods)) == len(periods), lines)
+        after = idle_probes(done or [])
+        check('the command started a new idle period (one more idle probe)',
+              len(after) == 1 and after[0][1] >= 1.0 and after[0][2] == 0, lines)
         report['records'] = records(state)
 
 
@@ -281,7 +324,7 @@ def measured(binary, args, output, report):
         time.sleep(1)
         keys(env, 'gnosis-dashboard', '-k', 'Return')
         # The command's end starts a new idle period: the idle probe records it.
-        fio.wait(lambda: len([r for r in records(state) if r.startswith('(idle')]) >= 2, args.timeout,
+        fio.wait(lambda: idle_probes(after_dashboard(records(state)) or []), args.timeout,
                  'dashboard command (idle session)', process)
         quiet(process, args.settle, args.timeout)
         report['idle_cpu_dashboard'] = idle_cpu(process.pid, args.cpu_window)

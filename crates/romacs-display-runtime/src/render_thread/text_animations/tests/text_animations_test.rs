@@ -3,7 +3,7 @@ use romacs_display_protocol::text_animation::TextAnimationKind;
 
 fn logo(moving: bool, epoch: u64) -> TextAnimation {
     TextAnimation { window: 1, top: 0, cols: 10, rows: 4, fps: 25, moving, still: false,
-                    kind: TextAnimationKind::Logo { cell_aspect: 0.5, epoch } }
+                    kind: TextAnimationKind::Logo { cell_aspect: 0.5, epoch, colours: Default::default() } }
 }
 
 #[test]

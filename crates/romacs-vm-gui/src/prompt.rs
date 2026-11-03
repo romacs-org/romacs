@@ -39,6 +39,26 @@ pub struct Shared {
     /// window ends and text animations: an unchanged redisplay answers
     /// these again.
     pub painted: Option<(romacs_layout_input::FrameSnapshot, u64, u64, Vec<romacs_vm::WindowEnd>, Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>)>,
+    /// A server session's window (`romacs--native-window'), None in a
+    /// session that is its window.
+    pub server: Option<ServerWindow>,
+    /// The window was shown or hidden since the loop last looked: what it
+    /// had in flight is gone with the old window.
+    pub window_changed: bool,
+}
+
+/// A server's window: whether one shows, and the size the next is made at.
+pub struct ServerWindow {
+    pub shown: bool,
+    pub size: (u32, u32),
+    pub title: String,
+}
+
+impl Shared {
+    /// Whether painting has a window to go to.
+    pub fn window_shown(&self) -> bool {
+        self.server.as_ref().is_none_or(|server| server.shown)
+    }
 }
 
 pub struct GuiHost {
@@ -136,6 +156,14 @@ fn next_queued(shared: &mut Shared) -> Next {
     }
 }
 
+/// What the last window showed is gone with it: the next paint is whole,
+/// and nothing it had in flight will be drawn.
+fn forget_window(shared: &mut Shared) {
+    shared.window_changed = true;
+    shared.in_flight = None;
+    shared.painted = None;
+}
+
 impl GuiHost {
     /// Move every queued channel event into `pending`, dropping the ones a
     /// prompt ignores (releases, activations), so "pending" means a real event.
@@ -175,6 +203,40 @@ impl HostInput for GuiHost {
         display_animates(&self.sender)
     }
 
+    fn native_window(&mut self, action: romacs_vm::NativeWindow) -> Option<bool> {
+        let mut shared = self.shared.borrow_mut();
+        let Some(server) = shared.server.as_mut() else {
+            // A session that is its window shows it while it runs.
+            if action == romacs_vm::NativeWindow::Show { let _ = self.sender.raise_primary(); }
+            return Some(true);
+        };
+        let shown = server.shown;
+        match action {
+            romacs_vm::NativeWindow::Query => {}
+            romacs_vm::NativeWindow::Show if shown => { let _ = self.sender.raise_primary(); }
+            romacs_vm::NativeWindow::Show => {
+                let (width, height) = server.size;
+                let made = self.sender.show_primary(width, height, server.title.clone())
+                    .and_then(|ready| ready.recv_timeout(Duration::from_secs(30)).map_err(|e| e.to_string())?);
+                match made {
+                    Ok(()) => {
+                        server.shown = true;
+                        shared.closed = false;
+                        forget_window(&mut shared);
+                    }
+                    Err(error) => eprintln!("romacs: server window: {error}"),
+                }
+            }
+            romacs_vm::NativeWindow::Hide if !shown => {}
+            romacs_vm::NativeWindow::Hide => {
+                if let Err(error) = self.sender.hide_primary() { eprintln!("romacs: server window: {error}"); }
+                server.shown = false;
+                forget_window(&mut shared);
+            }
+        }
+        Some(shared.window_shown())
+    }
+
     fn input_pending(&mut self) -> bool {
         self.drain();
         let shared = self.shared.borrow();
@@ -186,6 +248,8 @@ impl HostInput for GuiHost {
         // As the loop's changed_frame: a timer run in a prompt that left the
         // frame as this prompt last painted it, with nothing presented
         // since, submits no frame and answers that paint's window ends.
+        // A server with no window shows nothing; the layout stays as it is.
+        if !self.shared.borrow().window_shown() { return Ok(Vec::new()); }
         if let Some((painted, selected, presentation, ends, animations)) = &self.shared.borrow().painted {
             let shared = self.shared.borrow();
             if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)

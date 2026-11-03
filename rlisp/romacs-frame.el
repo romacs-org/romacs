@@ -173,6 +173,17 @@ The value is (RED GREEN BLUE), each between 0 and 65535, or nil."
            'dark)
           (t 'light))))
 
+;; A child frame shows its parent's faces until something sets one on it
+;; alone (`romacs--frame-shares-faces-p', DIVERGENCES.md VM2-CHILD-FRAME):
+;; recomputing a face there would only repeat the parent's, so
+;; `face-spec-recalc' skips it, and a theme or a `defface' costs one
+;; frame's work however many layers are open.
+(defun romacs--face-spec-recalc-shared (_face frame)
+  "Non-nil when FRAME shows another frame's faces, which `face-spec-recalc'
+already recomputes there."
+  (romacs--frame-shares-faces-p frame))
+(advice-add 'face-spec-recalc :before-until #'romacs--face-spec-recalc-shared)
+
 (defun frame-set-background-mode (frame &optional keep-face-specs)
   "Set up display-dependent faces on FRAME.
 Display-dependent faces are those which have different definitions

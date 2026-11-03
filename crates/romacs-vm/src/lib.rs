@@ -42,13 +42,13 @@ mod watchers;
 mod user_db;
 mod locale_info;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
-pub use host_input::{HostEvent, HostFrame, HostInput, QUIT_CHAR};
+pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
 pub use display_host::{DisplayHost, FontEntity, FontQuery, OpenedFont, OtfTable};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
-pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
+pub use terminal_host::{DEFAULT_ANSI, TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
 // Maps keyed by slots and ids the VM allocates use FxHash. Maps keyed by
 // names, which Lisp, files and the network supply, use foldhash with a random
 // seed per map, so a precomputed set of colliding names cannot make their
@@ -108,6 +108,7 @@ pub mod anchors;
 mod annotation_primitives;
 mod annotations;
 mod buffer;
+mod buffer_swap;
 mod bytes;
 mod modification;
 mod conditions;
@@ -966,13 +967,32 @@ struct Function {
     /// is the dialect's alone, nil or (t). Code images and older cache
     /// entries do not record it.
     dynamic: Option<bool>,
+    /// A compiled-Lisp body not yet decoded (`compiled_lisp`), decoded at
+    /// its first call as a `mapped_code` body is. `code` is empty while it
+    /// is here.
+    pending: Option<Box<PendingBody>>,
     /// The lambda list as written, GNU's interpreted-closure slot 0
     /// (`(aref CLOSURE 0)', which `help-function-arglist' reads). Code
     /// images and source-cache entries holding a generated symbol do not
     /// record it.
     params: Option<Vec<Form>>,
 }
-romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, params });
+romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params });
+/// A function body a compiled load left in its artifact's bytes
+/// (`Vm::decode_pending`), with what the body names: a collection keeps
+/// its VALUES (moving them with the heap) and CHILDREN alive, and its
+/// inline CACHES claimed, as it would through decoded code.
+#[derive(Clone, Debug)]
+struct PendingBody {
+    bytes: Arc<Vec<u8>>,
+    body: std::ops::Range<usize>,
+    values: Vec<Value>,
+    children: Vec<usize>,
+    caches: Vec<usize>,
+    /// The artifact's names, as slots.
+    names: Arc<Vec<usize>>,
+}
+romacs_snapshot::snapshot_struct!(PendingBody { bytes, body, values, children, caches, names });
 /// The unexpanded body of a function defined in GNU's non-eager load regime
 /// (src/lread.c:2183: `internal-macroexpand-for-load' not yet fbound).
 ///
@@ -1319,6 +1339,18 @@ pub struct Vm {
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
     gc_retained: usize,
+    /// Payload bytes (string text, vector slots) allocated since the last
+    /// collection, which GNU charges to `consing_until_gc' with the objects
+    /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
+    gc_payload_bytes: usize,
+    /// Payload since the last collection crossed another `POLL_PAYLOAD'
+    /// bytes: the engine polls, and collects if due, at its next jump or
+    /// call (`leave_native'), as GNU's maybe_gc runs at every call.
+    collect_poll: bool,
+    /// Vector and record slots the last collection kept, which it traced:
+    /// with `gc_retained', the live heap the proportional rule paces by, so
+    /// a big kept vector spaces out the collections that trace it.
+    gc_retained_slots: usize,
     /// Compiled code units (IR ops, lowered instructions) the last
     /// collection traced: with `gc_retained', what a collection traverses.
     gc_code: usize,
@@ -1495,6 +1527,9 @@ romacs_snapshot::snapshot_fields!(Vm {
     free_local_binding_slots,
     gc_stats,
     gc_retained,
+    gc_payload_bytes,
+    collect_poll,
+    gc_retained_slots,
     gc_code,
     gc_holds,
     running_engines,
@@ -1677,6 +1712,9 @@ impl Vm {
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_retained: 0,
+            gc_payload_bytes: 0,
+            collect_poll: false,
+            gc_retained_slots: 0,
             gc_code: 0,
             gc_floor: None,
             gc_holds: 0,
@@ -1771,6 +1809,9 @@ impl Vm {
         vm.specials.insert("yank-excluded-properties".into());
         vm.specials.insert("yank-handled-properties".into());
         vm.declare_special_raw("font-lock-defaults", Value::NIL);
+        // keyboard.c:13843: the command that entered the innermost
+        // minibuffer, which read_minibuf binds (rlisp/vm/minibuf.el).
+        vm.declare_special_raw("current-minibuffer-command", Value::NIL);
         for name in [
             "kill-ring",
             "kill-buffer-hook",
@@ -2150,6 +2191,7 @@ impl Vm {
             rest,
             sites: b.sites,
             lazy: None,
+            pending: None,
             dynamic: (visible == 0).then_some(self.dynamic_scope),
             params: Some(args.to_vec()),
         });
@@ -2241,6 +2283,7 @@ impl Vm {
             sites: vec![],
             dynamic: names.is_empty().then_some(self.dynamic_scope),
             lazy: Some(Arc::new(lazy)),
+            pending: None,
             params: Some(args.to_vec()),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
@@ -2932,6 +2975,9 @@ impl Vm {
             let decoded;
             let f = if f.mapped_code.is_some() {
                 decoded = self.decode_image_function(id)?;
+                &decoded
+            } else if f.pending.is_some() {
+                decoded = self.decode_pending(id)?;
                 &decoded
             } else {
                 f

@@ -1355,6 +1355,48 @@ fn a_reshape_draws_the_rect_from_its_departure_to_the_placed_rect() {
     assert!(mgr.frames.get(&1).unwrap().reshape.is_none());
 }
 
+/// A theme switch mid-tween: the same payload in new colours keeps the
+/// tween and glide where they were, on the same clock, and draws them in
+/// the new colours from the next pass.
+#[test]
+fn a_recoloured_payload_keeps_its_tween_and_glide_and_shows_the_new_look() {
+    use romacs_display_protocol::Color;
+    let payload = |background: Color, glow: Color, band: Color| {
+        let mut buf = make_child_buf(1, 0.0, 300.0, 800.0, 100.0, 0);
+        buf.background = background;
+        buf.layer.radius = 8.0;
+        buf.layer.glow = Some(glow);
+        buf.layer.selection = Some(romacs_display_protocol::SelectionBand {
+            x: 0.0, y: 20.0, width: 800.0, height: 20.0, radius: 4.0, color: band, base: background,
+        });
+        buf
+    };
+    let (dark, light) = (Color::from_pixel(0x11100d), Color::from_pixel(0xebebeb));
+    let (amber, blue) = (Color::from_pixel(0xd48a20), Color::from_pixel(0x3548cf));
+    let mut mgr = make_manager();
+    mgr.update_frame(payload(dark, amber, Color::WHITE));
+    let origin = origin_now();
+    mgr.begin_reshape(1, [0.0, 100.0, 800.0, 300.0], tween_100ms(), origin);
+    mgr.begin_glide(1, 60.0, tween_100ms(), origin);
+    let mid = mgr.frames[&1].drawn_rect(sample_at(origin, 50));
+    let band = mgr.frames[&1].drawn_selection_y(sample_at(origin, 50));
+    mgr.update_frame(payload(light, blue, Color::BLACK));
+    mgr.restyle_motion(1);
+    let entry = &mgr.frames[&1];
+    assert_eq!(entry.drawn_rect(sample_at(origin, 50)), mid, "the same interpolated rect");
+    assert_eq!(entry.drawn_selection_y(sample_at(origin, 50)), band, "the same band row");
+    assert!(entry.drawn_rect(sample_at(origin, 99)) != entry.drawn_rect(sample_at(origin, 100)), "still moving before its end");
+    assert_eq!(entry.drawn_rect(sample_at(origin, 100)), [0.0, 300.0, 800.0, 100.0], "the same end time");
+    mgr.advance(sample_at(origin, 50));
+    let entry = &mgr.frames[&1];
+    let frame_box = &entry.reshape.as_ref().unwrap().frame_box;
+    assert_eq!((frame_box.background, frame_box.layer.glow), (light, Some(blue)), "the box in the new look");
+    assert_eq!((frame_box.width, frame_box.height), (mid[2], mid[3]));
+    let glide = &entry.glide.as_ref().unwrap().frame;
+    assert_eq!((glide.background, glide.layer.selection.unwrap().color), (light, Color::BLACK), "the glide in the new look");
+    assert!(mgr.reclaim_finished_composition(sample_at(origin, 200)));
+}
+
 #[test]
 fn a_glide_moves_the_band_over_the_rows_and_hides_the_new_row_s_highlight() {
     let mut mgr = make_manager();

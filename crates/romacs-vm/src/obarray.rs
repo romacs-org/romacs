@@ -84,7 +84,17 @@ impl Obarray {
         self.count -= 1;
         true
     }
+    /// GNU `obarray-clear`: empty buckets of the default size; removed
+    /// entries stay only while their symbols live (`reclaim_removed`).
+    fn clear(&mut self) {
+        self.buckets = vec![None; 1 << DEFAULT_BITS];
+        for entry in self.entries.values_mut() { entry.present = false; entry.next = None; }
+        self.count = 0;
+    }
 }
+
+/// GNU lread.c `obarray_default_bits`.
+pub(super) const DEFAULT_BITS: u32 = 3;
 
 // GNU fns.c hash_char_array and lisp.h reduce_emacs_uint_to_hash_hash/knuth_hash.
 fn bucket(bytes: &[u8], size: usize) -> usize {
@@ -176,6 +186,17 @@ impl Vm {
         // A frozen obarray holds what it holds: nothing to remove.
         if Self::image_value(table) { return false; }
         if let Ok(Object::Obarray(t)) = self.object_mut(table) { t.remove(symbol) } else { false }
+    }
+    pub(super) fn obarray_clear(&mut self, table: Value) -> std::result::Result<(), prim::Fault> {
+        if Self::image_value(table) { return Err(self.read_only_fault(table)); }
+        let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
+        if initial {
+            let slots: Vec<usize> = self.names.drain().map(|(_, slot)| slot).collect();
+            for slot in slots { self.set_initial_obarray(slot, false); }
+            return Ok(());
+        }
+        if let Object::Obarray(t) = self.object_mut(table).map_err(prim::Fault::Error)? { t.clear(); }
+        Ok(())
     }
     pub(super) fn obarray_next(&self, table: Value, bucket_index: usize, current: Value) -> Option<(usize, Value)> {
         let Object::Obarray(t) = self.object_if(table)? else { return None };

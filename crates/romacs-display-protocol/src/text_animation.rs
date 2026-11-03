@@ -33,7 +33,24 @@ pub enum TextAnimationKind {
     /// The Romacs mark and wordmark (romacs-logo) in cells CELL_ASPECT as
     /// wide as high, a sweep of light crossing them.  A new EPOCH starts
     /// the motion over.
-    Logo { cell_aspect: f64, epoch: u64 },
+    Logo { cell_aspect: f64, epoch: u64, colours: LogoColours },
+}
+
+/// The colours the logo takes from the theme: the mark's light (the
+/// `romacs-landing-mark' face's foreground) and the wordmark's (the
+/// `romacs-landing-word' face's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogoColours {
+    pub mark: [u8; 3],
+    pub word: [u8; 3],
+}
+
+impl Default for LogoColours {
+    /// The stock theme's: its accent and the logo's own wordmark grey.
+    fn default() -> Self {
+        let word = romacs_logo::WORDMARK_COLOUR;
+        Self { mark: [0xd4, 0x8a, 0x20], word: [(word >> 16) as u8, (word >> 8) as u8, word as u8] }
+    }
 }
 
 impl TextAnimation {

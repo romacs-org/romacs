@@ -43,7 +43,7 @@ import re
 import shutil
 import subprocess
 
-from parity_live import ROOT, lisp_copy, lisp_string
+from parity_live import ROMACS_DEFAULTS_OFF, ROOT, lisp_copy, lisp_string
 
 CONFIG_ENV = 'ROMACS_BENCH_PROFILE'
 PROFILES = ('stock', 'init')
@@ -182,7 +182,9 @@ def init_source(engine, lisp, port_file, token, profile, config):
     local socket: Romacs's GUI host refuses local network processes."""
     real = profile == 'init'
     blocks = profile_init(config) if real else ''
-    setup = gnu_settings() if engine == 'gnu' else GNU_COMPLETION_UI
+    # Romacs takes GNU's completion and turns its own defaults off (stock's
+    # -Q already keeps them off).
+    setup = gnu_settings() if engine == 'gnu' else GNU_COMPLETION_UI + ROMACS_DEFAULTS_OFF
     return f''';; -*- lexical-binding: t -*-
 (defvar bench-init-errors nil "Init blocks that signalled, as (NAME MESSAGE).")
 (defmacro bench-block (name &rest body)

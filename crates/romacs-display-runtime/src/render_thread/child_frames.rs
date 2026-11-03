@@ -301,17 +301,7 @@ impl ChildFrameManager {
         if let Some(entry) = self.frames.get_mut(&frame_id)
             && let Some(motion) = Motion::start(spec, origin)
         {
-            let mut frame_box = FrameGlyphBuffer::with_size(from[2], from[3]);
-            frame_box.clone_font_bindings_from(&entry.frame);
-            frame_box.presentation_id = entry.frame.presentation_id;
-            frame_box.frame_placement = entry.frame.frame_placement;
-            frame_box.background = entry.frame.background;
-            frame_box.background_alpha = entry.frame.background_alpha;
-            frame_box.border_width = entry.frame.border_width;
-            frame_box.border_color = entry.frame.border_color;
-            frame_box.undecorated = entry.frame.undecorated;
-            // Its look (rounded, lit), not its selection, which the content draws.
-            frame_box.layer = romacs_display_protocol::Layer { selection: None, ..entry.frame.layer };
+            let frame_box = frame_box(&entry.frame, from[2], from[3]);
             entry.reshape = Some(EntryReshape { motion, from, frame_box });
             tracing::debug!(frame_id, ?from, "child_frame_lifecycle: reshape_started");
         }
@@ -320,14 +310,26 @@ impl ChildFrameManager {
     /// Start a selection glide for `frame_id` from band row `from_y`.
     pub fn begin_glide(&mut self, frame_id: u64, from_y: f32, spec: MotionSpec, origin: EventTime) {
         let Some(entry) = self.frames.get_mut(&frame_id) else { return };
-        let Some(band) = entry.frame.layer.selection else { return };
+        let Some(frame) = glide_frame(&entry.frame, from_y) else { return };
         let Some(motion) = Motion::start(spec, origin) else { return };
-        let mut frame = entry.frame.clone();
-        // Text's own pre-mixed background would show the row it settled on.
-        frame.text_over_backgrounds = true;
-        frame.add_background(band.x, band.y, band.width, band.height, band.base);
-        if let Some(moving) = frame.layer.selection.as_mut() { moving.y = from_y; }
         entry.glide = Some(EntryGlide { motion, from_y, frame });
+    }
+
+    /// Draw `frame_id`'s carried tween and glide from its new payload, each
+    /// keeping its origin, trajectory and deadline: for an update that
+    /// changed how the layer looks (its colours, a theme switch) and not
+    /// where it is, how big, or which row it selects.
+    pub fn restyle_motion(&mut self, frame_id: u64) {
+        let Some(entry) = self.frames.get_mut(&frame_id) else { return };
+        if let Some(reshape) = entry.reshape.as_mut() {
+            reshape.frame_box = frame_box(&entry.frame, reshape.frame_box.width, reshape.frame_box.height);
+        }
+        let restyled = entry.glide.as_ref().and_then(|glide| glide_frame(&entry.frame, glide.from_y));
+        match (entry.glide.as_mut(), restyled) {
+            (Some(glide), Some(frame)) => glide.frame = frame,
+            (Some(_), None) => entry.glide = None,
+            _ => {}
+        }
     }
 
     /// Bring every reshape box and gliding band to where SAMPLE puts it,
@@ -862,6 +864,36 @@ impl ChildFrameManager {
         }
         self.rebuild_render_order();
     }
+}
+
+/// FRAME's background and border without its glyphs, WIDTH by HEIGHT:
+/// what a reshape draws, resized to the drawn rect before each pass.
+fn frame_box(frame: &FrameGlyphBuffer, width: f32, height: f32) -> FrameGlyphBuffer {
+    let mut frame_box = FrameGlyphBuffer::with_size(width, height);
+    frame_box.clone_font_bindings_from(frame);
+    frame_box.presentation_id = frame.presentation_id;
+    frame_box.frame_placement = frame.frame_placement;
+    frame_box.background = frame.background;
+    frame_box.background_alpha = frame.background_alpha;
+    frame_box.border_width = frame.border_width;
+    frame_box.border_color = frame.border_color;
+    frame_box.undecorated = frame.undecorated;
+    // Its look (rounded, lit), not its selection, which the content draws.
+    frame_box.layer = romacs_display_protocol::Layer { selection: None, ..frame.layer };
+    frame_box
+}
+
+/// What a glide from band row FROM_Y draws: FRAME's glyphs, then its band's
+/// base colour over the row it settles on, with its band at FROM_Y; none
+/// when FRAME selects no row.
+fn glide_frame(frame: &FrameGlyphBuffer, from_y: f32) -> Option<FrameGlyphBuffer> {
+    let band = frame.layer.selection?;
+    let mut frame = frame.clone();
+    // Text's own pre-mixed background would show the row it settled on.
+    frame.text_over_backgrounds = true;
+    frame.add_background(band.x, band.y, band.width, band.height, band.base);
+    if let Some(moving) = frame.layer.selection.as_mut() { moving.y = from_y; }
+    Some(frame)
 }
 
 #[cfg(test)]

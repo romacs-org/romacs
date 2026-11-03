@@ -12,8 +12,9 @@
 ;; round them, so every window edge, body, minimum size, split, balance
 ;; and fit is the answer GNU gives for a frame with those parameters.
 ;; Corners, hairline, focus edge and dimming are paint only, inside each
-;; window's box; they change no number any primitive returns.  Every
-;; value reaches the display as a frame parameter of the root frame.
+;; window's box; they change no number any primitive returns.  The
+;; sizes reach the display as frame parameters of the root frame; the
+;; colours are faces, which the display reads as it paints.
 ;;
 ;; `romacs-status-bar-mode' puts a status bar between the windows and
 ;; the minibuffer line: the mode line of the window the selected one is
@@ -27,17 +28,12 @@
 
 ;;; Code:
 
+(require 'romacs-faces)
+
 (defgroup romacs-chrome nil
   "How the root frame's windows are drawn as panes."
   :group 'frames
   :prefix "romacs-pane-")
-
-(defface romacs-pane-focus '((t :inherit romacs-layer-glow))
-  "The selected pane's edge: its foreground.")
-
-(defface romacs-pane-border '((t))
-  "The hairline round every other pane: its foreground, or when that is
-unspecified the default background lifted 15% toward the foreground.")
 
 (defun romacs-chrome--set (option value)
   "Set OPTION to VALUE and apply the chrome to the root frame."
@@ -79,17 +75,71 @@ frame background, from 0 to 0.3."
   (when-let* ((values (and color (color-values color))))
     (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (ash v -8)) values))))
 
-(defun romacs-chrome--border ()
-  "The hairline's colour: `romacs-pane-border''s foreground, else the
-default background lifted 15% toward the default foreground."
-  (or (romacs-chrome--hex (face-foreground 'romacs-pane-border nil t))
-      (let ((bg (color-values (face-background 'default nil t)))
-            (fg (color-values (face-foreground 'default nil t)))
-            (mixed nil))
-        (when (and bg fg)
-          (while bg
-            (push (round (+ (* 0.85 (ash (pop bg) -8)) (* 0.15 (ash (pop fg) -8)))) mixed))
-          (apply #'format "#%02x%02x%02x" (nreverse mixed))))))
+;; Chrome colours and themes.  Every chrome colour is a face: the focus
+;; edge (`romacs-pane-focus', by default `romacs-layer-glow'), the
+;; hairline (`romacs-pane-border'), a layer's glow (`romacs-layer-glow'),
+;; the completion panel's selected row and matches
+;; (`romacs-complete-current', and `romacs-complete-match', which
+;; inherits the glow; its prompt inherits `shadow'), a glass layer's
+;; background (`romacs-layer-glass').  A theme that sets one of them is
+;; obeyed.  For the ones it leaves unset the faces' default specs are
+;; derived from faces every theme sets, again whenever a theme is enabled
+;; or disabled; with no theme enabled they are the built-in palette's.
+;; The display reads the faces as it paints, so a theme, `custom-set-faces'
+;; or `set-face-attribute' shows on the next frame.  The dimming tint is
+;; not a face: it is the default background.
+
+(defconst romacs-chrome-builtin-accent "#d48a20"
+  "The built-in palette's accent (rlisp/romacs-startup.el), Omarchy Rum's:
+the focus edge, glow and match colour while no theme is enabled.")
+
+(defun romacs-chrome-mix (amount)
+  "The default background moved AMOUNT, from 0 to 1, toward the default
+foreground, as #RRGGBB, or nil when either is unknown."
+  (let ((bg (color-values (face-background 'default nil t)))
+        (fg (color-values (face-foreground 'default nil t))))
+    (when (and bg fg)
+      (apply #'format "#%02x%02x%02x"
+             (seq-mapn (lambda (b f) (round (/ (+ (* (- 1 amount) b) (* amount f)) 257.0))) bg fg)))))
+
+(defun romacs-chrome--chromatic (color)
+  "COLOR as #RRGGBB when it has a clear hue, nil when it is a grey."
+  (when-let* ((values (and color (color-values color))))
+    (and (>= (- (apply #'max values) (apply #'min values)) (* 0.2 65535))
+         (romacs-chrome--hex color))))
+
+(defun romacs-chrome--accent ()
+  "The enabled theme's accent: the cursor's colour, which marks where
+input goes as the focus edge does; when that is a grey (black or white
+cursors are common), the link colour, the colour themes give what can
+be acted on; else the prompt's; else the cursor's grey."
+  (let ((cursor (face-background 'cursor nil t)))
+    (or (seq-some #'romacs-chrome--chromatic
+                  (list cursor (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t)))
+        (romacs-chrome--hex cursor))))
+
+(defun romacs-chrome-derived-faces ()
+  "The chrome faces' default specs, each (FACE ATTRIBUTE VALUE...):
+derived from `default', `cursor', `link' and `minibuffer-prompt', which
+every theme sets.  The accent is the
+built-in one while no theme is enabled.  A face whose colour cannot be
+derived is left out."
+  (let ((accent (if custom-enabled-themes (romacs-chrome--accent) romacs-chrome-builtin-accent)))
+    (seq-filter
+     (lambda (spec) (nth 2 spec))
+     `((romacs-layer-glow :foreground ,accent)
+       (romacs-pane-border :foreground ,(romacs-chrome-mix 0.15))
+       (romacs-layer-glass :background ,(romacs-chrome-mix 0.08))
+       (romacs-complete-current :background ,(romacs-chrome-mix 0.2) :extend t)))))
+
+(defun romacs-chrome--set-faces (&rest _)
+  "Make `romacs-chrome-derived-faces' the faces' default specs.  A
+theme's spec for a face still wins (faces.el `face-spec-recalc').
+Run from `enable-theme-functions' and `disable-theme-functions'."
+  (pcase-dolist (`(,face . ,attributes) (romacs-chrome-derived-faces))
+    (let ((spec `((t ,@attributes))))
+      (when (and (facep face) (not (equal spec (get face 'face-defface-spec))))
+        (face-spec-set face spec 'face-defface-spec)))))
 
 (defun romacs-chrome--parameters (classic)
   "The root frame's chrome parameters, GNU's look when CLASSIC."
@@ -99,8 +149,7 @@ default background lifted 15% toward the default foreground."
       (internal-border-width . ,gap)
       (romacs-pane-radius . ,(if classic 0 romacs-pane-radius))
       (romacs-pane-dim . ,(if classic 0.0 (float romacs-pane-dim)))
-      (romacs-pane-focus . ,(and (not classic) (romacs-chrome--hex (face-foreground 'romacs-pane-focus nil t))))
-      (romacs-pane-border . ,(and (not classic) (romacs-chrome--border))))))
+      (romacs-pane-chrome . ,(not classic)))))
 
 (defvar romacs-classic-chrome)
 (defvar romacs-status-bar-mode)
@@ -155,14 +204,19 @@ A window GNU draws no mode line for has none under any value."
       (romacs-pane-label . ,(if bar romacs-pane-label 'full)))))
 
 (defun romacs-chrome-apply (&rest _)
-  "Apply the chrome options to the root frame, on a window system only.
-Also run from `enable-theme-functions' and `after-init-hook', so the
-colours follow a theme and the faces an init sets."
+  "Apply the chrome options to the root frame, on a window system only."
   (let ((frame (romacs-chrome--root-frame)))
     (when (window-system frame)
       (let ((classic (bound-and-true-p romacs-classic-chrome)))
         (modify-frame-parameters frame (append (romacs-chrome--parameters classic)
                                                (romacs-chrome--status-bar-parameters classic)))))))
+
+(defun romacs-chrome-refresh (&rest _)
+  "Derive the chrome faces a theme leaves unset and apply the chrome to
+the root frame: at startup and from `after-init-hook', so the chrome
+follows the faces an init sets."
+  (romacs-chrome--set-faces)
+  (romacs-chrome-apply))
 
 (define-minor-mode romacs-classic-chrome
   "Draw the root frame's windows as GNU does: no gaps, corners, hairlines,
@@ -240,16 +294,17 @@ The event's position is that window's mode line."
           :internal-border (frame-internal-border-width frame)
           :pane-radius (or (frame-parameter frame 'romacs-pane-radius) 0)
           :pane-dim (or (frame-parameter frame 'romacs-pane-dim) 0.0)
-          :focus (frame-parameter frame 'romacs-pane-focus)
-          :border (frame-parameter frame 'romacs-pane-border)
+          :focus (and (frame-parameter frame 'romacs-pane-chrome) (face-foreground 'romacs-pane-focus frame t))
+          :border (and (frame-parameter frame 'romacs-pane-chrome) (face-foreground 'romacs-pane-border frame t))
           :status-bar (or (frame-parameter frame 'romacs-status-bar-lines) 0)
           :status-bar-height (romacs-status-bar-height)
           :label (if (assq 'romacs-pane-label (frame-parameters frame))
                      (frame-parameter frame 'romacs-pane-label)
                    'full))))
 
-(add-hook 'enable-theme-functions #'romacs-chrome-apply)
-(add-hook 'after-init-hook #'romacs-chrome-apply)
+(add-hook 'enable-theme-functions #'romacs-chrome--set-faces)
+(add-hook 'disable-theme-functions #'romacs-chrome--set-faces)
+(add-hook 'after-init-hook #'romacs-chrome-refresh)
 
 (provide 'romacs-chrome)
 ;;; romacs-chrome.el ends here

@@ -32,3 +32,9 @@ fn walk(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
     Ok(Step::Call { f: saved[0], args: vec![symbol], then: next, saved })
 }
 fn next(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { walk(cx, saved.to_vec()) }
+defsubr! { name = "obarray-clear", gnu = "lread.c:5079", effect = Global,
+fn obarray_clear(cx, obarray: Value) {
+    if !cx.is_obarray(obarray) { return Err(Fault::Wrong("obarrayp", obarray)); }
+    cx.clear_obarray(obarray)?;
+    Ok(Value::NIL)
+}}

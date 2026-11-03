@@ -49,3 +49,28 @@ fn take_doomed_finalizers(cx) {
 pub(crate) fn finalizers_ran(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
     Ok(Step::Done(value))
 }
+
+// Where the process's heap bytes are: a plist of the production
+// allocator's :platform-allocated and :platform-resident bytes
+// (`romacs_allocator::stats`, 0 where it keeps none), the arenas' :used,
+// :small-free, :slab-rest, :runs-kept, :runs-released and :above-top bytes
+// (`world::arena::census`) and :classes, an alist of block size to free
+// bytes; nil when the heap is the system allocator's.
+defsubr! { name = "romacs--arena-census", gnu = "alloc.c:7154", effect = Global,
+fn arena_census(cx) {
+    let Some(c) = crate::world::arena::census() else { return Ok(Value::NIL) };
+    let int = |n: usize| Value::integer(n as i64).expect("byte count fits fixnum");
+    let classes = c.classes.iter().rev().fold(Value::NIL, |tail, &(size, free)| {
+        let row = cx.cons(int(size), int(free));
+        cx.cons(row, tail)
+    });
+    let (allocated, resident) = romacs_allocator::stats().unwrap_or((0, 0));
+    let rows = [("platform-allocated", int(allocated)), ("platform-resident", int(resident)), ("used", int(c.used)),
+        ("small-free", int(c.small_free)), ("slab-rest", int(c.slab_rest)), ("runs-kept", int(c.runs_kept)),
+        ("runs-released", int(c.runs_released)), ("above-top", int(c.above_top)), ("classes", classes)];
+    Ok(rows.iter().rev().fold(Value::NIL, |tail, &(key, value)| {
+        let key = cx.intern(&format!(":{key}"));
+        let tail = cx.cons(value, tail);
+        cx.cons(key, tail)
+    }))
+}}

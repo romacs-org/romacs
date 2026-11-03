@@ -230,7 +230,10 @@ mod leaf {
         }
         pub(crate) fn mktime_offset(&self) -> i64 { self.vm.mktime_offset }
         pub(crate) fn idle_since(&self) -> Option<std::time::Instant> { self.vm.idle_since }
-        pub(crate) fn set_idle_since(&mut self, since: Option<std::time::Instant>) { self.vm.idle_since = since; }
+        pub(crate) fn set_idle_since(&mut self, since: Option<std::time::Instant>) {
+            self.vm.idle_since = since;
+            crate::compiled_lisp::note_idle(since);
+        }
         pub(crate) fn set_mktime_offset(&mut self, offset: i64) { self.vm.mktime_offset = offset; }
         pub(crate) fn tz_rule_dstoff(&self) -> i64 { self.vm.tz_rule_dstoff }
         pub(crate) fn set_tz_rule_dstoff(&mut self, offset: i64) { self.vm.tz_rule_dstoff = offset; }
@@ -1332,7 +1335,7 @@ mod leaf {
             matches!(self.vm.object_if(value), Some(data::Object::Obarray(_)))
         }
         pub fn make_obarray(&mut self, size: Value) -> super::Out {
-            let bits = if size == Value::NIL { 3 } else {
+            let bits = if size == Value::NIL { obarray::DEFAULT_BITS } else {
                 let n = size.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", size))? as u64;
                 let bits = 64 - n.leading_zeros();
                 if bits > 31 { return Err(Fault::Range1(size)); }
@@ -1366,6 +1369,7 @@ mod leaf {
             }
             Ok(if self.vm.obarray_unintern(table, found) { Value::TRUE } else { Value::NIL })
         }
+        pub fn clear_obarray(&mut self, table: Value) -> std::result::Result<(), Fault> { self.vm.obarray_clear(table) }
         pub fn obarray_next(&self, table: Value, bucket: usize, current: Value) -> Option<(usize, Value)> {
             self.vm.obarray_next(table, bucket, current)
         }
@@ -1708,6 +1712,7 @@ mod leaf {
     mod buffer_locals;
     mod frozen;
     mod isolate;
+    mod compiled_lisp;
     mod casetab;
     mod casing;
     pub(crate) use casing::RegionCase;
@@ -1738,7 +1743,7 @@ mod leaf {
     pub(crate) mod inotify;
     mod process;
     mod gnutls;
-    pub(crate) use process::{CallOutput, Target};
+    pub(crate) use process::{CallOutput, Target, strerror};
     mod random;
     mod width;
     mod coding_safe;
@@ -1754,7 +1759,7 @@ mod leaf {
     mod world;
     mod finalizer;
 }
-pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, strerror, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
 
 /// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
 pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {

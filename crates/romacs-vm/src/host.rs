@@ -660,7 +660,9 @@ pub(crate) fn build_root() -> PathBuf {
 fn env_read(form: &str, name: &[u8], value: Option<&OsString>) {
     let shown = String::from_utf8_lossy(name);
     match class(Fact::Env(name), None) {
-        Class::P => p_read(Fact::Env(name), format!("env {shown} ({form})")),
+        // A compile process (`Mode::Record`) pins nothing: a per-process
+        // name it reads is an input like any other.
+        Class::P if refusing() => p_read(Fact::Env(name), format!("env {shown} ({form})")),
         _ => record("env", json!({"form": form, "name": encoded(name), "value": value.map(|v| encoded(v.as_bytes()))})),
     }
 }
@@ -1226,6 +1228,10 @@ pub fn replay(record: &Json) -> Option<Json> {
             "canon" => { let _ = canonicalize(path()?); }
             "env" => {
                 let name = decoded(&record["name"])?;
+                // Asked as a compile process's recorder asks it, which
+                // records a per-process name too (`env_read`); a build
+                // records none of those as `env`.
+                MODE.with(|m| m.set(Mode::Record));
                 match record["form"].as_str()? {
                     "host" => { getenv(std::str::from_utf8(&name).ok()?); }
                     "process" => lisp_env(EnvList::Process, &name),
@@ -1313,6 +1319,27 @@ pub fn uid() -> u32 {
         host_fact("uid", json!(uid));
     }
     uid
+}
+
+/// Die with PARENT: SIGTERM when the thread that started this process
+/// ends, and exit now if PARENT is gone already. A child of a session
+/// thread then never outlives the session.
+pub fn die_with_parent(parent: u32) {
+    unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
+    if unsafe { libc::getppid() } as u32 != parent {
+        std::process::exit(1);
+    }
+}
+
+/// Lower this process to the background: the weakest CPU niceness and the
+/// idle I/O class, which its children inherit. Best effort.
+pub fn lower_priority() {
+    const IOPRIO_WHO_PROCESS: libc::c_long = 1;
+    const IOPRIO_CLASS_IDLE: libc::c_long = 3;
+    unsafe {
+        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, IOPRIO_CLASS_IDLE << 13);
+    }
 }
 
 pub fn euid() -> u32 {
@@ -1541,6 +1568,19 @@ fn read_counter(fd: &std::os::fd::OwnedFd) -> Option<u64> {
 /// /proc's process times.
 pub fn clock_ticks_per_second() -> u64 {
     u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok().filter(|&n| n > 0).unwrap_or(100)
+}
+
+/// The time since boot, suspended time included (`CLOCK_BOOTTIME`), as
+/// GNU's get_host_uptime reads it; None where the clock is missing.
+pub fn boot_clock() -> Option<std::time::Duration> {
+    let mut t: libc::timespec = unsafe { std::mem::zeroed() };
+    let ok = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut t) } == 0;
+    ok.then(|| std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32))
+}
+
+/// The memory page size in bytes (`getpagesize`).
+pub fn page_size() -> u64 {
+    u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok().filter(|&n| n > 0).unwrap_or(4096)
 }
 
 /// A time-zone file's bytes: `/etc/localtime`, a TZ file or a zoneinfo entry.
@@ -2565,5 +2605,79 @@ mod tests {
             0
         }).ok().unwrap();
         assert_eq!((entry.name, entry.gecos, entry.dir), (None, b"Full Name".to_vec(), None));
+    }
+}
+
+/// A deadline on one call the host admits (quit.rs `DEADLINE') (an agent's evaluation): out of
+/// band, as the host's C-g, since a Lisp timer cannot reach a CPU loop.
+/// One thread waits for the armed deadline; at expiry it marks the shared
+/// word (`DEADLINE') with the call's generation recorded, whatever the
+/// evaluator's state. The evaluator takes it at a safepoint while busy, as
+/// a quit, only while that generation is still the current call: a call
+/// that ended first (`disarm') retired its generation, so its deadline can
+/// never reach a later command. A deadline that passes while the call waits
+/// for input is kept until the call runs again. Cooperative like C-g:
+/// `inhibit-quit', a long primitive or a compile defer it.
+pub mod call_deadline {
+    use crate::QuitSignal;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Condvar, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    /// The current call's generation, 0 for none, and the one whose
+    /// deadline passed.
+    static CURRENT: AtomicU64 = AtomicU64::new(0);
+    static EXPIRED: AtomicU64 = AtomicU64::new(0);
+
+    struct Armed { generation: u64, at: Instant, signal: Arc<QuitSignal> }
+    struct Waiter { armed: Mutex<Option<Armed>>, changed: Condvar }
+
+    static WAITER: OnceLock<&'static Waiter> = OnceLock::new();
+
+    fn waiter() -> &'static Waiter {
+        WAITER.get_or_init(|| {
+            let waiter: &'static Waiter = Box::leak(Box::new(Waiter { armed: Mutex::new(None), changed: Condvar::new() }));
+            std::thread::Builder::new().name("call-deadline".into()).spawn(move || run(waiter)).expect("deadline thread");
+            waiter
+        })
+    }
+
+    fn run(waiter: &'static Waiter) {
+        let mut armed = waiter.armed.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            armed = match armed.as_ref().map(|a| a.at.saturating_duration_since(Instant::now())) {
+                None => waiter.changed.wait(armed).unwrap_or_else(|e| e.into_inner()),
+                Some(left) if left > Duration::ZERO => waiter.changed.wait_timeout(armed, left).unwrap_or_else(|e| e.into_inner()).0,
+                Some(_) => {
+                    let Armed { generation, signal, .. } = armed.take().expect("armed");
+                    EXPIRED.store(generation, Ordering::Release);
+                    signal.set_deadline(true);
+                    armed
+                }
+            };
+        }
+    }
+
+    /// Call GENERATION (nonzero) starts with BUDGET before its quit.
+    pub fn arm(signal: Arc<QuitSignal>, generation: u64, budget: Duration) {
+        CURRENT.store(generation, Ordering::Release);
+        let waiter = waiter();
+        *waiter.armed.lock().unwrap_or_else(|e| e.into_inner()) = Some(Armed { generation, at: Instant::now() + budget, signal });
+        waiter.changed.notify_one();
+    }
+
+    /// The call ended: its deadline, passed or not, reaches nothing more.
+    pub fn disarm(signal: &QuitSignal) {
+        CURRENT.store(0, Ordering::Release);
+        if let Some(waiter) = WAITER.get() {
+            *waiter.armed.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            waiter.changed.notify_one();
+        }
+        signal.set_deadline(false);
+    }
+
+    pub(crate) fn expired_is_current() -> bool {
+        let current = CURRENT.load(Ordering::Acquire);
+        current != 0 && EXPIRED.load(Ordering::Acquire) == current
     }
 }

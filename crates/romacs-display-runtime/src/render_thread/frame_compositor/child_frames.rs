@@ -167,6 +167,10 @@ impl GuiFrameRenderState {
             .frames
             .get(&frame_id)
             .map(|entry| (entry.abs_x, entry.abs_y));
+        // Where the previous payload settles: its placed rect and selected row.
+        let previous_target = self.compositor.child_frames.frames.get(&frame_id).map(|entry| {
+            ([entry.abs_x, entry.abs_y, entry.frame.width, entry.frame.height], entry.frame.layer.selection.map(|band| band.y))
+        });
         // Where the previous payload was being drawn now: a tween or glide
         // the update interrupts retargets from there.
         let now = observe_platform_now();
@@ -206,7 +210,7 @@ impl GuiFrameRenderState {
                 }
             }
             if let Some((from, reshaping, from_y)) = previous_drawn {
-                self.retarget_layer_motion(frame_id, motion, from, reshaping, from_y, previous_placement, now);
+                self.retarget_layer_motion(frame_id, motion, from, reshaping, from_y, previous_placement, previous_target, now);
             }
             if let Some(previous) = previous_presentation
                 && previous != next_presentation
@@ -219,9 +223,11 @@ impl GuiFrameRenderState {
     }
 
     /// After an update replaced FRAME_ID's payload, which was drawn in rect
-    /// FROM (mid-tween when RESHAPING) with its selection band at FROM_Y:
-    /// tween its rect when its size changed, or a tween was running, glide
-    /// its band when the selected row moved, drift it when it only moved.
+    /// FROM (mid-tween when RESHAPING) with its selection band at FROM_Y and
+    /// settled at PREVIOUS_TARGET: when only its look changed, carry its
+    /// tween and glide on with the new look; else tween its rect when its
+    /// size changed, or a tween was running, glide its band when the
+    /// selected row moved, drift it when it only moved.
     #[allow(clippy::too_many_arguments)]
     fn retarget_layer_motion(
         &mut self,
@@ -231,6 +237,7 @@ impl GuiFrameRenderState {
         reshaping: bool,
         from_y: Option<f32>,
         previous_placement: Option<(f32, f32)>,
+        previous_target: Option<([f32; 4], Option<f32>)>,
         now: romacs_display_protocol::frame_time::EventTime,
     ) {
         let children = &mut self.compositor.child_frames;
@@ -238,6 +245,12 @@ impl GuiFrameRenderState {
         let to = [entry.abs_x, entry.abs_y, entry.frame.width, entry.frame.height];
         let resized = (from[2] - to[2]).abs() > f32::EPSILON || (from[3] - to[3]).abs() > f32::EPSILON;
         let to_y = entry.frame.layer.selection.map(|band| band.y);
+        // The same place, size and row: only its look changed.
+        if previous_target == Some((to, to_y)) {
+            children.restyle_motion(frame_id);
+            self.compositor.dirty = true;
+            return;
+        }
         // The carried tween and glide hold the replaced payload's pictures.
         entry.reshape = None;
         entry.glide = None;

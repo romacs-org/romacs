@@ -205,12 +205,12 @@ fn terminal_styles_retain_unicode_colored_spaces_and_palette_overrides() {
     use romacs_vm::{TerminalColor, TerminalStyle};
     let mut service = Service::new();
     let id = service.create("/bin/sh", "/", 100, 12).unwrap();
-    service.send(id, "stty -echo; printf '\\033[2J\\033[H\\033[31m界é\\033[0m \\033[44m  \\033[0m\\nUNICODE_STYLE_DONE\\n'; read first; printf '\\033]4;1;rgb:01/02/03\\007\\033]10;rgb:04/05/06\\007\\033]11;rgb:07/08/09\\007\\033[2J\\033[H\\033[31mOVERRIDE\\033[0m\\nOSC_DONE\\n'; read last\n".as_bytes()).unwrap();
+    service.send(id, "stty -echo; printf '\\033[2J\\033[H\\033[31m界é\\033[0m \\033[44m  \\033[0m\\nUNICODE_STYLE_DONE\\n'; read first; printf '\\033]4;1;rgb:01/02/03\\007\\033]10;rgb:04/05/06\\007\\033]11;rgb:07/08/09\\007\\033[2J\\033[H\\033[31mOVERRIDE\\033[0m \\033[2;31mDIMSET\\033[0m \\033[2;32mDIMTHEME\\033[0m\\nOSC_DONE\\n'; read last\n".as_bytes()).unwrap();
     let initial = wait(&mut service, id, |s| s.text.contains("界é   \nUNICODE_STYLE_DONE\n"));
     let start = initial.text.rfind("界é   \n").unwrap();
     let style = |at| initial.styles.iter().find(|run| run.bytes.contains(&at)).map(|run| run.style).unwrap_or_default();
-    assert_eq!(style(start).foreground, TerminalColor::Rgb([172, 66, 66]));
-    assert_eq!(style(start + "界é".len() + 1).background, TerminalColor::Rgb([106, 159, 181]), "COLORED_TRAILING_SPACES_MUST_NOT_BE_TRIMMED");
+    assert_eq!(style(start).foreground, TerminalColor::Ansi(1), "THEME_BASE_COLOURS_STAY_SYMBOLIC");
+    assert_eq!(style(start + "界é".len() + 1).background, TerminalColor::Ansi(4), "COLORED_TRAILING_SPACES_MUST_NOT_BE_TRIMMED");
     for run in initial.styles.iter() {
         assert!(initial.text.is_char_boundary(run.bytes.start) && initial.text.is_char_boundary(run.bytes.end));
     }
@@ -220,6 +220,9 @@ fn terminal_styles_retain_unicode_colored_spaces_and_palette_overrides() {
     assert_eq!(changed.default_colors, [Some([4, 5, 6]), Some([7, 8, 9])], "SHELL_DEFAULT_PALETTE_OVERRIDES");
     let start = changed.text.rfind("OVERRIDE").unwrap();
     assert_eq!(changed.styles.iter().find(|r| r.bytes.contains(&start)).unwrap().style.foreground, TerminalColor::Rgb([1, 2, 3]), "SHELL_INDEXED_PALETTE_OVERRIDES");
+    let fg = |word: &str| changed.styles.iter().find(|r| r.bytes.contains(&changed.text.rfind(word).unwrap())).unwrap().style.foreground;
+    assert_eq!(fg("DIMSET"), TerminalColor::Rgb([0, 1, 1]), "DIM_OF_A_SESSION_COLOUR_IS_LITERAL");
+    assert_eq!(fg("DIMTHEME"), TerminalColor::DimAnsi(2), "DIM_OF_A_THEME_COLOUR_STAYS_SYMBOLIC");
     service.close(id).unwrap();
 }
 
