@@ -660,6 +660,20 @@ over it replaces; nil for GNU's stacking.")
   "Non-nil while `romacs-theme-fallback' is enabled as the session's
 stock theme rather than by choice.")
 
+(defun romacs-theme--colour-scheme-p (theme)
+  "Whether THEME is a colour scheme: one that says so (`:kind'
+`color-scheme', as GNU's and Modus's themes do), or one that says nothing
+and sets the `default' face, as most third-party themes do.  A theme
+packages use for their own settings, such as `use-package''s for
+`:custom-face', is neither."
+  (let ((kind (plist-get (get theme 'theme-properties) :kind)))
+    (or (eq kind 'color-scheme)
+        (and (null kind)
+             (let ((found nil))
+               (dolist (setting (get theme 'theme-settings) found)
+                 (when (and (eq (car setting) 'theme-face) (eq (nth 1 setting) 'default))
+                   (setq found t))))))))
+
 (defun romacs-theme--replace-stock (theme)
   "Run from `enable-theme-functions': THEME, a colour scheme enabled over
 the stock theme, replaces it, once.  Enabling the fallback itself is a
@@ -668,7 +682,7 @@ choice and keeps it."
         ((eq theme romacs-theme-fallback) (setq romacs-theme--stock nil))
         ((and romacs-theme--stock romacs-theme-fallback
               (memq romacs-theme-fallback custom-enabled-themes)
-              (memq (plist-get (get theme 'theme-properties) :kind) '(nil color-scheme)))
+              (romacs-theme--colour-scheme-p theme))
          (setq romacs-theme--stock nil)
          (disable-theme romacs-theme-fallback))))
 
