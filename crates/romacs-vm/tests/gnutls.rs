@@ -3,7 +3,11 @@
 //! a test-only CA and localhost certificate) and must agree on gnutls-boot's
 //! results and errors, the peer status and its certificate details, the
 //! records read and written, a STARTTLS upgrade, a :nowait connection's
-//! :tls-parameters and the error predicates.
+//! :tls-parameters and the error predicates. GNU's answers are pinned in
+//! tests/fixtures/tls/gnu-answers.json with the build that gave them, so
+//! the gate never runs GNU; ROMACS_GNUTLS_LIVE=1 asks GNU live instead and
+//! ROMACS_GNUTLS_RECORD=1 rewrites the pins (tests/fixtures/tls/regenerate.sh),
+//! each GNU call bounded in time and retried a few times.
 use romacs_vm::Vm;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -114,26 +118,126 @@ fn bootstrapped() -> Vm {
     vm
 }
 
+/// How long one GNU oracle call may take, and how many times a call that
+/// ran out of it is tried.
+const GNU_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const GNU_ATTEMPTS: usize = 3;
+
+/// GNU's batch output for ARGS: bounded in time, stdin closed, a call that
+/// runs out of time killed and tried again; Err after GNU_ATTEMPTS.
+fn gnu(args: &[&str]) -> Result<String, String> {
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    for attempt in 1..=GNU_ATTEMPTS {
+        let mut child = std::process::Command::new(&binary).args(args)
+            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
+            .spawn().map_err(|e| e.to_string())?;
+        let start = std::time::Instant::now();
+        while child.try_wait().map_err(|e| e.to_string())?.is_none() && start.elapsed() < GNU_TIMEOUT {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+            let _ = child.kill();
+            let _ = child.wait();
+            eprintln!("GNU oracle ran out of {GNU_TIMEOUT:?} (attempt {attempt} of {GNU_ATTEMPTS})");
+            continue;
+        }
+        let output = child.wait_with_output().map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+        }
+        return String::from_utf8(output.stdout).map_err(|e| e.to_string());
+    }
+    Err(format!("GNU oracle gave no answer in {GNU_ATTEMPTS} tries of {GNU_TIMEOUT:?}"))
+}
+
+/// CASE as the pins name it: the server's port and the authority's path
+/// as placeholders, so a changed case shows as a stale pin.
+fn template(case: &str, port: u16) -> String {
+    case.replace(&fixture("ca.pem").display().to_string(), "CA").replace(&format!(":service {port}"), ":service PORT")
+}
+
+/// The case's printed value as character codes, the form GNU prints it in.
+fn as_codes(case: &str) -> String {
+    format!("(append (prin1-to-string (condition-case e {case} (error (list 'signal e)))) nil)")
+}
+
+/// The oracle's identity: its repository revision and its binary's SHA-256.
+fn gnu_identity() -> (String, String) {
+    use sha2::Digest;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let revision = gnu(&["-Q", "--batch", "--eval", "(princ emacs-repository-version)"]).expect("GNU revision");
+    let digest = sha2::Sha256::digest(std::fs::read(&binary).expect("GNU binary"));
+    (revision, digest.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn pins_path() -> PathBuf {
+    fixture("gnu-answers.json")
+}
+
+/// The pins' answer under KEY, or GNU's live to ARGS under ROMACS_GNUTLS_LIVE
+/// or ROMACS_GNUTLS_RECORD (which writes it to a pins file of its own,
+/// merged by regenerate.sh).
+fn pinned_or_live(key: &str, args: &[&str]) -> String {
+    let live = std::env::var_os("ROMACS_GNUTLS_LIVE").is_some();
+    let record = std::env::var_os("ROMACS_GNUTLS_RECORD").is_some();
+    if !live && !record {
+        let pins: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(pins_path()).unwrap()).unwrap();
+        return pins[key].as_str().unwrap_or_else(|| panic!("no pin {key}: run tests/fixtures/tls/regenerate.sh")).to_owned();
+    }
+    let answer = gnu(args).unwrap_or_else(|e| panic!("GNU on {key}: {e}"));
+    if record {
+        std::fs::write(fixture(&format!("gnu-{key}.json")), serde_json::to_string(&serde_json::json!({key: answer})).unwrap()).unwrap();
+    }
+    answer
+}
+
+/// GNU's answer to each case: the pins, or GNU itself under
+/// ROMACS_GNUTLS_LIVE or ROMACS_GNUTLS_RECORD (which also rewrites the pins).
+fn gnu_answers(cases: &[String], port: u16) -> Vec<String> {
+    let live = std::env::var_os("ROMACS_GNUTLS_LIVE").is_some();
+    let record = std::env::var_os("ROMACS_GNUTLS_RECORD").is_some();
+    if !live && !record {
+        let pins: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(pins_path()).unwrap()).unwrap();
+        let pinned = pins["cases"].as_array().unwrap();
+        assert_eq!(pinned.len(), cases.len(), "stale pins: run tests/fixtures/tls/regenerate.sh");
+        return cases.iter().zip(pinned).map(|(case, pin)| {
+            assert_eq!(pin["source"].as_str().unwrap(), template(case, port), "stale pin: run tests/fixtures/tls/regenerate.sh");
+            pin["gnu"].as_str().unwrap().to_owned()
+        }).collect();
+    }
+    let answers: Vec<String> = cases.iter().enumerate().map(|(index, case)| {
+        eprintln!("gnutls case {index}");
+        let answer = gnu(&["-Q", "--batch", "--eval", "(require 'gnutls)", "--eval", &format!("(prin1 {})", as_codes(case))])
+            .unwrap_or_else(|e| panic!("GNU on case {index}: {e}"));
+        eprintln!("gnutls case {index}: GNU answered");
+        answer
+    }).collect();
+    if record {
+        let (revision, sha256) = gnu_identity();
+        let pins = serde_json::json!({
+            "revision": revision, "gnu_binary_sha256": sha256, "regime": "-Q --batch; (require 'gnutls)",
+            "cases": cases.iter().zip(&answers).map(|(case, gnu)| serde_json::json!({"source": template(case, port), "gnu": gnu})).collect::<Vec<_>>(),
+        });
+        std::fs::write(pins_path(), serde_json::to_string_pretty(&pins).unwrap() + "\n").unwrap();
+    }
+    answers
+}
+
 #[test]
 fn tls_sessions_match_pinned_gnu() {
-    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let port = start_server();
     let mut vm = bootstrapped();
     vm.eval_source("(progn (require 'gnutls) (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))").unwrap();
+    let cases = cases(port);
+    let answers = gnu_answers(&cases, port);
     let mut failures = Vec::new();
-    for (index, case) in cases(port).into_iter().enumerate() {
-        eprintln!("gnutls case {index}");
-        let source = format!("(append (prin1-to-string (condition-case e {case} (error (list 'signal e)))) nil)");
-        let output = std::process::Command::new(&binary)
-            .args(["-Q", "--batch", "--eval", "(require 'gnutls)", "--eval", &format!("(prin1 {source})")]).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
-        eprintln!("gnutls case {index}: GNU answered");
-        let actual = vm.eval_source(&source).and_then(|v| v.display());
+    for (index, (case, expected)) in cases.iter().zip(&answers).enumerate() {
+        eprintln!("gnutls case {index}: Romacs");
+        let actual = vm.eval_source(&as_codes(case)).and_then(|v| v.display());
         if actual.as_deref() != Ok(expected.as_str()) {
             let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
                 .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
-            failures.push(format!("{case}\n  GNU    {}\n  Romacs {:?}", text(&expected), actual.as_deref().map(text)));
+            failures.push(format!("{case}\n  GNU    {}\n  Romacs {:?}", text(expected), actual.as_deref().map(text)));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -156,15 +260,59 @@ fn nowait_verification_refusal_fails_the_connection() {
 /// the session capability, with GNU's shape for the queries (VM2-TLS1).
 #[test]
 fn tls_capability_claims_sessions_only() {
-    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let shape = "(list (func-arity 'gnutls-available-p) (subrp (symbol-function 'gnutls-available-p)) (special-variable-p 'libgnutls-version) (integerp libgnutls-version) (listp (gnutls-available-p)) gnutls-log-level)";
-    let output = std::process::Command::new(oracle)
-        .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {shape}))")])
-        .stdin(std::process::Stdio::null()).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let gnu = String::from_utf8(output.stdout).unwrap();
+    let gnu = pinned_or_live("capability", &["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {shape}))")]);
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     assert_eq!(vm.eval_source(&format!("(prin1-to-string {shape})")).unwrap().display().unwrap(), format!("{gnu:?}"));
     assert_eq!(vm.eval_source("(list (gnutls-available-p) libgnutls-version)").unwrap().display().unwrap(), "((gnutls gnutls3) -1)");
+}
+
+/// A 200 KB line sent over TLS comes back whole, every time: twenty
+/// echoes, each bounded, so a stall reports how far the echo got instead
+/// of hanging the suite.
+#[test]
+fn a_large_echo_completes_every_time() {
+    let port = start_server();
+    let mut vm = bootstrapped();
+    vm.eval_source("(progn (require 'gnutls) (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))").unwrap();
+    let ca = fixture("ca.pem").display().to_string();
+    for round in 0..20 {
+        let case = format!(r#"(let* ((b (get-buffer-create "echo-{round}"))
+                 (p (make-network-process :name "echo-{round}" :host "127.0.0.1" :service {port} :buffer b :coding 'utf-8 :noquery t))
+                 (deadline (+ (float-time) 10)))
+            (gnutls-boot p 'gnutls-x509pki (list :hostname "localhost" :trustfiles (list {ca:?}) :verify-error t))
+            (process-send-string p (concat (make-string 200000 ?a) "\n"))
+            (while (and (< (buffer-size b) 200007) (< (float-time) deadline))
+              (accept-process-output p 1))
+            (prog1 (buffer-size b) (delete-process p) (kill-buffer b)))"#);
+        let got = vm.eval_source(&case).unwrap().display().unwrap();
+        assert_eq!(got, "200007", "round {round}: the echo stopped at {got} of 200007 bytes");
+    }
+}
+
+
+/// A :nowait connection that boots TLS through :tls-parameters opens and
+/// tells its sentinel, every time: twenty, each bounded, so a lost event
+/// fails the round instead of waiting for ever.
+#[test]
+fn a_nowait_tls_connection_opens_every_time() {
+    let port = start_server();
+    let mut vm = bootstrapped();
+    vm.eval_source("(require 'gnutls)").unwrap();
+    let ca = fixture("ca.pem").display().to_string();
+    for round in 0..20 {
+        let case = format!(r#"(let* ((events nil)
+                  (p (make-network-process :name "nowait-{round}" :host "127.0.0.1" :service {port} :noquery t :nowait t
+                       :sentinel (lambda (_p m) (push m events))
+                       :tls-parameters (cons 'gnutls-x509pki (gnutls-boot-parameters :hostname "localhost" :trustfiles (list {ca:?})))))
+                  (deadline (+ (float-time) 10)))
+            (while (and (null events) (< (float-time) deadline))
+              (accept-process-output nil 1))
+            (prog1 (let ((got (list (process-status p) events)))
+                     (if (equal got '(open ("open\n"))) t (prin1-to-string got)))
+              (delete-process p)))"#);
+        let got = vm.eval_source(&case).unwrap().display().unwrap();
+        assert_eq!(got, "t", "round {round}: {got}");
+    }
 }
