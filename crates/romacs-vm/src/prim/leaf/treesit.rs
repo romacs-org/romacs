@@ -225,6 +225,7 @@ impl Leaf<'_> {
         let mut base = format!("libtree-sitter-{name}").into_bytes();
         let mut c_name = format!("tree_sitter_{}", name.replace('-', "_")).into_bytes();
         let overrides = self.ts_value("treesit-load-name-override-list")?;
+        let mut overridden = false;
         for entry in self.ts_list_values(overrides) {
             let Some((lang, rest)) = self.pair(entry) else { return Err(Fault::Wrong("listp", entry)) };
             self.ts_symbol(lang)?;
@@ -233,6 +234,7 @@ impl Leaf<'_> {
                 let (library, function) = (items.first().copied().unwrap_or(Value::NIL), items.get(1).copied().unwrap_or(Value::NIL));
                 base = self.ts_string_bytes(library)?;
                 c_name = self.ts_string_bytes(function)?;
+                overridden = true;
                 break;
             }
         }
@@ -244,32 +246,25 @@ impl Leaf<'_> {
         let mut sub = b"tree-sitter/".to_vec();
         sub.extend_from_slice(&base);
         stems.push(self.ts_expand(&sub, user)?);
-        stems.push(base);
         let suffixes = self.ts_value("dynamic-library-suffixes")?;
         let suffixes: Vec<Vec<u8>> = self.ts_list_values(suffixes).into_iter().filter_map(|s| self.string_bytes(s).ok()).collect();
         let mut errors = Vec::new();
-        let mut opened = None;
-        'stems: for stem in &stems {
-            // GNU conses each suffix's names before the last's.
-            for suffix in suffixes.iter().rev() {
-                let mut plain = stem.clone();
-                plain.extend_from_slice(suffix);
-                let mut candidates = vec![plain.clone()];
-                for version in (native::MIN_ABI_VERSION..=native::ABI_VERSION).rev() {
-                    candidates.push([&plain[..], format!(".{version}.0").as_bytes()].concat());
-                }
-                candidates.push([&plain[..], b".0"].concat());
-                candidates.push([&plain[..], b".0.0"].concat());
-                for candidate in candidates {
-                    match native::open_library(&candidate) {
-                        Ok(handle) => {
-                            opened = Some((handle, candidate));
-                            break 'stems;
-                        }
-                        Err(message) => errors.push(message),
-                    }
-                }
+        let mut opened = Self::ts_open_first(&stems, &suffixes, &mut errors);
+        // VM2-TREESIT-BUNDLED: after the user's directories, before the
+        // system's, the grammar linked into the executable, unless the
+        // override list names another library for the language.
+        if opened.is_none() && !overridden
+            && let Some(grammar) = ts::bundled_grammars().iter().find(|g| g.name == name)
+        {
+            let lang = native::Language::from_function(grammar.language);
+            let file = crate::host::current_exe().ok().map(|p| p.to_string_lossy().into_owned());
+            if lang.compatible() {
+                LANGUAGES.lock().unwrap().push((name, lang, file.clone()));
+                return Ok(Ok((lang, file)));
             }
+        }
+        if opened.is_none() {
+            opened = Self::ts_open_first(std::slice::from_ref(&base), &suffixes, &mut errors);
         }
         let Some((handle, library)) = opened else {
             let mut data = vec![self.intern("not-found")];
@@ -293,6 +288,31 @@ impl Leaf<'_> {
         }
         LANGUAGES.lock().unwrap().push((name, lang, file.clone()));
         Ok(Ok((lang, file)))
+    }
+    /// dynlib_open of each name GNU tries for STEMS, in its order: the
+    /// first library that opens and its file name, else None with every
+    /// attempt's message in ERRORS.
+    fn ts_open_first(stems: &[Vec<u8>], suffixes: &[Vec<u8>], errors: &mut Vec<String>) -> Option<(*mut std::ffi::c_void, Vec<u8>)> {
+        for stem in stems {
+            // GNU conses each suffix's names before the last's.
+            for suffix in suffixes.iter().rev() {
+                let mut plain = stem.clone();
+                plain.extend_from_slice(suffix);
+                let mut candidates = vec![plain.clone()];
+                for version in (native::MIN_ABI_VERSION..=native::ABI_VERSION).rev() {
+                    candidates.push([&plain[..], format!(".{version}.0").as_bytes()].concat());
+                }
+                candidates.push([&plain[..], b".0"].concat());
+                candidates.push([&plain[..], b".0.0"].concat());
+                for candidate in candidates {
+                    match native::open_library(&candidate) {
+                        Ok(handle) => return Some((handle, candidate)),
+                        Err(message) => errors.push(message),
+                    }
+                }
+            }
+        }
+        None
     }
     fn ts_string_bytes(&self, v: Value) -> R<Vec<u8>> {
         if !self.ts_is_string(v) { return Err(Fault::Wrong("stringp", v)); }
@@ -1860,6 +1880,19 @@ impl Leaf<'_> {
             Ok((lang, _)) => fixnum(i64::from(lang.abi_version())),
             Err(_) => Value::NIL,
         })
+    }
+    /// The grammars linked into the executable (VM2-TREESIT-BUNDLED), each
+    /// (:name LANGUAGE :url URL :commit COMMIT :abi VERSION), LANGUAGE a symbol.
+    pub(crate) fn ts_bundled_grammars(&mut self) -> Out {
+        let keys = [self.intern(":name"), self.intern(":url"), self.intern(":commit"), self.intern(":abi")];
+        let mut out = Vec::new();
+        for grammar in ts::bundled_grammars() {
+            let abi = native::Language::from_function(grammar.language).abi_version();
+            let plist = [keys[0], self.intern(grammar.name), keys[1], self.string(grammar.url),
+                         keys[2], self.string(grammar.commit), keys[3], fixnum(i64::from(abi))];
+            out.push(self.ts_list(&plist));
+        }
+        Ok(self.ts_list(&out))
     }
     pub(crate) fn ts_grammar_location(&mut self, language: Value) -> Out {
         self.ts_symbol(language)?;

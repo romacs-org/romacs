@@ -88,6 +88,7 @@ use std::sync::Arc;
 mod code_image;
 mod sqlite;
 mod treesit;
+pub use treesit::{BundledGrammar, register_bundled_grammars};
 mod random;
 mod digest;
 mod posix_tz;

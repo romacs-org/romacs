@@ -31,6 +31,7 @@ mod batch;
 mod user_init;
 mod measure;
 mod fonts;
+mod grammars;
 mod timers;
 mod world;
 mod isolate_worker;
@@ -561,6 +562,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if client::selected(&argv) { std::process::exit(client::main(&argv)); }
     if argv.first().map(String::as_str) == Some("--server-exited") { std::process::exit(client::exited(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
+    grammars::register();
     // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
     fonts::register_icon_font();
     let mut args = argv.into_iter();
