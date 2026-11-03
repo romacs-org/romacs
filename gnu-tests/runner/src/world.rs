@@ -101,18 +101,40 @@ pub fn finish(vm: &mut Vm, out: &Path) -> ! {
 /// preload after it from the same Romacs tree, up to the first that is not
 /// (a suite's setup file). None without the bootstrap first.
 pub fn world_preloads(preload: &[PathBuf]) -> usize {
-    let Some(root) = preload.first()
+    let Some(root) = world_root(preload) else { return 0 };
+    preload.iter().take_while(|p| p.starts_with(root)).count()
+}
+
+/// The tree the world's preloads are in: the bootstrap preload's.
+fn world_root(preload: &[PathBuf]) -> Option<&Path> {
+    preload.first()
         .filter(|p| p.file_name().is_some_and(|n| n == "romacs-loadup-bootstrap.el"))
         .and_then(|p| p.parent()?.parent())
-    else { return 0 };
-    preload.iter().take_while(|p| p.starts_with(root)).count()
+}
+
+/// The load path the world is built with and keyed on: the entries in its
+/// preloads' tree. A run's own, its test's directory, is added to a
+/// restored world's (`run_load_path`), so worlds are shared across runs.
+fn world_load_path(args: &crate::Args) -> Vec<PathBuf> {
+    let Some(root) = world_root(&args.preload) else { return vec![] };
+    args.load_path.iter().filter(|p| p.starts_with(root)).cloned().collect()
+}
+
+/// A restored world's `load-path' made the run's: its own entries outside
+/// the world's tree appended, in the order a fresh VM has them.
+fn run_load_path(vm: &mut Vm, args: &crate::Args) -> Result<(), String> {
+    let own = world_load_path(args);
+    let extra: Vec<String> = args.load_path.iter().filter(|p| !own.contains(p))
+        .map(|p| serde_json::to_string(&p.to_string_lossy()).unwrap_or_default()).collect();
+    if extra.is_empty() { return Ok(()); }
+    crate::eval(vm, &format!("(setq load-path (append load-path (list {})))", extra.join(" "))).map(drop).map_err(|e| e.1)
 }
 
 /// The recipe of the runner's world (§7): every embedder step before the
 /// world's end, in order.
 fn recipe(args: &crate::Args) -> Vec<String> {
     let mut lines = vec!["consumer romacs-gnu-ert".to_owned(), "noninteractive t".into(), "geometry 80 25 1 1".into()];
-    lines.extend(args.load_path.iter().map(|p| format!("load-path {}", p.display())));
+    lines.extend(world_load_path(args).iter().map(|p| format!("load-path {}", p.display())));
     lines.push("prelude".into());
     lines.extend(args.preload[..world_preloads(&args.preload)].iter().map(|p| format!("preload {}", p.display())));
     lines
@@ -151,6 +173,10 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
                 crate::emit(json!({"event": "setup", "ok": false, "phase": "world-restart", "error": e.1}));
                 std::process::exit(3);
             }
+            if let Err(error) = run_load_path(&mut vm, args) {
+                crate::emit(json!({"event": "setup", "ok": false, "phase": "load-path", "error": error}));
+                std::process::exit(3);
+            }
             let chain = manifest["events"]["chain"].as_array().cloned().unwrap_or_default();
             crate::emit(json!({"event": "world", "mode": "restored", "key": manifest["key"],
                                "restart_ms": started.elapsed().as_secs_f64() * 1e3}));
@@ -167,13 +193,13 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
 /// The builder: run the world's preloads in build mode, confined, then
 /// publish the world and exit, 0 when it was published.
 fn build(world: &World, args: &crate::Args, count: usize) -> ! {
-    let roots = world.build_roots(args.load_path.iter().chain(&args.preload[..count]).cloned().collect());
+    let roots = world.build_roots(world_load_path(args).into_iter().chain(args.preload[..count].iter().cloned()).collect());
     if let Err(e) = world.begin_build(&roots) {
         crate::emit(json!({"event": "world-build", "ok": false, "error": e.to_string()}));
         std::process::exit(3);
     }
     let built = world.build(|| {
-        let mut vm = crate::fresh_vm(args);
+        let mut vm = crate::fresh_vm(&crate::Args { load_path: world_load_path(args), ..args.clone() });
         let mut chain = vec![];
         if !crate::load_chain(&mut vm, args, 0, count, &mut chain) || chain.iter().any(|e| e["loaded"] != true) {
             return Err(json!({"chain": chain}).to_string());
