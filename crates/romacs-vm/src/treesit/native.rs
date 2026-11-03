@@ -71,6 +71,11 @@ pub(crate) fn language_symbol(handle: *mut c_void, name: &[u8]) -> Result<(Langu
 }
 
 impl Language {
+    /// The language a linked-in grammar's `tree_sitter_LANG` returns.
+    pub(crate) fn from_function(function: unsafe extern "C" fn() -> *const ()) -> Self {
+        // SAFETY: a grammar function returns its static TSLanguage.
+        Language(unsafe { function() }.cast())
+    }
     pub(crate) fn abi_version(self) -> u32 {
         // SAFETY: a loaded grammar.
         unsafe { ffi::ts_language_abi_version(self.0) }
