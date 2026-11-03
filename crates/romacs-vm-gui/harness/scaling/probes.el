@@ -780,6 +780,35 @@ thousandth a stack mark."
                 (current-buffer))
   :body (with-current-buffer it (if (cl-evenp i) (forward-char 1) (backward-char 1))))
 
+;; Motion and measurement in one long wrapped line of N words, around its
+;; middle: a step's rows are laid out from the line's start, so the work
+;; is linear in the line; a rescan per row would make it quadratic.
+(defun scaling--wrapped-line (n word-wrap)
+  "Show one line of N words, wrapped at words when WORD-WRAP; return its buffer."
+  (switch-to-buffer (get-buffer-create "scaling-wrapped")) (erase-buffer)
+  (dotimes (i n) (insert (format "word%d " i)))
+  (insert "\n")
+  (setq-local truncate-lines nil)
+  (if word-wrap (visual-line-mode 1) (setq-local word-wrap nil))
+  (goto-char (/ (point-max) 2))
+  (current-buffer))
+
+(defun scaling--wrapped-step (i)
+  "Move vertically from the middle, to the visual line's ends, and measure."
+  (goto-char (/ (point-max) 2))
+  (vertical-motion (if (cl-evenp i) 3 -3))
+  (end-of-visual-line)
+  (beginning-of-visual-line)
+  (window-text-pixel-size nil (line-beginning-position) (point)))
+
+(scaling-probe wrapped-line-words :gui t :n 1000 :steps 20
+  :setup (scaling--wrapped-line n t)
+  :body (with-current-buffer it (scaling--wrapped-step i)))
+
+(scaling-probe wrapped-line-continued :gui t :n 1000 :steps 20
+  :setup (scaling--wrapped-line n nil)
+  :body (with-current-buffer it (scaling--wrapped-step i)))
+
 ;;;; Running
 
 (defun scaling--probe (name)

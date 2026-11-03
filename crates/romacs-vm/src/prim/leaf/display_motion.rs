@@ -131,6 +131,9 @@ pub(super) struct It {
     /// The x the last row's line number took (lnum_pixel_width), kept
     /// across rows, 0 before any.
     pub lnum_last: i64,
+    /// The glyphs this row's line number took (GNU's lnum_width + 2), else
+    /// 0: the hpos of the row's first text glyph.
+    pub lnum_hpos: i64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -140,9 +143,6 @@ pub(super) struct Ctx {
     pub tab_width: i64,
     pub zv: i64,
     pub zv_after_newline: bool,
-    /// Whether a row may be continued or truncated. A host that lays out
-    /// neither cannot show such a row, so meeting one is refused.
-    pub breaks: bool,
     /// `display-line-numbers': how each row's number is labelled.
     pub lnum: Option<super::text_pixel_size::LineLabels>,
 }
@@ -154,10 +154,6 @@ pub(super) enum Move { Undefined, PosMatchOrZv, NewlineOrCr, LineTruncated, Line
 pub(super) struct Op { pub pos: bool, pub x: bool, pub y: bool, pub vpos: bool }
 const POS: Op = Op { pos: true, x: false, y: false, vpos: false };
 
-/// The refusal for a row a host would have to continue or truncate.
-fn unbroken() -> Fault {
-    Fault::Error("VM2 window-text-pixel-size of a continued or truncated line in a displayed window is unsupported".into())
-}
 
 fn wrap(cx: &Ctx, it: &It) -> Wrap {
     // handle_line_prefix truncates while the prefix is shown.
@@ -339,7 +335,7 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
         let moving = op.pos || op.x || op.y || op.vpos;
         if let Some(lnum) = cx.lnum && !(moving && to_x == 0) && it.current_x == 0 {
             let (glyphs, x) = lnum.prefix(src.line_at(it.index)?);
-            (it.current_x, it.hpos, it.lnum_x, it.lnum_last) = (x, glyphs, x, x);
+            (it.current_x, it.hpos, it.lnum_x, it.lnum_last, it.lnum_hpos) = (x, glyphs, x, x, glyphs);
         }
         if it.prefix.is_none() { handle_line_prefix(src, it)?; }
         subject = u8::from(it.prefix.is_some());
@@ -399,7 +395,6 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
                         if atx_it.is_none() { let mut a = *it; (a.current_x, a.max_h) = (x, max_h); atx_it = Some(a); }
                     }
                 }
-                if !cx.breaks && new_x > cx.last_visible_x { return Err(unbroken()); }
                 let beyond = new_x > cx.last_visible_x && (subject == 0 || (i != 0 && x > cx.last_visible_x));
                 if line_wrap != Wrap::Truncate && beyond {
                     result = continue_line(src, cx, it, &e, ContinueAt { i, x, new_x, x0, hpos_before, max_h },
@@ -442,9 +437,6 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
             break;
         }
     }
-    if !cx.breaks && matches!(result, Move::LineContinued | Move::LineTruncated) {
-        return Err(unbroken());
-    }
     let ww = wrap(cx, it) == Wrap::Word;
     match (wrap_it, atpos_it, atx_it) {
         (Some(w), a, b) if result == Move::LineContinued && ww
@@ -465,7 +457,10 @@ struct ContinueAt { i: i64, x: i64, new_x: i64, x0: i64, hpos_before: i64, max_h
 fn continue_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, e: &Elem, at: ContinueAt,
     wrap_it: &mut Option<It>, atpos_it: &mut Option<It>, atx_it: &mut Option<It>, reached: &impl Fn(&Elem) -> bool) -> R<Move> {
     let line_wrap = wrap(cx, it);
-    if it.hpos == 0 {
+    // The row's first text glyph does not fit (a wide image, or a TAB
+    // after the line number): it stays on the row (hpos == 0 modulo the
+    // line number's width, move_it_in_display_line_to).
+    if it.hpos == it.lnum_hpos {
         it.hpos += 1;
         it.current_x = at.new_x;
         if at.i == it.nglyphs - 1 {
@@ -600,6 +595,7 @@ pub(super) fn move_to<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: i64, 
         line_start_x = 0;
         it.hpos = 0;
         it.lnum_x = 0;
+        it.lnum_hpos = 0;
         it.current_y += it.max_h;
         it.vpos += 1;
         it.max_h = 0;
@@ -687,6 +683,7 @@ pub(super) fn text_size<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, m: &Meas
     it.current_x = 0;
     it.hpos = 0;
     it.lnum_x = 0;
+    it.lnum_hpos = 0;
     it.wrap_prefix_width = 0;
     let mut start_x;
     if charpos(src, &it)? != start {

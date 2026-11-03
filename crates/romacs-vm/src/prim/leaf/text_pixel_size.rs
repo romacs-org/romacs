@@ -105,9 +105,9 @@ impl Leaf<'_> {
             let mut hosted = Hosted::new(source);
             let cx = hosted_context(&mut hosted, cx, area)?;
             // GNU starts at the previous visible line start and moves to
-            // START (window-text-pixel-size, xdisp.c); a host that breaks
-            // rows only at newlines starts START's row at START when a plain
-            // newline precedes it, so the text before cannot change it.
+            // START (window-text-pixel-size, xdisp.c); a row starts at START
+            // when a plain newline precedes it, so the text before cannot
+            // change it.
             let origin = if hosted.source().starts_row(start)? { start } else { hosted.source().visible_line_start(start)? };
             hosted.reset(origin)?;
             let it = motion::screen_line_start(&mut hosted, &cx, start)?;
@@ -769,7 +769,6 @@ impl Leaf<'_> {
             tab_width: self.tab_width()? as i64,
             zv,
             zv_after_newline,
-            breaks: !area.hosted,
             lnum,
         })
     }
@@ -862,13 +861,12 @@ struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height
 /// init_iterator's last visible x on a window-system frame, in the
 /// host's pixels: the text area, less the truncation or continuation
 /// glyph's advance in the default face when there is no right fringe to
-/// show its indicator in (xdisp.c:3510-3518). The host continues and
-/// truncates rows as GNU does, but wraps no words.
+/// show its indicator in (xdisp.c:3510-3518). The host continues,
+/// truncates and word-wraps rows as GNU does (romacs-layout2 `WordBreaks').
 fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> std::result::Result<Ctx, Fault> {
     let advance = if area.right_fringe > 0 { 0 } else { hosted.default_advance(if cx.wrap == Wrap::Truncate { '$' } else { '\\' })?.0 };
     // Iterator x counts from the line's start, the hidden columns too.
     cx.last_visible_x = area.first_visible * area.column + area.body_width - advance;
-    cx.breaks = cx.wrap != Wrap::Word;
     Ok(cx)
 }
 

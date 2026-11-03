@@ -37,9 +37,11 @@
 (defvar romacs-clipboard-last-text nil)
 
 (defun romacs-clipboard-selection-value ()
-  "Return new desktop text, falling back to the kill ring on clipboard errors."
+  "Return new desktop text, falling back to the kill ring on clipboard errors.
+Empty text is no text, as in GNU's `gui-selection-value' (select.el)."
   (condition-case nil
       (let ((text (romacs--clipboard-text)))
+        (when (equal text "") (setq text nil))
         (unless (equal text romacs-clipboard-last-text)
           (setq romacs-clipboard-last-text text)
           text))

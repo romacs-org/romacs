@@ -136,6 +136,23 @@ fn ordinary_region_copy_kill_yank_and_registers_share_state() {
 }
 
 #[test]
+fn an_empty_clipboard_is_no_new_kill() {
+    let mut vm = setup();
+    vm.eval_source("(setq kill-ring nil)").unwrap();
+    // An empty CLIPBOARD (another program, or a read racing a set) is no
+    // new text: `current-kill' keeps the kill, as GNU's select.el does.
+    assert_eq!(printed(&mut vm, "(let ((set (symbol-function 'romacs--clipboard-set)) (get (symbol-function 'romacs--clipboard-text)) (interprogram-cut-function 'romacs-clipboard-select-text) (interprogram-paste-function 'romacs-clipboard-selection-value))
+        (defvar romacs-test-desktop nil)
+        (unwind-protect
+            (progn (fset 'romacs--clipboard-set (lambda (text) (setq romacs-test-desktop text)))
+                   (fset 'romacs--clipboard-text (lambda () romacs-test-desktop))
+                   (kill-new \"killed\") (setq romacs-test-desktop \"\")
+                   (list (current-kill 0) (length kill-ring) (progn (setq romacs-test-desktop \"other\") (current-kill 0))))
+          (fset 'romacs--clipboard-set set) (fset 'romacs--clipboard-text get)))"),
+               "(\"killed\" 1 \"other\")", "EMPTY_CLIPBOARD_IS_NO_NEW_TEXT");
+}
+
+#[test]
 fn active_regions_are_rendered_without_modifying_text() {
     let mut vm = setup();
     vm.eval_source("(goto-char 2) (set-mark 6) (setq saved-tick (buffer-chars-modified-tick))").unwrap();
