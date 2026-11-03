@@ -155,8 +155,11 @@ or a repeat."
          (unless (member (plist-get event :text) '("requesting" "compacting"))
            (romacs-agent-ui--line session event (format "· %s" (plist-get event :text)) 'face 'romacs-agent-dim)))
         ('error (romacs-agent-ui--line session event (format "! %s" (plist-get event :text)) 'face 'romacs-agent-error))
-        ('exit (romacs-agent-ui--line session event (format "· harness exited (%s)" (plist-get event :status))
-                                      'face 'romacs-agent-dim))
+        ('exit
+         ;; A per-turn harness ends every turn: only a failed run is news.
+         (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
+           (romacs-agent-ui--line session event (format "· harness exited (%s)" (plist-get event :status))
+                                  'face 'romacs-agent-dim)))
         ('session nil)
         (_ nil))
       (force-mode-line-update))))
@@ -229,8 +232,9 @@ or a repeat."
   "Render SESSION's journal into the current chat buffer."
   ;; A copy parses, so the live session's own state is not replayed over.
   (let ((scratch (copy-romacs-agent session)))
-    (setf (romacs-agent-seq scratch) 0
+    (setf (romacs-agent-seq scratch) 0 (romacs-agent-turns scratch) 0
           (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
+          (romacs-agent-tools scratch) (make-hash-table :test #'equal)
           (romacs-agent-approvals scratch) (make-hash-table :test #'equal))
     (let ((romacs-agent-event-functions (list (lambda (_ event) (romacs-agent-ui--render session event)))))
       (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record))))))

@@ -28,6 +28,8 @@ import sys
 import threading
 import time
 
+from romacs_mcp_client import RomacsMcp
+
 OUT = threading.Lock()
 LOG = os.environ.get('FAKE_HARNESS_LOG')
 
@@ -48,58 +50,20 @@ def argument(name):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
 
 
-class Mcp:
-    """The MCP client: the relay as a child, JSON-RPC over its stdio."""
-
-    def __init__(self, config_file):
-        server = json.load(open(config_file))['mcpServers']['romacs']
-        self.process = subprocess.Popen([server['command'], *server['args']], stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE, text=True, bufsize=1)
-        self.replies, self.next_id, self.lock = {}, 0, threading.Lock()
-        self.arrived = threading.Condition(self.lock)
-        threading.Thread(target=self.read, daemon=True).start()
-        self.request('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
-                                    'clientInfo': {'name': 'fake-harness', 'version': '1'}})
-        self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
-        self.instance = None
-
-    def read(self):
-        for line in self.process.stdout:
-            message = json.loads(line)
-            with self.lock:
-                self.replies[message.get('id')] = message
-                self.arrived.notify_all()
-
-    def send(self, message):
-        self.process.stdin.write(json.dumps(message) + '\n')
-        self.process.stdin.flush()
-
-    def request(self, method, params, timeout=120):
-        with self.lock:
-            self.next_id += 1
-            ident = self.next_id
-        self.send({'jsonrpc': '2.0', 'id': ident, 'method': method, 'params': params})
-        with self.lock:
-            self.arrived.wait_for(lambda: ident in self.replies, timeout)
-            return ident, self.replies.pop(ident, {'error': {'message': 'no reply'}})
-
-    def tool(self, name, arguments):
-        """(request id, text, is-error) of one tools/call."""
-        ident, reply = self.request('tools/call', {'name': name, 'arguments': arguments})
-        if 'error' in reply:
-            return ident, reply['error'].get('message', ''), True
-        result = reply['result']
-        return ident, ''.join(c.get('text', '') for c in result.get('content', [])), result.get('isError', False)
-
-
 class Harness:
     def __init__(self):
         self.session = argument('--session-id') or argument('--resume')
-        self.mcp = Mcp(argument('--mcp-config')) if argument('--mcp-config') else None
+        self.mcp = self.connect(argument('--mcp-config')) if argument('--mcp-config') else None
         self.inbox = queue.Queue()
         self.interrupted = threading.Event()
         self.approvals = {}
         self.turn = 0
+
+    @staticmethod
+    def connect(config_file):
+        """The MCP client: the relay the config names, as Claude Code runs it."""
+        server = json.load(open(config_file))['mcpServers']['romacs']
+        return RomacsMcp([server['command'], *server['args']], name='fake-harness')
 
     def init(self):
         emit({'type': 'system', 'subtype': 'init', 'session_id': self.session, 'model': 'fake-model',
@@ -122,10 +86,7 @@ class Harness:
 
     def call(self, name, arguments):
         if arguments.get('instance') == '?':
-            if not self.mcp.instance:
-                _, text, _ = self.mcp.tool('romacs_identity', {})
-                self.mcp.instance = json.loads(text)['instance']
-            arguments['instance'] = self.mcp.instance
+            arguments['instance'] = self.mcp.identity()
         use = f'toolu_{os.getpid()}_{time.time_ns()}'
         emit({'type': 'assistant', 'parent_tool_use_id': None,
               'message': {'id': use, 'content': [{'type': 'tool_use', 'id': use, 'name': f'mcp__romacs__{name}',
@@ -190,6 +151,11 @@ class Harness:
             seconds, _, command = rest.partition(' ')
             time.sleep(float(seconds))
             return self.run(command)
+        if text.startswith('Delegated task '):
+            # A delegated task's end, as Romacs wakes its parent.
+            log(wake=text[:400])
+            self.stream('woken')
+            return self.result(text)
         if verb == 'spawn':
             child = subprocess.Popen(['sh', '-c', f'while true; do date +%s.%N >> {rest}; sleep 0.2; done'],
                                      start_new_session=True)
