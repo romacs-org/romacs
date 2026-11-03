@@ -172,7 +172,7 @@ or a repeat."
 (defun romacs-agent-ui--header ()
   (let ((session romacs-agent-ui--session))
     (format " %s · %s · %s · %s%s"
-            (romacs-agent-harness session) (or (romacs-agent-model session) "…")
+            (romacs-agent-provider session) (or (romacs-agent-model session) "…")
             (abbreviate-file-name (or (romacs-agent-cwd session) ""))
             (romacs-agent-state session)
             (if (numberp (romacs-agent-cost session)) (format " · $%.4f" (romacs-agent-cost session)) ""))))
@@ -336,14 +336,14 @@ or a repeat."
 
 (define-derived-mode romacs-agents-mode tabulated-list-mode "Agents"
   "Every agent session this server knows."
-  (setq tabulated-list-format [("Session" 28 t) ("Harness" 8 t) ("State" 16 t) ("Cost" 9 t) ("Directory" 40 t)])
+  (setq tabulated-list-format [("Session" 28 t) ("Provider" 12 t) ("State" 16 t) ("Cost" 9 t) ("Directory" 40 t)])
   (setq tabulated-list-entries #'romacs-agents--entries)
   (tabulated-list-init-header))
 
 (defun romacs-agents--entries ()
   (mapcar (lambda (session)
             (list (romacs-agent-id session)
-                  (vector (or (romacs-agent-title session) "") (symbol-name (romacs-agent-harness session))
+                  (vector (or (romacs-agent-title session) "") (or (romacs-agent-provider session) "")
                           (symbol-name (romacs-agent-state session))
                           (if (numberp (romacs-agent-cost session)) (format "$%.4f" (romacs-agent-cost session)) "")
                           (abbreviate-file-name (or (romacs-agent-cwd session) "")))))

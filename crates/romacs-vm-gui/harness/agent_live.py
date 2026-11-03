@@ -4,6 +4,9 @@ reconnecting romacs-mcp relay) in a private headless labwc, HOME, XDG and
 TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 `claude' (no model is called).
 
+  providers  two instances of one harness: each harness gets its own
+             CLAUDE_CONFIG_DIR (the default instance none); a resume after a
+             restart uses the recorded one; a missing directory is refused.
   session    a session reads a buffer, edits it through romacs_buffer_edit,
              evaluates on the main VM, and its chat buffer shows each step;
              an approval the harness asks for is answered as the user says,
@@ -60,15 +63,27 @@ class Agents(Server):
         self.calls = self.root / 'harness-calls.jsonl'
         self.env['FAKE_HARNESS_LOG'] = str(self.calls)
         self.work = self.root / 'work'
+        # The default instance's directory, as a user who has run Claude Code has.
+        (self.home / '.claude').mkdir()
 
     def up(self):
         self.client('-n')
         self.pid = int(self.eval('(emacs-pid)'))
         self.eval(f"(progn (require 'romacs-agent) (setq romacs-agent-claude-program {lisp(HARNESS)}) t)")
 
-    def start(self, prompt):
-        sid = self.eval(f'(romacs-agent-id (romacs-agent-start {lisp(self.work)} {lisp_text(prompt)}))')
+    def start(self, prompt, provider=None):
+        named = f' nil {lisp_text(provider)}' if provider else ''
+        sid = self.eval(f'(romacs-agent-id (romacs-agent-start {lisp(self.work)} {lisp_text(prompt)}{named}))')
         return sid.strip('"')
+
+    def providers(self, entries):
+        """Set `romacs-agent-providers' to ENTRIES, (name, directory) pairs."""
+        self.eval('(setq romacs-agent-providers (list '
+                  + ' '.join(f'(cons {lisp_text(n)} {lisp_text(str(d))})' for n, d in entries) + '))')
+
+    def config_dirs(self, sid):
+        """CLAUDE_CONFIG_DIR of each harness started for SID, in order."""
+        return [e.get('config_dir') for e in self.logged() if e.get('started') == sid]
 
     def s(self, sid):
         return f'(romacs-agent-get {lisp_text(sid)})'
@@ -204,6 +219,56 @@ def survive(args, base):
         resumed = [e for e in a.logged() if 'started' in e][-1]
         result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and a.results(sid)[-1] == 'resumed'
         result['ok'] = result['harness_pid_same'] and new_pid == str(a.pid) and len(retries) <= 1 and result['resumed']
+        return result
+    finally:
+        a.close()
+
+
+def providers(args, base):
+    """Two instances of one harness, as T3 Code runs "Claude" and a second
+    account: each harness gets its instance's CLAUDE_CONFIG_DIR, the default
+    instance none (the editor's own value is not passed on); a session
+    resumed after a restart runs in the directory it recorded, though the
+    instance now names another; a missing directory is refused clearly."""
+    a = Agents(args, base, 'pv', {'CLAUDE_CONFIG_DIR': '/inherited/claude'})
+    try:
+        a.up()
+        second, moved = a.home / '.config/claude/second', a.home / '.config/claude/moved'
+        second.mkdir(parents=True)
+        moved.mkdir(parents=True)
+        a.providers([('claude', '~/.claude'), ('claude2', second)])
+        first = a.start('say one')
+        other = a.start('say two', 'claude2')
+        a.idle(first)
+        a.idle(other)
+        started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
+        shown = parity_live.read_sexp(parity_live.read_sexp(a.eval("(prin1-to-string (mapcar (lambda (e) (aref (cadr e) 1)) (romacs-agents--entries)))")))
+        a.eval(f'(romacs-agent-stop {a.s(other)})')
+        until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        a.restart()
+        a.providers([('claude', '~/.claude'), ('claude2', moved)])
+        a.eval(f'(romacs-agent-resume {a.s(other)})')
+        until(lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(other)})) t)') == 't', 15, 'resumed')
+        a.send(other, 'say resumed')
+        a.idle(other)
+        resumed = [e for e in a.logged() if e.get('started') == other][-1]
+        a.providers([('claude', '~/.claude'), ('claude3', a.home / 'missing')])
+        refused = a.eval(f'(let ((n (hash-table-count romacs-agent--sessions))) (condition-case err '
+                         f'(romacs-agent-start {lisp(a.work)} nil nil "claude3") '
+                         f'(user-error (list (cadr err) (= n (hash-table-count romacs-agent--sessions))))))')
+        # The default directory, named and missing, is refused too.
+        (a.home / '.claude').rmdir()
+        default_missing = a.eval(f'(condition-case err (romacs-agent-start {lisp(a.work)} nil nil "claude") '
+                                 '(user-error (cadr err)))')
+        result = {'started': started, 'dashboard': shown, 'resumed_config_dir': resumed.get('config_dir'),
+                  'resumed_with': '--resume' in resumed['argv'], 'missing': refused, 'default_missing': default_missing}
+        result['ok'] = (started == {'default': [None], 'claude2': [str(second)]}
+                        and sorted(shown) == ['claude', 'claude2']
+                        and resumed.get('config_dir') == str(second) and result['resumed_with']
+                        and 'does not exist' in refused and str(a.home / 'missing') in refused and refused.endswith(' t)')
+                        and f'{a.home}/.claude does not exist' in default_missing)
         return result
     finally:
         a.close()
@@ -474,7 +539,11 @@ def unit(args, base):
     a.unit = f'romacs-server-{a.name}'
     try:
         a.up()
-        sid = a.start('say ready')
+        # Under a second instance: the unit's harness gets its directory.
+        second = a.home / '.config/claude/second'
+        second.mkdir(parents=True)
+        a.providers([('claude', '~/.claude'), ('claude2', second)])
+        sid = a.start('say ready', 'claude2')
         a.idle(sid)
         unit_name = a.eval(f'(romacs-agent-unit {a.s(sid)})').strip('"')
         trace = a.root / 'grandchild.txt'
@@ -486,8 +555,9 @@ def unit(args, base):
         size = trace.stat().st_size
         time.sleep(1)
         result = {'unit': unit_name, 'grandchild_gone': not Path(f'/proc/{grandchild}').exists(),
-                  'stopped_writing': trace.stat().st_size == size}
-        result['ok'] = unit_name.startswith('romacs-agent-') and result['grandchild_gone'] and result['stopped_writing']
+                  'stopped_writing': trace.stat().st_size == size, 'config_dirs': a.config_dirs(sid)}
+        result['ok'] = (unit_name.startswith('romacs-agent-') and result['grandchild_gone'] and result['stopped_writing']
+                        and result['config_dirs'] == [str(second)])
         a.client('--stop=none')
         return result
     finally:
@@ -495,7 +565,7 @@ def unit(args, base):
         a.close()
 
 
-WORKFLOWS = {'host': host, 'deadline': deadline, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe}
+WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe}
 
 
 def main():
@@ -509,7 +579,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'survive', 'outcome', 'budget', 'deadline', 'probe']:
+    for name in args.workflow or ['host', 'session', 'providers', 'survive', 'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result

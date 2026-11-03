@@ -229,7 +229,7 @@ class Harness:
 
     def main(self):
         threading.Thread(target=self.read_stdin, daemon=True).start()
-        log(started=self.session, argv=sys.argv[1:])
+        log(started=self.session, argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'))
         while True:
             text = self.inbox.get()
             if text is None:

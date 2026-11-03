@@ -43,6 +43,28 @@ Romacs passes no permission mode of its own: the user's configuration
 decides, and these arguments may say otherwise."
   :type '(repeat string) :group 'romacs-agent)
 
+(defcustom romacs-agent-providers '(("claude" . "~/.claude"))
+  "The harness instances sessions run under, the first being the default.
+Each entry is (NAME . CONFIG-DIR), or (NAME :harness HARNESS :config-dir
+CONFIG-DIR :program PROGRAM :arguments ARGUMENTS) for more.  HARNESS, when
+omitted, is NAME's leading word (\"claude2\" and \"claude-work\" are
+Claude Code); PROGRAM and ARGUMENTS default to the harness's own options
+\(`romacs-agent-claude-program', `romacs-agent-claude-arguments').
+
+CONFIG-DIR is the harness's configuration directory, where it keeps its
+account, settings and conversations (Claude Code's CLAUDE_CONFIG_DIR).  It
+is given to the harness alone; the harness's default directory, or none,
+runs it with that variable unset, as the harness runs by default.  A
+session records its instance's directory, and resumes there."
+  :type '(repeat (choice (cons :tag "Name and directory" string directory)
+                         (cons :tag "Name and options" string plist)))
+  :group 'romacs-agent)
+
+(defcustom romacs-agent-default-provider nil
+  "The name of the instance `romacs-agent-start' offers first, or nil for
+the first of `romacs-agent-providers'."
+  :type '(choice (const nil) string) :group 'romacs-agent)
+
 (defcustom romacs-agent-reply-timeout 120
   "Seconds a session's relay waits for a tool call's answer while the
 editor is busy before it withdraws the call (`not executed' when it had
@@ -58,7 +80,7 @@ not started, `outcome unknown' when it had)."
 
 (cl-defstruct (romacs-agent (:constructor romacs-agent--make))
   "One agent session."
-  id harness cwd dir host-socket connection (seq 0) (state 'starting)
+  id harness provider config-dir cwd dir host-socket connection (seq 0) (state 'starting)
   title model harness-session cost unit buffer
   (approvals (make-hash-table :test #'equal))
   (streamed (make-hash-table :test #'equal))
@@ -113,12 +135,89 @@ not started, `outcome unknown' when it had)."
         (romacs-mcp-start (expand-file-name "server.sock" directory))
         romacs-mcp--socket)))
 
+;;; Provider instances
+
+(defconst romacs-agent--harnesses
+  '((claude :variable "CLAUDE_CONFIG_DIR" :default "~/.claude"
+            :program romacs-agent-claude-program :arguments romacs-agent-claude-arguments))
+  "The harnesses sessions run: the variable naming a harness's
+configuration directory, the directory it uses while that is unset, and
+the options holding its program and arguments.")
+
+(defun romacs-agent--harness-of (name)
+  "The harness an instance NAME names by its leading word."
+  (and (string-match "\\`[[:alpha:]]+" name) (intern (downcase (match-string 0 name)))))
+
+(defun romacs-agent--provider (entry)
+  "ENTRY of `romacs-agent-providers' as a plist: :name :harness :config-dir
+:program :arguments."
+  (let* ((name (car entry))
+         (options (if (listp (cdr entry)) (cdr entry) (list :config-dir (cdr entry))))
+         (harness (or (plist-get options :harness) (romacs-agent--harness-of name)))
+         (known (alist-get harness romacs-agent--harnesses)))
+    (unless known
+      (user-error "Agent provider %s: no harness %s (Romacs runs: %s)" name harness
+                  (mapconcat (lambda (h) (symbol-name (car h))) romacs-agent--harnesses ", ")))
+    (list :name name :harness harness :config-dir (plist-get options :config-dir)
+          :program (if (plist-member options :program) (plist-get options :program)
+                     (symbol-value (plist-get known :program)))
+          :arguments (if (plist-member options :arguments) (plist-get options :arguments)
+                       (symbol-value (plist-get known :arguments))))))
+
+(defun romacs-agent--configured (name)
+  "The configured instance NAME, or nil."
+  (when-let* ((entry (assoc name romacs-agent-providers))) (romacs-agent--provider entry)))
+
+(defun romacs-agent--instance (name harness)
+  "The instance NAME as configured now, else HARNESS's defaults: what a
+session recorded under NAME runs, its directory aside."
+  (let ((provider (romacs-agent--configured name)))
+    (if (eq (plist-get provider :harness) harness) provider
+      (romacs-agent--provider (list name :harness harness)))))
+
+(defun romacs-agent--config-dir (provider)
+  "PROVIDER's configuration directory, absolute, or nil for its harness's
+default (the harness then runs with its variable unset)."
+  (let ((dir (plist-get provider :config-dir))
+        (default (plist-get (alist-get (plist-get provider :harness) romacs-agent--harnesses) :default)))
+    (when (and dir (not (string= (file-name-as-directory (expand-file-name dir))
+                                 (file-name-as-directory (expand-file-name default)))))
+      (directory-file-name (expand-file-name dir)))))
+
+(defun romacs-agent--check-config-dir (provider dir)
+  "Signal a clear error when PROVIDER's configuration directory DIR is
+missing: the harness would start empty there, and could not resume."
+  (when (and dir (not (file-directory-p (expand-file-name dir))))
+    (user-error "Agent provider %s: configuration directory %s does not exist"
+                provider (expand-file-name dir))))
+
+(defun romacs-agent--environment-words (session)
+  "The `env' words giving SESSION's harness its configuration directory,
+whatever the editor's own environment and the user manager's say."
+  (let ((variable (plist-get (alist-get (romacs-agent-harness session) romacs-agent--harnesses) :variable)))
+    (if (romacs-agent-config-dir session)
+        (list "env" (concat variable "=" (romacs-agent-config-dir session)))
+      (list "env" "-u" variable))))
+
+(defun romacs-agent--default-provider ()
+  (or romacs-agent-default-provider (car (car romacs-agent-providers))
+      (user-error "No agent provider: `romacs-agent-providers' is empty")))
+
+(defun romacs-agent--read-provider ()
+  "An instance's name: asked for when there is more than one."
+  (let ((names (mapcar #'car romacs-agent-providers)))
+    (if (cdr names)
+        (completing-read (format-prompt "Provider" (romacs-agent--default-provider))
+                         names nil t nil nil (romacs-agent--default-provider))
+      (romacs-agent--default-provider))))
+
 ;;; Claude Code
 
 (defun romacs-agent--claude-argv (session resume)
   "Claude Code's command line for SESSION, resuming its conversation when
 RESUME is non-nil."
-  (let ((dir (romacs-agent-dir session)))
+  (let ((dir (romacs-agent-dir session))
+        (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))))
     (romacs-agent--write-json
      (expand-file-name "mcp.json" dir)
      (romacs-mcp--object
@@ -128,14 +227,15 @@ RESUME is non-nil."
                               "args" (vector "--socket" (romacs-agent--endpoint) "--reconnect"
                                              "--session" (romacs-agent-id session)
                                              "--reply-timeout" (number-to-string romacs-agent-reply-timeout))))))
-    (append (list romacs-agent-claude-program "-p" "--output-format" "stream-json"
+    (append (romacs-agent--environment-words session)
+            (list (plist-get instance :program) "-p" "--output-format" "stream-json"
                   "--input-format" "stream-json" "--verbose" "--include-partial-messages"
                   ;; The harness's own approvals come to this session's UI.
                   "--permission-prompt-tool" "stdio"
                   "--mcp-config" (expand-file-name "mcp.json" dir))
             (if resume (list "--resume" (romacs-agent-id session))
               (list "--session-id" (romacs-agent-id session)))
-            romacs-agent-claude-arguments)))
+            (plist-get instance :arguments))))
 
 (defun romacs-agent--line (session object)
   "Write OBJECT as one line to SESSION's harness."
@@ -346,6 +446,8 @@ Retried for a while: a new supervisor takes a moment to listen."
   (romacs-agent--write-json
    (expand-file-name "manifest.json" (romacs-agent-dir session))
    (romacs-mcp--object "id" (romacs-agent-id session) "harness" (symbol-name (romacs-agent-harness session))
+                       "provider" (romacs-agent-provider session)
+                       "configDir" (or (romacs-agent-config-dir session) :null)
                        "cwd" (romacs-agent-cwd session) "title" (romacs-agent-title session)
                        "created" (float-time) "argv" (vconcat argv)
                        "unit" (or (romacs-agent-unit session) :null)
@@ -383,19 +485,27 @@ manager answers, else detached."
     (romacs-agent--manifest session argv)))
 
 ;;;###autoload
-(defun romacs-agent-start (cwd &optional prompt title)
-  "Start a Claude Code session in CWD, sending PROMPT when given.
-Return the session."
-  (interactive (list (read-directory-name "Agent directory: " default-directory)
-                     (read-string "Prompt (empty for none): ")))
-  (let* ((id (romacs-agent--uuid))
+(defun romacs-agent-start (cwd &optional prompt title provider)
+  "Start a session in CWD under instance PROVIDER (a name in
+`romacs-agent-providers', by default `romacs-agent-default-provider'),
+sending PROMPT when given.  Return the session."
+  (interactive (let* ((cwd (read-directory-name "Agent directory: " default-directory))
+                      (provider (romacs-agent--read-provider)))
+                 (list cwd (read-string "Prompt (empty for none): ") nil provider)))
+  (let* ((name (or provider (romacs-agent--default-provider)))
+         (instance (or (romacs-agent--configured name)
+                       (user-error "No agent provider %s in `romacs-agent-providers'" name)))
+         (id (romacs-agent--uuid))
          (session (romacs-agent--make
-                   :id id :harness 'claude :cwd (expand-file-name cwd)
+                   :id id :harness (plist-get instance :harness) :provider name
+                   :config-dir (romacs-agent--config-dir instance) :cwd (expand-file-name cwd)
                    :title (or title (format "%s %s" (file-name-nondirectory (directory-file-name cwd))
                                             (romacs-agent--short id)))
                    :dir (expand-file-name id (romacs-agent--state-root))
                    :host-socket (expand-file-name (concat (romacs-agent--short id) "/host.sock")
                                                   (romacs-agent--runtime-root)))))
+    ;; The directory as configured: the harness's default too, when named.
+    (romacs-agent--check-config-dir name (plist-get instance :config-dir))
     (make-directory (romacs-agent-dir session) t)
     (set-file-modes (romacs-agent-dir session) #o700)
     (puthash id session romacs-agent--sessions)
@@ -458,9 +568,12 @@ asked, else it is denied with MESSAGE."
     (when-let* ((pid (romacs-agent-harness-pid session))) (signal-process pid 'TERM))))
 
 (defun romacs-agent-resume (session)
-  "Run SESSION's harness again on its conversation, after it ended."
+  "Run SESSION's harness again on its conversation, after it ended, in the
+configuration directory its instance had when it started: the harness
+keeps the conversation there."
   (when (process-live-p (romacs-agent-connection session))
     (user-error "Session %s is still attached" (romacs-agent-title session)))
+  (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   (let ((process-environment (cons "CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1" process-environment)))
     (romacs-agent--launch session (romacs-agent--claude-argv session t)))
@@ -475,6 +588,9 @@ asked, else it is denied with MESSAGE."
     (when (and manifest (not (gethash (gethash "id" manifest) romacs-agent--sessions)))
       (let ((session (romacs-agent--make
                       :id (gethash "id" manifest) :harness (intern (gethash "harness" manifest))
+                      ;; Sessions recorded before instances ran the harness's default.
+                      :provider (or (gethash "provider" manifest) (gethash "harness" manifest))
+                      :config-dir (gethash "configDir" manifest)
                       :cwd (gethash "cwd" manifest) :title (gethash "title" manifest)
                       :dir dir :unit (gethash "unit" manifest)
                       :host-socket (gethash "hostSocket" manifest) :state 'detached)))

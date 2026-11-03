@@ -26,10 +26,11 @@
 ;;; Generated autoloads from romacs-agent.el
 
 (autoload 'romacs-agent-start "romacs-agent"
-"Start a Claude Code session in CWD, sending PROMPT when given.
-Return the session.
+"Start a session in CWD under instance PROVIDER (a name in
+`romacs-agent-providers', by default `romacs-agent-default-provider'),
+sending PROMPT when given.  Return the session.
 
-(fn CWD &optional PROMPT TITLE)" t)
+(fn CWD &optional PROMPT TITLE PROVIDER)" t)
 (autoload 'romacs-agent-restore "romacs-agent"
 "Know every recorded session, and attach to those whose supervisor runs.
 A server runs this at its start, so sessions survive it.")
