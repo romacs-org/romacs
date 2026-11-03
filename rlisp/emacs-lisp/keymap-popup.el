@@ -1493,8 +1493,9 @@ Returns nil when BUF is dead (the popup already closed)."
   (let* ((window (if (plist-member (keymap-popup--session-state buf) :window)
                      (keymap-popup--display-window buf)
                    (get-buffer-window buf t)))
-         ;; `window-body-width' includes the continuation column.
-         (width (and window (max 1 (1- (window-body-width window)))))
+         ;; The columns a line can fill: a window without fringes keeps its
+         ;; last for the continuation glyph (`window-max-chars-per-line').
+         (width (and window (max 1 (window-max-chars-per-line window))))
          (content (keymap-popup--render-columns rendered-rows width)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -1631,6 +1632,23 @@ when the whole map has no binding.  Only then remove duplicate keys."
   (when-let* ((window (keymap-popup--display-window buf)))
     (quit-restore-window window 'killing)))
 
+(defun keymap-popup--fit-frame (frame)
+  "Fit FRAME to its buffer's text, and one column wider where its window
+keeps its last column for the continuation glyph: `fit-frame-to-buffer'
+makes the text area as wide as the longest line, which such a window
+would then continue, so a refresh would lay the popup out narrower.
+The extra column stays within `fit-frame-to-buffer-sizes'' maximum
+width and inside the parent frame."
+  (fit-frame-to-buffer frame)
+  (let* ((window (frame-root-window frame))
+         (sizes (or (frame-parameter frame 'fit-frame-to-buffer-sizes) fit-frame-to-buffer-sizes))
+         (max-width (nth 2 sizes))
+         (parent (frame-parent frame)))
+    (when (and (< (window-max-chars-per-line window) (window-body-width window))
+               (or (not (numberp max-width)) (< (window-body-width window) max-width))
+               (or (null parent) (< (frame-text-cols frame) (frame-text-cols parent))))
+      (set-frame-width frame (1+ (frame-text-cols frame))))))
+
 (defun keymap-popup--show-child-frame (buf)
   "Display BUF in a child frame centered on the parent.
 Frame parameters are taken from `keymap-popup-child-frame-parameters'."
@@ -1649,7 +1667,7 @@ Frame parameters are taken from `keymap-popup-child-frame-parameters'."
     (set-window-buffer win buf)
     (keymap-popup--set-session buf :window win)
     (set-window-dedicated-p win t)
-    (fit-frame-to-buffer frame)
+    (keymap-popup--fit-frame frame)
     (let ((x (/ (- (frame-pixel-width parent) (frame-pixel-width frame)) 2))
           (y (/ (- (frame-pixel-height parent) (frame-pixel-height frame)) 2)))
       (set-frame-position frame (max 0 x) (max 0 y)))
@@ -1661,7 +1679,7 @@ Frame parameters are taken from `keymap-popup-child-frame-parameters'."
   (when-let* ((frame (keymap-popup--session-get buf :frame))
               ((frame-live-p frame))
               ((keymap-popup--display-window buf)))
-    (fit-frame-to-buffer frame)))
+    (keymap-popup--fit-frame frame)))
 
 (defun keymap-popup--hide-child-frame (buf)
   "Delete the child frame allocated for BUF."
