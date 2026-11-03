@@ -21,21 +21,29 @@ impl Run {
     fn same(self, other: Self) -> bool {
         self.stamp == other.stamp && self.value == other.value
     }
+    /// What a reader sees: its value when present, whatever its stamp.
+    fn observed(self) -> Option<Value> {
+        (self.stamp != 0).then_some(self.value)
+    }
 }
+/// A leaf's runs, length and present length, and whether every run reads
+/// the same (`uniform`, presence and value alike, stamps aside): a search
+/// for the next change passes over a uniform subtree whole.
 #[derive(Clone)]
 enum Tree {
-    Leaf(Vec<Run>, usize, usize),
+    Leaf(Vec<Run>, usize, usize, bool),
     Branch {
         left: Box<Tree>,
         right: Box<Tree>,
         len: usize,
         present: usize,
         height: u32,
+        uniform: bool,
     },
 }
 romacs_snapshot::snapshot_enum!(Tree {
-    Tree::Leaf(f0, f1, f2) => (f0, f1, f2),
-    Tree::Branch { left, right, len, present, height } => (left, right, len, present, height),
+    Tree::Leaf(f0, f1, f2, f3) => (f0, f1, f2, f3),
+    Tree::Branch { left, right, len, present, height, uniform } => (left, right, len, present, height, uniform),
 });
 impl Tree {
     fn leaf(runs: Vec<Run>) -> Self {
@@ -45,17 +53,31 @@ impl Tree {
             .filter(|r| r.stamp != 0)
             .map(|r| r.len as usize)
             .sum();
-        Self::Leaf(runs, len, present)
+        let uniform = Self::runs_uniform(&runs);
+        Self::Leaf(runs, len, present, uniform)
+    }
+    fn runs_uniform(runs: &[Run]) -> bool {
+        runs.windows(2).all(|w| w[0].observed() == w[1].observed())
+    }
+    fn is_uniform(&self) -> bool {
+        match self {
+            Self::Leaf(.., uniform) => *uniform,
+            Self::Branch { uniform, .. } => *uniform,
+        }
+    }
+    /// Whether LEFT then RIGHT read the same throughout.
+    fn joined_uniform(left: &Self, right: &Self) -> bool {
+        left.is_uniform() && right.is_uniform() && left.edge(true).observed() == right.edge(false).observed()
     }
     fn len(&self) -> usize {
         match self {
-            Self::Leaf(_, len, _) => *len,
+            Self::Leaf(_, len, ..) => *len,
             Self::Branch { len, .. } => *len,
         }
     }
     fn present(&self) -> usize {
         match self {
-            Self::Leaf(_, _, present) => *present,
+            Self::Leaf(_, _, present, _) => *present,
             Self::Branch { present, .. } => *present,
         }
     }
@@ -70,6 +92,7 @@ impl Tree {
             len: left.len() + right.len(),
             present: left.present() + right.present(),
             height: 1 + left.height().max(right.height()),
+            uniform: Self::joined_uniform(&left, &right),
             left,
             right,
         })
@@ -206,7 +229,7 @@ impl Tree {
     fn edit_local(&mut self, start: usize, end: usize, inserted: usize, work: &mut usize) -> bool {
         *work += 1;
         match self {
-            Self::Leaf(runs, len, present) => {
+            Self::Leaf(runs, len, present, uniform) => {
                 if inserted > u32::MAX as usize {
                     return false;
                 }
@@ -294,6 +317,7 @@ impl Tree {
                     .filter(|r| r.stamp != 0)
                     .map(|r| r.len as usize)
                     .sum();
+                *uniform = Self::runs_uniform(runs);
                 true
             }
             Self::Branch {
@@ -301,6 +325,7 @@ impl Tree {
                 right,
                 len,
                 present,
+                uniform,
                 ..
             } => {
                 let boundary = left.len();
@@ -314,6 +339,7 @@ impl Tree {
                 if changed {
                     *len = left.len() + right.len();
                     *present = left.present() + right.present();
+                    *uniform = Self::joined_uniform(left, right);
                 }
                 changed
             }
@@ -441,14 +467,20 @@ impl Tree {
             return limit;
         };
         let before = self.at(at.0).filter(|r| r.stamp != 0).map(|r| r.value);
-        match self.next_different(0, after, before) {
+        match self.next_different(0, after, before, limit.0) {
             Some(p) => ByteOffset(p.min(limit.0)),
             None if before.is_some() && self.len() >= after => ByteOffset(self.len().min(limit.0)),
             None => limit,
         }
     }
-    fn next_different(&self, base: usize, at: usize, value: Option<Value>) -> Option<usize> {
-        if base + self.len() <= at {
+    /// The first position from `at`, before `limit`, whose run does not
+    /// read `value`. A uniform subtree that reads it is passed whole, so a
+    /// search costs the tree's height, not the runs it passes.
+    fn next_different(&self, base: usize, at: usize, value: Option<Value>, limit: usize) -> Option<usize> {
+        if base + self.len() <= at || base >= limit {
+            return None;
+        }
+        if self.is_uniform() && self.edge(false).observed() == value {
             return None;
         }
         match self {
@@ -464,8 +496,8 @@ impl Tree {
                 None
             }
             Self::Branch { left, right, .. } => left
-                .next_different(base, at, value)
-                .or_else(|| right.next_different(base + left.len(), at, value)),
+                .next_different(base, at, value, limit)
+                .or_else(|| right.next_different(base + left.len(), at, value, limit)),
         }
     }
     /// The last position before `at` whose preceding value differs from
@@ -475,12 +507,15 @@ impl Tree {
             return limit;
         }
         let before = self.at(at.0 - 1).filter(|r| r.stamp != 0).map(|r| r.value);
-        ByteOffset(self.last_different(0, at.0, before).unwrap_or(0).max(limit.0))
+        ByteOffset(self.last_different(0, at.0, before, limit.0).unwrap_or(0).max(limit.0))
     }
     /// The end of the last run starting before `at` whose value is not
     /// `value`.
-    fn last_different(&self, base: usize, at: usize, value: Option<Value>) -> Option<usize> {
-        if base >= at {
+    fn last_different(&self, base: usize, at: usize, value: Option<Value>, limit: usize) -> Option<usize> {
+        if base >= at || base + self.len() <= limit {
+            return None;
+        }
+        if self.is_uniform() && self.edge(true).observed() == value {
             return None;
         }
         match self {
@@ -496,8 +531,8 @@ impl Tree {
                 None
             }
             Self::Branch { left, right, .. } => right
-                .last_different(base + left.len(), at, value)
-                .or_else(|| left.last_different(base, at, value)),
+                .last_different(base + left.len(), at, value, limit)
+                .or_else(|| left.last_different(base, at, value, limit)),
         }
     }
     /// A copy of START..END of the runs, visiting only the subtrees
@@ -763,13 +798,14 @@ impl Properties {
         values.into_iter().map(|(_, k, v)| (k, v)).collect()
     }
     /// Observable boundaries compare presence and eq-values, never stamps.
+    /// Each key's search stops at the nearest change found so far.
     pub fn next_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
-        self.layers.values().flatten().fold(limit, |next, root| next.min(root.change_after(at, limit)))
+        self.layers.values().flatten().fold(limit, |next, root| next.min(root.change_after(at, next)))
     }
     /// The last boundary before `at` where any property changes, or
     /// `limit` when that is nearer: [`Self::next_change`] backwards.
     pub fn previous_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
-        self.layers.values().flatten().fold(limit, |previous, root| previous.max(root.change_before(at, limit)))
+        self.layers.values().flatten().fold(limit, |previous, root| previous.max(root.change_before(at, previous)))
     }
     /// [`Self::next_change`] of `key` alone.
     pub fn next_single_change(&self, at: ByteOffset, key: &str, limit: ByteOffset) -> ByteOffset {
