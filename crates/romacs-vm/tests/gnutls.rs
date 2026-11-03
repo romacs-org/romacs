@@ -304,14 +304,24 @@ fn bounded(limit: std::time::Duration, body: impl FnOnce() + Send + 'static) {
 fn a_stalled_handshake_is_cut_off_by_the_bound() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || { let _held: Vec<_> = listener.incoming().flatten().collect(); });
-    let outcome = std::panic::catch_unwind(|| bounded(std::time::Duration::from_secs(5), move || {
+    let (accepted, reached) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming().flatten() {
+            held.push(stream);
+            let _ = accepted.send(());
+        }
+    });
+    // Long enough for the bootstrap under load; the peer's accept shows the
+    // bound cut off the handshake, not the bootstrap.
+    let outcome = std::panic::catch_unwind(|| bounded(std::time::Duration::from_secs(30), move || {
         let mut vm = bootstrapped();
         vm.eval_source("(require 'gnutls)").unwrap();
         let _ = vm.eval_source(&format!(r#"(gnutls-boot (make-network-process :name "stall" :host "127.0.0.1" :service {port} :noquery t) 'gnutls-x509pki (list :hostname "localhost"))"#));
     }));
     let message = outcome.expect_err("the stalled handshake finished").downcast::<String>().map(|s| *s).unwrap_or_default();
     assert!(message.contains("still running after"), "{message}");
+    assert!(reached.try_recv().is_ok(), "the bound ran out before gnutls-boot reached the peer");
 }
 
 /// A 200 KB line sent over TLS comes back whole, every time: twenty
