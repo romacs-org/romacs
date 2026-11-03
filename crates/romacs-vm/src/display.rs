@@ -513,7 +513,12 @@ impl Vm {
                         (None, Some(Object::Float(f))) => *f,
                         _ => return Err("number required".into()),
                     };
-                    TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)? }
+                    // Its colours are faces, so the landing follows the theme.
+                    let colours = romacs_display_protocol::text_animation::LogoColours {
+                        mark: self.display_face("romacs-landing-mark")?.foreground,
+                        word: self.display_face("romacs-landing-word")?.foreground,
+                    };
+                    TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)?, colours }
                 }
                 _ => return Err("bad text animation kind".into()),
             };
@@ -572,8 +577,9 @@ impl Vm {
         Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar })
     }
     /// The host frame's pane chrome, from its `romacs-pane-radius',
-    /// `romacs-pane-dim', `romacs-pane-focus' and `romacs-pane-border'
-    /// parameters (rlisp/romacs-chrome.el): the window with the focus edge
+    /// `romacs-pane-dim' and `romacs-pane-chrome' parameters
+    /// (rlisp/romacs-chrome.el) and the `romacs-pane-focus' and
+    /// `romacs-pane-border' faces' foregrounds: the window with the focus edge
     /// is the one the status bar shows (`status_bar_owner'), whether or
     /// not the frame shows one (VM2-PANE-CHROME).
     fn pane_chrome(&mut self) -> Result<romacs_layout_input::FrameChrome> {
@@ -584,8 +590,12 @@ impl Vm {
             Some(v) => match self.object_if(v) { Some(Object::Float(f)) => *f as f32, _ => v.integer_value().unwrap_or(0) as f32 },
             None => 0.0,
         }.clamp(0.0, 1.0);
-        let focus = self.frame_hex_parameter(frame, "romacs-pane-focus")?;
-        let border = self.frame_hex_parameter(frame, "romacs-pane-border")?;
+        // The edge and hairline are faces, so they follow every theme and
+        // face change; only a frame that asks for pane chrome draws them.
+        let drawn = self.frame_parameter_of(frame, "romacs-pane-chrome")?.is_some_and(|v| v != Value::NIL);
+        let (focus, border) = if drawn {
+            (Some(self.display_face("romacs-pane-focus")?.foreground), Some(self.display_face("romacs-pane-border")?.foreground))
+        } else { (None, None) };
         let selected = self.status_bar_owner()?.0;
         let selected = self.window(selected)?.id;
         let minibuffer = self.window(self.mini_window())?.id;
@@ -622,7 +632,21 @@ impl Vm {
             let edge = self.display_face("child-frame-border")?;
             // An unspecified border face draws in the default foreground.
             let border_color = if edge.background == default.background { default.foreground } else { edge.background };
-            let background = self.frame_hex_parameter(frame, "background-color")?.unwrap_or(default.background);
+            let radius = self.frame_parameter_of(frame, "romacs-layer-radius")?
+                .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
+            // A glass layer (one with rounded corners) takes its colours
+            // from faces: its background from `romacs-layer-glass', or the
+            // face its `romacs-layer-face' parameter names (a toast's), and
+            // its glow from `romacs-layer-glow'.
+            let (background, glow) = if radius > 0 {
+                let face = match self.frame_parameter_of(frame, "romacs-layer-face")? {
+                    Some(v) => self.symbol_name_of(v).unwrap_or_else(|| "romacs-layer-glass".into()),
+                    None => "romacs-layer-glass".into(),
+                };
+                (self.display_face(&face)?.background, Some(self.display_face("romacs-layer-glow")?.foreground))
+            } else {
+                (self.frame_hex_parameter(frame, "background-color")?.unwrap_or(default.background), None)
+            };
             let mut windows: Vec<_> = self.snapshot_leaves(self.leaf_ids(root)?)?.into_iter().map(place).collect();
             // The hosted mini-window is placed in the host frame; drawn in this one.
             if hosts {
@@ -644,9 +668,6 @@ impl Vm {
             };
             let selection = self.frame_parameter_of(frame, "romacs-layer-selection")?
                 .and_then(|v| v.integer_value()).and_then(|row| u32::try_from(row).ok());
-            let radius = self.frame_parameter_of(frame, "romacs-layer-radius")?
-                .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
-            let glow = self.frame_hex_parameter(frame, "romacs-layer-glow")?;
             let shadow = self.frame_parameter_of(frame, "romacs-layer-shadow")?.is_some_and(|v| v != Value::NIL);
             children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
                                                                      background, background_alpha, windows,
@@ -726,6 +747,15 @@ impl Vm {
     }
     pub fn display_default_face(&self) -> Result<Face> {
         self.snapshot_face("default")
+    }
+    /// The terminal's sixteen base colours: the `ansi-color-*' faces'
+    /// foregrounds, Alacritty's where the theme holds no such face.
+    fn terminal_ansi(&self) -> [[u8; 3]; 16] {
+        const NAMES: [&str; 8] = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
+        std::array::from_fn(|i| {
+            let name = format!("ansi-color-{}{}", if i < 8 { "" } else { "bright-" }, NAMES[i % 8]);
+            self.snapshot_face(&name).map_or(crate::terminal_host::DEFAULT_ANSI[i], |face| face.foreground)
+        })
     }
     /// The face NAME as painting realizes it: one the theme does not hold
     /// paints in the default face (`painted_face').
@@ -1493,6 +1523,7 @@ impl Vm {
         }
         let default = faces[0].clone();
         let styles = terminal.map_or(&[][..], |binding| binding.styles.as_ref());
+        let ansi = if styles.is_empty() { crate::terminal_host::DEFAULT_ANSI } else { self.terminal_ansi() };
         let mut terminal_faces = std::collections::HashMap::new();
         let mut region_faces = std::collections::HashMap::new();
         let region_background = table.handle("region").map(|i| faces[i.0 as usize].background);
@@ -1509,7 +1540,7 @@ impl Vm {
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
-                    let resolved = run.style.face(&default);
+                    let resolved = run.style.face(&default, &ansi);
                     if resolved == default { return FaceHandle(0); }
                     let handle = FaceHandle(faces.len() as u32);
                     faces.push(resolved);

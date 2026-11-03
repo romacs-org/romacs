@@ -38,13 +38,23 @@ whose blinks redisplay twice a second for ten blinks.  With --chrome the run als
 `romacs-chrome-state' reports the pane chrome (gap 6, radius 6, dim
 0.12) and the exit's frame counters (ROMACS_FRAME_STATS) drew its quads.
 
+With --theme-switch THEME a last phase, retheme, repeats the last
+shrink key (the one whose rows tween) and loads THEME halfway through
+its tween, from a timer F5 (bound in the init) arms just before the key,
+since a key ends any animation in flight: the run fails unless the theme was
+enabled before the plain shrink's tween would have ended, and the tween's motion frames end when the plain shrink's did
+(within --retheme-slack-ms of it, measured from the key), no more of them
+than the headless output's 60 Hz refresh has in that span, plus two: the
+switch redraws in the frames the tween draws anyway.
+
 usage: layer_anim_live.py --binary BIN --output DIR [--renderer gles2]
        [--mesa MESA_DIR] [--input file-1] [--idle 3] [--budget-ms 4] [--no-force]
        [--expect-none] [--init FILE] [--slowdown N] [--shots]
-       [--idle-draws N] [--chrome]
+       [--idle-draws N] [--chrome] [--theme-switch THEME]
 """
 import argparse
 import hashlib
+import math
 import json
 import os
 from pathlib import Path
@@ -60,6 +70,15 @@ KEYSYMS = {'-': 'minus', '/': 'slash', ' ': 'space'}
 INIT = "(romacs-complete-mode 1)\n"
 CHROME_STATE = ("(run-at-time 1 nil (lambda () (with-temp-file (getenv \"CHROME_STATE\")"
                 " (prin1 (romacs-chrome-state) (current-buffer)))))\n")
+
+
+# F5 loads THEME and records what is enabled (--theme-switch).
+RETHEME = ("(global-set-key (kbd \"<f5>\") (lambda () (interactive) (run-at-time DELAY nil (lambda ()"
+           " (write-region (condition-case err (progn (load-theme 'THEME t) (prin1-to-string (list custom-enabled-themes (float-time))))"
+           " (error (format \"error %S\" err))) nil \"STATE\")))))\n")
+# A layer's rect tween, unslowed (child_frame_animation.rs
+# default_child_frame_resize).
+RESIZE_S = 0.08
 
 
 def wait(pred, timeout, what, proc):
@@ -121,6 +140,8 @@ def main():
     ap.add_argument('--expect-none', action='store_true')
     ap.add_argument('--idle-draws', type=int)
     ap.add_argument('--chrome', action='store_true')
+    ap.add_argument('--theme-switch')
+    ap.add_argument('--retheme-slack-ms', type=float, default=50)
     ap.add_argument('--init', type=Path)
     ap.add_argument('--font-size', default='15')
     ap.add_argument('--mode', default='2560x1440')
@@ -150,6 +171,8 @@ def main():
             (home / 'config' / 'romacs').mkdir(parents=True)
             (home / 'config' / 'romacs' / 'init.el').write_text((args.init.read_text() if args.init else INIT)
                                                                  + (CHROME_STATE if args.chrome else '')
+                                                                 + (RETHEME.replace('THEME', args.theme_switch).replace('STATE', str(root / 'theme-state'))
+                                                                    .replace('DELAY', str(RESIZE_S * args.slowdown / 2)) if args.theme_switch else '')
                                                                  + ('(setq inhibit-startup-screen t)\n(blink-cursor-mode -1)\n' if args.idle_draws is not None else ''))
             chrome_state, stats = root / 'chrome-state', out / 'frame-stats.txt'
             if stats.exists():
@@ -228,6 +251,16 @@ def main():
                     phase('grow', lambda: keys('-k', 'BackSpace', delay=10), .5)
                 for _ in range(3):
                     phase('move', lambda: ctrl('n'), .5)
+                if args.theme_switch:
+                    def retheme():
+                        report['retheme_key_s'] = time.time()
+                        keys('-k', 'F5', args.shrink[-1], delay=10)
+                    if args.shrink[:-1]:
+                        keys(args.shrink[:-1], delay=10)
+                        time.sleep(.5 * args.slowdown)
+                    phase('retheme', retheme, .5)
+                    keys(*['-k', 'BackSpace'] * len(args.shrink), delay=10)
+                    time.sleep(.5 * args.slowdown)
                 phase('close', lambda: ctrl('g'))
                 if args.idle_draws is not None:
                     time.sleep(2.0)
@@ -240,6 +273,11 @@ def main():
                     entry = report['phases'].setdefault(name, {'draws': 0, 'motion': []})
                     entry['draws'] += len(inside)
                     entry['motion'] += motion
+                # From a phase's key to its last motion frame, and how many.
+                spans = {}
+                for name, start, end in marks:
+                    motion = [d for d in all_draws if start <= d['start'] < end and 'ChildFrameMotion' in d['reasons']]
+                    spans.setdefault(name, []).append(((max(d['end'] for d in motion) - start) / 1e6 if motion else None, len(motion)))
                 for entry in report['phases'].values():
                     entry['motion'] = summary(entry.pop('motion'))
                 motion_all = [(d['end'] - d['start']) / 1e6 for d in all_draws if 'ChildFrameMotion' in d['reasons']]
@@ -253,6 +291,17 @@ def main():
                     ok = ok and p95 is not None and p95 <= args.budget_ms and idle_draws == 0
                 if args.idle_draws is not None:
                     ok = ok and idle_draws <= args.idle_draws
+                if args.theme_switch:
+                    (plain_ms, plain_n), (switched_ms, switched_n) = spans['shrink'][-1], spans['retheme'][0]
+                    theme = (root / 'theme-state').read_text() if (root / 'theme-state').exists() else ''
+                    report['retheme'] = {'plain_ms': plain_ms, 'plain_frames': plain_n, 'switched_ms': switched_ms,
+                                         'switched_frames': switched_n, 'theme_state': theme}
+                    loaded = re.fullmatch(r'\(\(' + re.escape(args.theme_switch) + r'[^)]*\) ([0-9.e+]+)\)', theme.strip())
+                    report['retheme']['loaded_ms'] = (float(loaded.group(1)) - report['retheme_key_s']) * 1000 if loaded else None
+                    ok = ok and loaded is not None and None not in (plain_ms, switched_ms) \
+                        and report['retheme']['loaded_ms'] < plain_ms \
+                        and abs(switched_ms - plain_ms) <= args.retheme_slack_ms \
+                        and switched_n <= math.ceil(switched_ms * 60 / 1000) + 2
                 if args.chrome:
                     state = chrome_state.read_text() if chrome_state.exists() else ''
                     report['chrome_state'] = state

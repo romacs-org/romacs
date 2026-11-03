@@ -23,7 +23,7 @@ fn geometry_of() -> Geometry {
 fn scene_at(g: &Geometry, policy: Policy, seconds: f64) -> Scene {
     Scene::new(SceneId(1), 1)
         .tick(Duration::ZERO, true)
-        .apply(&scene(g, policy), policy)
+        .apply(&scene(g, LogoColours::default(), policy), policy)
         .expect("the landing scene applies")
         .tick(Duration::from_secs_f64(seconds), true)
 }
@@ -151,12 +151,41 @@ fn the_placement_draws_the_mark_then_the_wordmark_over_nothing() {
     assert!((drawn.x0 - g.mark.x0).abs() < 1e-3 && (drawn.y1 - g.mark.y1).abs() < 1e-3, "{drawn:?} at {:?}", g.mark);
 }
 
+/// The mark's key light and the wordmark take the theme's colours, and new
+/// colours refit the scene in place: its motion runs on.
+#[test]
+fn the_landing_takes_the_themes_colours_and_keeps_its_motion() {
+    let g = geometry_of();
+    let stock = scene_at(&g, Policy::On, 1.0);
+    let key = |s: &Scene| { let k = uniform(s, 7) as u32; [k >> 16, (k >> 8) & 255, k & 255].map(|c| c as f32 / 255.0) };
+    assert_eq!(uniform(&stock, 7), packed(key_light(LogoColours::default().mark)));
+    let blue = LogoColours { mark: [0x7a, 0xa2, 0xf7], word: [0x10, 0x20, 0x30] };
+    let after = stock.apply(&recolour(blue, stock.rev()), Policy::On).expect("the recolour applies");
+    let [r, g_, b] = key(&after);
+    assert!(b == 1.0 && r < g_ && g_ < b, "a blue mark lights the mark blue: {:?}", key(&after));
+    assert!(matches!(after.value(WORDMARK, Prop::Fill), Some(Value::Color(c)) if c == Color::rgb8(0x10, 0x20, 0x30)));
+    assert_eq!(uniform(&after, 3), uniform(&stock, 3), "the assembly runs on from where it was");
+    assert!(after.tracks_of(MARK).count() >= 4, "turn, light and assembly keep their motions");
+    // Mid-entrance, the wordmark keeps rising and fading in as an untouched
+    // scene does.
+    let later = |s: &Scene| s.tick(Duration::from_secs_f64(1.6), true);
+    let (control, recoloured) = (later(&stock), later(&after));
+    for prop in [Prop::Y, Prop::Opacity] {
+        assert_eq!(recoloured.value(WORDMARK, prop), control.value(WORDMARK, prop), "{prop:?} mid-rise");
+    }
+    assert_eq!(after.tracks_of(WORDMARK).count(), stock.tracks_of(WORDMARK).count(), "the rise keeps its tracks");
+    assert!(stock.tracks_of(WORDMARK).count() > 0, "the wordmark is still rising at 1 s");
+    // The stock accent gives the warm light the mark was drawn in.
+    let [r, g_, b] = key_light(LogoColours::default().mark);
+    assert!(r == 1.0 && (g_ - 0.86).abs() < 0.02 && (b - 0.62).abs() < 0.02, "{:?}", [r, g_, b]);
+}
+
 #[test]
 fn a_refit_moves_the_scene_to_new_geometry_and_keeps_its_motion() {
     let g = geometry_of();
     let small = geometry(romacs_logo::View { cols: 80, rows: 18, cell_aspect: 0.45 }, cell()).expect("fits");
     let before = scene_at(&g, Policy::On, 1.0);
-    let after = before.apply(&refit(&small, before.rev()), Policy::On).expect("the refit applies");
+    let after = before.apply(&refit(&small, LogoColours::default(), before.rev()), Policy::On).expect("the refit applies");
     let revision = |s: &Scene| s.node(WORDMARK).map(|n| n.revision);
     assert!(revision(&after) > revision(&before), "the wordmark's tessellation input changed");
     assert_eq!(uniform(&after, 3), uniform(&before, 3), "the assembly runs on from where it was");
@@ -472,7 +501,7 @@ mod gpu {
         page_frame.set_face(FaceId::new(3), romacs_display_protocol::Color::WHITE, Some(page),
                        400, false, 0, None, 0, None, 0, None);
         let animation = TextAnimation { window: 1, top: 0, cols: cols.into(), rows, fps: 25, moving: false, still: true,
-                                        kind: TextAnimationKind::Logo { cell_aspect: 9.0 / 22.0, epoch: 0 } };
+                                        kind: TextAnimationKind::Logo { cell_aspect: 9.0 / 22.0, epoch: 0, colours: Default::default() } };
         let mut renderer = WgpuRenderer::with_device(std::sync::Arc::new(device.clone()),
                                                      std::sync::Arc::new(queue.clone()), w, h, FORMAT, 1.0);
         let mut atlas = WgpuGlyphAtlas::new(&device);
@@ -569,7 +598,7 @@ mod gpu {
         let (w, h) = (10 + u32::from(cols) * 9, 40 + rows * 22);
         let frame = super::super::super::tests::frame(1, rows, cols);
         let animation = |top: i32| TextAnimation { window: 1, top, cols: cols.into(), rows, fps: 25, moving: top > -(rows as i32),
-                                                   still: true, kind: TextAnimationKind::Logo { cell_aspect: 9.0 / 22.0, epoch: 0 } };
+                                                   still: true, kind: TextAnimationKind::Logo { cell_aspect: 9.0 / 22.0, epoch: 0, colours: Default::default() } };
         let mut renderer = WgpuRenderer::with_device(std::sync::Arc::new(device.clone()),
                                                      std::sync::Arc::new(queue.clone()), w, h, FORMAT, 1.0);
         let mut atlas = WgpuGlyphAtlas::new(&device);

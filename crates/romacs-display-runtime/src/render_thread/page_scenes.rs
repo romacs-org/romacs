@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use kurbo::{Rect, Size};
 use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer, GlyphRowRole};
-use romacs_display_protocol::text_animation::{TextAnimation, TextAnimationKind};
+use romacs_display_protocol::text_animation::{LogoColours, TextAnimation, TextAnimationKind};
 use romacs_display_protocol::types::{FaceId, SurfaceId};
 use romacs_renderer_wgpu::shader_surface::{SurfaceChannelSource, SurfaceShaderLanguage, SurfaceUniformInit};
 use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
@@ -86,13 +86,14 @@ pub(crate) fn block(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Opti
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Built {
     geometry: landing::Geometry,
+    colours: LogoColours,
     policy: Policy,
     epoch: u64,
 }
 
 impl Built {
-    /// Whether NEXT continues this one's motion: a new size redraws the
-    /// same moment, a new policy or epoch starts over.
+    /// Whether NEXT continues this one's motion: a new size or new colours
+    /// redraw the same moment, a new policy or epoch starts over.
     fn continued_by(&self, next: &Self) -> bool {
         (self.policy, self.epoch) == (next.policy, next.epoch)
     }
@@ -153,7 +154,7 @@ impl PageScene {
     pub(crate) fn prepare(&mut self, frame: &FrameGlyphBuffer, animation: &TextAnimation, moved: f64,
                           renderer: &mut WgpuRenderer) {
         self.pending = None;
-        let TextAnimationKind::Logo { epoch, .. } = animation.kind;
+        let TextAnimationKind::Logo { epoch, colours, .. } = animation.kind;
         let Some(block) = block(frame, animation) else { self.shown = None; return };
         // Laid out in the cells as drawn, which may be taller than the
         // frame's character height Lisp sized the braille by.
@@ -162,13 +163,17 @@ impl PageScene {
         let Some(geometry) = landing::geometry(view, block.cell) else { self.shown = None; return };
         // With motion off the scene shows its targets: the still frame.
         let policy = if animation.still { Policy::Reduced } else { Policy::On };
-        let built = Built { geometry, policy, epoch };
+        let built = Built { geometry, colours, policy, epoch };
         match self.built {
             Some(b) if b == built => {}
-            // New geometry: the same scene, refitted by a
-            // diff, so its motions run on and its nodes' revisions move.
+            // New geometry or colours: the same scene, refitted by a
+            // diff, so its motions run on and its nodes' revisions move;
+            // new colours alone touch only the colours, so the wordmark's
+            // rise keeps its place.
             Some(b) if b.continued_by(&built) => {
-                match self.scene.apply(&landing::refit(&geometry, self.scene.rev()), policy) {
+                let diff = if b.geometry == geometry { landing::recolour(colours, self.scene.rev()) }
+                           else { landing::refit(&geometry, colours, self.scene.rev()) };
+                match self.scene.apply(&diff, policy) {
                     Ok(scene) => self.scene = scene,
                     Err(reject) => {
                         tracing::warn!("landing scene refit rejected: {reject:?}");
@@ -181,7 +186,7 @@ impl PageScene {
             // A new start: a new scene, drawn by a new pass.
             _ => {
                 let fresh = Scene::new(SceneId(1), 1).tick(seconds(moved), true);
-                match fresh.apply(&landing::scene(&geometry, policy), policy) {
+                match fresh.apply(&landing::scene(&geometry, colours, policy), policy) {
                     Ok(scene) => self.scene = scene,
                     Err(reject) => {
                         tracing::warn!("landing scene rejected: {reject:?}");

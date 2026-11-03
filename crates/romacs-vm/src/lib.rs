@@ -48,7 +48,7 @@ pub use layout_host::LayoutHost;
 pub use display_host::{DisplayHost, FontEntity, FontQuery, OpenedFont, OtfTable};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
-pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
+pub use terminal_host::{DEFAULT_ANSI, TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
 // Maps keyed by slots and ids the VM allocates use FxHash. Maps keyed by
 // names, which Lisp, files and the network supply, use foldhash with a random
 // seed per map, so a precomputed set of colliding names cannot make their

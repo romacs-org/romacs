@@ -342,3 +342,47 @@ fn a_dimmed_pane_keeps_aa_contrast() {
         assert!(contrast >= 4.5, "{:?} on {:?}: {contrast:.2}", face.foreground, face.background);
     }
 }
+
+/// `gnu_session' with romacs-chrome.el's panes and Romacs's themes on the
+/// theme path.
+fn themed_session() -> Vm {
+    let mut vm = gnu_session();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    eval(&mut vm, &format!("(progn (push {:?} load-path) (push {:?} custom-theme-load-path) (require 'romacs-chrome) (romacs-chrome-refresh))",
+                           root.join("rlisp"), root.join("etc/themes")));
+    vm
+}
+
+fn chrome(vm: &mut Vm) -> romacs_layout_input::FrameChrome { vm.frame_snapshot(1216, 876).unwrap().chrome }
+
+/// The edge and hairline are the `romacs-pane-focus' and
+/// `romacs-pane-border' faces as the display realises them: a theme, a
+/// customised face and an inherited colour show on the next snapshot with
+/// no parameter set, and `romacs-chrome-state' reports them.
+#[test]
+fn pane_chrome_colours_are_the_faces() {
+    let mut vm = themed_session();
+    // No theme: the focus face inherits the glow, the built-in accent.
+    assert_eq!(chrome(&mut vm).focus, Some([0xd4, 0x8a, 0x20]), "an inherited foreground is realised");
+    eval(&mut vm, "(load-theme 'omarchy-tokyo-night t)");
+    let after = chrome(&mut vm);
+    assert_eq!(after.focus, Some([0x7a, 0xa2, 0xf7]), "a theme's focus edge without `romacs-chrome-apply'");
+    assert_eq!(eval(&mut vm, "(plist-get (romacs-chrome-state) :focus)"), "\"#7aa2f7\"");
+    let border = eval(&mut vm, "(face-foreground 'romacs-pane-border nil t)");
+    assert_eq!(after.border.map(|[r, g, b]| format!("\"#{r:02x}{g:02x}{b:02x}\"")), Some(border));
+    eval(&mut vm, "(custom-set-faces '(romacs-pane-focus ((t :foreground \"#ff0000\"))))");
+    assert_eq!(chrome(&mut vm).focus, Some([0xff, 0, 0]), "a customised face");
+    eval(&mut vm, "(romacs-classic-chrome 1)");
+    eval(&mut vm, "(load-theme 'omarchy-catppuccin-latte t)");
+    assert!(!chrome(&mut vm).drawn(), "classic chrome draws none after a theme switch");
+    assert_eq!(eval(&mut vm, "(plist-get (romacs-chrome-state) :focus)"), "nil");
+}
+
+/// A launch that never loaded romacs-chrome.el draws no pane chrome, even
+/// with the faces defined.
+#[test]
+fn without_romacs_chrome_no_pane_chrome_is_drawn() {
+    let mut vm = gnu_session();
+    eval(&mut vm, "(progn (defface romacs-pane-focus '((t :foreground \"#ff0000\")) \"\") (defface romacs-pane-border '((t :foreground \"#00ff00\")) \"\"))");
+    assert!(!chrome(&mut vm).drawn());
+}
