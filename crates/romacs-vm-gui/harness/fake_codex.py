@@ -7,6 +7,7 @@ continues thread ID.  Its "model" is a script on the prompt's first line:
   say TEXT      reply TEXT
   slow N        sleep N seconds, then reply `slow done' (a long turn)
   fail          end the turn with turn.failed
+  Evaluate ...  Gnosis's evaluator prompt: answered as fake_harness.py does
   anything else reply `VERDICT: APPROVE' and the prompt's line count
 
 Every run is logged to $FAKE_HARNESS_LOG as one JSON line (argv,
@@ -37,6 +38,12 @@ def main():
                                      'codex_home': os.environ.get('CODEX_HOME'), 'prompt': first[:200]}) + '\n')
     emit({'type': 'thread.started', 'thread_id': thread})
     emit({'type': 'turn.started'})
+    if prompt.startswith('Evaluate the learner response'):
+        from fake_harness import evaluator_reply
+        reply = evaluator_reply(prompt)
+        emit({'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'agent_message', 'text': reply}})
+        emit({'type': 'turn.completed', 'usage': {'input_tokens': 10, 'cached_input_tokens': 0, 'output_tokens': 3}})
+        return 0
     if first == 'fail':
         emit({'type': 'turn.failed', 'error': {'message': 'the fake model failed'}})
         return 1

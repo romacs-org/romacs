@@ -29,8 +29,9 @@
 (require 'subr-x)
 
 (autoload 'gnosis-agent-eval-hermes "gnosis-agent-eval-hermes")
+(autoload 'gnosis-agent-eval-romacs "gnosis-agent-romacs")
 
-(defcustom gnosis-agent-eval-function #'gnosis-agent-eval-hermes
+(defcustom gnosis-agent-eval-function #'gnosis-agent-eval-romacs
   "Function evaluating an agent-eval response asynchronously.
 Call with REQUEST, RESOLVE and REJECT; return a cancellation function.
 REQUEST is a plain plist of strings at :question, :reference-answer,
@@ -41,7 +42,9 @@ and give a correction.  REJECT accepts an error explanation string.
 Callbacks may arrive after cancellation; Gnosis ignores retired attempts.
 Do not write grades or mutate REQUEST.  Unknown or malformed results,
 rejections and abstentions never become a failed grade.  The default
-integration loads Hermes only when an evaluation is requested."
+evaluates in a Romacs agent session (`gnosis-agent-romacs-provider',
+`gnosis-agent-romacs-model'); `gnosis-agent-eval-hermes' evaluates through
+Hermes, loaded only when an evaluation is requested."
   :type 'function
   :group 'gnosis)
 

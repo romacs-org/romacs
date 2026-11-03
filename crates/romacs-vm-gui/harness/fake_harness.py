@@ -50,6 +50,18 @@ def argument(name):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
 
 
+def evaluator_reply(prompt):
+    """A model's answer to Gnosis's evaluator or tutor prompt, or None:
+    `pass' unless the response says MALFORMED, then not JSON."""
+    if prompt.startswith('Evaluate the learner response'):
+        if 'MALFORMED' in prompt:
+            return 'certainly, here is my verdict: pass'
+        return json.dumps({'verdict': 'pass', 'explanation': 'The essentials are there.'})
+    if prompt.startswith('You are a study tutor'):
+        return json.dumps({'verdict': 'pass', 'explanation': 'Good.'})
+    return None
+
+
 class Harness:
     def __init__(self):
         self.session = argument('--session-id') or argument('--resume')
@@ -151,11 +163,16 @@ class Harness:
             seconds, _, command = rest.partition(' ')
             time.sleep(float(seconds))
             return self.run(command)
-        if text.startswith('Delegated task '):
-            # A delegated task's end, as Romacs wakes its parent.
+        if text.startswith('Delegated task ') or text.startswith('Romacs restart'):
+            # A delegated task's end, or a restart, as Romacs tells a session.
             log(wake=text[:400])
             self.stream('woken')
             return self.result(text)
+        reply = evaluator_reply(text)
+        if reply is not None:
+            log(evaluated=text[:200])
+            self.stream(reply)
+            return self.result(reply)
         if verb == 'spawn':
             child = subprocess.Popen(['sh', '-c', f'while true; do date +%s.%N >> {rest}; sleep 0.2; done'],
                                      start_new_session=True)

@@ -465,6 +465,30 @@ thousandth a stack mark."
             (romacs-mcp--poll-deferred))
           (unless (null romacs-mcp--deferred) (error "Withdrawn calls were not retired"))))
 
+;; N one-shot questions pending, each session's turn end reaching only its
+;; own handler.
+(scaling-probe agent-asks :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--asks)
+                (mapcar (lambda (id)
+                          (let ((session (romacs-agent--make :id id :harness 'claude :title id :state 'running)))
+                            (puthash id (lambda (_event) (remhash id romacs-agent--asks)) romacs-agent--asks)
+                            session))
+                        (scaling--names "scaling-ask" n)))
+  :body (progn
+          (dolist (session it)
+            (romacs-agent--raise session (list :type 'done :text "ok" :seq 1 :last t)))
+          (unless (zerop (hash-table-count romacs-agent--asks)) (error "Asks left unanswered"))))
+
+;; N gnosis cursors and plans handed out as tokens (the newest 256 kept),
+;; each looked up again.
+(scaling-probe agent-gnosis-tokens :n 400
+  :setup (progn (scaling--agent) (require 'romacs-agent-gnosis)
+                (clrhash romacs-agent-gnosis--tokens) (fillarray romacs-agent-gnosis--ring nil)
+                (number-sequence 1 n))
+  :body (dolist (i it)
+          (romacs-agent-gnosis--value-of (romacs-agent-gnosis--token (list :after i)))))
+
 ;; N messages sent to a per-turn session while its turn runs.
 (scaling-probe agent-queue :n 2000
   :setup (progn (scaling--agent)
