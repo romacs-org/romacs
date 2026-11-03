@@ -76,6 +76,8 @@ unset RUST_MIN_STACK
 server=${ROMACS_SERVER-romacs}
 case " $* " in *" --batch "*|*" --world-build "*|*" --help "*|*" --world-reset"*) server=off ;; esac
 if [ "$server" != off ]; then
+    # The server tells when the binary a new launch would run is rebuilt.
+    export ROMACS_BUILD_WATCH="$bin"
     exec "$bin" --server "$server" "$@"
 fi
 

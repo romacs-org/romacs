@@ -555,6 +555,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // `--server NAME': a client of that server (client.rs), not a session.
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if client::selected(&argv) { std::process::exit(client::main(&argv)); }
+    if argv.first().map(String::as_str) == Some("--server-exited") { std::process::exit(client::exited(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
     fonts::register_icon_font();

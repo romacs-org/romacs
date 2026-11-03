@@ -301,6 +301,67 @@ close the window; the session goes on (`romacs --stop' ends it)."
     (romacs--native-window 'hide)
     (run-hooks 'romacs-server-window-closed-hook)))
 
+;;; A newer build
+
+;; A server keeps the build it started with: an install only repoints what
+;; the next launch runs.  The launcher names that in ROMACS_BUILD_WATCH (its
+;; `current' link, or the binary a checkout's launcher builds); once it
+;; names another build, the server says so once, at its next idle with its
+;; window shown.
+
+(defcustom romacs-server-build-watch (getenv "ROMACS_BUILD_WATCH")
+  "The file whose target is the build a new launch runs, or nil."
+  :type '(choice (const nil) file) :group 'romacs-server)
+
+(defvar romacs-layer-toast-timeout)
+(declare-function romacs-layer-toast "romacs-layer")
+
+(defvar romacs-server--build nil
+  "The watched build's identity when this server started, then when it
+last told of a newer one.")
+
+(defun romacs-server--build-identity (file)
+  "FILE's target and that target's file identity, or nil."
+  (when-let* ((true (and file (file-truename file))) (attributes (file-attributes true)))
+    (list true (file-attribute-inode-number attributes) (file-attribute-modification-time attributes))))
+
+(defun romacs-server--build-label (true)
+  "The short commit of the build at TRUE (a build directory, or a binary
+beside its build.json), or nil."
+  (let ((record (expand-file-name "build.json" (if (file-directory-p true) true (file-name-directory true)))))
+    (when (file-readable-p record)
+      (with-temp-buffer
+        (insert-file-contents record)
+        (let ((commit (ignore-errors (gethash "commit" (json-parse-buffer)))))
+          (and (stringp commit) (substring commit 0 (min 8 (length commit)))))))))
+
+(defun romacs-server-build-notice (true)
+  "What the server says when the build at TRUE was installed."
+  (let ((label (romacs-server--build-label true))
+        (switch (if (fboundp 'romacs-restart) "M-x romacs-restart to switch" "quit and relaunch to switch")))
+    (if label (format "Romacs %s installed; %s" label switch)
+      (format "A newer Romacs build is installed; %s" switch))))
+
+(defun romacs-server--check-build ()
+  "Tell once of a newer build than this server's, when the window shows."
+  (when (and romacs-server--build (romacs--native-window 'query))
+    (let ((now (romacs-server--build-identity romacs-server-build-watch)))
+      (when (and now (not (equal now romacs-server--build)))
+        (setq romacs-server--build now)
+        (let ((text (romacs-server-build-notice (car now))))
+          (let ((inhibit-message t)) (message "%s" text))
+          (if (fboundp 'romacs-layer-toast)
+              ;; Long enough to read: it is said once.
+              (let ((romacs-layer-toast-timeout 15)) (romacs-layer-toast text))
+            (message "%s" text)))))))
+
+(defun romacs-server--watch-build ()
+  (when-let* ((identity (romacs-server--build-identity romacs-server-build-watch)))
+    (setq romacs-server--build identity)
+    ;; Every 2 s, acting only while idle: an idle timer runs once per idle
+    ;; spell, and a window shown again by a client starts none.
+    (run-at-time 2 2 (lambda () (when (current-idle-time) (romacs-server--check-build))))))
+
 ;;; Lifecycle
 
 (defun romacs-server-window-closed ()
@@ -333,6 +394,7 @@ close the window; the session goes on (`romacs --stop' ends it)."
     (when romacs-server-gnu-socket
       (setq server-name name)
       (server-start))
+    (romacs-server--watch-build)
     ;; Agent sessions outlive servers: attach to the ones still running.
     (when (file-directory-p (expand-file-name "romacs/agents/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
       (require 'romacs-agent)
