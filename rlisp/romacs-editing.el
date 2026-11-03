@@ -442,6 +442,10 @@ Read-only text is copied before deletion signals its ordinary read-only error."
 (unless (lookup-key function-key-map [return])
   (put 'return 'ascii-character ?\C-m)
   (define-key function-key-map [return] [?\C-m]))
+;; Escape too is a function key, `escape', made ESC the same way.
+(unless (lookup-key function-key-map [escape])
+  (put 'escape 'ascii-character ?\e)
+  (define-key function-key-map [escape] [?\e]))
 (defun romacs-newline (n)
   "Insert N newlines: RET in a workspace without simple.el's `newline'."
   (interactive "*p")

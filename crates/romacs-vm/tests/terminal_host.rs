@@ -154,12 +154,13 @@ fn terminal_sessions_keep_independent_buffers_and_close_ownership() {
     assert!(!vm.poll_terminal_output().unwrap());
     assert_eq!(*reads.borrow(), vec![1], "TERMINAL_WAKE_MUST_QUERY_ONLY_ITS_OWNER");
     assert_eq!(vm.eval_source("(with-current-buffer b (buffer-string))").unwrap().display().unwrap(), "\"B\\n\"");
-    vm.eval_source("(with-current-buffer b (romacs--term-follow b-id nil) (goto-char 1))").unwrap();
+    // B shows in a window of its own that its user moved away from.
+    vm.eval_source("(setq b-window (let* ((w (selected-window)) (h (window-pixel-height w))) (set-window-new-pixel w (- h 200)) (split-window-internal w 200 nil 0.5))) (set-window-buffer b-window b) (romacs--term-follow b-id nil b-window) (set-window-point b-window 1)").unwrap();
     { let mut output = values.borrow_mut(); output[0].text = "A\nfirst".into(); output[0].revision += 1; output[1].text = "B\nsecond".into(); output[1].revision += 1; }
     pending.borrow_mut().extend([1, 2]);
-    assert!(!vm.poll_terminal_output().unwrap());
-    let got = vm.eval_source("(list (eq (current-buffer) file) (buffer-string) (point) (buffer-modified-p) (with-current-buffer a (buffer-string)) (with-current-buffer b (list (buffer-string) (point))))").unwrap().display().unwrap();
-    assert_eq!(got, "(t \"unsaved file\" 5 t \"A\\nfirst\" (\"B\\nsecond\" 1))", "TWO_TERMINALS_MUST_NOT_CHANGE_ORDINARY_BUFFER_OR_EACH_OTHER");
+    assert!(vm.poll_terminal_output().unwrap(), "B IS DISPLAYED");
+    let got = vm.eval_source("(list (eq (current-buffer) file) (buffer-string) (point) (buffer-modified-p) (with-current-buffer a (buffer-string)) (with-current-buffer b (buffer-string)) (window-point b-window))").unwrap().display().unwrap();
+    assert_eq!(got, "(t \"unsaved file\" 5 t \"A\\nfirst\" \"B\\nsecond\" 1)", "TWO_TERMINALS_MUST_NOT_CHANGE_ORDINARY_BUFFER_OR_EACH_OTHER");
     vm.eval_source("(kill-buffer a)").unwrap();
     assert!(!vm.poll_terminal_output().unwrap());
     assert_eq!(*closed.borrow(), vec![1], "KILLING_A_TERMINAL_CLOSES_ONLY_ITS_SESSION");
@@ -173,9 +174,10 @@ fn unchanged_sessions_are_not_queried_on_editor_input_or_idle() {
     state.borrow_mut().snapshot_reads = 0;
     for _ in 0..100 { assert!(!vm.poll_terminal_output().unwrap()); }
     assert_eq!(state.borrow().snapshot_reads, 0, "IDLE_EDITOR_MUST_NOT_QUERY_TERMINAL_PUBLICATIONS");
-    vm.eval_source("(romacs--term-follow terminal-id nil)").unwrap();
+    // A view change applies the last publication at once; it queries nothing.
+    vm.eval_source("(romacs--term-follow terminal-id nil) (romacs--term-follow terminal-id t)").unwrap();
     vm.poll_terminal_output().unwrap();
-    assert_eq!(state.borrow().snapshot_reads, 1, "EXPLICIT_VIEW_CHANGE_STILL_APPLIES_PUBLICATION");
+    assert_eq!(state.borrow().snapshot_reads, 0, "A_VIEW_CHANGE_QUERIES_NO_PUBLICATION");
 }
 
 #[test]

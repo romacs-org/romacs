@@ -75,6 +75,31 @@ impl Vm {
         }
         self.initialize_command_bindings(global);
     }
+    /// MAP's binding of EVENT alone (a character, a meta character standing
+    /// for ESC and its base, or a function-key symbol), or of `[remap
+    /// EVENT]' when REMAP, with default bindings when DEFAULTS: nil when
+    /// unbound or only a prefix of more.  An
+    /// error when a menu item's `:filter' would have to run, which a caller
+    /// that must not run Lisp takes as "cannot tell".
+    pub(crate) fn lookup_one_event(&mut self, map: Value, event: Value, remap: bool, defaults: bool) -> Result<Value> {
+        let events = if remap {
+            vec![KeyEvent { value: self.keymap_symbol("remap"), input_index: 0 }, KeyEvent { value: event, input_index: 1 }]
+        } else if let Some(c) = event.integer_value() {
+            let meta = 1 << 27;
+            if c & meta != 0 {
+                let prefix = self.slots[self.names["meta-prefix-char"]].value;
+                vec![KeyEvent { value: prefix, input_index: 0 }, KeyEvent { value: Value::integer(c & !meta)?, input_index: 0 }]
+            } else { vec![KeyEvent { value: event, input_index: 0 }] }
+        } else {
+            vec![KeyEvent { value: self.canonical_key_event_symbol(event)?, input_index: 0 }]
+        };
+        self.keymap_filters.clear();
+        self.keymap_pending_filter = None;
+        let binding = self.lookup_keymap_key(map, &events, defaults);
+        self.keymap_pending_filter = None;
+        let binding = binding?;
+        Ok(if binding.integer_value().is_some() { Value::NIL } else { binding })
+    }
     /// One `lookup-key' walk with FILTERS as the known menu-filter results:
     /// the binding, or the first filter still to run.
     pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)

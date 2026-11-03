@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "cc18877eb0c344d0d8385668eb1b3ffbd7c847881f98ed8cd29df1e198306de2",
+  "source_fingerprint": "87b3b5705ce313c5ecfde963a66f7d1d914936b44b56abd15ad0674d7502b024",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1283,
-  "parsed_vm2_only": 1283
+  "parsed_total": 1285,
+  "parsed_vm2_only": 1285
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4682,7 +4682,7 @@
   "romacs--term-close": {
    "name": "romacs--term-close",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:18"
+   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:28"
   },
   "romacs--term-create": {
    "name": "romacs--term-create",
@@ -4692,17 +4692,22 @@
   "romacs--term-encode-event": {
    "name": "romacs--term-encode-event",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:28"
+   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:38"
   },
   "romacs--term-follow": {
    "name": "romacs--term-follow",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/terminal.rs:13"
   },
+  "romacs--term-paste": {
+   "name": "romacs--term-paste",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:23"
+  },
   "romacs--term-running-p": {
    "name": "romacs--term-running-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:23"
+   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:33"
   },
   "romacs--term-send": {
    "name": "romacs--term-send",
@@ -4712,12 +4717,17 @@
   "romacs--term-send-event": {
    "name": "romacs--term-send-event",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:33"
+   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:43"
   },
   "romacs--term-state": {
    "name": "romacs--term-state",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:38"
+   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:48"
+  },
+  "romacs--term-track": {
+   "name": "romacs--term-track",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/terminal.rs:18"
   },
   "romacs--timer-next": {
    "name": "romacs--timer-next",

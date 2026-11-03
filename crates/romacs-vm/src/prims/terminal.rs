@@ -11,8 +11,18 @@ fn terminal_send(cx, session: Integer, bytes: Value) {
 }}
 
 defsubr! { name = "romacs--term-follow", gnu = "romacs:terminal", effect = Global,
-fn terminal_follow(cx, session: Integer, follow: Value) {
-    cx.terminal_follow(session.0, follow)
+fn terminal_follow(cx, session: Integer, follow: Value; optional window: Value) {
+    cx.terminal_follow(session.0, follow, window)
+}}
+
+defsubr! { name = "romacs--term-track", gnu = "romacs:terminal", effect = Global,
+fn terminal_track(cx) {
+    cx.terminal_track()
+}}
+
+defsubr! { name = "romacs--term-paste", gnu = "romacs:terminal", effect = Global,
+fn terminal_paste(cx, session: Integer, text: Value) {
+    cx.terminal_paste(session.0, text)
 }}
 
 defsubr! { name = "romacs--term-close", gnu = "romacs:terminal", effect = Global,

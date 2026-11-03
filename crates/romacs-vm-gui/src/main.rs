@@ -25,7 +25,6 @@ mod presentation;
 mod latency;
 mod echo;
 mod prompt;
-mod terminal_input;
 mod terminal_service;
 mod terminal_wait;
 mod batch;
@@ -1253,7 +1252,6 @@ fn evaluate(
         live_presentation.submitted(previous.presentation, first_submitted);
     }
     startup::mark_phase("first-paint");
-    let mut terminal_modal = false;
     reply(json!({"ready":true,"presentation":last_presentation()}))?;
     if let Some(after) = after_first_frame { after(); }
     let (input_tx, input_rx) = std::sync::mpsc::sync_channel(1);
@@ -1302,12 +1300,16 @@ fn evaluate(
                     if !live || close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender, exit::Exit::new("window-close", "", 0));
                     }
-                    terminal_modal = true;
                     continue;
                 }
                 received = if tracing() {
                     romacs_display_runtime::paint_host::take_key_enqueue_time(&event)
                 } else { None };
+                // Each pressed key's enqueue time on CLOCK_MONOTONIC, for
+                // latency to a point outside the editor (terminal_latency_live.py).
+                if let Some(at) = received && matches!(command::unwrap_event(event.clone()), InputEvent::Key { pressed: true, .. }) {
+                    eprintln!("{}", json!({"diagnostic":"key-ingress","monotonic_ns":latency::monotonic_ns(at)}));
+                }
                 // read_char's timer_stop_idle: Emacs is idle until a key arrives.
                 if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
                 let event = command::unwrap_event(event);
@@ -1340,22 +1342,20 @@ fn evaluate(
                     live_presentation.changed();
                     continue;
                 }
-                if live && let Some((session, input)) = vm.selected_terminal()? {
-                    let mode = if input { terminal_input::Mode::Terminal } else { terminal_input::Mode::Emacs };
-                    match terminal_input::route(&event, mode, terminal_modal) {
-                        terminal_input::Target::Terminal => {
-                            let sent = vm.terminal_input_state(session).and_then(|state| {
-                                let bytes = terminal_input::encode(&event, state.application_cursor)?;
-                                if bytes.is_empty() { Ok(()) }
-                                else if !state.running { Err("Terminal is not running".into()) }
-                                else { vm.terminal_send(session, &bytes) }
-                            });
-                            if let Err(error) = sent { echo::show(&mut vm, &error)?; }
-                            live_presentation.changed();
-                            continue;
-                        }
-                        terminal_input::Target::Ignore => continue,
-                        terminal_input::Target::Editor => {}
+                // A key the command loop would only send to the selected
+                // terminal goes to its pty now (`Vm::terminal_passthrough_key'):
+                // the keymaps decide, without the loop's cost per key.
+                if live && matches!(event, InputEvent::Key { pressed: true, .. })
+                    && let Some(key) = native::translate(event.clone()) {
+                    let fast_start = Instant::now();
+                    let fast = vm.terminal_passthrough_key(&key);
+                    if tracing() {
+                        eprintln!("{}", json!({"diagnostic":"terminal-passthrough","taken":fast == Ok(true),"ns":fast_start.elapsed().as_nanos()}));
+                    }
+                    match fast {
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                        Err(error) => echo::show(&mut vm, &error)?,
                     }
                 }
                 // The Lisp command loop reads the key itself, from the queue
@@ -1385,9 +1385,6 @@ fn evaluate(
                 };
                 if live && vm.eval_source("romacs-gui-quit-requested")? != romacs_vm::Fixed::NIL {
                     return shutdown_editor(&mut vm, sender, exit::Exit::new("gui-quit", "", 0));
-                }
-                if live {
-                    terminal_modal = vm.eval_source("(and (boundp 'romacs-gui-pending) romacs-gui-pending)")? != romacs_vm::Fixed::NIL;
                 }
                 let command_ns = command_start.elapsed().as_nanos();
                 let snapshot_ns = if !live {

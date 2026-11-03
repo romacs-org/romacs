@@ -1,9 +1,10 @@
 //! The terminal encoder, moved from the host's key router into the VM
 //! (`romacs--term-encode-event'), sends the bytes the router sent: every
 //! host key, as the host translates it into the Lisp event a command sees,
-//! encodes as the router encoded it, in both cursor modes.
+//! encodes as the router's encoder (frozen in `frozen/router_encode.rs')
+//! encoded it, in both cursor modes.
 #[path = "../src/native.rs"] mod native;
-#[path = "../src/terminal_input.rs"] #[allow(dead_code)] mod terminal_input;
+#[path = "frozen/router_encode.rs"] mod terminal_input;
 use romacs_display_runtime::{backend::wgpu::*, host_types::FrontendKey, thread_comm::InputEvent};
 use romacs_vm::{CommandEvent, Vm};
 
