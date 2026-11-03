@@ -175,11 +175,9 @@ fn got_lock_name(cx: &mut Leaf<'_>, lock: Value, saved: &[Value]) -> Next {
     supersession(cx, lock, &[saved[0], lock])
 }
 fn supersession(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    use std::os::unix::ffi::OsStrExt;
     let name = super::fileio::file_name_path(cx, saved[0])?;
-    let subject = cx.file_visits().into_iter().find(|(_, _, _, true_name)| true_name.as_deref().map(|b| Path::new(std::ffi::OsStr::from_bytes(b))) == Some(name.as_path()));
-    let state = match subject {
-        Some((buffer, _, _, _)) => Some(cx.fileio_modtime(buffer)?.0),
+    let state = match cx.visit_with_truename(&name) {
+        Some(buffer) => Some(cx.fileio_modtime(buffer)?.0),
         None => None,
     };
     let threatened = state.is_some_and(|state| match state {
@@ -229,8 +227,7 @@ fn attack(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
 
 fn current_truename(cx: &mut Leaf<'_>) -> Out {
     let current = cx.current_buffer()?;
-    Ok(cx.file_visits().into_iter().find(|(buffer, _, _, _)| *buffer == current)
-        .and_then(|(_, _, _, name)| name).map_or(Value::NIL, |name| match std::str::from_utf8(&name) {
+    Ok(cx.visit_truename(current).map_or(Value::NIL, |name| match std::str::from_utf8(&name) {
             // The truename a buffer records is a string, as bset_current recorded it.
             Ok(text) => cx.string(text),
             Err(_) => super::fileio::file_name_value(cx, &name),

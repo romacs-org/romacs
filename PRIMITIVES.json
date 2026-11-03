@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "87b3b5705ce313c5ecfde963a66f7d1d914936b44b56abd15ad0674d7502b024",
+  "source_fingerprint": "a5308c353d6a0afb6d29ed90e01561f91f574e15a6540561c0c7d1f4fd9943bb",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1285,
-  "parsed_vm2_only": 1285
+  "parsed_total": 1288,
+  "parsed_vm2_only": 1288
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1633,7 +1633,7 @@
   "file-locked-p": {
    "name": "file-locked-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:265"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:262"
   },
   "file-modes": {
    "name": "file-modes",
@@ -2805,12 +2805,12 @@
   "lock-buffer": {
    "name": "lock-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:240"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:237"
   },
   "lock-file": {
    "name": "lock-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:255"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:252"
   },
   "log": {
    "name": "log",
@@ -4348,6 +4348,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:94"
   },
+  "romacs--lead-buffer-list": {
+   "name": "romacs--lead-buffer-list",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/buffer_names.rs:128"
+  },
   "romacs--local-toplevel-cell": {
    "name": "romacs--local-toplevel-cell",
    "implementation": "vm2",
@@ -4623,6 +4628,16 @@
    "name": "romacs--secure-hash",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/digest.rs:8"
+  },
+  "romacs--session-image-read": {
+   "name": "romacs--session-image-read",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/session_image.rs:154"
+  },
+  "romacs--session-image-write": {
+   "name": "romacs--session-image-write",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/session_image.rs:82"
   },
   "romacs--set-coding-category-order": {
    "name": "romacs--set-coding-category-order",
@@ -6196,12 +6211,12 @@
   "unlock-buffer": {
    "name": "unlock-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:247"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:244"
   },
   "unlock-file": {
    "name": "unlock-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:260"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:257"
   },
   "unwind-protect": {
    "name": "unwind-protect",

@@ -134,7 +134,7 @@ fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result
 /// with the file arguments (startup.el:2830-2905): `-l FILE', `-f
 /// FUNCTION' and `--eval EXPRESSION', in their GNU spellings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StartupOption { Load, Funcall, Eval }
+pub enum StartupOption { Load, Funcall, Eval, Restore }
 
 impl StartupOption {
     pub fn parse(arg: &str) -> Option<Self> {
@@ -142,6 +142,7 @@ impl StartupOption {
             "-l" | "-load" | "--load" => Some(Self::Load),
             "-f" | "-funcall" | "--funcall" | "-e" => Some(Self::Funcall),
             "-eval" | "--eval" | "-execute" | "--execute" => Some(Self::Eval),
+            "--restore" => Some(Self::Restore),
             _ => None,
         }
     }
@@ -168,6 +169,12 @@ impl StartupOption {
             // GNU's check for text after the expression matches anywhere
             // (startup.el:2877), so any is ignored.
             Self::Eval => format!("(progn (setq inhibit-startup-screen t) (eval (car (read-from-string {text})) t))"),
+            // A session image (rlisp/warm-restart.el), restored over what the
+            // init made. A failure is reported and keeps the image; it never
+            // ends the startup.
+            Self::Restore => format!("(progn (setq inhibit-startup-screen t)
+               (condition-case err (warm-restart-restore-image (expand-file-name {text} command-line-default-directory) t)
+                 (error (message \"Session restore failed: %s; the image stays at %s\" (error-message-string err) {text}))))"),
         })
     }
 }

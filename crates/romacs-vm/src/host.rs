@@ -1661,6 +1661,12 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 
+/// fsync the directory DIR, so a rename into it survives a host crash.
+pub fn sync_dir(dir: impl AsRef<Path>) -> io::Result<()> {
+    effect(|| format!("sync directory {}", bytes(dir.as_ref())))?;
+    File::open(dir)?.sync_all()
+}
+
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("delete {}", bytes(path.as_ref())))?;

@@ -522,6 +522,7 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   -l, --load FILE       load FILE after the init, in order with the files
   -f, --funcall FUNC    call FUNC (as a command when it is one) there
   --eval EXPR           evaluate EXPR there
+  --restore IMAGE       restore the session image IMAGE (`romacs-restart') there
   --batch ARG...        GNU's `emacs --batch ARG...', from a batch world of its own
                         once one is prepared in an existing store
   --compile-lisp FILE   compile FILE into the compiled-Lisp store (what a
