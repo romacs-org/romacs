@@ -106,4 +106,84 @@
   (romacs-should (equal (cdr (assq 'accent (romacs-theme-palette))) "#d48a20"))
   (romacs-should (equal (cdr (assq 'glow (romacs-theme-palette 'default))) "#d48a20")))
 
+(romacs-deftest romacs-theme-the-bundled-themes-are-available ()
+  (let ((available (custom-available-themes)))
+    (dolist (entry romacs-theme-bundled)
+      (romacs-should (memq (car entry) available)))
+    (romacs-should (memq 'system available))))
+
+(romacs-deftest romacs-theme-every-shipped-theme-loads-and-reads ()
+  (let ((enabled custom-enabled-themes))
+    (dolist (entry romacs-theme-bundled)
+      (let ((theme (car entry)))
+        (load-theme theme t t)
+        (romacs-should (custom-theme-p theme))
+        (romacs-should (eq (plist-get (get theme 'theme-properties) :background-mode) (nth 1 entry)))
+        (let* ((resolved (romacs-theme-palette theme)) (bg (cdr (assq 'bg resolved)))
+               (faces (romacs-theme-faces resolved))
+               (fg (lambda (face) (plist-get (cdr (car (car (cdr (assq face faces))))) :foreground))))
+          (romacs-should (eq (cdr (assq 'mode resolved)) (nth 1 entry)))
+          (dolist (face '(default font-lock-keyword-face font-lock-string-face link error minibuffer-prompt))
+            (romacs-should (>= (romacs-color-contrast (funcall fg face) bg) 4.5)))
+          (romacs-should (>= (romacs-color-contrast (funcall fg 'font-lock-comment-face) bg) 3.0))
+          (dolist (on (list (cdr (assq 'glass resolved)) (cdr (assq 'selection resolved))))
+            (romacs-should (>= (romacs-color-contrast (funcall fg 'romacs-complete-match) on) 4.5))))))
+    (romacs-should (equal custom-enabled-themes enabled))))
+
+(romacs-deftest romacs-theme-a-variant-is-found-before-it-is-loaded ()
+  (unwind-protect
+      (let ((romacs-theme--stock t))
+        (load-theme 'omarchy-catppuccin t)
+        (romacs-should (equal custom-enabled-themes '(omarchy-catppuccin)))
+        (theme-choose-variant t)
+        (romacs-should (equal custom-enabled-themes '(omarchy-catppuccin-latte)))
+        (romacs-should (eq (frame-parameter nil 'background-mode) (if (display-graphic-p) 'light (frame-parameter nil 'background-mode)))))
+    (mapc #'disable-theme custom-enabled-themes)
+    (enable-theme 'default)))
+
+(romacs-deftest romacs-theme-system-needs-its-file ()
+  (let ((romacs-theme-system-file nil))
+    (romacs-should (eq (condition-case nil (progn (load-theme 'system t t) 'loaded) (user-error 'refused)) 'refused))
+    (romacs-should (not (custom-theme-p 'system)))))
+
+(romacs-deftest romacs-theme-system-is-its-file-s-palette ()
+  (let* ((file (make-temp-file "romacs-system-" nil ".toml"))
+         (romacs-theme-system-file file))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "mode = \"light\"\naccent = \"#1e66f5\"\nbackground = \"#eff1f5\"\nforeground = \"#4c4f69\"\nhyprland_active_border = \"rgba(1e66f5ee)\"\n"))
+          (load-theme 'system t t)
+          (let ((resolved (romacs-theme-palette 'system)))
+            (romacs-should (eq (cdr (assq 'mode resolved)) 'light))
+            (romacs-should (equal (cdr (assq 'accent resolved)) "#1e66f5"))
+            (romacs-should (equal (cdr (assq 'bg resolved)) "#eff1f5"))
+            ;; Keys the file leaves out are the stock theme's.
+            (romacs-should (equal (cdr (assq 'green resolved)) "#9cbd6f"))))
+      (delete-file file))))
+
+(romacs-deftest romacs-theme-a-light-system-palette-reads ()
+  ;; Catppuccin Latte's full palette: derived slots are its own, not the
+  ;; stock theme's dark pins.
+  (let* ((file (make-temp-file "romacs-system-" nil ".toml"))
+         (romacs-theme-system-file file))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "mode = \"light\"\naccent = \"#1e66f5\"\nselection = \"#ccd0da\"\nmuted = \"#acb0be\"
+background = \"#eff1f5\"\ndark_background = \"#e3e4e8\"\ndarker_background = \"#d7d8dc\"
+lighter_background = \"#dce0e8\"\nforeground = \"#4c4f69\"\ndark_foreground = \"#9ca0b0\"
+light_foreground = \"#5c5f77\"\nbright_foreground = \"#4c4f69\"\nred = \"#d20f39\"\nyellow = \"#df8e1d\"
+orange = \"#fe640b\"\ngreen = \"#40a02b\"\ncyan = \"#179299\"\nblue = \"#1e66f5\"\nmagenta = \"#ea76cb\"
+brown = \"#dc8a78\"\nbright_red = \"#d20f39\"\nbright_yellow = \"#df8e1d\"\nbright_green = \"#40a02b\"
+bright_cyan = \"#179299\"\nbright_blue = \"#1e66f5\"\nbright_magenta = \"#ea76cb\"\n"))
+          (load-theme 'system t t)
+          (let* ((resolved (romacs-theme-palette 'system)) (faces (romacs-theme-faces resolved))
+                 (match (plist-get (cdr (car (car (cdr (assq 'romacs-complete-match faces))))) :foreground)))
+            (romacs-should (not (equal (cdr (assq 'glass resolved)) "#11100d")))
+            (romacs-should (not (equal (cdr (assq 'bg-region resolved)) "#3e4451")))
+            (dolist (on (list (cdr (assq 'glass resolved)) (cdr (assq 'selection resolved))))
+              (romacs-should (>= (romacs-color-contrast match on) 4.5)))))
+      (delete-file file))))
+
 ;;; romacs-theme-custom-test.el ends here
