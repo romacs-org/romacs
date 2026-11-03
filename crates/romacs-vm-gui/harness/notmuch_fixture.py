@@ -129,6 +129,30 @@ def messages(anchor):
     return out
 
 
+# Subjects and authors as real mail carries them, raw: a form feed and a
+# TAB (notmuch-sanitize turns them into spaces), a C1 control, a raw byte,
+# no-break spaces and emoji with a variation selector and zero-width
+# joiners, which GNU shows as escapes, no-break glyphs and thin spaces.
+CONTROL_SUBJECTS = [b'Form\x0cfeed and\ttab', 'Next\u0085line control'.encode(), b'Raw \xff byte in the header',
+                    'Heart \u2764\ufe0f family \U0001f468\u200d\U0001f469\u200d\U0001f467 grin \U0001f600'.encode(),
+                    'No\u00a0break\u00a0space'.encode(), 'Mixed \u0085\u00a0\u200b end \U0001f3df'.encode()]
+CONTROL_AUTHORS = ['Zoë\u00a0Müller'.encode(), b'Raw \xe9 Sender', 'Plain Sender'.encode()]
+
+
+def control_messages(anchor):
+    """Raw messages whose headers carry CONTROL_SUBJECTS, tagged `controls'."""
+    out = []
+    for n in range(36):
+        date = format_datetime(datetime.datetime.fromtimestamp(anchor - 3600 * (n + 1), datetime.timezone.utc))
+        subject = CONTROL_SUBJECTS[n % len(CONTROL_SUBJECTS)] + f' {n}'.encode()
+        author = CONTROL_AUTHORS[n % len(CONTROL_AUTHORS)]
+        out.append(b'From: ' + author + b' <sender' + str(n).encode() + b'@example.org>\n'
+                   b'To: owner@example.org\nSubject: ' + subject + b'\nDate: ' + date.encode() +
+                   b'\nMessage-ID: <controls-' + str(n).encode() + b'@example.org>\nMIME-Version: 1.0\n'
+                   b'Content-Type: text/plain; charset=utf-8\n\nA message whose headers carry controls.\n')
+    return out
+
+
 def notmuch(env, *arguments, input=None):
     return subprocess.run(['notmuch', *arguments], env=env, check=True, capture_output=True,
                           timeout=120, input=input).stdout
@@ -149,7 +173,7 @@ def environment(root):
 def build(root, anchor):
     root = Path(root).resolve()
     mail = root / 'mail'
-    for folder in ('INBOX', 'sent', 'drafts', 'mail-vps/Sent'):
+    for folder in ('INBOX', 'sent', 'drafts', 'mail-vps/Sent', 'controls'):
         for sub in ('cur', 'new', 'tmp'):
             (mail / folder / sub).mkdir(parents=True, exist_ok=True)
     (root / 'notmuch-config').write_text(config_text(mail))
@@ -159,6 +183,8 @@ def build(root, anchor):
         path.write_bytes(m.as_bytes())
         stamp = datetime.datetime.strptime(m['Date'], '%a, %d %b %Y %H:%M:%S %z').timestamp()
         os.utime(path, (stamp, stamp))
+    for number, raw in enumerate(control_messages(anchor)):
+        (mail / 'controls' / 'new' / f'{anchor}.c{number:03d}.fixture').write_bytes(raw)
     env = dict(os.environ, HOME=str(root), **environment(root))
     notmuch(env, 'new', '--quiet')
     # As after a user's sync: their sent mail is tagged sent and out of the
@@ -166,7 +192,8 @@ def build(root, anchor):
     batch = ('-inbox -unread +sent -- folder:sent\n'
              '-inbox +archived -- date:..21d\n'
              '+lists -- from:bot@lists.example.org\n'
-             '+emacs-pm -- subject:"Patch review"\n')
+             '+emacs-pm -- subject:"Patch review"\n'
+             '+controls -- folder:controls\n')
     notmuch(env, 'tag', '--batch', input=batch.encode())
     return environment(root)
 

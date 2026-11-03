@@ -1654,6 +1654,7 @@ impl Vm {
 
 /// A live window as the display iterator sees it, in columns but for
 /// the mode line's pixels and the frame's character size.
+#[derive(Clone)]
 pub(crate) struct TextArea {
     pub window: Value,
     pub buffer: Value,

@@ -6,7 +6,7 @@
 //! (display_hosted.rs), as are pos-visible-in-window-p and posn-at-point.
 use super::*;
 use super::display_elements::{Source, View};
-use super::display_hosted::Hosted;
+use super::display_hosted::{Hosted, refused};
 use super::display_motion::{self as motion, Ctx, Elements, It, Measure, Op, Wrap};
 use crate::data::Object;
 use crate::window::TextArea;
@@ -159,6 +159,13 @@ impl Leaf<'_> {
         })
     }
 
+    /// Whether WINDOW's buffer bytes FROM..TO show other glyphs than their
+    /// characters (`text_shows_glyphs').
+    pub(crate) fn window_text_shows_glyphs(&mut self, window: Value, from: usize, to: usize) -> std::result::Result<bool, Fault> {
+        let buffer = self.windows().text_area(window, "redisplay")?.buffer;
+        self.with_buffer(buffer, |leaf| leaf.text_shows_glyphs(from, to))
+    }
+
     /// Fvertical_motion (indent.c:2207): move point LINES screen lines (or,
     /// for (COLS . LINES), to column COLS of that line) as WINDOW (default
     /// the selected one) would show the current buffer; the screen lines
@@ -194,34 +201,75 @@ impl Leaf<'_> {
             _ => return Err(unsupported("in a unibyte buffer")),
         };
         // window_column_x: COLS canonical columns in pixels, rounded.
-        let x = match cols {
-            Some((cols, value)) => {
-                let x = cols * area.column as f64 + 0.5;
-                if !(f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&x) {
-                    let condition = self.intern("args-out-of-range");
-                    return Err(Fault::Signal(condition, self.vm.list_value(&[area.window, value])));
-                }
-                // The goal counts from after the line number, and in a
-                // horizontally scrolled window adds to the scrolled
-                // columns (first_x + to_x).
-                let lnum = if area.hosted { self.line_number_widths(&area)?.1 } else { 0 };
-                Some(x as i64 + lnum + area.first_visible * area.column)
+        let goal = |leaf: &mut Self, area: &TextArea| -> std::result::Result<Option<i64>, Fault> {
+            let Some((cols, value)) = cols else { return Ok(None) };
+            let x = cols * area.column as f64 + 0.5;
+            if !(f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&x) {
+                let condition = leaf.intern("args-out-of-range");
+                return Err(Fault::Signal(condition, leaf.vm.list_value(&[area.window, value])));
             }
-            None => None,
+            // The goal counts from after the line number, and in a
+            // horizontally scrolled window adds to the scrolled
+            // columns (first_x + to_x).
+            let lnum = if area.hosted { leaf.line_number_widths(area)?.1 } else { 0 };
+            Ok(Some(x as i64 + lnum + area.first_visible * area.column))
         };
-        let cx = self.iterator_context(&area, zv, pt)?;
-        let view = Self::view(&area, buffer, begv, zv, cx.lnum);
-        let source = Source::new(self, view, begv)?;
-        let (at, vpos) = if area.hosted {
-            let mut hosted = Hosted::new(source);
-            let cx = hosted_context(&mut hosted, cx, &area)?;
-            motion::vertical_motion(&mut hosted, &cx, pt, lines, x)?
-        } else {
-            let mut source = source;
-            motion::vertical_motion(&mut source, &cx, pt, lines, x.map(|x| x / area.column))?
+        let motion = |leaf: &mut Self, area: &TextArea| -> std::result::Result<(i64, i64), Fault> {
+            let x = goal(leaf, area)?;
+            let cx = leaf.iterator_context(area, zv, pt)?;
+            let view = Self::view(area, buffer, begv, zv, cx.lnum);
+            let source = Source::new(leaf, view, begv)?;
+            if area.hosted {
+                let mut hosted = Hosted::new(source);
+                let cx = hosted_context(&mut hosted, cx, area)?;
+                motion::vertical_motion(&mut hosted, &cx, pt, lines, x)
+            } else {
+                let mut source = source;
+                motion::vertical_motion(&mut source, &cx, pt, lines, x.map(|x| x / area.column))
+            }
+        };
+        // What the host's layout cannot measure moves as a terminal frame
+        // would, by the frame's character cells (GNU's line-based paths);
+        // what the iterator cannot follow at all, by the buffer's lines:
+        // motion, and the scrolling and recentering built on it, never
+        // fails for a measurement it lacks.
+        let (at, vpos) = match motion(self, &area) {
+            Err(fault) if refused(&fault) && area.hosted => match motion(self, &TextArea { hosted: false, ..area.clone() }) {
+                Err(fault) if refused(&fault) => self.buffer_line_motion(pt, lines)?,
+                other => other?,
+            },
+            Err(fault) if refused(&fault) => self.buffer_line_motion(pt, lines)?,
+            other => other?,
         };
         self.goto_char_position(at)?;
         Value::integer(vpos).map_err(Fault::Error)
+    }
+
+    /// The start of the buffer line LINES lines from PT's, within the
+    /// accessible text (its end past the last line), and the lines moved:
+    /// vertical motion where every buffer line is one screen line.
+    fn buffer_line_motion(&mut self, pt: i64, lines: i64) -> std::result::Result<(i64, i64), Fault> {
+        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else {
+            return Err(unsupported("in a unibyte buffer"));
+        };
+        let r = b.accessible();
+        let text = &b.as_str()[r.start.0..r.end.0];
+        let at = b.byte_of_char(crate::coordinates::CharOffset((pt - 1).max(0) as usize)).map_err(Fault::Error)?.0.clamp(r.start.0, r.end.0) - r.start.0;
+        let mut start = text[..at].rfind('\n').map_or(0, |i| i + 1);
+        let mut moved = 0;
+        while moved < lines {
+            // Past the last line break, the end of the text (vmotion
+            // stops at ZV).
+            let Some(i) = text[start..].find('\n') else { start = text.len(); break };
+            start += i + 1;
+            moved += 1;
+        }
+        while moved > lines && start > 0 {
+            start = text[..start - 1].rfind('\n').map_or(0, |i| i + 1);
+            moved -= 1;
+        }
+        let pos = b.char_of_byte(crate::coordinates::ByteOffset(r.start.0 + start)).map_err(Fault::Error)?.0 as i64 + 1;
+        Ok((pos, moved))
     }
 
     /// Fline_pixel_height (xdisp.c:1545): the height of the screen line
@@ -240,17 +288,25 @@ impl Leaf<'_> {
                 }
                 _ => return Err(unsupported("in a unibyte buffer")),
             };
-            let cx = leaf.iterator_context(&area, zv, pt)?;
-            let view = Self::view(&area, buffer, begv, zv, cx.lnum);
-            let source = Source::new(leaf, view, begv)?;
-            if area.hosted {
-                let mut hosted = Hosted::new(source);
-                let cx = hosted_context(&mut hosted, cx, &area)?;
-                let height = row_height(&mut hosted, &cx, pt)?;
-                Ok(if height > 0 { height } else { hosted.default_advance(' ')?.1 })
-            } else {
-                let mut source = source;
-                Ok(row_height(&mut source, &cx, pt)?.max(1) * area.line)
+            let measured = |leaf: &mut Self| -> std::result::Result<i64, Fault> {
+                let cx = leaf.iterator_context(&area, zv, pt)?;
+                let view = Self::view(&area, buffer, begv, zv, cx.lnum);
+                let source = Source::new(leaf, view, begv)?;
+                if area.hosted {
+                    let mut hosted = Hosted::new(source);
+                    let cx = hosted_context(&mut hosted, cx, &area)?;
+                    let height = row_height(&mut hosted, &cx, pt)?;
+                    Ok(if height > 0 { height } else { hosted.default_advance(' ')?.1 })
+                } else {
+                    let mut source = source;
+                    Ok(row_height(&mut source, &cx, pt)?.max(1) * area.line)
+                }
+            };
+            // A row the iterator or the host's layout cannot measure is a
+            // character row.
+            match measured(leaf) {
+                Err(fault) if refused(&fault) => Ok(area.line),
+                other => other,
             }
         })?;
         Value::integer(height).map_err(Fault::Error)
@@ -680,10 +736,11 @@ impl Leaf<'_> {
             Some(Object::Buffer(b)) => b.as_str()[..b.accessible().end.0].ends_with('\n'),
             _ => false,
         };
-        // The host draws an ellipsis from a display table, not its glyphs
-        // for characters or its truncation, continuation or escape glyphs.
-        if area.hosted && let Some(table) = self.display_table()? && !self.only_ellipsis(table) {
-            return Err(unsupported("with a display table in a displayed window"));
+        // The host paints a display table's glyphs for characters and its
+        // escape and control glyphs as the elements publish them, but draws
+        // its own truncation and continuation glyphs.
+        if area.hosted && let Some(table) = self.display_table()? && !self.no_line_glyphs(table) {
+            return Err(unsupported("with a display table's truncation or continuation glyphs in a displayed window"));
         }
         Ok(Ctx {
             last_visible_x: area.first_visible + area.columns - area.left_margin - area.right_margin - glyph - border,
@@ -696,12 +753,11 @@ impl Leaf<'_> {
         })
     }
 
-    /// Whether the display table TABLE sets nothing but its ellipsis and
-    /// window border: no character's glyphs, nor truncation, continuation,
-    /// escape or control glyphs.
-    fn only_ellipsis(&self, table: Value) -> bool {
+    /// Whether the display table TABLE sets no truncation or continuation
+    /// glyph (slots 0 and 1).
+    fn no_line_glyphs(&self, table: Value) -> bool {
         let Some(Object::CharTable(t)) = self.vm.object_if(table) else { return false };
-        t.parent == Value::NIL && t.extras.iter().take(4).all(|&v| v == Value::NIL) && t.all_nil()
+        t.extras.iter().take(2).all(|&v| v == Value::NIL)
     }
 
     /// The truncation (SLOT 0) or continuation (SLOT 1) glyph's columns:

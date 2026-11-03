@@ -708,6 +708,73 @@ mod tests {
         h.eval("(delete-all-overlays)");
     }
 
+    /// Text the iterator cannot follow at all (a `composition' property)
+    /// moves by buffer lines, to the end past the last: a line scroll near
+    /// the end still advances the start, and the last line ends the motion.
+    #[test]
+    fn motion_the_iterator_refuses_moves_by_buffer_lines() {
+        let mut h = hosted();
+        h.eval("(progn (erase-buffer) (kill-all-local-variables) (insert \"ab\\ncd\\nlast\") (put-text-property 1 2 'composition '(1 . \"x\")) (goto-char 1) (set-window-start nil 1))");
+        assert!(h.eval("(condition-case e (progn (window-text-pixel-size) nil) (error (car (cdr e))))").contains("composed text"));
+        assert_eq!(h.eval("(progn (goto-char 4) (list (vertical-motion 5) (point)))"), "(1 11)", "TO_THE_END_PAST_THE_LAST_LINE");
+        assert_eq!(h.eval("(progn (goto-char (point-max)) (set-window-start nil 1) (scroll-up 1) (window-start))"), "4", "SCROLL_NEAR_THE_END");
+    }
+
+    /// GNU shows a control character as ^X (`ctl-arrow'), a C1 control or
+    /// a raw byte as an octal (or `display-raw-bytes-as-hex') escape, a
+    /// no-break character as an escape (`nobreak-char-display'), a display
+    /// table's glyphs for a character, and a glyphless character as a box
+    /// of its pixels: the host paints those glyphs, and every position's
+    /// place and the line's size measure as painted.
+    #[test]
+    fn escapes_glyphless_and_display_table_glyphs_measure_as_painted() {
+        let mut h = hosted();
+        h.eval("(put 'display-table 'char-table-extra-slots 18) (put 'glyphless-char-display 'char-table-extra-slots 1)");
+        for (setup, insert, glyphs) in [
+            ("", "(insert \"a\\fb\")", "a^Lb"),
+            ("", "(insert \"a\\u0085b\")", "a\\205b"),
+            ("(setq ctl-arrow nil)", "(insert \"a\\fb\")", "a\\014b"),
+            ("", "(insert \"a\" (string (unibyte-char-to-multibyte #x80)) \"b\")", "a\\200b"),
+            ("(setq display-raw-bytes-as-hex t)", "(insert \"a\" (string (unibyte-char-to-multibyte #x80)) \"b\")", "a\\x80b"),
+            ("(setq nobreak-char-display 'escape)", "(insert \"a\\u00a0b\")", "a\\ b"),
+            ("(setq buffer-display-table (make-char-table 'display-table)) (aset buffer-display-table ?b [?B ?B])", "(insert \"abc\")", "aBBc"),
+            ("(setq glyphless-char-display (make-char-table 'glyphless-char-display)) (aset glyphless-char-display #x200b 'thin-space)", "(insert \"a\\u200bb\")", "a\tb"),
+            ("(setq glyphless-char-display (make-char-table 'glyphless-char-display)) (aset glyphless-char-display #x200b 'hex-code)", "(insert \"a\\u200bb\")", "a\tb"),
+            // (GRAPHICAL . TEXT): the window-system frame's thin space.
+            ("(setq glyphless-char-display (make-char-table 'glyphless-char-display)) (aset glyphless-char-display #x200b '(thin-space . zero-width))", "(insert \"a\\u200bb\")", "a\tb"),
+        ] {
+            h.eval(&format!("(progn (erase-buffer) (kill-all-local-variables) (setq ctl-arrow t display-raw-bytes-as-hex nil nobreak-char-display t glyphless-char-display (make-char-table 'glyphless-char-display)) {setup} {insert} (goto-char 1) (set-window-start nil 1))"));
+            let paint = h.paint();
+            let mut row: Vec<_> = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text && g.2 == 0.0).collect();
+            row.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let painted: String = row.iter().map(|g| g.0).collect();
+            assert_eq!(painted, glyphs, "{setup} {insert}: painted");
+            let width = row.last().map_or(0.0, |g| g.1 + g.3);
+            let end = h.eval("(point-max)").parse::<i64>().unwrap();
+            assert_eq!(h.eval(&format!("(window-text-pixel-size nil 1 {end})")), cons(width, paint.rows[0].height), "{setup} {insert}: size");
+            for pos in 1..=end {
+                h.eval(&format!("(goto-char {pos})"));
+                let cursor = h.paint().cursor.unwrap();
+                assert_eq!(h.eval(&format!("(pos-visible-in-window-p {pos} nil t)")), format!("({} {})", cursor.0 as i64, cursor.1 as i64), "{setup} {insert}: {pos}");
+            }
+        }
+    }
+
+    /// A string's escape shows in `escape-glyph' over the string's face, as
+    /// GNU merges a display vector's face over the face it is in.
+    #[test]
+    fn a_strings_escape_merges_escape_glyph_over_the_strings_face() {
+        let mut h = hosted();
+        h.eval("(progn (erase-buffer) (delete-all-overlays) (internal-set-lisp-face-attribute 'escape-glyph :foreground \"#a01020\" nil) (insert \"ab\") (overlay-put (make-overlay 2 2) 'before-string (propertize \"\\f\" 'face '(:background \"#123456\"))) (goto-char 1) (set-window-start nil 1))");
+        let frame = h.vm.frame_snapshot(h.width, h.height).unwrap();
+        let text = &frame.windows[0].snapshot.text;
+        let caret = text.utf8.find('^').expect("the escape's caret is published");
+        let face = text.face_runs.iter().find(|run| run.bytes.contains(&caret)).unwrap().face;
+        let face = &frame.windows[0].snapshot.faces[face.0 as usize];
+        assert_eq!((face.foreground, face.background), ([0xa0, 0x10, 0x20], [0x12, 0x34, 0x56]));
+        h.eval("(delete-all-overlays)");
+    }
+
     /// A package's `make-display-table' leaves `standard-display-table' an
     /// empty table; vertical motion (next-line) still runs on the host's
     /// layout rather than refusing.
@@ -730,16 +797,11 @@ mod tests {
         for (refused, twin, what) in [
             // The host continues lines at the window edge, never at a word.
             (format!("(setq truncate-partial-width-windows nil word-wrap t) (insert {long})"), "(setq word-wrap t) (insert (make-string (- (window-body-width) 2) ?x))".to_owned(), "of a continued or truncated line"),
-            // It draws a control character's escape itself, as one glyph.
-            ("(insert \"a\\fb\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
-            ("(insert \"a\\u0085b\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(setq line-prefix \"> \") (insert \"abc\")".into(), "(insert \"abc\")".into(), "of a line or wrap prefix"),
             ("(insert \"a\" (propertize \" \" 'display '(space :width 2 :height 2)) \"c\")".into(), "(insert \"a\" (propertize \" \" 'display '(space :width 2)) \"c\")".into(), "of a space with its own height"),
-            // A display table that maps glyphs refuses; an empty one does not.
-            ("(setq buffer-display-table (make-char-table 'display-table)) (aset buffer-display-table ?b [?B]) (insert \"abc\")".into(),
-             "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "with a display table"),
+            // The host draws its own continuation and truncation glyphs.
             ("(setq buffer-display-table (make-char-table 'display-table)) (set-char-table-extra-slot buffer-display-table 1 ?|) (insert \"abc\")".into(),
-             "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "with a display table"),
+             "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "with a display table's truncation or continuation glyphs"),
         ] {
             for (form, refuse) in [(refused.as_str(), true), (twin.as_str(), false)] {
                 // Hosted since setup's paint.
@@ -748,6 +810,18 @@ mod tests {
                     let answer = h.eval(&format!("(condition-case e {call} (error (car (cdr e))))"));
                     if refuse { assert_eq!(answer, format!("\"VM2 window-text-pixel-size {what} in a displayed window is unsupported\""), "{form} {call}"); }
                     else { assert!(!answer.starts_with('"'), "{form} {call}: {answer}"); }
+                }
+                // Motion, and recentering and scrolling built on it, still
+                // moves: by the frame's character cells.
+                assert_eq!(h.eval("(progn (goto-char 1) (list (vertical-motion 0) (point)))"), "(0 1)", "{form}");
+                assert!(h.eval("(condition-case e (progn (recenter) 'ok) (error e))") == "ok", "{form}: recenter");
+                // Near the end, a line scroll still advances the start.
+                if refuse {
+                    assert_eq!(h.eval("(progn (goto-char (point-max)) (insert \"\\n2\\n3\\n4\") (goto-char (point-max)) (set-window-start nil 1) (scroll-up 1) (window-start))"),
+                               h.eval("(save-excursion (goto-char 1) (vertical-motion 1) (point))"), "{form}: scroll-up near the end");
+                }
+                for scroll in ["(scroll-up 1)", "(scroll-down 1)", "(move-to-window-line nil)", "(line-pixel-height)"] {
+                    assert_eq!(h.eval(&format!("(condition-case e (progn {scroll} 'ok) ((beginning-of-buffer end-of-buffer) 'ok) (error e))")), "ok", "{form}: {scroll}");
                 }
             }
         }

@@ -8,18 +8,27 @@
 //! elements measure here: each becomes a `Shape::Pixel` glyph with the
 //! advance and height the host's own layout gives it, or a
 //! `Shape::PixelTab` or `Shape::PixelStretch` from its face, so the motion
-//! measures in the host's pixels. What the host does not draw as GNU does
-//! (escapes and display-table glyphs, glyphless characters, line and wrap
-//! prefixes) is refused: the host would not show what GNU shows there.
+//! measures in the host's pixels. An escape or control sequence and a
+//! display table's glyphs publish each glyph, in its own face, so the host
+//! paints and measures what GNU shows; a glyphless character publishes a
+//! stretch of the pixels GNU gives it (produce_glyphless_glyph), painted
+//! blank where GNU draws its box. What the host does not draw as GNU does
+//! (line and wrap prefixes) is refused: the host would not show what GNU
+//! shows there.
 use super::*;
 use super::display_elements::{Source, View};
-use super::display_motion::{Elem, Elements, Lines, Method, Shape, Slot, R};
+use super::display_motion::{Elem, Elements, Glyphless, Lines, Method, Shape, Slot, R};
 use romacs_layout_input::StretchWidth;
 
 /// The elements one host measurement covers past the first it needs.
 const CHUNK: usize = 4096;
 
 fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixel-size {what} in a displayed window is unsupported")) }
+/// Whether FAULT is such a refusal: what the display iterator cannot yet
+/// measure, not an error of the caller's.
+pub(super) fn refused(fault: &Fault) -> bool {
+    matches!(fault, Fault::Error(m) if m.starts_with("VM2 window-text-pixel-size ") && m.ends_with(" is unsupported"))
+}
 fn not_as_gnu() -> Fault { unsupported("of text the host does not lay out as GNU displays it") }
 
 /// The face a display element shows in: the buffer's at a position (GNU
@@ -27,7 +36,10 @@ fn not_as_gnu() -> Fault { unsupported("of text the host does not lay out as GNU
 /// (face_at_string_position, the buffer text's face as its base), over the
 /// text's alone for an OVERLAY's string (face_for_overlay_string).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FaceKey { Buffer(i64), String { string: Value, strpos: usize, charpos: i64, overlay: bool },
+pub(crate) enum FaceKey { Buffer(i64),
+    /// A string's character, or with GLYPH (else nil) a display vector
+    /// glyph of it, in that glyph's face over the string's (merge_faces).
+    String { string: Value, strpos: usize, charpos: i64, overlay: bool, glyph: Value },
     /// A display-table glyph's face over the buffer's (merge_faces).
     Glyph { face: Value, charpos: i64 } }
 
@@ -56,31 +68,26 @@ pub(crate) enum ShownKind {
 /// not show what GNU does.
 fn host_char(source: &mut Source<'_, '_>, e: &Elem) -> R<Option<Option<char>>> {
     if !e.text_area { return Ok(None); }
+    let _ = source;
     Ok(Some(match (e.shape, e.method) {
-        (Shape::Glyph { c, .. }, Method::Buffer | Method::String) => char::from_u32(c),
-        (Shape::Tab, Method::Buffer | Method::String) => Some('\t'),
-        (Shape::Stretch { .. } | Shape::Align { .. }, _) => Some(' '),
+        // A character, an escape's or a display table's glyph as it is.
+        (Shape::Glyph { c, .. }, Method::Buffer | Method::String | Method::Vector { .. }) => char::from_u32(c),
+        (Shape::Tab, Method::Buffer | Method::String | Method::Vector { .. }) => Some('\t'),
+        // A glyphless character's box: a stretch of its width.
+        (Shape::Stretch { .. } | Shape::Align { .. } | Shape::Glyphless { .. }, _) => Some(' '),
         // Measured as the glyph it is relative to.
         (Shape::RelativeStretch { c, .. }, _) => char::from_u32(c),
-        (Shape::Glyph { c, .. }, Method::Vector { .. }) if e.ellipsis.is_some() => char::from_u32(c),
-        // An escape or a display table's glyphs stand for the character
-        // there, which the host draws itself.
-        (_, Method::Vector { last, .. }) => {
-            if !last { return Ok(Some(None)); }
-            let c = match e.strpos {
-                Some(k) if e.object != Value::NIL => source.leaf().vm.str_view(e.object).and_then(|v| v.chars().nth(k)),
-                _ => source.char_after(e.charpos)?,
-            };
-            return Ok(Some(c.and_then(char::from_u32)));
-        }
         _ => None,
     }))
 }
 
 fn face_key(e: &Elem) -> FaceKey {
     if let Some(face) = e.ellipsis.filter(|&f| f != Value::NIL) { return FaceKey::Glyph { face, charpos: e.charpos }; }
+    // A glyph's own face over the text's or the string's.
+    if let Some(face) = e.face.filter(|_| e.object == Value::NIL) { return FaceKey::Glyph { face, charpos: e.charpos }; }
     match e.strpos {
-        Some(strpos) if e.object != Value::NIL => FaceKey::String { string: e.object, strpos, charpos: e.charpos, overlay: !e.from_display },
+        Some(strpos) if e.object != Value::NIL => FaceKey::String { string: e.object, strpos, charpos: e.charpos, overlay: !e.from_display,
+            glyph: e.face.unwrap_or(Value::NIL) },
         _ => FaceKey::Buffer(e.charpos),
     }
 }
@@ -91,6 +98,39 @@ fn stretch_width(shape: Shape) -> Option<StretchWidth> {
         Shape::Align { target } => Some(StretchWidth::AlignTo(target)),
         _ => None,
     }
+}
+
+/// produce_glyphless_glyph: the pixels E, a glyphless character, takes
+/// on a window-system frame: THIN_SPACE_WIDTH, its columns of the face's
+/// base width for an empty box, or the wider of its code's (or acronym's)
+/// two halves in `glyphless-char', with the box's bars and spaces, and no
+/// less than the base width. Without a host, its columns.
+fn glyphless_pixels(source: &mut Source<'_, '_>, e: &Elem) -> R<i64> {
+    let Shape::Glyphless { width, c, how } = e.shape else { return Ok(0) };
+    if !source.leaf().vm.has_layout_host() {
+        let column = source.leaf().vm.window_state.column as i64;
+        return Ok(width * column);
+    }
+    let window = source.window();
+    let measure = |source: &mut Source<'_, '_>, text: &str, face: FaceKey| -> R<i64> {
+        if text.is_empty() { return Ok(0); }
+        let shown: Vec<(char, FaceKey)> = text.chars().map(|ch| (ch, face)).collect();
+        let measured = source.leaf().vm.host_measure_elements(window, &shown).map_err(Fault::Error)?;
+        Ok(measured.glyphs.iter().map(|&(w, _)| i64::from(w)).sum())
+    };
+    let base = measure(source, "x", face_key(e))?;
+    let text = match how {
+        Glyphless::ThinSpace => return Ok(1),
+        Glyphless::EmptyBox => return Ok(base * source.leaf().character_width(c)?.clamp(1, 4)),
+        Glyphless::HexCode => if c < 0x10000 { format!("{c:04X}") } else { format!("{c:06X}") },
+        Glyphless::Acronym(string) => source.leaf().vm.str_view(string).map(|v| v.chars().map_while(char::from_u32).take_while(char::is_ascii).take(6).collect()).unwrap_or_default(),
+    };
+    let glyph = source.leaf().intern("glyphless-char");
+    let face = FaceKey::Glyph { face: glyph, charpos: e.charpos };
+    let upper = text.chars().count().div_ceil(2);
+    let (top, bottom): (String, String) = (text.chars().take(upper).collect(), text.chars().skip(upper).collect());
+    let boxed = measure(source, &top, face)?.max(measure(source, &bottom, face)?) + 4;
+    Ok(boxed.max(base))
 }
 
 impl<'a> Leaf<'a> {
@@ -109,8 +149,15 @@ impl<'a> Leaf<'a> {
             // A space replaces when the buffer's display made it, not a string's.
             let (kind, replaces) = match stretch_width(e.shape) {
                 Some(width) => (ShownKind::Stretch(width), e.object == Value::NIL),
+                None if let Shape::Glyphless { .. } = e.shape => {
+                    let width = glyphless_pixels(&mut source, &e)?;
+                    (ShownKind::Stretch(StretchWidth::Width { width, zero_ok: false }), e.object == Value::NIL)
+                }
                 None if let Shape::RelativeStretch { factor, .. } = e.shape => (ShownKind::Relative { factor, c }, e.object == Value::NIL),
-                None if e.object == Value::NIL && e.ellipsis.is_none() && matches!(e.method, Method::Buffer | Method::Vector { .. }) => (ShownKind::Buffer, true),
+                None if e.object == Value::NIL && e.ellipsis.is_none() && e.method == Method::Buffer => (ShownKind::Buffer, true),
+                // An escape's or display table's glyphs stand for the
+                // buffer's character: point shows on the first.
+                None if e.object == Value::NIL && e.ellipsis.is_none() => (ShownKind::Other { cursor: false }, true),
                 None => {
                     let asks = match e.strpos { Some(k) if e.object != Value::NIL && !e.from_display =>
                         source.leaf().vm.property_textget(e.object, k as i64, cursor)? != Value::NIL, _ => false };
@@ -185,10 +232,12 @@ impl Elements for Hosted<'_, '_> {
         let slot = self.source.slot(index)?;
         let Some(e) = slot.elem else { return Ok(slot) };
         let Some(c) = host_char(&mut self.source, &e)? else { return Ok(slot) };
-        if c.is_none() || matches!(e.method, Method::Vector { .. }) && e.ellipsis.is_none() { return Err(not_as_gnu()); }
+        if c.is_none() { return Err(not_as_gnu()); }
         let (width, height) = self.glyph(index)?;
         let height = height.max(self.default_height);
         let shape = match e.shape {
+            Shape::Glyphless { .. } => Shape::PixelStretch {
+                width: StretchWidth::Width { width: glyphless_pixels(&mut self.source, &e)?, zero_ok: false }, unnumbered: None, height },
             Shape::Glyph { c, .. } => Shape::Pixel { c, width, height },
             Shape::Tab => Shape::PixelTab { space: width, height },
             // produce_stretch_glyph: NUMVAL (prop) * it2.pixel_width.
