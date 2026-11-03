@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "2af38eb8c4fba94cd0f3ae499988a2d512d11cd351f85e75511bdc6173292023",
+  "source_fingerprint": "6a7ca9ae062eef9a110c56df4872a9807dedb0bbd690f5e0a383836240948ea0",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -1081,7 +1081,7 @@
   "current-input-mode": {
    "name": "current-input-mode",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:456"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:462"
   },
   "current-kill": {
    "name": "current-kill",
@@ -2400,7 +2400,7 @@
   "input-pending-p": {
    "name": "input-pending-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:447"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:453"
   },
   "insert": {
    "name": "insert",
@@ -2497,7 +2497,7 @@
   "internal-event-symbol-parse-modifiers": {
    "name": "internal-event-symbol-parse-modifiers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:513"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:519"
   },
   "internal-get-lisp-face-attribute": {
    "name": "internal-get-lisp-face-attribute",
@@ -4091,7 +4091,7 @@
   "romacs--call-deadline": {
    "name": "romacs--call-deadline",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:538"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:544"
   },
   "romacs--call-process-run": {
    "name": "romacs--call-process-run",
@@ -4702,7 +4702,7 @@
   "romacs--take-user-signal": {
    "name": "romacs--take-user-signal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:442"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:444"
   },
   "romacs--term-close": {
    "name": "romacs--term-close",
@@ -5105,7 +5105,7 @@
   "set-input-meta-mode": {
    "name": "set-input-meta-mode",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:464"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:470"
   },
   "set-keyboard-coding-system-internal": {
    "name": "set-keyboard-coding-system-internal",

@@ -293,6 +293,12 @@ impl Vm {
                 }
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
             }
+            // A user signal `debug-on-event' names, which woke this wait:
+            // the command reading quits into the debugger now, as GNU's
+            // enters it at once, not at the read's next key.
+            if self.take_debug_event() {
+                self.poll_quit()?;
+            }
             let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
             host.watch_processes(&self.process_wait_fds());
             // Blocked for input, the evaluator is not busy: a C-g typed now

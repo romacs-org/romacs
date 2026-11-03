@@ -1289,6 +1289,9 @@ pub struct Vm {
     /// `quit-flag', `inhibit-quit' and `throw-on-input''s symbol slots, for
     /// the evaluator's quit polls (quit.rs).
     quit_slots: [usize; 3],
+    /// The slots of `debug-on-event' and of the user signal events, in
+    /// host::USER_SIGNAL_NAMES's order (`Vm::debug_event_mask').
+    debug_event_slots: [usize; 3],
     /// Counts keymap stores and parent changes, GNU's two flushes of the
     /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
     keymap_generation: u64,
@@ -1623,6 +1626,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit,
     force_quit_count,
     quit_slots,
+    debug_event_slots,
 } at_rest {
     regexp_cache,
     mode_line_forms,
@@ -1722,6 +1726,7 @@ impl Vm {
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],
+            debug_event_slots: [0; 3],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
@@ -1852,6 +1857,8 @@ impl Vm {
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
         vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
+        let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
+        vm.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| vm.slot(name));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);

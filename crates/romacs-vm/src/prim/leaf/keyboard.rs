@@ -2,6 +2,14 @@
 use super::*;
 
 impl Leaf<'_> {
+    /// Whether `debug-on-event' names the user signal EVENT (quit.rs).
+    pub(crate) fn debugs_on_event(&mut self, event: &str) -> bool {
+        self.vm.debugs_on(event)
+    }
+    /// handle_user_signal's debugger entry for `debug-on-event' (quit.rs).
+    pub(crate) fn debug_event(&mut self) {
+        self.vm.debug_event()
+    }
     /// keyboard.c get_input_pending over the host keyboard: a pending quit
     /// (`quit-flag', or a `C-g' the host counted) is input, since read_char
     /// returns the quit character for it; then whether an attached host
