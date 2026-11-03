@@ -883,10 +883,14 @@ impl Vm {
                 edited.map(|()| Value::NIL)
             }
             DeleteRegion => {
-                let edited = match region(args[0], args[1]) { Ok(r) => t.replace(r, b""), Err(error) => Err(error) };
+                let deleted = region(args[0], args[1]);
+                let at = deleted.as_ref().ok().map(|r| r.start);
+                let edited = match deleted { Ok(r) => t.replace(r, b""), Err(error) => Err(error) };
                 self.family_fetch(marks);
                 edited?;
-                self.finish_annotation_edit(self.slots[self.buffer_slot].value)?;
+                if let Some(at) = at {
+                    self.evaporate_overlays_at(self.slots[self.buffer_slot].value, at..at)?;
+                }
                 Ok(Value::NIL)
             }
             Substring => {

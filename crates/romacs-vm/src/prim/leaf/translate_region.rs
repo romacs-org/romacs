@@ -161,7 +161,13 @@ impl Leaf<'_> {
             changed += if len == 1 && replacement.len() == 1 { 1 } else { replacement.len() };
             at += replacement.len();
         }
-        self.vm.finish_annotation_edit(buffer).map_err(Fault::Error)?;
+        // The overlays a replacement emptied lie in the translated text.
+        let span = {
+            let data::Object::Buffer(b) = &self.vm.objects[index] else { unreachable!() };
+            b.byte_of_char(CharOffset((lo - 1) as usize)).map_err(Fault::Error)?
+                ..b.byte_of_char(CharOffset((lo - 1) as usize + chars.len())).map_err(Fault::Error)?
+        };
+        self.vm.evaporate_overlays_at(buffer, span).map_err(Fault::Error)?;
         Ok(Value::integer(changed as i64).unwrap())
     }
 }

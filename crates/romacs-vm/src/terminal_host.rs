@@ -281,7 +281,9 @@ impl Vm {
             let accessible = text.accessible();
             text.point = ByteOffset(next_point.clamp(accessible.start.0, accessible.end.0));
             text.state.set_modified(false);
-            self.finish_annotation_edit(buffer)?;
+            if prefix != end || prefix != inserted_end {
+                self.evaporate_overlays_at(buffer, ByteOffset(prefix)..ByteOffset(inserted_end))?;
+            }
             if !following.is_empty() {
                 let point = Value::integer(snapshot.text[..snapshot.cursor_byte].chars().count() as i64 + 1)?;
                 let start = Value::integer(snapshot.text[..snapshot.screen_start_byte].chars().count() as i64 + 1)?;
