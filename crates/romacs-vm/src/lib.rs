@@ -1246,6 +1246,10 @@ pub struct Vm {
     /// the expander's forms, by variable slot, while the value is the same
     /// object: cleared by every collection, which can move it.
     mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
+    /// The closures `(lambda ...)' lists called as functions compiled to,
+    /// by the list object (`Vm::lambda_list_closure'): cleared by every
+    /// collection, which can move the lists and what their snapshots hold.
+    lambda_lists: std::collections::HashMap<u64, source_cache::LambdaList>,
     /// The status bar's last fitted line (a `display::mode_line::Band'),
     /// kept for a click to read (`Vm::status_bar_target'); its object
     /// constants are traced handles.
@@ -1627,6 +1631,7 @@ romacs_snapshot::snapshot_fields!(Vm {
 } at_rest {
     regexp_cache,
     mode_line_forms,
+    lambda_lists,
     status_bar_line,
     suspended_code,
     host_input,
@@ -1700,6 +1705,7 @@ impl Vm {
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             mode_line_forms: Default::default(),
+            lambda_lists: Default::default(),
             status_bar_line: None,
             execution_fatal: false,
             loader: loader::Loader::default(),

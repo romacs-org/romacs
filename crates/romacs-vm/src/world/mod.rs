@@ -157,6 +157,7 @@ impl Vm {
         // compiled again at its first search.
         self.regexp_cache = Default::default();
         self.mode_line_forms.clear();
+        self.lambda_lists.clear();
         self.status_bar_line = None;
         self.idle_since = None;
         for name in ["process-environment", "initial-environment", "exec-path"] {

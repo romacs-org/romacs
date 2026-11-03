@@ -15,8 +15,10 @@ pub struct SourceCacheStats {
     pub invalidations: u64,
     pub disk_hits: u64,
     pub direct: u64,
+    /// `(lambda ...)' lists called as functions compiled (`lambda_list_closure').
+    pub lambda_compiles: u64,
 }
-romacs_snapshot::snapshot_struct!(SourceCacheStats { hits, compilations, invalidations, disk_hits, direct });
+romacs_snapshot::snapshot_struct!(SourceCacheStats { hits, compilations, invalidations, disk_hits, direct, lambda_compiles });
 #[derive(Clone)]
 struct Entry {
     function: usize,
@@ -25,6 +27,30 @@ struct Entry {
     calls: Vec<(usize, bool)>,
 }
 romacs_snapshot::snapshot_struct!(Entry { function, macros, specials, calls });
+/// A `(lambda ...)' list's compiled closure (`Vm::lambda_list_closure'):
+/// the list as it was compiled (`lambda_snapshot'), and the world epoch it
+/// was compiled in.
+pub(super) struct LambdaList {
+    snapshot: Vec<LambdaNode>,
+    closure: Value,
+    world: u64,
+}
+/// One mutable object of a lambda list, in the walk's order, as it was:
+/// a cons with its car and cdr, a string with its text, a vector with its
+/// elements. Children are held by identity, so replacing one, even with an
+/// `equal' copy, is a change, as it is for GNU's interpreter, which
+/// evaluates `(quote X)' to that X.
+enum LambdaNode {
+    Cons(Value, Value, Value),
+    Text(Value, Vec<u8>, bool),
+    Vector(Value, Vec<Value>),
+}
+// SAFETY: at rest in a world image (`world_quiescent' requires the map
+// empty); its Values are dropped by every collection before they move.
+unsafe impl romacs_snapshot::SnapshotSafe for LambdaList {}
+/// Conses, strings and vectors a lambda list's snapshot holds at most; a
+/// larger (or circular) list is compiled at each call.
+const LAMBDA_WALK_LIMIT: usize = 4096;
 #[derive(Default)]
 pub(super) struct SourceCache {
     entries: NameMap<String, Entry>,
@@ -208,6 +234,114 @@ impl Vm {
             calls,
         };
         Ok((function, compiled, e))
+    }
+    /// eval.c funcall_lambda's reading of a `(lambda ARGS . BODY)' list
+    /// called as a function: the closure evaluating LIST makes in GNU's
+    /// dynamic dialect (`eval_primitive'). It is reused while LIST is still
+    /// the text it was compiled from (`lambda_unchanged') and no function cell
+    /// has changed since (`world_version', which every `defun', `defmacro',
+    /// `defalias' and `fset' advances): its macros, its inner lambdas' too,
+    /// expand once per definition, as GNU expands a closure's, not on every
+    /// call as GNU's interpreter does with a list (DIVERGENCES.md
+    /// VM2-LAMBDA-LIST-EXPAND). In that dialect every binding is dynamic,
+    /// so special declarations change nothing it compiled.
+    pub(super) fn lambda_list_closure(&mut self, list: Value) -> Result<Value> {
+        if let Some(entry) = self.lambda_lists.get(&list.0)
+            && entry.world == self.world_version
+            && self.lambda_unchanged(list, &entry.snapshot)
+        {
+            return Ok(entry.closure);
+        }
+        // Compiling runs macro expanders, which may collect: LIST is the key
+        // and the snapshot's source after it.
+        let frame = self.root_frame(&[list]);
+        let result = self.eval_primitive(&[list, Value::NIL]);
+        let [list] = self.release_frame(frame);
+        let closure = result?;
+        self.source_cache.stats.lambda_compiles += 1;
+        // After the compile: a definition an expander made is part of what
+        // this code was compiled against, not a later change.
+        let world = self.world_version;
+        // Every collection empties the map, so it holds only lists called
+        // since the last one.
+        if let Some(snapshot) = self.lambda_snapshot(list) {
+            self.lambda_lists.insert(list.0, LambdaList { snapshot, closure, world });
+        }
+        Ok(closure)
+    }
+    /// Whether LIST is still as SNAPSHOT (`lambda_snapshot') recorded it:
+    /// the same walk, compared object by object as it goes.
+    fn lambda_unchanged(&self, list: Value, snapshot: &[LambdaNode]) -> bool {
+        let mut recorded = snapshot.iter();
+        let mut pending = vec![list];
+        while let Some(value) = pending.pop() {
+            if value == Value::NIL || value == Value::TRUE {
+                continue;
+            }
+            let same = match value.tag() {
+                3 => match (self.cons_pair(value), recorded.next()) {
+                    (Ok((car, cdr)), Some(LambdaNode::Cons(node, was_car, was_cdr))) => {
+                        pending.push(cdr);
+                        pending.push(car);
+                        (*node, *was_car, *was_cdr) == (value, car, cdr)
+                    }
+                    _ => false,
+                },
+                0 => match self.object_if(value) {
+                    Some(data::Object::String(text) | data::Object::RawString(text)) => matches!(recorded.next(),
+                        Some(LambdaNode::Text(node, bytes, multibyte))
+                            if *node == value && bytes.as_slice() == text.bytes() && *multibyte == text.is_multibyte()),
+                    Some(data::Object::Vector(items)) => match recorded.next() {
+                        Some(LambdaNode::Vector(node, was)) if *node == value && was == items => {
+                            pending.extend(items.iter().rev().copied());
+                            true
+                        }
+                        _ => false,
+                    },
+                    _ => true,
+                },
+                _ => true,
+            };
+            if !same {
+                return false;
+            }
+        }
+        recorded.next().is_none()
+    }
+    /// LIST's mutable objects as they are now, depth first: what a later
+    /// call compares to decide the list is unchanged. None past
+    /// `LAMBDA_WALK_LIMIT' objects, which a circular list reaches.
+    fn lambda_snapshot(&self, list: Value) -> Option<Vec<LambdaNode>> {
+        let mut nodes = Vec::new();
+        let mut pending = vec![list];
+        while let Some(value) = pending.pop() {
+            if nodes.len() == LAMBDA_WALK_LIMIT {
+                return None;
+            }
+            if value == Value::NIL || value == Value::TRUE {
+                continue;
+            }
+            match value.tag() {
+                3 => {
+                    let (car, cdr) = self.cons_pair(value).ok()?;
+                    nodes.push(LambdaNode::Cons(value, car, cdr));
+                    pending.push(cdr);
+                    pending.push(car);
+                }
+                0 => match self.object_if(value) {
+                    Some(data::Object::String(text) | data::Object::RawString(text)) => {
+                        nodes.push(LambdaNode::Text(value, text.bytes().to_vec(), text.is_multibyte()));
+                    }
+                    Some(data::Object::Vector(items)) => {
+                        nodes.push(LambdaNode::Vector(value, items.clone()));
+                        pending.extend(items.iter().rev().copied());
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        Some(nodes)
     }
     /// Code for FORM, a datum evaluated again and again (a mode-line
     /// `:eval' form): compiled once and cached by its structure while its
