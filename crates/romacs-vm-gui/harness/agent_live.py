@@ -4,6 +4,9 @@ reconnecting romacs-mcp relay) in a private headless labwc, HOME, XDG and
 TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 `claude' (no model is called).
 
+  providers  two instances of one harness: each harness gets its own
+             CLAUDE_CONFIG_DIR (the default instance none); a resume after a
+             restart uses the recorded one; a missing directory is refused.
   session    a session reads a buffer, edits it through romacs_buffer_edit,
              evaluates on the main VM, and its chat buffer shows each step;
              an approval the harness asks for is answered as the user says,
@@ -48,10 +51,12 @@ import sys
 import time
 
 import parity_live
+from romacs_mcp_client import RomacsMcp
 import server_live
 from server_live import Server, until, lisp
 
 HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
+CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
 
 
 class Agents(Server):
@@ -60,15 +65,47 @@ class Agents(Server):
         self.calls = self.root / 'harness-calls.jsonl'
         self.env['FAKE_HARNESS_LOG'] = str(self.calls)
         self.work = self.root / 'work'
+        # The default instance's directory, as a user who has run Claude Code has.
+        (self.home / '.claude').mkdir()
 
     def up(self):
         self.client('-n')
         self.pid = int(self.eval('(emacs-pid)'))
         self.eval(f"(progn (require 'romacs-agent) (setq romacs-agent-claude-program {lisp(HARNESS)}) t)")
 
-    def start(self, prompt):
-        sid = self.eval(f'(romacs-agent-id (romacs-agent-start {lisp(self.work)} {lisp_text(prompt)}))')
+    def start(self, prompt, provider=None):
+        named = f' nil {lisp_text(provider)}' if provider else ''
+        sid = self.eval(f'(romacs-agent-id (romacs-agent-start {lisp(self.work)} {lisp_text(prompt)}{named}))')
         return sid.strip('"')
+
+    def providers(self, entries):
+        """Set `romacs-agent-providers' to ENTRIES: (name, directory) pairs,
+        or (name, directory, program, arguments)."""
+        def entry(e):
+            if len(e) == 2:
+                return f'(cons {lisp_text(e[0])} {lisp_text(str(e[1]))})'
+            return (f'(list {lisp_text(e[0])} :config-dir {lisp_text(str(e[1]))} :program {lisp_text(str(e[2]))} '
+                    f':arguments (list {" ".join(lisp_text(a) for a in e[3])}))')
+        self.eval('(setq romacs-agent-providers (list ' + ' '.join(entry(e) for e in entries) + '))')
+
+    def codex_instance(self):
+        """A Codex instance running fake_codex.py, with its own CODEX_HOME
+        (not Codex's default ~/.codex, which leaves the variable unset)."""
+        home = self.home / '.config/codex-second'
+        home.mkdir(parents=True, exist_ok=True)
+        self.providers([('claude', '~/.claude'), ('codex', home, CODEX, [])])
+        return home
+
+    def codex_runs(self):
+        return [e for e in self.logged() if 'codex' in e]
+
+    def tool_results(self):
+        """The fake harness's tool calls: (tool, text, error) in order."""
+        return [(e['tool'], e['text'], e['error']) for e in self.logged() if 'tool' in e and 'repeated' not in e]
+
+    def config_dirs(self, sid):
+        """CLAUDE_CONFIG_DIR of each harness started for SID, in order."""
+        return [e.get('config_dir') for e in self.logged() if e.get('started') == sid]
 
     def s(self, sid):
         return f'(romacs-agent-get {lisp_text(sid)})'
@@ -113,9 +150,13 @@ class Agents(Server):
         for host in (self.home / '.local/state/romacs/agents').glob('*/host.json'):
             info = json.loads(host.read_text())
             for pid in (info.get('harness'), info.get('pid')):
+                # Only while the pid is still this tree's process: an ended
+                # one's number may be another's now.
                 try:
-                    os.kill(pid, signal.SIGKILL)
-                except (ProcessLookupError, TypeError):
+                    if str(self.root) in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace') \
+                            or 'romacs-agent-host' in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace'):
+                        os.kill(pid, signal.SIGKILL)
+                except (OSError, TypeError):
                     pass
         super().close()
 
@@ -204,6 +245,56 @@ def survive(args, base):
         resumed = [e for e in a.logged() if 'started' in e][-1]
         result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and a.results(sid)[-1] == 'resumed'
         result['ok'] = result['harness_pid_same'] and new_pid == str(a.pid) and len(retries) <= 1 and result['resumed']
+        return result
+    finally:
+        a.close()
+
+
+def providers(args, base):
+    """Two instances of one harness, as T3 Code runs "Claude" and a second
+    account: each harness gets its instance's CLAUDE_CONFIG_DIR, the default
+    instance none (the editor's own value is not passed on); a session
+    resumed after a restart runs in the directory it recorded, though the
+    instance now names another; a missing directory is refused clearly."""
+    a = Agents(args, base, 'pv', {'CLAUDE_CONFIG_DIR': '/inherited/claude'})
+    try:
+        a.up()
+        second, moved = a.home / '.config/claude/second', a.home / '.config/claude/moved'
+        second.mkdir(parents=True)
+        moved.mkdir(parents=True)
+        a.providers([('claude', '~/.claude'), ('claude2', second)])
+        first = a.start('say one')
+        other = a.start('say two', 'claude2')
+        a.idle(first)
+        a.idle(other)
+        started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
+        shown = parity_live.read_sexp(parity_live.read_sexp(a.eval("(prin1-to-string (mapcar (lambda (e) (aref (cadr e) 1)) (romacs-agents--entries)))")))
+        a.eval(f'(romacs-agent-stop {a.s(other)})')
+        until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        a.restart()
+        a.providers([('claude', '~/.claude'), ('claude2', moved)])
+        a.eval(f'(romacs-agent-resume {a.s(other)})')
+        until(lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(other)})) t)') == 't', 15, 'resumed')
+        a.send(other, 'say resumed')
+        a.idle(other)
+        resumed = [e for e in a.logged() if e.get('started') == other][-1]
+        a.providers([('claude', '~/.claude'), ('claude3', a.home / 'missing')])
+        refused = a.eval(f'(let ((n (hash-table-count romacs-agent--sessions))) (condition-case err '
+                         f'(romacs-agent-start {lisp(a.work)} nil nil "claude3") '
+                         f'(user-error (list (cadr err) (= n (hash-table-count romacs-agent--sessions))))))')
+        # The default directory, named and missing, is refused too.
+        (a.home / '.claude').rmdir()
+        default_missing = a.eval(f'(condition-case err (romacs-agent-start {lisp(a.work)} nil nil "claude") '
+                                 '(user-error (cadr err)))')
+        result = {'started': started, 'dashboard': shown, 'resumed_config_dir': resumed.get('config_dir'),
+                  'resumed_with': '--resume' in resumed['argv'], 'missing': refused, 'default_missing': default_missing}
+        result['ok'] = (started == {'default': [None], 'claude2': [str(second)]}
+                        and sorted(shown) == ['claude', 'claude2']
+                        and resumed.get('config_dir') == str(second) and result['resumed_with']
+                        and 'does not exist' in refused and str(a.home / 'missing') in refused and refused.endswith(' t)')
+                        and f'{a.home}/.claude does not exist' in default_missing)
         return result
     finally:
         a.close()
@@ -474,7 +565,11 @@ def unit(args, base):
     a.unit = f'romacs-server-{a.name}'
     try:
         a.up()
-        sid = a.start('say ready')
+        # Under a second instance: the unit's harness gets its directory.
+        second = a.home / '.config/claude/second'
+        second.mkdir(parents=True)
+        a.providers([('claude', '~/.claude'), ('claude2', second)])
+        sid = a.start('say ready', 'claude2')
         a.idle(sid)
         unit_name = a.eval(f'(romacs-agent-unit {a.s(sid)})').strip('"')
         trace = a.root / 'grandchild.txt'
@@ -486,16 +581,257 @@ def unit(args, base):
         size = trace.stat().st_size
         time.sleep(1)
         result = {'unit': unit_name, 'grandchild_gone': not Path(f'/proc/{grandchild}').exists(),
-                  'stopped_writing': trace.stat().st_size == size}
-        result['ok'] = unit_name.startswith('romacs-agent-') and result['grandchild_gone'] and result['stopped_writing']
+                  'stopped_writing': trace.stat().st_size == size, 'config_dirs': a.config_dirs(sid)}
+        result['ok'] = (unit_name.startswith('romacs-agent-') and result['grandchild_gone'] and result['stopped_writing']
+                        and result['config_dirs'] == [str(second)])
         a.client('--stop=none')
         return result
     finally:
         subprocess.run(['systemctl', '--user', 'stop', a.unit], capture_output=True)
         a.close()
 
+# Every Romacs MCP tool, once, with a check of its result: (tool, arguments,
+# check).  `tools' (fake harness) and `real' (Claude Code) both run it; a
+# tool the endpoint offers that is missing here fails the tour.
+def tour(work, delegate_target):
+    page = str(work / 'tour.txt')
+    return [
+        ('romacs_identity', {}, lambda t: '"instance"' in t),
+        ('romacs_eval', {'code': '(+ 1 2)'}, lambda t: t.strip() == '3'),
+        ('romacs_buffer_list', {'offset': 0, 'limit': 32}, lambda t: '"notes"' in t),
+        ('romacs_buffer_read', {'name': 'notes', 'start': 1, 'maxChars': 100}, lambda t: 'alpha beta' in t),
+        ('romacs_buffer_edit', {'name': 'notes', 'edits': [{'start': 1, 'end': 6, 'text': 'ALPHA'}]}, lambda t: '"tick"' in t),
+        ('romacs_visit', {'path': page}, lambda t: '"tour.txt"' in t),
+        ('romacs_file_write', {'path': page, 'text': 'written by the tour\n', 'save': True}, lambda t: '"saved":true' in t),
+        ('romacs_observe', {'maxRows': 5}, lambda t: len(t) > 2),
+        ('romacs_send_keys', {'keys': 'C-f'}, lambda t: True),
+        ('romacs_wait_idle', {'timeout': 5}, lambda t: True),
+        ('romacs_call_outcome', {'id': 1}, lambda t: '"outcome"' in t),
+        ('romacs_orchestrator_capabilities', {}, lambda t: '"codex"' in t and '"providers"' in t),
+        ('romacs_delegate_task', {'task': delegate_target['task'], 'role': 'review', 'mode': 'wait',
+                                  'target': delegate_target['target'], 'clientRequestId': 'tour-review'},
+         lambda t: '"completed"' in t and 'APPROVE' in t),
+        ('romacs_task_status', {'taskId': '<the taskId romacs_delegate_task returned>'}, lambda t: '"completed"' in t),
+        ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
+    ]
 
-WORKFLOWS = {'host': host, 'deadline': deadline, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe}
+
+DIFF = """--- a/greet.py
++++ b/greet.py
+@@ -1,2 +1,2 @@
+ def greet(name):
+-    return 'hello ' + name
++    return f'hello {name}'
+"""
+
+REVIEW = ('Review only; do not edit or run anything. Is this diff correct and behaviour-preserving? '
+          'Reply with VERDICT: APPROVE or VERDICT: CHANGES and one line why.\n' + DIFF)
+
+
+def offered(a):
+    """The tools the session's endpoint offers, through the harness MCP client."""
+    with RomacsMcp.for_server(a, agent_tools=True) as mcp:
+        return mcp.tools()
+
+
+def tour_setup(a):
+    a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "alpha beta\\n") t)')
+    (a.work / 'tour.txt').write_text('before\n')
+
+
+def tools(args, base):
+    """The fake harness calls every Romacs MCP tool once and each result
+    is checked; delegation runs a fake Codex child."""
+    a = Agents(args, base, 'tl')
+    try:
+        a.up()
+        a.codex_instance()
+        tour_setup(a)
+        sid = a.start('say ready')
+        a.idle(sid)
+        steps = tour(a.work, {'task': 'review this', 'target': {'provider': 'codex'}})
+        task_id = None
+        for tool, arguments, _ in steps:
+            if 'taskId' in arguments:
+                arguments = {'taskId': task_id}
+            # No instance: it is optional, and the tour shows each tool works without one.
+            a.send(sid, f'call {tool} ' + json.dumps(arguments))
+            a.idle(sid, 60)
+            if tool == 'romacs_delegate_task':
+                task_id = json.loads(a.tool_results()[-1][1])['taskId']
+        results = a.tool_results()[-len(steps):]
+        checked = {tool: (name == tool and not error and check(text))
+                   for (tool, _, check), (name, text, error) in zip(steps, results)}
+        missing = sorted(set(offered(a)) - set(checked))
+        result = {'checked': checked, 'not_in_tour': missing,
+                  'notes': a.eval('(with-current-buffer "notes" (buffer-string))'),
+                  'file': (a.work / 'tour.txt').read_text(),
+                  'failed': {t: x[:200] for (t, _, _), (_, x, e) in zip(steps, results) if not checked.get(t)}}
+        result['ok'] = all(checked.values()) and not missing and result['file'] == 'written by the tour\n'
+        return result
+    finally:
+        a.close()
+
+
+def delegate(args, base):
+    """Delegation at T3 Code's parity, a fake Claude parent and fake Codex
+    children: wait (with CODEX_HOME, model and effort passed), async with a
+    wake carrying the result, the same clientRequestId finding its task, a
+    follow-up continuing the child's thread, cancel, and a wake missed while
+    the server was down delivered by the next one."""
+    a = Agents(args, base, 'dg')
+    try:
+        a.up()
+        home = a.codex_instance()
+        parent = a.start('say ready')
+        a.idle(parent)
+
+        def delegate_call(arguments):
+            a.send(parent, 'call romacs_delegate_task ' + json.dumps(arguments))
+            a.idle(parent, 60)
+            return json.loads(a.tool_results()[-1][1])
+
+        waited = delegate_call({'task': 'say reviewed', 'mode': 'wait', 'role': 'review', 'clientRequestId': 'w1',
+                                'target': {'provider': 'codex', 'model': 'm-test', 'options': {'reasoningEffort': 'low'}}})
+        run = a.codex_runs()[-1]
+        again = delegate_call({'task': 'say other', 'mode': 'wait', 'clientRequestId': 'w1', 'target': {'provider': 'codex'}})
+        asynced = delegate_call({'task': 'slow 1', 'target': {'provider': 'codex'}, 'clientRequestId': 'a1'})
+        until(lambda: any(asynced['taskId'] in e.get('wake', '') for e in a.logged()), 30, 'parent woken')
+        wake = next(e['wake'] for e in a.logged() if asynced['taskId'] in e.get('wake', ''))
+        a.idle(parent)
+        a.eval(f'(romacs-agent-send {a.s(waited["taskId"])} "say second turn")')
+        until(lambda: sum(1 for e in a.codex_runs() if e['codex'] == run['codex']) >= 2, 30, 'follow-up turn')
+        follow = [e for e in a.codex_runs() if e['codex'] == run['codex']][-1]
+        a.idle(waited['taskId'])
+        cancelled = delegate_call({'task': 'slow 30', 'target': {'provider': 'codex'}, 'clientRequestId': 'c1'})
+        until(lambda: any(e['prompt'] == 'slow 30' for e in a.codex_runs()), 20, 'slow child running')
+        slow_pid = next(e['pid'] for e in a.codex_runs() if e['prompt'] == 'slow 30')
+        a.send(parent, 'call romacs_task_cancel ' + json.dumps({'taskId': cancelled['taskId']}))
+        a.idle(parent)
+        cancel = json.loads(a.tool_results()[-1][1])
+        until(lambda: not Path(f'/proc/{slow_pid}').exists(), 15, 'cancelled child ended')
+        # An interrupt ends the run, journaled: the turn failed, the session
+        # is idle (not detached), and the next message continues its thread.
+        stopped = delegate_call({'task': 'slow 30', 'target': {'provider': 'codex'}, 'clientRequestId': 'i1'})
+        until(lambda: sum(1 for e in a.codex_runs() if e['prompt'] == 'slow 30') >= 2, 20, 'second slow child running')
+        until(lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(stopped["taskId"])})) t)') == 't', 20, 'attached')
+        a.eval(f'(romacs-agent-interrupt {a.s(stopped["taskId"])})')
+        until(lambda: a.state(stopped['taskId']) == 'idle', 15, 'interrupted child idle')
+        interrupted = a.eval(f'(romacs-agent-tools--status {a.s(stopped["taskId"])})')
+        a.eval(f'(romacs-agent-send {a.s(stopped["taskId"])} "say after interrupt")')
+        until(lambda: any(e['prompt'] == 'say after interrupt' for e in a.codex_runs()), 20, 'turn after interrupt')
+        a.idle(stopped['taskId'])
+        # A wait that ends first (timeoutMs) leaves the child's end to wake the parent.
+        expired = delegate_call({'task': 'slow 2', 'mode': 'wait', 'timeoutMs': 500, 'target': {'provider': 'codex'},
+                                 'clientRequestId': 't1'})
+        until(lambda: any(expired['taskId'] in e.get('wake', '') for e in a.logged()), 30, 'expired wait woken')
+        # A child that ends while no server runs: the next server wakes its parent.
+        missed = delegate_call({'task': 'slow 3', 'target': {'provider': 'codex'}, 'clientRequestId': 'm1'})
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        until(lambda: any(e['prompt'] == 'slow 3' for e in a.codex_runs()), 20, 'missed child ran')
+        time.sleep(4)
+        a.restart()
+        until(lambda: any(missed['taskId'] in e.get('wake', '') for e in a.logged()), 30, 'missed wake delivered')
+        time.sleep(1)
+        cancelled_after = a.eval(f'(romacs-agent-tools--status {a.s(cancelled["taskId"])})')
+        wakes = [e['wake'] for e in a.logged() if 'wake' in e]
+        result = {'waited': {k: waited.get(k) for k in ('status', 'result', 'provider', 'model', 'role')},
+                  'codex_home': run['codex_home'], 'argv': run['argv'],
+                  'same_request_same_task': again['taskId'] == waited['taskId'],
+                  'async_status': asynced['status'], 'wake': wake[:200],
+                  'follow_up_resumed': 'resume' in follow['argv'] and follow['prompt'] == 'say second turn',
+                  'cancel': cancel.get('status'), 'cancelled_after_restart': cancelled_after,
+                  'interrupted': interrupted, 'expired_wait': expired.get('waitTimedOut'), 'wakes': len(wakes),
+                  'cancelled_woke': any(cancelled['taskId'] in w for w in wakes)}
+        result['ok'] = (waited['status'] == 'completed' and waited['result'] == 'reviewed'
+                        and run['codex_home'] == str(home) and '-m' in run['argv'] and 'm-test' in run['argv']
+                        and 'model_reasoning_effort="low"' in run['argv']
+                        and result['same_request_same_task'] and asynced['status'] == 'running'
+                        and '[completed]' in wake and 'slow done' in wake and result['follow_up_resumed']
+                        and cancel.get('status') == 'cancelled' and not result['cancelled_woke']
+                        and cancelled_after == '"cancelled"' and interrupted == '"failed"' and expired.get('waitTimedOut')
+                        # A wake per child turn end no wait answered, each with its own result: the
+                        # async child, the waited child's follow-up, the expired wait, the missed one
+                        # (a replay repeats none), and the interrupted child's failed run and next turn.
+                        and woken_ids(wakes, [asynced, waited, expired, missed], stopped))
+        return result
+    finally:
+        a.close()
+
+
+def woken_ids(wakes, once, interrupted):
+    ids = [w.split()[2] for w in wakes]
+    told = [w for w in wakes if w.split()[2] == interrupted['taskId']]
+    return (all(ids.count(task['taskId']) == 1 for task in once) and len(ids) == len(once) + 2
+            and len(told) == 2 and '[failed]' in told[0] and told[1].endswith('[completed]:\nafter interrupt'))
+
+
+def real_program(name):
+    """NAME's real executable on PATH, past version-manager shims and
+    wrappers, which need the real HOME's configuration."""
+    for directory in os.environ.get('PATH', '').split(':'):
+        candidate = Path(directory) / name
+        if (not any(part in directory for part in ('command-wrappers', '/shims'))
+                and candidate.is_file() and os.access(candidate, os.X_OK)):
+            return str(candidate.resolve())
+    return name
+
+
+def real(args, base):
+    """A real Claude Code session (--claude-model, default haiku) in an
+    isolated Romacs calls every Romacs MCP tool, each result checked, and
+    has a real Codex child (--codex-model, default gpt-6-luna) review a
+    tiny diff through romacs_delegate_task.  Costs money: not a default
+    workflow.  The instances use the real configuration directories
+    (--claude-config, --codex-home) for their logins."""
+    a = Agents(args, base, 'rl')
+    try:
+        a.up()
+        a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'), ['--model', args.claude_model]),
+                     ('codex', args.codex_home, args.codex_program or real_program('codex'), [])])
+        tour_setup(a)
+        target = {'provider': 'codex', 'model': args.codex_model, 'options': {'reasoningEffort': args.codex_effort}}
+        steps = tour(a.work, {'task': REVIEW, 'target': target})
+        plan = '\n'.join(f'{n}. {tool} {json.dumps(arguments)}' for n, (tool, arguments, _) in enumerate(steps, 1))
+        sid = a.start('Using only the romacs MCP tools, make these calls in this order, each exactly once, '
+                      'with exactly these arguments (fill a taskId from the delegate call\'s reply); do not stop '
+                      'at an error. Then reply DONE.\n' + plan)
+
+        def allow():
+            a.eval(f'(let ((s {a.s(sid)})) (dolist (id (hash-table-keys (romacs-agent-approvals s))) '
+                   '(romacs-agent-respond s id t)) t)')
+            return a.state(sid)
+        until(lambda: allow() == 'idle', 900, 'the tour')
+        uses, outputs = {}, {}
+        for record in a.journal(sid):
+            out = record.get('out') if isinstance(record.get('out'), dict) else {}
+            content = (out.get('message') or {}).get('content')
+            if out.get('type') == 'assistant' and isinstance(content, list):
+                for block in content:
+                    if block.get('type') == 'tool_use':
+                        uses[block['id']] = block['name'].removeprefix('mcp__romacs__')
+            if out.get('type') == 'user' and isinstance(content, list):
+                for block in content:
+                    if block.get('type') == 'tool_result':
+                        text = block.get('content')
+                        text = ''.join(c.get('text', '') for c in text) if isinstance(text, list) else str(text)
+                        outputs.setdefault(uses.get(block['tool_use_id']), (text, block.get('is_error')))
+        checked = {tool: tool in outputs and not outputs[tool][1] and check(outputs[tool][0]) for tool, _, check in steps}
+        missing = sorted(set(offered(a)) - set(checked))
+        cost = [r['out'].get('total_cost_usd') for r in a.journal(sid)
+                if isinstance(r.get('out'), dict) and r['out'].get('type') == 'result']
+        review = outputs.get('romacs_delegate_task', ('', None))[0]
+        result = {'checked': checked, 'not_in_tour': missing, 'review': review[:600], 'claude_cost': cost,
+                  'failed': {t: outputs.get(t, ('missing',))[0][:200] for t, ok in checked.items() if not ok}}
+        result['ok'] = all(checked.values()) and not missing
+        return result
+    finally:
+        a.close()
+
+
+WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+             'tools': tools, 'delegate': delegate, 'real': real}
 
 
 def main():
@@ -505,11 +841,20 @@ def main():
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--emacsclient', default='emacsclient')
     parser.add_argument('--workflow', action='append', choices=sorted(WORKFLOWS))
+    # The real-harness workflow's models: cheap by default; real reviews use Sol, high.
+    parser.add_argument('--claude-model', default='haiku')
+    parser.add_argument('--codex-model', default='gpt-6-luna')
+    parser.add_argument('--codex-effort', default='low')
+    parser.add_argument('--claude-config', default=os.environ.get('CLAUDE_CONFIG_DIR') or os.path.expanduser('~/.claude'))
+    parser.add_argument('--codex-home', default=os.environ.get('CODEX_HOME') or os.path.expanduser('~/.codex'))
+    parser.add_argument('--claude-program')
+    parser.add_argument('--codex-program')
     args = parser.parse_args()
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'survive', 'outcome', 'budget', 'deadline', 'probe']:
+    for name in args.workflow or ['host', 'session', 'providers', 'tools', 'delegate', 'survive', 'outcome', 'budget',
+                                  'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result

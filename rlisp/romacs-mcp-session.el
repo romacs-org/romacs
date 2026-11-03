@@ -420,19 +420,19 @@ At `timeout', answer with which of those had not happened."
      "Type keys (a kbd string) or literal text through the command loop, paced like typing unless burst; answers when consumed."
      (romacs-mcp--schema (list instance '("keys" . "string") '("text" . "string") '("burst" . "boolean")
                                '("gap" . "number") '("timeout" . "number"))
-                         '("instance"))
+                         nil)
      #'romacs-mcp-session--send-keys)
     (romacs-mcp-register-tool
      "romacs_wait_idle"
      "Answer when the command loop is idle and timers and process output settled, or at timeout; says which."
      (romacs-mcp--schema (list instance '("timeout" . "number") '("settle" . "number") '("horizon" . "number"))
-                         '("instance"))
+                         nil)
      #'romacs-mcp-session--wait-idle (romacs-mcp--object "readOnlyHint" t))
     (romacs-mcp-register-tool
      "romacs_observe"
      "The frame as shown: selected window and buffer, window tree, rows, mode and header lines, minibuffer, echo, *Messages* since messagesFrom, last error, modes."
      (romacs-mcp--schema (list instance '("faces" . "boolean") '("maxRows" . "integer") '("messagesFrom" . "integer"))
-                         '("instance"))
+                         nil)
      #'romacs-mcp-session--observe (romacs-mcp--object "readOnlyHint" t))))
 
 (provide 'romacs-mcp-session)

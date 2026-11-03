@@ -17,6 +17,11 @@
 //!
 //! The socket speaks lines: the server's first is `{"attach":{"from":N,
 //! "steal":BOOL}}`, then `{"write":LINE}` for each line to the harness.
+//!
+//! `--input FILE` gives a harness that reads its whole stdin (one run per
+//! turn, its prompt on stdin) FILE as that input: journaled as an `"in"`
+//! record, written, and the stdin closed, with no server needed; FILE is
+//! then removed.
 #![forbid(unsafe_code)]
 
 use serde_json::{Value as Json, json};
@@ -27,28 +32,30 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET -- PROGRAM [ARG...]";
+const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] -- PROGRAM [ARG...]";
 
 struct Config {
     dir: PathBuf,
     socket: PathBuf,
+    input: Option<PathBuf>,
     argv: Vec<String>,
 }
 
 fn parse(args: Vec<String>) -> Result<Config, String> {
     let mut args = args.into_iter();
-    let (mut dir, mut socket) = (None, None);
+    let (mut dir, mut socket, mut input) = (None, None, None);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--dir" => dir = args.next().map(PathBuf::from),
             "--socket" => socket = args.next().map(PathBuf::from),
+            "--input" => input = Some(args.next().map(PathBuf::from).ok_or(USAGE)?),
             "--" => break,
             _ => return Err(USAGE.into()),
         }
     }
     let argv: Vec<String> = args.collect();
     match (dir, socket) {
-        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, argv }),
+        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, argv }),
         _ => Err(USAGE.into()),
     }
 }
@@ -200,8 +207,20 @@ fn run(config: Config) -> Result<i32, String> {
     write_atomic(&config.dir.join("host.json"), &json!({"pid": std::process::id(), "harness": child.id(),
         "socket": config.socket, "started": now(), "argv": config.argv}).to_string())?;
     let stdout = child.stdout.take().ok_or("harness stdout")?;
-    let shared = Arc::new(Mutex::new(Shared { seq, journal, path, attached: None, next_attachment: 0,
-                                             stdin: Arc::new(Mutex::new(child.stdin.take())) }));
+    let mut stdin = child.stdin.take();
+    let mut shared = Shared { seq, journal, path, attached: None, next_attachment: 0, stdin: Arc::new(Mutex::new(None)) };
+    if let Some(file) = &config.input {
+        let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+        shared.seq += 1;
+        let entry = record(shared.seq, "in", &text);
+        shared.append(&entry, true);
+        // Its own thread: a harness slow to read never holds up the host.
+        let mut writer = stdin.take();
+        std::thread::spawn(move || { if let Some(w) = writer.as_mut() { let _ = w.write_all(text.as_bytes()); } });
+        let _ = std::fs::remove_file(file);
+    }
+    shared.stdin = Arc::new(Mutex::new(stdin));
+    let shared = Arc::new(Mutex::new(shared));
     let accepting = shared.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming().map_while(Result::ok) {
