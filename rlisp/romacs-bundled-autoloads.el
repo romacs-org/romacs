@@ -23,6 +23,31 @@
 (register-definition-prefixes "ob-wgsl" '("ob-wgsl-" "org-babel-"))
 
 
+;;; Generated autoloads from romacs-agent.el
+
+(autoload 'romacs-agent-start "romacs-agent"
+"Start a Claude Code session in CWD, sending PROMPT when given.
+Return the session.
+
+(fn CWD &optional PROMPT TITLE)" t)
+(autoload 'romacs-agent-restore "romacs-agent"
+"Know every recorded session, and attach to those whose supervisor runs.
+A server runs this at its start, so sessions survive it.")
+(register-definition-prefixes "romacs-agent" '("romacs-agent-"))
+
+
+;;; Generated autoloads from romacs-agent-tools.el
+
+(register-definition-prefixes "romacs-agent-tools" '("romacs-agent-"))
+
+
+;;; Generated autoloads from romacs-agent-ui.el
+
+(autoload 'romacs-agents "romacs-agent-ui"
+"Show every agent session." t)
+(register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
+
+
 ;;; Generated autoloads from romacs-animate.el
 
 (register-definition-prefixes "romacs-animate" '("romacs-animat"))
@@ -340,6 +365,15 @@ a value in `ivy-re-builders-alist'.
 ;;; Generated autoloads from romacs-project.el
 
 (register-definition-prefixes "romacs-project" '("romacs-project-"))
+
+
+;;; Generated autoloads from romacs-server.el
+
+(autoload 'romacs-server-start "romacs-server"
+"Serve this session as NAME: the native socket, and GNU's for emacsclient.
+
+(fn NAME)")
+(register-definition-prefixes "romacs-server" '("romacs-server-"))
 
 
 ;;; Generated autoloads from romacs-shader-playground.el

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "db1c77950993449044024175a26d0f58d3996ca18857c724e1a7eafeb90fa4ed",
+  "source_fingerprint": "91e87151b1fe1609d7e6cc18de392103b6ec79757f7485af57b0baa1f762fdf8",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1265,
-  "parsed_vm2_only": 1265
+  "parsed_total": 1267,
+  "parsed_vm2_only": 1267
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4043,6 +4043,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/autosave.rs:107"
   },
+  "romacs--call-deadline": {
+   "name": "romacs--call-deadline",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:538"
+  },
   "romacs--call-process-run": {
    "name": "romacs--call-process-run",
    "implementation": "vm2",
@@ -4307,6 +4312,11 @@
    "name": "romacs--minibuffer-host",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:470"
+  },
+  "romacs--native-window": {
+   "name": "romacs--native-window",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/animate.rs:17"
   },
   "romacs--nconc-list": {
    "name": "romacs--nconc-list",
