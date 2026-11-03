@@ -245,9 +245,10 @@ or `light') and colours.  `orange' and `brown' may be left out.")
     (fg-muted floor muted bg 3.0)
     (fg-dim* floor fg-dim bg 4.5)
     (prompt . accent)
-    ;; A key in help, popups and the completion layer: the accent, floored
-    ;; on each of their backgrounds (`help-key-binding').
-    (keybind . accent)
+    ;; A key in help, popups and the completion layer: a cool blue, as
+    ;; Modus keys are, floored on each of their backgrounds
+    ;; (`help-key-binding').
+    (keybind . blue)
     ;; Bands, highlights, search, diff.
     (bg-mode-line . bg-alt)
     (bg-mode-line-inactive . bg-dark)
