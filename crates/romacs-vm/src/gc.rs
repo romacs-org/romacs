@@ -341,7 +341,9 @@ impl Vm {
         };
         let proportional = percentage.map_or(0.0, |p| {
             let s = scaled_percentage(p);
-            s * (self.gc_retained + self.gc_code) as f64 / (1.0 - s / 2.0)
+            // A cons, the unit, traces two slots.
+            let live = self.gc_retained + self.gc_code + self.gc_retained_slots / 2;
+            s * live as f64 / (1.0 - s / 2.0)
         });
         (allocated, threshold.max(proportional))
     }
@@ -353,6 +355,13 @@ impl Vm {
         let (allocated, budget) = self.collection_budget();
         let code = self.request_code.since_collection as f64 / self.code_collection_threshold() as f64;
         (allocated / budget).max(code)
+    }
+    /// After a collection: no payload charged since, no poll pending, and the
+    /// vector slots the live heap keeps, for the proportional rule.
+    fn settle_payload(&mut self) {
+        self.gc_payload_bytes = 0;
+        self.collect_poll = false;
+        self.gc_retained_slots = self.objects.iter().map(crate::data::traced_slots).sum();
     }
     /// A forced stress collection is due at this Lisp entry.
     pub(crate) fn stress_due(&mut self) -> bool {
@@ -932,8 +941,7 @@ impl Vm {
         // A completely live arena needs no forwarding table or rewrite pass.
         if pads == 0 && marked == private_before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
             self.gc_retained = self.heap_objects();
-            self.gc_payload_bytes = 0;
-            self.collect_poll = false;
+            self.settle_payload();
             self.gc_stats.collections += 1;
             return;
         }
@@ -1153,8 +1161,7 @@ impl Vm {
         self.closures
             .shrink_to(self.closures.len().saturating_mul(2).max(1024));
         self.gc_retained = self.heap_objects();
-        self.gc_payload_bytes = 0;
-        self.collect_poll = false;
+        self.settle_payload();
         self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
     }

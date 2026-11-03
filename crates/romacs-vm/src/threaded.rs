@@ -1845,8 +1845,12 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
-    if e.vm.collection_due() && e.vm.may_collect(1) {
-        poll_collect(e);
+    if e.vm.collection_due() {
+        // Due but held (a nested engine): the request stays for the engine
+        // that may collect.
+        if e.vm.may_collect(1) { poll_collect(e); }
+    } else {
+        e.vm.collect_poll = false;
     }
     // GNU's maybe_quit: a host's C-g (quit.rs) or an isolate's interrupt
     // (SIGUSR1, `isolate.rs`) is `quit` at this safepoint unless
@@ -2088,8 +2092,10 @@ unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
 #[inline(never)]
 fn leave_native(e: &mut Engine<'_>) {
     if let Some(mark) = e.native_mark.take() { e.vm.trace_leave(mark); }
-    // The native code made big payloads: poll, and collect if due, soon.
-    if std::mem::take(&mut e.vm.collect_poll) { e.budget = 0; }
+    // Native code made big payloads: poll, and collect if due, soon. The
+    // request stays until a poll settles it, so an engine that returns
+    // before polling leaves it to the one it returns to.
+    if e.vm.collect_poll { e.budget = 0; }
 }
 #[inline(never)]
 fn leave_call(e: &mut Engine<'_>, mark: usize) {
@@ -2741,8 +2747,9 @@ unsafe fn generated_step(
             e.vm.propagated_eval_depth = None;
         }
         let step = e.vm.call_generated(target, base + start, argc);
-        // A region attached under id pressure (`frozen.rs`): poll, and collect, soon.
-        if e.vm.region_collect { e.budget = 0; }
+        // A region attached under id pressure (`frozen.rs`), or big payloads
+        // made (`Vm::collect_poll'): poll, and collect if due, soon.
+        if e.vm.region_collect || e.vm.collect_poll { e.budget = 0; }
         if !reader {
             return take_step(e, r, pc, step);
         }

@@ -12,11 +12,21 @@ mod string_cursor_tests;
 const POLL_PAYLOAD: usize = 256 << 10;
 
 /// The bytes OBJECT holds beyond its own slot, as GNU charges them to the
-/// next collection: a string's text, a vector's or record's slots.
-fn payload_bytes(object: &Object) -> usize {
+/// next collection: a string's text, a vector's or record's slots, a bool
+/// vector's bits.
+/// The slots a collection traces in OBJECT beyond the object itself.
+pub(super) fn traced_slots(object: &Object) -> usize {
+    match object {
+        Object::Vector(slots) | Object::Record(slots) => slots.len(),
+        _ => 0,
+    }
+}
+
+pub(super) fn payload_bytes(object: &Object) -> usize {
     match object {
         Object::String(s) | Object::RawString(s) => s.bytes.len(),
         Object::Bytes(bytes) => bytes.len(),
+        Object::BoolVector(bits) => bits.bytes.len(),
         Object::Vector(slots) | Object::Record(slots) => slots.len() * std::mem::size_of::<Value>(),
         _ => 0,
     }
@@ -409,11 +419,16 @@ impl Vm {
         }
         self.allocate_object(string_object(LispString::from_bytes(bytes, multibyte)))
     }
+    /// Charge BYTES of payload to the next collection, and ask the engine
+    /// to poll for one whenever the charge passes another `POLL_PAYLOAD'.
+    pub(super) fn charge_payload(&mut self, bytes: usize) {
+        let before = self.gc_payload_bytes;
+        self.gc_payload_bytes = before.saturating_add(bytes);
+        self.collect_poll |= self.gc_payload_bytes / POLL_PAYLOAD != before / POLL_PAYLOAD;
+    }
     pub(super) fn allocate_object(&mut self, object: Object) -> Value {
         if let Some(referrers) = &mut self.referrers { referrers.list(self.objects.len(), &object); }
-        let before = self.gc_payload_bytes;
-        self.gc_payload_bytes = before.saturating_add(payload_bytes(&object));
-        self.collect_poll |= self.gc_payload_bytes / POLL_PAYLOAD != before / POLL_PAYLOAD;
+        self.charge_payload(payload_bytes(&object));
         self.objects.push(object);
         Value::reference(self.objects.len(), 0)
     }
