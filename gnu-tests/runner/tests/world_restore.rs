@@ -16,9 +16,11 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
-fn scratch() -> PathBuf {
+/// A fresh directory for the test NAME alone, so tests run as threads of
+/// one process do not share one.
+fn scratch(name: &str) -> PathBuf {
     let base = std::env::var_os("TMPDIR").map(PathBuf::from).expect("lane TMPDIR");
-    let path = base.join(format!("world-restore-{}", std::process::id()));
+    let path = base.join(format!("world-restore-{}-{name}", std::process::id()));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).unwrap();
     path
@@ -71,7 +73,7 @@ fn run_in(tree: &Path, preloads: &[PathBuf], scratch: &Path, store: &Path, dir: 
 
 #[test]
 fn a_batch_world_store_build_restores_for_a_test_elsewhere() {
-    let scratch = scratch();
+    let scratch = scratch("restores");
     let store = scratch.join("store");
     fs::create_dir_all(&store).unwrap();
     fs::set_permissions(&store, fs::Permissions::from_mode(0o700)).unwrap();
@@ -101,7 +103,7 @@ fn a_batch_world_store_build_restores_for_a_test_elsewhere() {
 /// from source, their own directory still on `load-path'.
 #[test]
 fn a_world_whose_preloads_change_load_path_is_not_published() {
-    let scratch = scratch().join("pushing");
+    let scratch = scratch("pushing");
     let tree = scratch.join("tree");
     fs::create_dir_all(tree.join("rlisp")).unwrap();
     std::os::unix::fs::symlink(root().join("gnu-lisp"), tree.join("gnu-lisp")).unwrap();
@@ -130,4 +132,5 @@ fn a_world_whose_preloads_change_load_path_is_not_published() {
     let (second, loaded, output) = run_in(&tree, std::slice::from_ref(&push), &scratch, &store, "run-2");
     assert_eq!(second["mode"], "source", "{second}");
     assert!(loaded, "{}", String::from_utf8_lossy(&output.stdout));
+    let _ = fs::remove_dir_all(&scratch);
 }
