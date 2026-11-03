@@ -968,6 +968,7 @@ impl WgpuRenderer {
             let mut decoration_vertices: Vec<RectVertex> = Vec::new();
 
             let mut deco_face_cache: Option<(FaceId, MaterializedFaceData)> = None;
+            let mut underline_run = super::content::UnderlineRun::default();
             for (glyph_index, glyph) in frame_glyphs.glyphs.iter().enumerate() {
                 if let FrameGlyph::Char {
                     x,
@@ -1028,9 +1029,11 @@ impl WgpuRenderer {
                             .unwrap_or_default();
 
                         // --- Underline ---
+                        if *underline == UnderlineStyle::None { underline_run.end(); }
                         if *underline != UnderlineStyle::None {
                             let ul_color = underline_color.as_ref().unwrap_or(fg);
-                            let geometry = ul_position.resolve(ya, *height, baseline_y, ul_thick);
+                            let geometry = underline_run.geometry(*x, ya, *width, ul_position, *underline == UnderlineStyle::Wave,
+                                                                  || ul_position.resolve(ya, *height, baseline_y, ul_thick));
                             let ul_y = geometry.top_y;
                             let line_thickness = geometry.thickness;
 
@@ -1080,7 +1083,7 @@ impl WgpuRenderer {
                                     self.add_rect(
                                         &mut decoration_vertices,
                                         *x,
-                                        ul_y + line_thickness + 1.0,
+                                        ul_y - line_thickness - 1.0,
                                         *width,
                                         line_thickness,
                                         ul_color,
@@ -1271,7 +1274,7 @@ impl WgpuRenderer {
                                     self.add_rect(
                                         &mut decoration_vertices,
                                         *x,
-                                        ul_y + line_thickness + 1.0,
+                                        ul_y - line_thickness - 1.0,
                                         *width,
                                         line_thickness,
                                         ul_color,

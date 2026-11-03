@@ -69,6 +69,9 @@ fn child_stretch_decorations_follow_the_effective_face() {
             .all(|rect| rect.x >= 10.0 && rect.x + rect.width <= 30.0)
     );
     assert!(rects.iter().all(|rect| rect.color == Color::RED));
+    // pgtkterm.c: the second line of a double underline goes above the
+    // first, by its thickness and a pixel.
+    assert_eq!(rects[1].y, rects[0].y - rects[0].height - 1.0, "{rects:?}");
 }
 
 /// Regression guard for the glyph-rasterization hotspot fix.
@@ -110,4 +113,31 @@ fn snap_glyph_origin_is_position_invariant_and_pixel_snapped() {
         snap_glyph_origin(100.0, 200.1),
         snap_glyph_origin(100.0, 200.3)
     );
+}
+
+/// pgtkterm.c: a run of underlined glyphs keeps its first glyph's
+/// underline while the faces share a placement rule; `:position 3' after
+/// `:position t', a gap or another row places the line again.
+#[test]
+fn an_underlined_run_keeps_its_first_glyph_s_underline() {
+    use super::UnderlineRun;
+    use romacs_display_protocol::face::{UnderlineGeometry, UnderlinePosition};
+    let metric = |offset| UnderlinePosition::FontMetric { offset_from_baseline: offset };
+    let geometry = |top_y| move || UnderlineGeometry { top_y, thickness: 1.0 };
+    let mut run = UnderlineRun::default();
+    assert_eq!(run.geometry(0.0, 10.0, 8.0, metric(1), false, geometry(20.0)).top_y, 20.0);
+    // Another font's metric rule, continuing: the run's line.
+    assert_eq!(run.geometry(8.0, 10.0, 8.0, metric(3), false, geometry(24.0)).top_y, 20.0);
+    // A descent-line rule: its own.
+    let at_descent = |pixels_above| UnderlinePosition::DescentLine { pixels_above };
+    assert_eq!(run.geometry(16.0, 10.0, 8.0, at_descent(0), false, geometry(26.0)).top_y, 26.0);
+    assert_eq!(run.geometry(24.0, 10.0, 8.0, at_descent(3), false, geometry(23.0)).top_y, 23.0);
+    // A gap, then another row.
+    assert_eq!(run.geometry(40.0, 10.0, 8.0, at_descent(3), false, geometry(22.0)).top_y, 22.0);
+    assert_eq!(run.geometry(48.0, 40.0, 8.0, at_descent(3), false, geometry(52.0)).top_y, 52.0);
+    run.end();
+    assert_eq!(run.geometry(56.0, 40.0, 8.0, at_descent(3), false, geometry(50.0)).top_y, 50.0);
+    // A wave after a line keeps its own, and the line after it its own.
+    assert_eq!(run.geometry(64.0, 40.0, 8.0, at_descent(3), true, geometry(47.0)).top_y, 47.0);
+    assert_eq!(run.geometry(72.0, 40.0, 8.0, at_descent(3), false, geometry(51.0)).top_y, 51.0);
 }
