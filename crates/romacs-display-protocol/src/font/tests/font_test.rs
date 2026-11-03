@@ -4,7 +4,7 @@ use std::sync::Arc;
 fn sample_font(id: u32) -> ResolvedFont {
     let asset = FontFileAsset::new("/usr/share/fonts/TTF/DejaVuSansMono.ttf", 0)
         .expect("valid font file asset");
-    ResolvedFont {
+    ResolvedFont { underline: Default::default(),
         id: ResolvedFontId(id),
         identity: ResolvedFontIdentity::from_file(
             "/usr/share/fonts/TTF/DejaVuSansMono.ttf",

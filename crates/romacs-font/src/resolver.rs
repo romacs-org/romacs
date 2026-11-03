@@ -181,6 +181,9 @@ fn sfnt_metrics(data: &[u8], index: u32, pixel_size: f32) -> Option<crate::probe
         max_width: space,
         space_width: space,
         average_width: space,
+        underline: face.underline_metrics().map_or_else(Default::default, |line| {
+            romacs_display_protocol::font::FontUnderline::scaled(px(-f32::from(line.position)), px(f32::from(line.thickness)))
+        }),
     })
 }
 
@@ -572,6 +575,7 @@ impl FontResolver {
                 descent_px: metrics.descent.max(0) as f32,
                 space_advance_px: metrics.space_width.max(0) as f32,
                 glyph_advance,
+                underline: metrics.underline,
             }))
     }
 }

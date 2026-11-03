@@ -25,6 +25,7 @@ pub struct FontInstanceProperties {
     pub descent_px: f32,
     pub space_advance_px: f32,
     pub glyph_advance: ResolvedFontAdvance,
+    pub underline: romacs_display_protocol::font::FontUnderline,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -89,6 +90,7 @@ impl FontInstanceInterner {
                     descent_px: properties.descent_px,
                     space_advance_px: properties.space_advance_px,
                     glyph_advance: properties.glyph_advance,
+                    underline: properties.underline,
                 }
             })
             .clone()

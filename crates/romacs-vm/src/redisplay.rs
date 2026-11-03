@@ -509,9 +509,9 @@ fn point_line_snapshot(published: &romacs_layout_input::WindowSnapshot, point: u
     let stretches = published.stretches.iter().filter(|s| (from..to).contains(&s.byte)).map(|s| Stretch { byte: s.byte - from, width: s.width }).collect();
     let wrap_flips = published.wrap_flips.iter().filter(|&&b| (from..to).contains(&(b as usize))).map(|&b| b - from as u32).collect();
     let faces = used.iter().map(|&f| published.faces.get(f as usize).cloned()).collect::<Option<Vec<_>>>()?;
-    Some(WindowSnapshot {
+    Some(WindowSnapshot { underline_rules: Default::default(),
         id: published.id, width: published.width, height: 1 << 24, start_byte: 0, point_byte: point - from, buffer_version: 0,
-        text: TextSlice { utf8: text[from..to].into(), face_runs, raw },
+        text: TextSlice { extends: vec![], utf8: text[from..to].into(), face_runs, raw },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: published.hscroll, faces, tab_width: published.tab_width, wrap: published.wrap,
         cursor_off: false, stretches, wrap_flips, line_numbers: None,

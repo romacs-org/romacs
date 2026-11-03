@@ -6,13 +6,13 @@ use romacs_display_protocol::{Color, FrameGlyph, FrameGlyphBuffer};
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 
 fn window(text: &str, face_runs: Vec<FaceRun>) -> WindowSnapshot {
-    let face = |foreground| Face { foreground, background: [0; 3], family: "Liberation Mono".into(), pixel_size: 20.0, weight: 400, italic: false, width: 5 };
-    WindowSnapshot {
+    let face = |foreground| Face { decor: Default::default(), foreground, background: [0; 3], family: "Liberation Mono".into(), pixel_size: 20.0, weight: 400, italic: false, width: 5 };
+    WindowSnapshot { underline_rules: Default::default(),
         id: 7, width: 600, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: true, stretches: vec![], wrap_flips: vec![], line_numbers: None,
         chrome: Default::default(),
-        text: TextSlice { raw: vec![], utf8: text.into(), face_runs },
+        text: TextSlice { extends: vec![], raw: vec![], utf8: text.into(), face_runs },
         faces: vec![face([200; 3]), face([0x75, 0x6b, 0x59]), face([0xf4, 0xe7, 0xc3])],
     }
 }

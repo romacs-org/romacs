@@ -154,7 +154,7 @@ fn install_fonts(atlas: &mut WgpuGlyphAtlas) -> Vec<(Arc<str>, SceneFont)> {
         let identity = ResolvedFontIdentity::from_file(&path.to_string_lossy(), 0, None);
         table.insert(
             *id,
-            ResolvedFont {
+            ResolvedFont { underline: Default::default(),
                 id: *id,
                 replay: FontReplay::Swash {
                     asset: FontOutlineAsset::File(

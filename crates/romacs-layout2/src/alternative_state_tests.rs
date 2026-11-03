@@ -15,14 +15,14 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
         children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![PlacedWindowSnapshot {
             x: 0,
             y: 0,
-            snapshot: WindowSnapshot {
+            snapshot: WindowSnapshot { underline_rules: Default::default(),
                 id: 1,
                 width: 400,
                 height: 300,
                 start_byte: 0,
                 point_byte: 0,
                 buffer_version: 0,
-                text: TextSlice {
+                text: TextSlice { extends: vec![],
                     utf8: "A".into(),
                     face_runs: vec![],
                     raw: vec![],
@@ -30,7 +30,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
                 mode_line: None,
                 mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
                 vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
-                faces: vec![Face {
+                faces: vec![Face { decor: Default::default(),
                     foreground: [255; 3],
                     background: [0; 3],
                     family: "monospace".into(),

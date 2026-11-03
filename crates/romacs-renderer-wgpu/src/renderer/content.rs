@@ -67,6 +67,43 @@ pub(super) struct DecorationRect {
     pub(super) color: Color,
 }
 
+/// The underline of a run of underlined glyphs on one row (pgtkterm.c
+/// pgtk_draw_glyph_string): a glyph that continues the glyph before it,
+/// under the same descent-line rule and pixels above it, takes that
+/// glyph's position and thickness, so the run keeps its first glyph's font
+/// metrics (xdisp.c font_for_underline_metrics).  A wave is drawn apart:
+/// it neither takes nor gives a run's line.
+#[derive(Default)]
+pub(super) struct UnderlineRun(Option<(f32, f32, romacs_display_protocol::face::UnderlinePosition, romacs_display_protocol::face::UnderlineGeometry)>);
+
+impl UnderlineRun {
+    /// The geometry of the underline of a glyph X..X+WIDTH on the row at
+    /// ROW placed by RULE, a WAVE or not, RESOLVE giving its own.
+    pub(super) fn geometry(&mut self, x: f32, row: f32, width: f32, rule: romacs_display_protocol::face::UnderlinePosition,
+                           wave: bool, resolve: impl FnOnce() -> romacs_display_protocol::face::UnderlineGeometry)
+        -> romacs_display_protocol::face::UnderlineGeometry {
+        if wave {
+            self.0 = None;
+            return resolve();
+        }
+        use romacs_display_protocol::face::UnderlinePosition::{DescentLine, FontMetric};
+        let same_rule = |a, b| match (a, b) {
+            (FontMetric { .. }, FontMetric { .. }) => true,
+            (DescentLine { pixels_above: p }, DescentLine { pixels_above: q }) => p == q,
+            _ => false,
+        };
+        let geometry = match self.0 {
+            Some((at, end, before, geometry)) if at == row && (end - x).abs() < 0.5 && same_rule(before, rule) => geometry,
+            _ => resolve(),
+        };
+        self.0 = Some((row, x + width, rule, geometry));
+        geometry
+    }
+
+    /// A glyph without an underline ends the run.
+    pub(super) fn end(&mut self) { self.0 = None; }
+}
+
 pub(super) fn stretch_decoration_rects(
     face: &Face,
     x: f32,
@@ -101,7 +138,7 @@ pub(super) fn stretch_decoration_rects(
                 push(x, underline_y, width, thickness, underline_color);
                 push(
                     x,
-                    underline_y + thickness + 1.0,
+                    underline_y - thickness - 1.0,
                     width,
                     thickness,
                     underline_color,
@@ -925,6 +962,7 @@ impl WgpuRenderer {
         // --- Step 3: Collect decorations (underline, overline, strikethrough) ---
         let mut decoration_vertices: Vec<RectVertex> = Vec::new();
         let mut deco_face_cache: Option<(FaceId, MaterializedFaceData)> = None;
+        let mut underline_run = UnderlineRun::default();
         for (glyph_index, glyph) in frame.glyphs.iter().enumerate() {
             if let FrameGlyph::Char {
                 x,
@@ -980,9 +1018,11 @@ impl WgpuRenderer {
                         .unwrap_or_default();
 
                     // Underline
+                    if *underline == UnderlineStyle::None { underline_run.end(); }
                     if *underline != UnderlineStyle::None {
                         let ul_color = underline_color.as_ref().unwrap_or(fg);
-                        let geometry = ul_position.resolve(gy, *height, baseline_y, ul_thick);
+                        let geometry = underline_run.geometry(gx, gy, *width, ul_position, *underline == UnderlineStyle::Wave,
+                                                              || ul_position.resolve(gy, *height, baseline_y, ul_thick));
                         let ul_y = geometry.top_y;
                         let line_thickness = geometry.thickness;
 
@@ -1032,7 +1072,7 @@ impl WgpuRenderer {
                                 self.add_rect(
                                     &mut decoration_vertices,
                                     gx,
-                                    ul_y + line_thickness + 1.0,
+                                    ul_y - line_thickness - 1.0,
                                     *width,
                                     line_thickness,
                                     ul_color,

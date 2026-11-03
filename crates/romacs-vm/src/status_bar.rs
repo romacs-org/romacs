@@ -106,7 +106,7 @@ impl Vm {
             face_runs.push(FaceRun { bytes, face });
         }
         let bar = StatusBarSnapshot { x: 0, y: 0, width: 0, height: 0,
-            text: TextSlice { utf8: text, face_runs, raw: vec![] }, face: FaceHandle(0), faces, window, focused, marks };
+            text: TextSlice { extends: vec![], utf8: text, face_runs, raw: vec![] }, face: FaceHandle(0), faces, window, focused, marks };
         self.display_state.bar_cache = Some((key, bar.clone()));
         Ok(Some(place(bar)))
     }
@@ -276,7 +276,7 @@ impl Vm {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
                 faces: bar.faces.iter().map(|f| romacs_layout_input::Face { background, ..f.clone() }).collect(),
-                text: TextSlice { utf8: shown, face_runs, raw: vec![] },
+                text: TextSlice { extends: vec![], utf8: shown, face_runs, raw: vec![] },
             };
             self.host_layout(&input)?.glyphs.iter().map(|(advance, _)| *advance as f32).collect()
         } else {

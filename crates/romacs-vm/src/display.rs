@@ -102,9 +102,22 @@ struct ElementFaces {
     cursor: (i64, usize),
     merged: std::collections::HashMap<u64, FaceHandle>,
     layered: std::collections::HashMap<Vec<u64>, FaceHandle>,
+    /// The end-of-line faces of layer lists (`Vm::extend_face').
+    extended: std::collections::HashMap<Vec<u64>, Option<FaceHandle>>,
+    /// The region's bytes, which bound runs as an overlay's do.
+    region: Option<(usize, usize)>,
 }
 
 impl ElementFaces {
+    /// The region over RANGE in FACE, as simple.el's region overlay
+    /// (`redisplay--update-region-highlight'): priority (nil . 100), so it
+    /// is merged among the overlays as GNU sorts them.
+    fn add_region(&mut self, range: std::ops::Range<usize>, face: Value) {
+        let item = SortItem { overlay: Value::NIL, start: range.start as u32, end: range.end as u32, priority: 0, secondary: 100, inserted: u64::MAX };
+        self.overlays.push((item, range.start, range.end, face));
+        self.region = Some((range.start, range.end));
+    }
+
     /// For WINDOW's BUFFER over the bytes SPAN.
     fn new(vm: &mut Vm, window: Value, buffer: Value, span: std::ops::Range<usize>) -> Result<Self> {
         let face = vm.display_symbol("face");
@@ -126,7 +139,7 @@ impl ElementFaces {
         let plain = vm.annotation_variable("default-text-properties") == Value::NIL
             && !aliases.into_iter().any(|entry| vm.cons_pair(entry).is_ok_and(|(key, _)| key == face));
         Ok(ElementFaces { buffer, face, overlays, end,
-            run: (0, 0, FaceHandle(0), vec![]), plain, cursor: (0, 0), merged: Default::default(), layered: Default::default() })
+            run: (0, 0, FaceHandle(0), vec![]), plain, cursor: (0, 0), merged: Default::default(), layered: Default::default(), extended: Default::default(), region: None })
     }
 }
 
@@ -353,7 +366,7 @@ impl DisplayState {
 }
 /// The buffer-local variables a window's text, faces, start or mode line
 /// read, besides its buffer's text and the window itself.
-const DISPLAY_VARIABLES: [&str; 26] = [
+const DISPLAY_VARIABLES: [&str; 29] = [
     "mode-line-format", "header-line-format", "truncate-lines", "word-wrap", "tab-width",
     "truncate-partial-width-windows", "mark-active", "transient-mark-mode", "line-spacing",
     "buffer-invisibility-spec", "selective-display", "scroll-margin", "face-remapping-alist",
@@ -361,6 +374,8 @@ const DISPLAY_VARIABLES: [&str; 26] = [
     "display-line-numbers", "display-line-numbers-width", "display-line-numbers-current-absolute",
     "fringe-indicator-alist", "indicate-empty-lines", "indicate-buffer-boundaries", "auto-hscroll-mode",
     "hscroll-margin", "maximum-scroll-margin",
+    // Where underlines go (`buffer_underline_rules').
+    "underline-minimum-offset", "x-underline-at-descent-line", "x-use-underline-position-properties",
 ];
 const MARK_ACTIVE: usize = 6;
 const TRANSIENT_MARK_MODE: usize = 7;
@@ -440,7 +455,7 @@ struct Bands {
 
 /// A mode-line band as a text slice whose faces index TABLE.
 fn band_slice(table: &FaceTable, band: mode_line::Band) -> TextSlice {
-    TextSlice {
+    TextSlice { extends: vec![],
         face_runs: band.runs.into_iter()
             .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: table.handle(&face)? }))
             .collect(),
@@ -1069,6 +1084,21 @@ impl Vm {
         let width = self.buffer_variable(buffer, "tab-width")?;
         Ok(width.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as u32)
     }
+    /// Where BUFFER's underlines go (xterm.c x_draw_glyph_string): GNU's C
+    /// variables `underline-minimum-offset' (1), `x-underline-at-descent-line'
+    /// (nil) and `x-use-underline-position-properties' (t), their buffer's
+    /// values, each its C default while unbound.
+    fn buffer_underline_rules(&mut self, buffer: Value) -> romacs_layout_input::UnderlineRules {
+        let mut value = |name: &str| self.buffer_variable(buffer, name).ok().filter(|v| *v != Value::UNBOUND);
+        let minimum = value("underline-minimum-offset");
+        let at_descent = value("x-underline-at-descent-line");
+        let position = value("x-use-underline-position-properties");
+        romacs_layout_input::UnderlineRules {
+            minimum_offset: minimum.and_then(|v| v.integer_value()).map_or(1, |v| v.clamp(0, i64::from(u32::MAX)) as u32),
+            at_descent_line: at_descent.is_some_and(|v| v != Value::NIL),
+            use_position: position.is_none_or(|v| v != Value::NIL),
+        }
+    }
     /// The value of variable NAME in BUFFER (`buffer-local-value').
     pub(crate) fn buffer_variable(&mut self, buffer: Value, name: &str) -> Result<Value> {
         let saved = self.slots[self.buffer_slot].value;
@@ -1141,7 +1171,7 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, wrap_flips, line_numbers }
+        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, wrap_flips, line_numbers }
             = self.window_text(window, height, None)?;
         self.display_state.bases.insert(id, base);
         match segments {
@@ -1159,7 +1189,7 @@ impl Vm {
         self.display_state.width = width;
         self.display_state.height = height;
         // The mini-window shows its overlay strings (icomplete's candidates).
-        let (utf8, face_runs, raw, start_byte, point_byte) = if mini {
+        let (utf8, face_runs, raw, extends, start_byte, point_byte) = if mini {
             let spliced = self.splice_overlay_strings(window, buffer, &utf8)?;
             if spliced.has_strings() {
                 let mut strings = vec![];
@@ -1172,15 +1202,38 @@ impl Vm {
                     let (display, from, len) = (s.display, s.buffer, s.len);
                     raw.iter().filter(move |&&p| (from..from + len).contains(&(p as usize))).map(move |&p| p - from as u32 + display as u32)
                 }).collect();
+                // Each buffer newline's end-of-line face where the splice put
+                // it, the end's at the new end, and a string's newlines in
+                // the string's face (extend_face_to_end_of_line's `it->s').
+                let end = utf8.len() as u32;
+                let mut moved: Vec<romacs_layout_input::Extend> = vec![];
+                for s in &spliced.segments {
+                    if s.string {
+                        for (offset, c) in spliced.text.get(s.display..s.display + s.len).unwrap_or("").char_indices() {
+                            let byte = s.display + offset;
+                            let face = runs.iter().find(|run| run.bytes.contains(&byte)).map_or(FaceHandle(0), |run| run.face);
+                            if c == '\n' && (face != FaceHandle(0) || decorated(&faces[0])) {
+                                moved.push(romacs_layout_input::Extend { byte: byte as u32, face });
+                            }
+                        }
+                    } else {
+                        let (from, len, display) = (s.buffer as u32, s.len as u32, s.display as u32);
+                        moved.extend(extends.iter().filter(|e| e.byte != end && (from..from + len).contains(&e.byte))
+                            .map(|e| romacs_layout_input::Extend { byte: e.byte - from + display, face: e.face }));
+                    }
+                }
+                moved.extend(extends.iter().filter(|e| e.byte == end).map(|e| romacs_layout_input::Extend { byte: spliced.text.len() as u32, face: e.face }));
+                moved.sort_by_key(|e| e.byte);
+                moved.dedup_by_key(|e| e.byte);
                 let (start, point) = (spliced.before_strings(start_byte), spliced.cursor(point_byte));
                 self.display_state.segments.insert(id, spliced.segments);
-                (spliced.text, runs, raw, start, point)
+                (spliced.text, runs, raw, moved, start, point)
             } else {
                 self.display_state.segments.remove(&id);
-                (utf8, face_runs, raw, start_byte, point_byte)
+                (utf8, face_runs, raw, extends, start_byte, point_byte)
             }
         } else {
-            (utf8, face_runs, raw, start_byte, point_byte)
+            (utf8, face_runs, raw, extends, start_byte, point_byte)
         };
         let snapshot = WindowSnapshot {
             id,
@@ -1189,7 +1242,7 @@ impl Vm {
             start_byte,
             point_byte,
             buffer_version: self.display_state.version,
-            text: TextSlice { utf8, face_runs, raw },
+            text: TextSlice { extends, utf8, face_runs, raw },
             mode_line: bands.mode_line.map(|band| band_slice(&table, band)),
             mode_line_face: table.handle(&band_face).ok_or("mode-line face required")?,
             header_line: bands.header_line.map(|band| band_slice(&table, band)),
@@ -1204,6 +1257,7 @@ impl Vm {
             wrap_flips,
             line_numbers,
             chrome: self.text_chrome(window, &table, base, at_zv)?,
+            underline_rules: self.buffer_underline_rules(buffer),
         };
         let len = snapshot.text.utf8.len();
         let snapshot = self.publish_window(snapshot);
@@ -1239,7 +1293,7 @@ impl Vm {
             (true, _) => {
                 let name = if header { self.header_line_face_name(window)? } else { self.mode_line_face_name(window)? };
                 let face = self.display_faces()?.handle(&name).ok_or("band face required")?;
-                (Some(TextSlice { utf8: " ".into(), face_runs: vec![], raw: vec![] }), face)
+                (Some(TextSlice { extends: vec![], utf8: " ".into(), face_runs: vec![], raw: vec![] }), face)
             }
         })
     }
@@ -1276,7 +1330,7 @@ impl Vm {
         // Laying rows out reads the fringes' widths, not their bitmaps.
         let table = self.display_faces()?;
         let chrome = self.window_chrome(window, &table, false)?;
-        let snapshot = WindowSnapshot { id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
+        let snapshot = WindowSnapshot { underline_rules: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
             hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false,
             stretches: shown.stretches.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
@@ -1422,7 +1476,7 @@ impl Vm {
         let height = 1 << 24;
         let table = self.display_faces()?;
         let chrome = self.window_chrome(window, &table, false)?;
-        let snapshot = WindowSnapshot { id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
+        let snapshot = WindowSnapshot { underline_rules: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
             vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(),
             wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
@@ -1485,6 +1539,7 @@ impl Vm {
             .unwrap_or(1);
         let point = self.window_point_value(window)?.as_integer()?;
         let region = self.snapshot_region(window, buffer, point)?;
+        let region_face = self.intern("region");
         let table = self.display_faces()?;
         let floor = self.min_row_height();
         let (shown, start_byte, start, point_byte, at_zv, rows) = {
@@ -1533,6 +1588,7 @@ impl Vm {
         };
         let labels = if mini { None } else { crate::prim::window_line_numbers(self, window).ok().flatten() };
         let mut sources = ElementFaces::new(self, window, buffer, shown.clone())?;
+        if let Some(range) = region.clone() { sources.add_region(range, region_face); }
         let mut faces = table.faces.clone();
         let terminal = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer);
         if let Some(binding) = terminal {
@@ -1549,14 +1605,18 @@ impl Vm {
         let escape = table.handle("escape-glyph");
         let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
         let mut style_index = styles.partition_point(|run| run.bytes.end <= shown.start);
-        // The face the buffer's character CH at byte AT shows in.
-        let mut buffer_face = |vm: &Self, faces: &mut Vec<Face>, sources: &mut ElementFaces, at: usize, ch: char| -> Result<FaceHandle> {
+        // The face the buffer's character CH at byte AT shows in, and for a
+        // newline the face its row paints past the text in (`extend_face').
+        let mut buffer_face = |vm: &Self, faces: &mut Vec<Face>, sources: &mut ElementFaces, at: usize, ch: char| -> Result<(FaceHandle, Option<FaceHandle>)> {
             // Within the last run of one face, that face.
             let mut face = if (sources.run.0..sources.run.1).contains(&at) { sources.run.2 }
                 else { vm.element_face(&table, faces, sources, crate::prim::FaceKey::Buffer(0), Some(at))? };
-            if ((ch.is_control() && ch != '\n' && ch != '\t') || b.is_raw_at(at)) && let Some(escape) = escape { face = escape; }
+            // Whether the faces merged at AT (`sources.run') alone make its face.
+            let mut layered = true;
+            if ((ch.is_control() && ch != '\n' && ch != '\t') || b.is_raw_at(at)) && let Some(escape) = escape { face = escape; layered = false; }
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
+                layered = false;
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
                     let resolved = run.style.face(&default, &ansi);
                     if resolved == default { return FaceHandle(0); }
@@ -1565,16 +1625,28 @@ impl Vm {
                     handle
                 });
             }
-            if region.as_ref().is_some_and(|range| range.contains(&at)) && let Some(background) = region_background {
-                face = *region_faces.entry(face.0).or_insert_with(|| {
-                    let mut selected = faces[face.0 as usize].clone();
-                    selected.background = background;
-                    let handle = FaceHandle(faces.len() as u32);
-                    faces.push(selected);
-                    handle
-                });
+            // The region is one of the overlays (`ElementFaces::add_region'),
+            // merged at its priority; where an escape or a terminal's style
+            // makes the face instead, it lends its background.
+            if !layered && region.as_ref().is_some_and(|range| range.contains(&at)) {
+                if let Some(background) = region_background {
+                    face = *region_faces.entry(face.0).or_insert_with(|| {
+                        let mut selected = faces[face.0 as usize].clone();
+                        selected.background = background;
+                        let handle = FaceHandle(faces.len() as u32);
+                        faces.push(selected);
+                        handle
+                    });
+                }
             }
-            Ok(face)
+            // xdisp.c extend_face_to_end_of_line: a newline in the default
+            // face extends the default, which paints only lines; any other
+            // the filtered merge of the faces there.
+            let extend = if ch != '\n' { None }
+                else if face == FaceHandle(0) { decorated(&faces[0]).then_some(FaceHandle(0)) }
+                else if layered { let layers = sources.run.3.clone(); vm.extend_face(faces, sources, &layers) }
+                else { None };
+            Ok((face, extend))
         };
         let mut utf8 = String::new();
         let mut face_runs: Vec<FaceRun> = vec![];
@@ -1596,11 +1668,14 @@ impl Vm {
             // property run but on an escaped control character.
             let plain = region.is_none() && styles.is_empty();
             let mut run = (base, FaceHandle(0));
+            let mut extends = vec![];
+            let default_lines = decorated(&faces[0]);
             for (offset, ch) in utf8.char_indices() {
                 let at = base + offset;
                 let escaped = (ch.is_control() && ch != '\n' && ch != '\t') || b.is_raw_at(at);
-                let face = if plain && at < run.0 && !escaped { run.1 } else {
-                    let face = buffer_face(self, &mut faces, &mut sources, at, ch)?;
+                let face = if plain && at < run.0 && !escaped && (ch != '\n' || (run.1 == FaceHandle(0) && !default_lines)) { run.1 } else {
+                    let (face, extend) = buffer_face(self, &mut faces, &mut sources, at, ch)?;
+                    if let Some(face) = extend { extends.push(romacs_layout_input::Extend { byte: offset as u32, face }); }
                     if plain && !escaped { run = (sources.run.1, face); }
                     face
                 };
@@ -1610,6 +1685,8 @@ impl Vm {
                     _ => face_runs.push(FaceRun { bytes: offset..end, face }),
                 }
             }
+            // The row ending at point-max extends the default face.
+            if at_zv && default_lines { extends.push(romacs_layout_input::Extend { byte: utf8.len() as u32, face: FaceHandle(0) }); }
             let start_byte = start_byte.clamp(shown.start, shown.end) - base;
             // Point outside the published bytes is not shown: no glyph is at it.
             let point_byte = point_byte.checked_sub(base).filter(|&p| p <= utf8.len()).unwrap_or(utf8.len());
@@ -1618,7 +1695,7 @@ impl Vm {
                 let starts = std::iter::once(0).chain(utf8.match_indices('\n').map(|(at, _)| at + 1)).map(|at| (at, base + at)).collect();
                 line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
             });
-            return Ok(ShownText { text: TextSlice { utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
+            return Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
                 segments: None, stretches: vec![], wrap_flips: vec![], line_numbers });
         };
         // Each element's character, its face, and the buffer byte it shows:
@@ -1631,13 +1708,23 @@ impl Vm {
         // The display bytes rows of a new buffer line start at, and the
         // buffer bytes their first elements show, past any text hidden.
         let (mut starts, mut pending) = (vec![], Some(0));
+        let mut extends = vec![];
         for e in &elements {
             let at = b.byte_of_char(crate::coordinates::CharOffset((e.charpos - 1).max(0) as usize))?.0;
             if let Some(display) = pending.take() { starts.push((display, at)); }
             let display = utf8.len();
             let own = e.kind == crate::prim::ShownKind::Buffer;
-            let face = if own { buffer_face(self, &mut faces, &mut sources, at, e.c)? } else {
+            let face = if own {
+                let (face, extend) = buffer_face(self, &mut faces, &mut sources, at, e.c)?;
+                if let Some(face) = extend { extends.push(romacs_layout_input::Extend { byte: display as u32, face }); }
+                face
+            } else {
                 let face = self.element_face(&table, &mut faces, &mut sources, e.face, None)?;
+                // A string's newline extends the string's face itself
+                // (extend_face_to_end_of_line's `it->s').
+                if e.c == '\n' && (face != FaceHandle(0) || decorated(&faces[0])) {
+                    extends.push(romacs_layout_input::Extend { byte: display as u32, face });
+                }
                 if e.c.is_control() && e.c != '\n' && e.c != '\t' && let Some(escape) = escape { escape } else { face }
             };
             if let crate::prim::ShownKind::Stretch(width) = e.kind { stretches.push(romacs_layout_input::Stretch { byte: display, width }); }
@@ -1663,6 +1750,7 @@ impl Vm {
             if own && e.c == '\n' { pending = Some(utf8.len()); }
         }
         if let Some(display) = pending { starts.push((display, shown.end)); }
+        if at_zv && decorated(&faces[0]) { extends.push(romacs_layout_input::Extend { byte: utf8.len() as u32, face: FaceHandle(0) }); }
         // Past the last element: the end of the text published.
         segments.push(mini_window::Segment { display: utf8.len(), buffer: shown.end, len: 1, string: false });
         let len = utf8.len();
@@ -1674,14 +1762,14 @@ impl Vm {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
                 faces: faces.clone(),
-                text: TextSlice { utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }], raw: vec![] },
+                text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }], raw: vec![] },
             };
             let advance = if self.has_layout_host() { self.host_layout(&input)?.glyphs[0].0 } else { self.window_state.column };
             let width = romacs_layout_input::StretchWidth::Width { width: (factor * f64::from(advance)) as i64, zero_ok: false };
             let at = stretches.partition_point(|s: &romacs_layout_input::Stretch| s.byte < byte);
             stretches.insert(at, romacs_layout_input::Stretch { byte, width });
         }
-        Ok(ShownText { text: TextSlice { utf8, face_runs, raw: vec![] }, start_byte: start_at.unwrap_or(len), point_byte: cursor_at.or(point_at).unwrap_or(len),
+        Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw: vec![] }, start_byte: start_at.unwrap_or(len), point_byte: cursor_at.or(point_at).unwrap_or(len),
             faces, base: 0, at_zv, table: table.clone(), merged, segments: Some(segments), stretches, wrap_flips, line_numbers })
     }
     /// Whether WINDOW shows BUFFER's bytes SHOWN as more than its
@@ -2422,7 +2510,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces,
-            text: TextSlice { utf8: text, face_runs, raw: vec![] },
+            text: TextSlice { extends: vec![], utf8: text, face_runs, raw: vec![] },
         };
         self.host_layout(&input)
     }
@@ -2474,7 +2562,11 @@ impl Vm {
             };
             let end = sources.end.max(at + 1);
             layers.push(text_face);
-            let next = self.next_property_boundary(sources.buffer, ByteOffset(at), ByteOffset(end))?.0.max(at + 1);
+            let mut next = self.next_property_boundary(sources.buffer, ByteOffset(at), ByteOffset(end))?.0.max(at + 1);
+            // The region's edges end a run as an overlay's do.
+            if let Some((start, end)) = sources.region {
+                if at < start && start < next { next = start; } else if at < end && end < next { next = end; }
+            }
             let handle = self.layered_face(table, faces, sources, &layers);
             sources.run = (at, next, handle, layers);
         }
@@ -2515,6 +2607,41 @@ impl Vm {
         sources.layered.insert(key, handle);
         handle
     }
+    /// xdisp.c extend_face_to_end_of_line's face for a row that ends at a
+    /// newline shown in LAYERS (overlay faces first, the text's last), its
+    /// face not the default: `face_at_pos' with the `:extend' filter, the
+    /// merge of only those faces whose own realised `:extend' is non-nil
+    /// (a list of faces filtered face by face), or none.
+    fn extend_face(&self, faces: &mut Vec<Face>, sources: &mut ElementFaces, layers: &[Value]) -> Option<FaceHandle> {
+        let key: Vec<u64> = layers.iter().map(|v| v.0).collect();
+        if let Some(&handle) = sources.extended.get(&key) { return handle; }
+        let graph = Graph(self);
+        let view = romacs_face::View::bind(&self.display_state.theme(), &romacs_face::Remap::empty()).ok();
+        let extends = |datum: &romacs_face::Datum| -> bool {
+            let Some(view) = view.as_ref() else { return false };
+            BoundedDatum::new(datum).ok().and_then(|d| romacs_face::remap::parse_face_ref(&d).ok())
+                // The face's own `:extend', through its inheritance, never the
+                // default face's (merge_face_ref's attribute filter).
+                .is_some_and(|face_ref| matches!(view.effective_ref(&face_ref).get(Attribute::Extend), FaceSlot::Set(FaceValue::Bool(true))))
+        };
+        let mut kept = vec![];
+        for layer in layers.iter().filter(|&&v| v != Value::NIL) {
+            let Ok(datum) = BoundedDatum::from_graph(&graph, layer.0) else { continue };
+            // A list of faces, not one face's plist, is filtered face by face.
+            match &*datum {
+                romacs_face::Datum::List(items) if !matches!(items.first(), Some(romacs_face::Datum::Symbol(s)) if s.starts_with(':')) =>
+                    kept.extend(items.iter().filter(|item| extends(item)).cloned()),
+                one => if extends(one) { kept.push(one.clone()) },
+            }
+        }
+        let handle = (!kept.is_empty()).then(|| romacs_face::Datum::List(kept))
+            .and_then(|list| BoundedDatum::new(&list).ok())
+            .and_then(|datum| romacs_face::remap::parse_face_ref(&datum).ok())
+            .and_then(|face_ref| face_of_attrs(&view.as_ref()?.realize_ref(&face_ref), "extended face").ok())
+            .map(|face| { faces.push(face); FaceHandle(faces.len() as u32 - 1) });
+        sources.extended.insert(key, handle);
+        handle
+    }
     /// The host advance of C in the default face, and that face's row height.
     pub(crate) fn host_default_advance(&mut self, c: char) -> Result<(u32, u32)> {
         self.host_face_advance("default", c)
@@ -2526,7 +2653,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces: vec![face],
-            text: TextSlice { utf8: c.to_string(), face_runs: vec![], raw: vec![] },
+            text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![], raw: vec![] },
         };
         let measured = self.host_layout(&input)?;
         Ok((measured.glyphs[0].0, measured.face_heights[0]))
@@ -2563,7 +2690,7 @@ impl Vm {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
             faces,
-            text: TextSlice { utf8: " ".repeat(runs.len()), face_runs, raw: vec![] },
+            text: TextSlice { extends: vec![], utf8: " ".repeat(runs.len()), face_runs, raw: vec![] },
         };
         let heights = self.host_layout(&input)?.face_heights;
         Ok(runs.into_iter().map(|i| heights[i]).max().unwrap_or(0))
@@ -2579,6 +2706,48 @@ impl Vm {
 }
 
 /// The display's face for realized ATTRS of the face NAME.
+/// Whether FACE draws a line: what extending the default face paints, its
+/// background being the frame's.
+fn decorated(face: &Face) -> bool {
+    face.decor != romacs_layout_input::Decor::default()
+}
+
+/// The line a face's `:underline' (UNDERLINE), `:overline' or
+/// `:strike-through' value draws, as xfaces.c realize_gui_face reads it:
+/// t, the face's foreground; a colour, that colour; for an underline a
+/// plist of `:color' (a colour, or `foreground-color') and `:style'
+/// (`line', `double-line', `wave', `dots', `dashes').  An unknown colour
+/// is the foreground, as GNU's is when it cannot be loaded.
+fn face_line(slot: &FaceSlot, underline: bool) -> Option<romacs_layout_input::Line> {
+    use romacs_layout_input::Line;
+    let named = |name: &str| romacs_display_protocol::x11_color_value(name).map(|(r, g, b)| [r, g, b]);
+    match slot {
+        FaceSlot::Set(FaceValue::Bool(true)) => Some(Line { style: 1, color: None, position: None }),
+        FaceSlot::Set(FaceValue::Str(name)) => Some(Line { style: 1, color: named(name), position: None }),
+        FaceSlot::Set(FaceValue::Structured(datum)) if underline => {
+            let romacs_face::Datum::List(items) = &**datum else { return Some(Line { style: 1, color: None, position: None }) };
+            let (mut style, mut color, mut position) = (1, None, None);
+            for pair in items.chunks(2) {
+                match pair {
+                    [romacs_face::Datum::Symbol(key), romacs_face::Datum::Str(name)] if &**key == ":color" => color = named(name),
+                    [romacs_face::Datum::Symbol(key), romacs_face::Datum::Symbol(value)] if &**key == ":style" => {
+                        style = match &**value { "double-line" => 2, "wave" => 3, "dots" => 4, "dashes" => 5, _ => 1 };
+                    }
+                    // `:position t' puts it at the descent line, N that many
+                    // pixels above it.
+                    [romacs_face::Datum::Symbol(key), romacs_face::Datum::T] if &**key == ":position" => position = Some(0),
+                    [romacs_face::Datum::Symbol(key), romacs_face::Datum::Int(n)] if &**key == ":position" =>
+                        position = Some((*n).clamp(0, i64::from(u16::MAX)) as u16),
+                    _ => {}
+                }
+            }
+            Some(Line { style, color, position })
+        }
+        FaceSlot::Set(FaceValue::Structured(_)) => Some(Line { style: 1, color: None, position: None }),
+        _ => None,
+    }
+}
+
 fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
     let string = |a| match attrs.get(a) {
         FaceSlot::Set(FaceValue::Str(s)) => Ok(s.to_string()),
@@ -2597,9 +2766,19 @@ fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
         _ => return Err("absolute face height required".into()),
     };
     let symbol = |a| match attrs.get(a) { FaceSlot::Set(FaceValue::Symbol(s)) => Some(s.to_string()), _ => None };
+    // xfaces.c realize_gui_face: inverse video swaps the realised colours.
+    let inverse = matches!(attrs.get(Attribute::InverseVideo), FaceSlot::Set(FaceValue::Bool(true)));
+    let (foreground, background) = (color(Attribute::Foreground)?, color(Attribute::Background)?);
+    let (foreground, background) = if inverse { (background, foreground) } else { (foreground, background) };
+    let decor = romacs_layout_input::Decor {
+        underline: face_line(attrs.get(Attribute::Underline), true),
+        overline: face_line(attrs.get(Attribute::Overline), false),
+        strike: face_line(attrs.get(Attribute::StrikeThrough), false),
+    };
     Ok(Face {
-        foreground: color(Attribute::Foreground)?,
-        background: color(Attribute::Background)?,
+        decor,
+        foreground,
+        background,
         family: string(Attribute::Family)?,
         pixel_size: size,
         weight: symbol(Attribute::Weight).map_or(400, |w| romacs_face::attr::css_weight(&w)),

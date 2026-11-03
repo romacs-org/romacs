@@ -123,6 +123,11 @@ fn treesit_grammar_location(cx, language: Value) {
     cx.ts_grammar_location(language)
 }}
 
+defsubr! { name = "romacs-treesit-bundled-grammars", gnu = "romacs:treesit", effect = Reads,
+fn romacs_treesit_bundled_grammars(cx) {
+    cx.ts_bundled_grammars()
+}}
+
 // Line and column tracking.
 
 defsubr! { name = "treesit-tracking-line-column-p", gnu = "treesit.c:1250", effect = Reads,

@@ -20,7 +20,7 @@ fn gnu_parity_noto_sans_px1() {
     assert_gnu_probe(
         "/nix/store/7lrhms8rphrd8ywphjbvjyll57pkim64-noto-fonts-2025.11.01/share/fonts/noto/NotoSans[wdth,wght].ttf",
         1,
-        FontPxMetrics {
+        FontPxMetrics { underline: romacs_display_protocol::font::FontUnderline { position: 0, thickness: 0 },
             pixel_size: 1,
             height: 3,
             ascent: 2,
@@ -38,7 +38,7 @@ fn gnu_parity_hack_px1() {
     assert_gnu_probe(
         "/nix/store/b7ybgcl00ak8q66bc0w15vfnyly4g13k-hack-font-3.003/share/fonts/truetype/Hack-Italic.ttf",
         1,
-        FontPxMetrics {
+        FontPxMetrics { underline: romacs_display_protocol::font::FontUnderline { position: 0, thickness: 0 },
             pixel_size: 1,
             height: 2,
             ascent: 1,
@@ -56,7 +56,7 @@ fn gnu_parity_dejavu_sans_mono_px1() {
     assert_gnu_probe(
         "/nix/store/b5gf37jp4y3965bp6x9wanzqchkkvbvs-dejavu-fonts-2.37/share/fonts/truetype/DejaVuSansMono-BoldOblique.ttf",
         1,
-        FontPxMetrics {
+        FontPxMetrics { underline: romacs_display_protocol::font::FontUnderline { position: 0, thickness: 0 },
             pixel_size: 1,
             height: 2,
             ascent: 1,

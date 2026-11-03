@@ -15,7 +15,7 @@ const ENTRIES: &[&str] = &[
     "call_lisp_at_write", "safe_call", "set_variable_value", "bind_variable", "unbind_one", "unwind", "unbind",
     "unbind_after", "unbind_forwarded", "checked_unbind", "loader_primitive", "eval_primitive",
     "macroexpand_primitive", "macroexpand_value", "read_host_event", "force_lazy", "autoload_then",
-    "lambda_list_then", "lambda_list_raise", "nested_then", "bind_special",
+    "lambda_list_then", "lambda_list_raise", "lambda_list_closure", "nested_then", "bind_special",
     "reentrant_load", "reentrant_step", "signal_hook", "call_debugger", "call_in_signal", "handler_callback", "load_with_autoload_queue",
     "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request", "cached_source_form",
     "finish_request", "poll_collect", "collect_garbage", "watched_write", "call_suspended",
