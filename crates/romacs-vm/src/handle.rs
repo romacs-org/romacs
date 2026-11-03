@@ -335,6 +335,8 @@ impl Vm {
         self.profile_collection_begin();
         let start = crate::host::collection_clock();
         self.collect_rooted(roots);
+        // What the collection and the work before it freed goes back.
+        crate::world::arena::trim();
         let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
         self.count_collection(elapsed);
         self.profile_collection_end();

@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "5b17ae346d8568529e50994ec010eac22e3cb21bfc585c46e107778bfeec660a",
+    "input_hash": "c6885ca0b28dc3bb49b8b47372ee30131833d9f7e2c8e11c7876be9c20a973f8",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7847
+    "vm2_universe": 7863
   },
   "schema": 2,
   "vm2": {
-    "count": 1285,
+    "count": 1288,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -497,6 +497,7 @@
       "internal-get-lisp-face-attribute",
       "internal-handle-focus-in",
       "internal-lisp-face-attribute-values",
+      "internal-lisp-face-equal-p",
       "internal-lisp-face-p",
       "internal-make-lisp-face",
       "internal-make-var-non-special",
@@ -795,6 +796,7 @@
       "require",
       "restore-buffer-modified-p",
       "reverse",
+      "romacs--arena-census",
       "romacs--auto-save-1",
       "romacs--auto-save-done",
       "romacs--auto-save-failure-time",
@@ -814,6 +816,7 @@
       "romacs--decode-output",
       "romacs--display-animates",
       "romacs--doc-variable-records",
+      "romacs--frame-shares-faces-p",
       "romacs--frozen-regions",
       "romacs--fzf-filter",
       "romacs--fzf-highlight",

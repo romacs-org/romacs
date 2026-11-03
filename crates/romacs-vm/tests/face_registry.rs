@@ -96,3 +96,24 @@ fn aliases_and_validation_order_match_gnu() {
     let mut vm = Vm::new();
     assert_eq!(eval(&mut vm, "(progn (internal-make-lisp-face 'registry-test) (put 'registry-alias 'face-alias 'registry-test) (list (eq (internal-lisp-face-p 'registry-alias) (internal-lisp-face-p 'registry-test)) (condition-case e (internal-get-lisp-face-attribute 'no-face 42 t) (error e)) (condition-case e (internal-get-lisp-face-attribute 'registry-test :bogus t) (error e)) (condition-case e (internal-get-lisp-face-attribute \"registry-test\" :weight t) (error e)) (condition-case e (internal-lisp-face-p 'registry-test t) (error e))))"), "(t (error \"Invalid face\" no-face) (error \"Invalid face attribute name\" :bogus) (wrong-type-argument symbolp \"registry-test\") (wrong-type-argument frame-live-p t))");
 }
+
+/// xfaces.c Finternal_lisp_face_equal_p, as pinned GNU answers through
+/// faces.el's `face-equal' (-Q --batch, the same faces set with
+/// `set-face-attribute'): `(t nil t t t ... (error "Invalid face" ...))'.
+#[test]
+fn lisp_faces_compare_as_gnu_s() {
+    let mut vm = Vm::new();
+    eval(&mut vm, "(progn (dolist (face '(fe-a fe-b fe-c)) (internal-make-lisp-face face) (internal-make-lisp-face face (selected-frame)))
+                    (dolist (face '(fe-a fe-b)) (internal-set-lisp-face-attribute face :foreground \"red\" 0) (internal-set-lisp-face-attribute face :weight 'bold 0))
+                    (internal-set-lisp-face-attribute 'fe-c :inherit 'fe-a 0))");
+    assert_eq!(eval(&mut vm, "(list (internal-lisp-face-equal-p 'fe-a 'fe-b) (internal-lisp-face-equal-p 'fe-a 'fe-c)
+                                    (internal-lisp-face-equal-p 'fe-a 'fe-c nil t) (internal-lisp-face-equal-p 'fe-c 'fe-a nil t)
+                                    (internal-lisp-face-equal-p 'fe-a 'fe-b t)
+                                    (condition-case e (internal-lisp-face-equal-p 'fe-a 'fe-nosuch) (error e)))"),
+               "(t nil t t t (error \"Invalid face\" fe-nosuch))");
+    // An alias cycle signals, as pinned GNU's: `((circular-list cy-x) (circular-list cy-x))'.
+    assert_eq!(eval(&mut vm, "(progn (put 'cy-x 'face-alias 'cy-y) (put 'cy-y 'face-alias 'cy-x)
+                                     (list (condition-case e (internal-lisp-face-equal-p 'cy-x 'fe-a) (error e))
+                                           (condition-case e (internal-lisp-face-equal-p 'fe-a 'cy-x) (error e))))"),
+               "((circular-list cy-x) (circular-list cy-x))");
+}

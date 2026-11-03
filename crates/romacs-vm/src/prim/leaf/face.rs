@@ -79,28 +79,61 @@ impl Leaf<'_> {
         }
     }
 
+    /// The frame whose faces FRAME shows: FRAME, unless it is a child
+    /// frame that never had faces of its own, which shows its parent's
+    /// (DIVERGENCES.md VM2-CHILD-FRAME).
+    pub(crate) fn face_owner(&mut self, mut frame: Value) -> super::super::Out {
+        loop {
+            if self.face_table(frame, false)? != Value::NIL { return Ok(frame); }
+            let parent = self.vm.frame(frame).map_or(Value::NIL, |f| f.parent);
+            if parent == Value::NIL { return Ok(frame); }
+            frame = parent;
+        }
+    }
+
+    /// Whether FRAME shows another frame's faces: a child frame whose own
+    /// were never set.
+    pub(crate) fn frame_shares_faces(&mut self, frame: Value) -> std::result::Result<bool, Fault> {
+        Ok(self.face_owner(frame)? != frame)
+    }
+
+    /// Give FRAME faces of its own, a copy of each of those it shows, as
+    /// make-terminal-frame copies the selected frame's (frame.c:1879): the
+    /// first time anything sets a face on FRAME alone.
+    pub(crate) fn face_own(&mut self, frame: Value) -> super::super::Out {
+        let owner = self.face_owner(frame)?;
+        if owner == frame { return Ok(frame); }
+        // The default colours it showed stay its own, as its default face's.
+        let entries = self.windows().frame_parameter_entries(owner)?;
+        let own = self.windows().frame_parameter_entries(frame)?;
+        for name in ["foreground-color", "background-color"] {
+            let key = self.intern(name);
+            let colour = |cx: &Self, entries: &[(Value, Value)]| entries.iter().find(|(k, v)| *k == key && matches!(cx.kind(*v), Kind::String | Kind::Bytes)).map(|&(_, v)| v);
+            if colour(self, &own).is_none() && let Some(value) = colour(self, &entries) {
+                self.windows().store_frame_parameter(frame, key, value)?;
+            }
+        }
+        let from = self.face_table(owner, false)?;
+        let to = self.face_table(frame, true)?;
+        if from == Value::NIL { return Ok(frame); }
+        for (face, lface) in self.vm.declaration_hash_entries(from).map_err(Fault::Error)? {
+            let values = self.vector_values(lface)?;
+            let copy = self.vector_from(values);
+            self.vm.declaration_hash_put(to, face, copy).map_err(Fault::Error)?;
+        }
+        Ok(frame)
+    }
+
     pub(crate) fn face_lookup(&mut self, face: Value, frame: Value) -> super::super::Out {
+        let frame = if frame == Value::NIL { frame } else { self.face_owner(frame)? };
         let table = self.face_table(frame, false)?;
         if table == Value::NIL { return Ok(Value::NIL); }
         let value = self.vm.declaration_hash_get(table, face).map_err(Fault::Error)?.unwrap_or(Value::NIL);
         Ok(if frame == Value::NIL { self.pair(value).map_or(Value::NIL, |(_, face)| face) } else { value })
     }
 
-    /// A new frame's faces: a copy of each of FROM's lface vectors, as
-    /// make-terminal-frame copies the selected frame's (frame.c:1879) and a
-    /// window system's frame gets them from `face-set-after-frame-default'.
-    pub(crate) fn face_copy_frame(&mut self, from: Value, to: Value) -> super::super::Out {
-        let table = self.face_table(from, false)?;
-        if table == Value::NIL { return Ok(to); }
-        for (face, lface) in self.vm.declaration_hash_entries(table).map_err(Fault::Error)? {
-            let values = self.vector_values(lface)?;
-            let copy = self.vector_from(values);
-            self.face_insert(face, to, copy)?;
-        }
-        Ok(to)
-    }
-
     pub(crate) fn face_insert(&mut self, face: Value, frame: Value, vector: Value) -> super::super::Out {
+        if frame != Value::NIL { self.face_own(frame)?; }
         let table = self.face_table(frame, true)?;
         let value = if frame == Value::NIL {
             let counter = self.vm.slot("#:vm2-next-face-id");

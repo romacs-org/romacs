@@ -71,6 +71,33 @@ fn a_child_frame_has_its_parents_faces() {
     assert_eq!(vm.eval_source(probe).unwrap().display().unwrap(), "(bold bold bold)");
 }
 
+/// A child frame shows its parent's faces until something sets one on it
+/// alone (VM2-CHILD-FRAME): a face made or set everywhere, or set to what it
+/// already shows, leaves it sharing; a change on it alone gives it its own
+/// faces and leaves the parent's as they were. Sharing, it has the parent's
+/// default colours.
+#[test]
+fn a_child_frame_shares_its_parents_faces_until_one_is_set_on_it() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    vm.eval_source("(progn (setq f (selected-frame)) (internal-make-lisp-face 'probe-face) (internal-make-lisp-face 'probe-face f) \
+                    (modify-frame-parameters f '((background-color . \"#102030\"))) \
+                    (setq c (romacs--create-frame `((parent-frame . ,f) (width . 10) (height . 2)))))").unwrap();
+    let probe = "(list (romacs--frame-shares-faces-p c) \
+                 (progn (internal-set-lisp-face-attribute 'probe-face :weight 'bold 0) \
+                        (list (internal-get-lisp-face-attribute 'probe-face :weight c) (romacs--frame-shares-faces-p c))) \
+                 (progn (dolist (frame (frame-list)) (internal-make-lisp-face 'fresh-face frame)) \
+                        (list (and (internal-lisp-face-p 'fresh-face c) t) (romacs--frame-shares-faces-p c))) \
+                 (progn (internal-set-lisp-face-attribute 'probe-face :weight 'bold c) (romacs--frame-shares-faces-p c)) \
+                 (frame-parameter c 'background-color) \
+                 (progn (internal-set-lisp-face-attribute 'probe-face :weight 'light c) \
+                        (list (romacs--frame-shares-faces-p c) (internal-get-lisp-face-attribute 'probe-face :weight c) \
+                              (internal-get-lisp-face-attribute 'probe-face :weight f) (frame-parameter c 'background-color))))";
+    assert_eq!(vm.eval_source(probe).unwrap().display().unwrap(),
+               r##"(t (bold t) (t t) t "#102030" (nil light bold "#102030"))"##);
+}
+
 /// Positions as frame.c reads them for a child frame: a negative integer
 /// or `(- N)' from the parent's far edge, a float a fraction of the room.
 #[test]

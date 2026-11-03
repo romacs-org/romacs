@@ -207,6 +207,12 @@ impl DisplayState {
         }
         self.theme.borrow()
     }
+    /// The theme as far as the default face goes: pending edits are applied
+    /// only when one is to `default', the one face no other face's edit
+    /// changes. Font queries read it while a theme recomputes every face.
+    fn default_theme(&self) -> std::cell::Ref<'_, Theme> {
+        if self.pending_faces.borrow().iter().any(|(face, ..)| face == "default") { self.theme() } else { self.theme.borrow() }
+    }
     fn set_theme(&mut self, theme: Theme) {
         *self.theme.get_mut() = theme;
         self.faces_changed();
@@ -724,6 +730,10 @@ impl Vm {
     /// The face NAME as painting realizes it: one the theme does not hold
     /// paints in the default face (`painted_face').
     pub(crate) fn display_face(&self, name: &str) -> Result<Face> {
+        if name == "default" {
+            let attrs = self.display_state.default_theme().realize(name).ok_or("unknown face")?;
+            return face_of_attrs(&attrs, name);
+        }
         let known = self.display_state.theme().realize(name).is_some();
         self.snapshot_face(if known { name } else { "default" })
     }
