@@ -90,6 +90,28 @@
     (mapc #'disable-theme custom-enabled-themes)
     (enable-theme 'default)))
 
+(romacs-deftest romacs-theme-a-package-s-theme-keeps-the-stock-theme ()
+  ;; A theme a package keeps its own settings in, such as `use-package''s for
+  ;; `:custom-face', is no colour scheme: the stock theme and the default
+  ;; face's font stay.  A theme that sets `default' without saying what it
+  ;; is replaces the stock theme, as most third-party themes need.
+  (unwind-protect
+      (let ((romacs-theme--stock t)
+            (font (list (face-attribute 'default :family) (face-attribute 'default :height))))
+        (custom-declare-theme 'romacs-theme-test-settings nil)
+        (custom-theme-set-faces 'romacs-theme-test-settings '(romacs-theme-test-face ((t :weight bold))))
+        (enable-theme 'romacs-theme-test-settings)
+        (require 'use-package-core)
+        (defface romacs-theme-test-late '((t :foreground "red")) "A face defined late.")
+        (romacs-should (memq 'default custom-enabled-themes))
+        (romacs-should (equal (list (face-attribute 'default :family) (face-attribute 'default :height)) font))
+        (custom-declare-theme 'romacs-theme-test-doom nil)
+        (custom-theme-set-faces 'romacs-theme-test-doom '(default ((t :background "#101010" :foreground "#e0e0e0"))))
+        (enable-theme 'romacs-theme-test-doom)
+        (romacs-should (not (memq 'default custom-enabled-themes))))
+    (mapc #'disable-theme custom-enabled-themes)
+    (enable-theme 'default)))
+
 (romacs-deftest romacs-theme-the-stock-theme-merged-pairs-read ()
   (let* ((resolved (romacs-theme-palette 'default)) (faces (romacs-theme-faces resolved))
          (fg (lambda (face) (plist-get (cdr (car (car (cdr (assq face faces))))) :foreground)))

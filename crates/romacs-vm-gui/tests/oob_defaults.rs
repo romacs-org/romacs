@@ -225,3 +225,51 @@ fn a_quick_session_keeps_gnus_values() {
         "(nil nil nil nil nil nil)",
     ]);
 }
+
+/// Programming buffers number their lines relative to point, the current
+/// line by its own number; text, Org and special buffers do not.  The
+/// switch takes only its own hook away: a user's `prog-mode-hook' entry
+/// stays, the numbers it turned on go, and the option is GNU's again.
+#[test]
+fn programming_buffers_number_their_lines_relatively() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let (mut vm, _home) = session("numbers", false);
+        let numbers = "(mapcar (lambda (mode)
+            (with-current-buffer (get-buffer-create (format \"n-%s\" mode)) (funcall mode)
+              (list mode display-line-numbers)))
+            '(emacs-lisp-mode js-mode text-mode org-mode special-mode))";
+        let mut report = vec![printed(&mut vm, "(list display-line-numbers-type display-line-numbers-current-absolute
+            (and (memq 'romacs-defaults--line-numbers prog-mode-hook) t))")];
+        report.push(printed(&mut vm, numbers));
+        vm.eval_source("(add-hook 'prog-mode-hook #'oob-user-hook) (defun oob-user-hook () (setq-local oob-user-ran t))
+            (romacs-defaults-mode -1)").unwrap();
+        report.push(printed(&mut vm, "(list display-line-numbers-type (memq 'romacs-defaults--line-numbers prog-mode-hook)
+            (and (memq 'oob-user-hook prog-mode-hook) t) (with-current-buffer \"n-emacs-lisp-mode\" display-line-numbers))"));
+        report.push(printed(&mut vm, "(with-current-buffer (get-buffer-create \"n-after\") (emacs-lisp-mode)
+            (list display-line-numbers (bound-and-true-p oob-user-ran)))"));
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, [
+        "(relative t t)",
+        "((emacs-lisp-mode relative) (js-mode relative) (text-mode nil) (org-mode nil) (special-mode nil))",
+        "(t nil t nil)",
+        "(nil t)",
+    ]);
+}
+
+/// `use-package' forms show in a Lisp buffer's imenu under "Packages"
+/// (`use-package-enable-imenu-support'); the switch takes the entry away.
+#[test]
+fn use_package_forms_are_in_imenu() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let (mut vm, _home) = session("imenu", false);
+        let packages = "(progn (require 'lisp-mode)
+            (list use-package-enable-imenu-support
+                  (and (assoc \"Packages\" lisp-imenu-generic-expression) t)))";
+        let mut report = vec![printed(&mut vm, packages)];
+        vm.eval_source("(romacs-defaults-mode -1)").unwrap();
+        report.push(printed(&mut vm, packages));
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, ["(t t)", "(nil nil)"]);
+}

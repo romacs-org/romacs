@@ -651,8 +651,13 @@ pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
 
 /// The checkout this crate was built from: a compile-time path that no
 /// installed system has, kept for development binaries under `target/`.
+/// It is the manifest directory's grandparent itself, not `DIR/../..`:
+/// `data-directory' and the other runtime directories are directory names
+/// as GNU's are, so file names built from them compare equal to their
+/// expansions (find-func's library completion, bug#43393's test).
 pub(crate) fn build_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    manifest.parent().and_then(Path::parent).map_or_else(|| manifest.join("../.."), Path::to_path_buf)
 }
 
 /// A read of environment NAME through FORM: a K name is recorded with its
@@ -2559,6 +2564,16 @@ pub fn connect_nonblocking(addr: SocketAddr) -> io::Result<OwnedFd> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The build tree is a directory name with no `..` in it, so the
+    /// runtime directories built from it are what they expand to.
+    #[test]
+    fn the_build_root_has_no_parent_steps() {
+        let root = build_root();
+        assert!(root.is_absolute(), "{}", root.display());
+        assert!(!root.components().any(|c| matches!(c, std::path::Component::ParentDir)), "{}", root.display());
+        assert!(root.join("gnu-lisp").is_dir() && root.join("etc").is_dir(), "{}", root.display());
+    }
     /// A late wake samples once, at the next deadline after it.
     #[test]
     fn a_late_sampler_wake_skips_the_deadlines_it_missed() {

@@ -381,6 +381,96 @@ thousandth a stack mark."
           (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
             (dolist (i it) (romacs-mcp--withdraw 'scaling-peer "w" i)))))
 
+;; N delegated tasks, each indexed by its client request id and found again.
+(scaling-probe agent-requests :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--requests)
+                (mapcar (lambda (id) (romacs-agent--make :id id :harness 'codex :title id
+                                                        :options (list :parent "scaling-parent" :request id)))
+                        (scaling--names "scaling-request" n)))
+  :body (progn
+          (dolist (session it)
+            (puthash (romacs-agent-id session) session romacs-agent--sessions)
+            (romacs-agent--index session))
+          (dolist (session it) (romacs-agent-requested "scaling-parent" (romacs-agent-id session)))))
+
+;; N children of one parent each ending a turn while the parent's turn
+;; runs: each wake is queued behind it once (the real send and queue).
+(scaling-probe agent-wake :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (clrhash romacs-agent-tools--answered)
+                (let ((parent (romacs-agent--make :id "scaling-parent" :harness 'codex :title "parent"
+                                                  :state 'running)))
+                  (puthash "scaling-parent" parent romacs-agent--sessions))
+                (mapcar (lambda (id)
+                          (let ((child (romacs-agent--make :id id :harness 'codex :title id :done-seq 1
+                                                           :ends (list (list 1 "ok" nil))
+                                                           :dir (expand-file-name id (romacs-agent--state-root))
+                                                           :options (list :parent "scaling-parent"))))
+                            (make-directory (romacs-agent-dir child) t)
+                            (puthash id child romacs-agent--sessions)
+                            child))
+                        (scaling--names "scaling-child" n)))
+  :body (dolist (child it) (romacs-agent-tools--wake child)))
+
+;; One child with N turn ends its parent has not had: one wake gives each,
+;; in order, behind the parent's running turn.
+(scaling-probe agent-wake-ends :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (clrhash romacs-agent-tools--answered)
+                (puthash "scaling-parent" (romacs-agent--make :id "scaling-parent" :harness 'codex :title "parent"
+                                                              :state 'running)
+                         romacs-agent--sessions)
+                (let ((child (romacs-agent--make :id "scaling-ends" :harness 'codex :title "ends"
+                                                 :dir (expand-file-name "scaling-ends" (romacs-agent--state-root))
+                                                 :options (list :parent "scaling-parent")
+                                                 :ends (let (ends) (dotimes (i n) (push (list (1+ i) "ok" nil) ends)) ends))))
+                  (make-directory (romacs-agent-dir child) t)
+                  (puthash "scaling-ends" child romacs-agent--sessions)
+                  child))
+  :body (romacs-agent-tools--wake it))
+
+;; One child ending N turns, one after another, behind its parent's running
+;; turn: each wake hands on only the new end.
+(scaling-probe agent-wake-successive :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (clrhash romacs-agent-tools--answered)
+                (puthash "scaling-parent" (romacs-agent--make :id "scaling-parent" :harness 'codex :title "parent"
+                                                              :state 'running)
+                         romacs-agent--sessions)
+                (clrhash romacs-agent-tools--scheduled)
+                (let ((child (romacs-agent--make :id "scaling-turns" :harness 'codex :title "turns"
+                                                 :dir (expand-file-name "scaling-turns" (romacs-agent--state-root))
+                                                 :options (list :parent "scaling-parent"))))
+                  (make-directory (romacs-agent-dir child) t)
+                  (puthash "scaling-turns" child romacs-agent--sessions)
+                  child))
+  :body (dotimes (i n)
+          (romacs-agent--raise it (list :type 'done :text "ok" :seq (1+ i) :last t))
+          (romacs-agent-tools--wake it)))
+
+;; N deferred calls (delegations waiting) withdrawn by their relay, then
+;; retired by the next poll.
+(scaling-probe agent-withdraw-deferred :n 64
+  :setup (progn (require 'romacs-mcp) (number-sequence 0 (1- n)))
+  :body (let ((romacs-mcp--deferred nil) (romacs-mcp--deferred-index (make-hash-table :test #'equal))
+              (romacs-mcp--deferred-timer t))
+          (dolist (i it)
+            (romacs-mcp--defer-request (list :peer 'scaling-peer :cancelled nil) i #'ignore nil))
+          (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
+            (dolist (i it) (romacs-mcp--withdraw 'scaling-peer "w" i))
+            (romacs-mcp--poll-deferred))
+          (unless (null romacs-mcp--deferred) (error "Withdrawn calls were not retired"))))
+
+;; N messages sent to a per-turn session while its turn runs.
+(scaling-probe agent-queue :n 2000
+  :setup (progn (scaling--agent)
+                (romacs-agent--make :id "scaling-queue" :harness 'codex :title "queue" :state 'running))
+  :body (dotimes (i n) (romacs-agent-send it "queued")))
+
 ;; A chat of N tool calls, started then each answered.
 (scaling-probe agent-chat-tools :n 200
   :setup (progn (scaling--agent)

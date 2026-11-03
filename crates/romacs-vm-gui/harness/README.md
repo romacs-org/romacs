@@ -329,3 +329,65 @@ installed build has them) runs that runtime; otherwise give
 from `--commit`.  `--only` takes groups (`batch micro ert gui init apps`)
 or workloads: a batch row's name, `micro`, `ERT 25 files`, `launch`,
 `keys`, `init` or `apps`.
+
+## Line numbers in programming buffers
+
+An interactive session's defaults (`romacs-defaults-mode`, without `-Q`)
+number programming-mode buffers' lines relatively. The digits are ordinary
+text glyphs in the scene diagnostics, so a harness that matches a
+programming buffer's rows by their glyph text starts its init with
+`live_oracle.NO_LINE_NUMBERS`, which turns them off the way a user's init
+does (`fontify_live.py`, `lines_live.py`).
+# Driving Romacs through its MCP tools (`romacs_mcp_client.py`)
+
+A live harness can drive a Romacs session the way an agent does, through
+the session's own MCP endpoint, instead of wtype keystrokes and ad-hoc
+diagnostics: evaluate Lisp, read and edit buffers, type keys through the
+command loop, wait for idle, and read the frame as text. The client runs
+the `romacs-mcp` relay beside the Romacs binary and speaks MCP over its
+stdio (standard library only).
+
+```python
+from romacs_mcp_client import RomacsMcp
+
+# A server_live.Server (or anything with .name, .env and .args.romacs).
+with RomacsMcp.for_server(server, agent_tools=True) as mcp:
+    mcp.call('romacs_eval', code='(+ 1 2)')                          # '3'
+    mcp.call('romacs_buffer_read', name='*scratch*', start=1, maxChars=400)
+    mcp.call('romacs_send_keys', keys='C-x b notes RET')
+    mcp.call('romacs_wait_idle', timeout=5)
+    mcp.call('romacs_observe', maxRows=20)                          # the frame's rows
+    mcp.tools()                                                     # what it offers
+```
+
+- `call(name, **arguments)` returns the tool's result, JSON-parsed when it
+  is JSON, and raises `ToolError` on a tool error; `tool(name, arguments)`
+  returns the raw `(request id, text, is_error)`.
+- `instance` is optional on every tool. `call` fills it (from
+  `romacs_identity`) for tools that take it, so a call meant for a Romacs
+  that has since restarted is refused rather than run on the new one.
+- `agent_tools=True` loads `romacs-agent`, which registers the editing,
+  session and delegation tools (`romacs_buffer_edit`, `romacs_file_write`,
+  `romacs_visit`, `romacs_send_keys`, `romacs_wait_idle`, `romacs_observe`,
+  `romacs_delegate_task`, `romacs_buffer_read`, ...); a bare session
+  offers `romacs_identity` and `romacs_eval`.
+- `RomacsMcp.connect(socket, relay)` reaches any endpoint; outside a
+  harness, `romacs-mcp --server NAME` (default `romacs`) finds the server
+  `romacs --server NAME` runs, so an external agent can be configured once:
+  `{"command": "romacs-mcp", "args": ["--server", "romacs"]}`.
+
+`fake_harness.py` uses this client for its tool calls, and
+`agent_live.py --workflow tools` checks every tool the endpoint offers
+through it: a tool added without a check in `tour()` fails that workflow.
+
+## Agent sessions with real harnesses (`agent_live.py --workflow real`)
+
+`real` runs a Claude Code session in an isolated Romacs that calls every
+Romacs MCP tool once (each result checked) and delegates a tiny diff
+review to a Codex child through `romacs_delegate_task`. It spends money,
+so it is not a default workflow. Its models are parameters with cheap
+defaults: `--claude-model haiku`, `--codex-model gpt-6-luna`,
+`--codex-effort low`. Real reviews use Sol at high effort. The instances
+use the real configuration directories for their logins:
+`--claude-config` (default `$CLAUDE_CONFIG_DIR`, else `~/.claude`) and
+`--codex-home` (default `$CODEX_HOME`, else `~/.codex`).

@@ -12,7 +12,7 @@ fn main() {
             match reconnecting(&args) {
                 Some(config) => reconnect::main(config),
                 None => {
-                    eprintln!("usage: romacs-mcp --socket ABSOLUTE-PATH --reconnect --session ID [--reply-timeout SECONDS]");
+                    eprintln!("usage: romacs-mcp (--socket ABSOLUTE-PATH | --server NAME) --reconnect --session ID [--reply-timeout SECONDS]");
                     std::process::exit(1);
                 }
             }
@@ -26,7 +26,23 @@ fn main() {
     }
 }
 
-/// `--socket PATH --reconnect --session ID [--reply-timeout S]', in any order.
+/// The native socket of the Romacs server NAME (rlisp/romacs-server.el):
+/// `$XDG_RUNTIME_DIR/romacs/NAME/server.sock'.
+#[cfg(unix)]
+pub(crate) fn server_socket(name: &str) -> Option<std::path::PathBuf> {
+    let valid = (1..=32).contains(&name.len()) && !name.starts_with('.')
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(format!("/tmp/romacs{}", uid())));
+    valid.then(|| runtime.join("romacs").join(name).join("server.sock"))
+}
+
+#[cfg(unix)]
+fn uid() -> u32 {
+    std::os::unix::fs::MetadataExt::uid(&std::fs::metadata("/proc/self").expect("/proc/self"))
+}
+
+/// `--socket PATH | --server NAME', `--reconnect --session ID [--reply-timeout S]', in any order.
 #[cfg(unix)]
 fn reconnecting(args: &[String]) -> Option<reconnect::Config> {
     let (mut socket, mut session) = (None, None);
@@ -35,6 +51,7 @@ fn reconnecting(args: &[String]) -> Option<reconnect::Config> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--socket" => socket = args.next().map(std::path::PathBuf::from),
+            "--server" => socket = server_socket(args.next()?),
             "--session" => session = args.next().cloned(),
             "--reply-timeout" => reply_timeout = std::time::Duration::from_secs_f64(
                 args.next()?.parse::<f64>().ok().filter(|s| *s > 0.0)?),

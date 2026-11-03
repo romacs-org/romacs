@@ -254,15 +254,217 @@ call stays running until its answer is ready."
         (romacs-mcp-eval-string (gethash "code" arguments))
       (romacs--call-deadline nil))))
 
+;;; Delegation (T3 Code's delegate_task, task_status, task_cancel)
+;;
+;; A session delegates a task to a child session under any instance of any
+;; harness: `wait' answers when the child's turn ends (deferred: the editor
+;; keeps running), `async' answers at once and wakes the parent with the
+;; child's result when it ends, as T3 Code wakes a parent thread.  A wake
+;; is sent once per child turn: the child's directory records the journal
+;; seq last delivered once the parent's harness has it (`woken'), and each
+;; end a `wait' answered with (`answered'), so a server restarted meanwhile
+;; delivers what it missed, and a replay never repeats one.
+
+(defun romacs-agent-tools--caller ()
+  "The id of the session calling the current tool, or nil."
+  (let ((peer (plist-get romacs-mcp--active :peer)))
+    (and (processp peer) (process-get peer 'romacs-agent-session))))
+
+(defun romacs-agent-tools--status (session)
+  "SESSION's task status, in T3 Code's words."
+  (let ((state (romacs-agent-state session)))
+    (cond ((romacs-agent-cancelled session) "cancelled")
+          ((eq state 'waiting-approval) "waiting")
+          ((or (memq state '(starting running)) (romacs-agent-queue session)) "running")
+          ((romacs-agent-failed session) "failed")
+          ((> (romacs-agent-turns session) 0) "completed")
+          ((eq state 'ended) "failed")
+          (t (symbol-name state)))))
+
+(defun romacs-agent-tools--task (session)
+  "SESSION as a task record."
+  (let ((options (romacs-agent-options session)) (null (lambda (v) (or v :null))))
+    (romacs-mcp--object
+     "taskId" (romacs-agent-id session) "status" (romacs-agent-tools--status session)
+     "state" (symbol-name (romacs-agent-state session)) "title" (romacs-agent-title session)
+     "provider" (romacs-agent-provider session) "harness" (symbol-name (romacs-agent-harness session))
+     "model" (funcall null (or (romacs-agent-model session) (plist-get options :model)))
+     "role" (funcall null (plist-get options :role)) "parent" (funcall null (plist-get options :parent))
+     "turns" (romacs-agent-turns session) "result" (funcall null (romacs-agent-reply session))
+     "cost" (funcall null (romacs-agent-cost session))
+     "pendingApproval" (if (> (hash-table-count (romacs-agent-approvals session)) 0) t :false))))
+
+(defun romacs-agent-tools--known (arguments)
+  (or (romacs-agent-get (gethash "taskId" arguments)) (user-error "No task %s" (gethash "taskId" arguments))))
+
+(defun romacs-agent-tools--woken-file (session)
+  (expand-file-name "woken" (romacs-agent-dir session)))
+
+(defun romacs-agent-tools--woken (session)
+  "The journal seq of SESSION's last turn end delivered to its parent."
+  (or (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent-tools--woken-file session))
+                                       (string-to-number (buffer-string))))
+      0))
+
+(defun romacs-agent-tools--mark-woken (session seq)
+  "SESSION's turn ends through SEQ are delivered (never moving back): the
+parent's harness takes them in order."
+  (when (> seq (romacs-agent-tools--woken session))
+    (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))))
+
+(defun romacs-agent-tools--wake-text (session end)
+  "The parent's message for SESSION's turn END, (SEQ RESULT FAILED)."
+  (format "Delegated task %s (%s) [%s]:\n%s" (romacs-agent-id session) (romacs-agent-title session)
+          (if (nth 2 end) "failed" "completed") (or (nth 1 end) "")))
+
+(defvar romacs-agent-tools--answered (make-hash-table :test #'equal)
+  "A child's id to a table of its turn ends' seqs a `wait' answered with,
+read once from its `answered' file.")
+
+(defun romacs-agent-tools--answered-table (session)
+  (or (gethash (romacs-agent-id session) romacs-agent-tools--answered)
+      (let ((table (make-hash-table)) (file (expand-file-name "answered" (romacs-agent-dir session))))
+        (when (file-readable-p file)
+          (dolist (line (split-string (with-temp-buffer (insert-file-contents file) (buffer-string)) "\n" t))
+            (puthash (string-to-number line) t table)))
+        (puthash (romacs-agent-id session) table romacs-agent-tools--answered))))
+
+(defun romacs-agent-tools--answer (session seq)
+  "A `wait' answered with SESSION's turn end SEQ: its parent has it, and
+earlier ends still on their way stay so."
+  (puthash seq t (romacs-agent-tools--answered-table session))
+  (write-region (format "%d\n" seq) nil (expand-file-name "answered" (romacs-agent-dir session)) t 'silent))
+
+(defun romacs-agent-tools--wanted-p (session seq)
+  "Whether SESSION's turn end SEQ is still to be given to its parent."
+  (and (not (romacs-agent-cancelled session))
+       (> seq (romacs-agent-tools--woken session))
+       (not (gethash seq (romacs-agent-tools--answered-table session)))))
+
+(defun romacs-agent-tools--wake (child)
+  "Give CHILD's parent CHILD's new turn ends, in order, each with its own
+result.  Each end is handed on once: it then waits in the parent's queue
+(or for the parent's attaching) until the parent's harness has it."
+  (let ((parent (romacs-agent-get (plist-get (romacs-agent-options child) :parent)))
+        (ends (reverse (romacs-agent-ends child))))
+    (setf (romacs-agent-ends child) nil)
+    (when parent
+      (dolist (end ends)
+        (when (romacs-agent-tools--wanted-p child (car end))
+          (let* ((text (romacs-agent-tools--wake-text child end))
+                 ;; Delivered only once the parent's harness has it.
+                 (delivered (lambda () (romacs-agent-tools--mark-woken child (car end))))
+                 (valid (lambda () (romacs-agent-tools--wanted-p child (car end))))
+                 (deliver (lambda () (when (funcall valid) (romacs-agent-send parent text delivered valid)))))
+            ;; A per-turn parent takes the message as its next turn; another
+            ;; once its supervisor is attached.
+            (if (romacs-agent--per-turn-p parent) (funcall deliver)
+              (romacs-agent--when-attached parent deliver))))))))
+
+(defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
+  "Children whose wake is scheduled.")
+
+(defun romacs-agent-tools--on-event (session event)
+  (when (and (plist-get (romacs-agent-options session) :parent)
+             (or (eq (plist-get event :type) 'done)
+                 (and (eq (plist-get event :type) 'exit) (romacs-agent-failed session)
+                      (= (romacs-agent-done-seq session) (or (plist-get event :seq) -1)))))
+    ;; A moment later: a `wait' answering with this end (its poll runs
+    ;; every 0.05 s) marks it answered first; an abandoned one does not.
+    ;; One timer per child: the ends that come meanwhile go with it.
+    (unless (gethash (romacs-agent-id session) romacs-agent-tools--scheduled)
+      (puthash (romacs-agent-id session) t romacs-agent-tools--scheduled)
+      (run-at-time 0.5 nil (lambda ()
+                             (remhash (romacs-agent-id session) romacs-agent-tools--scheduled)
+                             (romacs-agent-tools--wake session))))))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent-tools--on-event)
+
+(defun romacs-agent-tools--wake-missed ()
+  "After a restart: wake the parents of children that ended meanwhile."
+  (dolist (session (romacs-agent-sessions))
+    (when (plist-get (romacs-agent-options session) :parent) (romacs-agent-tools--wake session))))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--wake-missed)
+
+(defun romacs-agent-tools--wait (child timeout-ms arrived)
+  "A deferred answer: CHILD's task record once its turn ends, asks for an
+approval, or TIMEOUT-MS passes (the child goes on; its end then wakes
+the parent).  The wait ends within the session relay's reply timeout,
+counted from the request's ARRIVED time, which would otherwise withdraw
+the call (and retire this wait) and drop its answer."
+  (let ((deadline (min (+ (float-time) (/ (or timeout-ms 600000) 1000.0))
+                       (+ arrived (max 1 (- romacs-agent-reply-timeout 5))))))
+    (romacs-mcp-defer
+     (lambda ()
+       (let ((status (romacs-agent-tools--status child)))
+         (cond ((member status '("completed" "failed" "cancelled" "waiting"))
+                (when (member status '("completed" "failed"))
+                  (romacs-agent-tools--answer child (romacs-agent-done-seq child)))
+                (list (romacs-agent-tools--task child)))
+               ((> (float-time) deadline)
+                (let ((task (romacs-agent-tools--task child))) (puthash "waitTimedOut" t task) (list task)))))))))
+
+(defun romacs-agent-tools--delegate (arguments)
+  "Start a child session on ARGUMENTS' task, or find the one this caller
+started with the same clientRequestId."
+  (romacs-mcp--instance arguments)
+  (let* ((parent (romacs-agent-tools--caller))
+         (request (gethash "clientRequestId" arguments))
+         (target (gethash "target" arguments (romacs-mcp--object)))
+         (options (gethash "options" target (romacs-mcp--object)))
+         (child (or (and request (romacs-agent-requested parent request))
+                    (romacs-agent-start
+                     (or (gethash "cwd" arguments)
+                         (and parent (romacs-agent-get parent) (romacs-agent-cwd (romacs-agent-get parent)))
+                         default-directory)
+                     (gethash "task" arguments) (gethash "title" arguments) (gethash "provider" target)
+                     (list :model (gethash "model" target)
+                           :effort (or (gethash "reasoningEffort" options) (gethash "effort" options))
+                           :role (gethash "role" arguments) :parent parent :request request)))))
+    (if (equal (gethash "mode" arguments) "wait")
+        (romacs-agent-tools--wait child (gethash "timeoutMs" arguments)
+                                  (or (plist-get romacs-mcp--active :arrived) (float-time)))
+      (romacs-agent-tools--task child))))
+
+(defun romacs-agent-tools--cancel (arguments)
+  (romacs-mcp--instance arguments)
+  (let ((child (romacs-agent-tools--known arguments)))
+    (setf (romacs-agent-cancelled child) t (romacs-agent-queue child) nil)
+    ;; A restarted server knows it was cancelled.
+    (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir child)))
+    (romacs-agent-stop child)
+    (romacs-agent-tools--task child)))
+
+(defun romacs-agent-tools--capabilities (arguments)
+  "Each provider instance: its harness, directory and program."
+  (romacs-mcp--instance arguments)
+  (romacs-mcp--object
+   "default" (romacs-agent--default-provider)
+   "providers"
+   (vconcat
+    (mapcar (lambda (entry)
+              (let* ((instance (romacs-agent--provider entry))
+                     (dir (or (plist-get instance :config-dir)
+                              (plist-get (alist-get (plist-get instance :harness) romacs-agent--harnesses) :default))))
+                (romacs-mcp--object
+                 "providerInstanceId" (plist-get instance :name) "harness" (symbol-name (plist-get instance :harness))
+                 "configDir" (expand-file-name dir) "configDirExists" (if (file-directory-p dir) t :false)
+                 "program" (plist-get instance :program)
+                 "programFound" (if (executable-find (plist-get instance :program)) t :false)
+                 "options" (if (eq (plist-get instance :harness) 'codex) ["reasoningEffort"] ["effort"]))))
+            romacs-agent-providers))))
+
 ;;; Registration
 
 (romacs-mcp-register-tool
  "romacs_eval"
  "Evaluate Emacs Lisp in the running editor (its buffers, frames and state) and return the last value printed. \
 Runs at a wait point of the editor's command loop; C-g or budgetMs (default 5000, 0 for none) quits it at its next \
-safepoint. Never safe to repeat after an unknown outcome: on `Romacs instance mismatch', call romacs_identity, \
+safepoint. instance (from romacs_identity) is optional: given, a call that would reach a restarted Romacs is \
+refused. Never safe to repeat after an unknown outcome: on `Romacs instance mismatch', call romacs_identity, \
 then romacs_call_outcome for your in-flight ids."
- (romacs-mcp--schema '(("instance" . "string") ("code" . "string") ("budgetMs" . "integer")) '("instance" "code"))
+ (romacs-mcp--schema '(("instance" . "string") ("code" . "string") ("budgetMs" . "integer")) '("code"))
  #'romacs-agent-tools--eval)
 
 (romacs-mcp-register-tool
@@ -271,7 +473,7 @@ then romacs_call_outcome for your in-flight ids."
 first character); edits must not overlap. With expectedTick the edit is refused if the buffer changed since you \
 read it (romacs_buffer_read gives the tick). Safe to repeat with expectedTick."
  (romacs-mcp--schema '(("instance" . "string") ("name" . "string") ("expectedTick" . "integer") ("edits" . "array"))
-                     '("instance" "name" "edits"))
+                     '("name" "edits"))
  #'romacs-agent-tools--buffer-edit)
 
 (romacs-mcp-register-tool
@@ -279,7 +481,7 @@ read it (romacs_buffer_read gives the tick). Safe to repeat with expectedTick."
  "Make a file's buffer text TEXT (visiting it first), as one undo group; save it only when save is true. The \
 file's earlier content is kept for this session."
  (romacs-mcp--schema '(("instance" . "string") ("path" . "string") ("text" . "string") ("save" . "boolean"))
-                     '("instance" "path" "text"))
+                     '("path" "text"))
  #'romacs-agent-tools--file-write)
 
 (romacs-mcp-register-tool
@@ -297,6 +499,47 @@ with its result."
                      (romacs-mcp--object "id" (romacs-mcp--object))
                      "required" ["id"] "additionalProperties" :false)
  #'romacs-agent-tools--outcome
+ (romacs-mcp--object "readOnlyHint" t))
+
+(romacs-mcp-register-tool
+ "romacs_delegate_task"
+ "Start a child agent session on TASK, as T3 Code's delegate_task: target {provider (a providerInstanceId from \
+romacs_orchestrator_capabilities), model, options {reasoningEffort|effort}}, role, cwd (default the caller's), title. \
+mode async (default) answers at once with the taskId and wakes you with the child's result when its turn ends; mode \
+wait answers when it ends, asks for an approval, or timeoutMs (default 600000) passes, and the child goes on. The \
+same clientRequestId returns the task it started before."
+ (romacs-mcp--object
+  "type" "object"
+  "properties" (romacs-mcp--object
+                "instance" (romacs-mcp--object "type" "string")
+                "task" (romacs-mcp--object "type" "string") "role" (romacs-mcp--object "type" "string")
+                "mode" (romacs-mcp--object "type" "string" "enum" ["async" "wait"])
+                "target" (romacs-mcp--object "type" "object")
+                "cwd" (romacs-mcp--object "type" "string") "title" (romacs-mcp--object "type" "string")
+                "timeoutMs" (romacs-mcp--object "type" "integer")
+                "clientRequestId" (romacs-mcp--object "type" "string"))
+  "required" ["task"] "additionalProperties" :false)
+ #'romacs-agent-tools--delegate)
+
+(romacs-mcp-register-tool
+ "romacs_task_status"
+ "A delegated task's status (running, waiting, completed, failed, cancelled), provider, model, turns, cost and its \
+last result."
+ (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string")) '("taskId"))
+ (lambda (arguments) (romacs-mcp--instance arguments) (romacs-agent-tools--task (romacs-agent-tools--known arguments)))
+ (romacs-mcp--object "readOnlyHint" t))
+
+(romacs-mcp-register-tool
+ "romacs_task_cancel"
+ "Cancel a delegated task: its session stops, with everything its harness started."
+ (romacs-mcp--schema '(("instance" . "string") ("taskId" . "string")) '("taskId"))
+ #'romacs-agent-tools--cancel)
+
+(romacs-mcp-register-tool
+ "romacs_orchestrator_capabilities"
+ "The provider instances romacs_delegate_task can start: harness, configuration directory, program and options."
+ (romacs-mcp--schema '(("instance" . "string")) nil)
+ #'romacs-agent-tools--capabilities
  (romacs-mcp--object "readOnlyHint" t))
 
 (romacs-mcp-enable-editor-tools)

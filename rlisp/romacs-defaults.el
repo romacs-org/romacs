@@ -7,8 +7,9 @@
 ;; where GNU leaves them off, so that a new user needs no configuration
 ;; and no package for them: paired delimiters, minibuffer history, recent
 ;; files and places kept across sessions, repeatable key sequences, key
-;; hints, buffers that follow their files, and backups and auto-saves kept
-;; out of the directories being edited.  `romacs-defaults-settings' lists
+;; hints, buffers that follow their files, relative line numbers in
+;; programming buffers, and backups and auto-saves kept out of the
+;; directories being edited.  `romacs-defaults-settings' lists
 ;; them.  DIVERGENCES.md VM2-OOB-DEFAULTS.
 ;;
 ;; One switch, `romacs-defaults-mode', turns them all on or off.  An
@@ -41,6 +42,8 @@
 (require 'autorevert)
 (require 'which-key)
 (require 'imenu)
+(require 'use-package-core)
+(require 'display-line-numbers)
 
 (defconst romacs-defaults--session-options '(savehist-file save-place-file recentf-save-file)
   "Options of the libraries above whose standard value names a per-user file.")
@@ -64,6 +67,9 @@
     (repeat-mode t idle)
     (global-auto-revert-mode t idle)
     (column-number-mode t)
+    ;; Programming buffers number their lines (`romacs-defaults--line-numbers'),
+    ;; counted from point, the current line by its own number.
+    (display-line-numbers-type 'relative)
     ;; Key hints in a layer over the frame, which resizes no window
     ;; (rlisp/romacs-layer.el), where the window system has layers.
     ,@(and (fboundp 'romacs-layer-which-key-show)
@@ -83,7 +89,9 @@
     (kill-do-not-save-duplicates t)
     (read-extended-command-predicate #'command-completion-default-include-p)
     (imenu-auto-rescan t)
-    (imenu-flatten 'prefix))
+    (imenu-flatten 'prefix)
+    ;; `use-package' forms in a Lisp buffer's imenu, under "Packages".
+    (use-package-enable-imenu-support t))
   "Romacs's defaults, each (OPTION FORM [idle]): FORM is OPTION's standard value.
 They are set in this order while `romacs-defaults-mode' is on.  An `idle'
 setting, a mode the first frame does not need, is set at the session's
@@ -164,6 +172,24 @@ setting's, keeps its value."
         (put option 'romacs-defaults-set nil)
         (when ours (romacs-defaults--set option (car gnu)))))))
 
+(defvar-local romacs-defaults--numbered nil
+  "Whether `romacs-defaults--line-numbers' turned this buffer's numbers on.")
+
+(defun romacs-defaults--line-numbers ()
+  "Number a programming buffer's lines, on `prog-mode-hook' while the mode is on."
+  (unless display-line-numbers-mode
+    (display-line-numbers-mode 1)
+    (setq romacs-defaults--numbered t)))
+
+(defun romacs-defaults--line-numbers-off ()
+  "Leave `prog-mode-hook', and turn off the numbers it turned on."
+  (remove-hook 'prog-mode-hook #'romacs-defaults--line-numbers)
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when romacs-defaults--numbered
+        (setq romacs-defaults--numbered nil)
+        (display-line-numbers-mode -1)))))
+
 (defun romacs-defaults--ensure-directories ()
   "Make the auto-save directory the setting names; GNU makes backups' itself."
   (ignore-error file-error
@@ -180,7 +206,9 @@ on before the user's init, unless started with -Q."
   :group 'romacs-defaults
   (if romacs-defaults-mode
       (progn (romacs-defaults--apply romacs-defaults-settings)
+             (add-hook 'prog-mode-hook #'romacs-defaults--line-numbers)
              (romacs-defaults--ensure-directories))
+    (romacs-defaults--line-numbers-off)
     (romacs-defaults--restore romacs-defaults-settings)))
 
 (defun romacs-defaults-start (quick)

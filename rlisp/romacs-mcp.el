@@ -72,6 +72,8 @@ without a scan.")
 (defvar romacs-mcp--deferred nil
   "Admitted requests awaiting a deferred result, as (REQUEST ID POLL MODERN).")
 (defvar romacs-mcp--deferred-timer nil)
+(defvar romacs-mcp--deferred-index (make-hash-table :test #'equal)
+  "(PEER . ID) of each deferred request to its entry, for withdrawal.")
 (defvar romacs-mcp-tools nil
   "Plain alist of NAME and tool plist.
 Each plist has :description, :schema, :handler and optional :annotations.
@@ -135,10 +137,12 @@ handle whose peer has gone answers nothing."
                        "endpointGeneration" romacs-mcp--generation))
 
 (defun romacs-mcp--instance (arguments)
-  "Refuse unless ARGUMENTS explicitly name this process incarnation."
-  (unless (equal (gethash "instance" arguments)
-                 (gethash "instance" (romacs-mcp-identity)))
-    (user-error "Romacs instance mismatch")))
+  "Refuse when ARGUMENTS name another process incarnation.  A call that
+names none runs on the Romacs it reaches; naming one (romacs_identity)
+refuses a call meant for a Romacs that has since restarted."
+  (let ((given (gethash "instance" arguments :absent)))
+    (unless (or (eq given :absent) (equal given (gethash "instance" (romacs-mcp-identity))))
+      (user-error "Romacs instance mismatch"))))
 
 (defun romacs-mcp-register-tool (name description schema handler &optional annotations)
   "Register a named tool with a JSON schema and handler.
@@ -442,34 +446,47 @@ acknowledgement.  Close an unread peer."
           (when (eq timer (process-get peer 'send-timer))
             (process-put peer 'send-timer nil)))))))
 
+(defun romacs-mcp--unindex (entry)
+  (let ((key (cons (plist-get (car entry) :peer) (nth 1 entry))))
+    (when (eq (gethash key romacs-mcp--deferred-index) entry) (remhash key romacs-mcp--deferred-index))))
+
 (defun romacs-mcp--poll-deferred ()
-  "Answer each deferred request whose poll has a result; drop dead ones."
-  (dolist (entry (copy-sequence romacs-mcp--deferred))
-    (pcase-let ((`(,request ,id ,poll ,modern) entry))
-      (if (or (plist-get request :cancelled)
-              (not (romacs-mcp--live-p (plist-get request :peer)
-                                       (plist-get request :generation))))
-          (setq romacs-mcp--deferred (delq entry romacs-mcp--deferred))
-        (let* ((failed nil)
-               (done (condition-case failure
-                         (with-local-quit (funcall poll))
-                       ((error quit)
-                        (setq failed t)
-                        (list (error-message-string failure))))))
-          (when done
-            (setq romacs-mcp--deferred (delq entry romacs-mcp--deferred))
-            (romacs-mcp--send request
-                              (romacs-mcp--object
-                               "jsonrpc" "2.0" "id" id
-                               "result" (romacs-mcp--result (car done) failed modern))))))))
+  "Answer each deferred request whose poll has a result; drop dead ones.
+One pass: the entries that stay are kept as it goes, so retiring many is
+linear."
+  (let ((entries romacs-mcp--deferred) (generation romacs-mcp--generation) (kept nil))
+    (dolist (entry entries)
+      (pcase-let ((`(,request ,id ,poll ,modern) entry))
+        (if (or (plist-get request :cancelled)
+                (not (romacs-mcp--live-p (plist-get request :peer)
+                                         (plist-get request :generation))))
+            (romacs-mcp--unindex entry)
+          (let* ((failed nil)
+                 (done (condition-case failure
+                           (with-local-quit (funcall poll))
+                         ((error quit)
+                          (setq failed t)
+                          (list (error-message-string failure))))))
+            (if (not done)
+                (push entry kept)
+              (romacs-mcp--unindex entry)
+              (romacs-mcp--send request
+                                (romacs-mcp--object
+                                 "jsonrpc" "2.0" "id" id
+                                 "result" (romacs-mcp--result (car done) failed modern))))))))
+    ;; Entries deferred meanwhile are ahead of ENTRIES; a stop meanwhile
+    ;; retired them all.
+    (when (= generation romacs-mcp--generation)
+      (setq romacs-mcp--deferred (nconc (cl-ldiff romacs-mcp--deferred entries) (nreverse kept)))))
   (unless (or romacs-mcp--deferred (not romacs-mcp--deferred-timer))
     (cancel-timer romacs-mcp--deferred-timer)
     (setq romacs-mcp--deferred-timer nil)))
 
 (defun romacs-mcp--defer-request (request id poll modern)
   "Keep REQUEST with ID until POLL yields its MODERN or legacy result."
-  (setq romacs-mcp--deferred
-        (nconc romacs-mcp--deferred (list (list request id poll modern))))
+  (let ((entry (list request id poll modern)))
+    (push entry romacs-mcp--deferred)
+    (puthash (cons (plist-get request :peer) id) entry romacs-mcp--deferred-index))
   (unless romacs-mcp--deferred-timer
     (setq romacs-mcp--deferred-timer
           (run-at-time 0.05 0.05 #'romacs-mcp--poll-deferred))))
@@ -538,7 +555,8 @@ This is cooperative admission, not a handler, serialization or send deadline."
               romacs-mcp--peer-queue-limit))
       (romacs-mcp--close peer)
     (let ((request (list :peer peer :generation romacs-mcp--generation
-                         :message message :error failure :cancelled nil :held nil)))
+                         :message message :error failure :cancelled nil :held nil
+                         :arrived (float-time))))
       (setq romacs-mcp--queue (nconc romacs-mcp--queue (list request)))
       (when-let* (((hash-table-p message)) (id (gethash "id" message nil)))
         (puthash (cons peer id) request romacs-mcp--queued)))
@@ -560,11 +578,15 @@ This is cooperative admission, not a handler, serialization or send deadline."
 
 (defun romacs-mcp--withdraw (peer id target)
   "Answer PEER's request ID: withdraw its queued request TARGET if it has
-not started, and say whether it was."
+not started, and say whether it was.  A deferred TARGET (started, its
+answer awaited) is retired too: the relay answered for it, so its poll
+must not act as if its answer were delivered."
   (let ((request (gethash (cons peer target) romacs-mcp--queued)))
-    (when request
-      (setf (plist-get request :cancelled) t)
-      (romacs-mcp--unqueue request))
+    (if request
+        (progn (setf (plist-get request :cancelled) t)
+               (romacs-mcp--unqueue request))
+      (when-let* ((entry (gethash (cons peer target) romacs-mcp--deferred-index)))
+        (setf (plist-get (car entry) :cancelled) t)))
     (romacs-mcp--send (list :peer peer :generation romacs-mcp--generation :cancelled nil)
                       (romacs-mcp--object "jsonrpc" "2.0" "id" id
                                           "result" (romacs-mcp--object "cancelled" (if request t :false))))))
@@ -769,6 +791,7 @@ Keep boot identity and companion receipts until the editor process exits."
   (when romacs-mcp--deferred-timer (cancel-timer romacs-mcp--deferred-timer))
   (setq romacs-mcp--timer nil romacs-mcp--queue nil
         romacs-mcp--deferred nil romacs-mcp--deferred-timer nil)
+  (clrhash romacs-mcp--deferred-index)
   (clrhash romacs-mcp--queued)
   (mapc #'romacs-mcp--close (copy-sequence romacs-mcp--peers))
   (when (process-live-p romacs-mcp--listener) (delete-process romacs-mcp--listener))
@@ -786,7 +809,7 @@ Keep boot identity and companion receipts until the editor process exits."
  (romacs-mcp--object "readOnlyHint" t))
 (romacs-mcp-register-tool
  "romacs_eval" "Evaluate unrestricted owner Lisp. No rollback or CPU preemption."
- (romacs-mcp--schema '(("instance" . "string") ("code" . "string")) '("instance" "code"))
+ (romacs-mcp--schema '(("instance" . "string") ("code" . "string")) '("code"))
  #'romacs-mcp--eval)
 
 (provide 'romacs-mcp)

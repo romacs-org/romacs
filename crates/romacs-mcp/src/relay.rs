@@ -13,7 +13,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const CHUNK: usize = 16 * 1024;
-const USAGE: &str = "usage: romacs-mcp --socket ABSOLUTE-PATH [--timeout-ms 1..60000]";
+const USAGE: &str = "usage: romacs-mcp [--socket ABSOLUTE-PATH | --server NAME] [--timeout-ms 1..60000]\n\
+  (default: --server romacs, the server `romacs --server romacs' runs)";
 
 struct Config {
     socket: PathBuf,
@@ -30,6 +31,10 @@ impl Config {
                 Some("--socket") if socket.is_none() => {
                     socket = Some(PathBuf::from(args.next().ok_or(USAGE)?));
                 }
+                Some("--server") if socket.is_none() => {
+                    let name = args.next().ok_or(USAGE)?;
+                    socket = Some(crate::server_socket(name.to_str().ok_or(USAGE)?).ok_or(USAGE)?);
+                }
                 Some("--timeout-ms") if timeout.is_none() => {
                     let value = args.next().ok_or(USAGE)?;
                     let millis = value
@@ -42,7 +47,11 @@ impl Config {
                 _ => return Err(USAGE.into()),
             }
         }
-        let socket = socket.filter(|s| s.is_absolute()).ok_or(USAGE)?;
+        let socket = match socket {
+            Some(socket) => socket,
+            None => crate::server_socket("romacs").ok_or(USAGE)?,
+        };
+        let socket = Some(socket).filter(|s| s.is_absolute()).ok_or(USAGE)?;
         Ok(Self {
             socket,
             timeout: timeout.unwrap_or(Duration::from_secs(2)),
@@ -104,10 +113,15 @@ fn supervise(events: Receiver<Event>, timeout: Duration) -> Result<(), String> {
     let mut drain = None;
     loop {
         let now = Instant::now();
+        // A client whose input ended gets the replies sent until the server
+        // has been quiet for the timeout: the server never sees an early EOF,
+        // which would end the connection before it answered.
+        if drain.is_some_and(|d| now >= d) && stdout.is_none() {
+            return Ok(());
+        }
         for (deadline, label) in [
             (upstream, "upstream write"),
             (stdout, "stdout write"),
-            (drain, "stdin EOF drain"),
         ] {
             if deadline.is_some_and(|d| now >= d) {
                 return Err(format!(
@@ -131,7 +145,10 @@ fn supervise(events: Receiver<Event>, timeout: Duration) -> Result<(), String> {
             }
             Ok(Event::Wrote(d)) => match d {
                 Direction::Upstream => upstream = None,
-                Direction::Stdout => stdout = None,
+                Direction::Stdout => {
+                    stdout = None;
+                    if drain.is_some() { drain = Some(Instant::now() + timeout); }
+                }
             },
             Ok(Event::InputEof) => drain = Some(Instant::now() + timeout),
             Ok(Event::PeerEof) => return Ok(()),
@@ -174,10 +191,9 @@ fn relay(config: Config) -> Result<(), String> {
         .spawn(move || {
             match copy_chunks(io::stdin().lock(), &inbound, Direction::Upstream, &input_tx) {
                 Ok(()) => {
+                    // No half-close: the supervisor closes once replies stop.
                     let _ = input_tx.send(Event::InputEof);
-                    if let Err(e) = inbound.shutdown(Shutdown::Write) {
-                        let _ = input_tx.send(Event::Error(format!("stdin EOF half-close: {e}")));
-                    }
+                    drop(inbound);
                 }
                 Err(e) => {
                     let _ = input_tx.send(Event::Error(format!("stdin to socket: {e}")));

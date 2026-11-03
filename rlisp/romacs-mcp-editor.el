@@ -91,7 +91,7 @@ A page can be empty and truncated; refresh after native catalogue changes."
          (remaining (nthcdr offset (buffer-list)))
          (scanned 0) (entries nil) (full nil)
          (result (romacs-mcp--object
-                  "instance" (gethash "instance" arguments) "offset" offset
+                  "instance" (gethash "instance" (romacs-mcp-identity)) "offset" offset
                   "buffers" [] "scanned" 0 "truncated" :false "nextOffset" :null
                   "encodedOutputLimit" romacs-mcp-editor-output-limit)))
     (while (and remaining (not full) (< (length entries) limit)
@@ -147,7 +147,7 @@ end-exclusive.  A name plus tick is not an enduring buffer or mutation identity.
                  (start (romacs-mcp--editor-integer arguments "start" 1 (point-max)))
                  (end (min (point-max) (+ start count)))
                  (result (romacs-mcp--object
-                          "instance" (gethash "instance" arguments) "name" (buffer-name)
+                          "instance" (gethash "instance" (romacs-mcp-identity)) "name" (buffer-name)
                           "tick" tick "start" start "end" end "text" ""
                           "truncated" :false "nextStart" :null
                           "encodedOutputLimit" romacs-mcp-editor-output-limit)))
@@ -177,11 +177,11 @@ Preserve trusted owner eval and the separate companion claim/receipt authority."
   (let* ((instance '("instance" . "string"))
          (list-schema (romacs-mcp--schema
                        (list instance '("offset" . "integer") '("limit" . "integer"))
-                       '("instance" "offset" "limit")))
+                       '("offset" "limit")))
          (read-schema (romacs-mcp--schema
                        (list instance '("name" . "string") '("start" . "integer")
                              '("maxChars" . "integer") '("expectedTick" . "integer"))
-                       '("instance" "name" "start" "maxChars"))))
+                       '("name" "start" "maxChars"))))
     (dolist (spec (list (list list-schema "offset" 0 most-positive-fixnum)
                        (list list-schema "limit" 1 32)
                        (list read-schema "start" 1 most-positive-fixnum)
