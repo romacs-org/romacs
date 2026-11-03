@@ -657,6 +657,9 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         // `romacs-complete-mode' is enabled.
         if vm.eval_source("(featurep 'minibuffer)")? != romacs_vm::Fixed::NIL {
             vm.eval_source(include_str!("../../../rlisp/romacs-complete.el"))?;
+            // Evaluation results in a chip after the sexp, off until
+            // `romacs-eval-chip-mode' is enabled.
+            vm.eval_source(include_str!("../../../rlisp/romacs-eval-chip.el"))?;
         }
     }
     // The scheduler for animations drawn in buffer text, and the startup

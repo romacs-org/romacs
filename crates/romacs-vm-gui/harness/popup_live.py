@@ -144,7 +144,7 @@ WHICH_KEY_INIT = '''(require 'which-key)
       which-key-idle-delay 0.3)
 (which-key-mode 1)
 (defun popup-live--record (&rest _)
-  (let ((frame (cdr (assq which-key--buffer romacs-layer--frames))))
+  (let ((frame (romacs-layer--frame-of which-key--buffer)))
     (write-region
      (prin1-to-string
       (list :position (list (car (frame-position frame)) (cdr (frame-position frame)))

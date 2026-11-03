@@ -29,7 +29,9 @@
   "Where `romacs-layer-show' puts a layer unless told otherwise.
 `bottom': the frame's full width, directly above the minibuffer line.
 `center': a box centred on the frame.
-`point': below point in the selected window."
+`point': below point in the selected window.
+A caller may also give `romacs-layer-show' (at WINDOW POS): after POS on
+its row in WINDOW."
   :type '(choice (const bottom) (const center) (const point)))
 
 (defcustom romacs-layer-animation t
@@ -66,22 +68,24 @@ casting a soft shadow and glowing in `romacs-layer-glow'.  nil gives
 them GNU's square child-frame border."
   :type 'boolean)
 
-(defun romacs-layer-glass-parameters (glass &optional face)
+(defun romacs-layer-glass-parameters (glass &optional face padding radius)
   "Frame parameters that make a layer glass when GLASS is non-nil, else
 the ones that make it GNU's square child frame again.  The host rounds a
-glass layer's corners (`romacs-layer-radius'), lights it
-(`romacs-layer-shadow'), leaves its border, there padding, unpainted,
-and paints it in faces: its background FACE's (default
-`romacs-layer-glass'), its glow `romacs-layer-glow''s foreground."
+glass layer's corners (`romacs-layer-radius', RADIUS pixels, default 8),
+lights it (`romacs-layer-shadow'), leaves its border, there PADDING
+pixels (default 10), unpainted, and paints it in faces: its background
+FACE's (default `romacs-layer-glass'), its glow `romacs-layer-glow''s
+foreground."
   (if glass
-      `((romacs-layer-radius . 8) (romacs-layer-shadow . t)
+      `((romacs-layer-radius . ,(or radius 8)) (romacs-layer-shadow . t)
         (romacs-layer-face . ,(or face 'romacs-layer-glass))
-        (child-frame-border-width . 10))
+        (child-frame-border-width . ,(or padding 10)))
     `((romacs-layer-radius) (romacs-layer-shadow) (romacs-layer-face)
       (child-frame-border-width . ,(alist-get 'child-frame-border-width romacs-layer-frame-parameters)))))
 
-(defvar romacs-layer--frames nil
-  "Alist of (BUFFER . FRAME): the child frame showing each layer's buffer.")
+(defvar romacs-layer--frames (make-hash-table :test 'eq)
+  "BUFFER -> FRAME: the child frame showing each layer's buffer.  A
+buffer's `kill-buffer-hook' deletes its layer and its entry.")
 
 (defun romacs-layer--root-frame ()
   "The frame layers are shown over: the selected frame's top-level ancestor."
@@ -89,31 +93,34 @@ and paints it in faces: its background FACE's (default
     (while (frame-parent frame) (setq frame (frame-parent frame)))
     frame))
 
-(defun romacs-layer--prune ()
-  "Delete the layers of killed buffers."
-  (dolist (entry romacs-layer--frames)
-    (unless (buffer-live-p (car entry))
-      (when (frame-live-p (cdr entry)) (delete-frame (cdr entry)))))
-  (setq romacs-layer--frames (seq-filter (lambda (entry) (buffer-live-p (car entry))) romacs-layer--frames)))
+(defun romacs-layer--forget ()
+  "Delete the current buffer's layer, as the buffer is killed."
+  (let ((frame (gethash (current-buffer) romacs-layer--frames)))
+    (remhash (current-buffer) romacs-layer--frames)
+    (when (frame-live-p frame) (delete-frame frame))))
+
+(defun romacs-layer--frame-of (buffer)
+  "The live child frame showing BUFFER's layer, if it has one."
+  (let ((frame (gethash buffer romacs-layer--frames)))
+    (and (frame-live-p frame) frame)))
 
 (defun romacs-layer--frame (buffer)
   "A live child frame for BUFFER, made once and kept for reuse."
-  (romacs-layer--prune)
-  (let ((frame (cdr (assq buffer romacs-layer--frames))))
-    (unless (frame-live-p frame)
-      (let ((after-make-frame-functions nil))
-        (setq frame (make-frame `((parent-frame . ,(romacs-layer--root-frame))
-                                  (minibuffer . ,(minibuffer-window))
-                                  (visibility . nil)
-                                  ,@romacs-layer-frame-parameters))))
-      (setf (alist-get buffer romacs-layer--frames) frame)
-      (let ((window (frame-root-window frame)))
-        (set-window-buffer window buffer)
-        (set-window-dedicated-p window t)
-        ;; Ordinary window cycling skips it (window.el `other-window').
-        (set-window-parameter window 'no-other-window t)
-        (set-window-parameter window 'no-delete-other-windows t)))
-    frame))
+  (or (romacs-layer--frame-of buffer)
+      (let ((frame (let ((after-make-frame-functions nil))
+                     (make-frame `((parent-frame . ,(romacs-layer--root-frame))
+                                   (minibuffer . ,(minibuffer-window))
+                                   (visibility . nil)
+                                   ,@romacs-layer-frame-parameters)))))
+        (puthash buffer frame romacs-layer--frames)
+        (with-current-buffer buffer (add-hook 'kill-buffer-hook #'romacs-layer--forget nil t))
+        (let ((window (frame-root-window frame)))
+          (set-window-buffer window buffer)
+          (set-window-dedicated-p window t)
+          ;; Ordinary window cycling skips it (window.el `other-window').
+          (set-window-parameter window 'no-other-window t)
+          (set-window-parameter window 'no-delete-other-windows t))
+        frame)))
 
 (defun romacs-layer--text-size (buffer)
   "BUFFER's text in columns and lines, as (COLUMNS . LINES)."
@@ -156,6 +163,8 @@ text size, in pixels."
       ('center
        (let ((width (min width (- frame-width (* 4 cw)))))
          (list (+ inset (/ (- frame-width width) 2)) (+ inset (/ (- (frame-text-height root) outer-height) 2)) width height)))
+      (`(at ,window ,pos)
+       (romacs-layer--after window pos width height border))
       ('point
        (let* ((edges (window-edges nil t nil t))
               (posn (posn-x-y (posn-at-point)))
@@ -166,34 +175,56 @@ text size, in pixels."
                width height)))
       (_ (error "Unknown layer position %S" position)))))
 
+(defun romacs-layer--after (window pos width height border)
+  "Where a layer of WIDTH by HEIGHT text pixels inside BORDER goes after
+POS in WINDOW: one column after POS's glyph, its text on POS's row; on
+the row below, flush with the window's right edge, when it would cross
+that edge; on the row above when the row below is past the window's
+bottom.  As (LEFT TOP WIDTH HEIGHT), or nil when POS is not shown."
+  (when-let* ((posn (posn-at-point pos window))
+              (xy (posn-x-y posn)))
+    (let* ((edges (window-edges window t nil t))
+           (left (nth 0 edges)) (top (nth 1 edges)) (right (nth 2 edges)) (bottom (nth 3 edges))
+           (ch (frame-char-height (window-frame window)))
+           (outer (+ width (* 2 border)))
+           (x (+ left (car xy) (frame-char-width (window-frame window))))
+           (y (+ top (cdr xy))))
+      (cond
+       ((<= (+ x outer) right))
+       ((<= (+ y ch height) bottom) (setq x (max left (- right outer)) y (+ y ch)))
+       (t (setq x (max left (- right outer)) y (max top (- y height)))))
+      (list x (- y border) width height))))
+
 (cl-defun romacs-layer-show (buffer &key position columns lines)
   "Show BUFFER in a layer over the frame and return the layer's frame.
-POSITION is `bottom', `center' or `point', `romacs-layer-position' by
-default.  COLUMNS and LINES size it, by default to BUFFER's text, at
+POSITION is `bottom', `center', `point' or (at WINDOW POS),
+`romacs-layer-position' by default; nil, showing nothing, when POS is
+not shown in WINDOW.  COLUMNS and LINES size it, by default to BUFFER's text, at
 most `romacs-layer-max-lines' lines; a `bottom' layer is as wide as the
 frame."
   (let* ((buffer (window-normalize-buffer buffer))
          (frame (romacs-layer--frame buffer))
          (text (romacs-layer--text-size buffer))
          (border (or (frame-parameter frame 'child-frame-border-width) 0)))
-    (pcase-let ((`(,left ,top ,width ,height)
-                 (romacs-layer--placement (or position romacs-layer-position)
-                                          (or columns (car text))
-                                          (min (or lines (cdr text)) romacs-layer-max-lines)
-                                          border)))
-      (set-frame-size frame width height t)
-      (set-frame-position frame left top)
-      ;; The edge it slides in from and grows away from.
-      (set-frame-parameter frame 'romacs-layer-edge
-                           (if (eq (or position romacs-layer-position) 'bottom) 'bottom 'top)))
-    (set-window-start (frame-root-window frame) (with-current-buffer buffer (point-min)))
-    (make-frame-visible frame)
-    frame))
+    (pcase (romacs-layer--placement (or position romacs-layer-position)
+                                    (or columns (car text))
+                                    (min (or lines (cdr text)) romacs-layer-max-lines)
+                                    border)
+      (`(,left ,top ,width ,height)
+       (set-frame-size frame width height t)
+       (set-frame-position frame left top)
+       ;; The edge it slides in from and grows away from.
+       (set-frame-parameter frame 'romacs-layer-edge
+                            (if (eq (or position romacs-layer-position) 'bottom) 'bottom 'top))
+       (set-window-start (frame-root-window frame) (with-current-buffer buffer (point-min)))
+       (make-frame-visible frame)
+       frame)
+      (_ (romacs-layer-hide buffer) nil))))
 
 (defun romacs-layer-hide (buffer)
   "Hide the layer showing BUFFER, keeping its frame for the next show."
-  (let ((frame (cdr (assq (get-buffer buffer) romacs-layer--frames))))
-    (when (frame-live-p frame) (make-frame-invisible frame))))
+  (let ((frame (and (get-buffer buffer) (romacs-layer--frame-of (get-buffer buffer)))))
+    (when (and frame (frame-visible-p frame)) (make-frame-invisible frame))))
 
 (defun romacs-layers ()
   "The child frames shown over the frame, oldest first: for each, a plist
@@ -231,13 +262,19 @@ columns and lines."
 ;; GNU's (`message', `current-message', *Messages*); only where a message
 ;; shows is ours (DIVERGENCES.md VM2-ECHO-LAYER).
 
-(defcustom romacs-layer-toast-timeout 4
-  "Seconds a message toast shows before it fades."
+(defcustom romacs-layer-toast-timeout 2.5
+  "Seconds a message toast shows before it fades, unless the next command
+clears the echo area first."
   :type 'number)
 
 (defcustom romacs-layer-toast-max 3
   "Most message toasts shown at once; the oldest goes first."
   :type 'natnum)
+
+(defvar romacs-layer-echo-claim-functions nil
+  "Functions offered the echo area's new message before it shows as a
+toast, each called with the text; one returning non-nil has shown it
+otherwise (an eval chip, romacs-eval-chip.el), and no toast shows.")
 
 (defvar romacs-layer--toasts nil
   "The toasts shown, newest first: each (BUFFER TEXT TIMER).")
@@ -287,6 +324,14 @@ waits hidden."
   (setq romacs-layer--toasts (seq-remove (lambda (toast) (eq (car toast) buffer)) romacs-layer--toasts))
   (romacs-layer-hide buffer)
   (romacs-layer--toast-stack))
+
+(defun romacs-layer-toast-clear ()
+  "Hide every toast, which fades, as the echo area clears."
+  (let ((toasts romacs-layer--toasts))
+    (setq romacs-layer--toasts nil)
+    (dolist (toast toasts)
+      (cancel-timer (nth 2 toast))
+      (romacs-layer-hide (car toast)))))
 
 (defun romacs-layer-toast (text)
   "Show TEXT as a toast for `romacs-layer-toast-timeout' seconds.

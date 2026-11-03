@@ -1098,17 +1098,19 @@ show the enclosing minibuffer's candidates again."
 or nil once the echo area is cleared.")
 
 (defun romacs-complete--message (text)
-  "Show TEXT, the echo area's new message, as a toast.  The echo area's
-clearing at the next command leaves a toast to its own timeout: it
-covers nothing that needs it gone."
-  (when (and text (not (equal text "")))
-    (romacs-layer-toast text)))
+  "Show TEXT, the echo area's new message, as a toast, unless a function
+of `romacs-layer-echo-claim-functions' shows it otherwise.  TEXT nil,
+the echo area's clearing as the next command starts, fades the toasts,
+as GNU's echo area clears."
+  (cond
+   ((null text) (romacs-complete--hide-message))
+   ((equal text ""))
+   ((run-hook-with-args-until-success 'romacs-layer-echo-claim-functions text))
+   (t (romacs-layer-toast text))))
 
 (defun romacs-complete--hide-message ()
   "Hide every message toast."
-  (dolist (toast romacs-layer--toasts)
-    (cancel-timer (nth 2 toast))
-    (romacs-layer--toast-expire (car toast))))
+  (romacs-layer-toast-clear))
 
 ;;;; The mode
 

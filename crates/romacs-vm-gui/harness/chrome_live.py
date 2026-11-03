@@ -147,6 +147,14 @@ SCENES = r'''
     (setq-local mode-line-format '("q  " "Gnosis Dashboard")))
   (display-buffer-in-side-window (get-buffer "*keymap-popup*") '((side . bottom) (window-height . 6)))
   (chrome-live--note "popup")))
+(run-at-time 38 nil (lambda ()
+  (delete-other-windows)
+  (switch-to-buffer (get-buffer-create "chip.el"))
+  (emacs-lisp-mode)
+  (setq eval-expression-debug-on-error nil)
+  (insert "(+ 1 2)\n(car 1)")
+  (goto-char (point-min)) (end-of-line)
+  (chrome-live--note "eval")))
 '''
 LOAD = r'''
 (blink-cursor-mode -1)
@@ -272,7 +280,7 @@ def main():
             end = (LOAD.replace('{frames}', str(args.gpu_frames)).replace('{at}', at) if args.gpu_frames
                    else f'(run-at-time {at} nil (lambda () (kill-emacs 0)))\n')
             if args.scenes:
-                end = SCENES + '(run-at-time 39 nil (lambda () (kill-emacs 0)))\n'
+                end = SCENES + '(run-at-time 47 nil (lambda () (kill-emacs 0)))\n'
                 repo = home / 'repo'
                 repo.mkdir()
                 (repo / 'a.el').write_text(';;; a.el --- a file  -*- lexical-binding: t -*-\n(defun a () 1)\n')
@@ -384,6 +392,19 @@ def main():
                     time.sleep(1.5)
                     shot('scene-popup')
                     report['state-popup'] = json.loads(popup.read_text())
+                    # An evaluation's value, then an error, in a chip after the sexp.
+                    evaluate = notes / 'eval.json'
+                    wait(evaluate.exists, args.timeout, 'eval', proc)
+                    time.sleep(.5)
+                    ctrl = lambda *keys: subprocess.run(['/usr/bin/wtype', '-M', 'ctrl', *[k for key in keys for k in ('-k', key)], '-m', 'ctrl'],
+                                                        env=env, timeout=10)
+                    ctrl('x', 'e')
+                    time.sleep(1)
+                    shot('scene-eval')
+                    ctrl('n', 'e')
+                    ctrl('x', 'e')
+                    time.sleep(1)
+                    shot('scene-eval-error')
                 wait(lambda: proc.poll() is not None, 30 + args.gpu_frames * .1, 'exit', None)
             if args.gpu_frames:
                 report['gpu'] = gpu_times(log_path.read_text(errors='replace'), out / 'trace.jsonl', MEASURED)
