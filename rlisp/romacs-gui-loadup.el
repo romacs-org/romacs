@@ -87,6 +87,15 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; so they follow the display record.
         (let ((user-emacs-directory-warning nil))
           (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
+        ;; faces.el x-create-frame-with-faces (faces.el:2243), by way of
+        ;; `frame-initialize': the frame's display parameters, then every
+        ;; face computed for this display, each new-frame default kept.
+        ;; The world computed the faces on the headless display, where a
+        ;; spec for a colour or graphic display (region's :extend, a
+        ;; button's :box) never matches.
+        (when initial-window-system
+          (frame-set-background-mode (selected-frame) t)
+          (face-set-after-frame-default (selected-frame)))
         ;; The root frame's windows are drawn as panes, with a status bar,
         ;; on a window system, in the chrome colours of the faces this
         ;; display shows (romacs-chrome.el, DIVERGENCES.md VM2-PANE-CHROME

@@ -145,6 +145,52 @@ fn internal_copy_lisp_face(cx, from: Value, to: Value, frame: Value, new_frame: 
     Ok(to)
 }}
 
+defsubr! { name = "internal-merge-in-global-face", gnu = "xfaces.c:4316", effect = Global,
+fn internal_merge_in_global_face(cx, face: Value, frame: Value) {
+    // Every attribute the face's new-frame defaults specify overrides
+    // FRAME's, which face-set-after-frame-default has just computed from
+    // the specs: "global before local", each slot copied as GNU copies it
+    // (the frame's own values are not validated again, so a :font or
+    // :fontset of `reset' arrives too).  A default of :ignore-defface
+    // unspecifies FRAME's.  What changes is mirrored to the display.
+    let frame = cx.face_frame(frame, false)?;
+    let resolved = resolve(cx, face, true)?;
+    let global = cx.face_lookup(resolved, Value::NIL)?;
+    if global == Value::NIL { return Err(signal(cx, "Invalid face", face)); }
+    let (unspecified, ignore) = (cx.intern("unspecified"), cx.intern(":ignore-defface"));
+    let mut wanted = Vec::new();
+    for index in 1..LFACE_VECTOR_SIZE {
+        let value = cx.vector_get(global, Value::integer(index as i64).unwrap())?;
+        if value == ignore { wanted.push((index, unspecified)); }
+        else if value != unspecified { wanted.push((index, value)); }
+    }
+    let mut local = cx.face_lookup(resolved, frame)?;
+    if local == Value::NIL { local = make_lisp_face(cx, resolved, frame)?; }
+    let mut changes = Vec::new();
+    for (index, value) in wanted {
+        let old = cx.vector_get(local, Value::integer(index as i64).unwrap())?;
+        if !cx.equal(old, value).map_err(|_| Fault::Circular(value))? { changes.push((index, value)); }
+    }
+    if changes.is_empty() { return Ok(Value::NIL); }
+    // A frame showing another's faces gets its own once this changes them.
+    if cx.frame_shares_faces(frame)? {
+        cx.face_own(frame)?;
+        local = cx.face_lookup(resolved, frame)?;
+    }
+    let no_inherit = cx.intern("face-no-inherit");
+    let mirror = displayed_faces(cx, frame)? && cx.face_property(resolved, no_inherit)? == Value::NIL;
+    let name = cx.symbol_name(resolved)?;
+    for (index, value) in changes {
+        cx.vector_set(local, Value::integer(index as i64).unwrap(), value)?;
+        if mirror {
+            let keyword = LFACE_ATTRIBUTES[index - 1];
+            let mirrored = theme_value(cx, keyword, value, frame)?;
+            cx.theme_face_attribute(&name, keyword, mirrored);
+        }
+    }
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "face-font", gnu = "xfaces.c:4423", effect = Reads,
 fn face_font(cx, face: Value; optional frame: Value, character: Value) {
     if frame == Value::TRUE {
