@@ -132,23 +132,30 @@ fn world_load_path(path: &[PathBuf], preload: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 /// A restored world's `load-path' made the run's: its own entries, those
-/// the world was not built on, spliced in after the world's last entry from
-/// the run, where a fresh VM has them before anything a preload added.
+/// the world was not built on, appended, as a fresh VM has them after the
+/// world's (whose preloads leave `load-path' as given, `load_path_kept').
 fn run_load_path(vm: &mut Vm, args: &crate::Args) -> Result<(), String> {
     let own = world_load_path(&args.load_path, &args.preload);
     let extra = &args.load_path[own.len()..];
     if extra.is_empty() {
         return Ok(());
     }
-    let literal = |p: &PathBuf| serde_json::to_string(&p.to_string_lossy()).unwrap_or_default();
-    let extra = extra.iter().map(literal).collect::<Vec<_>>().join(" ");
-    let form = match own.last() {
-        Some(last) => format!(
-            "(let ((tail (member {} load-path))) (setq load-path (if tail (append (butlast load-path (length (cdr tail))) (list {extra}) (cdr tail)) (append load-path (list {extra})))))",
-            literal(last)),
-        None => format!("(setq load-path (append (list {extra}) load-path))"),
-    };
-    crate::eval(vm, &form).map(drop).map_err(|e| e.1)
+    let extra = extra.iter().map(|p| lisp_string(p)).collect::<Vec<_>>().join(" ");
+    crate::eval(vm, &format!("(setq load-path (append load-path (list {extra})))")).map(drop).map_err(|e| e.1)
+}
+
+/// PATH as a Lisp string literal.
+fn lisp_string(path: &Path) -> String {
+    serde_json::to_string(&path.to_string_lossy()).unwrap_or_default()
+}
+
+/// Whether the world's preloads left `load-path' as OWN, as given: a world
+/// whose preloads changed it is not published, since where a run's own
+/// entries would go among the changes is unclear, and runs boot from source.
+fn load_path_kept(vm: &mut Vm, own: &[PathBuf]) -> bool {
+    let own = own.iter().map(|p| lisp_string(p)).collect::<Vec<_>>().join(" ");
+    crate::eval(vm, &format!("(equal load-path (list {own}))")).ok()
+        .and_then(|value| value.display().ok()).is_some_and(|shown| shown == "t")
 }
 
 /// The recipe of the runner's world (§7): every embedder step before the
@@ -224,6 +231,9 @@ fn build(world: &World, args: &crate::Args, count: usize) -> ! {
         let mut chain = vec![];
         if !crate::load_chain(&mut vm, args, 0, count, &mut chain) || chain.iter().any(|e| e["loaded"] != true) {
             return Err(json!({"chain": chain}).to_string());
+        }
+        if !load_path_kept(&mut vm, &world_load_path(&args.load_path, &args.preload)) {
+            return Err(json!({"chain": chain, "error": "the preloads changed load-path"}).to_string());
         }
         Ok((vm, (), json!({"chain": chain})))
     });
