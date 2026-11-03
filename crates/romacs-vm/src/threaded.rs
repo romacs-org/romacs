@@ -89,6 +89,17 @@ mod control_tests {
         );
     }
 
+    #[test]
+    fn forgotten_code_keeps_no_room_from_its_peak() {
+        let mut program = Program::default();
+        program.entries.reserve(SPARE_SITES * 64);
+        program.inline_bodies.reserve(SPARE_SITES * 64);
+        program.free_entries.reserve(SPARE_SITES * 64);
+        program.forget_code();
+        assert!(program.entries.capacity() <= SPARE_SITES && program.inline_bodies.capacity() <= SPARE_SITES
+            && program.free_entries.capacity() <= SPARE_SITES);
+    }
+
     fn empty_engine(vm: &mut Vm) -> Engine<'_> {
         Engine {
             vm,
@@ -542,6 +553,8 @@ impl InlineBody {
 }
 /// Private lowering is appended once and GC-forwarded in place. Retain it across externally
 /// submitted forms instead of relowering the complete retained world per eval.
+/// The call sites a forgotten program keeps room for (`forget_code`).
+const SPARE_SITES: usize = 1 << 14;
 #[derive(Default)]
 pub(super) struct Program {
     code: Vec<Vec<Inst>>,
@@ -573,12 +586,19 @@ impl Program {
         self.code.iter().all(Vec::is_empty) && self.entries.is_empty()
     }
     /// Drop the lowered code an idle program caches; it is lowered again on
-    /// first use. Nothing points into it: no engine runs this program.
+    /// first use. The per-site tables keep room for SPARE_SITES at most, so a
+    /// peak (a nested load's millions of call sites) leaves no capacity
+    /// behind, while an ordinary nested run reuses its room; `code` is
+    /// bounded by the function count and keeps its own. Nothing points into
+    /// it: no engine runs this program.
     pub(super) fn forget_code(&mut self) {
         self.code.clear();
         self.entries.clear();
+        self.entries.shrink_to(SPARE_SITES);
         self.inline_bodies.clear();
+        self.inline_bodies.shrink_to(SPARE_SITES);
         self.free_entries.clear();
+        self.free_entries.shrink_to(SPARE_SITES);
     }
     pub(super) fn code_len(&self) -> usize {
         self.code.iter().map(Vec::len).sum()

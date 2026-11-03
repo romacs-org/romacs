@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "4e3bd1d91c79e6a4911605b2abb68375cb7b289fff5c98e8eea9d9686063cd3c",
+  "source_fingerprint": "b840bd4ee117326bf3b8c764a69d4eb4e4a252a055795bc8ba2f7ab7b17ab8cf",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1279,
-  "parsed_vm2_only": 1279
+  "parsed_total": 1280,
+  "parsed_vm2_only": 1280
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4057,6 +4057,11 @@
    "name": "reverse",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/reverse.rs:4"
+  },
+  "romacs--arena-census": {
+   "name": "romacs--arena-census",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:59"
   },
   "romacs--auto-save-1": {
    "name": "romacs--auto-save-1",
