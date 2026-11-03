@@ -34,7 +34,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
                     foreground: [255; 3],
                     background: [0; 3],
                     family: "monospace".into(),
-                    pixel_size: 16.0,
+                    pixel_size: 16.0, weight: 400, italic: false, width: 5,
                 }],
             },
         }],

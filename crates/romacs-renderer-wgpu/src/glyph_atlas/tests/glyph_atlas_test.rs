@@ -678,7 +678,70 @@ fn renderer_replays_named_instance_weight_on_the_exact_raw_face() {
 
     assert_eq!(face.index, identity.file_face_index());
     assert_eq!(cache_key.font_weight.0, 700);
-    assert!(atlas.render_cache_key_image(cache_key, false).is_some());
+    assert!(atlas.render_cache_key_image(cache_key, false, cache_key.font_weight.0).is_some());
+}
+
+/// A bold face set in a family that has no bold one is emboldened, as
+/// fontconfig's `embolden' has cairo do for GNU; a regular request on the
+/// same face, or a bold request on a bold face, is drawn as the face is.
+#[cfg(unix)]
+#[test]
+#[tracing_test::traced_test]
+fn a_bold_request_on_a_regular_face_is_emboldened() {
+    use cosmic_text::{Buffer, Metrics, Shaping};
+    use romacs_display_protocol::font::{FontSlantKind, ResolvedFont, ResolvedFontId};
+
+    let Some(resolved) = resolved_test_font("Liberation Mono", 400, 18.0) else {
+        tracing::info!("skipping: Liberation Mono is not installed");
+        return;
+    };
+    if resolved.identity.file_path.is_none() {
+        tracing::info!("skipping: Fontconfig match has no file");
+        return;
+    }
+    let Some(mut atlas) = try_test_atlas() else {
+        tracing::info!("skipping: no headless wgpu adapter");
+        return;
+    };
+    let family = resolved.family;
+    let weight = resolved.weight;
+    let identity = resolved.identity;
+    let font = ResolvedFont {
+        id: ResolvedFontId(1),
+        identity: identity.clone(),
+        replay: file_replay_for(&identity),
+        family,
+        full_name: None,
+        postscript_name: identity.postscript_name.clone(),
+        weight,
+        slant: FontSlantKind::Normal,
+        width: 5,
+        pixel_size: 18.0,
+        ascent_px: 0.0,
+        descent_px: 0.0,
+        space_advance_px: 0.0,
+        glyph_advance: Default::default(),
+    };
+
+    let attrs = atlas
+        .exact_attrs_for_resolved_font(&font)
+        .expect("renderer must open the layout-resolved face");
+    let mut buffer = Buffer::new(&mut atlas.font_system, Metrics::new(18.0, 24.0));
+    buffer.set_size(&mut atlas.font_system, Some(72.0), Some(36.0));
+    buffer.set_text(&mut atlas.font_system, "M", &attrs, Shaping::Advanced, None);
+    buffer.shape_until_scroll(&mut atlas.font_system, false);
+    let cache_key = buffer
+        .layout_runs()
+        .find_map(|run| run.glyphs.first())
+        .expect("shaped glyph")
+        .physical((0.0, 0.0), 1.0)
+        .cache_key;
+    assert_eq!(cache_key.font_weight.0, 400);
+    let ink = |image: super::RasterGlyphImage| image.data.iter().map(|&a| u64::from(a)).sum::<u64>();
+    let regular = ink(atlas.render_cache_key_image(cache_key, false, 400).expect("regular raster"));
+    let faux = ink(atlas.render_cache_key_image(cache_key, false, 700).expect("faux bold raster"));
+    assert!(faux > regular * 11 / 10, "faux bold {faux} vs regular {regular}");
+    assert!(super::synthetic_bold(700, 400) && !super::synthetic_bold(700, 700) && !super::synthetic_bold(400, 400));
 }
 
 #[test]
@@ -848,7 +911,7 @@ fn renderer_replays_a_native_memory_asset_in_its_own_font_system() {
             .map(|face| &face.source),
         Some(fontdb::Source::Binary(_))
     ));
-    assert!(atlas.render_cache_key_image(cache_key, false).is_some());
+    assert!(atlas.render_cache_key_image(cache_key, false, cache_key.font_weight.0).is_some());
 }
 
 #[test]
@@ -1111,7 +1174,7 @@ fn colrv1_memory_asset_paints_through_the_color_stage() {
     );
 
     // The bug: Swash cannot paint this face's emoji glyphs at all.
-    let swash_only = atlas.render_cache_key_image(cache_key, false);
+    let swash_only = atlas.render_cache_key_image(cache_key, false, cache_key.font_weight.0);
     assert!(
         swash_only
             .as_ref()

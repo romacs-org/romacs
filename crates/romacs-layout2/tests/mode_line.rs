@@ -29,19 +29,19 @@ fn scene() -> WindowSnapshot {
                 foreground: [255; 3],
                 background: [0; 3],
                 family: "Liberation Mono".into(),
-                pixel_size: 20.0,
+                pixel_size: 20.0, weight: 400, italic: false, width: 5,
             },
             Face {
                 foreground: [255; 3],
                 background: [0, 0, 255],
                 family: "Liberation Mono".into(),
-                pixel_size: 20.0,
+                pixel_size: 20.0, weight: 400, italic: false, width: 5,
             },
             Face {
                 foreground: [255, 0, 0],
                 background: [0, 255, 0],
                 family: "Liberation Mono".into(),
-                pixel_size: 30.0,
+                pixel_size: 30.0, weight: 400, italic: false, width: 5,
             },
         ],
     }

@@ -6,7 +6,7 @@ use romacs_display_protocol::{Color, FrameGlyph, FrameGlyphBuffer};
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 
 fn window(text: &str, face_runs: Vec<FaceRun>) -> WindowSnapshot {
-    let face = |foreground| Face { foreground, background: [0; 3], family: "Liberation Mono".into(), pixel_size: 20.0 };
+    let face = |foreground| Face { foreground, background: [0; 3], family: "Liberation Mono".into(), pixel_size: 20.0, weight: 400, italic: false, width: 5 };
     WindowSnapshot {
         id: 7, width: 600, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),

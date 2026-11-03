@@ -5,7 +5,7 @@ use romacs_layout_input::{BitmapAlign, Face, FaceHandle, FaceRun, FrameSnapshot,
     PlacedWindowSnapshot, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowChrome, WindowSnapshot};
 
 fn face(foreground: [u8; 3], background: [u8; 3]) -> Face {
-    Face { foreground, background, family: "Liberation Mono".into(), pixel_size: 16.0 }
+    Face { foreground, background, family: "Liberation Mono".into(), pixel_size: 16.0, weight: 400, italic: false, width: 5 }
 }
 
 fn bitmap(number: u16) -> FringeBitmap {

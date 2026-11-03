@@ -117,12 +117,16 @@
                       romacs-mode-line-dim romacs-mode-line-bright))
         (romacs-should (>= (romacs-color-contrast (romacs-theme-test--fg faces face) (funcall slot 'bg-mode-line)) 4.5))))))
 
-(romacs-deftest romacs-theme-headings-have-rum-s-heights ()
+(romacs-deftest romacs-theme-headings-have-rum-s-heights-and-weights ()
   (let ((faces (romacs-theme-faces (romacs-theme-resolve romacs-theme-test-dark))))
     (romacs-should (equal (romacs-theme-test--attribute faces 'org-level-1 :height) 1.35))
     (romacs-should (equal (romacs-theme-test--attribute faces 'org-level-2 :height) 1.2))
     (romacs-should (equal (romacs-theme-test--attribute faces 'org-level-8 :height) 1.15))
-    (romacs-should (null (romacs-theme-test--attribute faces 'org-level-1 :weight)))
+    (dolist (row '((1 ultrabold 1.35) (2 semibold 1.2) (3 bold 1.15) (8 bold 1.15)))
+      (dolist (prefix '("outline-" "org-level-"))
+        (let ((face (intern (format "%s%d" prefix (car row)))))
+          (romacs-should (eq (romacs-theme-test--attribute faces face :weight) (nth 1 row)))
+          (romacs-should (equal (romacs-theme-test--attribute faces face :height) (nth 2 row))))))
     (romacs-should (romacs-theme-test--fg faces 'outline-4))))
 
 (romacs-deftest romacs-theme-every-slot-resolves-for-a-dark-and-a-light-palette ()

@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn base_colours_come_from_the_theme_s_sixteen() {
         use super::{TerminalColor, TerminalStyle};
-        let default = romacs_layout_input::Face { foreground: [200, 200, 200], background: [0, 0, 0], family: String::new(), pixel_size: 10.0 };
+        let default = romacs_layout_input::Face { foreground: [200, 200, 200], background: [0, 0, 0], family: String::new(), pixel_size: 10.0, weight: 400, italic: false, width: 5 };
         let mut ansi = super::DEFAULT_ANSI;
         ansi[1] = [100, 50, 10];
         let style = |foreground| TerminalStyle { foreground, ..Default::default() }.face(&default, &ansi).foreground;

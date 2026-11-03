@@ -259,6 +259,20 @@ fn frame_font_bindings_identity(
     FrameFontBindingsIdentity(hasher.finish())
 }
 
+/// Whether a face asking for REQUESTED weight, set in a font of ACTUAL
+/// weight, needs a faux bold: it asks for semi-bold or more and the font is
+/// lighter than semi-bold.
+fn synthetic_bold(requested: u16, actual: u16) -> bool {
+    requested >= 600 && actual < 600
+}
+
+/// Whether FACE asks for italic and the font it is set in, of SLANT, is
+/// upright, so its outlines are skewed.
+fn synthetic_italic(face: Option<&Face>, slant: romacs_display_protocol::font::FontSlantKind) -> bool {
+    face.is_some_and(|face| face.attributes.contains(romacs_display_protocol::face::FaceAttributes::ITALIC))
+        && slant == romacs_display_protocol::font::FontSlantKind::Normal
+}
+
 pub fn glyph_font_identity(face: Option<&Face>) -> u64 {
     let Some(face) = face else {
         return 0;
@@ -1391,6 +1405,7 @@ impl WgpuGlyphAtlas {
         &mut self,
         cache_key: cosmic_text::CacheKey,
         enable_subpixel: bool,
+        requested_weight: u16,
     ) -> Option<RasterGlyphImage> {
         let render_mode = self.render_mode(enable_subpixel);
         let font = self
@@ -1401,6 +1416,14 @@ impl WgpuGlyphAtlas {
             .as_swash()
             .variations()
             .find_by_tag(swash::Tag::from_be_bytes(*b"wght"));
+        // A bold face set in a family with no bold one is emboldened, as
+        // fontconfig's `embolden' has cairo do for GNU: by an em/24 stroke.
+        let actual_weight = self.font_system.db().face(cache_key.font_id).map_or(cache_key.font_weight.0, |face| face.weight.0);
+        let embolden = if variable_width.is_none() && synthetic_bold(requested_weight, actual_weight) {
+            f32::from_bits(cache_key.font_size_bits) / 24.0
+        } else {
+            0.0
+        };
 
         let mut scaler = self
             .scale_context
@@ -1446,6 +1469,7 @@ impl WgpuGlyphAtlas {
             } else {
                 None
             })
+            .embolden(embolden)
             .render(&mut scaler, cache_key.glyph_id)
             .map(RasterGlyphImage::from_swash)
     }
@@ -1477,7 +1501,8 @@ impl WgpuGlyphAtlas {
         ) {
             return Some(image);
         }
-        self.render_cache_key_image(cache_key, enable_subpixel)
+        let requested_weight = face.map_or(cache_key.font_weight.0, |face| face.font_weight);
+        self.render_cache_key_image(cache_key, enable_subpixel, requested_weight)
     }
 
     /// Whether one raster holds any color glyph, which makes the whole
@@ -2121,7 +2146,8 @@ impl WgpuGlyphAtlas {
                         x_bin,
                         y_bin,
                         font_weight: fontdb::Weight(font.weight),
-                        flags: CacheKeyFlags::empty(),
+                        // An italic face set in an upright font is slanted.
+                        flags: if synthetic_italic(face, font.slant) { CacheKeyFlags::FAKE_ITALIC } else { CacheKeyFlags::empty() },
                     };
                     let image = self.glyph_image(
                         cache_key,

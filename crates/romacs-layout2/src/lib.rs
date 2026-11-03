@@ -890,8 +890,8 @@ fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> b
             color(face.foreground),
             Some(color(face.background)),
             &face.family,
-            400,
-            false,
+            face.weight,
+            face.italic,
             face.pixel_size,
             0,
             None,
@@ -905,7 +905,7 @@ fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> b
             resolver,
             frame,
             id,
-            &FontRequest::new(&face.family, face.pixel_size),
+            &font_request(face),
             &policy,
             &face_text[index],
         )
@@ -924,7 +924,7 @@ fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> b
             // Dual-width fonts such as Iosevka report per-glyph advances. The
             // nominal space is only the frame column metric; text uses the
             // resolver's exact cached advance, including ASCII.
-            let request = FontRequest::new(&face.family, face.pixel_size);
+            let request = font_request(face);
             let mut ascii: Vec<_> = face_text[index].chars().filter(|c| c.is_ascii() && !c.is_control()).collect();
             ascii.sort_unstable(); ascii.dedup();
             for ch in ascii {
@@ -936,6 +936,12 @@ fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> b
         metrics.push((ascent, height, cell, space));
     }
     Ok(metrics)
+}
+
+/// The font FACE asks for: its family, size, weight, slant and width.
+fn font_request(face: &Face) -> FontRequest {
+    let slant = if face.italic { romacs_display_protocol::font::FontSlantKind::Italic } else { romacs_display_protocol::font::FontSlantKind::Normal };
+    FontRequest { weight: face.weight, slant, width: face.width, ..FontRequest::new(&face.family, face.pixel_size) }
 }
 
 /// The advance painting CH in face ID takes: its resolved glyph's, else
