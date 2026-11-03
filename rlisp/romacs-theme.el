@@ -364,11 +364,15 @@ spec replaces the face's own."
       (funcall face 'secondary-selection :background (funcall v 'bg-highlight) :extend t)
       (funcall face 'highlight :background (funcall v 'bg-highlight))
       (funcall face 'hl-line :background (funcall v 'bg-highlight) :extend t)
+      ;; Windows are panes apart (romacs-chrome.el): fringes, dividers and
+      ;; borders are the window background, so no strip shows beside a
+      ;; window, as the reference session's invisible dividers do; an
+      ;; indicator with a face of its own (flymake's, diff-hl's) shows.
       (funcall face 'fringe :foreground bg :background bg)
       (funcall face 'window-divider :foreground bg :background bg)
       (funcall face 'window-divider-first-pixel :foreground bg :background bg)
       (funcall face 'window-divider-last-pixel :foreground bg :background bg)
-      (funcall face 'vertical-border :foreground (funcall v 'border))
+      (funcall face 'vertical-border :foreground bg :background bg)
       (funcall face 'internal-border :background bg)
       (funcall face 'child-frame-border :background (funcall v 'border))
       (funcall face 'border :background (funcall v 'border))
