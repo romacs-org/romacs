@@ -127,6 +127,13 @@ and its comparison policy in its docstring:
   own copy of a synthetic store (`notmuch_fixture.py`) and its own
   loopback SMTP server (`fake_smtp.py`); the captured submissions must
   agree.
+* `theme_scenes_live.py`: standard scenes (code with a region and line
+  numbers, org, help beside a diff, Emacs Lisp beside dired, a toast, the command
+  panel, and notmuch hello/search/show on `notmuch_fixture.py`'s store
+  when the system has notmuch) under each of `--themes`, one private
+  session per theme, PNGs plus one sheet per scene stacking the themes;
+  `--gnu` puts pinned GNU under the reference Rum configuration first.
+  For judging a theme by eye, not a gate.
 * `command_errors_live.py`: the command loop and the session's end on a
   plain init: command errors' echo area, *Messages* and bells, the
   debugger's *Backtrace* from M-: and from a `debug-on-error` command,
