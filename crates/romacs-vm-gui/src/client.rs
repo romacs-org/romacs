@@ -114,6 +114,11 @@ fn start(request: &Request) -> Result<(), String> {
     let home = std::env::var_os("HOME").unwrap_or_else(|| "/".into());
     let mut command = std::process::Command::new("systemd-run");
     command.args(["--user", "--quiet", "--collect", "-p", "OOMPolicy=continue"])
+        // An abnormal end shows a desktop notification (`--server-exited').
+        // The editor ends a SIGTERM (a stop, a logout) with status 15, as
+        // GNU's does: a success here.
+        .args(["-p", "SuccessExitStatus=15"])
+        .arg("-p").arg(format!("ExecStopPost=\"{}\" --server-exited {}", exe.display(), request.name))
         .arg(format!("--unit={}", unit(&request.name)))
         .arg(format!("--working-directory={}", Path::new(&home).display()));
     // A slice for the server's unit, as a test or a desktop's policy sets.
@@ -151,6 +156,38 @@ fn start(request: &Request) -> Result<(), String> {
         .stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log)
         .status().map_err(|e| format!("setsid: {e}"))
         .and_then(|status| if status.success() { Ok(()) } else { Err(format!("setsid: {status}")) })
+}
+
+/// `--server-exited NAME': the server unit's ExecStopPost. systemd says how
+/// the server ended ($SERVICE_RESULT, $EXIT_CODE, $EXIT_STATUS); an end
+/// other than success (a crash, a kill, a failing status) shows the desktop
+/// notification a launcher shows for a standalone session, naming the
+/// journal that holds the server's output. A stop or a logout's TERM is a
+/// success to systemd and shows none.
+pub fn exited(argv: &[String]) -> i32 {
+    let Some(name) = argv.get(1).filter(|name| server_name(name).is_ok()) else {
+        eprintln!("usage: romacs --server-exited NAME");
+        return 2;
+    };
+    let var = |key: &str| std::env::var(key).unwrap_or_default();
+    if let Some((title, body)) = crash_notice(name, &var("SERVICE_RESULT"), &var("EXIT_CODE"), &var("EXIT_STATUS")) {
+        eprintln!("romacs: {title}; {body}");
+        let _ = std::process::Command::new("notify-send").env_remove("LD_LIBRARY_PATH")
+            .args(["-u", "critical", "-a", "Romacs", &title, &body]).status();
+    }
+    0
+}
+
+/// The notification for server NAME's end, or None for a clean one.
+fn crash_notice(name: &str, result: &str, code: &str, status: &str) -> Option<(String, String)> {
+    if result.is_empty() || result == "success" { return None; }
+    let how = match code {
+        "exited" => format!("status {status}"),
+        "killed" => format!("signal {status}"),
+        "dumped" => format!("signal {status}, core dumped"),
+        _ => result.to_owned(),
+    };
+    Some((format!("Romacs exited ({how})"), format!("Log: journalctl --user -u {}", unit(name))))
 }
 
 /// LAUNCH as a server's: GNU's Lisp (`--loadup') unless it names a mode,
@@ -263,6 +300,17 @@ pub fn main(argv: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_abnormal_end_is_noticed() {
+        assert_eq!(crash_notice("romacs", "success", "exited", "0"), None);
+        assert_eq!(crash_notice("romacs", "", "", ""), None);
+        assert_eq!(crash_notice("romacs", "signal", "killed", "KILL"),
+                   Some(("Romacs exited (signal KILL)".into(), "Log: journalctl --user -u romacs-server-romacs".into())));
+        assert_eq!(crash_notice("work", "core-dump", "dumped", "SEGV").unwrap().0, "Romacs exited (signal SEGV, core dumped)");
+        assert_eq!(crash_notice("work", "exit-code", "exited", "1").unwrap().0, "Romacs exited (status 1)");
+        assert_eq!(crash_notice("work", "oom-kill", "killed", "KILL").unwrap().0, "Romacs exited (signal KILL)");
+    }
 
     fn args(list: &[&str]) -> Vec<String> { list.iter().map(|s| s.to_string()).collect() }
 
