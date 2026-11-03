@@ -245,6 +245,9 @@ or `light') and colours.  `orange' and `brown' may be left out.")
     (fg-muted floor muted bg 3.0)
     (fg-dim* floor fg-dim bg 4.5)
     (prompt . accent)
+    ;; A key in help, popups and the completion layer: the accent, floored
+    ;; on each of their backgrounds (`help-key-binding').
+    (keybind . accent)
     ;; Bands, highlights, search, diff.
     (bg-mode-line . bg-alt)
     (bg-mode-line-inactive . bg-dark)
@@ -399,7 +402,9 @@ spec replaces the face's own."
       (funcall face 'homoglyph :foreground (funcall text 'orange))
       (funcall face 'nobreak-space :foreground (funcall text 'orange) :underline t)
       (funcall face 'tooltip :inherit 'variable-pitch :foreground (funcall text 'fg (funcall v 'glass)) :background (funcall v 'glass))
-      (funcall face 'help-key-binding :inherit 'fixed-pitch :foreground (funcall text 'accent (funcall v 'bg-alt)) :background (funcall v 'bg-alt))
+      ;; Keys stand out by weight and colour, on no box or band of their own.
+      (funcall face 'help-key-binding :inherit '(bold fixed-pitch)
+               :foreground (funcall text 'keybind (list bg (funcall v 'bg-alt) (funcall v 'glass))))
       (funcall face 'completions-first-difference :foreground (funcall text 'fg-bright))
       (funcall face 'completions-annotations :foreground (funcall dim 'fg-muted))
       (funcall face 'completions-highlight :background (funcall v 'selection)))

@@ -105,6 +105,13 @@
       (dolist (bg (list (funcall slot 'glass) (funcall slot 'selection)))
         (romacs-should (>= (romacs-color-contrast (romacs-theme-test--fg faces 'romacs-complete-match) bg) 4.5)))
       (romacs-should (>= (romacs-color-contrast (romacs-theme-test--fg faces 'completions-common-part) (funcall slot 'selection)) 4.5))
+      ;; Keys: bold, fixed-pitch, no background or box, readable in help
+      ;; (the default background), on popups and on the completion layer.
+      (romacs-should (equal (romacs-theme-test--attribute faces 'help-key-binding :inherit) '(bold fixed-pitch)))
+      (dolist (attribute '(:background :box))
+        (romacs-should (not (plist-member (cdr (car (car (cdr (assq 'help-key-binding faces))))) attribute))))
+      (dolist (bg (list (funcall slot 'bg) (funcall slot 'bg-alt) (funcall slot 'glass)))
+        (romacs-should (>= (romacs-color-contrast (romacs-theme-test--fg faces 'help-key-binding) bg) 4.5)))
       ;; The mode line's states on its band.
       (dolist (face '(romacs-mode-line-error romacs-mode-line-warning romacs-mode-line-ok romacs-mode-line-state
                       romacs-mode-line-dim romacs-mode-line-bright))
