@@ -2088,6 +2088,8 @@ unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
 #[inline(never)]
 fn leave_native(e: &mut Engine<'_>) {
     if let Some(mark) = e.native_mark.take() { e.vm.trace_leave(mark); }
+    // The native code made big payloads: poll, and collect if due, soon.
+    if std::mem::take(&mut e.vm.collect_poll) { e.budget = 0; }
 }
 #[inline(never)]
 fn leave_call(e: &mut Engine<'_>, mark: usize) {

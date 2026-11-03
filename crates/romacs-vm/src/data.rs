@@ -7,6 +7,21 @@ pub(crate) use crate::bool_vector::BoolVector;
 #[path = "string_cursor_tests.rs"]
 mod string_cursor_tests;
 
+/// Payload bytes between the engine's polls for a collection
+/// (`Vm::collect_poll').
+const POLL_PAYLOAD: usize = 256 << 10;
+
+/// The bytes OBJECT holds beyond its own slot, as GNU charges them to the
+/// next collection: a string's text, a vector's or record's slots.
+fn payload_bytes(object: &Object) -> usize {
+    match object {
+        Object::String(s) | Object::RawString(s) => s.bytes.len(),
+        Object::Bytes(bytes) => bytes.len(),
+        Object::Vector(slots) | Object::Record(slots) => slots.len() * std::mem::size_of::<Value>(),
+        _ => 0,
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum Object {
     SyntaxTable(std::collections::BTreeMap<u32, romacs_regex_engine::SyntaxClass>),
@@ -396,6 +411,9 @@ impl Vm {
     }
     pub(super) fn allocate_object(&mut self, object: Object) -> Value {
         if let Some(referrers) = &mut self.referrers { referrers.list(self.objects.len(), &object); }
+        let before = self.gc_payload_bytes;
+        self.gc_payload_bytes = before.saturating_add(payload_bytes(&object));
+        self.collect_poll |= self.gc_payload_bytes / POLL_PAYLOAD != before / POLL_PAYLOAD;
         self.objects.push(object);
         Value::reference(self.objects.len(), 0)
     }

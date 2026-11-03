@@ -308,7 +308,8 @@ impl Vm {
     /// (at least 80000 bytes) or, when `gc-cons-percentage' is a float, that
     /// fraction (scaled, PERCENTAGE_SCALE, and clamped, MAX_SCALED_PERCENTAGE)
     /// of the live heap plus half the allocation since. Allocation is counted
-    /// in objects charged CONS_BYTES each; the live heap is what a collection
+    /// in objects charged CONS_BYTES each, plus the payload bytes (string
+    /// text, vector slots) made since; the live heap is what a collection
     /// traverses, retained objects and compiled code units. Both variables
     /// are read live, so binding them takes effect at once.
     pub(crate) fn collection_due(&self) -> bool {
@@ -324,7 +325,8 @@ impl Vm {
     /// rule `A >= S (L + A/2)' over the live heap L is `A >= S L / (1 - S/2)',
     /// S being below 2.
     pub(crate) fn collection_budget(&self) -> (f64, f64) {
-        let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64;
+        let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64
+            + (self.gc_payload_bytes / CONS_BYTES as usize) as f64;
         // An embedder's floor overrides, as GNU's memory-full state does.
         if let Some(floor) = self.gc_floor {
             return (allocated, self.gc_retained.saturating_mul(2).max(floor).saturating_sub(self.gc_retained) as f64);
@@ -930,6 +932,8 @@ impl Vm {
         // A completely live arena needs no forwarding table or rewrite pass.
         if pads == 0 && marked == private_before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
             self.gc_retained = self.heap_objects();
+            self.gc_payload_bytes = 0;
+            self.collect_poll = false;
             self.gc_stats.collections += 1;
             return;
         }
@@ -1149,6 +1153,8 @@ impl Vm {
         self.closures
             .shrink_to(self.closures.len().saturating_mul(2).max(1024));
         self.gc_retained = self.heap_objects();
+        self.gc_payload_bytes = 0;
+        self.collect_poll = false;
         self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
     }
