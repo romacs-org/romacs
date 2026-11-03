@@ -18,7 +18,9 @@ network is touched; the mail sync command is never run.
 usage: notmuch_parity_live.py --romacs BIN [--gnu EMACS] --output DIR
                               [--workflow NAME]... [--snippet FILE [--accounts-variable NAME]]
 
-Workflows: `read' (hello, a saved search, motion, tagging, archiving,
+Workflows: `controls' (a search whose headers carry control characters,
+no-break spaces and emoji: M->, M-<, scrolling and recentering),
+`read' (hello, a saved search, motion, tagging, archiving,
 notmuch-show with HTML parts, notmuch-tree), `compose-send' (a new mail
 with address completion, an attachment and a saved draft, sent over
 STARTTLS) and `reply-send' (a reply from the identity it was addressed to;
@@ -209,7 +211,24 @@ REPLY_SEND = [
          trigger=[C('c'), C('c')], ready=f'(and (not {COMPOSE}) {SENT(lisp_string("001.eml"))})', settle=2),
 ]
 
-WORKFLOWS = {'read': READ, 'compose-send': COMPOSE_SEND, 'reply-send': REPLY_SEND}
+# Headers with control characters, no-break spaces and emoji: motion to
+# the ends and scrolling keep point and the window start as GNU's.
+CONTROLS = [
+    key('hello', [C('x'), T('m')], HELLO),
+    key('search-prompt', [T('s')], MINIBUFFER),
+    typed('search', 'tag:controls', [K('Return')], SEARCH, settle=1),
+    key('end', [M('>')], SEARCH),
+    key('beginning', [M('<')], SEARCH),
+    key('end-again', [M('>')], SEARCH),
+    key('scroll-back', [M('v')], SEARCH),
+    key('scroll', [C('v')], SEARCH),
+    key('beginning-again', [M('<')], SEARCH),
+    key('next', [T('n')], SEARCH),
+    key('recenter', [C('l')], SEARCH),
+    key('quit-search', [T('q')], HELLO),
+]
+
+WORKFLOWS = {'read': READ, 'compose-send': COMPOSE_SEND, 'reply-send': REPLY_SEND, 'controls': CONTROLS}
 
 
 def normalised_mail(engine):

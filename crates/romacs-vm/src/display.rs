@@ -1713,6 +1713,19 @@ impl Vm {
             if !self.overlay_applies_to(overlay, window) { continue; }
             for key in keys { found |= self.overlay_get(overlay, key)? != Value::NIL; }
         }
+        // A character GNU shows as an escape, a control sequence, a box or a
+        // display table's glyphs: the elements carry them, each glyph in
+        // its own face, for the host to paint and measure as GNU shows them.
+        if !found {
+            // Printable ASCII, newlines and TABs show as themselves: only
+            // other bytes, or a display table, need the iterator's look.
+            let Object::Buffer(b) = self.object(buffer)? else { return Ok(false) };
+            let plain = b.as_str().as_bytes()[shown.start..shown.end].iter().all(|&c| (0x20..0x7f).contains(&c) || c == b'\n' || c == b'\t');
+            let tables = ["buffer-display-table", "standard-display-table"].into_iter()
+                .map(|name| { let slot = self.slot(name); self.value_in_buffer(slot, buffer) })
+                .any(|v| v.is_ok_and(|v| v != Value::NIL && v != Value::UNBOUND));
+            if !plain || tables { found = crate::prim::window_text_shows_glyphs(self, window, shown.start, shown.end).unwrap_or(false); }
+        }
         Ok(found)
     }
     /// Record SNAPSHOT as its window's last publication.
@@ -2381,7 +2394,7 @@ impl Vm {
                     key: crate::prim::FaceKey, at: Option<usize>) -> Result<FaceHandle> {
         let (string, charpos, glyph) = match key {
             crate::prim::FaceKey::Buffer(charpos) => (None, charpos, Value::NIL),
-            crate::prim::FaceKey::String { string, strpos, charpos, overlay } => (Some((string, strpos, overlay)), charpos, Value::NIL),
+            crate::prim::FaceKey::String { string, strpos, charpos, overlay, glyph } => (Some((string, strpos, overlay)), charpos, glyph),
             crate::prim::FaceKey::Glyph { face, charpos } => (None, charpos, face),
         };
         let at = match at {
@@ -2424,15 +2437,16 @@ impl Vm {
             let handle = self.layered_face(table, faces, sources, &layers);
             sources.run = (at, next, handle, layers);
         }
-        if glyph != Value::NIL {
+        let Some((string, strpos, overlay)) = string else {
+            if glyph == Value::NIL { return Ok(sources.run.2); }
             let layers: Vec<Value> = std::iter::once(glyph).chain(sources.run.3.iter().copied()).collect();
             return Ok(self.layered_face(table, faces, sources, &layers));
-        }
-        let Some((string, strpos, overlay)) = string else { return Ok(sources.run.2) };
+        };
         let own = self.property_textget(string, strpos as i64, sources.face).map_err(crate::forwarded::fault_text)?;
         let base = if overlay { &sources.run.3[sources.run.3.len() - 1..] } else { &sources.run.3[..] };
-        if own == Value::NIL && !overlay { return Ok(sources.run.2); }
-        let layers: Vec<Value> = std::iter::once(own).chain(base.iter().copied()).collect();
+        if own == Value::NIL && !overlay && glyph == Value::NIL { return Ok(sources.run.2); }
+        // A string's glyph shows in its own face over the string's.
+        let layers: Vec<Value> = (glyph != Value::NIL).then_some(glyph).into_iter().chain(std::iter::once(own)).chain(base.iter().copied()).collect();
         Ok(self.layered_face(table, faces, sources, &layers))
     }
     /// The face of the face references LAYERS, the first taking precedence.

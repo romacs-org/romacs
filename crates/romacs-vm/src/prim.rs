@@ -1775,6 +1775,10 @@ pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i
     Leaf::new(vm).window_shown_elements(window, from, to)
 }
 
+pub(crate) fn window_text_shows_glyphs(vm: &mut Vm, window: Value, from: usize, to: usize) -> std::result::Result<bool, Fault> {
+    Leaf::new(vm).window_text_shows_glyphs(window, from, to)
+}
+
 /// The line numbers WINDOW shows from its start (Leaf::window_line_numbers).
 pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
     Leaf::new(vm).window_line_numbers(window)

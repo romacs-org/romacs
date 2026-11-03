@@ -19,6 +19,11 @@ pub(super) use romacs_layout_input::LineWrap as Wrap;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Method { Buffer, Vector { last: bool, buffer: bool }, String, Stretch }
 
+/// How a glyphless character shows (`glyphless-char-display'): a thin
+/// space, an empty box, or a box holding its code or an ACRONYM string.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum Glyphless { ThinSpace, EmptyBox, HexCode, Acronym(crate::Value) }
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum Shape {
     /// A character glyph WIDTH columns wide; a newline is zero wide.
@@ -36,7 +41,7 @@ pub(super) enum Shape {
     Align { target: i64 },
     /// A glyphless character shown as WIDTH columns (term.c
     /// produce_glyphless_glyph).
-    Glyphless { width: i64 },
+    Glyphless { width: i64, c: u32, how: Glyphless },
     /// `:relative-width' FACTOR of a TAB, whose width depends on x.
     TabStretch { factor: f64 },
     /// `:relative-width' FACTOR of the glyph C would make, in pixels once
@@ -67,6 +72,10 @@ pub(super) struct Elem {
     /// A glyph of the ellipsis that stands for invisible text, not of the
     /// character at CHARPOS (or STRPOS), with its glyph code's face, else nil.
     pub ellipsis: Option<crate::Value>,
+    /// A display vector glyph's own face, merged over the text's: the
+    /// `escape-glyph' of an escape or control sequence, `nobreak-space' or
+    /// `nobreak-hyphen', or a display table glyph code's face; else nil.
+    pub face: Option<crate::Value>,
     /// A stretch's shape with no line number produced on its row, where
     /// that differs.
     pub unnumbered: Option<Shape>,
@@ -211,7 +220,7 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
     let (width, glyphs) = match e.shape {
         Shape::Glyph { c: 10, .. } => (0, 0),
         Shape::Pixel { c, width, height: h } => { height = h; if c == 10 { (0, 0) } else { (width, 1) } }
-        Shape::Glyph { width, .. } | Shape::Glyphless { width } => (width, width),
+        Shape::Glyph { width, .. } | Shape::Glyphless { width, .. } => (width, width),
         Shape::Tab => { let spaces = tab_spaces(cx, it); (spaces, spaces) }
         Shape::PixelTab { space, height: h } => { height = h; (pixel_tab(cx, it, space), 1) }
         Shape::TabStretch { factor } => stretch(cx, it, e, (factor * tab_spaces(cx, it) as f64) as i64, false),

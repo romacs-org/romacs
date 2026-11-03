@@ -5,7 +5,7 @@
 //! then the characters, each classified as get_next_display_element and
 //! term.c produce_glyphs do. The window's buffer is current throughout.
 use super::*;
-use super::display_motion::{Elem, Elements, Method, Shape, Slot, R};
+use super::display_motion::{Elem, Elements, Glyphless, Method, Shape, Slot, R};
 use crate::coordinates::{ByteOffset, CharOffset};
 use crate::data::Object;
 use romacs_regex_engine::emacs_char::{cat_eq, UnicodeCategory as Category};
@@ -74,7 +74,7 @@ struct Syms {
     slice: Value, space_width: Value, height: Value, raise: Value, min_width: Value, width: Value,
     relative_width: Value, align_to: Value, text: Value, left: Value, right: Value, center: Value,
     scroll_bar: Value, plus: Value, minus: Value, zero_width: Value, thin_space: Value, empty_box: Value,
-    hex_code: Value,
+    hex_code: Value, escape_glyph: Value, nobreak_space: Value, nobreak_hyphen: Value,
 }
 
 fn fault(message: &str) -> Fault { Fault::Error(message.into()) }
@@ -458,7 +458,7 @@ impl<'l, 'a> Source<'l, 'a> {
             Some(vector) => self.leaf.vector_values(vector).unwrap_or_default(),
             None => vec![Value::integer(0x2e).map_err(Fault::Error)?; 3],
         };
-        let glyphs: Vec<u32> = codes.iter().map(|&g| self.glyph_char(g)).collect();
+        let glyphs: Vec<(u32, Option<Value>)> = codes.iter().map(|&g| (self.glyph_char(g), None)).collect();
         let first = self.slots.len();
         self.vector(&glyphs, origin, buffer, true)?;
         // Each glyph in its code's face (GLYPH_CODE_FACE), by `face-id'.
@@ -497,14 +497,21 @@ impl<'l, 'a> Source<'l, 'a> {
 
     /// Glyphs from a display vector, each its own element: an ELLIPSIS, or
     /// the glyphs the character at ORIGIN shows as.
-    fn vector(&mut self, glyphs: &[u32], origin: Origin, buffer: bool, ellipsis: bool) -> R<()> {
-        for (k, &g) in glyphs.iter().enumerate() {
+    /// Each glyph comes with its own face, if any.
+    fn vector(&mut self, glyphs: &[(u32, Option<Value>)], origin: Origin, buffer: bool, ellipsis: bool) -> R<()> {
+        for (k, &(g, face)) in glyphs.iter().enumerate() {
             let shape = self.glyph_shape(g)?;
             let method = Method::Vector { last: k + 1 == glyphs.len(), buffer };
             self.emit(Elem { shape, method, charpos: origin.charpos, whitespace: matches!(g, 0x20 | 0x09) || origin.whitespace_under,
-                text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: ellipsis.then_some(Value::NIL), unnumbered: None });
+                text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: ellipsis.then_some(Value::NIL),
+                face, unnumbered: None });
         }
         Ok(())
+    }
+    /// GLYPH_CODE_FACE: the face a glyph code names by `face-id', if any.
+    fn glyph_face(&mut self, glyph: Value) -> Option<Value> {
+        let id = match self.leaf.pair(glyph) { Some((_, face)) => face.integer_value(), None => glyph.integer_value().map(|g| g >> 22) };
+        id.filter(|&id| id > 0).map(|id| self.leaf.face_named_by_id(id))
     }
     /// produce_glyphs for a glyph character.
     fn glyph_shape(&mut self, c: u32) -> R<Shape> {
@@ -526,14 +533,14 @@ impl<'l, 'a> Source<'l, 'a> {
         if let Some(table) = self.look.display_table {
             let entry = self.leaf.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
             if let Ok(items) = self.leaf.vector_values(entry) {
-                let glyphs: Vec<u32> = items.into_iter().map(|g| self.glyph_char(g)).collect();
+                let glyphs: Vec<(u32, Option<Value>)> = items.into_iter().map(|g| (self.glyph_char(g), self.glyph_face(g))).collect();
                 return self.vector(&glyphs, origin, buffer, false);
             }
         }
-        if let Some(width) = self.glyphless(c)? {
-            if width > 0 {
-                self.emit(Elem { shape: Shape::Glyphless { width }, method: plain, charpos: origin.charpos,
-                    whitespace: origin.whitespace_under, text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, unnumbered: None });
+        if let Some((width, how)) = self.glyphless(c)? {
+            if let Some(how) = how.filter(|_| width > 0) {
+                self.emit(Elem { shape: Shape::Glyphless { width, c, how }, method: plain, charpos: origin.charpos,
+                    whitespace: origin.whitespace_under, text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, face: None, unnumbered: None });
             }
             return Ok(());
         }
@@ -544,47 +551,61 @@ impl<'l, 'a> Source<'l, 'a> {
         let space = nobreak && category.is_some_and(|k| cat_eq(k, Category::SpaceSeparator));
         let hyphen = nobreak && matches!(c, 0xad | 0x2010 | 0x2011);
         let escape = self.table_glyph(2).unwrap_or(0x5c);
-        let glyphs = if ascii_control && self.look.ctl_arrow {
-            Some(vec![self.table_glyph(3).unwrap_or(0x5e), c ^ 0x40])
+        // get_next_display_element: an escape or control sequence shows in
+        // the escape or control glyph's own face when its display table
+        // slot gives one, else in `escape-glyph'; a no-break character in
+        // `nobreak-space' or `nobreak-hyphen'; merged over the text's.
+        let slot_face = |source: &mut Self, slot: usize| {
+            let glyph = source.look.display_table.map(|t| source.extra(t, slot)).unwrap_or(Value::NIL);
+            source.glyph_face(glyph).unwrap_or(source.syms.escape_glyph)
+        };
+        let glyphs: Option<(Vec<u32>, Value)> = if ascii_control && self.look.ctl_arrow {
+            Some((vec![self.table_glyph(3).unwrap_or(0x5e), c ^ 0x40], slot_face(self, 3)))
         } else if (space || hyphen) && self.look.nobreak == Value::TRUE {
-            Some(vec![if !self.look.nobreak_ascii { c } else if space { 0x20 } else { 0x2d }])
+            Some((vec![if !self.look.nobreak_ascii { c } else if space { 0x20 } else { 0x2d }],
+                  if space { self.syms.nobreak_space } else { self.syms.nobreak_hyphen }))
         } else if space || hyphen {
-            Some(vec![escape, if space { 0x20 } else { 0x2d }])
+            Some((vec![escape, if space { 0x20 } else { 0x2d }], slot_face(self, 2)))
         } else if ascii_control || (nonascii && (romacs_regex_engine::emacs_char::char_byte8_p(c) || !printable(category))) {
             let code = if romacs_regex_engine::emacs_char::char_byte8_p(c) { c & 0xff } else { c };
             let digits = if self.look.raw_hex { format!("x{code:02x}") } else { format!("{code:03o}") };
-            Some(std::iter::once(escape).chain(digits.bytes().map(u32::from)).collect())
+            Some((std::iter::once(escape).chain(digits.bytes().map(u32::from)).collect(), slot_face(self, 2)))
         } else {
             None
         };
-        if let Some(glyphs) = glyphs { return self.vector(&glyphs, origin, buffer, false); }
+        if let Some((glyphs, face)) = glyphs {
+            let glyphs: Vec<(u32, Option<Value>)> = glyphs.into_iter().map(|g| (g, Some(face))).collect();
+            return self.vector(&glyphs, origin, buffer, false);
+        }
         let shape = match c {
             0x09 => Shape::Tab,
             0x0a => Shape::Glyph { c, width: 0 },
             _ => self.glyph_shape(c)?,
         };
         self.emit(Elem { shape, method: plain, charpos: origin.charpos, whitespace: matches!(c, 0x20 | 0x09) || origin.whitespace_under,
-            text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, unnumbered: None });
+            text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, face: None, unnumbered: None });
         Ok(())
     }
 
     /// lookup_glyphless_char_display and term.c produce_glyphless_glyph:
-    /// the columns a glyphless character takes, 0 for `zero-width', or
-    /// None when C displays normally.
-    fn glyphless(&mut self, c: u32) -> R<Option<i64>> {
+    /// the columns a glyphless character takes and how it shows, 0 (and
+    /// no look) for `zero-width', or None when C displays normally.
+    fn glyphless(&mut self, c: u32) -> R<Option<(i64, Option<Glyphless>)>> {
         let table = self.look.glyphless;
         let has_extra = matches!(self.leaf.vm.object_if(table), Some(Object::CharTable(t)) if !t.extras.is_empty());
         if !has_extra { return Ok(None); }
         let mut method = self.leaf.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
-        if let Some((_, text)) = self.leaf.pair(method) { method = text; }
+        // (GRAPHICAL . TEXT): a window-system frame's, else a terminal's.
+        if let Some((graphical, text)) = self.leaf.pair(method) { method = if self.view.pixels { graphical } else { text }; }
         let s = self.syms;
         Ok(if method == Value::NIL { None }
-            else if method == s.zero_width { Some(0) }
-            else if method == s.thin_space { Some(1) }
-            else if method == s.empty_box { Some(self.leaf.character_width(c)?.clamp(1, 4) + 2) }
-            else if method == s.hex_code { Some(if c < 0x10000 { 6 } else { 8 }) }
+            else if method == s.zero_width { Some((0, None)) }
+            else if method == s.thin_space { Some((1, Some(Glyphless::ThinSpace))) }
+            else if method == s.empty_box { Some((self.leaf.character_width(c)?.clamp(1, 4) + 2, Some(Glyphless::EmptyBox))) }
+            else if method == s.hex_code { Some((if c < 0x10000 { 6 } else { 8 }, Some(Glyphless::HexCode))) }
             else if let Some(view) = self.leaf.vm.str_view(method) {
-                if view.chars == 1 { Some(1) } else { Some(view.bytes().iter().take_while(|b| b.is_ascii()).take(6).count() as i64 + 2) }
+                let width = if view.chars == 1 { 1 } else { view.bytes().iter().take_while(|b| b.is_ascii()).take(6).count() as i64 + 2 };
+                Some((width, Some(Glyphless::Acronym(method))))
             } else { None })
     }
 
@@ -675,7 +696,7 @@ impl<'l, 'a> Source<'l, 'a> {
                 self.view.lnum = lnum;
                 let unnumbered = Some(unnumbered?).filter(|&s| s != shape);
                 self.emit(Elem { shape, method: Method::Stretch, charpos: origin.charpos, whitespace: origin.whitespace_under,
-                    text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, unnumbered });
+                    text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, face: None, unnumbered });
                 Ok(())
             }
         }
@@ -887,6 +908,40 @@ impl Elements for Source<'_, '_> {
     }
 }
 
+impl Leaf<'_> {
+    /// Whether the current buffer's bytes FROM..TO hold a character GNU's
+    /// iterator shows as other glyphs than itself (get_next_display_element):
+    /// a control or escape sequence, a raw byte, a no-break character, a
+    /// glyphless character; or whether a display table maps characters or
+    /// sets the escape or control glyph.
+    pub(crate) fn text_shows_glyphs(&mut self, from: usize, to: usize) -> R<bool> {
+        let look = Look::new(self)?;
+        if let Some(table) = look.display_table
+            && let Some(Object::CharTable(t)) = self.vm.object_if(table)
+            && (t.parent != Value::NIL || !t.all_nil() || t.extras.get(2..4).is_some_and(|s| s.iter().any(|&v| v != Value::NIL))) {
+            return Ok(true);
+        }
+        let glyphless = match self.vm.object_if(look.glyphless) { Some(Object::CharTable(t)) if !t.extras.is_empty() => Some(look.glyphless), _ => None };
+        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else { return Ok(false) };
+        let text = &b.as_str()[from.min(b.as_str().len())..to.min(b.as_str().len())];
+        let mut special = vec![];
+        for (at, ch) in text.char_indices() {
+            let c = ch as u32;
+            if (0x20..0x7f).contains(&c) || c == 0x0a || c == 0x09 { continue; }
+            if c < 0x20 || c == 0x7f || b.is_raw_at(from + at) { return Ok(true); }
+            special.push(c);
+        }
+        for c in special {
+            let category = romacs_regex_engine::emacs_char::char_general_category(c);
+            let nobreak = look.nobreak != Value::NIL
+                && (category.is_some_and(|k| cat_eq(k, Category::SpaceSeparator)) || matches!(c, 0xad | 0x2010 | 0x2011));
+            if nobreak || (0x80..0xa0).contains(&c) || !printable(category) { return Ok(true); }
+            if let Some(table) = glyphless && self.vm.char_table_get(table, c as usize).map_err(Fault::Error)? != Value::NIL { return Ok(true); }
+        }
+        Ok(false)
+    }
+}
+
 impl Look {
     fn new(leaf: &mut Leaf<'_>) -> R<Self> {
         let var = |leaf: &mut Leaf<'_>, name: &str| -> R<Value> {
@@ -916,7 +971,7 @@ impl Syms {
             slice: i("slice"), space_width: i("space-width"), height: i("height"), raise: i("raise"), min_width: i("min-width"),
             width: i(":width"), relative_width: i(":relative-width"), align_to: i(":align-to"), text: i("text"), left: i("left"),
             right: i("right"), center: i("center"), scroll_bar: i("scroll-bar"), plus: i("+"), minus: i("-"),
-            zero_width: i("zero-width"), thin_space: i("thin-space"), empty_box: i("empty-box"), hex_code: i("hex-code"),
+            zero_width: i("zero-width"), thin_space: i("thin-space"), empty_box: i("empty-box"), hex_code: i("hex-code"), escape_glyph: i("escape-glyph"), nobreak_space: i("nobreak-space"), nobreak_hyphen: i("nobreak-hyphen"),
         }
     }
 }
