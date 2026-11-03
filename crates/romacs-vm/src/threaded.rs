@@ -4262,11 +4262,11 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
 }
 
 #[cfg(test)]
-#[cfg(test)]
 thread_local! {
     /// The engine's polls (`poll_resume') on this thread, for tests.
     pub(crate) static POLLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
+#[cfg(test)]
 #[path = "threaded_reader_gc_tests.rs"]
 mod reader_gc_tests;
 
