@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "a5308c353d6a0afb6d29ed90e01561f91f574e15a6540561c0c7d1f4fd9943bb",
+  "source_fingerprint": "5e8b7d5ab14ba7a887a904a2f4bc1213bbc5984f93b7f57d5372113cc7091100",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1288,
-  "parsed_vm2_only": 1288
+  "parsed_total": 1289,
+  "parsed_vm2_only": 1289
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -898,7 +898,7 @@
   "color-values-from-color-spec": {
    "name": "color-values-from-color-spec",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:817"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:863"
   },
   "combine-after-change-execute": {
    "name": "combine-after-change-execute",
@@ -1371,7 +1371,7 @@
   "display-supports-face-attributes-p": {
    "name": "display-supports-face-attributes-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:586"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:632"
   },
   "do-auto-save": {
    "name": "do-auto-save",
@@ -1546,12 +1546,12 @@
   "face-attribute-relative-p": {
    "name": "face-attribute-relative-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:213"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:259"
   },
   "face-font": {
    "name": "face-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:148"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:194"
   },
   "fboundp": {
    "name": "fboundp",
@@ -1889,7 +1889,7 @@
   "frame--face-hash-table": {
    "name": "frame--face-hash-table",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:728"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:774"
   },
   "frame--set-was-invisible": {
    "name": "frame--set-was-invisible",
@@ -2502,7 +2502,7 @@
   "internal-get-lisp-face-attribute": {
    "name": "internal-get-lisp-face-attribute",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:196"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:242"
   },
   "internal-handle-focus-in": {
    "name": "internal-handle-focus-in",
@@ -2512,12 +2512,12 @@
   "internal-lisp-face-attribute-values": {
    "name": "internal-lisp-face-attribute-values",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:221"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:267"
   },
   "internal-lisp-face-equal-p": {
    "name": "internal-lisp-face-equal-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:746"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:792"
   },
   "internal-lisp-face-p": {
    "name": "internal-lisp-face-p",
@@ -2533,6 +2533,11 @@
    "name": "internal-make-var-non-special",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/leaf_variables.rs:3"
+  },
+  "internal-merge-in-global-face": {
+   "name": "internal-merge-in-global-face",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:148"
   },
   "internal-set-alternative-font-family-alist": {
    "name": "internal-set-alternative-font-family-alist",
@@ -2552,7 +2557,7 @@
   "internal-set-lisp-face-attribute": {
    "name": "internal-set-lisp-face-attribute",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:581"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:627"
   },
   "internal-show-cursor": {
    "name": "internal-show-cursor",
@@ -3169,7 +3174,7 @@
   "merge-face-attribute": {
    "name": "merge-face-attribute",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:833"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:879"
   },
   "message": {
    "name": "message",
@@ -4161,7 +4166,7 @@
   "romacs--frame-shares-faces-p": {
    "name": "romacs--frame-shares-faces-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:737"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:783"
   },
   "romacs--frozen-regions": {
    "name": "romacs--frozen-regions",

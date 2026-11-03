@@ -18,6 +18,14 @@ are unspecified/default-equal, and default height 1 makes their height
 coverage weak. Do not describe those counts as independent meaningful
 height proofs.
 
+`gnu/fixtures/rum-configured.eld` is the look the stock theme `default`
+ports: modus-themes 5.3.0 (`gnu/inputs/modus-themes.el`), Omarchy's Rum
+theme file (`gnu/inputs/rum-emacs.el`), the reference configuration's
+Modus options and font faces, and notmuch's faces, captured by
+`gnu/rum-configured.el` in `dump.el`'s regime. Regenerate with
+`gnu/regenerate-rum.sh` (pinned GNU, `NOTMUCH_LISP` naming notmuch's Lisp).
+`romacs-vm-gui/tests/romacs-theme-rum-test.el` compares every face.
+
 `gnu/redisplay.el` instead calls GNU C `face-attributes-as-vector` over
 non-unit defaults 100, 113, 97, 120; `gnu/redisplay.eld` records C-effective,
 C-realized and Lisp-query heights separately. Regeneration:

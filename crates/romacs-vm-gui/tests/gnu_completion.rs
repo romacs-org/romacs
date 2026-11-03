@@ -450,18 +450,31 @@ fn a_theme_switch_recomputes_the_background_mode() {
 }
 
 /// rlisp/romacs-theme.el's themes under Custom (tests/romacs-theme-custom-test.el):
-/// the session starts in the stock theme `default', Rum's look exactly;
+/// the session starts in the stock theme `default';
 /// defining a theme changes no face; a colour scheme replaces the stock
 /// theme once; disabling it gives GNU's faces.
 #[test]
 fn romacs_theme_lisp_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-custom-test.el");
+}
+
+/// The stock theme is the configured Rum look, face for face
+/// (tests/romacs-theme-rum-test.el), in a session of its own: the
+/// comparison defines faces and realises them for a graphic display.
+#[test]
+fn romacs_theme_rum_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-rum-test.el");
+}
+
+/// FILE's `romacs-deftest's, in a fresh `--loadup' session.
+fn theme_lisp_tests_pass(file: &'static str) {
     let summary = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for file in ["rlisp/romacs-test.el", "crates/romacs-vm-gui/tests/romacs-theme-custom-test.el"] {
+        for file in ["rlisp/romacs-test.el", file] {
             vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
         }
         printed(&mut vm, "(let ((s (romacs-test-run t))) (format \"%S\" s))")

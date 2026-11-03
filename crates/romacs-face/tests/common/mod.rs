@@ -103,7 +103,9 @@ pub fn theme_names() -> Vec<String> {
         .expect("fixtures dir")
         .filter_map(|e| e.ok()?.file_name().into_string().ok())
         .filter_map(|n| n.strip_suffix(".eld").map(str::to_owned))
-        .filter(|n| n != "deffaces" && n != "nil" && n != "remap")
+        // Not theme dumps: the configured-Rum session oracle and the palette
+        // generator's output have their own tests.
+        .filter(|n| !matches!(n.as_str(), "deffaces" | "nil" | "remap" | "rum-configured" | "rum-generator"))
         .collect();
     names.sort();
     names

@@ -9,6 +9,24 @@
 
 (require 'romacs-theme)
 
+(defconst romacs-theme-test--fixtures
+  (expand-file-name "../../romacs-face/tests/gnu/fixtures/" (file-name-directory load-file-name))
+  "The GNU oracle's fixtures.")
+
+(romacs-deftest romacs-theme-the-modus-generator-is-modus-s ()
+  ;; rlisp/romacs-theme-modus.el's generator, on the stock theme's
+  ;; reference palette, answers as GNU with modus-themes 5.3.0 does, entry
+  ;; for entry (fixture rum-generator.eld).
+  (require 'romacs-theme-modus)
+  (let* ((fixture (with-temp-buffer
+                    (insert-file-contents (expand-file-name "rum-generator.eld" romacs-theme-test--fixtures))
+                    (read (current-buffer))))
+         (ours (romacs-theme-modus-generate-palette (plist-get fixture :base) 'warm
+                                                    romacs-theme-modus-vivendi-palette))
+         (theirs (plist-get fixture :palette)))
+    (romacs-should (= (length ours) (length theirs)))
+    (romacs-should (null (seq-remove (lambda (entry) (equal entry (assq (car entry) theirs))) ours)))))
+
 (defconst romacs-theme-test-dark
   '((mode dark) (bg "#1a1b26") (bg-dark "#16161e") (bg-darker "#101014") (bg-alt "#24283b")
     (fg "#c0caf5") (fg-dim "#565f89") (fg-light "#a9b1d6") (fg-bright "#ffffff")
@@ -29,29 +47,6 @@
                                          show-paren-mismatch romacs-pane-focus romacs-pane-border romacs-layer-glow
                                          romacs-landing-mark romacs-landing-word vertical-border))))
           (romacs-should (>= (romacs-color-contrast fg on) (if (memq (car row) dim) 3.0 4.5))))))))
-
-(defconst romacs-theme-test-rum
-  '((default "#d4c5a0" "#000000") (cursor nil "#9099d9") (mode-line "#d4c5a0" "#50269a")
-    (mode-line-inactive "#756b59" "#141414") (region nil "#3e4451") (highlight nil "#7030af")
-    (minibuffer-prompt "#d2b580" nil) (font-lock-keyword-face "#b395db" nil)
-    (font-lock-string-face "#aacb75" nil) (font-lock-comment-face "#756b59" nil)
-    (font-lock-function-name-face "#c28fea" nil) (font-lock-variable-name-face "#00a6a6" nil)
-    (font-lock-constant-face "#72b6e4" nil) (font-lock-type-face "#00b8ad" nil)
-    (font-lock-builtin-face "#d0a3e8" nil) (font-lock-warning-face "#e89e30" nil)
-    (link "#4cc9f0" nil) (error "#c97054" nil) (warning "#e89e30" nil) (success "#00b8ad" nil)
-    (romacs-comment "#756b59" nil) (romacs-code "#aacb75" nil) (romacs-result "#72b6e4" nil)
-    (fringe "#000000" "#000000") (window-divider "#000000" "#000000")
-    (window-divider-first-pixel "#000000" "#000000") (window-divider-last-pixel "#000000" "#000000")
-    (show-paren-match nil "#7030af") (romacs-layer-glow "#d48a20" nil))
-  "Rum's look, which the stock theme keeps: (FACE FOREGROUND BACKGROUND).")
-
-(romacs-deftest romacs-theme-the-stock-theme-is-rum-s-look ()
-  (romacs-should (equal custom-enabled-themes '(default)))
-  (require 'romacs-faces)
-  (dolist (row romacs-theme-test-rum)
-    (let ((face (nth 0 row)))
-      (when (nth 1 row) (romacs-should (equal (list face (face-attribute face :foreground nil t)) (list face (nth 1 row)))))
-      (when (nth 2 row) (romacs-should (equal (list face (face-attribute face :background nil t)) (list face (nth 2 row))))))))
 
 (defun romacs-theme-test--look ()
   (mapcar (lambda (face) (list face (face-attribute face :foreground nil t) (face-attribute face :background nil t)))
@@ -151,6 +146,20 @@
           (dolist (on (list (cdr (assq 'glass resolved)) (cdr (assq 'selection resolved))))
             (romacs-should (>= (romacs-color-contrast (funcall fg 'romacs-complete-match) on) 4.5))))))
     (romacs-should (equal custom-enabled-themes enabled))))
+
+(romacs-deftest romacs-theme-every-shipped-theme-has-no-fringe-strip ()
+  ;; Fringes, window dividers and the vertical border are the window
+  ;; background in every theme Romacs ships, so no strip shows beside a
+  ;; window, as the reference session's invisible dividers do.
+  (dolist (theme (mapcar #'car romacs-theme-bundled))
+    (load-theme theme t t)
+    (let* ((spec (lambda (face)
+                   (nth 3 (car (seq-filter (lambda (s) (and (eq (car s) 'theme-face) (eq (nth 1 s) face)))
+                                           (get theme 'theme-settings))))))
+           (attr (lambda (face key) (plist-get (cdr (car (funcall spec face))) key)))
+           (bg (funcall attr 'default :background)))
+      (dolist (face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border))
+        (romacs-should (equal (list theme face (funcall attr face :background)) (list theme face bg)))))))
 
 (romacs-deftest romacs-theme-a-variant-is-found-before-it-is-loaded ()
   (unwind-protect

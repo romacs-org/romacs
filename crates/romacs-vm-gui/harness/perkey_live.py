@@ -289,8 +289,11 @@ class Session:
         forms = ['(setq auto-save-timeout nil)']
         if self.args.classic:
             forms.append('(romacs-classic-chrome 1)')
-        if self.args.line_numbers:
-            forms.append(f'(progn (setq display-line-numbers-type (quote {self.args.line_numbers})) (display-line-numbers-mode 1))')
+        # Harnesses that build their own arguments (theme_live.py,
+        # isolates_live.py) number no lines.
+        numbers = getattr(self.args, 'line_numbers', None)
+        if numbers:
+            forms.append(f'(progn (setq display-line-numbers-type (quote {numbers})) (display-line-numbers-mode 1))')
         if self.args.populate:
             forms += ['(require (quote flymake))',
                       '(setq trusted-content :all flymake-no-changes-timeout nil flymake-start-on-save-buffer nil isearch-lazy-count t)',
