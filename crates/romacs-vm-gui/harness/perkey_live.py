@@ -37,6 +37,9 @@ blinking after the last phase's keys.
 
 With --classic the same M-: also turns `romacs-classic-chrome' on, so
 the session draws GNU's look instead of its panes (VM2-PANE-CHROME).
+With --line-numbers TYPE it also numbers the buffer's lines
+(`display-line-numbers-type' TYPE, e.g. relative), so the key phases pay
+for a line-number column redrawn as point moves.
 With --state, a `post-command-hook' installed by --eval records after
 every command the collections so far and their seconds (`gcs-done',
 `gc-elapsed') and the selected window's start, end, point and body and
@@ -52,7 +55,7 @@ with the region active.
 usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
                       [--record PHASE] [--tools DIR:DIR] [--classic] [--state]
-                      [--mode WxH] [--populate]
+                      [--mode WxH] [--populate] [--line-numbers TYPE]
 """
 import argparse
 import hashlib
@@ -286,6 +289,8 @@ class Session:
         forms = ['(setq auto-save-timeout nil)']
         if self.args.classic:
             forms.append('(romacs-classic-chrome 1)')
+        if self.args.line_numbers:
+            forms.append(f'(progn (setq display-line-numbers-type (quote {self.args.line_numbers})) (display-line-numbers-mode 1))')
         if self.args.populate:
             forms += ['(require (quote flymake))',
                       '(setq trusted-content :all flymake-no-changes-timeout nil flymake-start-on-save-buffer nil isearch-lazy-count t)',
@@ -548,10 +553,13 @@ def main():
     parser.add_argument('--record', choices=PHASES, help='after the first counted session, profile this phase')
     parser.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
     parser.add_argument('--classic', action='store_true', help="measure under `romacs-classic-chrome'")
+    parser.add_argument('--line-numbers', choices=('t', 'relative'), help='number the buffer\'s lines of this type')
     parser.add_argument('--populate', action='store_true', help='a Git-tracked flymake buffer, and a region phase')
     parser.add_argument('--state', action='store_true', help='record collections and the window around each phase')
     parser.add_argument('--mode', default='1600x1000', help="the output's size")
     args = parser.parse_args()
+    if args.line_numbers and args.regime != 'loadup':
+        parser.error('--line-numbers needs --regime loadup, whose M-: setup turns them on')
     args.binary = args.binary.resolve()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)

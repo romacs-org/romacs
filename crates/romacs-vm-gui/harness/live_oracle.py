@@ -16,6 +16,14 @@ WIDTH, HEIGHT = 400, 300
 SOURCE = '(with-current-buffer "*g1a*" (goto-char (point-max)) (insert "Δ"))'
 LABWC = os.environ.get("ROMACS_TEST_LABWC", "labwc")
 RANDR = os.environ.get("ROMACS_TEST_WLR_RANDR", "wlr-randr")
+# Init text for a harness that matches screen rows by their glyphs: an
+# interactive session's defaults number programming buffers' lines
+# (VM2-OOB-DEFAULTS), whose digits are ordinary text glyphs, so a harness
+# reading a programming buffer's rows turns the numbers off the way an init
+# does.
+NO_LINE_NUMBERS = """;; The rows this harness reads are the text's alone, no line-number column.
+(add-hook 'prog-mode-hook (lambda () (display-line-numbers-mode -1)) 90)
+"""
 RC_XML = '''<?xml version="1.0"?>
 <labwc_config>
   <core><gap>0</gap></core>
