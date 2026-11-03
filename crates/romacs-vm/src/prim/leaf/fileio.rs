@@ -65,6 +65,12 @@ impl Leaf<'_> {
     pub fn file_visits(&self) -> Vec<(Value, Vec<u8>, Option<(u64, u64)>, Option<Vec<u8>>)> {
         self.vm.file_visits()
     }
+    pub fn visit_truename(&self, buffer: Value) -> Option<Vec<u8>> {
+        self.vm.visit_truename(buffer)
+    }
+    pub fn visit_with_truename(&self, truename: &std::path::Path) -> Option<Value> {
+        self.vm.visit_with_truename(truename)
+    }
 
     pub fn fileio_sync_output(&self, file: &std::fs::File) -> std::io::Result<()> {
         use std::os::fd::AsRawFd as _;

@@ -203,6 +203,7 @@ or a repeat."
 
 (define-derived-mode romacs-agent-chat-mode fundamental-mode "Agent"
   "An agent session's transcript and composer."
+  (setq-local desktop-save-buffer #'romacs-agent-ui--desktop-save)
   (setq-local header-line-format '(:eval (romacs-agent-ui--header)))
   (setq-local buffer-invisibility-spec (list 'romacs-agent-output))
   (visual-line-mode 1))
@@ -224,6 +225,31 @@ or a repeat."
     (pop-to-buffer buffer)
     (goto-char (point-max))
     buffer))
+
+(defvar desktop-buffer-mode-handlers)
+
+;; A session outlives the editor in its supervisor, so a restored chat
+;; (desktop.el, warm-restart.el) carries only which session it shows and
+;; the composer's unsent text; the transcript replays from the journal.
+(defun romacs-agent-ui--desktop-save (_dirname)
+  "The session this chat shows and its composer's unsent text."
+  (list :session (romacs-agent-id romacs-agent-ui--session)
+        :draft (and (markerp romacs-agent-ui--end) (romacs-agent-ui--composer-text))))
+
+(defun romacs-agent-ui-desktop-restore (_file _name misc)
+  "The chat of MISC's session, made anew from its journal, with its draft."
+  (let ((id (plist-get misc :session)))
+    (unless (romacs-agent-get id) (romacs-agent-restore))
+    (when-let* ((session (romacs-agent-get id))
+                (buffer (save-window-excursion (romacs-agent-show session))))
+      (with-current-buffer buffer
+        (when-let* ((draft (plist-get misc :draft)))
+          (unless (string-empty-p draft)
+            (goto-char (point-max))
+            (insert draft))))
+      buffer)))
+
+(add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-chat-mode . romacs-agent-ui-desktop-restore))
 
 (defun romacs-agent-ui--replay (session)
   "Render SESSION's journal into the current chat buffer."

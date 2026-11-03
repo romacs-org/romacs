@@ -36,6 +36,15 @@ impl Leaf<'_> {
     pub fn lifecycle_live_p(&self, value: Value) -> bool {
         self.vm.live_buffer_value(value)
     }
+    /// F of BUFFER's whole text in GNU's internal form and whether it is
+    /// multibyte (a session image's blob, prims/session_image.rs).
+    pub fn with_buffer_text<T>(&self, buffer: Value, f: impl FnOnce(&[u8], bool) -> T) -> std::result::Result<T, Fault> {
+        match self.vm.object_if(buffer) {
+            Some(Object::Buffer(t)) => Ok(f(t.bytes(), true)),
+            Some(Object::ByteBuffer(b)) => Ok(f(&b.bytes, false)),
+            _ => Err(Fault::Wrong("bufferp", buffer)),
+        }
+    }
     /// F of BUFFER's whole text in GNU's internal form, as its gap holds it.
     pub fn with_buffer_internal_bytes<T>(&self, buffer: Value, f: impl FnOnce(&[u8]) -> T) -> std::result::Result<T, Fault> {
         match self.vm.object_if(buffer) {
@@ -67,6 +76,16 @@ impl Leaf<'_> {
         self.vm.rename_buffer_model(buffer, name).map_err(Fault::Error)
     }
     pub(crate) fn bury_buffer_model(&mut self, buffer: Value) { self.vm.bury_buffer_model(buffer); }
+    /// The buffer list with LEAD first, in that order, then every other
+    /// buffer in its present order: a whole order in one rebuild.
+    pub(crate) fn lead_buffer_order(&mut self, lead: &[Value]) {
+        let order = self.vm.buffer_order();
+        let present: std::collections::HashSet<u64> = order.iter().map(|b| b.0).collect();
+        let mut led = std::collections::HashSet::new();
+        let mut out: Vec<Value> = lead.iter().copied().filter(|b| present.contains(&b.0) && led.insert(b.0)).collect();
+        out.extend(order.into_iter().filter(|b| !led.contains(&b.0)));
+        self.vm.set_buffer_order(&out);
+    }
     /// get_random: 62 random bits from the VM's generator.
     pub(crate) fn random_bits(&mut self) -> u64 {
         self.vm.fence_random();

@@ -3053,6 +3053,16 @@ durable session continues on send."
 (defvar warm-restart-passive)
 (defvar warm-restart-activate-functions)
 
+(defvar hermes-chat--warm-restart-attaches nil
+  "Attachments of the chats restored passively, newest first.")
+
+(defun hermes-chat--warm-restart-activate ()
+  "Attach every chat restored passively, once the session is whole.
+One function serves every chat, so restoring many registers it once."
+  (let ((attaches (nreverse hermes-chat--warm-restart-attaches)))
+    (setq hermes-chat--warm-restart-attaches nil)
+    (mapc #'funcall attaches)))
+
 (defun hermes-chat--desktop-save (_dirname)
   "Return this chat's durable identity and draft as desktop.el data."
   (let ((input (hermes-chat--input-position))
@@ -3112,7 +3122,8 @@ otherwise for the next command loop."
       (unless (string-equal (buffer-name) name)
         (rename-buffer name t)))
     (if (bound-and-true-p warm-restart-passive)
-        (add-hook 'warm-restart-activate-functions attach t)
+        (progn (push attach hermes-chat--warm-restart-attaches)
+               (add-hook 'warm-restart-activate-functions #'hermes-chat--warm-restart-activate))
       (run-at-time 0 nil attach))
     buffer))
 

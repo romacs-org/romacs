@@ -396,6 +396,102 @@ thousandth a stack mark."
             (romacs-agent-ui--render it (list :type 'tool :state 'completed :id (format "t%d" i) :output "ok"
                                               :seq (+ 1 n i) :last t)))))
 
+;;;; Session images (rlisp/warm-restart.el)
+
+(defun scaling--session (n)
+  "N text buffers, and a private image directory."
+  (require 'warm-restart)
+  (setq warm-restart-directory (make-temp-file "scaling-images-" t))
+  (dolist (name (scaling--names "scaling-session" n))
+    (with-current-buffer (get-buffer-create name) (text-mode) (insert name "\nsecond line\n"))))
+
+;; An image of a session of N buffers written.
+(scaling-probe session-image-write :n 200
+  :setup (progn (scaling--session n) (expand-file-name "w.image" warm-restart-directory))
+  :body (warm-restart-write nil it))
+
+;; An image of N buffers restored into a session without them.
+(scaling-probe session-image-restore :n 200
+  :setup (progn (scaling--session n)
+                (let ((file (expand-file-name "r.image" warm-restart-directory)))
+                  (warm-restart-write nil file)
+                  (dolist (name (scaling--names "scaling-session" n)) (kill-buffer name))
+                  file))
+  :body (warm-restart-restore-image it))
+
+;; An image of N file buffers, every other one with unsaved text,
+;; restored into a session without them.
+(scaling-probe session-image-restore-files :n 100
+  :setup (let ((dir (make-temp-file "scaling-files-" t)) (create-lockfiles nil))
+           (scaling--session 0)
+           (dolist (name (scaling--names "scaling-file" n))
+             (let ((file (expand-file-name name dir)))
+               (with-temp-file file (insert name "\n"))
+               (with-current-buffer (find-file-noselect file)
+                 (when (cl-evenp (length (buffer-list))) (insert "unsaved\n")))))
+           (let ((image (expand-file-name "f.image" warm-restart-directory)))
+             (warm-restart-write nil image)
+             (dolist (buffer (buffer-list))
+               (when (buffer-file-name buffer)
+                 (with-current-buffer buffer (set-buffer-modified-p nil))
+                 (kill-buffer buffer)))
+             image))
+  :body (warm-restart-restore-image it))
+
+;; N Hermes chats restored through Hermes's own desktop handler beside N
+;; text buffers, then attached at activation (offline: no dashboard).
+(defun scaling--offline-hermes (function)
+  "Call FUNCTION with Hermes's dashboard transport off."
+  (cl-letf (((symbol-function 'hermes-chat--dashboard-default-transport-p) #'ignore))
+    (funcall function)))
+
+(scaling-probe session-image-restore-mixed :n 50
+  :setup (progn
+           (scaling--session n)
+           (add-to-list 'load-path (expand-file-name "hermes" (file-name-directory (locate-library "warm-restart"))))
+           (require 'hermes-chat)
+           (scaling--offline-hermes
+            (lambda ()
+              (let ((warm-restart-passive t) (warm-restart-activate-functions nil))
+                (dolist (name (scaling--names "scaling-chat" n))
+                  (hermes-chat-desktop-restore nil name (list :version 1 :session-id name :title name))))
+              (setq hermes-chat--warm-restart-attaches nil)))
+           (let ((file (expand-file-name "m.image" warm-restart-directory)))
+             (warm-restart-write nil file)
+             (dolist (buffer (buffer-list))
+               (when (string-match-p "\\`scaling-\\(chat\\|session\\)" (buffer-name buffer))
+                 (with-current-buffer buffer (set-buffer-modified-p nil))
+                 (let ((kill-buffer-query-functions nil)) (kill-buffer buffer))))
+             file))
+  :body (scaling--offline-hermes (lambda () (warm-restart-restore-image it))))
+
+;; The restore's lock pass over N modified file buffers.
+(scaling-probe session-image-locks :n 100
+  :setup (let ((dir (make-temp-file "scaling-locks-" t)))
+           (require 'warm-restart)
+           (mapcar (lambda (name)
+                     (let ((file (expand-file-name name dir)))
+                       (with-temp-file file (insert "text\n"))
+                       (with-current-buffer (let ((create-lockfiles nil)) (find-file-noselect file))
+                         (let ((create-lockfiles nil)) (insert "edit"))
+                         (current-buffer))))
+                   (scaling--names "scaling-lock" n)))
+  :body (warm-restart--lock it))
+
+;; The same pass when another editor holds every one of those locks.
+(scaling-probe session-image-locks-contended :n 100
+  :setup (let ((dir (make-temp-file "scaling-contended-" t)))
+           (require 'warm-restart)
+           (mapcar (lambda (name)
+                     (let ((file (expand-file-name name dir)))
+                       (with-temp-file file (insert "text\n"))
+                       (make-symbolic-link "someone@elsewhere.1:0" (expand-file-name (concat ".#" name) dir))
+                       (with-current-buffer (let ((create-lockfiles nil)) (find-file-noselect file))
+                         (let ((create-lockfiles nil)) (insert "edit"))
+                         (current-buffer))))
+                   (scaling--names "scaling-contended" n)))
+  :body (warm-restart--lock it))
+
 ;; Cursor motion in a truncated window, which places point's line for its
 ;; hscroll each redisplay: N faces defined, then N distinct faces on
 ;; point's line.  Setup returns the buffer: a step's timer runs in whatever

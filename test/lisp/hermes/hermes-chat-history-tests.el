@@ -1071,6 +1071,25 @@
               (should (= (- (point) (hermes-chat--input-position)) 4))))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
+(ert-deftest hermes-chat-desktop-restore-passive-registers-one-activation ()
+  "Chats restored passively share one activation function; each attaches."
+  (let (resumes buffers)
+    (hermes-test--with-resume-stub resumes
+      (unwind-protect
+          (let ((warm-restart-passive t)
+                (warm-restart-activate-functions nil))
+            (dolist (n '(1 2 3))
+              (push (hermes-chat-desktop-restore
+                     nil (format "*chat %d*" n)
+                     (list :version 1 :session-id (format "sid-%d" n) :title "T" :profile "work"))
+                    buffers))
+            (should (equal warm-restart-activate-functions '(hermes-chat--warm-restart-activate)))
+            (should-not resumes)
+            (mapc #'funcall warm-restart-activate-functions)
+            (should (equal (sort (mapcar #'car resumes) #'string<) '("sid-1" "sid-2" "sid-3")))
+            (should-not hermes-chat--warm-restart-attaches))
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b))) buffers)))))
+
 (ert-deftest hermes-chat-desktop-restore-without-session-starts-fresh-chat ()
   "A chat that never created a session restores as a draft with no resume."
   (let (resumes buffer)
