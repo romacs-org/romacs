@@ -107,6 +107,9 @@ def main():
         home = runtime / 'home'
         for d in ('config', 'cache', 'data', 'state'):
             (home / d).mkdir(parents=True)
+        # *scratch*'s rows are read as text: no line-number column.
+        (home / 'config' / 'romacs').mkdir()
+        (home / 'config' / 'romacs' / 'init.el').write_text(live.NO_LINE_NUMBERS)
         env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
                'XDG_RUNTIME_DIR': str(runtime), 'XDG_CONFIG_HOME': str(home / 'config'),
                'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_DATA_HOME': str(home / 'data'),
