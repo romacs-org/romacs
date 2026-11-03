@@ -1339,6 +1339,18 @@ pub struct Vm {
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
     gc_retained: usize,
+    /// Payload bytes (string text, vector slots) allocated since the last
+    /// collection, which GNU charges to `consing_until_gc' with the objects
+    /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
+    gc_payload_bytes: usize,
+    /// Payload since the last collection crossed another `POLL_PAYLOAD'
+    /// bytes: the engine polls, and collects if due, at its next jump or
+    /// call (`leave_native'), as GNU's maybe_gc runs at every call.
+    collect_poll: bool,
+    /// Vector and record slots the last collection kept, which it traced:
+    /// with `gc_retained', the live heap the proportional rule paces by, so
+    /// a big kept vector spaces out the collections that trace it.
+    gc_retained_slots: usize,
     /// Compiled code units (IR ops, lowered instructions) the last
     /// collection traced: with `gc_retained', what a collection traverses.
     gc_code: usize,
@@ -1515,6 +1527,9 @@ romacs_snapshot::snapshot_fields!(Vm {
     free_local_binding_slots,
     gc_stats,
     gc_retained,
+    gc_payload_bytes,
+    collect_poll,
+    gc_retained_slots,
     gc_code,
     gc_holds,
     running_engines,
@@ -1697,6 +1712,9 @@ impl Vm {
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_retained: 0,
+            gc_payload_bytes: 0,
+            collect_poll: false,
+            gc_retained_slots: 0,
             gc_code: 0,
             gc_floor: None,
             gc_holds: 0,
