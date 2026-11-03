@@ -134,3 +134,31 @@ fn assoc_string(cx, key: Value, list: Value; optional fold: Value) {
     }
     Ok(Value::NIL)
 }}
+
+defsubr! { name = "string-collate-lessp", gnu = "fns.c:603", effect = Reads,
+fn string_collate_lessp(cx, first: Value, second: Value; optional locale: Value, ignore_case: Value) {
+    Ok(if collate(cx, first, second, locale, ignore_case)?.is_lt() { Value::TRUE } else { Value::NIL })
+}}
+
+defsubr! { name = "string-collate-equalp", gnu = "fns.c:650", effect = Reads,
+fn string_collate_equalp(cx, first: Value, second: Value; optional locale: Value, ignore_case: Value) {
+    Ok(if collate(cx, first, second, locale, ignore_case)?.is_eq() { Value::TRUE } else { Value::NIL })
+}}
+
+/// sysdep.c str_collate over two strings or symbols' names, in LOCALE (a
+/// string) or the environment's; a unibyte string's characters are its bytes.
+fn collate(cx: &mut Leaf<'_>, first: Value, second: Value, locale: Value, ignore_case: Value) -> std::result::Result<Ordering, Fault> {
+    let codes = |cx: &mut Leaf<'_>, value: Value| -> std::result::Result<Vec<u32>, Fault> {
+        match cx.symbol_name(value) {
+            Ok(name) => Ok(name.chars().map(u32::from).collect()),
+            Err(_) => Ok(cx.string_view(value)?.chars().collect()),
+        }
+    };
+    let (a, b) = (codes(cx, first)?, codes(cx, second)?);
+    let locale = if locale == Value::NIL { None } else {
+        let bytes = cx.string_view(locale)?.bytes;
+        let end = bytes.iter().position(|&c| c == 0).unwrap_or(bytes.len());
+        Some(std::ffi::CString::new(&bytes[..end]).expect("no NUL before END"))
+    };
+    crate::locale_info::collate(&a, &b, locale.as_deref(), ignore_case != Value::NIL).map_err(Fault::Error)
+}

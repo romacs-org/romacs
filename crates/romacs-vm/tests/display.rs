@@ -37,6 +37,18 @@ fn point_only_mutation_changes_display_revision() {
         "point-only redraw"
     );
 }
+/// buffer-swap-text changes the shown text with no edit of the shown
+/// buffer: here its modification tick after the swap equals the one its
+/// last snapshot read, yet the window shows the other text.
+#[test]
+fn swapped_text_is_shown_although_the_tick_matches() {
+    let mut vm = Vm::new();
+    vm.eval_source(r#"(progn (setq swap-a (current-buffer)) (insert "a") (insert "aa") (setq swap-b (get-buffer-create "swap-b")) (with-current-buffer swap-b (insert "bbb")))"#).unwrap();
+    assert_eq!(vm.display_snapshot(640, 480).unwrap().text.utf8, "aaa");
+    vm.eval_source("(buffer-swap-text swap-b)").unwrap();
+    assert_eq!(vm.eval_source("(buffer-modified-tick)").unwrap().display().unwrap(), "4");
+    assert_eq!(vm.display_snapshot(640, 480).unwrap().text.utf8, "bbb");
+}
 #[test]
 fn window_exists_before_first_query_and_scratch_identity_is_unique() {
     let mut vm = Vm::new();

@@ -17,6 +17,26 @@ pub(crate) enum PropertyBegin {
 }
 
 impl Leaf<'_> {
+    /// fns.c Fobject_intervals: OBJECT's intervals as (BEG END PLIST) lists.
+    pub(crate) fn object_intervals(&mut self, object: Value) -> super::super::Out {
+        if !matches!(self.kind(object), Kind::String | Kind::Bytes | Kind::Buffer | Kind::ByteBuffer) {
+            return Err(Fault::Wrong("buffer-or-string-p", object));
+        }
+        let runs = self.vm.object_intervals(object).map_err(Fault::Error)?;
+        let mut out = Value::NIL;
+        for (start, end, values) in runs.unwrap_or_default().into_iter().rev() {
+            let mut plist = Value::NIL;
+            for (key, value) in values.into_iter().rev() {
+                let key = self.vm.property_key_symbol(&key);
+                plist = self.cons(value, plist);
+                plist = self.cons(key, plist);
+            }
+            let interval = [Value::integer(start as i64).map_err(Fault::Error)?, Value::integer(end as i64).map_err(Fault::Error)?, plist];
+            let interval = interval.into_iter().rev().fold(Value::NIL, |tail, v| self.cons(v, tail));
+            out = self.cons(interval, out);
+        }
+        Ok(out)
+    }
     /// Run F with BUFFER current, restoring the current buffer after.
     fn in_buffer<T>(&mut self, buffer: Value, f: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
         let current = self.vm.slots[self.vm.buffer_slot].value;

@@ -101,6 +101,96 @@ impl Leaf<'_> {
         let text: &crate::text::Text = b;
         Ok(TextSpan { bytes: text.internal(from..to).map_err(Fault::Error)?.to_vec(), chars: (e - s) as usize, multibyte: true })
     }
+    /// One side of compare-buffer-substrings (editfns.c:1752): BUFFER (nil,
+    /// a buffer or its name) from START to END, each nil for that end of its
+    /// accessible text and in either order, as character codes; a unibyte
+    /// buffer's bytes above 127 are raw-byte characters (make_char_multibyte).
+    pub(crate) fn buffer_substring_codes(&mut self, buffer: Value, start: Value, end: Value) -> std::result::Result<Vec<u32>, Fault> {
+        let buffer = if buffer == Value::NIL { self.current_buffer()? } else {
+            let found = self.lifecycle_get(buffer)?;
+            if found == Value::NIL {
+                return Err(Fault::Error(match self.vm.str_view(buffer) {
+                    Some(_) => format!("No buffer named {}", self.string_text(buffer)?),
+                    None => "Invalid buffer argument".into(),
+                }));
+            }
+            if !self.lifecycle_live_p(found) { return Err(Fault::Error("Selecting deleted buffer".into())); }
+            found
+        };
+        let position = |leaf: &Self, v: Value, default: i64| if v == Value::NIL { Ok(default) } else { leaf.fix_position(v) };
+        match self.vm.object_if(buffer) {
+            Some(Object::Buffer(b)) => {
+                let r = b.accessible();
+                let char_pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
+                let (begv, zv) = (char_pos(r.start)?, char_pos(r.end)?);
+                let (s, e) = (position(self, start, begv)?, position(self, end, zv)?);
+                let (s, e) = (s.min(e), s.max(e));
+                if !(begv <= s && e <= zv) { return Err(Fault::Range(start, end)); }
+                let byte = |c: i64| b.byte_of_char(CharOffset(c as usize - 1)).map_err(Fault::Error);
+                let text: &crate::text::Text = b;
+                let bytes = text.internal(byte(s)?..byte(e)?).map_err(Fault::Error)?;
+                Ok(crate::lstring::StrView { bytes: &bytes, chars: (e - s) as usize, multibyte: true }.chars().collect())
+            }
+            Some(Object::ByteBuffer(b)) => {
+                let (begv, zv) = (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1);
+                let (s, e) = (position(self, start, begv)?, position(self, end, zv)?);
+                let (s, e) = (s.min(e), s.max(e));
+                if !(begv <= s && e <= zv) { return Err(Fault::Range(start, end)); }
+                Ok(b.bytes[s as usize - 1..e as usize - 1].iter()
+                    .map(|&c| if c < 0x80 { u32::from(c) } else { u32::from(c) + crate::lstring::BYTE8_OFFSET }).collect())
+            }
+            _ => unreachable!("a live buffer"),
+        }
+    }
+    /// Funencodable_char_position (coding.c:9209) once CODING is defined:
+    /// the positions of the first COUNT characters (one when COUNT is nil,
+    /// then the position alone) of the current buffer's START..END, or of
+    /// STRING's START..END as `substring' takes them, that CODING cannot
+    /// encode; nil for raw-text, unibyte text, or ASCII text in an
+    /// ASCII-compatible coding.
+    pub(crate) fn unencodable_char_position(&mut self, start: Value, end: Value, coding: Value, count: Value, string: Value) -> super::super::Out {
+        self.coding_check(coding)?;
+        let coding = if coding == Value::NIL { self.intern("undecided") } else { coding };
+        let spec = self.coding_spec(coding)?;
+        let field = |leaf: &mut Self, v: Value, i: i64| leaf.vector_get(v, Value::integer(i).expect("index"));
+        let attrs = field(self, spec, 0)?;
+        if field(self, attrs, 3)? == self.intern("raw-text") { return Ok(Value::NIL); }
+        let ascii_compatible = field(self, attrs, 5)? != Value::NIL;
+        let charsets = field(self, attrs, 4)?;
+        let charsets: Vec<usize> = self.coding_items(charsets)?.iter().filter_map(|id| id.integer_value()).map(|id| id as usize).collect();
+        let tables = self.coding_encode_translation(attrs)?;
+        let (codes, from) = if string == Value::NIL {
+            let text = self.text_span(start, end, true)?;
+            if !text.multibyte || (ascii_compatible && text.ascii()) { return Ok(Value::NIL); }
+            let from = self.vm.text_property_position(start)?.min(self.vm.text_property_position(end)?);
+            (text.view().chars().collect::<Vec<u32>>(), from)
+        } else {
+            let view = self.string_view(string)?;
+            let size = view.chars as i64;
+            let index = |v: Value, default: i64| -> std::result::Result<i64, Fault> {
+                if v == Value::NIL { return Ok(default); }
+                let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
+                Ok(if n < 0 { n + size } else { n })
+            };
+            let (f, t) = (index(start, 0)?, index(end, size)?);
+            if !(0 <= f && f <= t && t <= size) { return Err(Fault::Range3(string, start, end)); }
+            if !view.multibyte { return Ok(Value::NIL); }
+            let codes: Vec<u32> = view.chars().skip(f as usize).take((t - f) as usize).collect();
+            if ascii_compatible && codes.iter().all(|&c| c < 0x80) { return Ok(Value::NIL); }
+            (codes, f)
+        };
+        let mut wanted = if count == Value::NIL { 1 } else {
+            count.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", count))?
+        };
+        let mut positions = Vec::new();
+        for (i, &c) in codes.iter().enumerate() {
+            if (c < 0x80 && ascii_compatible) || self.coding_encodable(&charsets, &tables, c)? { continue; }
+            positions.push(Value::integer(from + i as i64).map_err(Fault::Error)?);
+            wanted -= 1;
+            if wanted == 0 { break; }
+        }
+        Ok(if count == Value::NIL { positions.first().copied().unwrap_or(Value::NIL) } else { self.coding_list(&positions) })
+    }
     /// Ffind_coding_systems_region_internal: t when the text needs no
     /// encoding (unibyte or ASCII), else the base coding systems of
     /// `coding-system-list', less EXCLUDE, that encode every character,
@@ -160,7 +250,7 @@ impl Leaf<'_> {
         let mut target = args[index + 1];
         let string = |leaf: &Self, v: Value| leaf.vm.str_view(v).is_some();
         let valid = string(self, target)
-            || (operation == insert && self.pair(target).is_some_and(|(file, buffer)| string(self, file) && self.kind(buffer) == Kind::Buffer))
+            || (operation == insert && self.pair(target).is_some_and(|(file, buffer)| string(self, file) && matches!(self.kind(buffer), Kind::Buffer | Kind::ByteBuffer)))
             || (operation == network && (target.integer_value().is_some() || target == Value::TRUE));
         if !valid { return Err(Fault::Error(format!("Invalid argument {} of operation ‘{name}’", index + 1))); }
         if let Some((file, _)) = self.pair(target) { target = file; }

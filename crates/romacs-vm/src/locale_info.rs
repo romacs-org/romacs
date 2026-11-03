@@ -35,3 +35,36 @@ pub(crate) fn query(item: Item) -> Option<Info> {
     unsafe { libc::freelocale(locale) };
     info
 }
+
+unsafe extern "C" {
+    fn wcscoll_l(a: *const libc::wchar_t, b: *const libc::wchar_t, locale: libc::locale_t) -> libc::c_int;
+    fn towlower_l(c: u32, locale: libc::locale_t) -> u32;
+}
+
+/// sysdep.c str_collate: wcscoll of character codes A and B, each read up to
+/// its first NUL as a wide string is, in LOCALE's collation (a locale name),
+/// else the environment's, as GNU's startup setlocale (LC_ALL, "") selects;
+/// IGNORE_CASE lowers both first (towlower). The error is GNU's message.
+pub(crate) fn collate(a: &[u32], b: &[u32], locale: Option<&std::ffi::CStr>, ignore_case: bool) -> Result<std::cmp::Ordering, String> {
+    let mask = libc::LC_COLLATE_MASK | libc::LC_CTYPE_MASK;
+    let name = locale.unwrap_or(c"");
+    let mut loc = unsafe { libc::newlocale(mask, name.as_ptr(), std::ptr::null_mut()) };
+    if loc.is_null() && locale.is_none() { loc = unsafe { libc::newlocale(mask, c"C".as_ptr(), std::ptr::null_mut()) }; }
+    if loc.is_null() {
+        let err = std::io::Error::last_os_error();
+        return Err(format!("Invalid locale {}: {}", name.to_string_lossy(), crate::prim::strerror(err.raw_os_error().unwrap_or(0))));
+    }
+    let wide = |s: &[u32]| -> Vec<libc::wchar_t> {
+        s.iter().map(|&c| if ignore_case { unsafe { towlower_l(c, loc) } } else { c } as libc::wchar_t).chain([0]).collect()
+    };
+    let (a, b) = (wide(a), wide(b));
+    let res = unsafe {
+        *libc::__errno_location() = 0;
+        let res = wcscoll_l(a.as_ptr(), b.as_ptr(), loc);
+        let err = *libc::__errno_location();
+        libc::freelocale(loc);
+        if err != 0 { return Err(format!("Invalid string for collation: {}", crate::prim::strerror(err))); }
+        res
+    };
+    Ok(res.cmp(&0))
+}
