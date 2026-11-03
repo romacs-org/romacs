@@ -527,7 +527,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   --compile-lisp FILE   compile FILE into the compiled-Lisp store (what a
                         compiled load runs on a miss)
   ROMACS_WORLD=off      boot from source, without a world
-  ROMACS_COMPILED_LISP=on  load GNU-compiled-kind files through compiled artifacts
+  ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
+                        artifacts (default: on in a live session, off in --batch)
   ROMACS_DIAGNOSTICS=1  print each paint, message and the loadup tables on stderr (harnesses)
   ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
                         stalled (default 2000): editing goes on, once told
@@ -687,7 +688,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor, init_layer.as_ref())?;
     }
     if live && launch == startup::Launch::Loadup && !romacs_vm::world::store::building() {
-        batch::configure_compiled_lisp(named_store.as_deref());
+        batch::configure_compiled_lisp(named_store.as_deref(), true);
     }
     // The session from here: its every end says why.
     exit::install();

@@ -1,32 +1,22 @@
 //! Background compiles of compiled Lisp (`crate::compiled_lisp`): what
-//! rlisp/romacs-precompile.el's idle worker asks.
+//! rlisp/romacs-precompile.el's switch asks.
 use super::*;
 
 impl Leaf<'_> {
-    fn file_name_string(&mut self, name: &std::ffi::OsStr) -> Value {
-        self.vm.make_lisp_string(name.as_encoded_bytes().to_vec(), true)
-    }
-
-    pub(crate) fn compiled_lisp_candidates(&mut self) -> crate::prim::Out {
-        let files = self.vm.precompile_candidates();
-        let names: Vec<Value> = files.iter().map(|f| self.file_name_string(f.as_os_str())).collect();
-        Ok(self.vm.list_value(&names))
-    }
-
-    pub(crate) fn compiled_lisp_compile_command(&mut self, file: Value) -> crate::prim::Out {
-        let file = self.string_text(file)?;
-        let Some((program, args, environment)) = self.vm.precompile_command(std::path::Path::new(&file)).map_err(Fault::Error)? else {
+    pub(crate) fn compiled_lisp_background(&mut self, on: bool, delay: Value) -> crate::prim::Out {
+        if !crate::compiled_lisp::compiles() {
             return Ok(Value::NIL);
+        }
+        if !on {
+            crate::compiled_lisp::stop_background();
+            return Ok(Value::TRUE);
+        }
+        let seconds = match delay.integer_value() {
+            Some(n) => n as f64,
+            None => self.float_value(delay)?,
         };
-        let program = self.file_name_string(&program);
-        let args: Vec<Value> = args.iter().map(|a| self.file_name_string(a)).collect();
-        let environment: Vec<Value> = environment.iter().map(|(name, value)| {
-            let mut entry = name.clone();
-            entry.push("=");
-            entry.push(value);
-            self.file_name_string(&entry)
-        }).collect();
-        let (args, environment) = (self.vm.list_value(&args), self.vm.list_value(&environment));
-        Ok(self.vm.list_value(&[program, args, environment]))
+        let load_path = self.vm.load_path_strings().map_err(Fault::Error)?;
+        crate::compiled_lisp::start_background(load_path, std::time::Duration::from_secs_f64(seconds.max(0.0)));
+        Ok(Value::TRUE)
     }
 }

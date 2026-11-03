@@ -57,7 +57,7 @@ pub fn run(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(),
 /// the chain's end is the batch world's ([`boot`]).
 fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(), String> {
     let (quick, args) = command_line_options(args, quick);
-    configure_compiled_lisp(store.as_deref());
+    configure_compiled_lisp(store.as_deref(), false);
     super::spawn_evaluator(move || -> Result<(), String> {
         let mut vm = boot(store, false)?;
         vm.set_session_host(Some(Box::new(|code| {
@@ -110,12 +110,14 @@ fn compile_environment(store: &Path) -> Vec<(OsString, OsString)> {
 /// installation's, `EXECUTABLE.lisp/` beside the executable, which every
 /// HOME shares as it shares GNU's installed `.elc` files, or the user's
 /// cache when the installation's cannot be made. Only a user with a world
-/// store compiles: a session in a fresh HOME reads what is compiled and
-/// loads the rest from source, as GNU does without `.elc` files.
-fn compiled_store(worlds: Option<&Path>) -> Option<(PathBuf, bool)> {
+/// store compiles, or an INTERACTIVE session, which makes one as it starts:
+/// a batch session in a fresh HOME reads what is compiled and loads the
+/// rest from source, as GNU does without `.elc` files.
+fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, bool)> {
     if let Some(store) = std::env::var_os(COMPILE_STORE) { return Some((store.into(), true)); }
-    if let Some(worlds) = worlds { return worlds.is_dir().then(|| (worlds.with_file_name("lisp"), true)); }
-    let user = super::world::default_store(|name| std::env::var_os(name)).filter(|store| store.is_dir());
+    let made = |store: &Path| interactive || store.is_dir();
+    if let Some(worlds) = worlds { return made(worlds).then(|| (worlds.with_file_name("lisp"), true)); }
+    let user = super::world::default_store(|name| std::env::var_os(name)).filter(|store| made(store));
     let exe = std::env::current_exe().ok()?;
     let installed = exe.with_file_name(format!("{}.lisp", exe.file_name()?.to_string_lossy()));
     let private = |dir: &Path| { use std::os::unix::fs::DirBuilderExt; std::fs::DirBuilder::new().mode(0o700).create(dir) };
@@ -126,14 +128,16 @@ fn compiled_store(worlds: Option<&Path>) -> Option<(PathBuf, bool)> {
 }
 
 /// Load compiled Lisp in this process (`romacs_vm::compiled_lisp`) when
-/// ROMACS_COMPILED_LISP=on and worlds are on, from the store
-/// [`compiled_store`] finds (WORLDS is a `--world-store` given). A compile
-/// process restores the compile world, the batch world of the compile
-/// environment in the store's `worlds/`, and that world's identity keys
-/// every artifact.
-pub fn configure_compiled_lisp(worlds: Option<&Path>) {
-    if !romacs_vm::compiled_lisp::requested() || romacs_vm::world::store::disabled() { return; }
-    let Some((store, compiles)) = compiled_store(worlds) else { return };
+/// it is asked for (by default in an INTERACTIVE session) and worlds are
+/// on, from the store [`compiled_store`] finds (WORLDS is a
+/// `--world-store` given). A compile process restores the compile world,
+/// the batch world of the compile environment in the store's `worlds/`,
+/// and that world's identity keys every artifact. An interactive session
+/// never waits for a compile: a load with no artifact reads source and the
+/// session compiles the file in the background (rlisp/romacs-precompile.el).
+pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
+    if !romacs_vm::compiled_lisp::requested(interactive) || romacs_vm::world::store::disabled() { return; }
+    let Some((store, compiles)) = compiled_store(worlds, interactive) else { return };
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     let mut runtime = vec![dir.clone()];
@@ -152,8 +156,15 @@ pub fn configure_compiled_lisp(worlds: Option<&Path>) {
         compiler,
         environment,
         inherited: &COMPILE_INHERITS,
+        defer_misses: interactive,
         store,
-        identity: Box::new(move || World::new(worlds.clone(), recipe.clone()).ok()?.lisp_identity().map(|id| format!("compile world {id}"))),
+        // The world is made once (its key hashes the executable and
+        // libraries); only whether its build was published is asked again.
+        identity: Box::new({
+            let world = std::sync::OnceLock::new();
+            move || world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?
+                .lisp_identity().map(|id| format!("compile world {id}"))
+        }),
         runtime,
     });
 }
@@ -165,7 +176,7 @@ pub fn configure_compiled_lisp(worlds: Option<&Path>) {
 pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String> {
     let file = std::path::absolute(&file).map_err(|e| e.to_string())?;
     if let Some(home) = std::env::var_os("HOME") { std::env::set_current_dir(home).map_err(|e| e.to_string())?; }
-    configure_compiled_lisp(store.as_deref());
+    configure_compiled_lisp(store.as_deref(), false);
     super::spawn_evaluator(move || -> Result<(), String> {
         let mut vm = boot(store, true)?;
         if let Ok(path) = std::env::var(romacs_vm::compiled_lisp::LOAD_PATH) {

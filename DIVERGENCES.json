@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "703e92dae7c3671e86669756eb632fdd674730e6423f7bc86d5a8cf67d31586f",
+  "input_hash": "a63fe09b055102685350b7111a6e067bdcfd4e878ff5334d3f3ee4e33818b9ba",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 340,
-  "symbols": 982,
+  "symbols": 983,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -2602,6 +2602,9 @@
    231
   ],
   "romacs-precompile": [
+   135
+  ],
+  "romacs-precompile-idle-delay": [
    135
   ],
   "romacs-precompile-start": [
@@ -5713,7 +5716,7 @@
    "planned": false,
    "mechanism": "Which loads run compiled code",
    "gnu": "GNU's `load` picks a file's `.elc` (or `.eln`) by its suffix rules; an installation ships its Lisp compiled by `make`, and a package's `.elc` is made when it is installed.",
-   "romacs": "With `ROMACS_COMPILED_LISP=on`, a load GNU would satisfy with compiled code (a file of the installation's Lisp trees, or one beside an `.elc` that `load-prefer-newer` accepts) runs a compiled-Lisp artifact: the file walked by bytecomp's file rules in a compile process, each top-level form compiled to VM2 code, and the units run in order under GNU's compiled-load bindings and unwind (`crates/romacs-vm/src/compiled_lisp`). A load with no artifact compiles one synchronously, then loads it; a session without a store of its own (a fresh HOME's batch run) reads source and compiles nothing. Artifacts are never stale: every observed input (files loaded and resolved at compile time, host reads, inherited environment variables) is checked again at load, and a change recompiles.",
+   "romacs": "In an interactive session (by default; `ROMACS_COMPILED_LISP=off` turns it off) and in a batch run with `ROMACS_COMPILED_LISP=on`, a load GNU would satisfy with compiled code (a file of the installation's Lisp trees, or one beside an `.elc` that `load-prefer-newer` accepts) runs a compiled-Lisp artifact: the file walked by bytecomp's file rules in a compile process, each top-level form compiled to VM2 code, and the units run in order under GNU's compiled-load bindings and unwind (`crates/romacs-vm/src/compiled_lisp`). A load with no artifact reads source in an interactive session, which compiles the file in the background later (VM2-LOADPRECOMPILE), so no load waits for a compile; a batch run compiles it synchronously, then loads it. A session without a store of its own (a fresh HOME's batch run) uses what is compiled and reads the rest from source, compiling nothing. Artifacts are never stale: every observed input (files loaded and resolved at compile time, host reads, inherited environment variables) is checked again at load, and a change recompiles.",
    "why": "GNU runs a stale `.elc` with a warning; here a changed source or dependency always recompiles. With compiled loads, VM2-EWCLOAD1 applies to source-kind loads only.",
    "symbols": [
     "load",
@@ -5748,10 +5751,11 @@
    "planned": false,
    "mechanism": "When compiled code is made",
    "gnu": "`make` compiles an installation's `.elc` before first use; a package's are made at installation.",
-   "romacs": "The installation's store (`EXECUTABLE.lisp/` beside the executable, shared by every HOME; else the user's cache) is filled ahead of use by an interactive session while it is idle (`rlisp/romacs-precompile.el`, `romacs-precompile`): one compile process at a time at the idle CPU and I/O priority, none started while input is pending, first the files compiled loads used before, then every file of the installation's Lisp trees.",
-   "why": "A first `require` finds its artifact made, without an install step; no work happens in the session between keys.",
+   "romacs": "The installation's store (`EXECUTABLE.lisp/` beside the executable, shared by every HOME; else the user's cache) is filled ahead of use while an interactive session is idle (`rlisp/romacs-precompile.el`, `romacs-precompile`, `romacs-precompile-idle-delay`): a host thread of the session, which never touches the Lisp heap, starts one compile process at a time at the idle CPU and I/O priority once the session has been idle that long, first for the files loads just read from source for want of an artifact, then the files compiled loads used before, then every file of the installation's Lisp trees.",
+   "why": "A first `require` finds its artifact made, without an install step; the session itself does no work for it, between keys or while idle.",
    "symbols": [
     "romacs-precompile",
+    "romacs-precompile-idle-delay",
     "romacs-precompile-start",
     "romacs-precompile-stop"
    ],

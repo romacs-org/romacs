@@ -221,7 +221,10 @@ impl Vm {
     }
 
     /// keyboard.c timer_stop_idle: the host read a key for a command.
-    pub fn timer_stop_idle(&mut self) { self.idle_since = None; }
+    pub fn timer_stop_idle(&mut self) {
+        self.idle_since = None;
+        crate::compiled_lisp::note_idle(None);
+    }
 
     pub(crate) fn redisplay_inhibited(&mut self) -> Result<bool> {
         let slot = self.slot("inhibit-redisplay");

@@ -623,7 +623,7 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     }
     // Compiled Lisp made ahead while the session is idle, so a first
     // `require' finds its artifact (`romacs-precompile-start').
-    if launch == Launch::Loadup && vm.eval_source("(and (fboundp 'run-with-idle-timer) (fboundp 'make-process))")? != romacs_vm::Fixed::NIL {
+    if launch == Launch::Loadup && vm.eval_source("(fboundp 'add-hook)")? != romacs_vm::Fixed::NIL {
         vm.eval_source(include_str!("../../../rlisp/romacs-precompile.el"))?;
     }
     // Layers are child frames, which GNU's frame.el makes.

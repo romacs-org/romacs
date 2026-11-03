@@ -198,6 +198,13 @@ pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&Artifa
     })
 }
 
+/// Whether KEY has any artifact, whatever its inputs.
+pub(super) fn has_artifact(store: &Path, key: &[u8; 32]) -> bool {
+    host::read_dir(generation(store).join(hex(key))).is_ok_and(|mut entries| {
+        entries.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|x| x == "rlc")))
+    })
+}
+
 /// The artifact at PATH, as a compile process published it.
 pub(super) fn open(path: &Path) -> crate::Result<Artifact> {
     decode(read(path).map_err(|e| format!("{}: {e}", path.display()))?)

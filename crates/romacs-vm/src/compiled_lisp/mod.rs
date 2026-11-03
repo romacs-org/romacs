@@ -23,6 +23,7 @@
 //! ROMACS_COMPILED_LISP=on, the embedder configured a store (`configure`),
 //! and this is no world build. Without a store every load reads source,
 //! as a GNU installation without `.elc` files.
+mod background;
 mod codec;
 pub(crate) mod store;
 mod unit;
@@ -30,6 +31,7 @@ mod unit;
 mod compiled_lisp_tests;
 
 use crate::*;
+pub(crate) use background::{note_idle, start as start_background, stop as stop_background};
 use serde_json::{Value as Json, json};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -48,6 +50,10 @@ pub struct Config {
     /// others' values are the compile environment's own, bound by its
     /// identity.
     pub inherited: &'static [&'static str],
+    /// A load with no artifact reads source and leaves the file to a
+    /// background compile (`background`), instead of compiling it first:
+    /// an interactive session's, where no load may wait for a compile.
+    pub defer_misses: bool,
     /// The store.
     pub store: PathBuf,
     /// The compile environment's identity, the world a compile process
@@ -84,8 +90,10 @@ impl Configured {
 static CONFIG: std::sync::OnceLock<Configured> = std::sync::OnceLock::new();
 
 /// Whether this process was asked to load compiled Lisp.
-pub fn requested() -> bool {
-    host::getenv("ROMACS_COMPILED_LISP").is_some_and(|v| v == "on")
+/// Whether this process loads compiled Lisp: ROMACS_COMPILED_LISP=on or
+/// off says; unset, an INTERACTIVE session does and a batch one does not.
+pub fn requested(interactive: bool) -> bool {
+    host::getenv("ROMACS_COMPILED_LISP").map_or(interactive, |v| v == "on")
 }
 
 /// Load compiled Lisp with CONFIG for the rest of this process; a second
@@ -96,7 +104,26 @@ pub fn configure(config: Config) {
     if host::getenv(BACKGROUND).is_some() {
         host::lower_priority();
     }
+    // A compile process ends with the process that started it, and within
+    // a deadline: nothing outlives a session or holds its queue forever.
+    // The name is its own, not its children's (a world builder, say).
+    // Read while the process is single threaded, at the start of main.
+    if let Some(parent) = host::getenv(PARENT).and_then(|p| p.to_str()?.parse().ok()) {
+        host::unset_env(PARENT);
+        host::die_with_parent(parent);
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(600));
+            eprintln!("romacs-compile: deadline passed");
+            std::process::exit(124);
+        });
+    }
     let _ = CONFIG.set(Configured { config, chain, trace, identity: std::sync::OnceLock::new() });
+}
+
+/// Whether this process may compile Lisp: it loads compiled Lisp and runs
+/// compile processes.
+pub(crate) fn compiles() -> bool {
+    config().is_some_and(|c| !c.compiler.is_empty())
 }
 
 /// The configured store, in a process that loads compiled Lisp.
@@ -118,8 +145,12 @@ const CHAIN: &str = "ROMACS_COMPILE_CHAIN";
 /// The session's `load-path`, for the compile process, one per line.
 pub const LOAD_PATH: &str = "ROMACS_COMPILE_LOAD_PATH";
 
+/// In a compile process's environment: the process that started it, which
+/// it does not outlive.
+const PARENT: &str = "ROMACS_COMPILE_PARENT";
+
 /// In a compile process's environment: run at the idle priority, as a
-/// background compile does (`Vm::precompile_command`).
+/// background compile does (`background`).
 pub const BACKGROUND: &str = "ROMACS_COMPILE_BACKGROUND";
 
 /// The compile process for the source file PATH on LOAD_PATH, as
@@ -139,6 +170,7 @@ fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
     environment.extend([
         (CHAIN.into(), format!("{}{name}\n", configured.chain).into()),
         (LOAD_PATH.into(), load_path.join("\n").into()),
+        (PARENT.into(), host::pid().to_string().into()),
         ("ROMACS_COMPILED_LISP".into(), "on".into()),
     ]);
     Some((program.clone(), args, environment))
@@ -268,6 +300,12 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         let Ok(found) = self.stored(configured, path, &load_path) else { return Ok(None) };
         let (artifact, data) = match found {
             Some(found) => found,
+            None if config.defer_misses => {
+                if !config.compiler.is_empty() {
+                    background::note_miss(path, &load_path);
+                }
+                return Ok(None);
+            }
             None => match self.compile_now(config, path, &load_path)? {
                 Some(artifact) => match store::open(&artifact) {
                     Ok(data) => (artifact, data),
@@ -293,42 +331,6 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         Ok(configured.identity().and_then(|identity| {
             let key = store::key(identity, path, &digest);
             store::lookup(&config.store, &key, |artifact| self.inputs_hold(&config.store, artifact, &joined))
-        }))
-    }
-
-    /// The files a background compile looks at, most likely first: those
-    /// compiled loads used before (`store::history`), then every file of
-    /// the installation's Lisp trees, as GNU's `make` compiles them all.
-    /// Empty in a process that compiles nothing.
-    pub(crate) fn precompile_candidates(&self) -> Vec<PathBuf> {
-        let Some(config) = config().filter(|c| !c.compiler.is_empty()) else { return vec![] };
-        let mut files = store::history(&config.store);
-        let mut seen: std::collections::HashSet<PathBuf> = files.iter().cloned().collect();
-        for root in &config.runtime {
-            files.extend(lisp_files(root).into_iter().filter(|p| seen.insert(p.clone())));
-        }
-        files
-    }
-
-    /// How to compile the source file FILE in the background, as
-    /// (PROGRAM ARGS ENVIRONMENT): the compile process a load would run,
-    /// lowered to the idle priority. None when a load of FILE would not
-    /// compile now: it has an artifact whose inputs hold, no compiled
-    /// form, or this process compiles nothing.
-    pub(crate) fn precompile_command(&mut self, file: &Path) -> Result<Option<(OsString, Vec<OsString>, Vec<(OsString, OsString)>)>> {
-        let Some(configured) = configured() else { return Ok(None) };
-        let config = &configured.config;
-        let Ok(path) = host::canonicalize(file) else { return Ok(None) };
-        if config.compiler.is_empty() || !self.has_compiled_form(config, &path) {
-            return Ok(None);
-        }
-        let load_path = self.load_path_strings()?;
-        if !matches!(self.stored(configured, &path, &load_path), Ok(None)) {
-            return Ok(None);
-        }
-        Ok(compile_command(configured, &path, &load_path).map(|(program, args, mut environment)| {
-            environment.push((BACKGROUND.into(), "1".into()));
-            (program, args, environment)
         }))
     }
 

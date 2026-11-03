@@ -1321,6 +1321,16 @@ pub fn uid() -> u32 {
     uid
 }
 
+/// Die with PARENT: SIGTERM when the thread that started this process
+/// ends, and exit now if PARENT is gone already. A child of a session
+/// thread then never outlives the session.
+pub fn die_with_parent(parent: u32) {
+    unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
+    if unsafe { libc::getppid() } as u32 != parent {
+        std::process::exit(1);
+    }
+}
+
 /// Lower this process to the background: the weakest CPU niceness and the
 /// idle I/O class, which its children inherit. Best effort.
 pub fn lower_priority() {
