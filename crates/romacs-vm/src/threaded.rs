@@ -1836,6 +1836,8 @@ fn fail(e: &mut Engine<'_>, message: &str) -> Value {
 #[inline(never)]
 unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     e.budget = 10_000;
+    #[cfg(test)]
+    POLLS.with(|polls| polls.set(polls.get() + 1));
     // R193: the dispatch below must be a sibling call or every poll keeps a
     // frame: gdb on the gate-built (non-LTO) romacs-gnu-ert adapter showed
     // 74,600 poll_resume frames and SIGABRT under `(while t)` when the
@@ -2093,9 +2095,10 @@ unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
 fn leave_native(e: &mut Engine<'_>) {
     if let Some(mark) = e.native_mark.take() { e.vm.trace_leave(mark); }
     // Native code made big payloads: poll, and collect if due, soon. The
-    // request stays until a poll settles it, so an engine that returns
-    // before polling leaves it to the one it returns to.
-    if e.vm.collect_poll { e.budget = 0; }
+    // request stays until a poll settles it; an engine that may not collect
+    // (nested, or held) leaves it to the one it returns to, polling at its
+    // own pace meanwhile.
+    if e.vm.collect_poll && e.vm.may_collect(1) { e.budget = 0; }
 }
 #[inline(never)]
 fn leave_call(e: &mut Engine<'_>, mark: usize) {
@@ -2749,7 +2752,7 @@ unsafe fn generated_step(
         let step = e.vm.call_generated(target, base + start, argc);
         // A region attached under id pressure (`frozen.rs`), or big payloads
         // made (`Vm::collect_poll'): poll, and collect if due, soon.
-        if e.vm.region_collect || e.vm.collect_poll { e.budget = 0; }
+        if e.vm.region_collect || (e.vm.collect_poll && e.vm.may_collect(1)) { e.budget = 0; }
         if !reader {
             return take_step(e, r, pc, step);
         }
@@ -4259,6 +4262,11 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
 }
 
 #[cfg(test)]
+#[cfg(test)]
+thread_local! {
+    /// The engine's polls (`poll_resume') on this thread, for tests.
+    pub(crate) static POLLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 #[path = "threaded_reader_gc_tests.rs"]
 mod reader_gc_tests;
 
