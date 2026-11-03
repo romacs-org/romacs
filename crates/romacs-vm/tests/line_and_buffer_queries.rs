@@ -34,3 +34,17 @@ fn line_and_buffer_queries_match_pinned_gnu() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Point inside a UTF-8 sequence of a unibyte buffer: `current-column'
+/// reads only point's line, and still refuses the split character
+/// instead of slicing through it.
+#[test]
+fn current_column_inside_a_unibyte_sequence_signals() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let printed = vm
+        .eval_source("(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 195 169)) (goto-char 2) (condition-case nil (current-column) (error 'refused)))")
+        .and_then(|v| v.display())
+        .unwrap();
+    assert_eq!(printed, "refused");
+}

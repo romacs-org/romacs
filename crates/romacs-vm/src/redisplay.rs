@@ -366,7 +366,7 @@ impl Vm {
         let margin = self.scroll_margin_px(window, laid.body_height)?;
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let accessible = b.accessible();
-        let from = crate::prim::line_beginning(b.as_str().as_bytes(), accessible.start.0, accessible.end.0, point_byte, -lines);
+        let from = crate::prim::line_beginning(b.body(), accessible.start.0, accessible.end.0, point_byte, -lines);
         let Some(rows) = self.rows_between(window, from, point_byte)? else { return Ok(None) };
         if !minimal {
             // Each row and whether it starts a line, as the recentring's

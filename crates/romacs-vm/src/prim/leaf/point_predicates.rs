@@ -46,10 +46,7 @@ impl Leaf<'_> {
                     buffer.byte_of_char(CharOffset((p - 1) as usize)).map_err(Fault::Error)?.0
                 } else { marker_byte.unwrap_or(buffer.point.0) };
                 if at <= accessible.start.0 || at > accessible.end.0 { return Ok(Value::NIL); }
-                let bytes = buffer.bytes();
-                let mut previous = at - 1;
-                while previous > 0 && bytes[previous] & 0xc0 == 0x80 { previous -= 1; }
-                buffer.character_at(ByteOffset(previous)).map_err(Fault::Error)?
+                buffer.character_at(ByteOffset(buffer.char_start_before(at))).map_err(Fault::Error)?
             }
             data::Object::ByteBuffer(buffer) => {
                 let at = if let Some(p) = scalar {
@@ -119,12 +116,12 @@ impl Leaf<'_> {
                 pos
             }
         };
-        let (text, low, high): (&[u8], i64, i64) = match &self.vm.objects[index] {
+        let (low, high): (i64, i64) = match &self.vm.objects[index] {
             data::Object::Buffer(b) => {
                 let r = b.accessible();
-                (b.bytes(), b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1, b.char_of_byte(r.end).map_err(Fault::Error)?.0 as i64 + 1)
+                (b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1, b.char_of_byte(r.end).map_err(Fault::Error)?.0 as i64 + 1)
             }
-            data::Object::ByteBuffer(b) => (&b.bytes, b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+            data::Object::ByteBuffer(b) => (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
             _ => unreachable!("buffer_index validates"),
         };
         let start = if absolute == Value::NIL { pos = pos.clamp(low, high); low } else { 1 };
@@ -133,7 +130,12 @@ impl Leaf<'_> {
             _ => Ok((c - 1) as usize),
         };
         let (from, to) = (byte(start)?, byte(pos.max(start))?);
-        let lines = text[from..to].iter().filter(|&&c| c == b'\n' || (selective && c == b'\r')).count() as i64 + 1;
+        let breaks = |bytes: &[u8]| bytes.iter().filter(|&&c| c == b'\n' || (selective && c == b'\r')).count();
+        let lines = match &self.vm.objects[index] {
+            data::Object::Buffer(b) => b.chunks_in(from..to).map(breaks).sum::<usize>(),
+            data::Object::ByteBuffer(b) => breaks(&b.bytes[from..to]),
+            _ => unreachable!("buffer_index validates"),
+        } as i64 + 1;
         Value::integer(lines).map_err(Fault::Error)
     }
 }
