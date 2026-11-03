@@ -361,7 +361,7 @@ mod frame_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         painted.snapshot.tab_bar = Some(romacs_layout_input::TabBarSnapshot { height: 20, face: Default::default(), faces: vec![],
-            text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
+            text: romacs_layout_input::TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
         let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)], status_bar: Default::default() };
         let click = |x, y, button, pressed| super::tab_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
@@ -383,7 +383,7 @@ mod frame_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         painted.snapshot.status_bar = Some(romacs_layout_input::StatusBarSnapshot { x: 6, y: 760, width: 1188, height: 20,
-            text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] },
+            text: romacs_layout_input::TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] },
             face: Default::default(), faces: vec![], window: 1, focused: true, marks: Default::default() });
         let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![],
                                    status_bar: (vec![Some((6.0, 10.0)), Some((16.0, 10.0)), Some((26.0, 100.0)), Some((126.0, 10.0)), None], Some(2)) };
