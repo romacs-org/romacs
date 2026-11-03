@@ -162,6 +162,29 @@ thousandth a stack mark."
             (dolist (o overlays) (move-overlay o (overlay-start o) (1+ (overlay-start o))))
             (mapc #'delete-overlay overlays))))
 
+;; N edits of a buffer holding N evaporating overlays (as a notmuch
+;; search holds one per result): each edit asks only the overlays at the
+;; span it leaves whether they emptied.  Half the edits empty an overlay,
+;; which is deleted, as GNU's are; they delete its span by the overlay's
+;; own positions, so no text is read between edits.
+(scaling-probe evaporating-overlays :n 2000
+  :setup (with-current-buffer (scaling--lines-buffer " scaling-evaporate" n)
+           (goto-char (point-min))
+           (let (overlays)
+             (dotimes (i n)
+               (let ((o (make-overlay (point) (line-end-position))))
+                 (overlay-put o 'evaporate t)
+                 (when (cl-evenp i) (push o overlays)))
+               (forward-line 1))
+             (cons (current-buffer) overlays)))
+  :body (with-current-buffer (car it)
+          (goto-char (point-max))
+          (dotimes (_ (/ n 2))
+            (insert-before-markers "xy")
+            (delete-region (- (point) 2) (point)))
+          (dolist (o (cdr it))
+            (delete-region (overlay-start o) (overlay-end o)))))
+
 (scaling-probe text-properties :n 2000
   :setup (scaling--lines-buffer " scaling-props" n)
   :body (with-current-buffer it
@@ -173,6 +196,23 @@ thousandth a stack mark."
           (dotimes (_ n) (get-text-property (point) 'face) (forward-line 1))
           (let ((pos (point-min)))
             (while (setq pos (next-single-property-change pos 'face))))))
+
+;; The buffer walked by next-property-change, as motion over invisible
+;; text and redisplay do, where one key reads one value under many stamps
+;; (each line's `fontified' put on its own, adjacent, as jit-lock puts its
+;; chunks) and another changes every 50 lines.
+(scaling-probe property-change-walk :n 20000
+  :setup (with-current-buffer (scaling--lines-buffer " scaling-walk" n)
+           (goto-char (point-min))
+           (dotimes (i n)
+             (when (zerop (% i 50)) (put-text-property (point) (line-end-position) 'face 'bold))
+             (put-text-property (point) (progn (forward-line 1) (point)) 'fontified t))
+           (current-buffer))
+  :body (with-current-buffer it
+          (let ((pos (point-min)))
+            (while (setq pos (next-property-change pos))))
+          (let ((pos (point-max)))
+            (while (setq pos (previous-property-change pos))))))
 
 (scaling-probe undo :n 2000
   :setup (with-current-buffer (get-buffer-create " scaling-undo")

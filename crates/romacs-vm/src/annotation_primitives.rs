@@ -460,7 +460,7 @@ impl Vm {
         }
         if reinserted { self.note_overlay_insertion(buffer, v)?; }
         if evaporates {
-            self.finish_annotation_edit(buffer)?;
+            self.evaporate_overlay(v)?;
         }
         Ok(v)
     }
@@ -473,24 +473,45 @@ impl Vm {
         o.inserted = count;
         Ok(())
     }
-    pub(super) fn finish_annotation_edit(&mut self, buffer: Value) -> Result<()> {
-        // A deletion empties the overlays of every buffer sharing the text
-        // (adjust_overlays_for_delete, buffer.c:3621).
+    /// buffer.c evaporate_overlays after an edit of BYTES of BUFFER's text:
+    /// the empty `evaporate' overlays there are deleted. An edit empties
+    /// only overlays it collapses onto the span it leaves, so only the
+    /// overlays at that span are asked, not every evaporating overlay of
+    /// the buffer, which made each edit cost the buffer's whole count. A
+    /// deletion empties the overlays of every buffer sharing the text
+    /// (adjust_overlays_for_delete, buffer.c:3621).
+    pub(super) fn evaporate_overlays_at(&mut self, buffer: Value, bytes: std::ops::Range<ByteOffset>) -> Result<()> {
         let family = self.text_family(buffer.index(0)? - 1);
         let buffers: Vec<Value> = if family.is_empty() { vec![buffer] }
             else { family.into_iter().map(|i| Value::reference(i + 1, 0)).collect() };
         let mut expired = Vec::new();
         for member in buffers {
-            for &v in self.annotated(member)?.evaporating.values() {
-                if self.overlay_range(v)?.is_some_and(|(a, b)| a == b) {
-                    expired.push(v);
-                }
+            let b = self.annotated(member)?;
+            if b.evaporating.is_empty() { continue; }
+            let (a, z) = (bytes.start.0 as u32, bytes.end.0 as u32);
+            let (found, _) = b.intervals.query_with_end(a, z, false, true, &b.anchors);
+            for v in found {
+                if self.overlay_evaporates(v)? { expired.push(v); }
             }
         }
         expired.sort_unstable_by_key(|v| v.0);
+        expired.dedup();
         for v in expired {
             self.delete_overlay_object(v)?;
         }
+        Ok(())
+    }
+    /// Whether OVERLAY is empty and has a non-nil `evaporate'.
+    fn overlay_evaporates(&self, overlay: Value) -> Result<bool> {
+        let o = self.overlay(overlay)?;
+        let Some(start) = o.start else { return Ok(false) };
+        Ok(self.annotated(o.buffer)?.evaporating.contains_key(&start)
+            && self.overlay_range(overlay)?.is_some_and(|(a, b)| a == b))
+    }
+    /// Foverlay_put and Fmove_overlay: OVERLAY itself is deleted when it is
+    /// empty and evaporates; no other overlay changed.
+    fn evaporate_overlay(&mut self, overlay: Value) -> Result<()> {
+        if self.overlay_evaporates(overlay)? { self.delete_overlay_object(overlay)?; }
         Ok(())
     }
     /// buffer.c Foverlay_get: intervals.c lookup_char_property on OVERLAY's
@@ -874,7 +895,7 @@ impl Vm {
                 });
                 self.family_fetch(marks);
                 edited?;
-                self.finish_annotation_edit(buffer)?;
+                // An insertion empties no overlay; GNU's evaporates nothing.
                 Ok(Value::NIL)
             }
             MakeOverlay => {
@@ -950,7 +971,7 @@ impl Vm {
                     list.remove(&anchor);
                     if args[2] != Value::NIL {
                         list.insert(anchor, x);
-                        self.finish_annotation_edit(buffer)?;
+                        self.evaporate_overlay(x)?;
                     }
                 }
                 Ok(args[2])

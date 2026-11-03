@@ -1540,6 +1540,9 @@ fn evaluate(
                 let processes = vm.process_wait_fds();
                 // A termination signal whose wake other work took: back to the top.
                 if romacs_vm::host::termination_signal(true).is_some() { continue; }
+                // A user signal `debug-on-event' names sets `quit-flag': its
+                // quit key runs into the debugger.
+                vm.take_debug_event();
                 if vm.take_quit_key() { pending.push_back(quit::quit_key()); continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(presentation::render_stall()), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),

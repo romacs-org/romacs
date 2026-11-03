@@ -1083,51 +1083,64 @@ impl Vm {
 
 thread_local! {
     /// The quit signal of the VM whose search runs on this thread, while
-    /// its matcher may quit (`Vm::arm_regexp_quit`).
+    /// a C-g may stop its matcher (`Vm::arm_regexp_quit`).
     static REGEXP_QUIT: std::cell::Cell<*const crate::QuitSignal> = const { std::cell::Cell::new(std::ptr::null()) };
+    /// The user signals `debug-on-event' named when that search began
+    /// (`Vm::debug_event_mask`): no Lisp runs inside a match to change it.
+    static REGEXP_DEBUG_EVENTS: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
 }
 
 /// The matcher's quit probe (romacs_regex_engine::host): a C-g the host
-/// counted for the searching VM.
+/// counted for the searching VM, or a debug event.
 fn regexp_quit_probe() -> bool {
     // SAFETY: set only for the extent of one search by the VM that owns the
     // signal (`ArmedQuit`), which outlives the search.
     REGEXP_QUIT.with(|signal| { let signal = signal.get(); !signal.is_null() && unsafe { (*signal).due() } })
+        || crate::host::user_signal_waiting(REGEXP_DEBUG_EVENTS.with(std::cell::Cell::get))
 }
 
 /// A search's armed quit probe, disarmed when dropped.
 pub(crate) struct ArmedQuit(bool);
 impl Drop for ArmedQuit {
     fn drop(&mut self) {
-        if self.0 { REGEXP_QUIT.with(|signal| signal.set(std::ptr::null())); }
+        if self.0 {
+            REGEXP_QUIT.with(|signal| signal.set(std::ptr::null()));
+            REGEXP_DEBUG_EVENTS.with(|events| events.set(0));
+        }
     }
 }
 
 impl Vm {
-    /// Let the matcher poll the host's C-g during one search, as GNU's
-    /// polls maybe_quit at its backtrack sites: only where the quit would be
-    /// acted on, so an aborted search always ends in `quit'.
+    /// Let the matcher poll the host's C-g, or a debug event, during one
+    /// search, as GNU's polls maybe_quit at its backtrack sites: only where
+    /// the quit would be acted on, so an aborted search always ends in
+    /// `quit'. A C-g only while `inhibit-quit' is nil; a debug event
+    /// whatever it is, since handle_user_signal clears it.
     fn arm_regexp_quit(&self) -> ArmedQuit {
-        let armed = std::sync::Arc::strong_count(&self.quit) > 1 && self.quit.busy()
-            && self.quit_variables()[1] == Value::NIL
-            && self.compile_depth == 0 && self.expanding.is_empty();
+        let reached = self.quit.busy() && self.compile_depth == 0 && self.expanding.is_empty();
+        let presses = reached && std::sync::Arc::strong_count(&self.quit) > 1 && self.quit_variables()[1] == Value::NIL;
+        let debug = if reached { self.debug_event_mask() } else { 0 };
+        let armed = presses || debug != 0;
         if armed {
-            REGEXP_QUIT.with(|signal| signal.set(std::sync::Arc::as_ptr(&self.quit)));
+            let quit = if presses { std::sync::Arc::as_ptr(&self.quit) } else { std::ptr::null() };
+            REGEXP_QUIT.with(|signal| signal.set(quit));
+            REGEXP_DEBUG_EVENTS.with(|events| events.set(debug));
             regex::host::set_quit_probe(Some(regexp_quit_probe));
         }
         ArmedQuit(armed)
     }
-    /// After an ARMED search: the host's C-g, if the matcher may have
-    /// stopped for it, as `quit'.
+    /// After an ARMED search: the host's C-g or a debug event, if the
+    /// matcher may have stopped for it, as `quit'.
     fn regexp_quit(&mut self, armed: ArmedQuit) -> std::result::Result<(), Fault> {
         let polled = armed.0;
         drop(armed);
-        if !polled || !self.quit.due() {
+        if !polled || !(self.quit.due() || crate::host::user_signal_waiting(self.debug_event_mask())) {
             return Ok(());
         }
         match self.maybe_quit() {
             Some(crate::threaded::Escape::Signal(..)) => Err(Fault::Signal("quit", Vec::new())),
-            // Unreachable while `inhibit-quit' stays nil; the next safepoint has it.
+            // A C-g `inhibit-quit' holds, which the matcher did not stop
+            // for; the next safepoint has it.
             _ => Ok(()),
         }
     }

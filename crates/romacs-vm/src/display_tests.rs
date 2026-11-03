@@ -55,3 +55,14 @@ fn a_function_height_stays_in_the_lface_and_realizes_over_the_default_height() {
     }
     assert_eq!(eval(&mut vm, "(internal-get-lisp-face-attribute 'fh-face :height (selected-frame))"), "fh-half");
 }
+
+#[test]
+fn a_band_shows_control_characters_as_gnu_display_does() {
+    // TAB, ^A and U+0085 in a header line: caret forms and an octal
+    // escape, the face runs moved with the text they cover.
+    let (text, runs) = super::shown_band("a\tb\u{1}c\u{85}d", vec![(0..1, 'x'), (1..4, 'y'), (4..8, 'z')]);
+    assert_eq!(text, "a^Ib^Ac\\205d");
+    assert_eq!(runs, vec![(0..1, 'x'), (1..6, 'y'), (6..12, 'z')]);
+    let (plain, same) = super::shown_band("plain", vec![(0..5, 'x')]);
+    assert_eq!((plain.as_str(), same), ("plain", vec![(0..5, 'x')]));
+}

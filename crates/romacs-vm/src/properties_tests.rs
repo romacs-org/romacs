@@ -1,8 +1,9 @@
 use super::*;
 fn check(tree: &Tree) -> (usize, usize, u32) {
     match tree {
-        Tree::Leaf(runs, len, present) => {
+        Tree::Leaf(runs, len, present, uniform) => {
             assert!(!runs.is_empty() && runs.len() <= LEAF);
+            assert_eq!(*uniform, runs.windows(2).all(|w| w[0].observed() == w[1].observed()), "leaf uniform summary");
             assert!(runs.iter().all(|r| r.len > 0));
             assert_eq!(*len, runs.iter().map(|r| r.len as usize).sum::<usize>());
             assert_eq!(
@@ -27,10 +28,13 @@ fn check(tree: &Tree) -> (usize, usize, u32) {
             len,
             present,
             height,
+            uniform,
         } => {
             let (a, b, h) = check(left);
             let (c, d, j) = check(right);
             assert!(h.abs_diff(j) <= 1, "annotation AVL balance");
+            assert_eq!(*uniform, left.is_uniform() && right.is_uniform()
+                && left.edge(true).observed() == right.edge(false).observed(), "branch uniform summary");
             assert_eq!((*len, *present, *height), (a + c, b + d, 1 + h.max(j)));
             (*len, *present, *height)
         }
@@ -293,4 +297,44 @@ fn runs_of_keys_end_only_where_those_keys_change() {
     }
     assert!(p.runs_of(ByteOffset(3)..ByteOffset(3), &keys).is_empty());
     assert_eq!(p.runs_of(ByteOffset(0)..ByteOffset(10), &["absent".to_owned()]).len(), 1);
+}
+#[test]
+fn next_change_matches_the_per_byte_oracle_across_uniform_stretches() {
+    // Few distinct values, put and edited in short pieces, so long
+    // stretches read one value under many stamps: the searches pass such
+    // stretches whole, and must still stop at every change, bounded by
+    // their limit, after edits and removals as well.
+    let mut p = Properties::new();
+    let mut len = 300;
+    let mut seed = 29u64;
+    for i in 0..1500 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let start = seed as usize % (len + 1);
+        let end = (start + ((seed >> 20) as usize % 30)).min(len);
+        let name = ["face", "fontified", "x"][(seed >> 32) as usize % 3];
+        let value = Value::integer((seed >> 40) as i64 % 2).unwrap();
+        match i % 5 {
+            4 => p.remove(ByteOffset(start)..ByteOffset(end), name),
+            3 => {
+                let inserted = (seed >> 44) as usize % 4;
+                p.replace(ByteOffset(start)..ByteOffset(end), inserted);
+                len = len - (end - start) + inserted;
+            }
+            _ => p.put(ByteOffset(start)..ByteOffset(end), name, value),
+        }
+        for tree in p.layers.values().flatten() {
+            check(tree);
+        }
+        let state = |at: usize| ["face", "fontified", "x"].map(|k| p.get_property(ByteOffset(at), k));
+        for at in 0..len {
+            for limit in [len, (at + 7).min(len)] {
+                let mut expected = at + 1;
+                while expected < limit && state(expected) == state(at) {
+                    expected += 1;
+                }
+                assert_eq!(p.next_change(ByteOffset(at), ByteOffset(limit)), ByteOffset(expected.min(limit)),
+                           "operation {i} at {at} limit {limit}");
+            }
+        }
+    }
 }
