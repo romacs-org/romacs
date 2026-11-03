@@ -61,6 +61,7 @@ pub(crate) struct ShownText {
     /// BASE is then 0 and the segments hold buffer bytes.
     segments: Option<Vec<mini_window::Segment>>,
     stretches: Vec<romacs_layout_input::Stretch>,
+    wrap_flips: Vec<u32>,
     line_numbers: Option<romacs_layout_input::LineNumbers>,
 }
 
@@ -1197,7 +1198,7 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, line_numbers }
+        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, wrap_flips, line_numbers }
             = self.window_text(window, height, None)?;
         self.display_state.bases.insert(id, base);
         match segments {
@@ -1280,6 +1281,7 @@ impl Vm {
             wrap: self.window_line_wrap(window, buffer)?,
             cursor_off: self.window(window)?.cursor_off,
             stretches,
+            wrap_flips,
             line_numbers,
             chrome: self.text_chrome(window, &table, base, at_zv)?,
             underline_rules: self.buffer_underline_rules(buffer),
@@ -1358,7 +1360,7 @@ impl Vm {
         let snapshot = WindowSnapshot { underline_rules: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
             hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false,
-            stretches: shown.stretches.clone(), line_numbers: shown.line_numbers.clone(), chrome };
+            stretches: shown.stretches.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
         Ok(Some((self.lay_out_alone(snapshot)?, shown)))
     }
     /// GNU's Fwindow_line_height (window.c:2048) for live WINDOW over the
@@ -1504,7 +1506,7 @@ impl Vm {
         let snapshot = WindowSnapshot { underline_rules: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
             vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(),
-            line_numbers: shown.line_numbers.clone(), chrome };
+            wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
         let end = self.lay_out_alone(snapshot)?;
         Ok(Some((end, shown)))
     }
@@ -1721,12 +1723,13 @@ impl Vm {
                 line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
             });
             return Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
-                segments: None, stretches: vec![], line_numbers });
+                segments: None, stretches: vec![], wrap_flips: vec![], line_numbers });
         };
         // Each element's character, its face, and the buffer byte it shows:
         // its own for the buffer's character, its position's for the rest.
         let mut segments: Vec<mini_window::Segment> = vec![];
         let mut stretches = vec![];
+        let mut wrap_flips = vec![];
         let mut relative = vec![];
         let (mut start_at, mut point_at, mut cursor_at) = (None, None, None);
         // The display bytes rows of a new buffer line start at, and the
@@ -1753,12 +1756,12 @@ impl Vm {
             };
             if let crate::prim::ShownKind::Stretch(width) = e.kind { stretches.push(romacs_layout_input::Stretch { byte: display, width }); }
             // A relative space's width waits for the host's glyph of C.
-            if let crate::prim::ShownKind::Relative { factor, c } = e.kind {
+            let shown = if let crate::prim::ShownKind::Relative { factor, c } = e.kind {
                 relative.push((display, face, c, factor));
-                push(&mut utf8, &mut face_runs, ' ', face);
-            } else {
-                push(&mut utf8, &mut face_runs, e.c, face);
-            }
+                ' '
+            } else { e.c };
+            push(&mut utf8, &mut face_runs, shown, face);
+            if e.whitespace != matches!(shown, ' ' | '\t') { wrap_flips.push(display as u32); }
             let len = utf8.len() - display;
             match segments.last_mut() {
                 Some(s) if !s.string && own && s.buffer + s.len == at && s.display + s.len == display => s.len += len,
@@ -1794,7 +1797,7 @@ impl Vm {
             stretches.insert(at, romacs_layout_input::Stretch { byte, width });
         }
         Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw: vec![] }, start_byte: start_at.unwrap_or(len), point_byte: cursor_at.or(point_at).unwrap_or(len),
-            faces, base: 0, at_zv, table: table.clone(), merged, segments: Some(segments), stretches, line_numbers })
+            faces, base: 0, at_zv, table: table.clone(), merged, segments: Some(segments), stretches, wrap_flips, line_numbers })
     }
     /// Whether WINDOW shows BUFFER's bytes SHOWN as more than its
     /// characters: text there has a `display' or `invisible' property, maybe

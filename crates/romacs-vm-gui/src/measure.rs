@@ -185,6 +185,11 @@ mod tests {
             r#"(insert "λόγος " (make-string 30 ?a) "\t" (make-string 20 ?b) "\tc\td")"#,
             r#"(insert (propertize (make-string 50 ?i) 'face 'hosted-sans) (propertize "WWW" 'face 'hosted-big) (make-string 40 ?m))"#,
             r#"(insert (make-string 57 ?q) "\t\t" (make-string 5 ?r))"#,
+            // `word-wrap' breaks a row at its last whitespace, or at the
+            // edge when a word fills it, as GNU's word wrap does.
+            r#"(setq truncate-partial-width-windows nil word-wrap t) (insert "the quick brown fox jumps over the lazy dog and keeps running far away\n" (make-string 40 ?x) " tail\nshort line\n")"#,
+            r#"(setq truncate-partial-width-windows nil word-wrap t) (insert "a  b   c    words  with  runs  of  spaces  between  them  all  the  way\tand\ttabs\ttoo here")"#,
+            r#"(setq truncate-partial-width-windows nil word-wrap t) (insert "λόγος and 日本語 mixed " (propertize "BIG words" 'face 'hosted-big) " then plain words to wrap the row again and again")"#,
             // Truncated lines show to their `$' and hide the rest, here as
             // `truncate-partial-width-windows' asks of this window.
             r#"(setq truncate-partial-width-windows 50) (insert (make-string 40 ?t) "\nnext\n" (make-string 25 ?u) "\t" (make-string 3 ?v))"#,
@@ -575,6 +580,34 @@ mod tests {
     /// logical line is one row, measured to its newline, and where the host
     /// shows the cursor for a position, pos-visible-in-window-p and
     /// posn-at-point answer its place and glyph.
+    /// Under `word-wrap' an element is whitespace by the text under it
+    /// (IT_DISPLAYING_WHITESPACE): a space over a letter is no wrap point,
+    /// a letter over a space is one. The host breaks the rows where the
+    /// motion does, so every position shows where the VM places it.
+    #[test]
+    fn word_wrap_classes_elements_by_the_text_under_them() {
+        let mut h = hosted();
+        let (d, b) = ("d".repeat(25), "b".repeat(25));
+        for (insert, rows) in [
+            (r#"(insert "abc" (propertize "X" 'display '(space :width 1)) (make-string 30 ?d) " tail")"#, vec![format!("abc\t{d}\\"), "ddddd tail".to_owned()]),
+            (r#"(insert (make-string 10 ?a) (propertize " " 'display "Y") (make-string 25 ?b) " tail")"#, vec!["aaaaaaaaaaY\\".to_owned(), format!("{b} \\"), "tail".to_owned()]),
+        ] {
+            h.eval(&format!("(progn (erase-buffer) (kill-all-local-variables) (setq truncate-partial-width-windows nil word-wrap t) {insert} (goto-char 1) (set-window-start nil 1))"));
+            let paint = h.paint();
+            let mut text: Vec<_> = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).copied().collect();
+            text.sort_by(|a, b| (a.2, a.1).partial_cmp(&(b.2, b.1)).unwrap());
+            let mut painted = vec![String::new(); paint.rows.len()];
+            for g in &text { painted[paint.rows.iter().position(|r| r.y == g.2).unwrap()].push(g.0); }
+            assert_eq!(painted.iter().filter(|r| !r.is_empty()).collect::<Vec<_>>(), rows.iter().collect::<Vec<_>>(), "{insert}: painted rows");
+            let last = h.eval("(point-max)").parse::<usize>().unwrap();
+            for pos in 1..=last {
+                h.eval(&format!("(goto-char {pos})"));
+                let Some((x, y, _, _)) = h.paint().cursor else { continue };
+                assert_eq!(h.eval(&format!("(pos-visible-in-window-p {pos} nil t)")), format!("({} {})", x as i64, y as i64), "{insert}: visible {pos}");
+            }
+        }
+    }
+
     fn agree_painted(h: &mut Hosted, insert: &str, rows: &[&str]) {
         // GNU's kill-all-local-variables resets the invisibility spec
         // (buffer.c:1163); Romacs's keeps the last case's.
@@ -664,7 +697,15 @@ mod tests {
         h.eval(r#"(progn (erase-buffer) (setq display-line-numbers t) (insert "first\nsecond\nthird") (goto-char 3) (set-window-start nil 1))"#);
         h.paint();
         assert_eq!(h.eval("(list (vertical-motion 1) (point) (line-number-display-width) (line-number-display-width 'columns))"), "(1 7 2 4.0)");
-        h.eval("(setq display-line-numbers nil)");
+        // A row's first text glyph stays on it though it does not fit, a
+        // TAB after the line number too; the text after it continues.
+        h.eval(r#"(progn (erase-buffer) (setq truncate-partial-width-windows nil word-wrap t tab-width 40) (insert "\tafter\nnext") (goto-char 1) (set-window-start nil 1))"#);
+        let paint = h.paint();
+        let a = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::Text && g.0 == 'a').unwrap();
+        assert!(a.2 > 0.0, "the text after the TAB continues on the next row");
+        assert_eq!(h.eval("(list (progn (goto-char 2) (vertical-motion 0)) (point) (progn (goto-char 1) (vertical-motion 1)) (point) (cdr (nth 2 (posn-at-point 2))))"),
+                   format!("(0 2 1 2 {})", a.2 as i64));
+        h.eval("(setq display-line-numbers nil word-wrap nil) (kill-local-variable 'tab-width)");
         // The face lists and overlay faces GNU merges size the glyphs.
         h.eval(r#"(progn (erase-buffer) (insert "abc") (goto-char 1))"#);
         let plain = h.eval("(window-text-pixel-size)");
@@ -816,11 +857,8 @@ mod tests {
     fn displayed_window_refuses_what_the_host_does_not_lay_out() {
         let mut h = hosted();
         h.eval("(put 'display-table 'char-table-extra-slots 18)");
-        let long = "(make-string (+ (window-body-width) 2) ?x)";
         for (refused, twin, what) in [
-            // The host continues lines at the window edge, never at a word.
-            (format!("(setq truncate-partial-width-windows nil word-wrap t) (insert {long})"), "(setq word-wrap t) (insert (make-string (- (window-body-width) 2) ?x))".to_owned(), "of a continued or truncated line"),
-            ("(setq line-prefix \"> \") (insert \"abc\")".into(), "(insert \"abc\")".into(), "of a line or wrap prefix"),
+            ("(setq line-prefix \"> \") (insert \"abc\")".to_owned(), "(insert \"abc\")".to_owned(), "of a line or wrap prefix"),
             ("(insert \"a\" (propertize \" \" 'display '(space :width 2 :height 2)) \"c\")".into(), "(insert \"a\" (propertize \" \" 'display '(space :width 2)) \"c\")".into(), "of a space with its own height"),
             // The host draws its own continuation and truncation glyphs.
             ("(setq buffer-display-table (make-char-table 'display-table)) (set-char-table-extra-slot buffer-display-table 1 ?|) (insert \"abc\")".into(),

@@ -68,7 +68,7 @@ fn snapshot(face: &Face, width: u32, height: u32, cell: (u32, u32), t: f64) -> F
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { extends: vec![], utf8, face_runs, raw: vec![] }, mode_line: None,
             mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, hscroll: Default::default(), tab_width: 8,
-            wrap: Default::default(), cursor_off: true, stretches: vec![], line_numbers: None, chrome: Default::default(), faces,
+            wrap: Default::default(), cursor_off: true, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces,
         } }],
     }
 }

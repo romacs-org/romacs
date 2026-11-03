@@ -173,9 +173,9 @@ impl<'l, 'a> Source<'l, 'a> {
         };
         Ok(Some((start.max(self.view.begv), string)))
     }
-    /// Whether a row starts at POS for a host that breaks rows only at
-    /// newlines: the character before it is a newline that is visible and
-    /// not replaced, so no text before POS can reach POS's row.
+    /// Whether a row starts at POS: the character before it is a newline
+    /// that is visible and not replaced, so no text before POS can reach
+    /// POS's row.
     pub(super) fn starts_row(&mut self, pos: i64) -> R<bool> {
         if pos <= self.view.begv { return Ok(true); }
         if self.char_after(pos - 1)? != Some(0x0a) { return Ok(false); }

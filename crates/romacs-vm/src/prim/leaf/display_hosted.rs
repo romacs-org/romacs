@@ -46,9 +46,10 @@ pub(crate) enum FaceKey { Buffer(i64),
 /// One element as a host shows it: its character, the face it shows in,
 /// the buffer position it is at, what it is there and whether it REPLACES
 /// the buffer's text there (the text itself, or what its `display' shows;
-/// not an overlay string's), so point can show on it.
+/// not an overlay string's), so point can show on it, and whether it is
+/// word-wrap WHITESPACE (IT_DISPLAYING_WHITESPACE).
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Shown { pub c: char, pub face: FaceKey, pub charpos: i64, pub kind: ShownKind, pub replaces: bool }
+pub(crate) struct Shown { pub c: char, pub face: FaceKey, pub charpos: i64, pub kind: ShownKind, pub replaces: bool, pub whitespace: bool }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum ShownKind {
@@ -164,7 +165,7 @@ impl<'a> Leaf<'a> {
                     (ShownKind::Other { cursor: asks }, e.from_display)
                 }
             };
-            out.push(Shown { c, face: face_key(&e), charpos: e.charpos, kind, replaces });
+            out.push(Shown { c, face: face_key(&e), charpos: e.charpos, kind, replaces, whitespace: e.whitespace });
         }
         Ok(out)
     }

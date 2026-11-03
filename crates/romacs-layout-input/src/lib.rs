@@ -315,6 +315,11 @@ pub struct WindowSnapshot {
     pub cursor_off: bool,
     /// The characters of TEXT shown as stretches, in byte order.
     pub stretches: Vec<Stretch>,
+    /// The bytes of TEXT whose character's word-wrap class is not its own,
+    /// sorted: a space or TAB there is no wrap whitespace, another
+    /// character is. GNU's IT_DISPLAYING_WHITESPACE looks under a stretch
+    /// or a string at the buffer's text.
+    pub wrap_flips: Vec<u32>,
     /// `display-line-numbers': what starts each row.
     pub line_numbers: Option<LineNumbers>,
     /// The margins and fringes around the text area: WIDTH is the text
@@ -323,7 +328,7 @@ pub struct WindowSnapshot {
     /// Where its underlines go.
     pub underline_rules: UnderlineRules,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, line_numbers, chrome, underline_rules });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, wrap_flips, line_numbers, chrome, underline_rules });
 
 /// A window's horizontal scroll in pixels (GNU's first_visible_x): the x
 /// on each line, from its start after any line number, that shows at the
@@ -673,10 +678,10 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, line_numbers, chrome, underline_rules } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, wrap_flips, line_numbers, chrome, underline_rules } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
-            && *wrap == other.wrap && *stretches == other.stretches && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
+            && *wrap == other.wrap && *stretches == other.stretches && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
             && *underline_rules == other.underline_rules
     }
 }

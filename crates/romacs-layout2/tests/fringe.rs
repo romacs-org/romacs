@@ -24,7 +24,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
         id: 1, width: 100, height: 200, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap, cursor_off: false, stretches: vec![], line_numbers: None,
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap, cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None,
         faces: vec![face([255; 3], [0; 3]), face([1, 2, 3], [200, 0, 0]), face([0, 255, 0], [0; 3])],
         chrome: WindowChrome { left_fringe: 8, right_fringe: 8, fringe_face: FaceHandle(1), indicators, ..WindowChrome::default() },
     }

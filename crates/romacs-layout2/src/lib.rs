@@ -26,7 +26,7 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { extends: vec![], utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
     }
 }
 
@@ -646,6 +646,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             None => (numbers.columns as f32 * cell, None, false),
         }
     };
+    // A `word-wrap' window's rows break where GNU's word wrap breaks them.
+    let word = snapshot.wrap == LineWrap::Word && !truncate;
+    let mut breaks = WordBreaks { row: line_start, continued: 0.0, next: None, done: !word };
     let mut x0 = gutter(line_start).0;
     let mut x = x0;
     let mut shift = shift_of(line_start);
@@ -748,14 +751,15 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let shown = match stretch { Some(width) => Shown::Stretch(width), None => shown(ch, snapshot.text.is_raw(byte)) };
         // X on the row and from the line's start (`continued' before it);
         // a TAB stops as from after the line number (x_produce_glyphs).
-        let width = |frame: &FrameGlyphBuffer, x: f32, line_x: f32, x0: f32| match &shown {
-            Shown::Tab => tab_advance(f64::from(line_x - x0), f64::from(space), snapshot.tab_width) as f32,
-            Shown::Stretch(width) => stretch_advance(*width, f64::from(x), f64::from(line_x), (!truncate).then_some(f64::from(last_x))) as f32,
-            Shown::Glyphs(glyphs) => glyphs.chars().map(|glyph| advance(frame, id, glyph, cell)).sum(),
-        };
+        let width = |frame: &FrameGlyphBuffer, x: f32, line_x: f32, x0: f32|
+            shown_advance(frame, &shown, id, cell, space, snapshot.tab_width, x, line_x, x0, (!truncate).then_some(last_x));
         let mut advance_px = width(frame, x, x + continued, x0);
         if measuring { x += advance_px; continue; }
-        if !truncate && hpos > 0 && x + advance_px > last_x {
+        // A word-wrapped row breaks where `WordBreaks' finds; another, at
+        // the glyph that would pass the text area.
+        let breaking = if word { breaks.at(byte, snapshot, frame, &metrics, face_base, last_x, &|byte| gutter(byte).0) }
+                       else { !truncate && hpos > 0 && x + advance_px > last_x };
+        if breaking {
             if glyphs_mark && drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
@@ -1002,6 +1006,80 @@ fn shown(ch: char, raw: bool) -> Shown {
         // placeholder has the byte's code.
         _ if raw || ch.is_control() => Shown::Glyphs(Glyphs::of(&['\\', digit(6), digit(3), digit(0)])),
         _ => Shown::Glyphs(Glyphs::of(&[ch])),
+    }
+}
+
+/// The advance of SHOWN in face ID (CELL wide, SPACE its space's width)
+/// at row X, line x LINE_X, on a row whose text starts at X0: a TAB to
+/// its next stop as from after the line number, a stretch as GNU's (up to
+/// LAST_X on a continued row), glyphs by their own advances.
+#[allow(clippy::too_many_arguments)]
+fn shown_advance(frame: &FrameGlyphBuffer, shown: &Shown, id: FaceId, cell: f32, space: f32, tab_width: u32,
+                 x: f32, line_x: f32, x0: f32, last_x: Option<f32>) -> f32 {
+    match shown {
+        Shown::Tab => tab_advance(f64::from(line_x - x0), f64::from(space), tab_width) as f32,
+        Shown::Stretch(width) => stretch_advance(*width, f64::from(x), f64::from(line_x), last_x.map(f64::from)) as f32,
+        Shown::Glyphs(glyphs) => glyphs.chars().map(|glyph| advance(frame, id, glyph, cell)).sum(),
+    }
+}
+
+/// GNU's word wrap (move_it_in_display_line_to), one row ahead of the
+/// layout: the bytes where a `word-wrap' window's rows break, from ROW, a
+/// line start. A row breaks when its next glyph would pass LAST_X, at its
+/// last wrap point, the first glyph after whitespace (a space or TAB, as
+/// `wrap_flips' classes the snapshot's elements), or
+/// with none at that glyph; the next row continues the line from there,
+/// its TABs stopping as from the line's start (a TAB that does not fit,
+/// from the text area's edge). Rows are found only as the layout reaches
+/// them, so a long line costs what the window shows.
+struct WordBreaks { row: usize, continued: f32, next: Option<usize>, done: bool }
+
+impl WordBreaks {
+    /// Whether a row breaks at BYTE; BYTEs ascend.
+    #[allow(clippy::too_many_arguments)]
+    fn at(&mut self, byte: usize, snapshot: &WindowSnapshot, frame: &FrameGlyphBuffer, metrics: &[(f32, f32, f32, f32)],
+          face_base: u32, last_x: f32, gutter: &dyn Fn(usize) -> f32) -> bool {
+        while !self.done && self.next.is_none_or(|next| next < byte) {
+            self.next = self.row_break(snapshot, frame, metrics, face_base, last_x, gutter);
+            self.done = self.next.is_none();
+        }
+        self.next == Some(byte)
+    }
+
+    /// The next break after the rows already found, or None at the text's end.
+    fn row_break(&mut self, snapshot: &WindowSnapshot, frame: &FrameGlyphBuffer, metrics: &[(f32, f32, f32, f32)],
+                 face_base: u32, last_x: f32, gutter: &dyn Fn(usize) -> f32) -> Option<usize> {
+        let text = &snapshot.text.utf8;
+        let stretch_at = |byte: usize| snapshot.stretches.binary_search_by_key(&byte, |s| s.byte).ok().map(|i| snapshot.stretches[i].width);
+        while self.row < text.len() {
+            let (row, x0) = (self.row, gutter(self.row));
+            let (mut x, mut hpos, mut may_wrap, mut wrap_at) = (x0, 0usize, false, None::<(usize, f32)>);
+            let mut end = None;
+            for (byte, ch) in text[row..].char_indices().map(|(at, ch)| (row + at, ch)) {
+                if ch == '\n' { end = Some((byte + 1, None)); break; }
+                let whitespace = (ch == ' ' || ch == '\t') != snapshot.wrap_flips.binary_search(&(byte as u32)).is_ok();
+                if may_wrap && !whitespace { wrap_at = Some((byte, x)); }
+                may_wrap = whitespace;
+                let index = face_at(&snapshot.text, byte, 0);
+                let (_, _, cell, space) = metrics[index];
+                let shown = match stretch_at(byte) { Some(width) => Shown::Stretch(width), None => shown(ch, snapshot.text.is_raw(byte)) };
+                let id = FaceId::new(face_base + index as u32);
+                let advance = shown_advance(frame, &shown, id, cell, space, snapshot.tab_width, x, x + self.continued, x0, Some(last_x));
+                if hpos > 0 && x + advance > last_x {
+                    let (at, x) = wrap_at.unwrap_or((byte, if matches!(shown, Shown::Tab) { last_x } else { x }));
+                    end = Some((at, Some(x)));
+                    break;
+                }
+                if !matches!(shown, Shown::Stretch(_)) || advance > 0.0 { hpos += 1; }
+                x += advance;
+            }
+            match end {
+                None => { self.row = text.len(); }
+                Some((at, None)) => { (self.row, self.continued) = (at, 0.0); }
+                Some((at, Some(x))) => { (self.row, self.continued) = (at, self.continued + x); return Some(at); }
+            }
+        }
+        None
     }
 }
 
