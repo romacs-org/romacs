@@ -88,6 +88,18 @@ class Agents(Server):
                     f':arguments (list {" ".join(lisp_text(a) for a in e[3])}))')
         self.eval('(setq romacs-agent-providers (list ' + ' '.join(entry(e) for e in entries) + '))')
 
+    def persist(self):
+        """This tree's harness settings in the init file too, so a restarted
+        Romacs (which runs the init again) has them."""
+        home = self.home / '.config/codex-second'
+        home.mkdir(parents=True, exist_ok=True)
+        with open(self.home / '.config/romacs/init.el', 'a') as init:
+            init.write(f"""
+(setq romacs-agent-claude-program {lisp(HARNESS)}
+      romacs-agent-providers (list (cons "claude" "~/.claude")
+                                   (list "codex" :config-dir {lisp_text(str(home))} :program {lisp(CODEX)} :arguments nil)))
+""")
+
     def codex_instance(self):
         """A Codex instance running fake_codex.py, with its own CODEX_HOME
         (not Codex's default ~/.codex, which leaves the variable unset)."""
@@ -593,6 +605,11 @@ def unit(args, base):
 # Every Romacs MCP tool, once, with a check of its result: (tool, arguments,
 # check).  `tools' (fake harness) and `real' (Claude Code) both run it; a
 # tool the endpoint offers that is missing here fails the tour.
+# Tools the tour leaves to their own workflows: a restart ends the tour's
+# server (`restart'); gnosis's tools need its fixture database (`gnosis').
+ELSEWHERE = ['romacs_restart_request']
+
+
 def tour(work, delegate_target):
     page = str(work / 'tour.txt')
     return [
@@ -662,7 +679,7 @@ def tools(args, base):
         results = a.tool_results()[-len(steps):]
         checked = {tool: (name == tool and not error and check(text))
                    for (tool, _, check), (name, text, error) in zip(steps, results)}
-        missing = sorted(set(offered(a)) - set(checked))
+        missing = sorted(set(offered(a)) - set(checked) - set(ELSEWHERE) - {t for t in offered(a) if t.startswith('gnosis_')})
         result = {'checked': checked, 'not_in_tour': missing,
                   'notes': a.eval('(with-current-buffer "notes" (buffer-string))'),
                   'file': (a.work / 'tour.txt').read_text(),
@@ -767,6 +784,201 @@ def woken_ids(wakes, once, interrupted):
             and len(told) == 2 and '[failed]' in told[0] and told[1].endswith('[completed]:\nafter interrupt'))
 
 
+def build_dir(a, commit):
+    """A build directory for this binary: romacs-vm-gui and its runtime, and
+    a build.json naming COMMIT, as an install makes."""
+    d = a.root / f'build-{commit[:8]}'
+    d.mkdir()
+    binary = Path(a.args.romacs).resolve()
+    runtime = Path(os.environ.get('ROMACS_RUNTIME_ROOT') or Path(__file__).resolve().parents[3])
+    (d / 'romacs-vm-gui').symlink_to(binary)
+    for name in ('romacs-mcp', 'romacs-agent-host'):
+        (d / name).symlink_to(binary.with_name(name))
+    for root in ('gnu-lisp', 'rlisp', 'etc'):
+        (d / root).symlink_to(runtime / root)
+    (d / 'build.json').write_text(json.dumps({'commit': commit}))
+    return d
+
+
+def restart_unit(args, base):
+    """`restart' with the user manager: the server is the unit
+    romacs-server-S, and its successor comes from a helper unit once that
+    unit has ended."""
+    bus = os.environ.get('DBUS_SESSION_BUS_ADDRESS')
+    if not bus:
+        return {'ok': None, 'skipped': 'no user bus'}
+    return restart(args, base, bus)
+
+
+def restart_race(args, base):
+    """`restart' with a launcher racing the successor: a client that starts
+    the server when none listens keeps asking during the restart; whichever
+    server comes up restores the session, and the requester is told."""
+    return restart(args, base, race=True)
+
+
+def restart(args, base, bus=None, race=False):
+    """An agent asks for a restart into a build: it runs once the agent's turn
+    ends; the server comes back as the same server (no user manager here:
+    the detached path) with the session's buffers; the requesting Claude
+    session and an idle Codex session are told "Romacs restarted into
+    <commit>" (the Codex one by a new turn)."""
+    name = f'ru{os.getpid()}' if bus else 'rs'
+    a = Agents(args, base, name, bus and {'DBUS_SESSION_BUS_ADDRESS': bus, 'ROMACS_SERVER_SLICE': 'romacs-build.slice'})
+    if bus:
+        a.env['WAYLAND_DISPLAY'] = str(a.runtime / a.env['WAYLAND_DISPLAY'])
+        a.env['XDG_RUNTIME_DIR'] = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+        a.unit = f'romacs-server-{name}'
+    a.persist()
+    try:
+        a.up()
+        in_unit = a.eval('(and (getenv "INVOCATION_ID") t)')
+        a.codex_instance()
+        target = build_dir(a, 'abcdef0123456789')
+        a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "carried across\\n") t)')
+        requester = a.start('say ready')
+        a.idle(requester)
+        idle_codex = a.start('say codex ready', 'codex')
+        a.idle(idle_codex)
+        old_pid, harness = a.pid, a.harness_pid(requester)
+        # The Codex session is told too, as if it had asked.
+        (a.home / '.local/state/romacs/agents' / idle_codex / 'restart-wake').write_text('')
+        a.send(requester, 'call romacs_restart_request ' + json.dumps({'target': str(target), 'delay': 1}))
+        asked = None
+        until(lambda: any(e.get('tool') == 'romacs_restart_request' for e in a.logged()), 30, 'requested')
+        asked = next(e for e in a.logged() if e.get('tool') == 'romacs_restart_request')
+
+        def new_pid():
+            # Never starting a server (unless racing): the successor must be the one to.
+            seconds, out = a.client(*(() if race else ('--no-start',)), '-e', '(emacs-pid)', check=False)
+            return int(out) if out.isdigit() else None
+        # Asked rarely: a call in flight is in the restart's way.
+        time.sleep(1)
+        pending = a.eval('(prin1-to-string (list (romacs-agent-state (romacs-agent-get %s)) warm-restart-last-result))'
+                         % lisp_text(requester))
+        for _ in range(45 if not race else 300):
+            time.sleep(2 if not race else 0.3)
+            if (p := new_pid()) and p != old_pid:
+                break
+        else:
+            raise RuntimeError(f'not restarted: {pending}')
+        a.pid = new_pid()
+        until(lambda: any('Romacs restarted' in e.get('wake', '') for e in a.logged()), 30, 'requester told')
+        told = next(e['wake'] for e in a.logged() if 'Romacs restarted' in e.get('wake', ''))
+        until(lambda: any(e.get('prompt', '').startswith('Romacs restarted') for e in a.codex_runs()), 30, 'codex told')
+        codex_told = next(e['prompt'] for e in a.codex_runs() if e.get('prompt', '').startswith('Romacs restarted'))
+        carried = a.eval('(and (get-buffer "notes") (with-current-buffer "notes" (buffer-string)))')
+        runtime = a.eval('(getenv "ROMACS_RUNTIME_ROOT")')
+        served = a.eval('romacs-server-name')
+        wake_files = [p for p in (a.home / '.local/state/romacs/agents').glob('*/restart-wake')]
+        result = {'in_unit': in_unit, 'unit_after': bus and subprocess.run(
+                      ['systemctl', '--user', 'is-active', a.unit], capture_output=True, text=True).stdout.strip(),
+                  'asked': asked['text'][:200], 'old_pid': old_pid, 'new_pid': a.pid, 'harness_same': a.harness_pid(requester) == harness,
+                  'told': told, 'codex_told': codex_told, 'carried': carried, 'runtime': runtime, 'served': served,
+                  'wake_files_left': len(wake_files)}
+        # Racing, the launcher's server (this build) may win: it restores the
+        # session in its own build, and says which.
+        into = 'Romacs restarted into ' if race else 'Romacs restarted into abcdef01'
+        result['ok'] = ('"scheduled"' in asked['text'] and a.pid != old_pid and result['harness_same']
+                        and told.startswith(into) and codex_told.startswith(into)
+                        and carried == '"carried across\\n"' and (race or str(target) in runtime) and served == f'"{name}"'
+                        and not wake_files and (in_unit == 't') == bool(bus) and (not bus or result['unit_after'] == 'active'))
+        return result
+    finally:
+        if bus:
+            subprocess.run(['systemctl', '--user', 'stop', a.unit], capture_output=True)
+        a.close()
+
+
+GNOSIS_FIXTURE = r"""(progn
+  (require 'gnosis)
+  (setq gnosis-dir (file-name-as-directory %s) gnosis-testing t gnosis-vc-auto-push nil)
+  (make-directory gnosis-dir t)
+  (setq gnosis-db (gnosis-sqlite-open (expand-file-name "gnosis.db" gnosis-dir)))
+  (gnosis-db-init)
+  (load %s nil t)
+  (prin1-to-string (list (gnosis-test--add-basic-thema "Capital of France?" "Paris")
+                         (gnosis-test--add-basic-thema "Capital of Greece?" "Athens")
+                         (gnosis-test--add-basic-thema "Capital of Italy?" "Rome"))))"""
+
+
+def gnosis(args, base):
+    """Gnosis's agent layer through romacs-agent, on a fixture database in the
+    private tree: the API's tools through the harness MCP client (paging by
+    cursor token, preview and apply with reordered keys, practice reserved and
+    cancelled with no grade written); the evaluation adapter through a fake
+    Claude and a fake Codex session (pass resolved, malformed rejected), the
+    tutor adapter through a fake Claude."""
+    a = Agents(args, base, 'gn')
+    try:
+        a.up()
+        a.codex_instance()
+        helpers = Path(__file__).resolve().parents[3] / 'test/lisp/gnosis/gnosis-test-helpers.el'
+        ids = parity_live.read_sexp(parity_live.read_sexp(a.eval(GNOSIS_FIXTURE % (lisp(a.home / 'gnosis'), lisp(helpers)))))
+        with RomacsMcp.for_server(a, agent_tools=True) as mcp:
+            offered = [t for t in mcp.tools() if t.startswith('gnosis_')]
+            page1 = mcp.call('gnosis_content_search', limit=2)
+            page2 = mcp.call('gnosis_content_search', limit=2, cursor=page1['next'])
+            records = mcp.call('gnosis_content_fetch', ids=[str(i) for i in ids])
+            first = records['items'][0]
+            # Keys in another order than fetch gave them.
+            change = {'add-tags': ['agent'], 'revision': first['revision'], 'id': first['id']}
+            plan = mcp.call('gnosis_content_preview', owner=records['owner'], changes=[change])
+            applied = mcp.call('gnosis_content_apply', **{'plan-token': plan['plan-token']})
+            practice = mcp.call('gnosis_start_practice', **{'thema-ids': ids[:2], 'limit': 2,
+                                                            'policy': {'consecutive': False, 'successes-required': 1}})
+            status = mcp.call('gnosis_status', **{'session-id': practice['session-id']})
+            # Native answering has the batch now: the API refuses to change it.
+            _, refusal, refused = mcp.tool('gnosis_cancel', {'session-id': practice['session-id']})
+            sessions = mcp.call('gnosis_sessions', limit=5)
+        # Nothing graded: no review event, no practice encounter.
+        reviews = a.eval('(+ (caar (sqlite-select gnosis-db "SELECT count(*) FROM review_events")) '
+                         '(caar (sqlite-select gnosis-db "SELECT count(*) FROM practice_encounters")))')
+        # Asked as a command would: the answer arrives later, from the session.
+        ask_form = r"""(progn (defvar gnosis-live--answer nil) (setq gnosis-live--answer nil)
+  (funcall %s (list :question "Capital of France?" :reference-answer "Paris" :rubric "Names Paris" :response %s)
+           (lambda (r) (setq gnosis-live--answer (list 'resolved r))) (lambda (e) (setq gnosis-live--answer (list 'rejected e))))
+  t)"""
+
+        def ask(function, response):
+            a.eval(ask_form % (function, response))
+            until(lambda: a.eval('gnosis-live--answer') != 'nil', 40, 'evaluation answered')
+            return parity_live.read_sexp(a.eval('(prin1-to-string gnosis-live--answer)'))
+        a.eval("(progn (require 'gnosis-agent-romacs) t)")
+        claude = ask("#'gnosis-agent-eval-romacs", '"Paris"')
+        malformed = ask("#'gnosis-agent-eval-romacs", '"MALFORMED"')
+        a.eval('(setq gnosis-agent-romacs-provider "codex" gnosis-agent-romacs-model "m-luna")')
+        codex = ask("#'gnosis-agent-eval-romacs", '"Paris"')
+        codex_run = [e for e in a.codex_runs() if e.get('prompt', '').startswith('Evaluate')][-1]
+        a.eval('(setq gnosis-agent-romacs-provider nil gnosis-agent-romacs-model nil)')
+        a.eval(r"""(progn (setq gnosis-live--answer nil)
+  (gnosis-agent-review-romacs (list :api-version 1 :phase "evaluate" :question (list :id "q1" :question "Capital?"
+                                     :reference-answer "Paris" :rubric "Paris" :hints [] :parathema nil :tags [] :source "atlas")
+                                    :response "Paris")
+                              (lambda (r) (setq gnosis-live--answer (list 'resolved r)))
+                              (lambda (e) (setq gnosis-live--answer (list 'rejected e))))
+  t)""")
+        until(lambda: a.eval('gnosis-live--answer') != 'nil', 40, 'tutor answered')
+        tutor = parity_live.read_sexp(a.eval('(prin1-to-string gnosis-live--answer)'))
+        asks = parity_live.read_sexp(a.eval(
+            "(prin1-to-string (mapcar (lambda (s) (symbol-name (romacs-agent-state s))) "
+            "(seq-filter (lambda (s) (equal (plist-get (romacs-agent-options s) :role) \"ask\")) (romacs-agent-sessions))))"))
+        result = {'offered': len(offered), 'paged': [len(page1['items']), len(page2['items']), page2['complete']],
+                  'applied_tags': applied['items'][0].get('tags'), 'practice': practice.get('status'),
+                  'status': status.get('status'), 'cancel_refused': [refused, refusal[:120]], 'sessions': len(sessions['items']),
+                  'review_rows': reviews, 'claude': claude, 'malformed': malformed, 'codex': codex,
+                  'codex_argv_model': 'm-luna' in codex_run['argv'], 'tutor': tutor, 'ask_states': asks}
+        result['ok'] = (len(offered) == 20 and result['paged'] == [2, 1, True] and 'agent' in (result['applied_tags'] or [])
+                        and practice.get('status') in ('pending', 'running') and refused and 'native review' in refusal
+                        and reviews == '0' and 'resolved' in claude and 'pass' in claude
+                        and 'rejected' in malformed and 'no grade recorded' in malformed
+                        and 'resolved' in codex and result['codex_argv_model'] and 'resolved' in tutor
+                        and all(state in ('ended', 'idle', 'detached') for state in parity_live.read_sexp(asks)))
+        return result
+    finally:
+        a.close()
+
+
 def real_program(name):
     """NAME's real executable on PATH, past version-manager shims and
     wrappers, which need the real HOME's configuration."""
@@ -818,7 +1030,7 @@ def real(args, base):
                         text = ''.join(c.get('text', '') for c in text) if isinstance(text, list) else str(text)
                         outputs.setdefault(uses.get(block['tool_use_id']), (text, block.get('is_error')))
         checked = {tool: tool in outputs and not outputs[tool][1] and check(outputs[tool][0]) for tool, _, check in steps}
-        missing = sorted(set(offered(a)) - set(checked))
+        missing = sorted(set(offered(a)) - set(checked) - set(ELSEWHERE) - {t for t in offered(a) if t.startswith('gnosis_')})
         cost = [r['out'].get('total_cost_usd') for r in a.journal(sid)
                 if isinstance(r.get('out'), dict) and r['out'].get('type') == 'result']
         review = outputs.get('romacs_delegate_task', ('', None))[0]
@@ -831,7 +1043,8 @@ def real(args, base):
 
 
 WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
-             'tools': tools, 'delegate': delegate, 'real': real}
+             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
+             'gnosis': gnosis}
 
 
 def main():
@@ -853,8 +1066,8 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'providers', 'tools', 'delegate', 'survive', 'outcome', 'budget',
-                                  'deadline', 'probe']:
+    for name in args.workflow or ['host', 'session', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'survive',
+                                  'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result

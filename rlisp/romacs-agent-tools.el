@@ -354,12 +354,18 @@ result.  Each end is handed on once: it then waits in the parent's queue
           (let* ((text (romacs-agent-tools--wake-text child end))
                  ;; Delivered only once the parent's harness has it.
                  (delivered (lambda () (romacs-agent-tools--mark-woken child (car end))))
-                 (valid (lambda () (romacs-agent-tools--wanted-p child (car end))))
-                 (deliver (lambda () (when (funcall valid) (romacs-agent-send parent text delivered valid)))))
-            ;; A per-turn parent takes the message as its next turn; another
-            ;; once its supervisor is attached.
-            (if (romacs-agent--per-turn-p parent) (funcall deliver)
-              (romacs-agent--when-attached parent deliver))))))))
+                 (valid (lambda () (romacs-agent-tools--wanted-p child (car end)))))
+            (romacs-agent-tools--deliver parent text delivered valid)))))))
+
+(defun romacs-agent-tools--deliver (session text delivered &optional valid)
+  "Give SESSION's harness TEXT as its next message, then call DELIVERED.
+A per-turn harness takes it as its next turn (queued behind a running
+one); another once its supervisor is attached.  VALID, when given, is
+asked first: nil drops the message."
+  (let ((deliver (lambda () (when (or (null valid) (funcall valid))
+                              (romacs-agent-send session text delivered valid)))))
+    (if (romacs-agent--per-turn-p session) (funcall deliver)
+      (romacs-agent--when-attached session deliver))))
 
 (defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
   "Children whose wake is scheduled.")
@@ -455,6 +461,66 @@ started with the same clientRequestId."
                  "options" (if (eq (plist-get instance :harness) 'codex) ["reasoningEffort"] ["effort"]))))
             romacs-agent-providers))))
 
+;;; Restart requests (the agents-develop-Romacs-live loop)
+
+(defvar warm-restart-last-result)
+(declare-function warm-restart-request "warm-restart")
+(declare-function romacs-server--build-label "romacs-server" (true))
+
+(defun romacs-agent-tools--restart-wake-file (session)
+  (expand-file-name "restart-wake" (romacs-agent-dir session)))
+
+(defun romacs-agent-tools--restart-ready (id)
+  "A restart request's READY for session ID: its turn has ended."
+  (lambda ()
+    (when-let* ((session (romacs-agent-get id))
+                ((memq (romacs-agent-state session) '(starting running waiting-approval))))
+      (list (format "agent session %s's turn is running" (romacs-agent-title session))))))
+
+(defun romacs-agent-tools--restart (arguments)
+  "Schedule a restart after the calling session's turn; tell it after."
+  (romacs-mcp--instance arguments)
+  (require 'warm-restart)
+  (let* ((id (romacs-agent-tools--caller))
+         (session (and id (romacs-agent-get id))))
+    (warm-restart-request
+     :ready (and session (romacs-agent-tools--restart-ready id))
+     :target (gethash "target" arguments)
+     :delay (gethash "delay" arguments)
+     :expiry (gethash "expiry" arguments)
+     :force (eq (gethash "force" arguments) t)
+     ;; Written just before the restart: the successor tells the session.
+     :before (and session (lambda () (write-region "" nil (romacs-agent-tools--restart-wake-file session) nil 'silent)))
+     :failed (and session (lambda (why)
+                            (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))
+                            (romacs-agent-tools--deliver session (format "Romacs restart failed, this session goes on: %s" why)
+                                                         #'ignore))))
+    (romacs-mcp--object
+     "status" (symbol-name (plist-get warm-restart-last-result :status))
+     "target" (or (gethash "target" arguments) :null)
+     "waitsFor" (if session "this session's turn to end, then nothing in the way" "nothing in the way"))))
+
+(defun romacs-agent-tools--build-text ()
+  "Which build this process runs, for the restarted sessions' message."
+  (let ((root (getenv "ROMACS_RUNTIME_ROOT")))
+    (format "Romacs restarted into %s"
+            (or (and root (fboundp 'romacs-server--build-label)
+                     (when-let* ((label (romacs-server--build-label root))) (format "%s (%s)" label root)))
+                (and root (format "the build at %s" root))
+                (format "the build at %s" invocation-directory)))))
+
+(defun romacs-agent-tools--restart-wakes ()
+  "After a restart: tell each session that asked for it, once."
+  (let ((text nil))
+    (dolist (session (romacs-agent-sessions))
+      (let ((file (romacs-agent-tools--restart-wake-file session)))
+        (when (file-exists-p file)
+          (romacs-agent-tools--deliver session (or text (setq text (romacs-agent-tools--build-text)))
+                                       (lambda () (ignore-errors (delete-file file)))
+                                       (lambda () (file-exists-p file))))))))
+
+(add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--restart-wakes)
+
 ;;; Registration
 
 (romacs-mcp-register-tool
@@ -536,6 +602,20 @@ last result."
  #'romacs-agent-tools--cancel)
 
 (romacs-mcp-register-tool
+ "romacs_restart_request"
+ "Restart Romacs into a new process once your turn ends, carrying the session (buffers, windows, histories) \
+and its agent sessions: after an install, the new build runs. target is a build directory (one holding \
+romacs-vm-gui, gnu-lisp and rlisp, e.g. the launcher's current) or a binary; omitted, the session's restart \
+command or its own binary. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
+carried), no Romacs tool call is in flight and the editor is between commands, for delay seconds (default 2), up \
+to expiry seconds (default 900). A process that would end (a shell) is in the way unless force. After the \
+restart this session is told \"Romacs restarted into <commit>\"; if it fails, it is told why."
+ (romacs-mcp--schema '(("instance" . "string") ("target" . "string") ("delay" . "number")
+                       ("expiry" . "number") ("force" . "boolean"))
+                     nil)
+ #'romacs-agent-tools--restart)
+
+(romacs-mcp-register-tool
  "romacs_orchestrator_capabilities"
  "The provider instances romacs_delegate_task can start: harness, configuration directory, program and options."
  (romacs-mcp--schema '(("instance" . "string")) nil)
@@ -543,6 +623,8 @@ last result."
  (romacs-mcp--object "readOnlyHint" t))
 
 (romacs-mcp-enable-editor-tools)
+;; Gnosis's agent API, when gnosis is installed (it loads at a tool's first call).
+(when (locate-library "gnosis-agent") (require 'romacs-agent-gnosis))
 (romacs-mcp-enable-session-tools)
 
 (provide 'romacs-agent-tools)

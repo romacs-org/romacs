@@ -364,6 +364,15 @@ beside its build.json), or nil."
 
 ;;; Lifecycle
 
+(defvar warm-restart-directory)
+
+(defun romacs-server--pending-restart (name)
+  "Where a restart of server NAME names its image (warm-restart.el's
+`warm-restart-pending-file'), without loading warm-restart."
+  (expand-file-name (format "pending-%s" name)
+                    (or (bound-and-true-p warm-restart-directory)
+                        (expand-file-name "romacs/warm-restart/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))))
+
 (defun romacs-server-window-closed ()
   "The server's window was closed: non-nil when the session should end."
   (if romacs-server-exit-with-last-frame
@@ -395,6 +404,10 @@ beside its build.json), or nil."
       (setq server-name name)
       (server-start))
     (romacs-server--watch-build)
+    ;; Started (by a launcher) while a restart of this server was under
+    ;; way: the session it carries is restored here, once.
+    (when (file-exists-p (romacs-server--pending-restart name))
+      (run-at-time 0 nil (lambda () (require 'warm-restart) (warm-restart-adopt-pending name))))
     ;; Agent sessions outlive servers: attach to the ones still running.
     (when (file-directory-p (expand-file-name "romacs/agents/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
       (require 'romacs-agent)
