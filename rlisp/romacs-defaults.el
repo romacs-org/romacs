@@ -42,6 +42,7 @@
 (require 'autorevert)
 (require 'which-key)
 (require 'imenu)
+(require 'use-package-core)
 (require 'display-line-numbers)
 
 (defconst romacs-defaults--session-options '(savehist-file save-place-file recentf-save-file)
@@ -88,7 +89,9 @@
     (kill-do-not-save-duplicates t)
     (read-extended-command-predicate #'command-completion-default-include-p)
     (imenu-auto-rescan t)
-    (imenu-flatten 'prefix))
+    (imenu-flatten 'prefix)
+    ;; `use-package' forms in a Lisp buffer's imenu, under "Packages".
+    (use-package-enable-imenu-support t))
   "Romacs's defaults, each (OPTION FORM [idle]): FORM is OPTION's standard value.
 They are set in this order while `romacs-defaults-mode' is on.  An `idle'
 setting, a mode the first frame does not need, is set at the session's
