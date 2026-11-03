@@ -161,6 +161,7 @@ source_cache.rs cached_source_form compile_guarded 1 held  # an open compiler bu
 source_cache.rs compile_guarded compile_request 1 held  # an open compiler builder holds collection
 source_cache.rs expand_macro autoload_do_load 1 clean  # ITEMS are forms; the macro is looked up again after the load
 source_cache.rs expand_macro call_macro_expander 1 clean  # FUNCTION and the literal arguments are the call's own, rooted by it
+source_cache.rs lambda_list_closure eval_primitive 1 rooted  # LIST is in a RootFrame across the compile and read back; the closure is its result
 source_cache/prepared.rs call_prepared execute_args 1 boundary  # ARGS become the engine's registers before it can collect
 source_cache/prepared.rs call_prepared finish_request 1 collector  # the request's result is its root
 source_cache/prepared.rs call_prepared_source_raw invoke_prepared_raw 2 clean  # ARGS are passed on, never used after the call
@@ -195,7 +196,7 @@ threaded.rs invoke_full autoload_then 1 suspended  # registers are rebased from 
 threaded.rs invoke_full lambda_list_raise 1 rooted  # the walk's bindings and data are external roots, read back per binding
 threaded.rs invoke_full lambda_list_then 1 suspended  # registers are rebased from the result; the closure is fresh
 threaded.rs lambda_list_raise bind_special 1 rooted  # each parameter and argument is read from the external roots before its binding
-threaded.rs lambda_list_then eval_primitive 1 suspended  # inside nested_then; LIST is an argument read before any Lisp
+threaded.rs lambda_list_then lambda_list_closure 1 suspended  # inside nested_then; LIST is an argument read before any Lisp
 threaded.rs lambda_list_then nested_then 1 suspended  # registers are rebased from the result
 threaded.rs nested_then call_suspended 1 suspended  # the caller's registers are rebased from the result
 threaded.rs poll_collect collect 1 collector  # the engine is suspended first

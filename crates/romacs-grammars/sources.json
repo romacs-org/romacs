@@ -1,0 +1,191 @@
+{
+ "bash": {
+  "commit": "487734f87fd87118028a65a4599352fa99c9cde8",
+  "files": {
+   "src/parser.c": "b9cff39a81cf3e6e06f2dc8d9610f49bb947bea08c54aaf880955e40e0e9c3d5",
+   "src/scanner.c": "cd589544f07eed1b9a12233c1dd6406a64ae874ee7db8a5b9407297896001202",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-bash"
+ },
+ "c": {
+  "commit": "3aa2995549d5d8b26928e8d3fa2770fd4327414e",
+  "files": {
+   "src/parser.c": "5a44cd6746b323aaa79f57364ad4c24e5510782c55f1371599aad6090ec7c5c8",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-c"
+ },
+ "cpp": {
+  "commit": "f41b4f66a42100be405f96bdc4ebc4a61095d3e8",
+  "files": {
+   "src/parser.c": "2a35a43b4af6c9f7b69624ac00c2c50808912591450dc79c05dea03ac1bae814",
+   "src/scanner.c": "cf60387d290271f4d2fb558d0569b2b9ef879cb72206a9df5cc73b0b1a4b20ff",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-cpp"
+ },
+ "css": {
+  "commit": "6a442a3cf461b0ce275339e5afa178693484c927",
+  "files": {
+   "src/parser.c": "f2f2b94f9a522ef42764bc5539ec1dfcf73e2a12e1cde77d818159c881d7e0e8",
+   "src/scanner.c": "c43f53b6b764f3281a6ca0bac19f00ef542ba93f2ad34f57396cd9d03bed7e29",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-css"
+ },
+ "go": {
+  "commit": "12fe553fdaaa7449f764bc876fd777704d4fb752",
+  "files": {
+   "src/parser.c": "7aa4657c76dd66538228ddb319447225f9dddf54573e521743b4203f1d909051",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-go"
+ },
+ "html": {
+  "commit": "d9219ada6e1a2c8f0ab0304a8bd9ca4285ae0468",
+  "files": {
+   "src/parser.c": "65768172733b3bbe461cbdc14ea928f00fbfcc51d8ac68f0a5c72071c6a0bbf1",
+   "src/scanner.c": "5c0a0567e010277b81fe63be0acd04f6b44c3ef3063ac01429b910c1d22f0dca",
+   "src/tag.h": "aaf1a10c8a2f685ef51a4aa6c01a2cbe166bff67eeccf6b9501a625b71f9ab70",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-html"
+ },
+ "javascript": {
+  "commit": "108b2d4d17a04356a340aea809e4dd5b801eb40d",
+  "files": {
+   "src/parser.c": "1150721590eca3c7b6623c7dc3498184f3e22c5d895a08b4806ebf5804f817c3",
+   "src/scanner.c": "b3d3f64284d97bf80749c026862427782cf7ecc0b7dc094e6698ab311c9a42c7",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-javascript"
+ },
+ "jsdoc": {
+  "commit": "b253abf68a73217b7a52c0ec254f4b6a7bb86665",
+  "files": {
+   "src/parser.c": "b851240b8d9cf049dddc4b84f04b5de552b9ed966bf09230d93e9fb0a419dd98",
+   "src/scanner.c": "4e8e9fdbfbdc306998afee3848227499a4c668534d5e5d5e7a858bff9e99071e",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-jsdoc"
+ },
+ "json": {
+  "commit": "4d770d31f732d50d3ec373865822fbe659e47c75",
+  "files": {
+   "src/parser.c": "e8e1ff5df0d73e3b82574129724e68ef4fa0faf1b8c43dd3f5c1a84839f830ab",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-json"
+ },
+ "markdown": {
+  "commit": "413285231ce8fa8b11e7074bbe265b48aa7277f9",
+  "files": {
+   "tree-sitter-markdown/src/parser.c": "6adb54da19b0b5aada9e5d14a4e91b7ce542f852fe7bf7e1b85753898cc34653",
+   "tree-sitter-markdown/src/scanner.c": "17c35f96baf853f88ffa5b142617e10bd592828820a60827b6a1ec5eb32a1500",
+   "tree-sitter-markdown/src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "tree-sitter-markdown/src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
+   "tree-sitter-markdown/src/tree_sitter/parser.h": "11b654fbba7770b1c710cc14b169be2deb5d89c0f87233d4605037c26c1ff657"
+  },
+  "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown"
+ },
+ "markdown-inline": {
+  "commit": "413285231ce8fa8b11e7074bbe265b48aa7277f9",
+  "files": {
+   "tree-sitter-markdown-inline/src/parser.c": "02d9a3fe72eee6be234d1e27067f2c405f7e4d8ef6fc28bceb54ac1b16274823",
+   "tree-sitter-markdown-inline/src/scanner.c": "96f2aa2310e6e9de52f08d6e7b0ac9cd1fe70f35e0449deb726dfe687524cc55",
+   "tree-sitter-markdown-inline/src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "tree-sitter-markdown-inline/src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
+   "tree-sitter-markdown-inline/src/tree_sitter/parser.h": "11b654fbba7770b1c710cc14b169be2deb5d89c0f87233d4605037c26c1ff657"
+  },
+  "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown"
+ },
+ "python": {
+  "commit": "bffb65a8cfe4e46290331dfef0dbf0ef3679de11",
+  "files": {
+   "src/parser.c": "5df63395433197cb65168e95f5ce705cb1dd4c12a11a85020755a5c4b8b55c21",
+   "src/scanner.c": "411b2357bc1286b171fd042ccb0f640109074cc341d3cd78b5628144887f7ab8",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-python"
+ },
+ "rust": {
+  "commit": "18b0515fca567f5a10aee9978c6d2640e878671a",
+  "files": {
+   "src/parser.c": "a0f424079fd2ba8fe6ae29538e4a773e43c7a1271e6962eb6e8185f67a5c0db9",
+   "src/scanner.c": "77faa4943da96dcb17d9c2a735bdbf7702287b52a1d2971117b167e47e318620",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
+   "src/tree_sitter/parser.h": "11b654fbba7770b1c710cc14b169be2deb5d89c0f87233d4605037c26c1ff657"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-rust"
+ },
+ "toml": {
+  "commit": "64b56832c2cffe41758f28e05c756a3a98d16f41",
+  "files": {
+   "src/parser.c": "1991a2608e6f0214e563fe5f762e8df72954dc69a3dd9a1e22ea8a870e4052c3",
+   "src/scanner.c": "b25ff3b5034f40046e9a041d1e9110aa46d081706bbd1b748b480701aa6f5bde",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter-grammars/tree-sitter-toml"
+ },
+ "tsx": {
+  "commit": "8e13e1db35b941fc57f2bd2dd4628180448c17d5",
+  "files": {
+   "common/scanner.h": "da66ef2bd14a3f7ea743e25ba068c6c9aae2c3509db200ff80c4a0e6116e564c",
+   "tsx/src/parser.c": "1902cb53fa7ff5179df89b2eea863165e84c8cc866226419dc26921d8c055885",
+   "tsx/src/scanner.c": "d563cd30b2f39718c9ae4292795c5ce03a2ad01954ba3a86ef84c2781a736673",
+   "tsx/src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "tsx/src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "tsx/src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-typescript"
+ },
+ "typescript": {
+  "commit": "8e13e1db35b941fc57f2bd2dd4628180448c17d5",
+  "files": {
+   "common/scanner.h": "da66ef2bd14a3f7ea743e25ba068c6c9aae2c3509db200ff80c4a0e6116e564c",
+   "typescript/src/parser.c": "74fe453edd70f4eae9af0a1050cbd7943d8971d59165b6aaebbaa0a0b716d1aa",
+   "typescript/src/scanner.c": "9125013b42cb888379d9be909f1d73dfb75a37626c2cdbf4122718a2b431a6d3",
+   "typescript/src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "typescript/src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "typescript/src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter/tree-sitter-typescript"
+ },
+ "yaml": {
+  "commit": "b733d3f5f5005890f324333dd57e1f0badec5c87",
+  "files": {
+   "src/parser.c": "2a5e194b70cce476e5d696007aee076b8bef720dded0d56972844f420a2f80f2",
+   "src/scanner.c": "839cdec1525df4a46d3111b0ad6ae3417e8dd73ce2a3066540e0cd357fa6f7f2",
+   "src/schema.core.c": "ad8335348a78643a0bb96cbf4ccea213fba65fd9b8c2c10eb8e4375707eb0972",
+   "src/schema.json.c": "15c6fa0f9c6789b5fe7491136fe27f074805c766bcad2b5ccdedfd6919a081e4",
+   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+   "src/tree_sitter/array.h": "4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1",
+   "src/tree_sitter/parser.h": "a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a"
+  },
+  "url": "https://github.com/tree-sitter-grammars/tree-sitter-yaml"
+ }
+}

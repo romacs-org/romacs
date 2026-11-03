@@ -8,10 +8,41 @@
 pub(crate) mod native;
 
 use crate::text::TextBody;
+use std::sync::OnceLock;
 use crate::Value;
 use native::{TSInputEdit, TSPoint, Tree};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+/// A grammar linked into the executable (DIVERGENCES VM2-TREESIT-BUNDLED):
+/// GNU's language symbol name, its `tree_sitter_LANG` function, and the
+/// repository and commit of its sources.
+#[derive(Clone, Copy, Debug)]
+pub struct BundledGrammar {
+    pub name: &'static str,
+    pub language: unsafe extern "C" fn() -> *const (),
+    pub url: &'static str,
+    pub commit: &'static str,
+}
+
+static BUNDLED: OnceLock<Vec<BundledGrammar>> = OnceLock::new();
+
+/// Make GRAMMARS the executable's bundled grammars, once per process,
+/// before any VM loads a language. A later call is ignored.
+///
+/// # Safety
+/// Each grammar's `language` must be a tree-sitter grammar function
+/// (`tree_sitter_LANG`) linked into this process: callable at any time
+/// from any thread, returning a pointer to a static `TSLanguage` of an
+/// ABI the runtime accepts or rejects through `ts_parser_set_language`.
+pub unsafe fn register_bundled_grammars(grammars: Vec<BundledGrammar>) {
+    let _ = BUNDLED.set(grammars);
+}
+
+/// The bundled grammars, none unless the executable registered them.
+pub(crate) fn bundled_grammars() -> &'static [BundledGrammar] {
+    BUNDLED.get().map_or(&[], Vec::as_slice)
+}
 
 /// GNU's `struct ts_linecol`; `bytepos` 0 is the empty linecol.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

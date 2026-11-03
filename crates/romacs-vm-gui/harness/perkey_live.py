@@ -45,6 +45,10 @@ every command the collections so far and their seconds (`gcs-done',
 `gc-elapsed') and the selected window's start, end, point and body and
 total heights in pixels, and writes them to the session's state.el at
 C-x C-s; --mode sets the output's size (default 1600x1000).
+With --sample FILE the session visits a copy of FILE, under its name (so
+its extension picks the major mode, e.g. a tree-sitter mode), instead of
+--lines lines of prose; FILE must have no tabs, as C-n's expected point
+assumes.
 With --populate the visited file is tracked in a Git repository (so
 `vc-mode' shows a branch), the buffer is in `flymake-mode' with a backend
 that reports three fixed diagnostics once, and `isearch-lazy-count' is
@@ -55,7 +59,7 @@ with the region active.
 usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
                       [--record PHASE] [--tools DIR:DIR] [--classic] [--state]
-                      [--mode WxH] [--populate] [--line-numbers TYPE]
+                      [--mode WxH] [--populate] [--line-numbers TYPE] [--sample FILE]
 """
 import argparse
 import hashlib
@@ -88,6 +92,12 @@ class Invalid(Exception):
 
 def text_of(lines):
     return ''.join(f'line {i} of some ordinary prose text, about sixty bytes long\n' for i in range(lines))
+
+
+def sample_text(args):
+    """The visited file's text: --sample's file, else --lines of prose."""
+    sample = getattr(args, 'sample', None)
+    return sample.read_text() if sample else text_of(args.lines)
 
 
 def column(text, point):
@@ -251,11 +261,12 @@ class Session:
         for directory in (self.root / 'home', work, config):
             directory.mkdir()
         (config / 'rc.xml').write_text(live.RC_XML)
-        self.file = work / 'text.txt'
-        self.file.write_text(text_of(self.args.lines))
+        sample = getattr(self.args, 'sample', None)
+        self.file = work / (sample.name if sample else 'text.txt')
+        self.file.write_text(sample_text(self.args))
         if self.args.populate:
             git = ['git', '-C', str(work), '-c', 'user.name=perkey', '-c', 'user.email=perkey@localhost', '-c', 'commit.gpgsign=false']
-            for command in (['init', '-q', '-b', 'main'], ['add', 'text.txt'], ['commit', '-q', '-m', 'text']):
+            for command in (['init', '-q', '-b', 'main'], ['add', self.file.name], ['commit', '-q', '-m', 'text']):
                 subprocess.run(git + command, check=True, capture_output=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(self.root / 'home')})
         self.stdout, self.stderr = self.root / 'binary.stdout', self.root / 'binary.stderr'
         self.environ = env = self.env()
@@ -426,7 +437,7 @@ class Session:
 
     def measure(self):
         keys = self.args.keys
-        text, point = 'a' * keys + text_of(self.args.lines), 0
+        text, point = 'a' * keys + sample_text(self.args), 0
         idle = lambda: time.sleep(keys * self.args.gap)
         result = {'tid': self.tid, 'commands': self.commands, 'renderer': self.renderer, 'phases': {}}
         if text_point(records(self.stderr)) != 0:
@@ -554,6 +565,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--regime', choices=('loadup', 'workspace'), default='loadup')
     parser.add_argument('--lines', type=int, default=200)
+    parser.add_argument('--sample', type=Path, help='visit a copy of this file (its name picks the mode) instead of --lines of prose')
     parser.add_argument('--keys', type=int, default=40)
     parser.add_argument('--gap', type=float, default=.25, help='seconds between keys')
     parser.add_argument('--sessions', type=int, default=5)
@@ -581,7 +593,7 @@ def main():
     rejected |= {f'latency-{i}': why for i, r in enumerate(timed) if (why := invalid(r))}
     good = [r for r in counted if not invalid(r)]
     report = {'binary': str(args.binary), 'binary_sha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(),
-              'regime': args.regime, 'lines': args.lines, 'keys_per_phase': args.keys, 'gap_s': args.gap,
+              'regime': args.regime, 'lines': args.lines, 'sample': str(args.sample) if args.sample else None, 'keys_per_phase': args.keys, 'gap_s': args.gap,
               'counter': 'instructions:u, evaluator thread, idle-subtracted',
               'latency': 'key enqueue to render observed (--trace-latency), perf-free sessions',
               'instructions_per_key': per_key(good, args.keys) if good else None,

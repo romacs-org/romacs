@@ -3518,13 +3518,14 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
 }
 /// eval.c funcall_lambda of a `(lambda ARGS . BODY)' list: GNU interprets
 /// it with dynamic binding (lexenv nil). VM2 evaluates the list in that
-/// dialect, as `(function LIST)', and calls the closure; the list itself
+/// dialect, as `(function LIST)', and calls the closure, compiled once
+/// while the list is unchanged (`Vm::lambda_list_closure'); the list itself
 /// stays the function. Returns the rebased caller registers and the
 /// closure, or None with the condition pending.
 #[cold]
 #[inline(never)]
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
-    unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
+    unsafe { nested_then(e, r, |vm| vm.lambda_list_closure(list)) }
 }
 /// specbind of SLOT to VALUE from compiled code or a call site: a protected
 /// variable (most-positive-fixnum, enable-multibyte-characters, ...) is

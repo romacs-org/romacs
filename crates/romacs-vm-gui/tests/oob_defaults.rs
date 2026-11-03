@@ -14,6 +14,8 @@ mod echo;
 mod eval_last_sexp;
 #[path = "../src/fonts.rs"]
 mod fonts;
+#[path = "../src/grammars.rs"]
+mod grammars;
 #[path = "../src/loadup.rs"]
 mod loadup;
 #[path = "../src/native.rs"]
@@ -272,4 +274,35 @@ fn use_package_forms_are_in_imenu() {
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, ["(t t)", "(nil nil)"]);
+}
+
+/// Files of the languages whose grammars Romacs ships open in their
+/// tree-sitter modes (`treesit-enabled-modes'); the switch gives the regex
+/// modes back, except where GNU's own `*-ts-mode-maybe' picks the ts mode
+/// whenever its grammar is available (Rust).
+#[test]
+fn files_of_bundled_languages_open_in_their_ts_modes() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        grammars::register();
+        let (mut vm, home) = session("treesit", false);
+        let files: Vec<String> = ["x.rs", "x.py", "x.c", "x.json"].iter().map(|name| {
+            let path = home.join(name);
+            std::fs::write(&path, "\n").unwrap();
+            quoted(&path.display().to_string())
+        }).collect();
+        let visit = format!("(mapcar (lambda (file) (with-current-buffer (find-file-noselect file)
+              (prog1 (list (file-name-extension file) major-mode (mapcar #'treesit-parser-language (treesit-parser-list)))
+                (kill-buffer))))
+            (list {}))", files.join(" "));
+        let mut report = vec![printed(&mut vm, &visit)];
+        vm.eval_source("(romacs-defaults-mode -1)").unwrap();
+        report.push(printed(&mut vm, "(list treesit-enabled-modes (rassq 'python-ts-mode major-mode-remap-alist))"));
+        report.push(printed(&mut vm, &visit));
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, [
+        r#"(("rs" rust-ts-mode (rust)) ("py" python-ts-mode (python)) ("c" c-ts-mode (c)) ("json" json-ts-mode (json)))"#,
+        "(nil nil)",
+        r#"(("rs" rust-ts-mode (rust)) ("py" python-mode nil) ("c" c-mode nil) ("json" js-json-mode nil))"#,
+    ]);
 }

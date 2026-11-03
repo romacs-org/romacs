@@ -613,6 +613,7 @@ impl Vm {
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);
         self.mode_line_forms.clear();
+        self.lambda_lists.clear();
         let before = self.heap_objects();
         let private_before = self.private_objects();
         self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
