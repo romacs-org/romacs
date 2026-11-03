@@ -78,10 +78,49 @@
         (enable-theme 'romacs-theme-test-scheme)
         (romacs-should (equal custom-enabled-themes '(romacs-theme-test-scheme)))
         (romacs-should (equal (face-attribute 'romacs-layer-glow :foreground nil t) "#7aa2f7"))
-        ;; The stock theme enabled again by hand is a choice: it stays.
+        ;; Romacs's colour schemes are one look each: the stock theme
+        ;; enabled again by hand replaces the scheme, and stays.
         (enable-theme 'default)
-        (romacs-should (equal custom-enabled-themes '(default romacs-theme-test-scheme)))
+        (romacs-should (equal custom-enabled-themes '(default)))
         (romacs-should (null romacs-theme--stock)))
+    (mapc #'disable-theme custom-enabled-themes)
+    (enable-theme 'default)))
+
+(romacs-deftest romacs-theme-rum-and-default-toggle ()
+  ;; `rum' (Rum exactly) and `default' (the stock look, which starts from
+  ;; it) replace each other however often they are switched, disabled and
+  ;; enabled again; each switch leaves the faces a fresh enable gives.
+  (unwind-protect
+      (let ((look (lambda () (mapcar (lambda (face) (list face (face-attribute face :foreground nil t)
+                                                          (face-attribute face :background nil t)))
+                                     '(default region mode-line font-lock-keyword-face link)))))
+        (load-theme 'rum t)
+        (romacs-should (equal custom-enabled-themes '(rum)))
+        (let ((rum (funcall look)))
+          (dotimes (_ 3)
+            (enable-theme 'default)
+            (romacs-should (equal custom-enabled-themes '(default)))
+            (enable-theme 'rum)
+            (romacs-should (equal custom-enabled-themes '(rum)))
+            (romacs-should (equal (funcall look) rum)))
+          (disable-theme 'rum)
+          (romacs-should (null custom-enabled-themes))
+          (enable-theme 'rum)
+          (romacs-should (equal (funcall look) rum))))
+    (mapc #'disable-theme custom-enabled-themes)
+    (enable-theme 'default))
+  (romacs-should (equal custom-enabled-themes '(default))))
+
+(romacs-deftest romacs-theme-a-third-party-scheme-stacks-over-rum ()
+  ;; Only Romacs's own colour schemes replace each other: a third-party
+  ;; one enabled over an explicitly chosen `rum' stacks, as GNU's themes do.
+  (unwind-protect
+      (progn
+        (load-theme 'rum t)
+        (custom-declare-theme 'romacs-theme-test-third nil)
+        (custom-theme-set-faces 'romacs-theme-test-third '(default ((t :background "#101010" :foreground "#e0e0e0"))))
+        (enable-theme 'romacs-theme-test-third)
+        (romacs-should (equal custom-enabled-themes '(romacs-theme-test-third rum))))
     (mapc #'disable-theme custom-enabled-themes)
     (enable-theme 'default)))
 

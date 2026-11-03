@@ -1,4 +1,4 @@
-;;; romacs-theme-rum-test.el --- The stock theme is the configured Rum -*- lexical-binding: t -*-
+;;; romacs-theme-rum-test.el --- `rum' is the configured Rum -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
@@ -13,7 +13,7 @@
   (expand-file-name "../../romacs-face/tests/gnu/fixtures/" (file-name-directory load-file-name))
   "The GNU oracle's fixtures.")
 
-;; The stock theme is the configured Rum look face for face (fixture
+;; `rum' is the configured Rum look face for face (fixture
 ;; rum-configured.eld; tests/gnu/rum-configured.el captures it).  Both
 ;; sides realise their faces for a graphical truecolour display, which
 ;; this batch session's record is told it is for the comparison, as
@@ -23,7 +23,7 @@
 ;; and heights are relative to the default face's; an unspecified weight,
 ;; slant or width is normal.
 (defconst romacs-theme-test-rum-divergences '(vertical-border)
-  "Faces the stock theme shows otherwise, on purpose: dividers in the
+  "Faces `rum' shows otherwise, on purpose: dividers in the
 window background under pane chrome (DIVERGENCES.md VM2-PANE-CHROME).")
 
 (defun romacs-theme-test--normalise (attributes default)
@@ -57,8 +57,9 @@ window background under pane chrome (DIVERGENCES.md VM2-PANE-CHROME).")
   (frame-set-background-mode (selected-frame) t)
   (face-set-after-frame-default (selected-frame)))
 
-(romacs-deftest romacs-theme-the-stock-theme-is-the-configured-rum ()
-  (romacs-should (equal custom-enabled-themes '(default)))
+(romacs-deftest romacs-theme-rum-is-the-configured-rum ()
+  (load-theme 'rum t)
+  (romacs-should (equal custom-enabled-themes '(rum)))
   (let* ((fixture (with-temp-buffer
                     (insert-file-contents (expand-file-name "rum-configured.eld" romacs-theme-test--fixtures))
                     (read (current-buffer))))
