@@ -1902,6 +1902,44 @@ impl Vm {
         merged.insert(value.0, handle);
         handle
     }
+    /// Fredisplay's part VM2 does inside a command (VM2-REDISPLAY1): each
+    /// live window's point visibility (`keep_point_visible'), its buffer
+    /// current and at the text height the next layout gives it, so
+    /// `window-start' and `window-end' answer what the screen will show
+    /// once the command ends: isearch's lazy highlighting, after `sit-for',
+    /// highlights the window the match scrolled into view. Only once a host
+    /// lays the frame out; nothing is painted.
+    pub(crate) fn redisplay_point_visibility_now(&mut self) -> Result<()> {
+        if !self.has_layout_host() { return Ok(()); }
+        let root = self.slot("#:vm2-redisplay-window");
+        let saved = self.slot("#:vm2-redisplay-saved-buffer");
+        self.slots[saved].value = self.slots[self.buffer_slot].value;
+        let outcome = self.redisplay_point_visibility_windows(root);
+        if self.buffer_state(self.slots[saved].value).is_ok_and(|b| b.live) {
+            self.slots[self.buffer_slot].value = self.slots[saved].value;
+        }
+        self.slots[saved].value = Value::UNBOUND;
+        self.slots[root].value = Value::UNBOUND;
+        outcome
+    }
+    fn redisplay_point_visibility_windows(&mut self, root: usize) -> Result<()> {
+        for v in self.leaf_windows()? {
+            // Lisp one window's visibility runs may delete a later one.
+            if !matches!(self.object_if(v), Some(Object::Window(w)) if w.live()) { continue; }
+            let w = self.window(v)?;
+            if w.mini || w.height == 0 { continue; }
+            let [_, below] = self.window_dividers(v)?;
+            let height = self.window(v)?.height.saturating_sub(below);
+            // As redisplay_window_inner: less the mode and header lines.
+            let format = self.window_band_format(v)?;
+            let header = crate::window::Windows::new(self).header_line_format(v).map_err(crate::forwarded::fault_text)?;
+            let bands = self.window_state.line * (u32::from(format.is_some()) + u32::from(header != Value::NIL));
+            self.slots[root].value = v;
+            self.slots[self.buffer_slot].value = self.window(v)?.buffer;
+            self.keep_point_visible(v, height.saturating_sub(bands))?;
+        }
+        Ok(())
+    }
     /// GNU `redisplay_window` order for one window: make its buffer current,
     /// keep point visible, then `display_mode_line` (`src/xdisp.c:28200`)
     /// with that window's own -- possibly buffer-local -- `mode-line-format`.
