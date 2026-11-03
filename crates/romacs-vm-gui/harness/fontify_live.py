@@ -29,7 +29,7 @@ import live_oracle as live
 # The visited file fills the frame, as after a GNU init that inhibits the
 # startup screen; without it GNU, and --loadup, show the screen's concise
 # form beside the file.
-INIT = '''(setq inhibit-startup-screen t)
+INIT = live.NO_LINE_NUMBERS + '''(setq inhibit-startup-screen t)
 (dolist (name '(font-lock-ensure font-lock-fontify-buffer))
   (advice-add name :before
               (lambda (&rest _) (write-region (format "%s\\n" name) nil {explicit} t))))
