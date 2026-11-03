@@ -5,7 +5,6 @@
 
 ;;; Commentary:
 
-;; Palette port from Omarchy Rum emacs.el and colors.toml; no Modus runtime dependency.
 ;; Host helpers keep VM2's own `window-child': GNU's window.el (loaded by
 ;; loadup.el) replaces it with Lisp over C primitives VM2 lacks
 ;; (`window-top-child'), and the GUI's selection and window commands must
@@ -14,30 +13,12 @@
 ;;; Code:
 
 (fset 'romacs-gui--window-child (symbol-function 'window-child))
-(defface default '((t (:foreground "#d4c5a0" :background "#000000" :family "Iosevka"))) "Rum parchment on black.")
-(defface cursor '((t (:background "#9099d9"))) "Rum indigo cursor.")
-(defface mode-line '((t (:foreground "#d4c5a0" :background "#50269a"))) "Rum active mode line.")
-(defface mode-line-inactive '((t (:foreground "#756b59" :background "#141414"))) "Rum inactive mode line.")
-(defface region '((t (:foreground "#d4c5a0" :background "#3e4451"))) "Rum selection.")
-(defface fringe '((t (:foreground "#000000" :background "#000000"))) "Unobtrusive fringe.")
-(defface highlight '((t (:foreground "#d4c5a0" :background "#7030af"))) "Rum highlight.")
-(defface minibuffer-prompt '((t (:foreground "#d2b580"))) "Rum prompt.")
-(defface font-lock-keyword-face '((t (:foreground "#b395db"))) "Rum keyword.")
-(defface font-lock-string-face '((t (:foreground "#aacb75"))) "Rum string.")
-(defface font-lock-comment-face '((t (:foreground "#756b59"))) "Rum comment.")
-(defface font-lock-function-name-face '((t (:foreground "#c28fea"))) "Rum function name.")
-(defface font-lock-variable-name-face '((t (:foreground "#00a6a6"))) "Rum variable.")
-(defface font-lock-constant-face '((t (:foreground "#72b6e4"))) "Rum constant.")
-(defface font-lock-type-face '((t (:foreground "#00b8ad"))) "Rum type.")
-(defface font-lock-builtin-face '((t (:foreground "#d0a3e8"))) "Rum builtin.")
-(defface font-lock-warning-face '((t (:foreground "#e89e30"))) "Rum font lock warning.")
-(defface link '((t (:foreground "#4cc9f0"))) "Rum link.")
-(defface error '((t (:foreground "#c97054"))) "Rum error.")
-(defface warning '((t (:foreground "#e89e30"))) "Rum warning.")
-(defface success '((t (:foreground "#00b8ad"))) "Rum success.")
-(defface romacs-comment '((t (:foreground "#756b59"))) "Rum dim annotation.")
-(defface romacs-code '((t (:foreground "#aacb75"))) "Rum olive source.")
-(defface romacs-result '((t (:foreground "#72b6e4"))) "Rum evaluation result.")
+;; The default face's font; its colours, and every other face's, are the
+;; stock theme's (etc/themes/default-theme.el, rlisp/romacs-theme.el).
+(defface default '((t (:family "Iosevka"))) "The launch font.")
+(defface romacs-comment '((t (:inherit font-lock-comment-face))) "A dim annotation.")
+(defface romacs-code '((t (:inherit font-lock-string-face))) "Source shown as text.")
+(defface romacs-result '((t (:inherit font-lock-constant-face))) "An evaluation's result.")
 (setq romacs-gui-quit-requested nil)
 ;; Pending confirmation consumes future GUI keys, not read-string's macro input.
 (defvar romacs-gui-pending nil)

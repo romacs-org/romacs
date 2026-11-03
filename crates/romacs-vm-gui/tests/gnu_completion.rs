@@ -342,8 +342,8 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
 }
 
 /// Every chrome colour follows the theme (romacs-chrome.el
-/// `romacs-chrome-derived-faces'): a theme's own Romacs face wins (Rum's
-/// accent, a theme setting `romacs-pane-focus'), the rest are derived from
+/// `romacs-chrome-derived-faces'): a theme's own Romacs face wins (the
+/// stock theme's, a theme setting `romacs-pane-focus'), the rest are derived from
 /// the faces every theme sets, light or dark, and the root frame's and a
 /// shown glass layer's parameters change with them when a theme is enabled
 /// or disabled.  With no theme the built-in palette's accent shows.
@@ -367,29 +367,29 @@ fn chrome_colours_follow_the_theme() {
                     (frame-parameter toast 'romacs-layer-glow) (frame-parameter toast 'background-color)
                     (funcall hex 'romacs-complete-current t) (funcall hex 'romacs-complete-match nil))))").unwrap();
         let mut report = vec![printed(&mut vm, "(tc-probe)")];
-        for step in ["(load-theme 'rum t)",
-                     "(progn (disable-theme 'rum) (load-theme 'modus-operandi t))",
+        for step in ["(load-theme 'modus-operandi t)",
                      "(progn (disable-theme 'modus-operandi) (load-theme 'tango-dark t))",
                      "(progn (deftheme tc-focus) (custom-theme-set-faces 'tc-focus '(romacs-pane-focus ((t :foreground \"#ff0000\")))) (enable-theme 'tc-focus))",
-                     "(mapc #'disable-theme custom-enabled-themes)"] {
+                     "(mapc #'disable-theme custom-enabled-themes)",
+                     "(enable-theme 'default)"] {
             report.push(printed(&mut vm, &format!("(progn {step} (tc-probe))")));
         }
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, [
-        // No theme: the built-in palette, Rum's black, and its accent.
-        r##"(nil "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#2a2720" "#d48a20")"##,
-        // Rum sets `romacs-layer-glow' itself: the same accent, though its
-        // cursor is indigo.
-        r##"((rum) "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#2a2720" "#d48a20")"##,
-        // Light: the cursor is black, so the accent is the link colour; the
-        // hairline 15%, glass 8% and selection 20% toward black.
+        // The stock theme, `default': Rum's look, its own chrome colours.
+        r##"((default) "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#3a2914" "#d48a20")"##,
+        // A colour scheme replaces the stock theme. Light: the cursor is
+        // black, so the accent is the link colour; the hairline 15%, glass 8%
+        // and selection 20% toward black.
         r##"((modus-operandi) "#ffffff" "#3548cf" "#d9d9d9" "#3548cf" "#ebebeb" "#cccccc" "#3548cf")"##,
         // Dark: the cursor's butter yellow.
         r##"((tango-dark) "#2e3436" "#fce94f" "#4b5051" "#fce94f" "#3d4345" "#54595a" "#fce94f")"##,
         // A theme that sets the focus edge alone changes it alone.
         r##"((tc-focus tango-dark) "#2e3436" "#ff0000" "#4b5051" "#fce94f" "#3d4345" "#54595a" "#fce94f")"##,
-        r##"(nil "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#2a2720" "#d48a20")"##]);
+        // No theme: GNU's stock faces, and the built-in accent.
+        r##"(nil "#ffffff" "#d48a20" "#d9d9d9" "#d48a20" "#ebebeb" "#cccccc" "#d48a20")"##,
+        r##"((default) "#000000" "#d48a20" "#201e18" "#d48a20" "#11100d" "#3a2914" "#d48a20")"##]);
 }
 
 /// A theme switch recomputes the frame's background mode as GNU's does
@@ -397,7 +397,8 @@ fn chrome_colours_follow_the_theme() {
 /// so a dark theme after a light one gets the dark defface specs; and a
 /// shown layer keeps showing the root frame's faces throughout
 /// (VM2-CHILD-FRAME). Pinned GNU X11 on Xvfb, the same switches from -Q:
-/// modus-operandi `light' "#595959", then tango-dark `dark' "grey70".
+/// modus-operandi `light' "#595959", then tango-dark `dark' "grey70", and
+/// with no theme `light' "grey50".
 #[test]
 fn a_theme_switch_recomputes_the_background_mode() {
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
@@ -429,11 +430,32 @@ fn a_theme_switch_recomputes_the_background_mode() {
         report
     }).unwrap().join().unwrap();
     assert_eq!(report, [
-        // The built-in palette is dark (GNU's stock frame is light: `light' "grey50").
-        r##"(nil dark "#b3b3b3" t)"##,
+        // The stock theme, `default', is dark.
+        r##"((default) dark "#756b59" t)"##,
         r##"("#000000" "#d4c5a0")"##,
         "(t t t)",
         r##"((modus-operandi) light "#595959" t)"##,
         r##"((tango-dark) dark "#b3b3b3" t)"##,
-        r##"(nil dark "#b3b3b3" t)"##]);
+        // No theme: GNU's stock faces, light, as pinned GNU's -Q frame.
+        r##"(nil light "#7f7f7f" t)"##]);
+}
+
+/// rlisp/romacs-theme.el's themes under Custom (tests/romacs-theme-custom-test.el):
+/// the session starts in the stock theme `default', Rum's look exactly;
+/// defining a theme changes no face; a colour scheme replaces the stock
+/// theme once; disabling it gives GNU's faces.
+#[test]
+fn romacs_theme_lisp_tests_pass() {
+    let summary = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for file in ["rlisp/romacs-test.el", "crates/romacs-vm-gui/tests/romacs-theme-custom-test.el"] {
+            vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+        }
+        printed(&mut vm, "(let ((s (romacs-test-run t))) (format \"%S\" s))")
+    }).unwrap().join().unwrap();
+    assert!(summary.contains(":failed 0") && summary.contains(":errors 0"), "{summary}");
 }

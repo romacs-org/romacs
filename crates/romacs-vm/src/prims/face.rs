@@ -743,6 +743,58 @@ fn romacs_frame_shares_faces_p(cx; optional frame: Value) {
     Ok(if cx.frame_shares_faces(frame)? { Value::TRUE } else { Value::NIL })
 }}
 
+defsubr! { name = "internal-lisp-face-equal-p", gnu = "xfaces.c:4382", effect = Reads,
+fn internal_lisp_face_equal_p(cx, face1: Value, face2: Value; optional frame: Value, inherit: Value) {
+    // FRAME t: the defaults for new frames; nil: the selected frame.
+    let frame = if frame == Value::TRUE { Value::NIL } else { cx.face_frame(frame, true)? };
+    // lface_from_face_name (F, FACE, true): an alias cycle signals.
+    let lface = |cx: &mut Leaf<'_>, face: Value| -> Out {
+        let resolved = resolve(cx, face, true)?;
+        let found = cx.face_lookup(resolved, frame)?;
+        if found == Value::NIL { Err(signal(cx, "Invalid face", face)) } else { Ok(found) }
+    };
+    let (a, b) = (lface(cx, face1)?, lface(cx, face2)?);
+    let mut equal = true;
+    for index in 1..LFACE_VECTOR_SIZE {
+        let index = Value::integer(index as i64).unwrap();
+        let (x, y) = (cx.vector_get(a, index)?, cx.vector_get(b, index)?);
+        if !face_attr_equal(cx, x, y)? { equal = false; break; }
+    }
+    // A face that inherits directly from the other, and whose other
+    // attributes are its parent's or unspecified, equals it.
+    if !equal && inherit != Value::NIL {
+        let slot = Value::integer(lface_slot(":inherit") as i64).unwrap();
+        let unspecified = cx.intern("unspecified");
+        for (child, parent, other) in [(a, b, face2), (b, a, face1)] {
+            if cx.vector_get(child, slot)? != other { continue; }
+            equal = true;
+            for index in 1..LFACE_VECTOR_SIZE {
+                let at = Value::integer(index as i64).unwrap();
+                if at == slot { continue; }
+                let (x, y) = (cx.vector_get(child, at)?, cx.vector_get(parent, at)?);
+                if !(x == unspecified || face_attr_equal(cx, x, y)?) { equal = false; break; }
+            }
+            break;
+        }
+    }
+    Ok(if equal { Value::TRUE } else { Value::NIL })
+}}
+
+/// xfaces.c face_attr_equal_p: lface attributes X and Y of one type,
+/// strings by their bytes, numbers and symbols only when `eq', other
+/// objects `equal'.
+fn face_attr_equal(cx: &mut Leaf<'_>, x: Value, y: Value) -> std::result::Result<bool, Fault> {
+    if x == y { return Ok(true); }
+    let text = |k: Kind| matches!(k, Kind::String | Kind::Bytes);
+    let (kx, ky) = (cx.kind(x), cx.kind(y));
+    if kx != ky && !(text(kx) && text(ky)) { return Ok(false); }
+    match kx {
+        Kind::String | Kind::Bytes => Ok(cx.string_view(x)?.bytes() == cx.string_view(y)?.bytes()),
+        Kind::Symbol | Kind::Integer => Ok(false),
+        _ => cx.equal(x, y).map_err(|_| Fault::Circular(x)),
+    }
+}
+
 /// Whether lface vector LFACE has every attribute unspecified.
 fn empty_lface(cx: &mut Leaf<'_>, lface: Value) -> std::result::Result<bool, Fault> {
     let unspecified = cx.intern("unspecified");

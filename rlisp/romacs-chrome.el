@@ -27,18 +27,12 @@
 
 ;;; Code:
 
+(require 'romacs-faces)
+
 (defgroup romacs-chrome nil
   "How the root frame's windows are drawn as panes."
   :group 'frames
   :prefix "romacs-pane-")
-
-(defface romacs-pane-focus '((t :inherit romacs-layer-glow))
-  "The selected pane's edge: its foreground.")
-
-(defface romacs-pane-border '((t))
-  "The hairline round every other pane: its foreground.  Unless a theme
-sets it, the default background lifted 15% toward the foreground
-\(`romacs-chrome-derived-faces').")
 
 (defun romacs-chrome--set (option value)
   "Set OPTION to VALUE and apply the chrome to the root frame."

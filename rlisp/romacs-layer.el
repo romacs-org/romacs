@@ -59,11 +59,6 @@ environment variable ROMACS_LAYER_ANIMATION is 1."
   "Frame parameters of a layer's child frame."
   :type '(alist :key-type symbol :value-type sexp))
 
-(defface romacs-layer-glow `((t :foreground ,romacs-chrome-builtin-accent))
-  "The colour a raised layer glows in: the key light of the Ember Lattice
-design language, the theme's accent.  Unless a theme sets it, it is
-derived from the theme (`romacs-chrome-derived-faces').")
-
 (defcustom romacs-layer-glass t
   "Whether raised layers (the completion panel, message toasts) are glass:
 rounded, padded, on the background lifted 8% toward the foreground,

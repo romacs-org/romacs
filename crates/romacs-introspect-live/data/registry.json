@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "f42fcb35804353f4f081b860e6bc12e7e2cb7984a84bc0f43e58d9538404f057",
+    "input_hash": "3e9eed2b96ed3f9993c8e448b0e58099c614d0c1d72a52b58729491073f0e578",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7776
+    "vm2_universe": 7778
   },
   "schema": 2,
   "vm2": {
-    "count": 1274,
+    "count": 1275,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -495,6 +495,7 @@
       "internal-get-lisp-face-attribute",
       "internal-handle-focus-in",
       "internal-lisp-face-attribute-values",
+      "internal-lisp-face-equal-p",
       "internal-lisp-face-p",
       "internal-make-lisp-face",
       "internal-make-var-non-special",

@@ -26,13 +26,14 @@ measure, which divides it among all its switches, is judged.
 The run fails when
   * a switch signals, or a theme is not the one enabled after it;
   * a cycled switch of the first round costs more than --budget
-    instructions;
+    instructions (the default, 450 M, is about 50 ms of the switch's
+    own Lisp, measured beside it);
   * a round's cycled switch grows faster than its face count: its ratio
     to the first round's exceeds --slack times the ratio of the face
     counts (cost linear in the faces passes; quadratic does not).
 
-usage: theme_live.py --binary PATH --output DIR [--themes rum,modus-vivendi,tango-dark]
-                     [--extra 1000] [--budget 200e6] [--slack 1.5] [--rounds 4]
+usage: theme_live.py --binary PATH --output DIR [--themes default,modus-vivendi,tango-dark]
+                     [--extra 1000] [--budget 450e6] [--slack 1.5] [--rounds 4]
                      [--tools DIR:DIR]
 """
 import argparse
@@ -126,9 +127,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--binary', type=Path, required=True)
     ap.add_argument('--output', type=Path, required=True)
-    ap.add_argument('--themes', default='rum,modus-vivendi,tango-dark')
+    ap.add_argument('--themes', default='default,modus-vivendi,tango-dark')
     ap.add_argument('--extra', default='1000', help='comma-separated face counts to add between rounds')
-    ap.add_argument('--budget', type=float, default=200e6, help='instructions per first-round switch')
+    ap.add_argument('--budget', type=float, default=450e6, help='instructions per cycled switch at the session\'s faces')
     ap.add_argument('--slack', type=float, default=1.5)
     ap.add_argument('--rounds', type=int, default=4, help='passes through --themes in the cycled measure')
     ap.add_argument('--settle', type=float, default=2)
@@ -137,7 +138,7 @@ def main():
     ap.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
     args = ap.parse_args()
     args.binary, args.output = args.binary.resolve(), args.output.resolve()
-    args.regime, args.lines, args.classic, args.state, args.gap = 'loadup', 20, False, False, .25
+    args.regime, args.lines, args.classic, args.state, args.gap, args.populate = 'loadup', 20, False, False, .25, False
     args.output.mkdir(parents=True, exist_ok=True)
     themes = [t for t in args.themes.split(',') if t]
     report = {'binary': str(args.binary), 'themes': themes, 'budget': args.budget, 'slack': args.slack, 'rounds': []}
