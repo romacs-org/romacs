@@ -370,10 +370,7 @@ impl Vm {
     }
     pub(super) fn window_point_value(&mut self, v: Value) -> Result<Value> {
         if v == self.window_root(SELECTED) {
-            let Object::Buffer(b) = self.object(self.window(v)?.buffer)? else {
-                return Err("buffer required".into());
-            };
-            Value::integer((b.char_of_byte(b.point)?.0 + 1) as i64)
+            Value::integer(self.buffer_point_position(self.window(v)?.buffer)?)
         } else {
             self.marker_position_value(self.window(v)?.point)
         }
@@ -383,10 +380,11 @@ impl Vm {
         let marker = self.window(v)?.point;
         self.set_marker_object(marker, pos, buffer)?;
         let pos = self.marker_position_value(marker)?.as_integer()?;
-        let Object::Buffer(b) = self.object_mut(buffer)? else {
-            return Err("buffer required".into());
-        };
-        b.point = b.byte_of_char(coordinates::CharOffset((pos - 1) as usize))?;
+        match self.object_mut(buffer)? {
+            Object::Buffer(b) => b.point = b.byte_of_char(coordinates::CharOffset((pos - 1) as usize))?,
+            Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset((pos - 1) as usize),
+            _ => return Err("buffer required".into()),
+        }
         Ok(())
     }
     /// GNU window_discard_buffer_from_window (ALL false): BUFFER leaves

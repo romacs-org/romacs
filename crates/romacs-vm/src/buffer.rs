@@ -334,6 +334,14 @@ impl Vm {
             _ => Err("buffer required".into()),
         }
     }
+    /// BUFFER's point as a character position, multibyte or unibyte.
+    pub(crate) fn buffer_point_position(&self, buffer: Value) -> Result<i64> {
+        match self.object(buffer)? {
+            Object::Buffer(b) => Ok(b.char_of_byte(b.point)?.0 as i64 + 1),
+            Object::ByteBuffer(b) => Ok(b.point.0 as i64 + 1),
+            _ => Err("buffer required".into()),
+        }
+    }
     pub(crate) fn require_live_buffer(&self, value: Value) -> Result<()> {
         if self.buffer_state(value)?.live { Ok(()) }
         else { Err("Selecting deleted buffer".into()) }

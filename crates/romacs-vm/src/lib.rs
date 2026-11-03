@@ -42,7 +42,7 @@ mod watchers;
 mod user_db;
 mod locale_info;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
-pub use host_input::{HostEvent, HostFrame, HostInput, QUIT_CHAR};
+pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
 pub use display_host::{DisplayHost, FontEntity, FontQuery, OpenedFont, OtfTable};
@@ -108,6 +108,7 @@ pub mod anchors;
 mod annotation_primitives;
 mod annotations;
 mod buffer;
+mod buffer_swap;
 mod bytes;
 mod modification;
 mod conditions;
@@ -966,13 +967,32 @@ struct Function {
     /// is the dialect's alone, nil or (t). Code images and older cache
     /// entries do not record it.
     dynamic: Option<bool>,
+    /// A compiled-Lisp body not yet decoded (`compiled_lisp`), decoded at
+    /// its first call as a `mapped_code` body is. `code` is empty while it
+    /// is here.
+    pending: Option<Box<PendingBody>>,
     /// The lambda list as written, GNU's interpreted-closure slot 0
     /// (`(aref CLOSURE 0)', which `help-function-arglist' reads). Code
     /// images and source-cache entries holding a generated symbol do not
     /// record it.
     params: Option<Vec<Form>>,
 }
-romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, params });
+romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params });
+/// A function body a compiled load left in its artifact's bytes
+/// (`Vm::decode_pending`), with what the body names: a collection keeps
+/// its VALUES (moving them with the heap) and CHILDREN alive, and its
+/// inline CACHES claimed, as it would through decoded code.
+#[derive(Clone, Debug)]
+struct PendingBody {
+    bytes: Arc<Vec<u8>>,
+    body: std::ops::Range<usize>,
+    values: Vec<Value>,
+    children: Vec<usize>,
+    caches: Vec<usize>,
+    /// The artifact's names, as slots.
+    names: Arc<Vec<usize>>,
+}
+romacs_snapshot::snapshot_struct!(PendingBody { bytes, body, values, children, caches, names });
 /// The unexpanded body of a function defined in GNU's non-eager load regime
 /// (src/lread.c:2183: `internal-macroexpand-for-load' not yet fbound).
 ///
@@ -2153,6 +2173,7 @@ impl Vm {
             rest,
             sites: b.sites,
             lazy: None,
+            pending: None,
             dynamic: (visible == 0).then_some(self.dynamic_scope),
             params: Some(args.to_vec()),
         });
@@ -2244,6 +2265,7 @@ impl Vm {
             sites: vec![],
             dynamic: names.is_empty().then_some(self.dynamic_scope),
             lazy: Some(Arc::new(lazy)),
+            pending: None,
             params: Some(args.to_vec()),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
@@ -2935,6 +2957,9 @@ impl Vm {
             let decoded;
             let f = if f.mapped_code.is_some() {
                 decoded = self.decode_image_function(id)?;
+                &decoded
+            } else if f.pending.is_some() {
+                decoded = self.decode_pending(id)?;
                 &decoded
             } else {
                 f

@@ -4452,6 +4452,9 @@ version = "0.1.0"
 [[package]]
 name = "romacs-mcp"
 version = "0.0.19"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "romacs-mem"

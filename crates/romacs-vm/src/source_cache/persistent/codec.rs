@@ -109,6 +109,7 @@ fn function(v: &J) -> Option<Function> {
         rest: a[4].as_bool()?,
         sites,
         lazy: None,
+        pending: None,
         dynamic: a.get(7).and_then(J::as_bool),
         params: a.get(8).and_then(J::as_array).and_then(|p| p.iter().map(|v| form(v, 0)).collect::<Option<Vec<_>>>()),
         code: a[6]

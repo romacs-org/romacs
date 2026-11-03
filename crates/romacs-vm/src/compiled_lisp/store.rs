@@ -15,9 +15,9 @@ use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const MAGIC: &[u8] = b"RLC2\n";
+const MAGIC: &[u8] = b"RLC3\n";
 /// What a key binds besides its inputs: this format and the compiler.
-const FORMAT: &str = concat!("romacs-compiled-lisp 2\n", env!("VM2_COMPILER_ID"));
+const FORMAT: &str = concat!("romacs-compiled-lisp 3\n", env!("VM2_COMPILER_ID"));
 /// The default cap on the store's artifacts, in bytes.
 pub(super) const BUDGET: u64 = 256 << 20;
 
@@ -61,12 +61,21 @@ pub(super) struct UnitEntry {
 }
 
 pub(super) struct Artifact {
-    pub(super) bytes: Vec<u8>,
+    /// Shared with the bodies a load leaves pending (`PendingBody`).
+    pub(super) bytes: std::sync::Arc<Vec<u8>>,
     pub(super) status: Status,
-    /// The observed inputs, each a record's text.
-    pub(super) inputs: Vec<String>,
-    pub(super) names: Vec<String>,
+    /// The observed inputs, each a record's text, and the names, as
+    /// places in BYTES (`text`).
+    pub(super) inputs: Vec<std::ops::Range<usize>>,
+    pub(super) names: Vec<std::ops::Range<usize>>,
     pub(super) units: Vec<UnitEntry>,
+}
+
+impl Artifact {
+    /// The text at RANGE, one of `inputs` or `names`: UTF-8, as `decode` checked.
+    pub(super) fn text(&self, range: &std::ops::Range<usize>) -> &str {
+        std::str::from_utf8(&self.bytes[range.clone()]).unwrap_or_default()
+    }
 }
 
 /// An artifact's bytes, its inputs part's digest naming it.
@@ -134,10 +143,14 @@ pub(super) fn decode(bytes: Vec<u8>) -> crate::Result<Artifact> {
         _ => return Err("compiled Lisp artifact: bad status".into()),
     };
     let _source = r.str()?;
+    let place = |s: &str| {
+        let start = s.as_ptr() as usize - bytes.as_ptr() as usize;
+        start..start + s.len()
+    };
     let n = r.count()?;
-    let inputs = (0..n).map(|_| r.str().map(str::to_owned)).collect::<crate::Result<Vec<_>>>()?;
+    let inputs = (0..n).map(|_| r.str().map(place)).collect::<crate::Result<Vec<_>>>()?;
     let n = r.count()?;
-    let names = (0..n).map(|_| r.str().map(str::to_owned)).collect::<crate::Result<Vec<_>>>()?;
+    let names = (0..n).map(|_| r.str().map(place)).collect::<crate::Result<Vec<_>>>()?;
     let n = r.count()?;
     let mut units = Vec::with_capacity(n);
     for _ in 0..n {
@@ -149,7 +162,7 @@ pub(super) fn decode(bytes: Vec<u8>) -> crate::Result<Artifact> {
     if !r.done() {
         return Err("compiled Lisp artifact: trailing data".into());
     }
-    Ok(Artifact { bytes, status, inputs, names, units })
+    Ok(Artifact { bytes: std::sync::Arc::new(bytes), status, inputs, names, units })
 }
 
 /// A store directory, made private when missing.
@@ -169,7 +182,7 @@ fn read(path: &Path) -> std::io::Result<Vec<u8>> {
 
 /// The first artifact for KEY whose inputs VALID accepts. A damaged one
 /// is deleted: its generation fixes its format, so it can never load.
-pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&[String]) -> bool) -> Option<(PathBuf, Artifact)> {
+pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&Artifact) -> bool) -> Option<(PathBuf, Artifact)> {
     let dir = generation(store).join(hex(key));
     let mut candidates: Vec<PathBuf> = host::read_dir(&dir).ok()?
         .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -181,7 +194,14 @@ pub(super) fn lookup(store: &Path, key: &[u8; 32], mut valid: impl FnMut(&[Strin
             let _ = host::remove_file(&path);
             return None;
         };
-        valid(&artifact.inputs).then_some((path, artifact))
+        valid(&artifact).then_some((path, artifact))
+    })
+}
+
+/// Whether KEY has any artifact, whatever its inputs.
+pub(super) fn has_artifact(store: &Path, key: &[u8; 32]) -> bool {
+    host::read_dir(generation(store).join(hex(key))).is_ok_and(|mut entries| {
+        entries.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|x| x == "rlc")))
     })
 }
 
@@ -218,12 +238,14 @@ pub(super) fn publish(store: &Path, key: &[u8; 32], inputs: &[u8; 32], bytes: &[
     Ok(path)
 }
 
-/// Note that the artifact at PATH was used, for pruning.
-pub(super) fn note_use(store: &Path, path: &Path) {
+/// Note that the artifact at PATH, of the source file SOURCE, was used:
+/// for pruning, and for what a background compile does first (`history`).
+/// A line is the artifact's path in its generation, a tab, the source's.
+pub(super) fn note_use(store: &Path, path: &Path, source: &Path) {
     use std::io::Write;
     let log = generation(store).join("use.log");
     if let Ok(mut file) = host::open_store_file(&log, host::StoreOpen::Write { create: true, truncate: false }) {
-        let line = format!("{}\n", path.strip_prefix(generation(store)).unwrap_or(path).display());
+        let line = format!("{}\t{}\n", path.strip_prefix(generation(store)).unwrap_or(path).display(), source.display());
         let _ = file.seek_end().and_then(|()| file.write_all(line.as_bytes()));
     }
 }
@@ -296,10 +318,11 @@ pub(super) fn prune(store: &Path, budget: u64) -> std::io::Result<Vec<PathBuf>> 
     let log = read(&current.join("use.log")).unwrap_or_default();
     let mut last_use = std::collections::HashMap::new();
     for (i, line) in String::from_utf8_lossy(&log).lines().enumerate() {
-        last_use.insert(current.join(line), i);
+        let artifact = line.split('\t').next().unwrap_or(line);
+        last_use.insert(current.join(artifact), (i, line.to_owned()));
     }
     let mut files = artifacts(&current);
-    files.sort_by_key(|(path, _)| last_use.get(path).copied().map_or(0, |i| i + 1));
+    files.sort_by_key(|(path, _)| last_use.get(path).map_or(0, |(i, _)| i + 1));
     for (path, size) in files {
         if total <= budget * 9 / 10 {
             break;
@@ -310,15 +333,37 @@ pub(super) fn prune(store: &Path, budget: u64) -> std::io::Result<Vec<PathBuf>> 
             removed.push(path);
         }
     }
-    let mut kept: Vec<(usize, PathBuf)> = last_use.into_iter().map(|(p, i)| (i, p)).collect();
+    let mut kept: Vec<(usize, String)> = last_use.into_values().collect();
     kept.sort();
-    let text: String = kept.iter()
-        .filter_map(|(_, p)| Some(format!("{}\n", p.strip_prefix(&current).ok()?.display())))
-        .collect();
+    let text: String = kept.iter().map(|(_, line)| format!("{line}\n")).collect();
     let temporary = current.join(format!(".use.log.{}", host::pid()));
     host::write_store_file(&temporary, text)?;
     host::rename(&temporary, current.join("use.log"))?;
     Ok(removed)
+}
+
+/// The source files compiled loads used, most recent first, from the use
+/// logs of every generation in the store: a new compiler's generation
+/// starts from what the one before it served.
+pub(super) fn history(store: &Path) -> Vec<PathBuf> {
+    let mut logs: Vec<(std::time::SystemTime, PathBuf)> = host::read_dir(store).into_iter().flatten().flatten()
+        .map(|e| e.path().join("use.log"))
+        .filter_map(|log| Some((host::metadata(&log).ok()?.modified().ok()?, log)))
+        .collect();
+    logs.sort();
+    let mut sources: Vec<PathBuf> = vec![];
+    let mut seen = std::collections::HashSet::new();
+    for (_, log) in logs.iter().rev() {
+        let text = read(log).unwrap_or_default();
+        for line in String::from_utf8_lossy(&text).lines().rev() {
+            if let Some((_, source)) = line.split_once('\t')
+                && seen.insert(source.to_owned())
+            {
+                sources.push(PathBuf::from(source));
+            }
+        }
+    }
+    sources
 }
 
 /// SOURCE's content digest, memoised by its identity and change times in

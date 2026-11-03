@@ -89,6 +89,25 @@ pub trait HostInput {
     fn display_animates(&mut self) -> Option<bool> {
         Some(false)
     }
+
+    /// Ask about or change the host frame's native window
+    /// (`romacs--native-window'): whether one shows after the request is
+    /// taken, None when the host has no native windows. A server session
+    /// hides and shows it; a session that is its window only reports it.
+    fn native_window(&mut self, _action: NativeWindow) -> Option<bool> {
+        None
+    }
+}
+
+/// What `romacs--native-window' asks of the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeWindow {
+    /// Whether the window shows.
+    Query,
+    /// Show it, made anew when it was closed, and ask for the focus.
+    Show,
+    /// Close it and keep the session.
+    Hide,
 }
 
 /// The Lisp variable that tells the minibuffer a host keyboard exists.
@@ -221,7 +240,10 @@ impl Vm {
     }
 
     /// keyboard.c timer_stop_idle: the host read a key for a command.
-    pub fn timer_stop_idle(&mut self) { self.idle_since = None; }
+    pub fn timer_stop_idle(&mut self) {
+        self.idle_since = None;
+        crate::compiled_lisp::note_idle(None);
+    }
 
     pub(crate) fn redisplay_inhibited(&mut self) -> Result<bool> {
         let slot = self.slot("inhibit-redisplay");

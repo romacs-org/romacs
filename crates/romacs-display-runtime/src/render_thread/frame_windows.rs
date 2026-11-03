@@ -2330,6 +2330,9 @@ impl GuiFrameWindowManager {
                     );
 
                     self.winit_to_emacs.insert(winit_id, req.emacs_frame_id);
+                    if self.primary_emacs_frame_id == Some(req.emacs_frame_id) {
+                        self.primary_winit_id = Some(winit_id);
+                    }
                     let chrome = WindowChrome {
                         title: req.title.clone(),
                         titlebar_hover: 0,

@@ -119,6 +119,14 @@ impl Vm {
                 functions.push(json!([1, 0, 0, 0, false]));
                 continue;
             }
+            // A compiled-Lisp body still pending is published decoded.
+            let decoded;
+            let f = if f.pending.is_some() {
+                decoded = self.decode_pending(id)?;
+                &decoded
+            } else {
+                f
+            };
             let mut code = Vec::new();
             let mut roots = BTreeMap::new();
             for &op in &f.code {
@@ -279,6 +287,7 @@ impl Vm {
                 required: number(&m[3])?,
                 rest: m[4].as_bool().ok_or("invalid rest flag")?,
                 lazy: None,
+                pending: None,
                 dynamic: None,
                 params: None,
             };
@@ -497,6 +506,7 @@ impl Vm {
             required: f.required,
             rest: f.rest,
             lazy: None,
+            pending: None,
             dynamic: f.dynamic,
             params: f.params.clone(),
         };
@@ -520,7 +530,13 @@ impl Vm {
         if let Some(error) = error { return Err(error.into()); }
         Ok(f)
     }
+    /// Decode function ID's body if it is still mapped from a code image
+    /// or pending in a compiled-Lisp artifact (`decode_pending`).
     pub(super) fn materialize_image_function(&mut self, id: usize) -> Result<()> {
+        if self.functions.get(id).ok_or("invalid function")?.pending.is_some() {
+            self.functions[id] = Arc::new(self.decode_pending(id)?);
+            return Ok(());
+        }
         if self
             .functions
             .get(id)

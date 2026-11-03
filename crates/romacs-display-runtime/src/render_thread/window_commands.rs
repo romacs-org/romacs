@@ -373,6 +373,15 @@ impl RenderApp {
                 if let Some(visual) = visual {
                     self.handle_config(crate::thread_comm::ConfigCommand::SetVisualConfig(visual));
                 }
+                if adopt_primary
+                    && self.comms.keep_alive_without_frames
+                    && self.gpu.is_some()
+                    && self.frame_windows.primary_window().is_none()
+                {
+                    // A server's primary window closed and is asked for
+                    // again: the window made for the frame becomes primary.
+                    self.frame_windows.primary_emacs_frame_id = Some(id);
+                }
                 if adopt_primary && self.frame_windows.primary_window().is_some() {
                     self.handle_window(WindowCommand::SetWindowTitle { title });
                     self.handle_window(WindowCommand::SetFrameGeometryHints {
