@@ -35,7 +35,13 @@ impl Leaf<'_> {
         };
         state.set_modified(flag != Value::NIL);
         if flag == autosaved { state.autosave_modiff = state.modiff; }
-        if redisplay { self.vm.display_state.version += 1; }
+        // GNU's Fset_buffer_modified_p updates every mode line: packages
+        // call it with the flag unchanged to force that (`BarKey').
+        if redisplay {
+            self.vm.display_state.version += 1;
+            self.vm.display_state.mode_line_epoch = self.vm.display_state.mode_line_epoch.wrapping_add(1);
+            self.vm.mode_line_forms.clear();
+        }
         Ok(())
     }
 }

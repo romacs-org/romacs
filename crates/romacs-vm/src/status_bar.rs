@@ -8,6 +8,23 @@ use super::mode_line;
 use crate::{data::Object, *};
 use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, Pill, Segment, StatusBarSnapshot, TextSlice};
 
+/// What the bar's expansion depends on (`Vm::bar_key').
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct BarKey {
+    epoch: u64, collections: u64, faces: u64, columns: usize, focused: bool,
+    minibuffer: (u64, u64, u64),
+    lines: Vec<LineKey>,
+}
+romacs_snapshot::snapshot_struct!(BarKey { epoch, collections, faces, columns, focused, minibuffer, lines });
+
+/// What one window's line in the bar depends on (`Vm::line_key').
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct LineKey {
+    id: u64, buffer: u64, name: Option<String>, format: u64, modiff: u64, modified: bool,
+    point: i64, start: i64, size: (u32, u32), accessible: (usize, usize),
+}
+romacs_snapshot::snapshot_struct!(LineKey { id, buffer, name, format, modiff, modified, point, start, size, accessible });
+
 /// The corner radius of a segment's pill, in pixels.
 const PILL_RADIUS: u32 = 6;
 
@@ -56,32 +73,74 @@ impl Vm {
         let window = self.window(owner)?.id;
         let [width, height] = self.window_state.text_area;
         let columns = (width / self.window_state.column.max(1)) as usize;
+        let border = self.host_border();
+        // At the top the bar ends where the root window starts; at the
+        // bottom it starts above the mini-window.
+        let root = self.window_root_peek(crate::window::ROOT);
+        let y = if self.status_bar_top() { self.window(root)?.y.saturating_sub(reserved) }
+                else { height - self.window_state.mini_reserved - reserved };
+        let place = |bar: StatusBarSnapshot| StatusBarSnapshot { x: border, y: border + y, width, height: reserved, ..bar };
+        // Expanded again only when GNU's redisplay would update the line
+        // (`BarKey'); otherwise the last expansion is shown where the bar is now.
+        let key = self.bar_key(owner, focused, columns)?;
+        if let Some((known, bar)) = &self.display_state.bar_cache && *known == key {
+            return Ok(Some(place(bar.clone())));
+        }
         let band = self.status_bar_band(owner, columns)?;
+        // Kept for a click, which reads it as a string (`status_bar_target').
+        self.status_bar_line = band.clone().map(|band| Box::new(band) as Box<dyn std::any::Any>);
         let table = self.display_faces()?;
         let base = table.handle("mode-line-active").or_else(|| table.handle("mode-line")).ok_or("mode-line face required")?;
         let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
         let marks = self.band_marks(&text, &props, &segments, &table)?;
         // The bar's faces: its base face first, then those its runs use.
         let mut faces = vec![table.faces[base.0 as usize].clone()];
-        let mut local: Vec<(u32, FaceHandle)> = vec![];
+        let mut local: std::collections::HashMap<u32, FaceHandle> = std::collections::HashMap::new();
         let mut face_runs = vec![];
         for (bytes, name) in runs {
             let Some(handle) = table.handle(&name) else { continue };
-            let face = match local.iter().find(|(h, _)| *h == handle.0) {
-                Some(&(_, face)) => face,
-                None => {
-                    faces.push(table.faces[handle.0 as usize].clone());
-                    local.push((handle.0, FaceHandle(faces.len() as u32 - 1)));
-                    FaceHandle(faces.len() as u32 - 1)
-                }
-            };
+            let face = *local.entry(handle.0).or_insert_with(|| {
+                faces.push(table.faces[handle.0 as usize].clone());
+                FaceHandle(faces.len() as u32 - 1)
+            });
             face_runs.push(FaceRun { bytes, face });
         }
-        let border = self.host_border();
-        Ok(Some(StatusBarSnapshot {
-            x: border, y: border + height - self.window_state.mini_reserved - reserved, width, height: reserved,
-            text: TextSlice { utf8: text, face_runs, raw: vec![] }, face: FaceHandle(0), faces, window, focused, marks,
-        }))
+        let bar = StatusBarSnapshot { x: 0, y: 0, width: 0, height: 0,
+            text: TextSlice { utf8: text, face_runs, raw: vec![] }, face: FaceHandle(0), faces, window, focused, marks };
+        self.display_state.bar_cache = Some((key, bar.clone()));
+        Ok(Some(place(bar)))
+    }
+    /// What the bar's line shows depends on, as GNU's redisplay decides when
+    /// to update a mode line (`update_mode_lines', a window's buffer, its
+    /// point, start and size, the buffer's tick and modified state), for
+    /// OWNER and each context window, with the faces, the bar's COLUMNS,
+    /// FOCUSED, the minibuffer's state and the collections (cached values
+    /// move with them).
+    fn bar_key(&mut self, owner: Value, focused: bool, columns: usize) -> Result<BarKey> {
+        let mut lines = vec![];
+        for window in std::iter::once(owner).chain(self.context_windows(owner)?) {
+            lines.push(self.line_key(window)?);
+        }
+        let [level, origin] = ["romacs--minibuf-level", "romacs--minibuf-selected-window"].map(|name| self.slot(name));
+        Ok(BarKey {
+            epoch: self.display_state.mode_line_epoch, collections: self.gc_stats.collections,
+            faces: self.display_state.face_revision, columns, focused,
+            minibuffer: (self.variable_value(level)?.0, self.variable_value(origin)?.0, self.selected_window_value()?.0),
+            lines,
+        })
+    }
+    /// What WINDOW's own line depends on (`bar_key').
+    fn line_key(&mut self, window: Value) -> Result<LineKey> {
+        let format = self.window_mode_line_format(window)?.map_or(0, |v| v.0);
+        let w = self.window(window)?;
+        let (id, buffer, size, start) = (w.id, w.buffer, (w.width, w.height), w.start);
+        let start = self.marker_position_value(start)?.integer_value().unwrap_or(1);
+        let point = self.window_point_value(window)?.integer_value().unwrap_or(1);
+        let Object::Buffer(b) = self.object(buffer)? else { return Err("buffer required".into()) };
+        let accessible = b.accessible();
+        // Its name too: `rename-buffer' changes `%b' without a modification.
+        Ok(LineKey { id, buffer: buffer.0, name: b.state.name.clone(), format, modiff: b.state.modiff, modified: b.state.modified(),
+                     point, start, size, accessible: (accessible.start.0, accessible.end.0) })
     }
     /// The marks of a bar's TEXT: its segments, from the `:propertize'
     /// constructs that name one (SEGMENTS, which own all they expanded to)
@@ -89,7 +148,7 @@ impl Vm {
     /// the background of its `romacs-pill' face, its text in the foreground
     /// of its `romacs-pill-text' face; and each character a `romacs-icon'
     /// alist names, drawn as that icon (`icon_index').
-    fn band_marks(&mut self, text: &str, props: &[(std::ops::Range<usize>, mode_line::Projected)],
+    pub(super) fn band_marks(&mut self, text: &str, props: &[(std::ops::Range<usize>, mode_line::Projected)],
                   segments: &[(std::ops::Range<usize>, mode_line::Projected)], table: &super::FaceTable) -> Result<BandMarks> {
         let mut marks = BandMarks::default();
         let structural: Vec<Segment> = segments.iter().filter_map(|(bytes, projected)| self.segment_of(bytes, projected, table)).collect();
@@ -129,6 +188,61 @@ impl Vm {
         marks.segments.extend(structural);
         marks.segments.sort_by_key(|s| (s.bytes.start, std::cmp::Reverse(s.bytes.end)));
         Ok(marks)
+    }
+    /// Fit BAND, a marked band, into COLUMNS (VM2-MODE-LINE): drop each
+    /// character its `romacs-icon' alist maps to `none', then whole
+    /// segments that have a `romacs-priority', the lowest first (of equal
+    /// ones the later), until the rest is no wider; a segment without one
+    /// stays. Each shown character's index in the expanded text, when
+    /// anything was dropped.
+    pub(super) fn fit_band(&mut self, band: &mut mode_line::Band, columns: usize) -> Result<Option<Vec<usize>>> {
+        if band.segments.is_empty() && band.props.is_empty() { return Ok(None); }
+        // Each character's byte and columns, once; a dropped flag each and
+        // the running width, so every drop costs its own characters only.
+        let cells = |c: char| if ('\u{FE000}'..='\u{FE0FF}').contains(&c) { 1 } else { unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) };
+        let chars: Vec<(usize, usize)> = band.text.char_indices().map(|(at, c)| (at, cells(c))).collect();
+        let index = |byte: usize| chars.partition_point(|(at, _)| *at < byte);
+        let mut dropped = vec![false; chars.len()];
+        let mut width: usize = chars.iter().map(|(_, w)| w).sum();
+        let mut drop = |range: std::ops::Range<usize>, dropped: &mut Vec<bool>, width: &mut usize| {
+            for i in index(range.start)..index(range.end) {
+                if !dropped[i] { dropped[i] = true; *width -= chars[i].1; }
+            }
+        };
+        for (bytes, projected) in &band.props {
+            let Some((_, alist)) = projected.iter().find(|(name, _)| *name == "romacs-icon") else { continue };
+            // Each key's first entry decides, as `assq' (and the painter) does.
+            let mut first: std::collections::HashMap<i64, bool> = std::collections::HashMap::new();
+            for (key, name) in self.ml_icon_alist(alist) { first.entry(key).or_insert(name == "none"); }
+            let none: std::collections::HashSet<i64> = first.into_iter().filter(|(_, none)| *none).map(|(key, _)| key).collect();
+            if none.is_empty() { continue; }
+            for (at, c) in band.text[bytes.clone()].char_indices() {
+                if none.contains(&(c as i64)) { drop(bytes.start + at..bytes.start + at + c.len_utf8(), &mut dropped, &mut width); }
+            }
+        }
+        if width > columns {
+            let mut ranked: Vec<(i64, std::ops::Range<usize>)> = band.segments.iter().filter_map(|(range, projected)| {
+                projected.iter().find(|(name, _)| *name == "romacs-priority")
+                    .and_then(|(_, form)| match &**form { Form::Int(n) => Some((*n, range.clone())), _ => None })
+            }).collect();
+            ranked.sort_by_key(|(priority, range)| (*priority, std::cmp::Reverse(range.start)));
+            for (_, range) in ranked {
+                if width <= columns { break; }
+                drop(range, &mut dropped, &mut width);
+            }
+        }
+        // The dropped characters as ordered byte ranges, in one pass.
+        let mut merged: Vec<std::ops::Range<usize>> = vec![];
+        for (i, &(at, _)) in chars.iter().enumerate() {
+            if !dropped[i] { continue; }
+            let end = chars.get(i + 1).map_or(band.text.len(), |(next, _)| *next);
+            match merged.last_mut() {
+                Some(last) if last.end == at => last.end = end,
+                _ => merged.push(at..end),
+            }
+        }
+        if merged.is_empty() { return Ok(None); }
+        Ok(Some(band.drop_ranges(&merged)))
     }
     /// The segment PROJECTED names over BYTES, if it names one.
     fn segment_of(&self, bytes: &std::ops::Range<usize>, projected: &mode_line::Projected, table: &super::FaceTable) -> Option<Segment> {
@@ -212,34 +326,117 @@ impl Vm {
         }
         Ok(index)
     }
-    /// OWNER's effective mode-line format expanded as its band is, at
-    /// COLUMNS: `%-' fills them and the text is clipped there. None when it
-    /// has no format.
+    /// The bar's band (VM2-STATUS-BAR): OWNER's line, then the line of
+    /// each other window of the host frame that sets its own format (a
+    /// popup's, a side window's) as a context segment, all at COLUMNS and
+    /// fitted there; the click map of what it shows recorded. None when no
+    /// window has a line.
     fn status_bar_band(&mut self, owner: Value, columns: usize) -> Result<Option<mode_line::Band>> {
-        let Some(format) = self.window_mode_line_format(owner)? else { return Ok(None) };
-        let format = self.mode_line_form(format);
-        let [root, buffer_slot, saved] = ["#:vm2-status-bar-window", "#:vm2-status-bar-buffer", "#:vm2-status-bar-current"].map(|name| self.slot(name));
-        self.slots[root].value = owner;
-        self.slots[buffer_slot].value = self.window(owner)?.buffer;
+        let mut parts: Vec<(std::ops::Range<usize>, u64)> = vec![];
+        let mut bar: Option<mode_line::Band> = None;
+        let mut bar_chars = 0;
+        let separator = " │ ";
+        // By id: a line's `:eval' may collect, which moves windows.
+        let mut ids = vec![self.window(owner)?.id];
+        for window in self.context_windows(owner)? { ids.push(self.window(window)?.id); }
+        let mut by_id: std::collections::HashMap<u64, Value> = std::collections::HashMap::new();
+        let mut resolved_at = None;
+        for (i, id) in ids.into_iter().enumerate() {
+            if resolved_at != Some(self.gc_stats.collections) {
+                by_id = self.leaf_windows()?.into_iter().filter_map(|w| self.window(w).ok().map(|x| (x.id, w))).collect();
+                resolved_at = Some(self.gc_stats.collections);
+            }
+            let Some(&window) = by_id.get(&id) else { continue };
+            let Some(line) = self.window_line(window, columns)? else { continue };
+            let line = if i == 0 { line } else { self.plain_markers(line).into_context("mode-line-inactive") };
+            let length = line.text.chars().count();
+            match bar.as_mut() {
+                None => {
+                    parts.push((0..length, id));
+                    bar = Some(line);
+                    bar_chars = length;
+                }
+                Some(bar) => {
+                    let start = bar_chars + separator.chars().count();
+                    let separator_start = bar.text.len();
+                    parts.push((start..start + length, id));
+                    bar.append(line, separator, "mode-line-inactive");
+                    // A context goes with its separator when the bar drops it.
+                    if let Some((range, _)) = bar.segments.last_mut() { range.start = separator_start; }
+                    bar_chars = start + length;
+                }
+            }
+        }
+        self.display_state.bar_parts = parts;
+        self.display_state.bar_kept = None;
+        if let Some(band) = bar.as_mut() {
+            self.display_state.bar_kept = self.fit_band(band, columns)?;
+        }
+        Ok(bar)
+    }
+    /// LINE, a context's, with its `right-align' markers plain text: the
+    /// bar's alignment is the selected line's. A marker is a segment and a
+    /// projected property, a `:propertize''s symbol or a string's own
+    /// value: none stays.
+    fn plain_markers(&self, mut line: mode_line::Band) -> mode_line::Band {
+        let marker = |(name, value): &(&'static str, std::rc::Rc<Form>)| *name == "romacs-segment" && self.ml_form_name(value).as_deref() == Some("right-align");
+        line.segments.retain(|(_, projected)| !projected.iter().any(marker));
+        for (_, projected) in line.props.iter_mut() {
+            if projected.iter().any(marker) {
+                *projected = std::rc::Rc::new(projected.iter().filter(|p| !marker(p)).cloned().collect());
+            }
+        }
+        line
+    }
+    /// The host frame's ordinary windows but OWNER whose line differs from
+    /// the default one (a buffer-local `mode-line-format' or a window
+    /// parameter), in the frame's order; a nil or `none' format has no line.
+    fn context_windows(&mut self, owner: Value) -> Result<Vec<Value>> {
+        let mut found = vec![];
+        for window in self.leaf_windows()? {
+            if window == owner || !self.bar_owns_mode_line(window) { continue; }
+            if !self.window_shows_default_mode_line(window)? && self.window_mode_line_format(window)?.is_some() {
+                found.push(window);
+            }
+        }
+        Ok(found)
+    }
+    /// WINDOW's line as the bar shows it: its effective format expanded at
+    /// COLUMNS with its buffer current and WINDOW selected, as GNU's
+    /// display_mode_lines selects it (frame-local, without select-window's
+    /// point effects, restored), reading its own point and start. Unlike
+    /// GNU's, no window's point is installed in its buffer: nothing moves.
+    fn window_line(&mut self, window: Value, columns: usize) -> Result<Option<mode_line::Band>> {
+        let Some(format) = self.window_mode_line_format(window)? else { return Ok(None) };
+        let format = self.band_format_form(format);
+        let [root, buffer_slot, saved, selection] = ["#:vm2-status-bar-window", "#:vm2-status-bar-buffer", "#:vm2-status-bar-current", "#:vm2-status-bar-selected"].map(|name| self.slot(name));
+        self.slots[root].value = window;
+        self.slots[buffer_slot].value = self.window(window)?.buffer;
         self.slots[saved].value = self.slots[self.buffer_slot].value;
         self.slots[self.buffer_slot].value = self.slots[buffer_slot].value;
         self.display_state.building_band = true;
         let outcome = (|| {
             let window = self.slots[root].value;
             let [_, below] = self.window_dividers(window)?;
-            let text_height = self.window(window)?.height.saturating_sub(self.window_state.line + below);
+            let text_height = self.window(window)?.height.saturating_sub(below);
             let mut state = self.mode_line_state(root, buffer_slot, text_height)?;
             state.clip = Some(columns);
             state.marks = true;
-            let [_, band] = self.expand_bands(root, buffer_slot, &state, [None, Some(&format)])?;
-            Ok(band)
+            let frame = self.frame_value_peek();
+            let selected = self.frame(frame)?.selected;
+            self.slots[selection].value = selected;
+            self.frame_mut(frame)?.selected = window;
+            let band = self.mode_line_band(&format, &state);
+            let frame = self.frame_value_peek();
+            self.frame_mut(frame)?.selected = self.slots[selection].value;
+            band
         })();
         self.display_state.building_band = false;
         if self.buffer_state(self.slots[saved].value).is_ok_and(|b| b.live) {
             self.slots[self.buffer_slot].value = self.slots[saved].value;
         }
-        for slot in [root, buffer_slot, saved] { self.slots[slot].value = Value::UNBOUND; }
-        outcome
+        for slot in [root, buffer_slot, saved, selection] { self.slots[slot].value = Value::UNBOUND; }
+        outcome.map(Some)
     }
     /// BAR, the bar the frame wants, when its last layout made room for it.
     pub(crate) fn status_bar_shown(&self, bar: Option<StatusBarSnapshot>) -> Option<StatusBarSnapshot> {
@@ -278,6 +475,35 @@ impl crate::window::Windows<'_> {
     pub(crate) fn status_bar_window(&mut self) -> std::result::Result<Value, crate::prim::Fault> {
         self.vm.ensure_windows().map_err(crate::prim::Fault::Error)?;
         Ok(self.vm.status_bar_owner().map_err(crate::prim::Fault::Error)?.0)
+    }
+    /// `romacs--window-of-id': the live window whose display id is ID, the
+    /// one a host's pointer event names, else nil.
+    pub(crate) fn window_of_id(&mut self, id: Value) -> std::result::Result<Value, crate::prim::Fault> {
+        let Some(id) = id.integer_value().and_then(|id| u64::try_from(id).ok()) else { return Ok(Value::NIL) };
+        let windows = self.vm.leaf_windows().map_err(crate::prim::Fault::Error)?;
+        Ok(windows.into_iter().find(|&w| self.vm.window(w).is_ok_and(|w| w.id == id)).unwrap_or(Value::NIL))
+    }
+    /// `romacs--status-bar-target': for the status bar's shown character
+    /// COLUMN, (WINDOW STRING COLUMN): the window whose line it is, and the
+    /// bar's text as it was last painted, a string with the properties a
+    /// click reads; nil over a separator or with no bar.
+    pub(crate) fn status_bar_target(&mut self, column: Value) -> std::result::Result<Value, crate::prim::Fault> {
+        let at = column.integer_value().and_then(|c| usize::try_from(c).ok()).unwrap_or(0);
+        let Some((id, _)) = self.vm.display_state.bar_target(at) else { return Ok(Value::NIL) };
+        // The kept line as a string, built now: no Lisp runs, it allocates.
+        let Some(line) = self.vm.status_bar_line.take() else { return Ok(Value::NIL) };
+        let string = match line.downcast_ref::<mode_line::Band>() {
+            Some(band) => self.vm.mode_line_string(band, Value::NIL),
+            None => Ok(Value::NIL),
+        };
+        self.vm.status_bar_line = Some(line);
+        let string = string.map_err(crate::prim::Fault::Error)?;
+        let slot = self.vm.slot("#:vm2-status-bar-string");
+        self.vm.slots[slot].value = string;
+        let window = self.window_of_id(Value::integer(id as i64).map_err(crate::prim::Fault::Error)?)?;
+        let string = std::mem::replace(&mut self.vm.slots[slot].value, Value::UNBOUND);
+        if window == Value::NIL || string == Value::NIL { return Ok(Value::NIL); }
+        Ok(self.vm.list_value(&[window, string, column]))
     }
     /// `romacs-status-bar-height': the pixels the root frame's last layout
     /// left for the status bar, 0 while it shows none.

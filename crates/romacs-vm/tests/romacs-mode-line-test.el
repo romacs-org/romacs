@@ -36,43 +36,21 @@ mode line would be."
           (romacs-should (eq (default-value 'mode-line-format) package)))
       (setq-default mode-line-format gnu))))
 
-(romacs-deftest romacs-mode-line-follows-classic-chrome ()
-  (let ((gnu (default-value 'mode-line-format))
-        (package (list "package")))
+;; The status bar is the mode line in every look: classic chrome leaves
+;; Romacs's mode line and its format alone.
+(romacs-deftest romacs-mode-line-stays-under-classic-chrome ()
+  (let ((gnu (default-value 'mode-line-format)))
     (unwind-protect
         (progn
           (romacs-mode-line-mode 1)
           (romacs-classic-chrome 1)
-          (romacs-should-not romacs-mode-line-mode)
-          (romacs-should (eq (default-value 'mode-line-format) gnu))
-          (romacs-classic-chrome -1)
           (romacs-should romacs-mode-line-mode)
           (romacs-should (eq (default-value 'mode-line-format) romacs-mode-line-format))
-          ;; A package's format installed after startup survives classic.
-          (setq-default mode-line-format package)
-          (romacs-classic-chrome 1)
-          (romacs-should (eq (default-value 'mode-line-format) package))
           (romacs-classic-chrome -1)
-          (romacs-should (eq (default-value 'mode-line-format) package)))
+          (romacs-should (eq (default-value 'mode-line-format) romacs-mode-line-format)))
       (romacs-classic-chrome -1)
       (romacs-mode-line-mode -1)
       (setq-default mode-line-format gnu))))
-
-(romacs-deftest romacs-chrome-keeps-a-mode-chosen-during-classic ()
-  (unwind-protect
-      (progn
-        (romacs-status-bar-mode 1)
-        (romacs-mode-line-mode 1)
-        (romacs-classic-chrome 1)
-        (romacs-should-not romacs-status-bar-mode)
-        ;; Turned off by hand during classic: classic's end keeps it off.
-        (romacs-status-bar-mode -1)
-        (romacs-classic-chrome -1)
-        (romacs-should-not romacs-status-bar-mode)
-        (romacs-should romacs-mode-line-mode))
-    (romacs-classic-chrome -1)
-    (romacs-mode-line-mode -1)
-    (romacs-status-bar-mode -1)))
 
 (romacs-deftest romacs-mode-line-leaves-a-buffers-own-format ()
   (with-temp-buffer
@@ -111,7 +89,8 @@ mode line would be."
         (romacs-should-not romacs-mode-line-search)
         (setq isearch-lazy-count-current 3 isearch-lazy-count-total 12)
         (run-hooks 'lazy-count-update-hook)
-        (romacs-should (equal (substring-no-properties romacs-mode-line-search) "  3/12")))
+        ;; After the search glyph, or its symbol without the font.
+        (romacs-should (string-suffix-p " 3/12" (substring-no-properties romacs-mode-line-search))))
       (let ((isearch-mode nil))
         (run-hooks 'isearch-mode-end-hook)
         (romacs-should-not romacs-mode-line-search)))))
@@ -145,10 +124,13 @@ mode line would be."
             (narrow-to-region (point-min) (point-max))
             (narrow-to-region (1+ (point-min)) (point-max))
             (setq vc-mode " Git-main")
+            (romacs-mode-line-refresh-vc)
             (let* ((romacs-mode-line-minor-modes t)
                    (minor-mode-alist '((t " Probe")))
                    (text (romacs-mode-line-test--format romacs-mode-line-format)))
-              (dolist (part (list (file-name-nondirectory file) "*" " Narrow" "12:3" " Git-main"
+              ;; The branch without its backend's name, as doom-modeline shows it.
+              (romacs-should-not (string-search "Git" text))
+              (dolist (part (list (file-name-nondirectory file) "*" " Narrow" "12:3" "main"
                                   (format-mode-line mode-name) " Probe"))
                 (romacs-should (string-search part text))))
             (set-buffer-modified-p nil)

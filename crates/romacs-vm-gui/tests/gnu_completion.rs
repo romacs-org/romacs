@@ -331,14 +331,15 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         // Layers are placed in the frame's native pixels, outside the
                         // 6-pixel internal border of the pane gap (VM2-PANE-CHROME),
                         // centred on the frame, and the status bar takes a line above
-                        // the minibuffer (VM2-STATUS-BAR).
-                        "(748 ((top 330 93 600 80 8 top) (center 330 260 600 80 8 top) (bottom 330 448 600 80 8 top)))",
-                        "(180 6 0)", "(\"cand-06\" (5 5 40 160 180) 2 t)",
+                        // the minibuffer and is the windows' mode line, so a window
+                        // ends where its band would start (VM2-STATUS-BAR).
+                        "(768 ((top 330 93 600 80 8 top) (center 330 260 600 80 8 top) (bottom 330 468 600 80 8 top)))",
+                        "(200 7 0)", "(\"cand-07\" (6 6 40 180 200) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
                         // 500 pixels less the fringes and the pane gap's internal
                         // border (VM2-PANE-CHROME), centred on the native 500.
-                        "(8 (nil 1))", "(600 840 480 1260)", "(14 486 472)", "(140 200 328 t)"]);
+                        "(8 (nil 1))", "(600 840 480 1260)", "(14 486 472)", "(140 200 348 t)"]);
 }
 
 /// Every chrome colour follows the theme (romacs-chrome.el

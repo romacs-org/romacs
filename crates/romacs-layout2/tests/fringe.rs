@@ -244,6 +244,26 @@ fn an_icon_in_text_paints_and_measures_one_column() {
     assert_eq!(advances, widths.iter().map(|w| w.1.round() as u32).collect::<Vec<_>>());
 }
 
+/// A line folded into the bar from another window (a `context' segment)
+/// keeps its own face's background (`mode-line-inactive''s), so its text
+/// reads as on its own line, whatever the bar's background.
+#[test]
+fn a_context_segment_keeps_its_own_background() {
+    let band = [30, 40, 50];
+    let inactive = [240, 240, 240];
+    let mut snapshot = frame(window("x", LineWrap::Window), None);
+    snapshot.status_bar = Some(StatusBarSnapshot {
+        x: 0, y: 150, width: 116, height: 20,
+        text: TextSlice { utf8: "ab | cd".into(), face_runs: vec![FaceRun { bytes: 2..7, face: FaceHandle(1) }], raw: vec![] },
+        face: FaceHandle(0), faces: vec![face([200; 3], band), face([0; 3], inactive)], window: 1, focused: true,
+        marks: BandMarks { segments: vec![Segment { bytes: 2..7, name: "context".into(), pill: None }], icons: vec![] },
+    });
+    let painted = lay_out(snapshot);
+    let found = painted.glyphs.iter().any(|g| matches!(g, FrameGlyph::Background { bounds, color }
+        if bounds.y == 150.0 && bounds.x > 3.0 && *color == romacs_display_protocol::Color::from_pixel(0xf0f0f0)));
+    assert!(found, "the context's own background behind it");
+}
+
 /// Panes (VM2-PANE-CHROME): each window's box, fringes included, but the
 /// mini-window's; the selected window's edge in the focus colour, the
 /// others' in the hairline's and dimmed; none in GNU's look.

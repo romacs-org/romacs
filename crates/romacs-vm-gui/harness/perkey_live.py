@@ -295,6 +295,14 @@ class Session:
                       ' (flymake-make-diagnostic (current-buffer) 5 6 :note "n"))))',
                       '(setq-local flymake-diagnostic-functions (list (quote perkey--diagnostics)))',
                       '(flymake-mode 1)']
+        if self.args.split > 1:
+            # The measured buffer stays selected; the other windows show
+            # other buffers, each drawing its own mode line.
+            # Stacked, full width: line motion measures what it does alone.
+            forms.append('(let ((others (list (get-buffer-create "*perkey-other*") (messages-buffer))))'
+                         ' (save-selected-window (select-window (split-window-below))'
+                         ' (switch-to-buffer (car others))'
+                         f'{" (select-window (split-window-below)) (switch-to-buffer (cadr others))" if self.args.split > 2 else ""}))')
         return f"(progn {' '.join(forms)})"
 
     def state_form(self):
@@ -549,6 +557,7 @@ def main():
     parser.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
     parser.add_argument('--classic', action='store_true', help="measure under `romacs-classic-chrome'")
     parser.add_argument('--populate', action='store_true', help='a Git-tracked flymake buffer, and a region phase')
+    parser.add_argument('--split', type=int, default=1, choices=(1, 2, 3), help='windows in the frame, each with its own buffer')
     parser.add_argument('--state', action='store_true', help='record collections and the window around each phase')
     parser.add_argument('--mode', default='1600x1000', help="the output's size")
     args = parser.parse_args()

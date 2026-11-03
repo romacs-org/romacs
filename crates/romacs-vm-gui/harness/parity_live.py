@@ -36,14 +36,14 @@ ROMACS_DEFAULTS_OFF = "(when (fboundp 'romacs-defaults-mode) (romacs-defaults-mo
 # romacs-complete's layer (VM2-COMPLETE-DEFAULT), and these harnesses compare
 # GNU's completion, displayed by fido-vertical.  Romacs's other interactive
 # defaults (rlisp/romacs-defaults.el, VM2-OOB-DEFAULTS) go off with their
-# switch, so both engines edit with GNU's values; Romacs shows no status bar
-# and GNU's mode line in each window (VM2-STATUS-BAR, VM2-MODE-LINE).
+# switch, so both engines edit with GNU's values; Romacs shows GNU's mode
+# line in each window (VM2-MODE-LINE).
 GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"
                   "      completion-category-overrides '((file (styles partial-completion))))\n"
                   ";; GNU sees romacs-complete-mode through the bundled autoloads, but\n"
                   ";; only Romacs can host a minibuffer in a layer.\n"
                   "(when (fboundp 'romacs--host-minibuffer) (romacs-complete-mode -1) (fido-vertical-mode 1))\n"
-                  "(when (fboundp 'romacs-status-bar-mode) (romacs-status-bar-mode -1) (romacs-mode-line-mode -1))\n"
+                  "(when (fboundp 'romacs-mode-line-mode) (romacs-mode-line-mode -1))\n"
                   + ROMACS_DEFAULTS_OFF)
 RC_XML = '''<?xml version="1.0"?>
 <labwc_config><core><gap>0</gap></core>

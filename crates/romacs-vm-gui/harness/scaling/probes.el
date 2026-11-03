@@ -370,6 +370,66 @@ thousandth a stack mark."
            buffer)
   :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
 
+;; N windows, each showing its own buffer and drawing its own line
+;; (VM2-MODE-LINE), a key typed in one: the others' lines are reused,
+;; not expanded again.
+(scaling-probe mode-line-windows :gui t :n 2 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (delete-other-windows)
+           (let ((main (scaling--lines-buffer "scaling-windows" 20)))
+             (switch-to-buffer main)
+             (save-selected-window
+               (dotimes (i (1- n))
+                 (select-window (split-window (get-largest-window) nil (quote below)))
+                 (switch-to-buffer (scaling--lines-buffer (format "scaling-window-%d" i) 5))))
+             (balance-windows)
+             main))
+  :body (with-current-buffer it (insert "x")))
+
+;; N side windows whose buffers set their own mode line, each folded into
+;; the status bar as a context segment (VM2-STATUS-BAR), a key typed in
+;; the selected window.
+(scaling-probe mode-line-contexts :gui t :n 2 :steps 20
+  :setup (progn
+           (delete-other-windows)
+           (let ((main (scaling--lines-buffer "scaling-contexts" 20)))
+             (switch-to-buffer main)
+             (dotimes (i n)
+               (let ((buffer (scaling--lines-buffer (format "scaling-context-%d" i) 2)))
+                 (with-current-buffer buffer (setq-local mode-line-format (list (format "ctx %d " i) "%b")))
+                 (display-buffer-in-side-window buffer `((side . right) (slot . ,i) (window-width . 12)))))
+             main))
+  :body (with-current-buffer it (insert "x")))
+
+;; N side windows whose own lines are each wider than the bar, so every
+;; one is dropped when the bar fits (VM2-STATUS-BAR): fitting and folding
+;; stay linear in what they drop.
+(scaling-probe mode-line-contexts-saturated :gui t :n 3 :steps 20
+  :setup (progn
+           (delete-other-windows)
+           (let ((main (scaling--lines-buffer "scaling-saturated" 20)))
+             (switch-to-buffer main)
+             (dotimes (i n)
+               (let ((buffer (scaling--lines-buffer (format "scaling-saturated-%d" i) 2)))
+                 (with-current-buffer buffer (setq-local mode-line-format (list (make-string 200 (+ ?a (% i 26))))))
+                 (display-buffer-in-side-window buffer `((side . ,(if (cl-oddp i) 'left 'right)) (slot . ,i) (window-width . 10)))))
+             main))
+  :body (with-current-buffer it (insert "x")))
+
+;; `format-mode-line' of N pieces under one `:propertize' whose shared
+;; keymap has N bindings: the map is made once for the string, not once
+;; per piece (VM2-G1B).
+(scaling-probe mode-line-shared-properties :n 200
+  :setup (let ((map (list 'keymap)))
+           (dotimes (i n) (push (cons (+ 1000 i) 'ignore) (cdr map)))
+           (list :propertize (let (pieces) (dotimes (i n) (push (propertize "a" 'help-echo (number-to-string i)) pieces)) pieces)
+                 'local-map map))
+  :body (let* ((noninteractive nil) (s (format-mode-line it)))
+          (unless (get-text-property 0 'local-map s) (error "The shared keymap is not projected"))
+          s))
+
 ;;;; Redisplay (GUI: the host lays out each step's change)
 
 (scaling-probe redisplay-lines :gui t :n 2000 :steps 20 :budget 0.5

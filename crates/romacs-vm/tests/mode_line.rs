@@ -160,7 +160,7 @@ mod gui_probe;
 /// entries `Vm::mode_line_evals' counts for one expansion of the
 /// installed format, over a file buffer, with `vc-mode' set, with a
 /// region, and in `flymake-mode' with three diagnostics, where it makes
-/// as many as GNU's `flymake-mode-line-counters' element alone.
+/// none: the counts are made when flymake reports.
 #[test]
 fn romacs_mode_line_enters_the_evaluator_only_where_due() {
     let mut vm = gui_probe::gnu_session();
@@ -196,7 +196,11 @@ fn romacs_mode_line_enters_the_evaluator_only_where_due() {
     assert_eq!(eval(&mut vm, "(length (flymake-diagnostics))"), "3");
     let gnu = evals(&mut vm, "flymake-mode-line-counters");
     assert!(gnu > 0);
-    assert_eq!(evals(&mut vm, "mode-line-format"), gnu, "flymake's element, no more");
+    // Romacs's diagnostics are counted when flymake reports, not in the
+    // format: none of GNU's element's entries.
+    assert_eq!(evals(&mut vm, "mode-line-format"), 0, "flymake's counts, refreshed on report");
+    let line = eval(&mut vm, "(let ((noninteractive nil)) (substring-no-properties (format-mode-line mode-line-format)))");
+    assert!(line.contains("1") && line.matches('1').count() >= 3, "{line}");
     eval(&mut vm, "(progn (flymake-mode -1) (set-buffer-modified-p nil) (kill-buffer))");
     std::fs::remove_dir_all(&dir).ok();
 }

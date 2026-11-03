@@ -14,7 +14,7 @@ use romacs_face::{
     Attribute, AttrsBuilder, Background, Base, BoundedDatum, Deffaces, LispGraph, NodeView,
     Slot as FaceSlot, Theme, Value as FaceValue,
 };
-use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
+use romacs_layout_input::{Face, FaceHandle, FaceRun, StatusBarSnapshot, TextSlice, WindowSnapshot};
 
 /// The face table a snapshot publishes: `default' first, then the theme's
 /// other faces, realized once per theme revision rather than per frame.
@@ -174,6 +174,17 @@ pub(super) struct DisplayState {
     row_floor: Option<(u64, u32)>,
     /// The status bar's row height for its faces, for a face revision.
     pub(super) bar_fit: Option<(u64, Vec<Face>, u32)>,
+    /// The status bar's last text by owner (`Vm::status_bar_target'): each
+    /// character it shows as its index in the expanded text, where
+    /// `fit_band' dropped any, and each window's line in that text
+    /// (character range, window id).
+    bar_kept: Option<Vec<usize>>,
+    bar_parts: Vec<(std::ops::Range<usize>, u64)>,
+    /// The bar's last expansion and what it depended on (`Vm::bar_key').
+    pub(super) bar_cache: Option<(status_bar::BarKey, StatusBarSnapshot)>,
+    /// Advanced by `force-mode-line-update' and `set-buffer-modified-p':
+    /// GNU's `update_mode_lines'; the bar's segment cache is dropped.
+    pub(crate) mode_line_epoch: u64,
     pub version: u64,
     /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
     pub(super) hosted: bool,
@@ -184,7 +195,7 @@ pub(super) struct DisplayState {
     /// Every evaluator entry a mode-line expansion made (`Vm::mode_line_evals').
     pub(super) mode_line_evals: u64,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, bar_fit, version, hosted, width, height, building_band, diagnostics, mode_line_evals });
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals });
 impl DisplayState {
     /// The theme with every pending face edit applied: built once for them
     /// all, or, when that fails, one edit at a time, so an edit the theme
@@ -245,6 +256,12 @@ impl DisplayState {
     pub(super) fn repaint_window(&mut self, id: u64) {
         self.previous.remove(&id);
         self.version = self.version.wrapping_add(1);
+    }
+    /// The window and column of the status bar's shown character COLUMN
+    /// in that window's own expansion; none over a separator.
+    pub(super) fn bar_target(&self, column: usize) -> Option<(u64, usize)> {
+        let expanded = self.bar_kept.as_ref().map_or(Some(column), |kept| kept.get(column).copied())?;
+        self.bar_parts.iter().find(|(range, _)| range.contains(&expanded)).map(|(range, id)| (*id, expanded - range.start))
     }
     /// Forget a deleted window's last publication. Ids are monotonic and never
     /// reused, so without this the map grows for the life of the VM.
@@ -311,6 +328,10 @@ impl DisplayState {
             face_revision: 0,
             row_floor: None,
             bar_fit: None,
+            bar_kept: None,
+            bar_parts: vec![],
+            bar_cache: None,
+            mode_line_epoch: 0,
             theme: std::cell::RefCell::new(Theme::build(
                 Arc::new(defs),
                 None,
@@ -1189,17 +1210,11 @@ impl Vm {
         Ok(snapshot)
     }
     /// The format WINDOW's mode-line band expands, converted: GNU's
-    /// (`window_mode_line_format') for a window that wants one, or under
-    /// the pane label `name' `romacs-pane-label-format' (VM2-STATUS-BAR).
+    /// (`window_mode_line_format') for a window that wants one.
     fn window_band_format(&mut self, window: Value) -> Result<Option<Form>> {
         if !self.window_wants_mode_line(window)? { return Ok(None); }
-        let value = if self.pane_label(window) == crate::frame::PaneLabel::Name {
-            let slot = self.slot("romacs-pane-label-format");
-            match self.variable_value(slot)? { Value::UNBOUND => return Ok(Some(Form::String("%b".into()))), label => label }
-        } else {
-            self.window_mode_line_format(window)?.unwrap_or(Value::NIL)
-        };
-        Ok(Some(self.mode_line_form(value)))
+        let value = self.window_mode_line_format(window)?.unwrap_or(Value::NIL);
+        Ok(Some(self.band_format_form(value)))
     }
     /// The mode line, or with HEADER the header line, WINDOW paints now
     /// and its face: the last painted band while it still has one, else one
@@ -2141,10 +2156,20 @@ impl Vm {
             .flat_map(|r| [r.start, r.end]).chain([0, text.len()]).collect();
         bounds.sort_unstable();
         bounds.dedup();
+        // Runs and elements are pieces in order, none overlapping: each span's
+        // by one search, not a scan of them all.
+        let mut runs: Vec<&(std::ops::Range<usize>, String)> = band.runs.iter().collect();
+        runs.sort_by_key(|(r, _)| r.start);
+        let mut elts: Vec<&(std::ops::Range<usize>, i64)> = band.elts.iter().collect();
+        elts.sort_by_key(|(r, _)| r.start);
+        fn covering<'a, T>(sorted: &[&'a (std::ops::Range<usize>, T)], at: usize) -> Option<&'a T> {
+            let k = sorted.partition_point(|(r, _)| r.start <= at);
+            (k > 0 && sorted[k - 1].0.contains(&at)).then(|| &sorted[k - 1].1)
+        }
         for span in bounds.windows(2) {
             let range = ByteOffset(span[0])..ByteOffset(span[1]);
-            let own = band.runs.iter().find(|(r, _)| r.contains(&span[0])).map(|(_, name)| self.intern(name));
-            let elt = band.elts.iter().find(|(r, _)| r.contains(&span[0])).map(|(_, n)| *n);
+            let own = covering(&runs, span[0]).map(|name| self.intern(name));
+            let elt = covering(&elts, span[0]).copied();
             let added = match own {
                 Some(own) if face != Value::NIL => Some(self.list_value(&[own, face])),
                 Some(own) => Some(own),
@@ -2162,10 +2187,17 @@ impl Vm {
         let slot = self.slot("#:vm2-mode-line-string");
         self.slots[slot].value = string;
         let outcome = (|| {
+            // A value shared by several pieces (one `:propertize') is made
+            // once, so every piece carries the same object, as GNU's do.
+            let mut made: std::collections::HashMap<(*const Form, &'static str), Value> = std::collections::HashMap::new();
             for (range, projected) in &band.props {
                 for (name, form) in projected.iter() {
                     self.intern(name);
-                    let value = self.ml_prop_value(form)?;
+                    let key = (std::rc::Rc::as_ptr(form), *name);
+                    let value = match made.get(&key) {
+                        Some(&value) => value,
+                        None => { let value = self.ml_prop_value(form)?; made.insert(key, value); value }
+                    };
                     let Object::String(s) = self.object_mut(self.slots[slot].value)? else { return Err("mode-line string required".into()) };
                     s.properties.put(ByteOffset(range.start)..ByteOffset(range.end), name, value);
                 }
@@ -2178,13 +2210,16 @@ impl Vm {
     }
     /// A projected property's value from its form: the object a string
     /// carried, or a `:propertize' plist's datum.
+    /// FORM, a projected property's value, as the data it spells, built
+    /// without running Lisp: what `(quote FORM)' gives (`Vm::literal'), so a
+    /// click's primitive can build the bar's string (`status_bar_target').
     fn ml_prop_value(&mut self, form: &Form) -> Result<Value> {
         match form {
             Form::Object(object) => object.value(self),
             Form::Sym(name) => Ok(self.intern(name)),
             Form::Int(n) => Value::integer(*n),
             Form::String(text) => Ok(self.make_lisp_string(text.clone().into_bytes(), !text.is_ascii())),
-            datum => self.eval_datum_raw(&Form::List(vec![Form::Sym("quote".into()), datum.clone()])),
+            datum => self.literal(datum),
         }
     }
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
@@ -2261,10 +2296,8 @@ impl Vm {
     /// (`real_selected_window`) draws `mode-line-active`, others `mode-line-inactive` while
     /// `mode-line-in-non-selected-windows` is non-nil (its C default). Without
     /// faces.el's definitions a missing face falls back to `mode-line`.
-    /// A pane label draws in `mode-line-inactive': the status bar is the
-    /// active line (VM2-STATUS-BAR).
     fn mode_line_face_name(&mut self, window: Value) -> Result<String> {
-        let selected = window == self.real_selected_window()? && self.pane_label(window) != crate::frame::PaneLabel::Name;
+        let selected = window == self.real_selected_window()?;
         let slot = self.slot("mode-line-in-non-selected-windows");
         let distinguish = self.variable_value(slot)? != Value::NIL;
         let wanted = if selected || !distinguish { "mode-line-active" } else { "mode-line-inactive" };

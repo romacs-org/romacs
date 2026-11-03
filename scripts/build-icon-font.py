@@ -6,7 +6,8 @@ the baseline at y=800 (DIVERGENCES.md VM2-MODE-LINE). assets/icons/
 codepoints.txt gives each icon's name its codepoint in the Supplementary
 Private Use Area-A (U+FE000-U+FE0FF). The font is 1000 units per em,
 every advance 500, ascent 800 and descent 200, and its name table names
-the family Romacs Icons under the SIL Open Font License 1.1.
+the family Romacs Icons, a Modified Version of Symbols Nerd Font under the
+SIL Open Font License 1.1, and its glyph sets' licences (assets/icons/LICENSE).
 
 The build is deterministic: no timestamps, glyphs in codepoint order.
 The name table records the sources' digest (tools/icon_font.py), which
@@ -32,9 +33,11 @@ import icon_font  # noqa: E402
 
 FAMILY = 'Romacs Icons'
 VERSION = '1.000'
-COPYRIGHT = 'Copyright 2026 Thanos Apollo <public@thanosapollo.org>, with Reserved Font Name Romacs Icons'
-LICENSE = ('This Font Software is licensed under the SIL Open Font License, Version 1.1. '
-           'This license is available with a FAQ at: https://openfontlicense.org')
+COPYRIGHT = ('Copyright (c) 2014, Ryan L McIntyre (Symbols Nerd Font, Nerd Fonts 3.4.0), of which this is a Modified Version; '
+             'glyphs from Material Design Icons (Pictogrammers), Devicon (konpa), Octicons (GitHub Inc.) and Nerd Fonts')
+LICENSE = ('This Font Software is licensed under the SIL Open Font License, Version 1.1; its Material Design Icons glyphs '
+           'also under the Apache License 2.0, its Devicon, Octicons and Nerd Fonts glyphs under MIT. '
+           'See assets/fonts/OFL.txt and assets/icons/LICENSE in Romacs.')
 ADVANCE, ASCENT, DESCENT, BASELINE = 500, 800, 200, 800
 
 

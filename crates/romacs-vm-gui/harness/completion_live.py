@@ -309,7 +309,8 @@ def main():
                     scene = fio.last_scene(log_path.read_text(errors='replace'))
                     by_y = {}
                     for glyph in (scene or {}).get('glyphs', []):
-                        if glyph['role'] == 'ModeLine':
+                        # The status bar is the mode line (VM2-STATUS-BAR).
+                        if glyph['role'] in ('ModeLine', 'StatusBar'):
                             by_y.setdefault(glyph['y'], []).append((glyph['x'], glyph['char']))
                     return [''.join(c for _, c in sorted(row)) for _, row in sorted(by_y.items())]
 

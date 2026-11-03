@@ -391,7 +391,7 @@ mod frame_tests {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
             action: PointerAction::Button { button, pressed, modifiers: 0 } }));
         assert_eq!(click(17.0, 765.0, 1, false).as_deref(), Some("(romacs--status-bar-click 1 'mouse-1)"));
-        assert_eq!(click(6.0, 779.0, 3, true).as_deref(), Some("(romacs--status-bar-click 0 'down-mouse-3)"));
+        assert_eq!(click(6.0, 779.0, 3, true).as_deref(), Some("nil"), "a press is consumed and runs nothing");
         assert_eq!(click(500.0, 765.0, 1, false), None, "past the text");
         assert_eq!(click(60.0, 765.0, 1, false), None, "the marker's room");
         assert_eq!(click(130.0, 765.0, 1, false).as_deref(), Some("(romacs--status-bar-click 3 'mouse-1)"));
@@ -1022,8 +1022,11 @@ fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let (extents, marker) = &shown.status_bar;
     let column = extents.iter().position(|e| e.is_some_and(|(x, width)| position.x >= x && position.x < x + width))?;
     if Some(column) == *marker { return None; }
-    let kind = if *pressed { "down-mouse" } else { "mouse" };
-    Some(format!("(romacs--status-bar-click {column} '{kind}-{button})"))
+    // A press is the bar's and runs nothing: its release is the click, so
+    // `[mode-line down-mouse-1] mouse-drag-mode-line' never starts a drag of
+    // an edge the bar does not have (VM2-STATUS-BAR).
+    if *pressed { return Some("nil".into()); }
+    Some(format!("(romacs--status-bar-click {column} 'mouse-{button})"))
 }
 
 /// No cursor colour cycle in any window of SNAPSHOT, its child frames'
@@ -1248,7 +1251,7 @@ fn evaluate(
     if let Some(Err(error)) = &early { eprintln!("romacs: server window: {error}"); }
     if let (Some(Ok(())), Some(server)) = (&early, host.borrow_mut().server.as_mut()) { server.shown = true; }
     let mut previous = if serve.is_some() && !host.borrow().window_shown() {
-        Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Vec::new() }
+        Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Default::default() }
     } else {
         paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending,
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?

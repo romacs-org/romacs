@@ -612,6 +612,7 @@ impl Vm {
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);
+        self.mode_line_forms.clear();
         let before = self.heap_objects();
         let private_before = self.private_objects();
         self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;

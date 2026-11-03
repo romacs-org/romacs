@@ -390,6 +390,7 @@ pub struct StatusBarSnapshot {
     /// Its segments and icons.
     pub marks: BandMarks,
 }
+romacs_snapshot::snapshot_struct!(StatusBarSnapshot { x, y, width, height, text, face, faces, window, focused, marks });
 
 /// What the status bar's painter reads of its text besides faces
 /// (VM2-STATUS-BAR): the segments it is made of, each a pill on its own
@@ -401,6 +402,7 @@ pub struct BandMarks {
     pub segments: Vec<Segment>,
     pub icons: Vec<(usize, char)>,
 }
+romacs_snapshot::snapshot_struct!(BandMarks { segments, icons });
 
 /// One segment of a band: its bytes, its name, and its pill.
 #[derive(Clone, Debug, PartialEq)]
@@ -409,6 +411,7 @@ pub struct Segment {
     pub name: String,
     pub pill: Option<Pill>,
 }
+romacs_snapshot::snapshot_struct!(Segment { bytes, name, pill });
 
 /// A rounded background behind a segment's text: its colour, corner
 /// radius in pixels, and the colour of the text on it where the pill
@@ -419,6 +422,7 @@ pub struct Pill {
     pub radius: u32,
     pub foreground: Option<[u8; 3]>,
 }
+romacs_snapshot::snapshot_struct!(Pill { background, radius, foreground });
 
 impl BandMarks {
     /// The bytes of the `right-align' marker, where the band splits.
@@ -432,18 +436,32 @@ impl BandMarks {
 pub const STATUS_BAR_ACCENT: f32 = 3.0;
 
 impl StatusBarSnapshot {
-    /// Where each character goes, in text order, given ADVANCES, their
-    /// advances: its x from the band's left edge and its advance, or None
-    /// where the band clips it; the `right-align' marker's characters span
-    /// the room between the two sides. The text starts right of the
-    /// accent block; the part after the marker is flush with the right edge
-    /// and shows whole when it fits, the part before it from the left,
-    /// clipped where the right part starts. The painter (layout2) and
-    /// `romacs-status-bar-string' (the VM) both place by this.
+    /// Where each character goes (`BandMarks::places'), right of the
+    /// accent block. The painter (layout2) and `romacs-status-bar-string'
+    /// (the VM) both place by this.
     pub fn places(&self, advances: &[f32]) -> Vec<Option<(f32, f32)>> {
-        let width = self.width as f32 - STATUS_BAR_ACCENT;
-        let starts: Vec<usize> = self.text.utf8.char_indices().map(|(at, _)| at).collect();
-        let marker = self.marks.right_align().and_then(|bytes| starts.iter().position(|&at| at == bytes.start)
+        self.marks.places(&self.text, self.width as f32, STATUS_BAR_ACCENT, advances)
+    }
+
+    /// What the bar shows (`BandMarks::shown_text').
+    pub fn shown_text(&self, places: &[Option<(f32, f32)>], column: f32) -> String {
+        self.marks.shown_text(&self.text, places, column)
+    }
+}
+
+impl BandMarks {
+    /// Where each character of TEXT, a marked band WIDTH wide whose text
+    /// starts INSET from its left edge, goes in text order, given
+    /// ADVANCES, their advances: its x from the band's left edge and its
+    /// advance, or None where the band clips it; the `right-align'
+    /// marker's characters span the room between the two sides. The part
+    /// after the marker is flush with the right edge and shows whole when
+    /// it fits, the part before it from the left, clipped where the right
+    /// part starts.
+    pub fn places(&self, text: &TextSlice, width: f32, inset: f32, advances: &[f32]) -> Vec<Option<(f32, f32)>> {
+        let width = width - inset;
+        let starts: Vec<usize> = text.utf8.char_indices().map(|(at, _)| at).collect();
+        let marker = self.right_align().and_then(|bytes| starts.iter().position(|&at| at == bytes.start)
             .map(|first| (first, starts.iter().filter(|&&at| bytes.contains(&at)).count())));
         let (left_end, right_start) = marker.map_or((starts.len(), starts.len()), |(first, count)| (first, first + count));
         let right: f32 = advances[right_start..].iter().sum();
@@ -464,19 +482,19 @@ impl StatusBarSnapshot {
                 x += advance;
             }
         }
-        places.into_iter().map(|place| place.map(|(x, w)| (x + STATUS_BAR_ACCENT, w))).collect()
+        places.into_iter().map(|place| place.map(|(x, w)| (x + inset, w))).collect()
     }
 
-    /// What the bar shows (`romacs-status-bar-string'), placed by PLACES
-    /// (`places'): each shown character, an icon's character where it is
-    /// drawn as one, and for the marker's room as many spaces as COLUMN-wide
-    /// cells fill it.
-    pub fn shown_text(&self, places: &[Option<(f32, f32)>], column: f32) -> String {
-        let marker = self.marks.right_align();
-        let mut icons = self.marks.icons.iter().peekable();
+    /// What a marked band of TEXT shows, placed by PLACES (`places'):
+    /// each shown character, an icon's character where it is drawn as
+    /// one, and for the marker's room as many spaces as COLUMN-wide cells
+    /// fill it.
+    pub fn shown_text(&self, text: &TextSlice, places: &[Option<(f32, f32)>], column: f32) -> String {
+        let marker = self.right_align();
+        let mut icons = self.icons.iter().peekable();
         let mut shown = String::new();
         let mut gap_done = false;
-        for ((byte, ch), place) in self.text.utf8.char_indices().zip(places) {
+        for ((byte, ch), place) in text.utf8.char_indices().zip(places) {
             while icons.peek().is_some_and(|(at, _)| *at < byte) { icons.next(); }
             let Some((_, width)) = place else { continue };
             if marker.as_ref().is_some_and(|m| m.contains(&byte)) {
@@ -488,6 +506,9 @@ impl StatusBarSnapshot {
         }
         shown
     }
+
+    /// Whether the band has anything a marked painter draws.
+    pub fn is_empty(&self) -> bool { self.segments.is_empty() && self.icons.is_empty() }
 }
 
 /// GNU's line numbers (xdisp.c maybe_produce_line_number): every row

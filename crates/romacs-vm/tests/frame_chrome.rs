@@ -192,7 +192,9 @@ fn the_total_lines_count_the_tab_bar() {
     assert_eq!(eval(&mut vm, "(list (frame-total-lines) (frame-text-lines) (frame-total-cols) (frame-text-cols))"), "(35 34 121 120)");
 }
 
-/// `gnu_session' with romacs-chrome.el's panes, then `romacs-classic-chrome'.
+/// `gnu_session' with romacs-chrome.el's panes, then `romacs-classic-chrome',
+/// without the status bar it keeps (tests/status_bar.rs has the bar's
+/// geometry), so the window geometry is a GNU frame's.
 fn classic_session() -> Vm {
     let mut vm = gnu_session();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -201,7 +203,8 @@ fn classic_session() -> Vm {
     eval(&mut vm, "(romacs-chrome-apply)");
     assert_eq!(eval(&mut vm, "(list (frame-internal-border-width) (frame-right-divider-width) (window-pixel-width))"), "(6 6 1204)");
     eval(&mut vm, "(romacs-classic-chrome 1)");
-    assert_eq!(eval(&mut vm, "(list (plist-get (romacs-chrome-state) :classic) (frame-internal-border-width) (frame-right-divider-width) (frame-parameter nil 'romacs-pane-radius))"), "(t 0 0 0)");
+    assert_eq!(eval(&mut vm, "(list (plist-get (romacs-chrome-state) :classic) (frame-internal-border-width) (frame-right-divider-width) (frame-parameter nil 'romacs-pane-radius) (frame-parameter nil 'romacs-status-bar-lines))"), "(t 0 0 0 1)");
+    eval(&mut vm, "(modify-frame-parameters nil '((romacs-status-bar-lines . 0)))");
     vm
 }
 
