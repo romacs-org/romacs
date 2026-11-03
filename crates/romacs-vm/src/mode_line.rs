@@ -12,12 +12,22 @@ use std::ops::Range;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Target { Display, String, NoProp }
 
-/// The text properties a `format-mode-line' string carries besides faces
-/// (VM2-G1B): a string element's own, else an enclosing `:propertize''s.
-const PROJECTED: [&str; 3] = ["local-map", "keymap", "help-echo"];
+/// The text properties a mode line projects besides faces (VM2-G1B): a
+/// string element's own, else an enclosing `:propertize''s. A
+/// `format-mode-line' string carries them all, and so does the status bar
+/// (`BandMarks' and its clicks read them, VM2-STATUS-BAR); a window's band
+/// none.
+const PROJECTED: [&str; 7] = ["local-map", "keymap", "help-echo", "romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text"];
+
+/// The `:propertize' properties that make a construct one of the status
+/// bar's segments, which owns all it expands to (`Band::segments').
+const SEGMENT: [&str; 4] = ["romacs-segment", "romacs-pill", "romacs-pill-text", "romacs-priority"];
 
 /// A piece's projected properties, by name.
-pub(super) type Projected = std::rc::Rc<Vec<(&'static str, Form)>>;
+/// Each value is shared (`Rc'): a `:propertize''s values reach every piece
+/// under it, merged with a string's own or not, as the one object they are
+/// (`Vm::mode_line_string' makes each once).
+pub(super) type Projected = std::rc::Rc<Vec<(&'static str, std::rc::Rc<Form>)>>;
 
 /// An enclosing `:propertize''s properties the expansion keeps: its face,
 /// and for a string its PROJECTED ones.
@@ -35,11 +45,18 @@ struct Own {
 }
 
 /// One expanded mode line: text plus face-name runs over its bytes.
+#[derive(Clone)]
 pub(super) struct Band {
     pub text: String,
     pub runs: Vec<(Range<usize>, String)>,
     /// A string's projected properties over its bytes.
     pub props: Vec<(Range<usize>, Projected)>,
+    /// For the status bar, each `:propertize' construct's segment
+    /// properties over all the bytes it expanded to, in expansion order.
+    pub segments: Vec<(Range<usize>, Projected)>,
+    /// The properties projected: all for a string, the painted ones for
+    /// the status bar, none for a window's band.
+    projected: &'static [&'static str],
     pub target: Target,
     /// GNU's `mode_line_elt_no` for a string: the count of elements entered
     /// so far, and the count each piece was stored under, its
@@ -70,9 +87,13 @@ pub(super) struct SpecState {
     pub frame_cols: usize,
     /// keyboard.c command_loop_level: recursive edits, not minibuffers.
     pub command_loop_level: usize,
-    /// The columns a painted band is clipped at: the status bar's, else
-    /// none past `4 * frame_cols'.
+    /// The status bar's columns, which its `%-' fills; a painted band is
+    /// clipped at four times them, or at `4 * frame_cols'.
     pub clip: Option<usize>,
+    /// Whether a painted band is the status bar's: it projects the
+    /// properties its painter reads (`BandMarks') and those a click reads
+    /// (`local-map', `keymap', `help-echo').
+    pub marks: bool,
 }
 
 /// Field widths and precisions, after GNU's C `int` wrap, are clamped here:
@@ -195,19 +216,24 @@ fn is_cons(form: &Form) -> bool {
     matches!(form, Form::List(items) | Form::Dotted(items, _) if !items.is_empty())
 }
 
-/// What a `:propertize' PLIST gives the pieces inside it: its face and,
-/// for a string (PROJECTING), its PROJECTED properties; none without either.
-fn propertize_of(plist: &Form, projecting: bool) -> Option<std::rc::Rc<Propertize>> {
+/// What a `:propertize' PLIST gives the pieces inside it: its face and
+/// the properties of NAMES it has; none without either.
+fn propertize_of(plist: &Form, names: &'static [&'static str]) -> Option<std::rc::Rc<Propertize>> {
     let face = face_of(plist);
-    let projected: Vec<(&'static str, Form)> = match plist {
-        Form::List(items) if projecting => items.chunks(2)
+    let projected: Vec<(&'static str, std::rc::Rc<Form>)> = match plist {
+        Form::List(items) if !names.is_empty() => items.chunks(2)
             .filter_map(|pair| match (&pair[0], pair.get(1)) {
-                (Form::Sym(name), Some(value)) if !is_nil(value) => PROJECTED.iter().find(|p| **p == name).map(|p| (*p, value.clone())),
+                (Form::Sym(name), Some(value)) if !is_nil(value) => names.iter().find(|p| **p == name).map(|p| (*p, std::rc::Rc::new(value.clone()))),
                 _ => None,
             }).collect(),
         _ => vec![],
     };
     (face.is_some() || !projected.is_empty()).then(|| std::rc::Rc::new(Propertize { face, projected: std::rc::Rc::new(projected) }))
+}
+
+/// Whether a `:propertize' PLIST has the property NAME.
+fn plist_has(plist: &Form, name: &str) -> bool {
+    matches!(plist, Form::List(items) if items.chunks(2).any(|pair| matches!(&pair[0], Form::Sym(n) if n == name)))
 }
 
 /// OUTER's projected properties over OWN's: an enclosing `:propertize'
@@ -239,6 +265,72 @@ fn face_of(props: &Form) -> Option<String> {
 }
 
 impl Band {
+    /// This band as a context segment of the status bar (VM2-STATUS-BAR):
+    /// FACE (`mode-line-inactive') under every byte no run of its own
+    /// covers, all of it the `context' segment, lowest in priority.
+    pub(super) fn into_context(mut self, face: &str) -> Band {
+        let mut runs = std::mem::take(&mut self.runs);
+        runs.sort_by_key(|(range, _)| range.start);
+        let mut at = 0;
+        for (range, name) in runs {
+            if range.start > at { self.runs.push((at..range.start, face.to_owned())); }
+            at = at.max(range.end);
+            self.runs.push((range, name));
+        }
+        if at < self.text.len() { self.runs.push((at..self.text.len(), face.to_owned())); }
+        let context: Projected = std::rc::Rc::new(vec![("romacs-segment", std::rc::Rc::new(Form::Sym("context".into()))), ("romacs-priority", std::rc::Rc::new(Form::Int(0)))]);
+        self.segments.push((0..self.text.len(), context));
+        self
+    }
+    /// OTHER after this band, SEPARATOR in FACE between them: its text and
+    /// every range of it moved past this band's.
+    pub(super) fn append(&mut self, other: Band, separator: &str, face: &str) {
+        let start = self.text.len();
+        self.text.push_str(separator);
+        self.runs.push((start..self.text.len(), face.to_owned()));
+        let at = self.text.len();
+        let moved = |range: Range<usize>| at + range.start..at + range.end;
+        self.runs.extend(other.runs.into_iter().map(|(r, v)| (moved(r), v)));
+        self.props.extend(other.props.into_iter().map(|(r, v)| (moved(r), v)));
+        self.segments.extend(other.segments.into_iter().map(|(r, v)| (moved(r), v)));
+        self.elts.extend(other.elts.into_iter().map(|(r, v)| (moved(r), v)));
+        self.text.push_str(&other.text);
+    }
+    /// The band without the bytes of DROP, disjoint ranges in order: its
+    /// text, and every range over it moved to the text left, a range
+    /// left empty gone. Returns each kept character's index in the text
+    /// before.
+    pub(super) fn drop_ranges(&mut self, drop: &[Range<usize>]) -> Vec<usize> {
+        // Bytes dropped before each range, to move a position by one search.
+        let mut before = Vec::with_capacity(drop.len());
+        let mut total = 0;
+        for range in drop { before.push(total); total += range.len(); }
+        let moved = |at: usize| {
+            let k = drop.partition_point(|r| r.start < at);
+            if k == 0 { return at; }
+            let last = &drop[k - 1];
+            at - before[k - 1] - (at.min(last.end) - last.start)
+        };
+        let mut kept = vec![];
+        let mut text = String::with_capacity(self.text.len());
+        let mut next = 0;
+        for (index, (at, ch)) in self.text.char_indices().enumerate() {
+            while next < drop.len() && drop[next].end <= at { next += 1; }
+            if drop.get(next).is_some_and(|r| r.contains(&at)) { continue; }
+            kept.push(index);
+            text.push(ch);
+        }
+        fn remap<T>(ranges: &mut Vec<(Range<usize>, T)>, moved: &dyn Fn(usize) -> usize) {
+            for (range, _) in ranges.iter_mut() { *range = moved(range.start)..moved(range.end); }
+            ranges.retain(|(range, _)| !range.is_empty());
+        }
+        remap(&mut self.runs, &moved);
+        remap(&mut self.props, &moved);
+        remap(&mut self.segments, &moved);
+        remap(&mut self.elts, &moved);
+        self.text = text;
+        kept
+    }
     /// `n` columns of padding, never more than can still be shown.
     fn pad(&mut self, n: i64, face: Option<&String>) {
         let n = usize::try_from(n).unwrap_or(0).min(self.max_cols - self.cols);
@@ -260,10 +352,8 @@ impl Band {
         if self.target == Target::Display { self.push_clipped(s) } else { self.text.push_str(s) }
         if self.text.len() == begin || self.target == Target::NoProp { return; }
         if let Some(face) = face { self.runs.push((begin..self.text.len(), face.clone())); }
-        if self.target == Target::String {
-            self.elts.push((begin..self.text.len(), self.elt));
-            if let Some(projected) = projected { self.props.push((begin..self.text.len(), projected.clone())); }
-        }
+        if self.target == Target::String { self.elts.push((begin..self.text.len(), self.elt)); }
+        if let Some(projected) = projected { self.props.push((begin..self.text.len(), projected.clone())); }
     }
 
     /// Append S in an enclosing `:propertize' OUTER over a string's OWN
@@ -339,9 +429,31 @@ impl Vm {
         if value == Value::UNBOUND {
             return Ok(None);
         }
+        // Romacs's own segments (rlisp/romacs-mode-line.el) are set, never
+        // edited in place: each is converted once while it holds the same
+        // object. Any other variable is read as it is now, as GNU does.
+        if name.starts_with("romacs-mode-line-") {
+            if let Some((known, form)) = self.mode_line_forms.get(&slot) && *known == value { return Ok(Some(form.clone())); }
+            let form = self.mode_line_form(value);
+            self.mode_line_forms.insert(slot, (value, form.clone()));
+            return Ok(Some(form));
+        }
         Ok(Some(self.mode_line_form(value)))
     }
 
+    /// VALUE, a window's mode-line format, as the expander's form: Romacs's
+    /// own `romacs-mode-line-format' converted once while it is that
+    /// object (`ml_symbol_value'), any other format as it is now.
+    pub(super) fn band_format_form(&mut self, value: Value) -> Form {
+        let slot = self.slot("romacs-mode-line-format");
+        if self.slots[slot].value == value && value != Value::NIL && value != Value::UNBOUND {
+            if let Some((known, form)) = self.mode_line_forms.get(&slot) && *known == value { return form.clone(); }
+            let form = self.mode_line_form(value);
+            self.mode_line_forms.insert(slot, (value, form.clone()));
+            return form;
+        }
+        self.mode_line_form(value)
+    }
     /// Preserve executable object constants in collector-traced handles.
     pub(super) fn mode_line_form(&self, value: Value) -> Form {
         self.expansion_form(value, 0).unwrap_or(Form::Vector(vec![]))
@@ -370,23 +482,29 @@ impl Vm {
     /// enclosing `:propertize''s PROPS onto them unless the element is
     /// risky (display_mode_element), so each character shows its `face'
     /// (a symbol, or a face list's first one) where PROPS give none, and
-    /// in a string (PROJECTING) its PROJECTED properties where PROPS do
+    /// the properties of NAMES (`Band::projected') where PROPS do
     /// not give them. Runs, each from its first character; None when no
     /// character has any, or a band's PROPS give its face.
-    fn ml_own_props(&mut self, elt: &Form, props: Option<&Propertize>, risky: bool, projecting: bool) -> Result<Option<Vec<(usize, Own)>>> {
-        if risky || (!projecting && props.is_some_and(|p| p.face.is_some())) { return Ok(None); }
+    fn ml_own_props(&mut self, elt: &Form, props: Option<&Propertize>, risky: bool, names: &'static [&'static str]) -> Result<Option<Vec<(usize, Own)>>> {
+        if risky || (names.is_empty() && props.is_some_and(|p| p.face.is_some())) { return Ok(None); }
         let Form::Object(object) = elt else { return Ok(None) };
         let value = object.value(self)?;
-        if !matches!(self.object_if(value), Some(data::Object::String(_))) || self.string_bytes(value)?.is_empty() { return Ok(None); }
+        // A string without properties shows none; of NAMES, only those it
+        // carries somewhere are read per run.
+        let names: Vec<&'static str> = match self.object_if(value) {
+            Some(data::Object::String(s)) if !s.properties.is_empty() => names.iter().copied().filter(|name| s.properties.has_key(name)).collect(),
+            _ => return Ok(None),
+        };
+        if self.string_bytes(value)?.is_empty() { return Ok(None); }
         let face = self.intern("face");
-        let names = if projecting { PROJECTED.map(|name| self.intern(name)).to_vec() } else { vec![] };
+        let keys: Vec<Value> = names.iter().map(|name| self.intern(name)).collect();
         let mut runs: Vec<(usize, Own)> = vec![];
         for start in self.property_run_starts(value).map_err(crate::forwarded::fault_text)? {
             let v = self.property_textget(value, start, face).map_err(crate::forwarded::fault_text)?;
             let mut projected = vec![];
-            for (&name, &key) in PROJECTED.iter().zip(&names) {
+            for (&name, &key) in names.iter().zip(&keys) {
                 let v = self.property_textget(value, start, key).map_err(crate::forwarded::fault_text)?;
-                if v != Value::NIL { projected.push((name, Form::Object(crate::handle::FormObject::new(self, v)))); }
+                if v != Value::NIL { projected.push((name, std::rc::Rc::new(Form::Object(crate::handle::FormObject::new(self, v))))); }
             }
             let own = Own { face: self.ml_face_name(v), projected: std::rc::Rc::new(projected) };
             let same = runs.last().is_some_and(|(_, last)| last.face == own.face && last.projected.is_empty() && own.projected.is_empty());
@@ -453,8 +571,15 @@ impl Vm {
     }
 
     pub(super) fn mode_line_expand(&mut self, format: &Form, state: &SpecState, target: Target) -> Result<Band> {
-        let max_cols = if target == Target::Display { state.clip.unwrap_or(4 * state.frame_cols) } else { usize::MAX };
-        let mut band = Band { text: String::new(), runs: vec![], props: vec![], target, elt: 0, elts: vec![], cols: 0, max_cols };
+        // The status bar's painter clips what it shows (a right side shows
+        // whole), so its text is clipped where a window band's is.
+        let max_cols = if target == Target::Display { 4 * state.clip.unwrap_or(state.frame_cols) } else { usize::MAX };
+        let projected: &'static [&'static str] = match target {
+            Target::String => &PROJECTED,
+            Target::Display if state.marks => &PROJECTED,
+            Target::Display | Target::NoProp => &[],
+        };
+        let mut band = Band { text: String::new(), runs: vec![], props: vec![], segments: vec![], projected, target, elt: 0, elts: vec![], cols: 0, max_cols };
         self.mode_line_element(&mut band, state, 0, 0, 0, format.clone(), None, false)?;
         Ok(band)
     }
@@ -488,7 +613,14 @@ impl Vm {
                 // GNU replaces a risky string's properties with PROPS and
                 // otherwise merges PROPS onto the string's own: where PROPS
                 // has no face, the string's own faces show.
-                let own = self.ml_own_props(&elt, props.as_deref(), risky, band.target == Target::String)?;
+                // The status bar reads a string's own projected properties;
+                // a window's band only its faces.
+                let own_names: &'static [&'static str] = match band.target {
+                    Target::String => band.projected,
+                    Target::Display if !band.projected.is_empty() => &PROJECTED,
+                    _ => &[],
+                };
+                let own = self.ml_own_props(&elt, props.as_deref(), risky, own_names)?;
                 if literal {
                     // GNU `store_mode_line_string`: precision and N count characters.
                     let shown = if precision - n > 0 { char_prefix(&s, (precision - n) as usize) } else { &s };
@@ -593,7 +725,23 @@ impl Vm {
                                 break;
                             }
                             if let Some((inner, plist)) = split(cdr) {
-                                n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, propertize_of(&plist, band.target == Target::String), risky)?;
+                                let start = band.text.len();
+                                // In the status bar a construct naming a segment
+                                // owns all it expands to (`Band::segments').
+                                let segment = (band.target == Target::Display && !band.projected.is_empty()
+                                               && plist_has(&plist, "romacs-segment"))
+                                    .then(|| propertize_of(&plist, &SEGMENT)).flatten().map(|p| p.projected.clone());
+                                // The bar's painter lays out what follows a
+                                // `right-align' marker from the right edge and
+                                // shows it whole: it gets its own columns, however
+                                // long the left side ran.
+                                if segment.as_ref().is_some_and(|s| s.iter().any(|(name, v)| *name == "romacs-segment" && matches!(&**v, Form::Sym(v) if v == "right-align"))) {
+                                    band.cols = 0;
+                                }
+                                n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, propertize_of(&plist, band.projected), risky)?;
+                                if let Some(projected) = segment && band.text.len() > start {
+                                    band.segments.push((start..band.text.len(), projected));
+                                }
                             }
                             break;
                         }
@@ -683,6 +831,9 @@ impl Vm {
             '[' | ']' => c.to_string().repeat(state.command_loop_level),
             // A string's dashes are "infinitely long" as two.
             '-' if target != Target::Display => "--".into(),
+            // The status bar has no dashes: they would fill it and hide the
+            // lines folded into it (VM2-STATUS-BAR).
+            '-' if state.clip.is_some() => String::new(),
             '-' => "-".repeat(if field <= 0 || field as usize > LOTS_OF_DASHES { 4 * state.frame_cols - 1 } else { LOTS_OF_DASHES }),
             'b' => state.buffer_name.clone(),
             'c' => pint2str(width, state.column as i64),

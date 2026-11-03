@@ -31,7 +31,6 @@ compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rus
 compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is a symbol, which never moves
 compiled_lisp/unit.rs function force_lazy 1 held  # an open compiler builder holds collection
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
-display.rs ml_prop_value eval_datum_raw 1 rooted  # a `:propertize' datum quoted, its objects form objects; mode_line_string keeps the string in a #: slot and reads it back
 eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
 eval_form.rs eval_primitive compile_request 1 held  # an open compiler builder holds collection
 eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environment are converted to forms first

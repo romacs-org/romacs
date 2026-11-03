@@ -36,6 +36,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'project)
 
 (defgroup romacs-mode-line nil
@@ -49,8 +50,47 @@
 (defface romacs-mode-line-bright '((t :inherit mode-line-buffer-id))
   "The buffer's name in the mode line.")
 
-(defface romacs-mode-line-state '((t :inherit (romacs-pane-focus bold)))
-  "A state the mode line announces: a macro recording, overwrite, an agent.")
+(defface romacs-mode-line-state '((t :inherit bold))
+  "A state the mode line announces: a macro recording, overwrite, an
+agent, in the accent (`romacs-mode-line-pill-faces').")
+
+(defface romacs-mode-line-state-pill '((t))
+  "The status bar's state pill: the accent, with the frame's background
+as its text (`romacs-mode-line-pill-faces').")
+
+(defface romacs-mode-line-pill '((t))
+  "The background of the status bar's pills: the bar's own blended
+toward the frame's (`romacs-mode-line-pill-faces').")
+
+(defvar romacs-mode-line--pill-colors nil
+  "The colours `romacs-mode-line-pill-faces' last gave the pill faces.")
+
+(defun romacs-mode-line--mix (a b fraction)
+  "Colour A blended FRACTION of the way toward colour B, as #RRGGBB."
+  (let ((a (color-values a)) (b (color-values b)))
+    (and a b (apply #'format "#%02x%02x%02x"
+                    (cl-mapcar (lambda (x y) (round (/ (+ (* (- 1 fraction) x) (* fraction y)) 257.0))) a b)))))
+
+(defun romacs-mode-line-pill-faces (&rest _)
+  "Give the pill faces the colours the theme leaves them: a pill the bar's
+background blended 40% toward the frame's; the state the accent
+\(`romacs-pane-focus'), and its pill the accent with the frame's
+background as its text.  A face the theme or the user set keeps its
+colours."
+  (let* ((bar (face-background 'mode-line-active nil t))
+         (frame (face-background 'default nil t))
+         (accent (or (and (facep 'romacs-pane-focus) (face-foreground 'romacs-pane-focus nil t))
+                     (face-foreground 'default nil t)))
+         (colors (list (list 'romacs-mode-line-pill :background (romacs-mode-line--mix bar frame 0.4))
+                       (list 'romacs-mode-line-state :foreground accent)
+                       (list 'romacs-mode-line-state-pill :background accent :foreground frame))))
+    (dolist (entry colors)
+      (let ((face (car entry)) (last (assq (car entry) romacs-mode-line--pill-colors)))
+        (cl-loop for (attribute value) on (cdr entry) by #'cddr
+                 for current = (face-attribute face attribute nil)
+                 when (and value (or (eq current 'unspecified) (equal current (plist-get (cdr last) attribute))))
+                 do (set-face-attribute face nil attribute value))))
+    (setq romacs-mode-line--pill-colors colors)))
 
 (defface romacs-mode-line-error '((t :inherit error)) "An error state.")
 (defface romacs-mode-line-warning '((t :inherit warning)) "A warning state.")
@@ -91,17 +131,27 @@ DOC documents it.  SPEC is a plist:
                      variable holds (`romacs-mode-line-refresh-NAME');
   :hooks (HOOK ...)  with :compute, the hooks that make it stale;
   :local BOOL        with :compute, buffer-local (the default) or global;
-  :face FACE         the face the segment shows in where it gives none."
+  :face FACE         the face the segment shows in where it gives none;
+  :pill FACE         in the status bar, a rounded pill on FACE's
+                     background behind the segment (VM2-STATUS-BAR);
+  :pill-text FACE    the segment's text on its pill in FACE's foreground;
+  :priority N        where a narrow window's line drops segments to fit,
+                     the lower first; a segment without one stays."
   (declare (indent 1) (doc-string 2))
   (let* ((variable (romacs-mode-line--variable name))
          (face (plist-get spec :face))
+         (pill (plist-get spec :pill))
+         (pill-text (plist-get spec :pill-text))
+         (priority (plist-get spec :priority))
          (format (plist-get spec :format))
          (compute (plist-get spec :compute))
          (local (if (plist-member spec :local) (plist-get spec :local) t)))
     (when (and format compute) (error "Segment %s has both :format and :compute" name))
     `(progn
        (defvar ,variable
-         ,(and format `'(:propertize ,format ,@(and face `(face ,face)) romacs-segment ,name))
+         ,(and format `'(:propertize ,format ,@(and face `(face ,face)) romacs-segment ,name ,@(and pill `(romacs-pill ,pill))
+                                     ,@(and pill-text `(romacs-pill-text ,pill-text))
+                                     ,@(and priority `(romacs-priority ,priority))))
          ,doc)
        (put ',variable 'risky-local-variable t)
        ,@(when compute
@@ -109,12 +159,13 @@ DOC documents it.  SPEC is a plist:
              (defun ,(intern (format "romacs-mode-line-refresh-%s" name)) ()
                ,(format "Compute the segment `%s' again in the current buffer." name)
                (let* ((text (funcall ,compute))
-                      (value (and text (propertize text ,@(and face `('face ',face)) 'romacs-segment ',name))))
+                      (value (and text ,(if face `(propertize text 'face ',face) 'text))))
                  (unless (equal-including-properties value ,variable)
                    (setq ,variable value)
                    (force-mode-line-update))))))
        (romacs-mode-line--add-segment
-        ',name (list :compute ,(and compute t) :hooks ',(plist-get spec :hooks) :local ,local))
+        ',name (list :compute ,(and compute t) :hooks ',(plist-get spec :hooks) :local ,local
+                     :pill ',pill :pill-text ',pill-text :priority ,priority))
        ',name)))
 
 (defun romacs-mode-line--refresh (name)
@@ -271,15 +322,45 @@ else nil."
   "Whether the mode line lists the minor modes."
   :type 'boolean)
 
+;;;; Glyphs
+
+(defvar romacs-mode-line--glyphs
+  '((romacs-mode-line--g-record record romacs-mode-line-state)
+    (romacs-mode-line--g-overwrite overwrite romacs-mode-line-state)
+    (romacs-mode-line--g-agent agent romacs-mode-line-state)
+    (romacs-mode-line--g-narrow narrow romacs-mode-line-dim)
+    (romacs-mode-line--g-region region romacs-mode-line-dim)
+    (romacs-mode-line--g-search search romacs-mode-line-dim)
+    (romacs-mode-line--g-keyboard keyboard romacs-mode-line-dim))
+  "Each glyph variable the format shows, its icon and face; set by
+`romacs-mode-line--refresh-glyphs' where the display can draw them.")
+
+(dolist (glyph romacs-mode-line--glyphs)
+  (eval `(defvar ,(car glyph) nil) t)
+  (put (car glyph) 'risky-local-variable t))
+
+(defun romacs-mode-line--refresh-glyphs (&rest _)
+  "Give each glyph variable its icon as this display draws it."
+  (dolist (glyph romacs-mode-line--glyphs)
+    (set (car glyph) (or (and (fboundp 'romacs-icon) (romacs-icon (nth 1 glyph) (nth 2 glyph))) ""))))
+
+;;;; Segments
+;;
+;; What each segment shows and why it earns its place: modeline.md's
+;; segment table.
+
 (romacs-mode-line-define-segment front
-  "One space at the start, under the status bar's accent."
+  "One space at the start, after the accent."
   :format " ")
 
 (romacs-mode-line-define-segment state
   "A keyboard macro recording, overwrite mode, recursive edits, an agent."
   :face romacs-mode-line-state
-  :format ("" (defining-kbd-macro " REC ") (overwrite-mode " OVR ") "%[%]"
-           (romacs-mode-line-agent ("" " " romacs-mode-line-agent " "))))
+  :pill romacs-mode-line-state-pill
+  :pill-text romacs-mode-line-state-pill
+  :format ("" (defining-kbd-macro ("" " " romacs-mode-line--g-record " "))
+           (overwrite-mode ("" " " romacs-mode-line--g-overwrite " ")) "%[%]"
+           (romacs-mode-line-agent ("" " " romacs-mode-line--g-agent " " romacs-mode-line-agent " "))))
 
 (romacs-mode-line-define-segment buffer-name
   "The buffer's name in `romacs-mode-line-buffer-style'."
@@ -288,89 +369,165 @@ else nil."
           buffer-list-update-hook window-buffer-change-functions))
 
 (romacs-mode-line-define-segment buffer-remote
-  "A remote buffer's marker."
+  "A remote buffer's glyph, its host in the help."
   :compute (lambda () (when-let* ((host (and (stringp default-directory) (file-remote-p default-directory 'host))))
-                        (propertize " @" 'help-echo (format "Remote: %s" host))))
+                        (concat " " (propertize (or (romacs-mode-line--glyph 'remote) "@") 'help-echo (format "Remote: %s" host)))))
   :hooks (find-file-hook after-set-visited-file-name-hook))
 
 (romacs-mode-line-define-segment buffer
-  "The buffer: its icon, name, modified or read-only state, remote and
-narrowed markers."
-  :format ("" romacs-mode-line-mode-icon romacs-mode-line-buffer-name " "
-           (:propertize "%*" romacs-icon ((?* . modified) (?- . saved) (?% . read-only)))
-           romacs-mode-line-buffer-remote "%n"))
+  "The buffer: its mode's icon, its name, its remote and narrowed
+glyphs, and its modified or read-only glyph (none while unmodified)."
+  :format (" " romacs-mode-line-mode-icon romacs-mode-line-buffer-name romacs-mode-line-buffer-remote
+           (:propertize "%n" romacs-icon ((?N . narrow) (?a . none) (?r . none) (?o . none) (?w . none)))
+           (:propertize " %*" romacs-icon ((?* . modified) (?- . none) (?% . read-only)))))
 
 (romacs-mode-line-define-segment position
-  "Point's line and column and how far the window is down the buffer."
+  "Point's line and column, and how far down the window is unless the
+whole buffer shows (GNU's `All' is dropped)."
   :face romacs-mode-line-dim
-  :format ("  %l:%c  %p" (size-indication-mode " %I")))
+  :priority 80
+  :format (" %l:%c" (:propertize " %p" romacs-icon ((?A . none) (?l . none)))
+           (size-indication-mode " %I")))
 
 (defun romacs-mode-line--selection ()
   "The active region's lines and characters."
   (when (region-active-p)
     (let ((start (region-beginning)) (end (region-end)))
-      (format "  %d×%d" (count-lines start end) (- end start)))))
+      (format "%d×%d" (count-lines start end) (- end start)))))
 
 (romacs-mode-line-define-segment selection
   "The active region's size."
   :face romacs-mode-line-dim
-  :format (mark-active (:eval (romacs-mode-line--selection))))
+  :priority 75
+  :format (mark-active ("" "  " romacs-mode-line--g-region " " (:eval (romacs-mode-line--selection)))))
 
 (defvar isearch-lazy-count-current)
 (defvar isearch-lazy-count-total)
 
 (romacs-mode-line-define-segment search
   "The current match and the matches of an incremental search."
+  :priority 90
   :compute (lambda () (and (bound-and-true-p isearch-mode)
                            (natnump isearch-lazy-count-current) (natnump isearch-lazy-count-total)
                            (> isearch-lazy-count-total 0)
-                           (format "  %d/%d" isearch-lazy-count-current isearch-lazy-count-total)))
+                           (concat "  " (and (> (length romacs-mode-line--g-search) 0) (concat romacs-mode-line--g-search " "))
+                                   (format "%d/%d" isearch-lazy-count-current isearch-lazy-count-total))))
   :hooks (lazy-count-update-hook isearch-mode-end-hook))
 
 (romacs-mode-line-define-segment input-method
   "The input method's title."
-  :format (current-input-method (" " current-input-method-title)))
+  :priority 60
+  :format (current-input-method ("" "  " romacs-mode-line--g-keyboard " " current-input-method-title)))
 
 (romacs-mode-line-define-segment right-align
   "The point the segments after it are laid out from the right edge."
   :format " ")
 
+(romacs-mode-line-define-segment misc
+  "What packages and the user add (`mode-line-misc-info', with
+`global-mode-string': the time, a clock, a timer)."
+  :priority 40
+  :format ("" mode-line-misc-info))
+
+(defface romacs-mode-line-info '((t :inherit success)) "An informational count.")
+
+(defun romacs-mode-line--diagnostics ()
+  "Flymake's error, warning and note counts after their glyphs, as
+doom-modeline's `check' segment shows them; nil without flymake."
+  (when (and (bound-and-true-p flymake-mode) (fboundp 'flymake-diagnostics))
+    (let ((counts (list 0 0 0)))
+      (dolist (diagnostic (flymake-diagnostics))
+        (let ((level (flymake--severity (flymake-diagnostic-type diagnostic))))
+          (cl-incf (nth (cond ((>= level (flymake--severity :error)) 0)
+                              ((>= level (flymake--severity :warning)) 1)
+                              (t 2))
+                        counts))))
+      (concat " "
+              (mapconcat (lambda (entry)
+                           (pcase-let ((`(,icon ,face ,count) entry))
+                             (concat (or (romacs-mode-line--glyph icon face) "")
+                                     (propertize (number-to-string count) 'face face))))
+                         (cl-mapcar #'list '(error warning note)
+                                    '(romacs-mode-line-error romacs-mode-line-warning romacs-mode-line-info)
+                                    counts)
+                         "")
+              " "))))
+
+(defun romacs-mode-line--after-flymake-report (&rest _)
+  "Refresh the diagnostics of the current buffer after flymake reports."
+  (when (fboundp 'romacs-mode-line-refresh-diagnostics) (romacs-mode-line-refresh-diagnostics)))
+
+(with-eval-after-load 'flymake
+  (advice-add 'flymake--handle-report :after #'romacs-mode-line--after-flymake-report))
+
 (romacs-mode-line-define-segment diagnostics
-  "Flymake's counters, GNU's element."
-  :format (flymake-mode ("" flymake-mode-line-counters " ")))
+  "Flymake's error, warning and note counts, each after its glyph."
+  :priority 70
+  :compute #'romacs-mode-line--diagnostics
+  :hooks (flymake-mode-hook))
 
 (romacs-mode-line-define-segment lsp
-  "The language server Eglot manages the buffer with."
+  "The language server's glyph, its name in the help."
+  :priority 30
   :compute (lambda () (when (and (bound-and-true-p eglot--managed-mode) (fboundp 'eglot-current-server))
                         (when-let* ((server (eglot-current-server)))
-                          (format " %s " (if (fboundp 'eglot-project-nickname) (eglot-project-nickname server) "eglot")))))
+                          (concat " " (propertize (or (romacs-mode-line--glyph 'lsp) "LSP")
+                                                  'help-echo (format "Eglot: %s" (if (fboundp 'eglot-project-nickname)
+                                                                                    (eglot-project-nickname server) "eglot")))
+                                  " "))))
   :hooks (eglot-managed-mode-hook))
 
-(defun romacs-mode-line--vc-face ()
-  "The face of the current buffer's version-control state."
-  (pcase (and buffer-file-name (ignore-errors (vc-state buffer-file-name)))
-    ((or 'up-to-date 'nil) 'romacs-mode-line-ok)
-    ((or 'edited 'added) 'romacs-mode-line-warning)
-    (_ 'romacs-mode-line-error)))
+(defun romacs-mode-line--glyph (name &optional face)
+  "The icon NAME in FACE where it has one, else nil."
+  (and (fboundp 'romacs-icon) (romacs-icon name face)))
 
-(romacs-mode-line-define-segment vc-icon
-  "The branch icon in the version-control state's colour."
-  :compute (lambda () (and (bound-and-true-p vc-mode) (romacs-mode-line--icon 'branch (romacs-mode-line--vc-face))))
-  :hooks (find-file-hook after-save-hook after-revert-hook vc-checkin-hook vc-post-command-functions))
+(defun romacs-mode-line--vc ()
+  "The branch, as doom-modeline shows it: the state's glyph in its colour,
+then `vc-mode''s text without the backend's name, with its help and map."
+  (when (and (bound-and-true-p vc-mode) (stringp vc-mode))
+    (let* ((state (and buffer-file-name (ignore-errors (vc-state buffer-file-name))))
+           (glyph (pcase state
+                    ((or 'up-to-date 'nil) (romacs-mode-line--glyph 'branch 'romacs-mode-line-ok))
+                    ((or 'edited 'added) (romacs-mode-line--glyph 'vc-edited 'romacs-mode-line-warning))
+                    (_ (romacs-mode-line--glyph 'vc-conflict 'romacs-mode-line-error))))
+           (text (string-trim vc-mode))
+           (branch (if (string-match "\\`[A-Za-z]+[-:@!?]" text) (substring text (match-end 0)) text)))
+      (concat (and glyph (concat glyph " ")) branch " "))))
 
 (romacs-mode-line-define-segment vc
-  "The branch: its icon, then GNU's `vc-mode' as it is."
-  :format (vc-mode ("" romacs-mode-line-vc-icon vc-mode " ")))
+  "The branch: the version-control state's glyph and the branch's name."
+  :priority 60
+  :compute #'romacs-mode-line--vc
+  :hooks (find-file-hook after-save-hook after-revert-hook vc-checkin-hook vc-post-command-functions))
 
 (defcustom romacs-mode-line-mode-icons
   '((emacs-lisp-mode . lisp) (lisp-mode . lisp) (lisp-data-mode . lisp) (rust-mode . rust) (rust-ts-mode . rust)
-    (c-mode . c) (c-ts-mode . c) (c++-mode . c) (python-mode . python) (python-ts-mode . python)
-    (sh-mode . shell) (bash-ts-mode . shell) (org-mode . org) (markdown-mode . markdown) (dired-mode . dired)
+    (c-mode . c) (c-ts-mode . c) (c++-mode . c) (c++-ts-mode . c) (python-mode . python) (python-ts-mode . python)
+    (js-mode . javascript) (js-ts-mode . javascript) (typescript-ts-mode . typescript) (tsx-ts-mode . typescript)
+    (go-mode . go) (go-ts-mode . go) (java-mode . java) (java-ts-mode . java) (nix-mode . nix) (nix-ts-mode . nix)
+    (haskell-mode . haskell) (json-mode . json) (json-ts-mode . json) (js-json-mode . json)
+    (html-mode . html) (mhtml-mode . html) (css-mode . css) (css-ts-mode . css) (lua-mode . lua) (lua-ts-mode . lua)
+    (conf-mode . conf) (yaml-ts-mode . data) (toml-ts-mode . conf) (sql-mode . database)
+    (sh-mode . shell) (bash-ts-mode . shell) (org-mode . org) (org-agenda-mode . calendar) (calendar-mode . calendar)
+    (markdown-mode . markdown) (gfm-mode . markdown) (dired-mode . dired)
     (eshell-mode . shell) (shell-mode . shell) (term-mode . term) (romacs-term-mode . term) (eww-mode . web)
-    (image-mode . image) (help-mode . help) (lisp-interaction-mode . scratch) (text-mode . text)
-    (prog-mode . default) (special-mode . default))
-  "Each major mode's icon, found for a mode through its parents."
+    (image-mode . image) (help-mode . help) (helpful-mode . help) (Info-mode . info) (Man-mode . info)
+    (message-mode . mail) (notmuch-search-mode . mail) (notmuch-show-mode . mail) (notmuch-tree-mode . mail)
+    (jabber-chat-mode . chat) (erc-mode . chat) (rcirc-mode . chat)
+    (lisp-interaction-mode . scratch) (text-mode . text) (prog-mode . default) (special-mode . default))
+  "Each major mode's icon, found for a mode through its parents; a mode
+whose nearest icon is `default' also shows its name."
   :type '(alist :key-type symbol :value-type symbol))
+
+(defvar-local romacs-mode-line--iconic nil
+  "Non-nil when the major mode's icon says what the mode is, so its name
+need not show.")
+
+(defcustom romacs-mode-line-telling-icons
+  '(rust python go java nix haskell json html css lua javascript typescript markdown org dired)
+  "The mode icons that name their mode unambiguously: a mode showing one
+of them does not also show its name."
+  :type '(repeat symbol))
 
 (defun romacs-mode-line--mode-icon-name ()
   "The icon of the current major mode or its nearest parent."
@@ -381,18 +538,43 @@ narrowed markers."
 
 (romacs-mode-line-define-segment mode-icon
   "The major mode's icon."
-  :compute (lambda () (romacs-mode-line--icon (romacs-mode-line--mode-icon-name))))
+  :hooks (window-buffer-change-functions)
+  :compute (lambda () (let* ((name (romacs-mode-line--mode-icon-name))
+                             (icon (romacs-mode-line--icon name)))
+                        (setq romacs-mode-line--iconic (and icon (memq name romacs-mode-line-telling-icons) t))
+                        icon)))
 
 (romacs-mode-line-define-segment major-mode
-  "The major mode: its icon and GNU's `mode-name', then the minor modes
-while `romacs-mode-line-minor-modes'."
-  :format ("" romacs-mode-line-mode-icon " " mode-name
-           (romacs-mode-line-minor-modes minor-mode-alist) " "))
+  "The major mode's name where its icon does not say it (GNU's
+`mode-name'), and the minor modes while `romacs-mode-line-minor-modes'."
+  :priority 50
+  :format ("" (romacs-mode-line--iconic "" (" " mode-name))
+           (romacs-mode-line-minor-modes (" " minor-mode-alist)) " "))
+
+(defcustom romacs-mode-line-default-coding 'utf-8-unix
+  "The coding system the mode line does not mention: a buffer in any
+other shows its coding and end of line."
+  :type 'coding-system)
+
+(defun romacs-mode-line--encoding ()
+  "The buffer's end of line and coding, as doom-modeline shows them
+(`LF UTF-8'), unless they are `romacs-mode-line-default-coding''s or
+nothing was decided."
+  (let* ((coding buffer-file-coding-system)
+         (base (and coding (coding-system-base coding)))
+         (eol (and coding (coding-system-eol-type coding))))
+    (unless (or (null coding) (memq base '(undecided no-conversion prefer-utf-8))
+                (and (eq base (coding-system-base romacs-mode-line-default-coding))
+                     (memq eol (list 0 (coding-system-eol-type romacs-mode-line-default-coding)))))
+      (concat (pcase eol (1 "CRLF ") (2 "CR ") (_ "LF "))
+              (upcase (symbol-name (or (coding-system-get base :mime-charset) base))) " "))))
 
 (romacs-mode-line-define-segment encoding
-  "The buffer's coding system."
+  "The coding system and end of line, where they are not the default."
   :face romacs-mode-line-dim
-  :format "%z ")
+  :priority 20
+  :compute #'romacs-mode-line--encoding
+  :hooks (find-file-hook after-save-hook after-revert-hook after-set-visited-file-name-hook))
 
 ;;;; The format
 
@@ -409,21 +591,28 @@ mode-line constructs."
   :set #'romacs-mode-line--set-layout)
 
 (defcustom romacs-mode-line-right
-  '(diagnostics lsp vc major-mode encoding display-time-string mode-line-misc-info)
+  '(misc lsp encoding major-mode vc diagnostics)
   "The mode line's segments laid out from the right edge."
   :type '(repeat sexp)
   :set #'romacs-mode-line--set-layout)
 
 (defvar romacs-mode-line-format nil
-  "The mode-line format `romacs-mode-line-mode' installs: `%e', the
-left segments, the `right-align' marker, the right segments.")
+  "The mode-line format `romacs-mode-line-mode' installs: `%e', the left
+segments, the `right-align' marker, the right segments.")
 (put 'romacs-mode-line-format 'risky-local-variable t)
 
 (defun romacs-mode-line--element (item)
-  "ITEM of a segment list as a format element: a segment's variable."
-  (if (and (symbolp item) (gethash item romacs-mode-line--segments))
-      (romacs-mode-line--variable item)
-    item))
+  "ITEM of a segment list as a format element: a segment's variable, a
+`:compute' one in the `:propertize' that names it its segment (and pill),
+as a `:format' one's own value does."
+  (let ((definition (and (symbolp item) (gethash item romacs-mode-line--segments))))
+    (cond ((not definition) item)
+          ((plist-get definition :compute)
+           `(:propertize ("" ,(romacs-mode-line--variable item)) romacs-segment ,item
+                         ,@(when-let* ((pill (plist-get definition :pill))) `(romacs-pill ,pill))
+                         ,@(when-let* ((text (plist-get definition :pill-text))) `(romacs-pill-text ,text))
+                         ,@(when-let* ((priority (plist-get definition :priority))) `(romacs-priority ,priority))))
+          (t (romacs-mode-line--variable item)))))
 
 (defvar romacs-mode-line--installed nil
   "The format `romacs-mode-line-mode' last installed.")
@@ -477,6 +666,8 @@ Off, GNU's default returns where this mode's is installed."
   :group 'romacs-mode-line
   (if romacs-mode-line-mode
       (let ((current (default-value 'mode-line-format)))
+        (romacs-mode-line-pill-faces)
+        (romacs-mode-line--refresh-glyphs)
         (unless romacs-mode-line-format (romacs-mode-line-rebuild))
         (romacs-mode-line--hook t)
         (romacs-mode-line--refresh-all)
@@ -492,6 +683,7 @@ Off, GNU's default returns where this mode's is installed."
       (romacs-mode-line--install romacs-mode-line--installed romacs-mode-line--gnu-default))))
 
 (romacs-mode-line-rebuild)
+(add-hook 'enable-theme-functions #'romacs-mode-line-pill-faces)
 
 (provide 'romacs-mode-line)
 ;;; romacs-mode-line.el ends here

@@ -156,6 +156,8 @@ impl Vm {
         // Compiled patterns' SIMD searchers hold function pointers; each is
         // compiled again at its first search.
         self.regexp_cache = Default::default();
+        self.mode_line_forms.clear();
+        self.status_bar_line = None;
         self.idle_since = None;
         for name in ["process-environment", "initial-environment", "exec-path"] {
             let slot = self.slot(name);

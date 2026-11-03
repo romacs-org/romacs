@@ -157,8 +157,11 @@ def gnu_settings():
 # takes the root window's last line, and its styles begin with fzf
 # (VM2-FZF-DEFAULT), which fido then completes with instead of flex; GNU
 # gets `fido-vertical-mode' and the same styles without fzf, and no
-# project-file override, which the defaults add only with fzf.
+# project-file override, which the defaults add only with fzf.  Romacs
+# shows GNU's mode line in each window (VM2-MODE-LINE), so the windows'
+# mode lines and global modes compare with GNU's.
 GNU_COMPLETION_UI = '''(romacs-complete-mode -1)
+(when (fboundp 'romacs-mode-line-mode) (romacs-mode-line-mode -1))
 (setq completion-styles (remq 'fzf completion-styles)
       completion-category-overrides
       (mapcar (lambda (entry)

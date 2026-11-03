@@ -12,7 +12,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{ChildFrameSnapshot, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
+use romacs_layout_input::{ChildFrameSnapshot, STATUS_BAR_ACCENT, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -161,7 +161,7 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?);
     }
     if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(&mut frame, tab_bar, snapshot.width as f32, resolver)?; }
-    if let Some(bar) = &snapshot.status_bar { paint_status_bar(&mut frame, bar, resolver)?; }
+    if let Some(bar) = &snapshot.status_bar { paint_status_bar(&mut frame, bar, snapshot.chrome.focus, resolver)?; }
     frame.panes = panes(snapshot);
     Ok((frame, ends))
 }
@@ -226,48 +226,177 @@ pub fn tab_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
     }).collect()
 }
 
-/// The root frame's status bar (VM2-STATUS-BAR): BAR's band in its face's
-/// background, then each character in its face on that background, as a
-/// window's band paints, in faces published above the windows', clipped
-/// to the band. A click finds its character by these glyphs
-/// (`status_bar_extents'), which are the bar's only ones and in its
-/// text's order.
-fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, resolver: &mut FontResolver) -> Result<(), String> {
-    let text = &bar.text;
-    validate_runs(text, bar.faces.len())?;
+/// Whether CH is one of Romacs's icons (U+FE000-U+FE0FF): one column wide
+/// in any face (VM2-MODE-LINE).
+#[inline]
+fn is_icon(ch: char) -> bool {
+    ('\u{FE000}'..='\u{FE0FF}').contains(&ch)
+}
+
+/// Paint the status bar BAR (VM2-STATUS-BAR), a marked band whose
+/// accent block is FOCUS where its window holds the input focus, else its
+/// face's foreground dimmed.
+fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, focus: Option<[u8; 3]>, resolver: &mut FontResolver) -> Result<(), String> {
     let face = bar.face.0 as usize;
-    if face >= bar.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid status bar".into()); }
-    let background = bar.faces[face].background;
-    let faces: Vec<Face> = bar.faces.iter().map(|f| Face { background, ..f.clone() }).collect();
-    let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
-    let face_text = face_text(faces.len(), &[(text, face)]);
-    let metrics = realize_faces(&faces, &face_text, |index| index == face, frame, resolver, face_base)?;
+    if face >= bar.faces.len() { return Err("invalid status bar".into()); }
+    let (foreground, background) = (bar.faces[face].foreground, bar.faces[face].background);
+    let dimmed = std::array::from_fn(|i| ((u16::from(foreground[i]) + u16::from(background[i])) / 2) as u8);
+    let accent = if bar.focused { focus.unwrap_or(foreground) } else { dimmed };
     let bounds = Rect::new(bar.x as f32, bar.y as f32, bar.width as f32, bar.height as f32);
-    frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(background));
-    frame.set_draw_context(DisplayWindowId::new(0), GlyphRowRole::StatusBar, Some(bounds));
-    let mut x = 0.0;
-    for (byte, ch) in text.utf8.char_indices() {
-        let index = face_at(text, byte, face);
-        let id = FaceId::new(face_base + index as u32);
-        let (ascent, height, cell, _) = metrics[index];
-        let advance = advance(frame, id, ch, cell);
-        if x + advance > bounds.width { break; }
-        frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);
-        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing status bar face")? = id;
-        x += advance;
-    }
+    let band = Marked { text: &bar.text, faces: &bar.faces, face, marks: &bar.marks, bounds, accent: Some(accent) };
+    paint_marked(frame, &band, (DisplayWindowId::new(0), GlyphRowRole::StatusBar), resolver)?;
     frame.status_bar = Some(bounds);
     Ok(())
 }
 
-/// The status bar's characters as FRAME paints them: each one's left edge
-/// and width, in its text's order; the characters past the last are
-/// clipped.
-pub fn status_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
-    frame.glyphs.iter().filter_map(|glyph| match glyph {
+/// A band whose painter reads its marks (`BandMarks'): the status bar, or
+/// a window's mode line in Romacs's format. Its text starts right of the
+/// accent block, drawn in ACCENT when it has one.
+struct Marked<'a> {
+    text: &'a TextSlice,
+    faces: &'a [Face],
+    face: usize,
+    marks: &'a romacs_layout_input::BandMarks,
+    bounds: Rect,
+    accent: Option<[u8; 3]>,
+}
+
+/// Paint BAND for the window and row role OWNER: its face's background,
+/// the accent block, each segment's pill, its characters in its faces on
+/// that background (an icon in place of the character it marks, a pill's
+/// text in the pill's foreground), the part after its `right-align'
+/// marker flush with the right edge (`BandMarks::places').
+fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWindowId, GlyphRowRole), resolver: &mut FontResolver) -> Result<(), String> {
+    let (text, face, bounds) = (band.text, band.face, band.bounds);
+    validate_runs(text, band.faces.len())?;
+    if face >= band.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid marked band".into()); }
+    let background = band.faces[face].background;
+    let faces: Vec<Face> = band.faces.iter().map(|f| Face { background, ..f.clone() }).collect();
+    let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
+    let mut face_text = face_text(faces.len(), &[(text, face)]);
+    for &(byte, icon) in &band.marks.icons { face_text[face_at(text, byte, face)].push(icon); }
+    let metrics = realize_faces(&faces, &face_text, |index| index == face, frame, resolver, face_base)?;
+    // Each character once, in order: its byte, what is drawn (an icon in
+    // place of the character it marks), its face and advance.
+    let mut icons = band.marks.icons.iter().peekable();
+    let chars: Vec<(usize, char, usize, f32)> = text.utf8.char_indices().map(|(byte, ch)| {
+        while icons.peek().is_some_and(|(at, _)| *at < byte) { icons.next(); }
+        let shown = icons.peek().filter(|(at, _)| *at == byte).map_or(ch, |&&(_, icon)| icon);
+        let index = face_at(text, byte, face);
+        (byte, shown, index, advance(frame, FaceId::new(face_base + index as u32), shown, metrics[index].2))
+    }).collect();
+    let advances: Vec<f32> = chars.iter().map(|c| c.3).collect();
+    let places = band.marks.places(text, bounds.width, STATUS_BAR_ACCENT, &advances);
+    frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(background));
+    if let Some(accent) = band.accent { frame.add_background(bounds.x, bounds.y, STATUS_BAR_ACCENT, bounds.height, color(accent)); }
+    // Each pill over what its segment shows, a little inside the band; its
+    // text in the pill's own foreground where it has one.
+    let mut pill_text: Vec<(std::ops::Range<usize>, [u8; 3])> = vec![];
+    for segment in &band.marks.segments {
+        let Some(pill) = segment.pill else { continue };
+        let first = chars.partition_point(|c| c.0 < segment.bytes.start);
+        let end = chars.partition_point(|c| c.0 < segment.bytes.end);
+        let shown: Vec<(f32, f32)> = places[first..end].iter().filter_map(|place| *place).collect();
+        let (Some(&(start, _)), Some(&(last, width))) = (shown.first(), shown.last()) else { continue };
+        let inset = (bounds.height * 0.1).round();
+        frame.rounded_fills.push(romacs_display_protocol::RoundedFill {
+            bounds: Rect::new(bounds.x + start, bounds.y + inset, last + width - start, bounds.height - 2.0 * inset),
+            radius: pill.radius as f32, color: color(pill.background),
+        });
+        if let Some(text) = pill.foreground { pill_text.push((first..end, text)); }
+    }
+    // A line folded in from another window (a `context' segment, with its
+    // separator) on its own face's background, `mode-line-inactive''s.
+    for segment in band.marks.segments.iter().filter(|s| s.name == "context") {
+        let first = chars.partition_point(|c| c.0 < segment.bytes.start);
+        let end = chars.partition_point(|c| c.0 < segment.bytes.end);
+        let shown: Vec<(f32, f32)> = places[first..end].iter().filter_map(|place| *place).collect();
+        let (Some(&(start, _)), Some(&(last, width))) = (shown.first(), shown.last()) else { continue };
+        let own = band.faces[face_at(text, segment.bytes.start, face)].background;
+        if own != background {
+            frame.add_background(bounds.x + start, bounds.y, last + width - start, bounds.height, color(own));
+        }
+    }
+    // A pill's text colour: copies of the faces it uses, in that foreground.
+    let mut next = face_base + faces.len() as u32;
+    let mut recoloured: std::collections::HashMap<(usize, [u8; 3]), FaceId> = std::collections::HashMap::new();
+    let mut ids: Vec<FaceId> = chars.iter().map(|c| FaceId::new(face_base + c.2 as u32)).collect();
+    for (range, foreground) in &pill_text {
+        for i in range.clone() {
+            let key = (chars[i].2, *foreground);
+            let id = match recoloured.get(&key) {
+                Some(&id) => id,
+                None => {
+                    let Some(mut copied) = frame.faces.get(&ids[i]).cloned() else { continue };
+                    let id = FaceId::new(next);
+                    next += 1;
+                    copied.id = id;
+                    copied.foreground = color(*foreground);
+                    frame.faces.insert(id, copied);
+                    recoloured.insert(key, id);
+                    id
+                }
+            };
+            // The recoloured face draws this character as its source does:
+            // only the characters it draws are bound.
+            let shown = chars[i].1;
+            if let Some(glyph) = frame.char_fonts.get(&ids[i]).and_then(|fonts| fonts.get(&shown)).cloned() {
+                frame.char_fonts.entry(id).or_default().insert(shown, glyph);
+            }
+            ids[i] = id;
+        }
+    }
+    frame.set_draw_context(owner.0, owner.1, Some(bounds));
+    let marker = band.marks.right_align();
+    for (i, (&(byte, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
+        let Some((x, width)) = *place else { continue };
+        if marker.as_ref().is_some_and(|m| m.contains(&byte)) { continue; }
+        let (ascent, height, _, _) = metrics[index];
+        frame.add_char(shown, bounds.x + x, bounds.y, width, height, ascent, false);
+        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
+    }
+    Ok(())
+}
+
+/// Where each character of BAR is as FRAME paints it, in its text's
+/// order: its left edge in the frame and its width, or None where the bar
+/// clipped it; and the index of the `right-align' marker's space, which
+/// spans the room between the bar's two sides and runs nothing when
+/// clicked.
+pub fn status_bar_extents(frame: &FrameGlyphBuffer, bar: &StatusBarSnapshot) -> (Vec<Option<(f32, f32)>>, Option<usize>) {
+    let drawn: Vec<(f32, f32)> = frame.glyphs.iter().filter_map(|glyph| match glyph {
         romacs_display_protocol::FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, x, width, .. } => Some((*x, *width)),
         _ => None,
-    }).collect()
+    }).collect();
+    marked_extents(&drawn, &bar.text, &bar.marks, bar.x as f32, (bar.x + bar.width) as f32)
+}
+
+/// Where each character of a marked band's TEXT is, from DRAWN, its
+/// painted glyphs in order, in a band from LEFT to RIGHT: its left edge
+/// and width, or None where the band clipped it; and the index of the
+/// `right-align' marker's space, which spans the room between the band's
+/// two sides and runs nothing when clicked.
+fn marked_extents(drawn: &[(f32, f32)], text: &TextSlice, marks: &romacs_layout_input::BandMarks, left_edge: f32, right_edge: f32) -> (Vec<Option<(f32, f32)>>, Option<usize>) {
+    let starts: Vec<usize> = text.utf8.char_indices().map(|(at, _)| at).collect();
+    let marker = marks.right_align();
+    let marker_index = marker.as_ref().and_then(|m| starts.iter().position(|&at| at == m.start));
+    let (left, right) = match (&marker, marker_index) {
+        (Some(m), Some(first)) => (first, starts.iter().filter(|&&at| at >= m.end).count()),
+        _ => (starts.len(), 0),
+    };
+    let marker_count = starts.len() - left - right;
+    // The glyphs are the left side's shown prefix, then the right side's
+    // shown prefix: the right side shows whole unless it is wider than the band.
+    let right_shown = drawn.len().min(right);
+    let left_shown = drawn.len() - right_shown;
+    let mut extents: Vec<Option<(f32, f32)>> = drawn[..left_shown].iter().copied().map(Some).collect();
+    extents.extend(std::iter::repeat_n(None, left - left_shown));
+    let left_end = drawn[..left_shown].last().map_or(left_edge, |(x, w)| x + w);
+    let right_start = drawn.get(left_shown).map_or(right_edge, |(x, _)| *x);
+    extents.extend(std::iter::repeat_n(Some((left_end, (right_start - left_end).max(0.0))), marker_count));
+    extents.extend(drawn[left_shown..].iter().copied().map(Some));
+    extents.extend(std::iter::repeat_n(None, right - right_shown));
+    (extents, marker_index)
 }
 
 /// CHILD of SNAPSHOT as a frame of its own: its windows inside its border,
@@ -901,15 +1030,17 @@ fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> b
             None,
             false,
         );
-        let published = publish_face_text(
-            resolver,
-            frame,
-            id,
-            &font_request(face),
-            &policy,
-            &face_text[index],
-        )
-        .map_err(|e| e.to_string())?;
+        // Icons are bound from the resolver's one answer for them, not
+        // resolved through the face's fallback on every layout.
+        let request = font_request(face);
+        let text = &face_text[index];
+        let plain: std::borrow::Cow<str> = if text.chars().any(is_icon) { text.chars().filter(|&c| !is_icon(c)).collect::<String>().into() } else { text.into() };
+        let published = publish_face_text(resolver, frame, id, &request, &policy, &plain).map_err(|e| e.to_string())?;
+        for icon in text.chars().filter(|&c| is_icon(c)) {
+            let resolution = resolver.resolve_sole(&request, icon, &policy).map_err(|e| e.to_string())?;
+            if !frame.fonts.contains_key(&resolution.font.id) { frame.fonts.insert(resolution.font.id, resolution.font.clone()); }
+            frame.char_fonts.entry(id).or_default().insert(icon, resolution.glyph.clone());
+        }
         if !published.unresolved.is_empty() {
             return Err(format!("unresolved face text: {:?}", published.unresolved));
         }
@@ -947,6 +1078,8 @@ fn font_request(face: &Face) -> FontRequest {
 /// The advance painting CH in face ID takes: its resolved glyph's, else
 /// the face's nominal CELL.
 fn advance(frame: &FrameGlyphBuffer, id: FaceId, ch: char, cell: f32) -> f32 {
+    // An icon is one column in any family and size (VM2-MODE-LINE).
+    if is_icon(ch) { return cell; }
     frame.char_fonts.get(&id).and_then(|chars| chars.get(&ch)).map_or(cell, |glyph| glyph.advance_px)
 }
 

@@ -155,6 +155,10 @@ WHICH_KEY_INIT = '''(require 'which-key)
                               (cond ((null host) (window-pixel-top (minibuffer-window)))
                                     ((frame-visible-p host) (cdr (frame-position host)))
                                     (t (frame-text-height (frame-parent frame)))))
+            ;; Where a bottom layer ends: above the status bar.
+            :chrome-bottom (romacs-chrome-bottom (frame-parent frame) frame)
+            ;; Child frames are placed outside the root's internal border.
+            :inset (frame-internal-border-width (frame-parent frame))
             :root-windows (mapcar (lambda (w) (list (window-pixel-top w) (window-pixel-height w)))
                                   (window-list (frame-parent frame) 'nomini))))
      nil {state} nil (quote quiet))))
@@ -163,11 +167,12 @@ WHICH_KEY_INIT = '''(require 'which-key)
 
 
 def check_which_key(args, output, report, env, process, state, keys, glyphs):
-    """C-x shows which-key's keys in a layer above the minibuffer (at the
-    frame's bottom while the minibuffer's layer is hidden); the root
-    frame's windows do not move."""
+    """C-x shows which-key's keys in a layer above the status bar and the
+    minibuffer (the bar sits on the minibuffer line, or the frame's bottom
+    while the minibuffer's layer is hidden); the root frame's windows do
+    not move."""
     def root_bands():
-        return [y for y, _, _ in rows([g for g in glyphs() if g.get('frame', 1) == 1], 'ModeLine')]
+        return [y for y, _, _ in rows([g for g in glyphs() if g.get('frame', 1) == 1], 'StatusBar') + rows([g for g in glyphs() if g.get('frame', 1) == 1], 'ModeLine')]
 
     def layer_rows():
         return rows([g for g in glyphs() if g.get('frame', 1) != 1], 'Text')
@@ -186,8 +191,8 @@ def check_which_key(args, output, report, env, process, state, keys, glyphs):
         raise AssertionError(f'which-key layer shows {shown}')
     left, top = probe['position']
     width, height = probe['native']
-    if (left, top + height) != (0, probe['minibuffer-top']):
-        raise AssertionError(f"layer at {left},{top} {width}x{height}, minibuffer line at {probe['minibuffer-top']}")
+    if (left, top + height) != (probe['inset'], probe['chrome-bottom']) or probe['chrome-bottom'] > probe['minibuffer-top']:
+        raise AssertionError(f"layer at {left},{top} {width}x{height}, chrome bottom {probe['chrome-bottom']}, minibuffer line at {probe['minibuffer-top']}")
     if root_bands() != before:
         raise AssertionError(f'root mode lines at {root_bands()} with the layer, {before} without')
     keys('-M', 'ctrl', 'g', '-m', 'ctrl')
@@ -279,7 +284,8 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
     fio.wait(lambda: any(text.strip() for _, text, _ in popup_rows()), args.timeout, 'popup painted', process)
     time.sleep(1.5)
     fio.shot(output / 'popup.png', env, report)
-    shown = {'root_mode_lines': [(y, t) for y, t, _ in root('ModeLine')], 'popup_rows': [(y, t) for y, t, _ in popup_rows()]}
+    # The root frame's mode line: its status bar (VM2-STATUS-BAR).
+    shown = {'root_mode_lines': [(y, t) for y, t, _ in root('StatusBar') + root('ModeLine')], 'popup_rows': [(y, t) for y, t, _ in popup_rows()]}
     report['captures'].append({'name': 'popup', **shown})
     lines = [line.rstrip() for line in probe['lines'] if line.strip()]
     # A line as wide as the window continues on the next row, as GNU
@@ -314,7 +320,7 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
     fio.wait(lambda: not popup_rows(), args.timeout, 'popup gone', process)
     time.sleep(1)
     fio.shot(output / 'gone.png', env, report)
-    gone = [(y, t) for y, t, _ in root('ModeLine')]
+    gone = [(y, t) for y, t, _ in root('StatusBar') + root('ModeLine')]
     report['captures'].append({'name': 'gone', 'root_mode_lines': gone})
     if [y for y, _ in gone] != [y for y, _ in shown['root_mode_lines']]:
         raise AssertionError(f"root mode lines at {[y for y, _ in gone]} after, {[y for y, _ in shown['root_mode_lines']]} while the popup showed")
@@ -392,7 +398,9 @@ def main():
                     return [text for _, text, _ in rows(glyphs(), 'Text')]
 
                 def mode_lines():
-                    return [text for _, text, _ in rows(glyphs(), 'ModeLine')]
+                    # The status bar is the mode line (VM2-STATUS-BAR), with
+                    # the popup's own line folded into it.
+                    return [text for _, text, _ in rows(glyphs(), 'StatusBar') + rows(glyphs(), 'ModeLine')]
 
                 fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
                 if args.which_key:
@@ -418,7 +426,7 @@ def main():
                 state.unlink()
                 keys('h')
                 fio.wait(state.exists, args.timeout, 'popup fit', process)
-                fio.wait(lambda: len(mode_lines()) >= 2 and any('Navigate' in row for row in text_rows()),
+                fio.wait(lambda: mode_lines() and any('Navigate' in row for row in text_rows()),
                          args.timeout, 'popup painted', process)
                 time.sleep(1.5)
                 fio.shot(output / 'popup.png', env, report)
@@ -429,15 +437,17 @@ def main():
                 report['probe_source'] = state.read_text()
                 if probe['outcome'] != 'fitted':
                     raise AssertionError(f"fit-window-to-buffer: {probe['outcome']}")
-                # The popup is the bottom window: its band is the last mode line,
-                # its text the rows between the band above and its band.
-                bands = rows(painted, 'ModeLine')
+                # The popup is the bottom window: its text is the rows between
+                # its top and its body's bottom edge.  A GUI window has no
+                # mode-line row (its line folds into the status bar), so the
+                # edge comes from the window's geometry, not a painted band.
                 text = rows(painted, 'Text')
                 line = probe['frame-char-height']
                 top = probe['window-pixel-top']
-                band_y = bands[-1][0]
-                popup_rows = [r for r in text if top <= r[0] < band_y]
-                report['checks'].append({'popup_rows': [t for _, t, _ in popup_rows], 'band_y': band_y, 'top': top})
+                band = probe['window-pixel-height'] - probe['window-body-pixel-height']
+                edge = top + probe['window-pixel-height'] - band
+                popup_rows = [r for r in text if top <= r[0] < edge]
+                report['checks'].append({'popup_rows': [t for _, t, _ in popup_rows], 'edge': edge, 'top': top})
                 # Each line's painted row is where posn-at-point puts it,
                 # every nonblank line is painted, and nothing is cut.
                 starts = probe['line-starts']
@@ -450,15 +460,14 @@ def main():
                 if len([t for t, _ in starts if t.strip()]) != len(popup_rows):
                     raise AssertionError(f'{len(popup_rows)} painted rows for lines {starts}')
                 width, height = probe['text-size']
-                band = probe['window-pixel-height'] - probe['window-body-pixel-height']
                 text_bottom = top + height - band
-                if text_bottom > band_y:
-                    raise AssertionError(f'text ends at {text_bottom}, below the mode line at {band_y}')
+                if text_bottom > edge:
+                    raise AssertionError(f'text ends at {text_bottom}, below the body edge at {edge}')
                 # fit-window-to-buffer rounds to whole lines (pixelwise nil).
                 if probe['window-pixel-height'] != -(-height // line) * line:
                     raise AssertionError(f"window {probe['window-pixel-height']}px for {height}px of text and band")
-                if band_y - text_bottom >= line:
-                    raise AssertionError(f'{band_y - text_bottom}px of blank rows above the mode line')
+                if edge - text_bottom >= line:
+                    raise AssertionError(f'{edge - text_bottom}px of blank rows above the body edge')
                 widest = max(x for _, _, row in popup_rows for x, _ in row)
                 report['checks'].append({'text_size': [width, height], 'painted_last_glyph_x': widest})
                 # Each posn's X, Y is where the painter drew its glyph: X and

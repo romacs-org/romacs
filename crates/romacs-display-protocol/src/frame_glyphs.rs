@@ -1165,6 +1165,16 @@ pub struct Pane {
     pub dim: f32,
 }
 
+/// A rounded background behind a chrome row's text (the status bar's
+/// pills, VM2-STATUS-BAR): BOUNDS filled in COLOR with corners of RADIUS,
+/// over the row's own backgrounds and under its glyphs.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RoundedFill {
+    pub bounds: Rect,
+    pub radius: f32,
+    pub color: Color,
+}
+
 /// Buffer collecting glyphs for current frame.
 ///
 /// With matrix-based rendering, this buffer is cleared and rebuilt from scratch
@@ -1249,6 +1259,9 @@ pub struct FrameGlyphBuffer {
 
     /// The status bar's band, while the frame shows one (VM2-STATUS-BAR).
     pub status_bar: Option<Rect>,
+
+    /// Rounded backgrounds behind chrome rows' text (`RoundedFill`).
+    pub rounded_fills: Vec<RoundedFill>,
 
     /// Explicit transition requests emitted by layout producers.
     pub transition_hints: Vec<ContentTransitionHint>,
@@ -1621,6 +1634,7 @@ impl FrameGlyphBuffer {
             window_infos: Vec::with_capacity(16),
             panes: Vec::new(),
             status_bar: None,
+            rounded_fills: Vec::new(),
             transition_hints: Vec::with_capacity(16),
             window_cursors: Vec::with_capacity(8),
             cursor_blinked_off: false,
@@ -1664,6 +1678,7 @@ impl FrameGlyphBuffer {
         self.window_infos.clear();
         self.panes.clear();
         self.status_bar = None;
+        self.rounded_fills.clear();
         self.transition_hints.clear();
         self.window_cursors.clear();
         self.cursor_blinked_off = false;

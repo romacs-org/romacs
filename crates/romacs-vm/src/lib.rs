@@ -1241,6 +1241,14 @@ pub struct Vm {
     speculative_misses: usize,
     regexp: regexp::MatchState,
     regexp_cache: regexp::PatternCache,
+    /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
+    /// the expander's forms, by variable slot, while the value is the same
+    /// object: cleared by every collection, which can move it.
+    mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
+    /// The status bar's last fitted line (a `display::mode_line::Band'),
+    /// kept for a click to read (`Vm::status_bar_target'); its object
+    /// constants are traced handles.
+    status_bar_line: Option<Box<dyn std::any::Any>>,
     execution_fatal: bool,
     loader: loader::Loader,
     source_cache: source_cache::SourceCache,
@@ -1617,6 +1625,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit_slots,
 } at_rest {
     regexp_cache,
+    mode_line_forms,
+    status_bar_line,
     suspended_code,
     host_input,
     layout_host,
@@ -1688,6 +1698,8 @@ impl Vm {
             speculative_misses: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
+            mode_line_forms: Default::default(),
+            status_bar_line: None,
             execution_fatal: false,
             loader: loader::Loader::default(),
             source_cache: source_cache::SourceCache::default(),

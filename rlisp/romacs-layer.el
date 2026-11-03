@@ -128,6 +128,7 @@ and paints it in faces: its background FACE's (default
         (cons (max columns 1) (max lines 1))))))
 
 (declare-function romacs-chrome-bottom "romacs-chrome" (&optional frame except))
+(declare-function romacs-chrome-top "romacs-chrome" (&optional frame))
 
 (defun romacs-layer--bottom (root)
   "Where a `bottom' layer of ROOT ends: above the status bar and the
@@ -258,13 +259,14 @@ columns and lines."
     (cons width (min 6 (apply #'+ (mapcar (lambda (l) (max 1 (ceiling (string-width l) (float width)))) lines))))))
 
 (defun romacs-layer--toast-stack ()
-  "Place the shown toasts at the top right, newest on top; a toast that
-would reach below `romacs-chrome-bottom' waits hidden."
+  "Place the shown toasts at the top right below `romacs-chrome-top',
+newest on top; a toast that would reach below `romacs-chrome-bottom'
+waits hidden."
   (let* ((root (romacs-layer--root-frame))
          (cw (frame-char-width root)) (ch (frame-char-height root))
          (inset (frame-internal-border-width root))
          (bottom (romacs-chrome-bottom root))
-         (margin 12) (gap 8) (top (+ inset margin)))
+         (margin 12) (gap 8) (top (+ (romacs-chrome-top root) margin)))
     (dolist (toast romacs-layer--toasts)
       (let* ((frame (romacs-layer--frame (car toast)))
              (border (or (frame-parameter frame 'child-frame-border-width) 0))

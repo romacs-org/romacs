@@ -17,19 +17,24 @@ a screenshot (grim) is probed:
   corner   the selected window's top-left corner pixel, outside its
            rounded corner, is the frame background (modern only);
 
-  bar      a pixel at the right end of the status bar's band, below its
-           top, is the `mode-line-active' background (modern only;
-           DIVERGENCES.md VM2-STATUS-BAR);
+  line     a pixel in the middle of the status bar, below its top, is the
+           `mode-line-active' background and its left edge the accent
+           (modern only; DIVERGENCES.md VM2-STATUS-BAR);
+  bands    no window has a mode-line band: the bar is the mode line;
 
 and the run checks that `romacs-chrome-state' reports gap 6, radius 6,
-dim 0.12, status bar 1 and pane label `name' (or classic, 0, no bar and
-`full' with --classic) and that the exit's frame counters
-(ROMACS_FRAME_STATS) drew pane chrome quads and status-bar bands (none
-with --classic).
+dim 0.12 (or classic, 0) and status bar 1 in either look, and that the
+exit's frame counters (ROMACS_FRAME_STATS) drew pane chrome quads (none
+with --classic) and status-bar bands.
 
 With --scenes the session then shows, each in a screenshot: a file of
 a Git repository (vc), that buffer modified, the buffer in
-`flymake-mode' with an error and a warning, and an M-x prompt.  With --slowdown N the window animations run N times
+`flymake-mode' with an error and a warning, an M-x prompt, and three
+tall toasts: every one shown ends above the status bar
+(`romacs-chrome-bottom') and the bar's pixel probe still finds its
+background (on a short --mode one toast waits hidden); then a narrow
+window, and a bottom side window whose buffer sets its own line
+(keymap-popup's), which the bar shows after the selected window's.  With --slowdown N the window animations run N times
 longer and a screenshot is taken a third into the second split.
 
 With --gpu-frames N (at least 200) the three panes then show N edits,
@@ -75,17 +80,25 @@ INIT = r'''
   "Record the chrome and the windows' edges in NAME, a JSON file."
   (let ((state (romacs-chrome-state)))
     (with-temp-file (expand-file-name (concat name ".json") chrome-live-dir)
-      (insert (format "{\"classic\": %s, \"gap\": %d, \"radius\": %d, \"dim\": %s, \"right_divider\": %d, \"internal_border\": %d, \"focus\": %S, \"background\": %S, \"windows\": [%s], \"status_bar\": %d, \"label\": \"%s\", \"bar_top\": %d, \"bar_background\": %S, \"native_width\": %d, \"border\": %d}"
+      (insert (format "{\"classic\": %s, \"gap\": %d, \"radius\": %d, \"dim\": %s, \"right_divider\": %d, \"internal_border\": %d, \"focus\": %S, \"background\": %S, \"windows\": [%s], \"status_bar\": %d, \"bar_top\": %d, \"bar_background\": %S, \"native_width\": %d, \"border\": %d, \"pill\": [%S, %S], \"state_pill\": [%S, %S], \"char_width\": %d, \"bar_height\": %d, \"inactive\": %S}"
                       (if (plist-get state :classic) "true" "false") (plist-get state :gap) (plist-get state :pane-radius)
                       (plist-get state :pane-dim) (plist-get state :right-divider) (plist-get state :internal-border)
                       (or (plist-get state :focus) "") (chrome-live--hex (face-background 'default nil t))
-                      (mapconcat (lambda (w) (format "{\"edges\": [%s], \"selected\": %s}"
+                      (mapconcat (lambda (w) (format "{\"edges\": [%s], \"selected\": %s, \"mode_line\": %d}"
                                                      (mapconcat #'number-to-string (window-edges w nil nil t) ", ")
-                                                     (if (eq w (selected-window)) "true" "false")))
+                                                     (if (eq w (selected-window)) "true" "false")
+                                                     (window-mode-line-height w)))
                                  (window-list nil 'never (frame-first-window)) ", ")
-                      (plist-get state :status-bar) (plist-get state :label)
-                      (romacs-chrome-bottom) (chrome-live--hex (face-background 'mode-line-active nil t))
-                      (frame-native-width) (frame-internal-border-width))))))
+                      (plist-get state :status-bar)
+                      (if (eq romacs-status-bar-position 'top) (- (romacs-chrome-top) (romacs-status-bar-height)) (romacs-chrome-bottom))
+                      (chrome-live--hex (face-background 'mode-line-active nil t))
+                      (frame-native-width) (frame-internal-border-width)
+                      (or (chrome-live--hex (face-foreground 'mode-line-active nil t)) "")
+                      (or (chrome-live--hex (face-background 'romacs-mode-line-pill nil t)) "")
+                      (or (chrome-live--hex (face-foreground 'romacs-mode-line-state-pill nil t)) "")
+                      (or (chrome-live--hex (face-background 'romacs-mode-line-state-pill nil t)) "")
+                      (frame-char-width) (romacs-status-bar-height)
+                      (or (chrome-live--hex (face-background 'mode-line-inactive nil t)) ""))))))
 '''
 
 STEPS = r'''
@@ -110,6 +123,30 @@ SCENES = r'''
                                  (flymake-mode 1) (flymake-start))
                       (run-at-time 1 nil (lambda () (chrome-live--note "flymake")))))
 (run-at-time 23 nil (lambda () (chrome-live--note "prompt")))
+(run-at-time 28 nil (lambda ()
+  (dotimes (i 3) (romacs-layer-toast (format "toast %d\n%s" i (string-join (make-list 5 "a toast line") "\n"))))
+  (run-at-time 1 nil (lambda ()
+    (with-temp-file (expand-file-name "toasts.json" chrome-live-dir)
+      (insert (format "{\"bottom\": %d, \"toasts\": [%s]}" (romacs-chrome-bottom)
+                      (mapconcat (lambda (toast)
+                                   (let ((f (romacs-layer--frame (car toast))))
+                                     (format "[%d, %d, %s]" (cdr (frame-position f)) (+ (cdr (frame-position f)) (frame-pixel-height f))
+                                             (if (frame-visible-p f) "true" "false"))))
+                                 romacs-layer--toasts ", "))))))))
+(run-at-time 32 nil (lambda ()
+  (mapc #'romacs-layer--toast-expire (mapcar #'car romacs-layer--toasts))
+  (delete-other-windows)
+  (switch-to-buffer "a.el")
+  (select-window (split-window-right -20))
+  (chrome-live--note "narrow")))
+(run-at-time 35 nil (lambda ()
+  (delete-other-windows)
+  (switch-to-buffer "a.el")
+  (with-current-buffer (get-buffer-create "*keymap-popup*")
+    (erase-buffer) (insert "Navigate   n  Nodes\n           t  Thema\n\nq  Dismiss menu")
+    (setq-local mode-line-format '("q  " "Gnosis Dashboard")))
+  (display-buffer-in-side-window (get-buffer "*keymap-popup*") '((side . bottom) (window-height . 6)))
+  (chrome-live--note "popup")))
 '''
 LOAD = r'''
 (blink-cursor-mode -1)
@@ -140,7 +177,19 @@ def pixel(png: Path, x: int, y: int) -> str:
     return out.stdout.strip().lower()[:7]
 
 
+def contrast(a: str, b: str) -> float:
+    """WCAG 2 contrast of two #rrggbb colours."""
+    def luminance(hex_):
+        c = [int(hex_[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        c = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in c]
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    x, y = luminance(a), luminance(b)
+    return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+
+
 def near(a: str, b: str, slack: int = 3) -> bool:
+    if not (a.startswith('#') and b.startswith('#')):
+        return a == b
     return all(abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) <= slack for i in (1, 3, 5))
 
 
@@ -181,6 +230,7 @@ def main():
     ap.add_argument('--light', action='store_true')
     ap.add_argument('--themes', default='', help='comma-separated themes to load in turn after the splits')
     ap.add_argument('--scenes', action='store_true')
+    ap.add_argument('--top', action='store_true', help="the status bar at the top (`romacs-status-bar-position')")
     ap.add_argument('--labwc', default=live.LABWC)
     ap.add_argument('--wlr-randr', default=live.RANDR)
     args = ap.parse_args()
@@ -212,6 +262,8 @@ def main():
                 init += '(set-face-attribute \'default nil :foreground "#202020" :background "#f0f0f0")\n'
             if args.classic:
                 init += '(romacs-classic-chrome 1)\n'
+            if args.top:
+                init += "(setopt romacs-status-bar-position 'top)\n"
             if args.slowdown != 1:
                 init += f'(setopt romacs-window-animations-slowdown {args.slowdown})\n'
             for i, theme in enumerate(themes):
@@ -220,7 +272,7 @@ def main():
             end = (LOAD.replace('{frames}', str(args.gpu_frames)).replace('{at}', at) if args.gpu_frames
                    else f'(run-at-time {at} nil (lambda () (kill-emacs 0)))\n')
             if args.scenes:
-                end = SCENES + '(run-at-time 30 nil (lambda () (kill-emacs 0)))\n'
+                end = SCENES + '(run-at-time 39 nil (lambda () (kill-emacs 0)))\n'
                 repo = home / 'repo'
                 repo.mkdir()
                 (repo / 'a.el').write_text(';;; a.el --- a file  -*- lexical-binding: t -*-\n(defun a () 1)\n')
@@ -286,8 +338,16 @@ def main():
                         fx, fy = round(left * s), round((top + bottom) / 2 * s)
                         checks[f'focus-{step}'] = [pixel(png, fx, fy), state['focus']]
                         checks[f'corner-{step}'] = [pixel(png, round(left * s), round(top * s)), state['background']]
-                        bx = round((state['native_width'] - state['border'] - 3) * s)
-                        checks[f'bar-{step}'] = [pixel(png, bx, round((state['bar_top'] + 2) * s)), state['bar_background']]
+                        # The line the selected window's mode line is, or
+                        # the bar: its background in the middle, and the
+                        # accent block at its left edge.
+                        x0, x1, top, height = state['border'], state['native_width'] - state['border'], state['bar_top'], state['bar_height']
+                        mid = round((top + height / 2) * s)
+                        # The middle of the line: the right-align marker's room.
+                        checks[f'line-{step}'] = [pixel(png, round((x0 + x1) / 2 * s), round((top + 2) * s)), state['bar_background']]
+                        checks[f'accent-{step}'] = [pixel(png, round((x0 + 1) * s), mid), state['focus']]
+                        # No window draws a band of its own: the bar is the mode line.
+                        checks[f'bands-{step}'] = [str(sum(w['mode_line'] for w in state['windows'])), '0']
                 for scene in (('vc', 'modified', 'flymake', 'prompt') if args.scenes else ()):
                     note = notes / f'{scene}.json'
                     wait(note.exists, args.timeout, f'record {scene}', proc)
@@ -298,6 +358,32 @@ def main():
                     report[f'state-{scene}'] = json.loads(note.read_text())
                     if scene == 'prompt':
                         subprocess.run(['/usr/bin/wtype', '-M', 'ctrl', 'g', '-m', 'ctrl'], env=env, timeout=10)
+                if args.scenes:
+                    toasts = notes / 'toasts.json'
+                    wait(toasts.exists, args.timeout, 'toasts', proc)
+                    time.sleep(1.5)
+                    png = shot('scene-toasts')
+                    found = json.loads(toasts.read_text())
+                    report['toasts'] = found
+                    shown = [t for t in found['toasts'] if t[2]]
+                    checks['toasts-above-lines'] = ['ok' if shown and all(t[1] <= found['bottom'] for t in shown) else 'covered', 'ok']
+                    if not args.classic:
+                        # The selected line (or bar) still shows under them.
+                        state = report['state-3']
+                        lx, ly = state['native_width'] / 2, state['bar_top'] + 2
+                        checks['line-under-toasts'] = [pixel(png, round(lx * args.scale), round(ly * args.scale)), state['bar_background']]
+                    # A narrow window's line: its segments dropped by priority.
+                    narrow = notes / 'narrow.json'
+                    wait(narrow.exists, args.timeout, 'narrow', proc)
+                    time.sleep(1.5)
+                    shot('scene-narrow')
+                    report['state-narrow'] = json.loads(narrow.read_text())
+                    # A popup's own line folds into the bar.
+                    popup = notes / 'popup.json'
+                    wait(popup.exists, args.timeout, 'popup', proc)
+                    time.sleep(1.5)
+                    shot('scene-popup')
+                    report['state-popup'] = json.loads(popup.read_text())
                 wait(lambda: proc.poll() is not None, 30 + args.gpu_frames * .1, 'exit', None)
             if args.gpu_frames:
                 report['gpu'] = gpu_times(log_path.read_text(errors='replace'), out / 'trace.jsonl', MEASURED)
@@ -311,8 +397,12 @@ def main():
             ok = (state['classic'], state['gap'] if not args.classic else state['right_divider'], state['radius'],
                   float(state['dim'])) == wanted
             ok = ok and (report['chrome_divider_quads'] == 0 if args.classic else (report['chrome_divider_quads'] or 0) > 0)
-            ok = ok and (state['status_bar'], state['label']) == ((0, 'full') if args.classic else (1, 'name'))
-            ok = ok and (report['chrome_bar_bands'] == 0 if args.classic else (report['chrome_bar_bands'] or 0) > 0)
+            # The bar is the mode line in every look (VM2-STATUS-BAR).
+            ok = ok and state['status_bar'] == 1 and (report['chrome_bar_bands'] or 0) > 0
+            # The pills keep the bar's text readable (WCAG AA).
+            if not args.classic:
+                report['pill_contrast'] = [round(contrast(*state['pill']), 2), round(contrast(*state['state_pill']), 2)]
+                ok = ok and min(report['pill_contrast']) >= 4.5
             for name, (got, want) in checks.items():
                 ok = ok and near(got, want)
             if themes:

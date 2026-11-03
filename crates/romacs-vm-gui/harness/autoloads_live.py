@@ -146,7 +146,10 @@ def main():
                     time.sleep(.15)
 
                 def mode_lines():
-                    return scene_rows(log_path.read_text(errors='replace'), 'ModeLine')
+                    # The status bar is the mode line on a window system
+                    # (VM2-STATUS-BAR); a GNU band where a window has one.
+                    text = log_path.read_text(errors='replace')
+                    return scene_rows(text, 'StatusBar') + scene_rows(text, 'ModeLine')
 
                 def shown(buffer, text):
                     """BUFFER names a window's mode line and TEXT is in a window."""

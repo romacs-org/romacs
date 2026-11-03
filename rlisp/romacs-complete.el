@@ -984,6 +984,7 @@ large font gets a panel as wide as the frame."
                       (round (* romacs-complete-center-width room))))))
 
 (declare-function romacs-chrome-bottom "romacs-chrome" (&optional frame except))
+(declare-function romacs-chrome-top "romacs-chrome" (&optional frame))
 
 (defun romacs-complete--mode-line-top (root)
   "The top of the mode line of the window the minibuffer was entered
@@ -1003,7 +1004,8 @@ panel TALLEST pixels at most, with CH-pixel lines."
     (pcase romacs-complete-position
       ('center (+ inset (/ (- height tallest) 2)))
       ('bottom (- (romacs-complete--mode-line-top root) ch tallest))
-      (_ (+ inset (max (* 2 ch) (round (* 0.11 height))))))))
+      ;; Below a status bar at the top (`romacs-chrome-top') by a line.
+      (_ (max (+ (romacs-chrome-top root) ch) (+ inset (max (* 2 ch) (round (* 0.11 height)))))))))
 
 (defun romacs-complete--rows ()
   "Most candidate rows the panel shows: `romacs-complete-count', fewer

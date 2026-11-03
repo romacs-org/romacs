@@ -1,0 +1,63 @@
+# Each icon's upstream glyph: NAME, its Nerd Fonts glyph name and
+# codepoint, and the glyph set it comes from (assets/icons/LICENSE gives
+# each set's licence). scripts/import-icon-glyphs.py writes
+# assets/icons/NAME.svg from Symbols Nerd Font Mono 3.4.0 (NFM.ttf as
+# nerd-icons.el ships it, revision 1e75075e, SHA-256
+# f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60).
+# The glyph for each state, mode and segment follows doom-modeline
+# (revision 2d68288) and nerd-icons.el's mode table.
+modified nf-md-content_save_edit U+F0CFB md
+saved nf-md-content_save_outline U+F0818 md
+read-only nf-md-lock U+F033E md
+remote nf-md-earth U+F01E7 md
+narrow nf-md-unfold_less_horizontal U+F054E md
+branch nf-dev-git_branch U+E725 dev
+tag nf-md-tag_outline U+F04FC md
+error nf-md-alert_circle_outline U+F05D6 md
+warning nf-md-alert_outline U+F002A md
+note nf-md-information_outline U+F02FD md
+check nf-md-check_circle_outline U+F05E1 md
+lsp nf-oct-rocket U+F427 oct
+process nf-oct-gear U+F423 oct
+agent nf-md-robot U+F06A9 md
+record nf-md-record_rec U+F044B md
+overwrite nf-md-pencil_box_outline U+F03ED md
+search nf-md-magnify U+F0349 md
+region nf-md-selection U+F0489 md
+keyboard nf-md-keyboard_outline U+F097B md
+clock nf-md-clock_outline U+F0150 md
+lisp nf-custom-emacs U+E632 custom
+rust nf-dev-rust U+E7A8 dev
+c nf-custom-c U+E61E custom
+python nf-dev-python U+E73C dev
+shell nf-dev-terminal U+E795 dev
+text nf-md-file_document_outline U+F09EE md
+org nf-custom-orgmode U+E633 custom
+markdown nf-oct-markdown U+F48A oct
+dired nf-md-folder_outline U+F0256 md
+mail nf-md-email_outline U+F01F0 md
+chat nf-md-chat U+F0B79 md
+term nf-md-console U+F018D md
+web nf-md-web U+F059F md
+image nf-md-image_outline U+F0976 md
+scratch nf-md-note_text_outline U+F11D7 md
+help nf-md-help_circle_outline U+F0625 md
+default nf-md-file_outline U+F0224 md
+missing nf-md-cancel U+F073A md
+vc-edited nf-dev-git_compare U+E728 dev
+vc-conflict nf-oct-alert U+F421 oct
+javascript nf-dev-javascript U+E781 dev
+typescript nf-dev-typescript U+E8CA dev
+go nf-dev-go U+E724 dev
+java nf-dev-java U+E738 dev
+nix nf-dev-nixos U+E843 dev
+haskell nf-dev-haskell U+E777 dev
+json nf-md-code_json U+F0626 md
+html nf-dev-html5 U+E736 dev
+css nf-dev-css3 U+E749 dev
+lua nf-dev-lua U+E826 dev
+conf nf-md-cog_outline U+F08BB md
+data nf-md-code_braces U+F0169 md
+calendar nf-md-calendar_outline U+F0B67 md
+info nf-md-book_open_outline U+F0B63 md
+database nf-md-database_outline U+F1632 md
