@@ -24,13 +24,13 @@ fn scene() -> WindowSnapshot {
                 foreground: [255; 3],
                 background: [0; 3],
                 family: "Liberation Mono".into(),
-                pixel_size: 20.0,
+                pixel_size: 20.0, weight: 400, italic: false, width: 5,
             },
             Face {
                 foreground: [255, 0, 0],
                 background: [0; 3],
                 family: "Liberation Mono".into(),
-                pixel_size: 20.0,
+                pixel_size: 20.0, weight: 400, italic: false, width: 5,
             },
         ],
     }
@@ -164,4 +164,30 @@ fn stretches_paint_as_gnus_window_system_stretches() {
     // Not on its placeholder, or out of order: refused.
     snapshot.stretches = vec![Stretch { byte: 0, width: StretchWidth::AlignTo(10) }];
     assert!(romacs_layout2::layout(&snapshot, 1).is_err());
+}
+
+/// A face's `:weight' and `:slant' choose the font: bold text is set in
+/// the family's bold face and italic in its italic, not in the regular.
+#[test]
+fn a_bold_or_italic_face_is_set_in_that_font() {
+    let mut s = scene();
+    // "Hello" bold, the "Δ" on the next line italic.
+    s.text.face_runs = vec![FaceRun { bytes: 11..16, face: FaceHandle(1) }, FaceRun { bytes: 17..19, face: FaceHandle(2) }];
+    s.faces[1] = Face { weight: 700, ..s.faces[0].clone() };
+    s.faces.push(Face { italic: true, ..s.faces[0].clone() });
+    let frame = romacs_layout2::layout(&s, 1).unwrap();
+    let font_of = |ch: char| {
+        let face = frame.glyphs.iter().find_map(|g| match g {
+            FrameGlyph::Char { char, face_id, .. } if *char == ch => Some(*face_id),
+            _ => None,
+        }).unwrap();
+        let id = frame.faces[&face].default_resolved_font_id.expect("a resolved font");
+        (frame.faces[&face].attributes, &frame.fonts[&id])
+    };
+    let ((regular_attrs, regular), (bold_attrs, bold), (italic_attrs, italic)) = (font_of('Ω'), font_of('H'), font_of('Δ'));
+    assert!(bold_attrs.contains(romacs_display_protocol::FaceAttributes::BOLD) && !regular_attrs.contains(romacs_display_protocol::FaceAttributes::BOLD));
+    assert!(italic_attrs.contains(romacs_display_protocol::FaceAttributes::ITALIC));
+    assert!(regular.weight < 700 && bold.weight >= 700, "{regular:?} {bold:?}");
+    assert_eq!(regular.slant, romacs_display_protocol::font::FontSlantKind::Normal);
+    assert_ne!(italic.slant, romacs_display_protocol::font::FontSlantKind::Normal, "{italic:?}");
 }

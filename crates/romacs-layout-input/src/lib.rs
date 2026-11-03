@@ -202,8 +202,14 @@ pub struct Face {
     pub background: [u8; 3],
     pub family: String,
     pub pixel_size: f32,
+    /// CSS weight, 400 normal and 700 bold (`:weight').
+    pub weight: u16,
+    /// Italic or oblique (`:slant').
+    pub italic: bool,
+    /// OS/2 width class, 5 normal (`:width').
+    pub width: u16,
 }
-romacs_snapshot::snapshot_struct!(Face { foreground, background, family, pixel_size });
+romacs_snapshot::snapshot_struct!(Face { foreground, background, family, pixel_size, weight, italic, width });
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FaceRun {

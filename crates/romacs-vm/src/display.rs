@@ -2504,11 +2504,15 @@ fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
         }
         _ => return Err("absolute face height required".into()),
     };
+    let symbol = |a| match attrs.get(a) { FaceSlot::Set(FaceValue::Symbol(s)) => Some(s.to_string()), _ => None };
     Ok(Face {
         foreground: color(Attribute::Foreground)?,
         background: color(Attribute::Background)?,
         family: string(Attribute::Family)?,
         pixel_size: size,
+        weight: symbol(Attribute::Weight).map_or(400, |w| romacs_face::attr::css_weight(&w)),
+        italic: symbol(Attribute::Slant).is_some_and(|s| matches!(s.as_str(), "italic" | "i" | "ot" | "oblique" | "o")),
+        width: symbol(Attribute::Width).map_or(5, |w| romacs_face::attr::width_class(&w)),
     })
 }
 

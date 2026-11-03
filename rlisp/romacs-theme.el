@@ -245,9 +245,10 @@ or `light') and colours.  `orange' and `brown' may be left out.")
     (fg-muted floor muted bg 3.0)
     (fg-dim* floor fg-dim bg 4.5)
     (prompt . accent)
-    ;; A key in help, popups and the completion layer: the accent, floored
-    ;; on each of their backgrounds (`help-key-binding').
-    (keybind . accent)
+    ;; A key in help, popups and the completion layer: a cool blue, as
+    ;; Modus keys are, floored on each of their backgrounds
+    ;; (`help-key-binding').
+    (keybind . blue)
     ;; Bands, highlights, search, diff.
     (bg-mode-line . bg-alt)
     (bg-mode-line-inactive . bg-dark)
@@ -452,14 +453,16 @@ spec replaces the face's own."
         (funcall face 'romacs-mode-line-error :inherit 'error :foreground (funcall text 'error band))
         (funcall face 'romacs-mode-line-warning :inherit 'warning :foreground (funcall text 'warning band))
         (funcall face 'romacs-mode-line-ok :inherit 'success :foreground (funcall text 'success band))))
-     ;; Headings: Rum's heights, no bold.
+     ;; Headings: Rum's heights and weights (its Modus `headings': 1
+     ;; ultrabold 1.35, 2 semibold 1.2, the rest Modus's bold at 1.15), on
+     ;; outline and Org headings alike.
      (let ((rows nil) (level 1))
        (dolist (slot '(red yellow blue magenta green orange cyan fg-dim*))
-         (let ((colour (funcall text slot)))
-           (push (funcall face (intern (format "outline-%d" level)) :foreground colour) rows)
-           (push (funcall face (intern (format "org-level-%d" level)) :foreground colour
-                          :height (cond ((= level 1) 1.35) ((= level 2) 1.2) (t 1.15)))
-                 rows))
+         (let ((colour (funcall text slot))
+               (height (cond ((= level 1) 1.35) ((= level 2) 1.2) (t 1.15)))
+               (weight (cond ((= level 1) 'ultrabold) ((= level 2) 'semibold) (t 'bold))))
+           (dolist (name (list (format "outline-%d" level) (format "org-level-%d" level)))
+             (push (funcall face (intern name) :foreground colour :height height :weight weight) rows)))
          (setq level (1+ level)))
        (nreverse rows))
      ;; The terminal.

@@ -468,3 +468,34 @@ fn romacs_theme_lisp_tests_pass() {
     }).unwrap().join().unwrap();
     assert!(summary.contains(":failed 0") && summary.contains(":errors 0"), "{summary}");
 }
+
+/// The display paints a face's weight and slant: `bold', `italic', the
+/// stock theme's org headings (Rum's ultra-bold and semi-bold) and the
+/// mode line's buffer name (in the status bar) each reach the snapshot with
+/// their own weight, and plain text with the normal one.
+#[test]
+fn faces_paint_their_weight_and_slant() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        vm.eval_source("(progn (require 'org-faces) (delete-other-windows)
+            (switch-to-buffer (get-buffer-create \"fw\")) (fundamental-mode)
+            (insert (propertize \"B\" 'face 'bold) (propertize \"I\" 'face 'italic)
+                    (propertize \"H\" 'face 'org-level-1) (propertize \"S\" 'face 'org-level-2) \"r\"))").unwrap();
+        let frame = vm.frame_snapshot(1280, 800).unwrap();
+        let window = frame.windows.iter().find(|w| w.snapshot.text.utf8.starts_with("BIHSr")).expect("the fw window");
+        let face_at = |slice: &romacs_layout_input::TextSlice, faces: &[romacs_layout_input::Face], byte: usize| {
+            let handle = slice.face_runs.iter().find(|run| run.bytes.contains(&byte)).map_or(0, |run| run.face.0 as usize);
+            (faces[handle].weight, faces[handle].italic)
+        };
+        let mut report: Vec<(u16, bool)> = (0..5).map(|i| face_at(&window.snapshot.text, &window.snapshot.faces, i)).collect();
+        // The selected window's mode line is the status bar's (VM2-STATUS-BAR).
+        let bar = frame.status_bar.as_ref().expect("a status bar");
+        report.push(face_at(&bar.text, &bar.faces, bar.text.utf8.find("fw").expect("the buffer name")));
+        report
+    }).unwrap().join().unwrap();
+    // bold, italic, org-level-1, org-level-2, plain; mode-line-buffer-id.
+    assert_eq!(report, [(700, false), (400, true), (800, false), (600, false), (400, false), (700, false)]);
+}

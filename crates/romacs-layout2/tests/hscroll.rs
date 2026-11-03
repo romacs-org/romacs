@@ -7,7 +7,7 @@ use romacs_layout_input::{BitmapAlign, Face, FaceHandle, FrameSnapshot, FringeBi
     PlacedWindowSnapshot, TextSlice, WindowChrome, WindowEnd, WindowSnapshot};
 
 fn face() -> Face {
-    Face { foreground: [255; 3], background: [0; 3], family: "Liberation Mono".into(), pixel_size: 16.0 }
+    Face { foreground: [255; 3], background: [0; 3], family: "Liberation Mono".into(), pixel_size: 16.0, weight: 400, italic: false, width: 5 }
 }
 
 fn cell() -> f32 { romacs_layout2::frame_metrics(&face()).unwrap().1 as f32 }

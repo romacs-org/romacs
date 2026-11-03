@@ -268,6 +268,39 @@ pub struct AttrError {
     pub reason: &'static str,
 }
 
+/// The CSS weight of `:weight' NAME (one of WEIGHTS), as fontconfig
+/// matches it: 400 for `normal' and anything unknown.
+pub fn css_weight(name: &str) -> u16 {
+    match name {
+        "thin" => 100,
+        "ultra-light" | "ultralight" | "extra-light" | "extralight" => 200,
+        "light" => 300,
+        "semi-light" | "semilight" | "demilight" => 350,
+        "medium" => 500,
+        "semi-bold" | "semibold" | "demibold" | "demi-bold" | "demi" => 600,
+        "bold" => 700,
+        "extra-bold" | "extrabold" | "ultra-bold" | "ultrabold" => 800,
+        "black" | "heavy" | "ultra-heavy" | "ultraheavy" => 900,
+        _ => 400,
+    }
+}
+
+/// The OS/2 width class of `:width' NAME (one of WIDTHS): 5 for `normal'
+/// and anything unknown.
+pub fn width_class(name: &str) -> u16 {
+    match name {
+        "ultra-condensed" | "ultracondensed" => 1,
+        "extra-condensed" | "extracondensed" => 2,
+        "condensed" | "compressed" | "narrow" => 3,
+        "semi-condensed" | "semicondensed" | "demicondensed" => 4,
+        "semi-expanded" | "semiexpanded" | "demiexpanded" => 6,
+        "expanded" => 7,
+        "extra-expanded" | "extraexpanded" => 8,
+        "ultra-expanded" | "ultraexpanded" | "wide" => 9,
+        _ => 5,
+    }
+}
+
 // GNU font.c weight_table, slant_table, width_table: every accepted name.
 const WEIGHTS: &[&str] = &[
     "thin",

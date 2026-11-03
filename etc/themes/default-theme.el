@@ -31,7 +31,7 @@
    (prompt "#d2b580") (link "#4cc9f0")
    (keyword "#b395db") (function "#c28fea") (string "#aacb75") (comment "#756b59")
    (variable "#00a6a6") (constant "#72b6e4") (type "#00b8ad") (builtin "#d0a3e8")
-   (fl-warning "#e89e30")
+   (fl-warning "#e89e30") (keybind "#72b6e4")
    ;; The chrome as it was mixed in sRGB: Oklab's mix toward black is darker.
    (border "#201e18") (glass "#11100d")
    (error "#c97054") (warning "#e89e30") (success "#00b8ad")))
