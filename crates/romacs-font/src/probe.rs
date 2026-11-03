@@ -41,6 +41,8 @@ pub struct FontPxMetrics {
     pub max_width: i32,
     pub space_width: i32,
     pub average_width: i32,
+    /// ftcrfont_open's `underline_position' and `underline_thickness'.
+    pub underline: romacs_display_protocol::font::FontUnderline,
 }
 
 /// Hinted horizontal advances measured in device pixels for ASCII printable
@@ -328,6 +330,18 @@ std::cfg_select! {
             let ascent = ((size_metrics.ascender + 32) >> 6) as i32;
             let descent = ((-size_metrics.descender + 32) >> 6) as i32;
 
+            // ftcrfont_open: a scalable face's underline metrics, scaled to
+            // the size, a thick line raised by half its thickness; none for
+            // a fixed-size one.
+            let raw = face.raw();
+            let scalable = raw.face_flags & freetype::freetype_sys::FT_FACE_FLAG_SCALABLE != 0;
+            let underline = if scalable && raw.units_per_EM > 0 {
+                let scale = |units: i64| (units * i64::from(pixel_size) / i64::from(raw.units_per_EM)) as i32;
+                romacs_display_protocol::font::FontUnderline::scaled(
+                    scale(-i64::from(raw.underline_position)), scale(i64::from(raw.underline_thickness)))
+            } else {
+                romacs_display_protocol::font::FontUnderline::default()
+            };
             Some(FontPxMetrics {
                 pixel_size,
                 height: ascent + descent,
@@ -336,6 +350,7 @@ std::cfg_select! {
                 max_width,
                 space_width,
                 average_width: average_width as i32,
+                underline,
             })
         }
 

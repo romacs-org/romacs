@@ -288,7 +288,7 @@ fn renderer_reopens_the_exact_physical_bitmap_strike_without_rescaling() {
         })
         .expect("layout-side fixed strike");
     let metrics = opened.metrics();
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id: ResolvedFontId(41),
         identity,
         replay: opened.replay(),
@@ -538,7 +538,7 @@ fn renderer_keeps_missing_ascii_on_primary_font() {
     let weight = resolved.weight;
     let identity = resolved.identity;
     let id = ResolvedFontId(1);
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id,
         identity: identity.clone(),
         replay: file_replay_for(&identity),
@@ -640,7 +640,7 @@ fn renderer_replays_named_instance_weight_on_the_exact_raw_face() {
     let family = resolved.family;
     let weight = resolved.weight;
     let identity = resolved.identity;
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id: ResolvedFontId(1),
         identity: identity.clone(),
         replay: file_replay_for(&identity),
@@ -706,7 +706,7 @@ fn a_bold_request_on_a_regular_face_is_emboldened() {
     let family = resolved.family;
     let weight = resolved.weight;
     let identity = resolved.identity;
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id: ResolvedFontId(1),
         identity: identity.clone(),
         replay: file_replay_for(&identity),
@@ -754,7 +754,7 @@ fn renderer_exact_attrs_reject_an_unopenable_identity() {
         return;
     };
     let identity = ResolvedFontIdentity::from_file("/romacs/missing/font.ttf", 0, None);
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id: ResolvedFontId(1),
         identity: identity.clone(),
         replay: file_replay_for(&identity),
@@ -786,7 +786,7 @@ fn renderer_replays_the_same_decoded_woff_face_as_layout() {
     let path = test_font_path(romacs_test_fonts::spleen_2_2_0().woff());
     let id = ResolvedFontId(73);
     let identity = ResolvedFontIdentity::from_file(&path, 0, None);
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id,
         identity: identity.clone(),
         replay: file_replay_for(&identity),
@@ -862,7 +862,7 @@ fn renderer_replays_a_native_memory_asset_in_its_own_font_system() {
             .expect("native-memory fixture"),
     );
     let id = ResolvedFontId(74);
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id,
         identity,
         replay: FontReplay::Swash { asset },
@@ -926,7 +926,7 @@ fn reused_resolved_font_id_invalidates_renderer_identity_caches() {
     let id = ResolvedFontId(9);
     let font = |path: &str| {
         let identity = ResolvedFontIdentity::from_file(path, 0, None);
-        ResolvedFont {
+        ResolvedFont { underline: Default::default(),
             id,
             identity: identity.clone(),
             replay: file_replay_for(&identity),
@@ -989,7 +989,7 @@ fn install_colrv1_memory_face(atlas: &mut WgpuGlyphAtlas) -> (ResolvedFontId, Re
             .expect("COLRv1 memory fixture"),
     );
     let id = ResolvedFontId(542);
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id,
         identity,
         replay: FontReplay::Swash { asset },
@@ -1080,7 +1080,7 @@ fn install_nabla_memory_face(
         FontMemoryAsset::new(identity.stable_key.clone(), bytes, 0).expect("Nabla memory fixture"),
     );
     let resolved_id = ResolvedFontId(id);
-    let font = ResolvedFont {
+    let font = ResolvedFont { underline: Default::default(),
         id: resolved_id,
         identity,
         replay: FontReplay::Swash { asset },
@@ -1352,7 +1352,7 @@ fn mask_glyph_identities_ignore_the_foreground() {
         None,
     );
     let outline_id = ResolvedFontId(543);
-    let outline_font = ResolvedFont {
+    let outline_font = ResolvedFont { underline: Default::default(),
         id: outline_id,
         replay: file_replay_for(&outline_identity),
         identity: outline_identity,
