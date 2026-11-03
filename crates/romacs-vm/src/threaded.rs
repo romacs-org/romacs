@@ -89,6 +89,17 @@ mod control_tests {
         );
     }
 
+    #[test]
+    fn forgotten_code_keeps_no_room_from_its_peak() {
+        let mut program = Program::default();
+        program.entries.reserve(SPARE_SITES * 64);
+        program.inline_bodies.reserve(SPARE_SITES * 64);
+        program.free_entries.reserve(SPARE_SITES * 64);
+        program.forget_code();
+        assert!(program.entries.capacity() <= SPARE_SITES && program.inline_bodies.capacity() <= SPARE_SITES
+            && program.free_entries.capacity() <= SPARE_SITES);
+    }
+
     fn empty_engine(vm: &mut Vm) -> Engine<'_> {
         Engine {
             vm,
@@ -409,7 +420,7 @@ struct InlineBody {
 #[inline(never)]
 fn inline_body(vm: &Vm, function: usize) -> Option<InlineBody> {
     let f = &vm.functions[function];
-    if f.captures != 0 || f.rest || f.required != f.arity || f.code.len() > 8 {
+    if f.pending.is_some() || f.captures != 0 || f.rest || f.required != f.arity || f.code.len() > 8 {
         return None;
     }
     let mut operands = vec![None; f.regs];
@@ -542,6 +553,8 @@ impl InlineBody {
 }
 /// Private lowering is appended once and GC-forwarded in place. Retain it across externally
 /// submitted forms instead of relowering the complete retained world per eval.
+/// The call sites a forgotten program keeps room for (`forget_code`).
+const SPARE_SITES: usize = 1 << 14;
 #[derive(Default)]
 pub(super) struct Program {
     code: Vec<Vec<Inst>>,
@@ -573,12 +586,19 @@ impl Program {
         self.code.iter().all(Vec::is_empty) && self.entries.is_empty()
     }
     /// Drop the lowered code an idle program caches; it is lowered again on
-    /// first use. Nothing points into it: no engine runs this program.
+    /// first use. The per-site tables keep room for SPARE_SITES at most, so a
+    /// peak (a nested load's millions of call sites) leaves no capacity
+    /// behind, while an ordinary nested run reuses its room; `code` is
+    /// bounded by the function count and keeps its own. Nothing points into
+    /// it: no engine runs this program.
     pub(super) fn forget_code(&mut self) {
         self.code.clear();
         self.entries.clear();
+        self.entries.shrink_to(SPARE_SITES);
         self.inline_bodies.clear();
+        self.inline_bodies.shrink_to(SPARE_SITES);
         self.free_entries.clear();
+        self.free_entries.shrink_to(SPARE_SITES);
     }
     pub(super) fn code_len(&self) -> usize {
         self.code.iter().map(Vec::len).sum()
@@ -1848,6 +1868,8 @@ fn fail(e: &mut Engine<'_>, message: &str) -> Value {
 #[inline(never)]
 unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     e.budget = 10_000;
+    #[cfg(test)]
+    POLLS.with(|polls| polls.set(polls.get() + 1));
     // R193: the dispatch below must be a sibling call or every poll keeps a
     // frame: gdb on the gate-built (non-LTO) romacs-gnu-ert adapter showed
     // 74,600 poll_resume frames and SIGABRT under `(while t)` when the
@@ -1857,8 +1879,12 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
-    if e.vm.collection_due() && e.vm.may_collect(1) {
-        poll_collect(e);
+    if e.vm.collection_due() {
+        // Due but held (a nested engine): the request stays for the engine
+        // that may collect.
+        if e.vm.may_collect(1) { poll_collect(e); }
+    } else {
+        e.vm.collect_poll = false;
     }
     // GNU's maybe_quit: a host's C-g (quit.rs) or an isolate's interrupt
     // (SIGUSR1, `isolate.rs`) is `quit` at this safepoint unless
@@ -2095,6 +2121,11 @@ unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
 #[inline(never)]
 fn leave_native(e: &mut Engine<'_>) {
     if let Some(mark) = e.native_mark.take() { e.vm.trace_leave(mark); }
+    // Native code made big payloads: poll, and collect if due, soon. The
+    // request stays until a poll settles it; an engine that may not collect
+    // (nested, or held) leaves it to the one it returns to, polling at its
+    // own pace meanwhile.
+    if e.vm.collect_poll && e.vm.may_collect(1) { e.budget = 0; }
 }
 #[inline(never)]
 fn leave_call(e: &mut Engine<'_>, mark: usize) {
@@ -2746,8 +2777,9 @@ unsafe fn generated_step(
             e.vm.propagated_eval_depth = None;
         }
         let step = e.vm.call_generated(target, base + start, argc);
-        // A region attached under id pressure (`frozen.rs`): poll, and collect, soon.
-        if e.vm.region_collect { e.budget = 0; }
+        // A region attached under id pressure (`frozen.rs`), or big payloads
+        // made (`Vm::collect_poll'): poll, and collect if due, soon.
+        if e.vm.region_collect || (e.vm.collect_poll && e.vm.may_collect(1)) { e.budget = 0; }
         if !reader {
             return take_step(e, r, pc, step);
         }
@@ -4256,6 +4288,11 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The engine's polls (`poll_resume') on this thread, for tests.
+    pub(crate) static POLLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 #[cfg(test)]
 #[path = "threaded_reader_gc_tests.rs"]
 mod reader_gc_tests;

@@ -340,9 +340,15 @@ fn fresh_vm(args: &Args) -> Vm {
         emit(json!({"event": "setup", "ok": false, "phase": "batch-mode", "error": error}));
         std::process::exit(3);
     }
+    let quote = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
+    // GNU's init_cmdargs: `command-line-args' is the process's own argv.
+    let argv: Vec<String> = std::env::args().map(|arg| quote(&arg)).collect();
+    if let Err((_, error)) = eval(&mut vm, &format!("(setq command-line-args (list {}))", argv.join(" "))) {
+        emit(json!({"event": "setup", "ok": false, "phase": "command-line-args", "error": error}));
+        std::process::exit(3);
+    }
     if let Some(emacs) = &args.invocation {
         let (Some(name), Some(directory)) = (emacs.file_name(), emacs.parent()) else { usage() };
-        let quote = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
         let set = format!("(setq invocation-name {} invocation-directory {})",
                           quote(&name.to_string_lossy()), quote(&format!("{}/", directory.display())));
         if let Err((_, error)) = eval(&mut vm, &set) {

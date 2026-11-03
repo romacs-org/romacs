@@ -411,6 +411,7 @@ impl Vm {
                     sites: vec![],
                     params: Some(lazy.args.clone()),
                     lazy: Some(Arc::new(lazy)),
+                    pending: None,
                     dynamic: names.is_empty().then_some(a[2] == Value::NIL),
                 });
                 (function, names)

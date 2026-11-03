@@ -109,6 +109,9 @@ fn eval_buffer_and_load_quit_between_forms_keeping_what_ran() {
     let text = form.repeat(10) + &format!("(write-region \"\" nil {:?})\n", marker.display().to_string())
         + &form.repeat(FORMS - 10);
     let file = std::env::temp_dir().join(format!("quit-async-{}.el", std::process::id()));
+    // Removed however the test ends: a failed run must not leave its
+    // megabytes in TMPDIR for other suites to list.
+    let _cleanup = Cleanup([file.clone(), marker.clone()]);
     std::fs::write(&file, &text).unwrap();
     eval(&mut vm, &format!("(progn (defvar quit-async-n 0) (set-buffer (get-buffer-create \"quit-async\")) (insert-file-contents {:?}) t)", file.display().to_string()));
     let quit = quit_after_marker(&mut vm, &signal, "(condition-case nil (progn (eval-buffer) 'done) (quit 'quit))", &marker);
@@ -119,8 +122,6 @@ fn eval_buffer_and_load_quit_between_forms_keeping_what_ran() {
     eval(&mut vm, "(setq quit-async-n 0)");
     let quit = quit_after_marker(&mut vm, &signal, &format!("(condition-case nil (progn (load {:?} nil t t) 'done) (quit 'quit))", file.display().to_string()), &marker);
     let n: usize = eval(&mut vm, "quit-async-n").parse().unwrap();
-    std::fs::remove_file(&file).unwrap();
-    std::fs::remove_file(&marker).unwrap();
     assert_eq!(quit, "quit");
     assert!(n > 0 && n < FORMS, "load ran {n} forms");
 }
@@ -160,11 +161,10 @@ fn an_endless_macroexpand_quits() {
 fn an_endless_expansion_during_load_quits_unwrapped() {
     let (mut vm, signal) = endless_macro_vm();
     let file = std::env::temp_dir().join(format!("quit-async-macro-{}.el", std::process::id()));
+    let _cleanup = Cleanup([file.clone()]);
     std::fs::write(&file, ";;; -*- lexical-binding: t -*-\n(quit-async-endless)\n").unwrap();
     let load = format!("(condition-case nil (progn (load {:?} nil t t) 'done) (quit 'quit))", file.display().to_string());
-    let value = quit_into(&mut vm, &signal, &load);
-    std::fs::remove_file(&file).unwrap();
-    assert_eq!(value, "quit");
+    assert_eq!(quit_into(&mut vm, &signal, &load), "quit");
 }
 
 /// The escape that leaves a quit expansion is raised at the form's reach,
@@ -231,6 +231,17 @@ fn quit_flag_in_an_expansion_raises_what_gnu_does() {
     ];
     for (form, gnu) in cases {
         assert_eq!(eval(&mut vm, form), gnu, "{form}");
+    }
+}
+
+/// Removes its paths when dropped, so a panicking test cleans up too.
+struct Cleanup<const N: usize>([std::path::PathBuf; N]);
+
+impl<const N: usize> Drop for Cleanup<N> {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 

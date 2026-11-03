@@ -109,6 +109,27 @@ fn callback_preserves_an_open_builders_collection_hold() {
     assert_eq!(vm.gc_holds, 1);
 }
 
+/// Big payloads under a collection hold leave their request pending
+/// without making every native return poll; once the hold ends, the next
+/// native return polls and collects.
+#[test]
+fn a_held_collection_keeps_its_request_without_polling_at_every_return() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source("(defvar held-big nil)").unwrap();
+    vm.gc_holds += 1;
+    POLLS.with(|polls| polls.set(0));
+    vm.eval_source("(progn (setq held-big (make-string 4000000 ?x)) (dotimes (_ 5000) (make-string 4 ?y)))").unwrap();
+    let polls = POLLS.with(|polls| polls.get());
+    assert!(vm.collect_poll, "the request waits for the hold");
+    assert!(polls < 50, "{polls} polls over 5000 native returns under a hold");
+    vm.gc_holds -= 1;
+    let before = vm.heap_stats().collections;
+    vm.eval_source("(dotimes (_ 3) (make-string 4 ?y))").unwrap();
+    assert!(vm.heap_stats().collections > before, "collected once the hold ended");
+    assert!(!vm.collect_poll);
+}
+
 #[test]
 fn a_collection_drops_idle_programs_code_and_nested_runs_relower_it() {
     let mut vm = Vm::new();

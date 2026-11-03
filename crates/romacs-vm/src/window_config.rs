@@ -257,8 +257,7 @@ impl Vm {
             && (new_current != current || self.window(selected)?.buffer == new_current) {
             self.marker_position_value(self.window(data.current_window)?.point)?
         } else {
-            let Object::Buffer(b) = self.object(new_current)? else { return Err("buffer required".into()) };
-            Value::integer(b.char_of_byte(b.point)?.0 as i64 + 1)?
+            Value::integer(self.buffer_point_position(new_current)?)?
         };
         // Swap out the selected window's point into its marker.
         let selected_buffer = self.window(selected)?.buffer;

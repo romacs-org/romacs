@@ -311,12 +311,16 @@ impl RenderApp {
                     if is_primary {
                         self.frame_windows.take_primary_window();
                         self.frame_windows.clear_primary_mapping();
-                    } else {
+                    } else if emacs_fid != 0 {
                         self.frame_windows.request_destroy(emacs_fid);
                     }
-                    self.comms.send_input(InputEvent::WindowClose {
-                        emacs_frame_id: emacs_fid,
-                    });
+                    // A window already retired (DestroyWindow) is no frame's
+                    // any more: its late Destroyed closes nothing.
+                    if emacs_fid != 0 {
+                        self.comms.send_input(InputEvent::WindowClose {
+                            emacs_frame_id: emacs_fid,
+                        });
+                    }
                 } else if is_primary {
                     self.lifecycle_flags.request_shutdown(
                         super::state::RenderShutdownReason::NativeWindowDestroyed,

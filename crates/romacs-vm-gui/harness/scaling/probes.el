@@ -105,9 +105,10 @@ thousandth a stack mark."
             (set-face-attribute face nil :foreground (if (cl-oddp k) "red" "blue") :weight 'bold)
             (setq k (1+ k)))))
 
-;; A theme application over N more package faces.  Its cost is the themes
-;; lane's: ~7 G instructions for modus-operandi in a -Q window, and ~16 M
-;; more per defined face, linear but each far above GNU's.
+;; A theme application over N more package faces: loading and enabling
+;; modus-operandi in a -Q window, ~1.3 G instructions, most of it loading
+;; the theme file; nearly flat in the faces, which only the root frame
+;; recomputes (VM2-CHILD-FRAME).
 (scaling-probe faces-theme :gui t :n 50 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces)
@@ -306,6 +307,114 @@ thousandth a stack mark."
            (switch-to-buffer (get-buffer-create "scaling-chrome-shown"))
            (current-buffer))
   :body (with-current-buffer it (insert "x")))
+
+;;;; Server clients and agent sessions (romacs-server.el, romacs-agent*.el)
+
+(defun scaling--server ()
+  "romacs-server.el's waiter index with its GNU advice, and no socket."
+  (require 'romacs-server)
+  (advice-add 'server-buffer-done :before #'romacs-server--buffer-done)
+  (advice-add 'server-done :around #'romacs-server--done))
+
+;; One native client waiting on N files, each finished with server-done,
+;; last first: each costs its own waiters, never the files left.  The
+;; index alone (bury-buffer, which every server-done runs as GNU's does,
+;; left out) and the whole command.
+(scaling-probe server-waiters-index :n 200
+  :setup (progn (scaling--server)
+                (mapcar (lambda (name) (get-buffer-create name)) (scaling--names " scaling-wait" n)))
+  :body (cl-letf (((symbol-function 'romacs-mcp-reply) #'ignore)
+                  ((symbol-function 'bury-buffer) #'ignore))
+          (romacs-server--wait (list :probe t) 'scaling-peer it)
+          (dolist (buffer (reverse it)) (with-current-buffer buffer (server-done)))))
+
+(scaling-probe server-waiters :n 200
+  :known "ticket buffers: bury-buffer, which server-done runs per finished buffer, rebuilds the buffer order list"
+  :setup (progn (scaling--server)
+                (mapcar (lambda (name) (get-buffer-create name)) (scaling--names " scaling-wait" n)))
+  :body (cl-letf (((symbol-function 'romacs-mcp-reply) #'ignore))
+          (romacs-server--wait (list :probe t) 'scaling-peer it)
+          (dolist (buffer (reverse it)) (with-current-buffer buffer (server-done)))))
+
+;; N requests held on one connection, then the connection lost.
+(scaling-probe server-peer :n 200
+  :setup (progn (scaling--server)
+                (mapcar (lambda (name) (get-buffer-create name)) (scaling--names " scaling-peer" n)))
+  :body (progn
+          (dolist (buffer it) (romacs-server--wait (list :probe t) 'scaling-one-peer (list buffer)))
+          (romacs-server--peer-closed 'scaling-one-peer)))
+
+(defun scaling--agent ()
+  "romacs-agent.el with a private state directory."
+  (setenv "XDG_STATE_HOME" (make-temp-file "scaling-state-" t))
+  (require 'romacs-agent))
+
+;; One event to each of N sessions.
+(scaling-probe agent-dispatch :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (mapcar (lambda (id) (let ((s (romacs-agent--make :id id :harness 'claude :title id)))
+                                       (puthash id s romacs-agent--sessions) s))
+                        (scaling--names "scaling-session" n)))
+  :body (let ((record (json-parse-string "{\"seq\": 1, \"out\": {\"type\": \"result\", \"total_cost_usd\": 0}}"
+                                         :object-type 'hash-table :null-object :null :false-object :false)))
+          (dolist (session it) (romacs-agent--record (romacs-agent-get (romacs-agent-id session)) record))))
+
+;; N calls recorded in a session's call log (each an appended line) and
+;; each looked up.
+(scaling-probe agent-calls :n 200
+  :setup (progn (scaling--agent)
+                (make-directory (romacs-agent-tools--dir "scaling-calls") t)
+                (scaling--names "relay:call" n))
+  :body (progn
+          (dolist (key it) (romacs-agent-tools--note "scaling-calls" key (romacs-mcp--object "state" "done")))
+          (dolist (key it) (gethash key (romacs-agent-tools--table "scaling-calls")))))
+
+;; N queued calls, each withdrawn by its relay.
+(scaling-probe agent-withdraw :n 64
+  :setup (progn (require 'romacs-mcp) (number-sequence 0 (1- n)))
+  :body (let ((romacs-mcp--queue nil) (romacs-mcp--queued (make-hash-table :test #'equal)))
+          (dolist (i it)
+            (let ((request (list :peer 'scaling-peer :message (romacs-mcp--object "id" i) :cancelled nil)))
+              (push request romacs-mcp--queue)
+              (puthash (cons 'scaling-peer i) request romacs-mcp--queued)))
+          (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
+            (dolist (i it) (romacs-mcp--withdraw 'scaling-peer "w" i)))))
+
+;; A chat of N tool calls, started then each answered.
+(scaling-probe agent-chat-tools :n 200
+  :setup (progn (scaling--agent)
+                (let ((session (romacs-agent--make :id "scaling-chat" :harness 'claude :title "scaling chat"
+                                                   :dir temporary-file-directory)))
+                  (romacs-agent-show session)
+                  session))
+  :body (progn
+          (dotimes (i n)
+            (romacs-agent-ui--render it (list :type 'tool :state 'started :id (format "t%d" i) :name "Bash"
+                                              :seq (1+ i) :last t)))
+          (dotimes (i n)
+            (romacs-agent-ui--render it (list :type 'tool :state 'completed :id (format "t%d" i) :output "ok"
+                                              :seq (+ 1 n i) :last t)))))
+
+;; Cursor motion in a truncated window, which places point's line for its
+;; hscroll each redisplay: N faces defined, then N distinct faces on
+;; point's line.  Setup returns the buffer: a step's timer runs in whatever
+;; buffer is current then.
+(scaling-probe hscroll-faces-defined :gui t :n 500 :steps 40
+  :setup (progn (dotimes (i n) (custom-declare-face (intern (format "scaling-hs-%d" i)) '((t :weight bold)) "x" :group 'scaling))
+                (switch-to-buffer (get-buffer-create "hs")) (erase-buffer)
+                (insert (make-string 400 ?x) "\n") (setq-local truncate-lines t) (goto-char 10)
+                (current-buffer))
+  :body (with-current-buffer it (if (cl-evenp i) (forward-char 1) (backward-char 1))))
+
+(scaling-probe hscroll-faces-on-line :gui t :n 500 :steps 40
+  :setup (progn (switch-to-buffer (get-buffer-create "hs")) (erase-buffer)
+                (dotimes (i n) (let ((face (intern (format "scaling-hs-%d" i))))
+                                 (custom-declare-face face '((t :weight bold)) "x" :group 'scaling)
+                                 (insert (propertize "x" 'face face))))
+                (insert "\n") (setq-local truncate-lines t) (goto-char 10)
+                (current-buffer))
+  :body (with-current-buffer it (if (cl-evenp i) (forward-char 1) (backward-char 1))))
 
 ;;;; Running
 

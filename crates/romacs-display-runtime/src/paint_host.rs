@@ -155,6 +155,30 @@ impl PaintHost {
         height: u32,
         title: String,
     ) -> Result<(Self, PaintSender), String> {
+        Self::wayland_with(socket, width, height, title, false)
+    }
+
+    /// A server's host: no window until [`PaintSender::show_primary`] asks
+    /// for one, and the session outlives each window it shows. The GPU
+    /// starts with the first window and stays for the next.
+    #[cfg(target_os = "linux")]
+    pub fn wayland_server(
+        socket: &std::path::Path,
+        width: u32,
+        height: u32,
+        title: String,
+    ) -> Result<(Self, PaintSender), String> {
+        Self::wayland_with(socket, width, height, title, true)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn wayland_with(
+        socket: &std::path::Path,
+        width: u32,
+        height: u32,
+        title: String,
+        server: bool,
+    ) -> Result<(Self, PaintSender), String> {
         if width == 0 || height == 0 {
             return Err("paint host size must be nonzero".into());
         }
@@ -167,12 +191,15 @@ impl PaintHost {
         let (comms, mut render) = ThreadComms::new().split();
         let diagnostics = std::sync::Arc::new(PaintDiagnostics::default());
         render.paint_diagnostics = Some(diagnostics.clone());
-        comms
-            .cmd_tx
-            .try_send(RenderCommand::Window(WindowCommand::AdoptPrimaryFrame {
-                frame: FrameRef::Frame(PRIMARY_FRAME),
-            }))
-            .map_err(|error| error.to_string())?;
+        render.keep_alive_without_frames = server;
+        if !server {
+            comms
+                .cmd_tx
+                .try_send(RenderCommand::Window(WindowCommand::AdoptPrimaryFrame {
+                    frame: FrameRef::Frame(PRIMARY_FRAME),
+                }))
+                .map_err(|error| error.to_string())?;
+        }
         Ok((
             Self {
                 event_loop,
@@ -368,6 +395,63 @@ impl PaintSender {
             .comms
             .cmd_tx
             .try_send(RenderCommand::Window(WindowCommand::RefreshFrameOpacity))
+            .map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result
+    }
+
+    /// A server's window for the primary frame, WIDTH by HEIGHT: made
+    /// when none shows, asked for the focus when one does. The receiver
+    /// answers once the window and its surface exist (or failed), within
+    /// 30 s; paint the frame after that.
+    pub fn show_primary(
+        &self,
+        width: u32,
+        height: u32,
+        title: String,
+    ) -> Result<crossbeam_channel::Receiver<Result<(), String>>, String> {
+        let (reply, ready) = crossbeam_channel::bounded(1);
+        let none = crate::host_types::GuiFrameGeometryHints {
+            base_width: 0, base_height: 0, min_width: 0, min_height: 0, width_inc: 0, height_inc: 0,
+        };
+        let result = self
+            .comms
+            .cmd_tx
+            .try_send(RenderCommand::Window(WindowCommand::RealizeFrame {
+                frame: FrameRef::Frame(PRIMARY_FRAME),
+                width,
+                height,
+                title,
+                geometry_hints: none,
+                fullscreen: None,
+                visual: None,
+                adopt_primary: true,
+                reply: Some(reply),
+                live: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+            }))
+            .map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result.map(|()| ready)
+    }
+
+    /// Close a server's primary window; the render loop and the GPU stay.
+    pub fn hide_primary(&self) -> Result<(), String> {
+        let result = self
+            .comms
+            .cmd_tx
+            .try_send(RenderCommand::Window(WindowCommand::DestroyWindow { frame: FrameRef::Primary }))
+            .map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result
+    }
+
+    /// Ask the compositor to bring the primary window to the user.
+    pub fn raise_primary(&self) -> Result<(), String> {
+        let result = self
+            .comms
+            .cmd_tx
+            .try_send(RenderCommand::Window(WindowCommand::RequestAttention { urgent: false }))
             .map_err(|error| error.to_string());
         self.proxy.wake_up();
         result

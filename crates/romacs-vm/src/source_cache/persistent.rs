@@ -128,7 +128,7 @@ impl Vm {
                 _ => unreachable!(),
             }
         }
-        let (ids, cache_ids) = self.reserve_request_artifact(&a.functions, a.caches);
+        let (ids, cache_ids) = self.reserve_request_artifact(a.functions.clone(), a.caches);
         for f in &mut a.functions {
             for op in &mut f.code {
                 match op {

@@ -245,6 +245,13 @@ fn exact_pair(cx: &mut Leaf<'_>, time: ExactStamp) -> Value {
     cx.cons(ticks, hz)
 }
 
+/// Ftime_convert ((TICKS . HZ), Qnil): the exact stamp in
+/// `current-time-list''s form.
+pub(super) fn ticks_time(cx: &mut Leaf<'_>, ticks: i128, hz: i64) -> Out {
+    let stamp = ExactStamp { ticks: ticks.into(), hz: hz.into(), identity: FrequencyIdentity::Lisp(Value::integer(hz).map_err(Fault::Error)?) };
+    Ok(if list_time_output(cx)? { exact_list(cx, &stamp) } else { exact_pair(cx, stamp) })
+}
+
 fn invalid_frequency(cx: &mut Leaf<'_>, value: Value) -> Fault {
     let message = cx.string("Invalid time frequency");
     let data = cx.cons(value, Value::NIL);

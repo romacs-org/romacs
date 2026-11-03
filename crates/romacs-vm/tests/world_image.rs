@@ -32,6 +32,7 @@ const ANCESTORS: &str = "a_store_is_refused_under_a_home_or_cache_others_could_r
 const UMASK: &str = "a_store_made_under_umask_000_is_private_all_the_way_down";
 const RESERVED: &str = "an_images_range_is_reserved_before_anything_else_maps_and_the_restore_succeeds";
 const TAKEN: &str = "an_image_whose_range_was_taken_before_the_process_started_is_refused_and_says_why";
+const HEAP: &str = "a_restored_process_allocates_from_the_system_and_an_arena_returns_a_freed_peak";
 
 /// Before the runtime's first allocation, so before the arena reserves its
 /// window: a page mapped at the address ROMACS_WORLD_IMAGE_TEST_PREMAP
@@ -102,6 +103,8 @@ fn act_in_role() -> bool {
         Ok("probe") => probe(),
         Ok("launch-reserved") => launch_reserved(&store.unwrap()),
         Ok("pages") => pages(&store.unwrap()),
+        Ok("heap") => heap(&store.unwrap()),
+        Ok("trim") => trim(),
         _ => return false,
     }
     true
@@ -379,6 +382,70 @@ fn an_image_whose_range_was_taken_before_the_process_started_is_refused_and_says
                          json!({"taken_after": true}).to_string()]);
     assert_eq!(std::fs::metadata(image(&store)).unwrap().ino(), inode, "the image was kept");
     assert_eq!(outcome(&mut child_of(TAKEN, "launch", &store)), restored());
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// This process's resident bytes.
+fn resident() -> usize {
+    let statm = std::fs::read_to_string("/proc/self/statm").unwrap();
+    statm.split_whitespace().nth(1).unwrap().parse::<usize>().unwrap() * 4096
+}
+
+/// After a restore: whether a new block lies outside the arena, and
+/// whether the arena's used span stayed as it was over a large block's
+/// life and the VM's drop.
+fn heap(store: &Path) {
+    let Launch::Restored { vm, .. } = world(store).launch::<u64>(Vec::new, true, || {}) else {
+        println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
+        return;
+    };
+    let (base, reserve) = arena::current_range().unwrap();
+    let used = arena::census().unwrap().used;
+    let block = vec![1u8; 64 << 20];
+    let outside = !(base..base + reserve).contains(&(block.as_ptr() as usize));
+    drop(block);
+    drop(vm);
+    println!("WORLD-IMAGE {}", json!({"outside": outside, "used_kept": arena::census().unwrap().used == used}));
+}
+
+/// In a process whose heap is its first arena: a large block freed at the
+/// top gives its pages back, but for a bounded slack above the top; short
+/// free runs below the top keep theirs until a collection, even one that
+/// finds everything live, and the census then counts them released.
+fn trim() {
+    let block = vec![1u8; 64 << 20];
+    let touched = resident();
+    drop(block);
+    let census = arena::census().unwrap();
+    let (returned, slack) = (touched - resident() >= 48 << 20, census.above_top <= 4 << 20);
+    let mut vm = Vm::new();
+    vm.collect_garbage();
+    // 64 runs of 32 pages, each held apart by a live 10-page run.
+    let (mut runs, mut apart) = (Vec::new(), Vec::new());
+    for _ in 0..64 {
+        runs.push(vec![1u8; 32 << 12]);
+        apart.push(vec![1u8; 10 << 12]);
+    }
+    drop(runs);
+    let (kept, before) = (arena::census().unwrap(), resident());
+    vm.collect_garbage();
+    let after = arena::census().unwrap();
+    let released = after.runs_released - kept.runs_released;
+    println!("WORLD-IMAGE {}", json!({"returned": returned, "slack": slack,
+                                       "collected": before - resident() >= 6 << 20 && released >= 6 << 20}));
+    drop(apart);
+}
+
+#[test]
+fn a_restored_process_allocates_from_the_system_and_an_arena_returns_a_freed_peak() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(HEAP);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(HEAP, "launch", &store)), restored());
+    assert_eq!(outcome(&mut child_of(HEAP, "heap", &store)), json!({"outside": true, "used_kept": true}).to_string());
+    assert_eq!(outcome(&mut child_of(HEAP, "trim", &store)), json!({"returned": true, "slack": true, "collected": true}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

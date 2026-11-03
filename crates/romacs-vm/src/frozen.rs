@@ -707,6 +707,7 @@ impl Vm {
         let (conses, objects) = self.place(&decoded, place, &symbols).map_err(FreezeError::Failed)?;
         let tables: Vec<usize> = objects.iter().enumerate().filter(|(_, o)| matches!(o, Object::HashTable(_))).map(|(i, _)| i).collect();
         self.conses.extend(conses);
+        self.charge_payload(objects.iter().map(crate::data::payload_bytes).sum());
         self.objects.extend(objects);
         let Place::Private { objects: base, .. } = place else { unreachable!() };
         for i in tables {

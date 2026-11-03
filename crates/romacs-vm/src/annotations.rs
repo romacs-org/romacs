@@ -742,8 +742,10 @@ impl Vm {
     pub(super) fn plist_lookup(&self, plist: Value, key: Value) -> Value {
         let mut walk = TailWalk::new(plist);
         let mut tail = plist;
-        while let Ok((k, rest)) = self.cons_pair(tail) {
-            let Ok((v, next)) = self.cons_pair(rest) else { break };
+        // A tail that is no cons ends the walk; testing the tag first spares
+        // the error `cons_pair' would format for it.
+        while tail.index_if(3).is_some() && let Ok((k, rest)) = self.cons_pair(tail) {
+            let Some((v, next)) = rest.index_if(3).and_then(|_| self.cons_pair(rest).ok()) else { break };
             if k == key {
                 return v;
             }
@@ -845,6 +847,44 @@ impl Vm {
             out = cell;
         }
         out
+    }
+    /// Fobject_intervals' layout: the text of OBJECT, a string or buffer,
+    /// as 0-based character runs of eq property values over all of it, as
+    /// the printer shows them, each with its properties, most recently set
+    /// first; None without an interval tree (text that never had
+    /// properties).
+    pub(crate) fn object_intervals(&self, object: Value) -> Result<Option<Vec<(usize, usize, Vec<(String, Value)>)>>> {
+        fn runs(properties: &crate::properties::Properties, len: usize, char_of: impl Fn(usize) -> Result<usize>)
+            -> Result<Option<Vec<(usize, usize, Vec<(String, Value)>)>>> {
+            if !properties.has_intervals() || len == 0 { return Ok(None); }
+            properties.runs(ByteOffset(0)..ByteOffset(len)).into_iter()
+                .map(|(run, values)| Ok((char_of(run.start.0)?, char_of(run.end.0)?, values)))
+                .collect::<Result<Vec<_>>>().map(Some)
+        }
+        if Self::image_string(object) { return Ok(None); }
+        match self.object(object)? {
+            Object::String(s) | Object::RawString(s) => {
+                let offsets: Vec<usize> = (0..=s.len()).map(|i| s.byte_offset(CharOffset(i)).unwrap()).collect();
+                runs(&s.properties, s.bytes().len(), |b| Ok(offsets.partition_point(|&o| o < b)))
+            }
+            Object::Bytes(_) => Ok(None),
+            Object::Buffer(t) => runs(&t.properties, t.len_bytes(), |b| Ok(t.char_of_byte(ByteOffset(b))?.0)),
+            Object::ByteBuffer(t) => {
+                if t.had_intervals && t.properties.is_empty() && !t.bytes.is_empty() {
+                    return Ok(Some(vec![(0, t.bytes.len(), Vec::new())]));
+                }
+                runs(&crate::properties::Properties::from_map(&t.properties), t.bytes.len(), Ok)
+            }
+            _ => Err("buffer-or-string-p".into()),
+        }
+    }
+    /// The symbol a text property's key names.
+    pub(crate) fn property_key_symbol(&mut self, key: &str) -> Value {
+        match key {
+            "nil" => Value::NIL,
+            "t" => Value::TRUE,
+            _ => Value::reference(self.slot(key) + 1, 7),
+        }
     }
     pub(super) fn annotation_raw(&self, object: Value, at: usize) -> Result<Vec<(String, Value)>> {
         if Self::image_string(object) {
@@ -1024,12 +1064,7 @@ impl Vm {
         if raw_query {
             let mut values = vec![];
             for (key, value) in raw {
-                let symbol = match key.as_str() {
-                    "nil" => Value::NIL,
-                    "t" => Value::TRUE,
-                    _ => Value::reference(self.slot(&key) + 1, 7),
-                };
-                values.extend([symbol, value]);
+                values.extend([self.property_key_symbol(&key), value]);
             }
             Ok(self.list_value(&values))
         } else {
