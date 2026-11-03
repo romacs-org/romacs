@@ -307,6 +307,94 @@ thousandth a stack mark."
            (current-buffer))
   :body (with-current-buffer it (insert "x")))
 
+;;;; Server clients and agent sessions (romacs-server.el, romacs-agent*.el)
+
+(defun scaling--server ()
+  "romacs-server.el's waiter index with its GNU advice, and no socket."
+  (require 'romacs-server)
+  (advice-add 'server-buffer-done :before #'romacs-server--buffer-done)
+  (advice-add 'server-done :around #'romacs-server--done))
+
+;; One native client waiting on N files, each finished with server-done,
+;; last first: each costs its own waiters, never the files left.  The
+;; index alone (bury-buffer, which every server-done runs as GNU's does,
+;; left out) and the whole command.
+(scaling-probe server-waiters-index :n 200
+  :setup (progn (scaling--server)
+                (mapcar (lambda (name) (get-buffer-create name)) (scaling--names " scaling-wait" n)))
+  :body (cl-letf (((symbol-function 'romacs-mcp-reply) #'ignore)
+                  ((symbol-function 'bury-buffer) #'ignore))
+          (romacs-server--wait (list :probe t) 'scaling-peer it)
+          (dolist (buffer (reverse it)) (with-current-buffer buffer (server-done)))))
+
+(scaling-probe server-waiters :n 200
+  :known "ticket buffers: bury-buffer, which server-done runs per finished buffer, rebuilds the buffer order list"
+  :setup (progn (scaling--server)
+                (mapcar (lambda (name) (get-buffer-create name)) (scaling--names " scaling-wait" n)))
+  :body (cl-letf (((symbol-function 'romacs-mcp-reply) #'ignore))
+          (romacs-server--wait (list :probe t) 'scaling-peer it)
+          (dolist (buffer (reverse it)) (with-current-buffer buffer (server-done)))))
+
+;; N requests held on one connection, then the connection lost.
+(scaling-probe server-peer :n 200
+  :setup (progn (scaling--server)
+                (mapcar (lambda (name) (get-buffer-create name)) (scaling--names " scaling-peer" n)))
+  :body (progn
+          (dolist (buffer it) (romacs-server--wait (list :probe t) 'scaling-one-peer (list buffer)))
+          (romacs-server--peer-closed 'scaling-one-peer)))
+
+(defun scaling--agent ()
+  "romacs-agent.el with a private state directory."
+  (setenv "XDG_STATE_HOME" (make-temp-file "scaling-state-" t))
+  (require 'romacs-agent))
+
+;; One event to each of N sessions.
+(scaling-probe agent-dispatch :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (mapcar (lambda (id) (let ((s (romacs-agent--make :id id :harness 'claude :title id)))
+                                       (puthash id s romacs-agent--sessions) s))
+                        (scaling--names "scaling-session" n)))
+  :body (let ((record (json-parse-string "{\"seq\": 1, \"out\": {\"type\": \"result\", \"total_cost_usd\": 0}}"
+                                         :object-type 'hash-table :null-object :null :false-object :false)))
+          (dolist (session it) (romacs-agent--record (romacs-agent-get (romacs-agent-id session)) record))))
+
+;; N calls recorded in a session's call log (each an appended line) and
+;; each looked up.
+(scaling-probe agent-calls :n 200
+  :setup (progn (scaling--agent)
+                (make-directory (romacs-agent-tools--dir "scaling-calls") t)
+                (scaling--names "relay:call" n))
+  :body (progn
+          (dolist (key it) (romacs-agent-tools--note "scaling-calls" key (romacs-mcp--object "state" "done")))
+          (dolist (key it) (gethash key (romacs-agent-tools--table "scaling-calls")))))
+
+;; N queued calls, each withdrawn by its relay.
+(scaling-probe agent-withdraw :n 64
+  :setup (progn (require 'romacs-mcp) (number-sequence 0 (1- n)))
+  :body (let ((romacs-mcp--queue nil) (romacs-mcp--queued (make-hash-table :test #'equal)))
+          (dolist (i it)
+            (let ((request (list :peer 'scaling-peer :message (romacs-mcp--object "id" i) :cancelled nil)))
+              (push request romacs-mcp--queue)
+              (puthash (cons 'scaling-peer i) request romacs-mcp--queued)))
+          (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
+            (dolist (i it) (romacs-mcp--withdraw 'scaling-peer "w" i)))))
+
+;; A chat of N tool calls, started then each answered.
+(scaling-probe agent-chat-tools :n 200
+  :setup (progn (scaling--agent)
+                (let ((session (romacs-agent--make :id "scaling-chat" :harness 'claude :title "scaling chat"
+                                                   :dir temporary-file-directory)))
+                  (romacs-agent-show session)
+                  session))
+  :body (progn
+          (dotimes (i n)
+            (romacs-agent-ui--render it (list :type 'tool :state 'started :id (format "t%d" i) :name "Bash"
+                                              :seq (1+ i) :last t)))
+          (dotimes (i n)
+            (romacs-agent-ui--render it (list :type 'tool :state 'completed :id (format "t%d" i) :output "ok"
+                                              :seq (+ 1 n i) :last t)))))
+
 ;;;; Running
 
 (defun scaling--probe (name)
