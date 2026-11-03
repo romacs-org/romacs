@@ -103,6 +103,12 @@ class LispLayoutTests(unittest.TestCase):
                     # retains its notice.
                     self.assertIn(';; Copyright (C) 2010-2026 Free Software Foundation, Inc.', (ROOT / 'gnu-lisp/color.el').read_text())
                     self.assertIn(';; Portions Copyright (C) 2010-2026 Free Software Foundation, Inc., from\n;; GNU Emacs lisp/color.el', source)
+                elif file == ROOT / 'rlisp/romacs-theme-modus.el':
+                    # Generated from modus-themes.el (GNU ELPA, FSF copyright) by
+                    # scripts/adapt-modus; retains its notice and names the version.
+                    self.assertIn(';; Copyright (C) 2019-2026  Free Software Foundation, Inc.', source)
+                    self.assertIn(';; Adapted from modus-themes.el 5.3.0 by Protesilaos Stavrou', source)
+                    self.assertRegex(source, r'sha256 [0-9a-f]{64}')
                 else:
                     self.assertNotRegex(source, copyright_pattern)
                 self.assertNotIn('This file is part of GNU Emacs.', source)

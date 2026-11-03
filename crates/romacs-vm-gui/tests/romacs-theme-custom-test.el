@@ -9,6 +9,24 @@
 
 (require 'romacs-theme)
 
+(defconst romacs-theme-test--fixtures
+  (expand-file-name "../../romacs-face/tests/gnu/fixtures/" (file-name-directory load-file-name))
+  "The GNU oracle's fixtures.")
+
+(romacs-deftest romacs-theme-the-modus-generator-is-modus-s ()
+  ;; rlisp/romacs-theme-modus.el's generator, on the stock theme's
+  ;; reference palette, answers as GNU with modus-themes 5.3.0 does, entry
+  ;; for entry (fixture rum-generator.eld).
+  (require 'romacs-theme-modus)
+  (let* ((fixture (with-temp-buffer
+                    (insert-file-contents (expand-file-name "rum-generator.eld" romacs-theme-test--fixtures))
+                    (read (current-buffer))))
+         (ours (romacs-theme-modus-generate-palette (plist-get fixture :base) 'warm
+                                                    romacs-theme-modus-vivendi-palette))
+         (theirs (plist-get fixture :palette)))
+    (romacs-should (= (length ours) (length theirs)))
+    (romacs-should (null (seq-remove (lambda (entry) (equal entry (assq (car entry) theirs))) ours)))))
+
 (defconst romacs-theme-test-dark
   '((mode dark) (bg "#1a1b26") (bg-dark "#16161e") (bg-darker "#101014") (bg-alt "#24283b")
     (fg "#c0caf5") (fg-dim "#565f89") (fg-light "#a9b1d6") (fg-bright "#ffffff")
