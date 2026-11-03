@@ -369,9 +369,10 @@ struct ShownKey {
     /// how far rows other than point's are scrolled.
     min_hscroll: i64,
     suspended: bool,
-    /// The window's fringe and margin widths and whether the fringes are
-    /// outside the margins: what its chrome places.
-    chrome: ([u32; 2], [u32; 2], bool),
+    /// The window's fringe and margin widths, whether the fringes are
+    /// outside the margins, and whether its frame draws pane chrome, which
+    /// paints the fringes in the window background: what its chrome places.
+    chrome: ([u32; 2], [u32; 2], bool, bool),
     root: (u32, u32),
     metrics: (u32, u32),
     /// What fonts faces realize (`DisplayState::face_revision`).
@@ -602,7 +603,7 @@ impl Vm {
         Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, selected, minibuffer })
     }
     /// FRAME's parameter NAME, if it has one.
-    fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
+    pub(crate) fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
         let key = self.intern(name);
         Ok(self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v))
     }
@@ -1765,8 +1766,10 @@ impl Vm {
             min_hscroll,
             suspended,
             chrome: {
+                let host = self.host_frame_peek();
+                let pane = self.frame_parameter_of(host, "romacs-pane-chrome")?.is_some_and(|v| v != Value::NIL);
                 let w = self.window(window)?;
-                (self.window_fringe_widths(window)?, [w.left_margin, w.right_margin], w.fringes_outside_margins)
+                (self.window_fringe_widths(window)?, [w.left_margin, w.right_margin], w.fringes_outside_margins, pane)
             },
             root,
             metrics: (self.window_state.line, self.window_state.column),

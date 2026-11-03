@@ -386,3 +386,27 @@ fn without_romacs_chrome_no_pane_chrome_is_drawn() {
     eval(&mut vm, "(progn (defface romacs-pane-focus '((t :foreground \"#ff0000\")) \"\") (defface romacs-pane-border '((t :foreground \"#00ff00\")) \"\"))");
     assert!(!chrome(&mut vm).drawn());
 }
+
+/// Under pane chrome a window's fringes are part of its pane: painted in
+/// its default background whatever the theme gives `fringe' (here Modus
+/// Vivendi's dimmer one); classic chrome paints the `fringe' face, as GNU.
+#[test]
+fn pane_chrome_paints_fringes_in_the_window_background() {
+    let mut vm = themed_session();
+    eval(&mut vm, "(load-theme 'modus-vivendi t)");
+    let fringe_and_default = |vm: &mut Vm| {
+        let frame = vm.frame_snapshot(1216, 876).unwrap();
+        let window = &frame.windows[0].snapshot;
+        assert!(window.chrome.left_fringe > 0 && window.chrome.right_fringe > 0, "fringes keep their width");
+        (window.faces[window.chrome.fringe_face.0 as usize].background, window.faces[0].background)
+    };
+    let (fringe, default) = fringe_and_default(&mut vm);
+    assert_eq!(fringe, default, "pane chrome: no fringe strip");
+    eval(&mut vm, "(romacs-classic-chrome 1)");
+    let (fringe, default) = fringe_and_default(&mut vm);
+    assert_ne!(fringe, default, "classic chrome paints the theme's fringe face");
+    // The parameter alone, after a classic snapshot: the window is shown again.
+    eval(&mut vm, "(set-frame-parameter nil 'romacs-pane-chrome t)");
+    let (fringe, default) = fringe_and_default(&mut vm);
+    assert_eq!(fringe, default, "a pane-chrome switch alone shows no stale strip");
+}

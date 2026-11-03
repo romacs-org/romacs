@@ -147,6 +147,20 @@
             (romacs-should (>= (romacs-color-contrast (funcall fg 'romacs-complete-match) on) 4.5))))))
     (romacs-should (equal custom-enabled-themes enabled))))
 
+(romacs-deftest romacs-theme-every-shipped-theme-has-no-fringe-strip ()
+  ;; Fringes, window dividers and the vertical border are the window
+  ;; background in every theme Romacs ships, so no strip shows beside a
+  ;; window, as the reference session's invisible dividers do.
+  (dolist (theme (mapcar #'car romacs-theme-bundled))
+    (load-theme theme t t)
+    (let* ((spec (lambda (face)
+                   (nth 3 (car (seq-filter (lambda (s) (and (eq (car s) 'theme-face) (eq (nth 1 s) face)))
+                                           (get theme 'theme-settings))))))
+           (attr (lambda (face key) (plist-get (cdr (car (funcall spec face))) key)))
+           (bg (funcall attr 'default :background)))
+      (dolist (face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border))
+        (romacs-should (equal (list theme face (funcall attr face :background)) (list theme face bg)))))))
+
 (romacs-deftest romacs-theme-a-variant-is-found-before-it-is-loaded ()
   (unwind-protect
       (let ((romacs-theme--stock t))

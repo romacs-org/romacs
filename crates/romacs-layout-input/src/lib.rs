@@ -305,6 +305,7 @@ pub struct WindowChrome {
     pub left_fringe: u32,
     pub right_fringe: u32,
     pub outside_margins: bool,
+    /// The face the fringes' background is painted in.
     pub fringe_face: FaceHandle,
     pub border: Option<FaceHandle>,
     pub indicators: Indicators,
