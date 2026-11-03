@@ -411,25 +411,28 @@ def main():
                 shell('printf "INTERRUPT_RECOVERED\\n"')
                 visible('INTERRUPT_RECOVERED')
                 capture('interrupt-recovered')
+                # Moving point off the cursor (M-x is an exception) makes the
+                # window a plain Emacs buffer: output does not move it, and
+                # typing puts it back on the cursor and sends the keys.
                 gate = work / 'output-gate'
-                shell('while [ ! -f ' + shlex.quote(str(gate)) + ' ]; do sleep .05; done; printf "NAVIGATION_TAIL\\n"')
-                control('c')
-                control('c')
-                visible('Emacs input:')
-                control('a')
-                control('p')
+                tail = work / 'tail-written'
+                shell('seq 1 200')
+                shell('while [ ! -f ' + shlex.quote(str(gate)) + ' ]; do sleep .05; done; printf "NAVIGATION_%s\\n" TAIL; : > '
+                      + shlex.quote(str(tail)))
+                extended('beginning-of-buffer')
+                time.sleep(.5)
                 before = cursor_state(trace())
                 gate.write_text('go')
-                visible('NAVIGATION_TAIL')
+                check('NAVIGATION_TAIL_WRITTEN', tail.exists)
+                time.sleep(.5)
                 after = cursor_state(trace())
-                assert after == before, f'TERMINAL_DETACHED_POINT_STABLE: {before} -> {after}'
-                capture('navigation-during-output')
-                keys('READ_ONLY_SENTINEL')
-                assert not any('READ_ONLY_SENTINEL' in row for row in fio.rows(trace())), 'TERMINAL_OUTPUT_PROTECTED'
-                report['checks'].append('TERMINAL_OUTPUT_PROTECTED_AND_POINT_STABLE')
-                control('c')
-                control('c')
-                visible('Terminal input:')
+                assert after == before, f'TERMINAL_AWAY_POINT_STABLE: {before} -> {after}'
+                assert not any('NAVIGATION_TAIL' in row for row in ff.current_rows(trace())), 'TERMINAL_AWAY_VIEW_STABLE'
+                capture('scrollback-during-output')
+                shell('printf "SNAPPED_%s\\n" BACK')
+                visible('SNAPPED_BACK')
+                visible('NAVIGATION_TAIL')
+                report['checks'].append('TERMINAL_SCROLLBACK_STABLE_AND_TYPING_SNAPS_BACK')
                 gate2 = work / 'prompt-gate'
                 shell('while [ ! -f ' + shlex.quote(str(gate2)) + ' ]; do sleep .05; done; printf "OUTPUT_DURING_MX\\n"')
                 keys('-M', 'alt', 'x', '-m', 'alt')

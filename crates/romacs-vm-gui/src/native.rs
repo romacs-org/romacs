@@ -9,6 +9,17 @@ pub fn translate(event: InputEvent) -> Option<CommandEvent> {
         InputEvent::Key { key, modifiers, pressed: true, .. } => (key, modifiers),
         _ => return None,
     };
+    // Shift+Tab is the function key `backtab', as GNU's X and pgtk frames
+    // deliver ISO_Left_Tab; modifiers other than Shift stay on it.
+    if let FrontendKey::Keysym(0xff09 | 0xfe20) = key
+        && modifiers & ROMACS_SHIFT_MASK != 0
+    {
+        let mut prefix = String::new();
+        for (mask, label) in [(ROMACS_ALT_MASK, "A-"), (ROMACS_CTRL_MASK, "C-"), (ROMACS_HYPER_MASK, "H-"), (ROMACS_META_MASK, "M-"), (ROMACS_SUPER_MASK, "s-")] {
+            if modifiers & mask != 0 { prefix.push_str(label); }
+        }
+        return Some(CommandEvent::Named(prefix + "backtab"));
+    }
     let mut code = match key {
         FrontendKey::Character(c) => Some(c as i64),
         FrontendKey::Keysym(k) => match k {
@@ -16,7 +27,10 @@ pub fn translate(event: InputEvent) -> Option<CommandEvent> {
             // Return is the function key `return', as GNU's X and pgtk
             // frames deliver it; `local-function-key-map' makes an unbound
             // one RET (simple.el).
-            0xff08 => Some(127), 0xff09 => Some(9), 0xff1b => Some(27),
+            // Escape is the function key `escape', as GNU's X and pgtk
+            // frames deliver it; `function-key-map' makes an unbound one ESC
+            // (simple.el), and a terminal can send it at once.
+            0xff08 => Some(127), 0xff09 => Some(9),
             0..=0x7f | 0xa0..=0xff => Some(k as i64),
             0x01000000..=0x0110ffff => char::from_u32(k & 0xffffff).map(|c| c as i64),
             _ => None,
@@ -35,7 +49,7 @@ pub fn translate(event: InputEvent) -> Option<CommandEvent> {
     }
     let FrontendKey::Keysym(k) = key else { return None; };
     let name = match k {
-        0xff08 => "backspace".into(), 0xff0d => "return".into(),
+        0xff08 => "backspace".into(), 0xff0d => "return".into(), 0xff1b => "escape".into(),
         0xff50 => "home".into(), 0xff51 => "left".into(), 0xff52 => "up".into(),
         0xff53 => "right".into(), 0xff54 => "down".into(), 0xff55 => "prior".into(),
         0xff56 => "next".into(), 0xff57 => "end".into(), 0xffff => "delete".into(),

@@ -75,6 +75,31 @@ impl Vm {
         }
         self.initialize_command_bindings(global);
     }
+    /// MAP's binding of EVENT alone (a character, a meta character standing
+    /// for ESC and its base, or a function-key symbol), or of `[remap
+    /// EVENT]' when REMAP, with default bindings when DEFAULTS: nil when
+    /// unbound or only a prefix of more.  An
+    /// error when a menu item's `:filter' would have to run, which a caller
+    /// that must not run Lisp takes as "cannot tell".
+    pub(crate) fn lookup_one_event(&mut self, map: Value, event: Value, remap: bool, defaults: bool) -> Result<Value> {
+        let events = if remap {
+            vec![KeyEvent { value: self.keymap_symbol("remap"), input_index: 0 }, KeyEvent { value: event, input_index: 1 }]
+        } else if let Some(c) = event.integer_value() {
+            let meta = 1 << 27;
+            if c & meta != 0 {
+                let prefix = self.slots[self.names["meta-prefix-char"]].value;
+                vec![KeyEvent { value: prefix, input_index: 0 }, KeyEvent { value: Value::integer(c & !meta)?, input_index: 0 }]
+            } else { vec![KeyEvent { value: event, input_index: 0 }] }
+        } else {
+            vec![KeyEvent { value: self.canonical_key_event_symbol(event)?, input_index: 0 }]
+        };
+        self.keymap_filters.clear();
+        self.keymap_pending_filter = None;
+        let binding = self.lookup_keymap_key(map, &events, defaults);
+        self.keymap_pending_filter = None;
+        let binding = binding?;
+        Ok(if binding.integer_value().is_some() { Value::NIL } else { binding })
+    }
     /// One `lookup-key' walk with FILTERS as the known menu-filter results:
     /// the binding, or the first filter still to run.
     pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)
@@ -96,10 +121,17 @@ impl Vm {
             _ => unreachable!("buffer_index names a buffer"),
         }
     }
-    pub(super) fn resolve_keymap(&self, mut value: Value) -> Option<Value> {
+    pub(super) fn resolve_keymap(&self, value: Value) -> Option<Value> {
+        self.resolve_keymap_as(value, Value::reference(*self.names.get("keymap")? + 1, 7))
+    }
+    /// `resolve_keymap' with KEYMAP, the symbol, already found: a walk
+    /// resolves every entry it meets.
+    fn resolve_keymap_as(&self, mut value: Value, keymap: Value) -> Option<Value> {
         for _ in 0..=self.slots.len() {
-            if let Ok((head, _)) = self.cons_pair(value) {
-                return (head == Value::reference(*self.names.get("keymap")? + 1, 7)).then_some(value);
+            // The tag first: a failed `cons_pair' formats its error.
+            if value.tag() == 3 {
+                let (head, _) = self.cons_pair(value).ok()?;
+                return (head == keymap).then_some(value);
             }
             let slot = value.index_if(7)?.checked_sub(1)?;
             value = self.slots.get(slot)?.function;
@@ -149,6 +181,7 @@ impl Vm {
     }
     fn keymap_entry_at(&mut self, map: Value, event: Value, inherit: bool, defaults: bool, depth: usize) -> Result<Option<Value>> {
         if depth > 64 { return Err("keymap nesting limit exceeded".into()); }
+        let keymap = Value::reference(self.names["keymap"] + 1, 7);
         let (_, mut tail) = self.cons_pair(map)?;
         let mut fallback = None;
         let mut found = None;
@@ -156,15 +189,15 @@ impl Vm {
         for _ in 0..=limit {
             if tail == Value::NIL { return found.or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
             if tail.tag() != 3 {
-                let parent = self.resolve_keymap(tail).ok_or("keymap parent required")?;
+                let parent = self.resolve_keymap_as(tail, keymap).ok_or("keymap parent required")?;
                 tail = parent;
             }
             let (entry, next) = self.cons_pair(tail)?;
-            let binding = if entry == Value::reference(self.names["keymap"] + 1, 7) {
+            let binding = if entry == keymap {
                 if !inherit || found == Some(Value::NIL) { return found.or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
                 if let Some(child) = found {
                     let parent = self.keymap_entry_at(tail, event, true, defaults, depth + 1)?;
-                    if let Some(parent) = parent.and_then(|v| self.resolve_keymap(v)) {
+                    if let Some(parent) = parent.and_then(|v| self.resolve_keymap_as(v, keymap)) {
                         let child_cell = self.keymap_cons(child, parent);
                         let head = self.keymap_symbol("keymap");
                         return Ok(Some(self.keymap_cons(head, child_cell)));
@@ -172,10 +205,10 @@ impl Vm {
                     return Ok(found);
                 }
                 None
-            } else if let Some(submap) = self.resolve_keymap(entry) {
+            } else if let Some(submap) = self.resolve_keymap_as(entry, keymap) {
                 self.keymap_entry_at(submap, event, inherit, defaults, depth + 1)?
-            } else if let Ok((key, value)) = self.cons_pair(entry) {
-                let range_match = self.cons_pair(key).ok().and_then(|(lo,hi)| Some((lo.integer_value()?,hi.integer_value()?,event.integer_value()?))).is_some_and(|(lo,hi,event)| lo <= event && event <= hi);
+            } else if let Some((key, value)) = (entry.tag() == 3).then(|| self.cons_pair(entry).ok()).flatten() {
+                let range_match = (key.tag() == 3).then(|| self.cons_pair(key).ok()).flatten().and_then(|(lo,hi)| Some((lo.integer_value()?,hi.integer_value()?,event.integer_value()?))).is_some_and(|(lo,hi,event)| lo <= event && event <= hi);
                 if key == event || (range_match && found.is_none()) { Some(value) }
                 else {
                     if defaults && key == Value::TRUE && fallback.is_none() { fallback = Some(value); }
@@ -189,7 +222,7 @@ impl Vm {
             } else { None };
             if let Some(value) = binding {
                 let value = self.keymap_definition(if value == Value::TRUE { Value::NIL } else { value })?;
-                if self.resolve_keymap(value).is_some() {
+                if self.resolve_keymap_as(value, keymap).is_some() {
                     if let Some(child) = found.filter(|&v| v != Value::NIL) {
                         let head = self.keymap_symbol("keymap");
                         found = Some(self.list_value(&[head, child, value]));

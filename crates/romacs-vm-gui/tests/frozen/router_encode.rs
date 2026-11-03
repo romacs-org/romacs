@@ -1,17 +1,7 @@
+//! The GUI host's terminal encoder, as it was before keys reached the
+//! command loop: kept unchanged as the reference the VM encoder
+//! (`romacs--term-encode-event') is checked against. Not built into the GUI.
 use romacs_display_runtime::thread_comm::InputEvent;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    Terminal,
-    Emacs,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Target {
-    Editor,
-    Terminal,
-    Ignore,
-}
 
 pub fn encode(event: &InputEvent, application_cursor: bool) -> Result<Vec<u8>, String> {
     use romacs_display_runtime::backend::wgpu::*;
@@ -74,43 +64,4 @@ pub fn encode(event: &InputEvent, application_cursor: bool) -> Result<Vec<u8>, S
         _ => return Err(format!("Unsupported terminal keysym {key:#x}")),
     };
     Ok(if modifier == 1 { format!("\x1b[{number}~") } else { format!("\x1b[{number};{modifier}~") }.into_bytes())
-}
-
-pub fn route(event: &InputEvent, mode: Mode, editor_prefix: bool) -> Target {
-    use romacs_display_runtime::backend::wgpu::{
-        ROMACS_ALT_MASK, ROMACS_CTRL_MASK, ROMACS_HYPER_MASK, ROMACS_META_MASK,
-        ROMACS_SHIFT_MASK, ROMACS_SUPER_MASK,
-    };
-    use romacs_display_runtime::host_types::FrontendKey;
-
-    let (key, modifiers, pressed) = match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => {
-            return route(event, mode, editor_prefix);
-        }
-        InputEvent::Key { key, modifiers, pressed, .. } => (key, *modifiers, *pressed),
-        _ => return Target::Ignore,
-    };
-    let character = match key {
-        FrontendKey::Character(c) => Some(*c as u32),
-        FrontendKey::Keysym(code) => match *code {
-            0..=0xff => Some(*code),
-            0x01000000..=0x0110ffff => Some(*code & 0xffffff),
-            _ => None,
-        },
-    };
-    let plain = modifiers & (ROMACS_META_MASK | ROMACS_ALT_MASK | ROMACS_SUPER_MASK | ROMACS_HYPER_MASK) == 0;
-    let control = modifiers & ROMACS_CTRL_MASK != 0;
-    let control_prefix_or_quit = plain && match character {
-        Some(3 | 7 | 24) => true,
-        Some(c) => control && (c == b'c' as u32 || c == b'g' as u32 || c == b'x' as u32),
-        None => false,
-    };
-    let extended_command = character == Some(b'x' as u32)
-        && modifiers & (ROMACS_META_MASK | ROMACS_ALT_MASK) != 0
-        && modifiers & (ROMACS_CTRL_MASK | ROMACS_SHIFT_MASK | ROMACS_SUPER_MASK | ROMACS_HYPER_MASK) == 0;
-    if mode == Mode::Emacs || editor_prefix || control_prefix_or_quit || extended_command {
-        if pressed { Target::Editor } else { Target::Ignore }
-    } else {
-        Target::Terminal
-    }
 }

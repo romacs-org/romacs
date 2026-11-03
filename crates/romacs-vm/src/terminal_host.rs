@@ -89,12 +89,13 @@ pub struct TerminalInputState {
     pub running: bool,
     pub application_cursor: bool,
     pub bracketed_paste: bool,
+    pub alternate_screen: bool,
 }
 
 impl TerminalSnapshot {
     /// Read protocol flags from an immutable publication.
     pub fn input_state(&self) -> TerminalInputState {
-        TerminalInputState { running: self.running, application_cursor: self.application_cursor, bracketed_paste: self.bracketed_paste }
+        TerminalInputState { running: self.running, application_cursor: self.application_cursor, bracketed_paste: self.bracketed_paste, alternate_screen: self.alternate_screen }
     }
 }
 
@@ -114,7 +115,11 @@ pub(crate) struct TerminalBinding {
     pub(crate) buffer: Value,
     pub(crate) session: u64,
     pub(crate) revision: Option<u64>,
-    pub(crate) follow: bool,
+    /// The windows showing the buffer that do not follow the terminal: a
+    /// command moved their point off the cursor or their start off the
+    /// grid. The rest follow. Every window writer obeys it (publication,
+    /// geometry); the alternate screen clears it. Roots for collection.
+    pub(crate) away: Vec<Value>,
     pub(crate) columns: u16,
     pub(crate) rows: u16,
     pub(crate) styles: std::sync::Arc<[TerminalStyleRun]>,
@@ -122,13 +127,21 @@ pub(crate) struct TerminalBinding {
     /// The last publication's cursor and first grid row, in buffer bytes.
     pub(crate) cursor_byte: usize,
     pub(crate) screen_start_byte: usize,
+    /// Whether the last publication showed the alternate screen.
+    pub(crate) alternate: bool,
+    /// The keymap generation (and screen) at which neither the route's map
+    /// nor the global map, `unremapped_maps', remapped `romacs-term-send-key':
+    /// a keymap change, or another route or global map, asks again, as GNU's
+    /// where_is_cache is flushed. The maps are roots for collection.
+    pub(crate) unremapped: Option<(u64, bool)>,
+    pub(crate) unremapped_maps: Vec<Value>,
 }
-romacs_snapshot::snapshot_struct!(TerminalBinding { buffer, session, revision, follow, columns, rows, styles, default_colors, cursor_byte, screen_start_byte });
+romacs_snapshot::snapshot_struct!(TerminalBinding { buffer, session, revision, away, columns, rows, styles, default_colors, cursor_byte, screen_start_byte, alternate, unremapped, unremapped_maps });
 
 impl TerminalBinding {
     pub(crate) fn new(buffer: Value, session: u64, columns: u16, rows: u16) -> Self {
-        Self { buffer, session, revision: None, follow: true, columns, rows, styles: std::sync::Arc::from([]),
-               default_colors: [None; 2], cursor_byte: 0, screen_start_byte: 0 }
+        Self { buffer, session, revision: None, away: Vec::new(), columns, rows, styles: std::sync::Arc::from([]),
+               default_colors: [None; 2], cursor_byte: 0, screen_start_byte: 0, alternate: false, unremapped: None, unremapped_maps: Vec::new() }
     }
 }
 
@@ -181,12 +194,6 @@ impl Vm {
         self.terminal_host.as_mut().ok_or("No terminal host attached")?.resize(session, columns, rows)
     }
 
-    /// The selected terminal's identity and whether it currently receives input.
-    pub fn selected_terminal(&mut self) -> Result<Option<(u64, bool)>, String> {
-        let window = self.selected_window_value()?;
-        let buffer = self.window(window)?.buffer;
-        Ok(self.terminal_bindings.iter().find(|b| b.buffer == buffer).map(|b| (b.session, b.follow)))
-    }
 
     /// Apply publications to their buffers; return whether a displayed buffer changed.
     pub fn poll_terminal_output(&mut self) -> Result<bool, String> {
@@ -199,9 +206,9 @@ impl Vm {
         let mut changed = false;
         let mut index = 0;
         while index < self.terminal_bindings.len() {
-            let (buffer, session, revision, follow) = {
+            let (buffer, session, revision) = {
                 let binding = &self.terminal_bindings[index];
-                (binding.buffer, binding.session, binding.revision, binding.follow)
+                (binding.buffer, binding.session, binding.revision)
             };
             if !self.live_buffer_value(buffer) {
                 self.terminal_host.as_mut().ok_or("No terminal host attached")?.close(session)?;
@@ -226,13 +233,20 @@ impl Vm {
                 }
                 previous_end = run.bytes.end;
             }
-            if revision == Some(snapshot.revision) || (!follow && snapshot.alternate_screen && revision.is_some()) {
+            if revision == Some(snapshot.revision) {
                 index += 1;
                 continue;
             }
+            // The alternate screen has no away: its windows all follow.
+            if snapshot.alternate_screen { self.terminal_bindings[index].away.clear(); }
+            self.prune_away(index)?;
+            // Buffer point is the selected window's when it shows the buffer.
+            let selected = self.selected_window_value()?;
+            let selected_shows = self.window(selected)?.buffer == buffer;
+            let follow = !(selected_shows && self.terminal_bindings[index].away.contains(&selected));
             // Decided before the new text moves (or, when history rolls
             // over, collapses) their markers.
-            let following = if follow { self.following_windows(index)? } else { vec![] };
+            let following = self.following_windows(index)?;
             let Object::Buffer(text) = self.object_mut(buffer)? else {
                 return Err("Terminal requires a Unicode buffer".into());
             };
@@ -280,6 +294,7 @@ impl Vm {
             }
             self.terminal_bindings[index].cursor_byte = snapshot.cursor_byte;
             self.terminal_bindings[index].screen_start_byte = snapshot.screen_start_byte;
+            self.terminal_bindings[index].alternate = snapshot.alternate_screen;
             self.terminal_bindings[index].default_colors = snapshot.default_colors;
             self.terminal_bindings[index].styles = snapshot.styles.clone();
             self.terminal_bindings[index].revision = Some(snapshot.revision);
@@ -307,17 +322,25 @@ impl Vm {
     /// selected one, and any other not scrolled back before the grid of the
     /// last publication.
     fn following_windows(&mut self, index: usize) -> Result<Vec<Value>, String> {
-        let binding = &self.terminal_bindings[index];
-        let (buffer, screen) = (binding.buffer, binding.screen_start_byte);
-        let selected = self.selected_window_value()?;
+        let buffer = self.terminal_bindings[index].buffer;
         let mut out = vec![];
         for w in self.leaf_windows()? {
-            let window = self.window(w)?;
-            if window.buffer != buffer { continue; }
-            let start = self.marker_byte(self.marker(window.start)?)?;
-            if w == selected || start.is_none_or(|start| start >= screen) { out.push(w); }
+            if self.window(w)?.buffer == buffer && !self.terminal_bindings[index].away.contains(&w) { out.push(w); }
         }
         Ok(out)
+    }
+
+    /// Forget away windows that are dead or no longer show the buffer.
+    fn prune_away(&mut self, index: usize) -> Result<(), String> {
+        let buffer = self.terminal_bindings[index].buffer;
+        let mut away = std::mem::take(&mut self.terminal_bindings[index].away);
+        let mut kept = Vec::with_capacity(away.len());
+        for w in away.drain(..) {
+            let live = matches!(self.object_if(w), Some(crate::data::Object::Window(window)) if window.live());
+            if live && self.window(w)?.buffer == buffer { kept.push(w); }
+        }
+        self.terminal_bindings[index].away = kept;
+        Ok(())
     }
 
     /// Run at each geometry publication: size every terminal's pty to its
@@ -342,8 +365,11 @@ impl Vm {
                     self.terminal_bindings[index].rows = rows;
                 }
             }
-            if self.terminal_bindings[index].follow && self.terminal_bindings[index].revision.is_some() {
-                for &w in &showing { self.terminal_viewport(index, w, w == selected)?; }
+            if self.terminal_bindings[index].revision.is_some() {
+                self.prune_away(index)?;
+                for &w in &showing {
+                    if !self.terminal_bindings[index].away.contains(&w) { self.terminal_viewport(index, w, w == selected)?; }
+                }
             }
         }
         Ok(())
@@ -351,9 +377,9 @@ impl Vm {
 
     /// Show a following terminal's grid in WINDOW from its first row, or,
     /// while WINDOW is shorter than the grid, from the row that puts the
-    /// cursor on its last line; a start its user scrolled above the grid
-    /// stays. A
-    /// window other than the selected one also takes the cursor as point.
+    /// cursor on its last line. A window other than the selected one also
+    /// takes the cursor as point. Only following windows come here: a window
+    /// its user scrolled is away (`TerminalBinding::away`).
     fn terminal_viewport(&mut self, index: usize, window: Value, selected: bool) -> Result<(), String> {
         use crate::coordinates::ByteOffset;
         let binding = &self.terminal_bindings[index];
@@ -366,13 +392,237 @@ impl Vm {
         let crate::data::Object::Buffer(text) = self.object(buffer)? else { return Ok(()) };
         let all = text.as_str();
         if screen > cursor || cursor > all.len() || !all.is_char_boundary(screen) || !all.is_char_boundary(cursor) { return Ok(()); }
-        if start.is_some_and(|start| start < screen) { return Ok(()); }
         let wanted = viewport_start(all, screen, cursor, rows);
         let position = |byte| -> Result<Value, String> { Value::integer(text.char_of_byte(ByteOffset(byte))?.0 as i64 + 1) };
         let (wanted_start, wanted_point) = (position(wanted)?, position(cursor)?);
         if start != Some(wanted) { self.set_marker_object(start_marker, wanted_start, buffer)?; }
         if !selected && point != Some(cursor) { self.set_marker_object(point_marker, wanted_point, buffer)?; }
         Ok(())
+    }
+
+    /// A window's point and start, as bytes of BUFFER: the selected
+    /// window's point is the buffer's.
+    fn window_place(&mut self, window: Value, buffer: Value, selected: bool) -> Result<Option<(usize, usize)>, String> {
+        let w = self.window(window)?;
+        let (start_marker, point_marker) = (w.start, w.point);
+        let start = self.marker_byte(self.marker(start_marker)?)?;
+        let point = if selected {
+            match self.object(buffer)? { crate::data::Object::Buffer(text) => Some(text.point.0), _ => None }
+        } else {
+            self.marker_byte(self.marker(point_marker)?)?
+        };
+        Ok(start.zip(point).map(|(start, point)| (point, start)))
+    }
+
+    /// Mark away every window showing a published terminal on its normal
+    /// screen whose point left the cursor, or whose start left the grid:
+    /// before the screen's first row, or past the cursor's row. Run after
+    /// each command (`romacs-term--track'), so a command in any window, a
+    /// scroll from another (`scroll-other-window') included, counts.
+    pub(crate) fn terminal_track(&mut self) -> Result<(), String> {
+        if self.terminal_bindings.is_empty() { return Ok(()); }
+        let leaves = self.leaf_windows()?;
+        let selected = self.selected_window_value()?;
+        for index in 0..self.terminal_bindings.len() {
+            let binding = &self.terminal_bindings[index];
+            if binding.revision.is_none() || binding.alternate { continue; }
+            let (buffer, cursor, screen) = (binding.buffer, binding.cursor_byte, binding.screen_start_byte);
+            let line = match self.object(buffer)? {
+                crate::data::Object::Buffer(text) if cursor <= text.as_str().len() => text.as_str()[..cursor].rfind('\n').map_or(0, |i| i + 1),
+                _ => continue,
+            };
+            for &w in &leaves {
+                if self.window(w)?.buffer != buffer || self.terminal_bindings[index].away.contains(&w) { continue; }
+                let Some((point, start)) = self.window_place(w, buffer, w == selected)? else { continue };
+                if point != cursor || start < screen || start > line.max(screen) {
+                    self.terminal_bindings[index].away.push(w);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Make WINDOW follow binding INDEX again, at once: its start where a
+    /// publication would put it and its point (the buffer's, when it is
+    /// the selected window) on the cursor.
+    pub(crate) fn terminal_snap(&mut self, index: usize, window: Value) -> Result<(), String> {
+        self.terminal_bindings[index].away.retain(|&w| w != window);
+        let binding = &self.terminal_bindings[index];
+        if binding.revision.is_none() || self.window(window)?.buffer != binding.buffer { return Ok(()); }
+        let (buffer, cursor) = (binding.buffer, binding.cursor_byte);
+        let selected = window == self.selected_window_value()?;
+        self.terminal_viewport(index, window, selected)?;
+        if selected {
+            let crate::data::Object::Buffer(text) = self.object_mut(buffer)? else { return Ok(()) };
+            let accessible = text.accessible();
+            if text.as_str().is_char_boundary(cursor) {
+                text.point = crate::coordinates::ByteOffset(cursor.clamp(accessible.start.0, accessible.end.0));
+            }
+        }
+        Ok(())
+    }
+
+    /// Send EVENT, a key just read at the start of a command, straight to the
+    /// selected terminal when the command loop would only have sent it:
+    /// no minibuffer or recursive edit is reading; the terminal follows its
+    /// cursor in the selected window, runs, and has its own local map; no keyboard macro, input method, keyboard
+    /// translation or overriding map is in effect; no buffer-local command
+    /// hook but romacs-term's own is set (global ones are skipped for the
+    /// key); no text property, emulation or minor-mode
+    /// map binds or remaps the key; and the route's map (romacs-term's
+    /// generated one, under `romacs-term-mode-map') or the global map
+    /// through it gives `romacs-term-send-key'.  Then the bytes are written
+    /// and true returned; else false, and the command loop reads the key as
+    /// usual.  Lisp never runs here.
+    pub fn terminal_passthrough_key(&mut self, event: &crate::CommandEvent) -> Result<bool, String> {
+        if self.terminal_bindings.is_empty() { return Ok(false); }
+        // A minibuffer or recursive edit reads its own keys, whichever
+        // window is selected.
+        for level in ["romacs--minibuf-level", "romacs--command-loop-level"] {
+            let slot = self.slot(level);
+            if self.variable_value(slot)?.integer_value().is_some_and(|n| n > 0) { return Ok(false); }
+        }
+        let window = self.selected_window_value()?;
+        let w = self.window(window)?;
+        if w.mini { return Ok(false); }
+        let buffer = w.buffer;
+        let Some(index) = self.terminal_bindings.iter().position(|b| b.buffer == buffer) else { return Ok(false) };
+        let binding = &self.terminal_bindings[index];
+        if binding.revision.is_none() || binding.away.contains(&window) { return Ok(false); }
+        let (session, alternate) = (binding.session, binding.alternate);
+        let value = |vm: &mut Self, name: &str| -> Result<Value, String> {
+            let slot = vm.slot(name);
+            let v = vm.value_in_buffer(slot, buffer)?;
+            Ok(if v == Value::UNBOUND { Value::NIL } else { v })
+        };
+        for name in ["defining-kbd-macro", "executing-kbd-macro", "overriding-terminal-local-map", "overriding-local-map",
+                     "keyboard-translate-table"] {
+            if value(self, name)? != Value::NIL { return Ok(false); }
+        }
+        // A translation of the key, or one it begins, is the reader's
+        // (`input-decode-map', `key-translation-map').
+        if let Ok(key) = match event {
+            crate::CommandEvent::Character(code) => Value::integer(*code),
+            crate::CommandEvent::Named(name) => Ok(self.intern(name)),
+        } {
+            for name in ["input-decode-map", "key-translation-map"] {
+                let map = value(self, name)?;
+                let Some(map) = self.resolve_keymap(map) else { continue };
+                if self.lookup_one_event(map, key, false, true).map_or(true, |b| b != Value::NIL) { return Ok(false); }
+            }
+        }
+        // GNU's `input-method-function' is `list' when no input method is on.
+        let method = value(self, "input-method-function")?;
+        if method != Value::NIL && method != self.intern("list") { return Ok(false); }
+        // Global command hooks are skipped: the key's effect is in the pty,
+        // not the buffer (VM2-TERM-KEYS).  A buffer-local hook other than
+        // romacs-term's own (and the local `t') is a package watching this
+        // buffer's keys, so they go through the loop.
+        let ours = self.intern("romacs-term--track");
+        for hook in ["pre-command-hook", "post-command-hook"] {
+            let slot = self.slot(hook);
+            let local = value(self, hook)?;
+            if local == self.slots[slot].value { continue; }
+            let mut tail = local;
+            for _ in 0..64 {
+                let Ok((head, rest)) = self.cons_pair(tail) else { break };
+                if head != ours && head != Value::TRUE { return Ok(false); }
+                tail = rest;
+            }
+            if tail != Value::NIL && self.cons_pair(tail).is_err() { return Ok(false); }
+        }
+        let mode_map = value(self, "romacs-term-mode-map")?;
+        let index_of = buffer.index(0)? - 1;
+        if *self.local_keymap(index_of) != mode_map || mode_map == Value::NIL { return Ok(false); }
+        let event = match event {
+            crate::CommandEvent::Character(code) => Value::integer(*code)?,
+            crate::CommandEvent::Named(name) => self.intern(name),
+        };
+        let send = self.intern("romacs-term-send-key");
+        // A keymap or local-map property at point comes first: the
+        // character's (`get-char-property'), or the one an insertion there
+        // would inherit (`get-pos-property'), as romacs-keymap--local-map
+        // and keymap.c get_local_map find them.
+        // The reader widens before it looks (romacs-keymap--local-map): a
+        // narrowed buffer goes through the loop.
+        let point = match self.object(buffer)? {
+            crate::data::Object::Buffer(text) if text.accessible() == (crate::coordinates::ByteOffset(0)..crate::coordinates::ByteOffset(text.as_str().len())) =>
+                text.char_of_byte(text.point)?.0 as i64 + 1,
+            _ => return Ok(false),
+        };
+        for property in ["keymap", "local-map"] {
+            let property = self.intern(property);
+            let at = Value::integer(point)?;
+            if self.get_char_property_values(at, property, buffer)? != Value::NIL { return Ok(false); }
+            if self.get_pos_property_values(at, property, buffer).map_err(|_| "keymap property")? != Value::NIL { return Ok(false); }
+        }
+        // The route's map, then the global map, as the command loop's lookup:
+        // `romacs-term-send-key' directly, or a global command the route
+        // remaps to it (`self-insert-command' for non-ASCII characters).
+        let route = value(self, if alternate { "romacs-term-alternate-map" } else { "romacs-term--passthrough" })?;
+        let global = self.slots[self.names["#:vm2-global-keymap"]].value;
+        // Events with default bindings, as the reader's `key-binding'; remaps
+        // without, as `command-remapping'.
+        let lookup = |vm: &mut Self, map: Value, key: Value, remap: bool| vm.lookup_one_event(map, key, remap, !remap).ok();
+        let Some(direct) = lookup(self, route, event, false) else { return Ok(false) };
+        let remapped = if direct == send { None } else if direct != Value::NIL { return Ok(false) } else {
+            let Some(command) = lookup(self, global, event, false) else { return Ok(false) };
+            if command.tag() != 7 || lookup(self, route, command, true) != Some(send) { return Ok(false); }
+            Some(command)
+        };
+        let generation = (self.keymap_generation(), alternate);
+        let binding = &self.terminal_bindings[index];
+        if binding.unremapped != Some(generation) || binding.unremapped_maps != [route, global] {
+            for map in [route, global] {
+                if lookup(self, map, send, true) != Some(Value::NIL) { return Ok(false); }
+            }
+            self.terminal_bindings[index].unremapped = Some(generation);
+            self.terminal_bindings[index].unremapped_maps = vec![route, global];
+        }
+        // Emulation and minor-mode maps that are on and bind the key or remap
+        // a command the lookup went through come first: the loop decides.
+        let mut alists = vec![];
+        let mut tail = value(self, "emulation-mode-map-alists")?;
+        for _ in 0..64 {
+            let Ok((head, rest)) = self.cons_pair(tail) else { break };
+            alists.push(if head.tag() == 7 { let v = self.value_in_buffer(head.index(7)? - 1, buffer)?; if v == Value::UNBOUND { Value::NIL } else { v } } else { head });
+            tail = rest;
+        }
+        alists.push(value(self, "minor-mode-overriding-map-alist")?);
+        alists.push(value(self, "minor-mode-map-alist")?);
+        for alist in alists {
+            let mut tail = alist;
+            for _ in 0..4096 {
+                let Ok((entry, rest)) = self.cons_pair(tail) else { break };
+                tail = rest;
+                let Ok((variable, map)) = self.cons_pair(entry) else { continue };
+                if variable.tag() != 7 { continue; }
+                let on = self.value_in_buffer(variable.index(7)? - 1, buffer)?;
+                if on == Value::NIL || on == Value::UNBOUND { continue; }
+                let Some(map) = self.resolve_keymap(map) else { continue };
+                for (key, remap) in [(Some(event), false), (Some(send), true), (remapped, true)] {
+                    let Some(key) = key else { continue };
+                    if lookup(self, map, key, remap) != Some(Value::NIL) { return Ok(false); }
+                }
+            }
+        }
+        let state = self.terminal_input_state(session)?;
+        if !state.running { return Ok(false); }
+        let key = if let Some(code) = event.integer_value() {
+            match crate::terminal_keys::character_event(code) { Some(key) => key, None => return Ok(false) }
+        } else {
+            let name = self.symbol_names[event.index(7)? - 1].clone();
+            let bytes = match crate::terminal_keys::encode(crate::terminal_keys::symbol_event(&name), state.application_cursor) {
+                Ok(bytes) if !bytes.is_empty() => bytes,
+                _ => return Ok(false),
+            };
+            self.terminal_send(session, &bytes)?;
+            return Ok(true);
+        };
+        match crate::terminal_keys::encode(key, state.application_cursor) {
+            Ok(bytes) if !bytes.is_empty() => { self.terminal_send(session, &bytes)?; Ok(true) }
+            _ => Ok(false),
+        }
     }
 
     /// Whether idle/background service work is needed, including hidden terminals.

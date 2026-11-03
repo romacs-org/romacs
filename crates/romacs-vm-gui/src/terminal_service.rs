@@ -469,7 +469,7 @@ impl TerminalHost for Service {
         session.events();
         let terminal = session.terminal.lock();
         let mode = terminal.mode();
-        Ok(TerminalInputState { running: session.running, application_cursor: mode.contains(TermMode::APP_CURSOR), bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE) })
+        Ok(TerminalInputState { running: session.running, application_cursor: mode.contains(TermMode::APP_CURSOR), bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE), alternate_screen: mode.contains(TermMode::ALT_SCREEN) })
     }
 
     fn changed_sessions(&mut self) -> Vec<u64> { self.mailbox.take() }

@@ -4741,6 +4741,7 @@ version = "0.0.19"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
+ "libc",
  "romacs-display-protocol",
  "romacs-display-runtime",
  "romacs-face",
