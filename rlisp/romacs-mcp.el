@@ -491,9 +491,24 @@ linear."
     (setq romacs-mcp--deferred-timer
           (run-at-time 0.05 0.05 #'romacs-mcp--poll-deferred))))
 
+(defvar romacs-mcp-admission-paused nil
+  "Non-nil holds every new request in its queue: none starts.  A restart
+sets it once nothing is in flight, so none is cut off; clear it with
+`romacs-mcp-resume-admission'.")
+
+(defun romacs-mcp-resume-admission ()
+  "Let queued requests start again."
+  (setq romacs-mcp-admission-paused nil)
+  (romacs-mcp--schedule))
+
+(defun romacs-mcp-in-flight-p ()
+  "Non-nil while a request is running, queued or awaiting a deferred answer."
+  (or romacs-mcp--active romacs-mcp--queue romacs-mcp--deferred))
+
 (defun romacs-mcp--schedule ()
   "Schedule a bounded drain unless another drain owns admission."
-  (when (and romacs-mcp--queue (not romacs-mcp--active) (not romacs-mcp--timer))
+  (when (and romacs-mcp--queue (not romacs-mcp--active) (not romacs-mcp--timer)
+             (not romacs-mcp-admission-paused))
     (setq romacs-mcp--timer (run-at-time 0.01 nil #'romacs-mcp--drain))))
 
 (defun romacs-mcp--drain ()
@@ -501,7 +516,7 @@ linear."
 Retire at most `romacs-mcp--scan-limit' cancelled or stale queue entries.
 This is cooperative admission, not a handler, serialization or send deadline."
   (setq romacs-mcp--timer nil)
-  (unless romacs-mcp--active
+  (unless (or romacs-mcp--active romacs-mcp-admission-paused)
     ;; Guard admission across native input polling too.  The no-timers query
     ;; services native special input, but does not request timer execution.
     (setq romacs-mcp--active (list :admission t))

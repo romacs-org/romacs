@@ -584,9 +584,14 @@ describes, for a theme of MODE, as (FACES . VARIABLES):
 
 (defun romacs-theme--romacs-face-p (face)
   "Whether FACE is one Romacs's engine colours over a Modus table: Romacs's
-own faces, and the fringes and dividers a pane is separated without."
+own faces, the fringes and dividers a pane is separated without, and
+`font-lock-comment-delimiter-face', which keeps GNU's defface relation
+(it inherits `font-lock-comment-face', as GNU's own tests and every
+change to the comment face expect) where Modus gives it the comment's
+colour directly."
   (or (string-prefix-p "romacs-" (symbol-name face))
-      (memq face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border))))
+      (memq face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border
+                   font-lock-comment-delimiter-face))))
 
 (defun romacs-theme-define (name doc &rest properties)
   "Define theme NAME, documented by DOC, from PROPERTIES :palette (base

@@ -1,5 +1,6 @@
-Copyright 2026 Thanos Apollo <public@thanosapollo.org>,
-with Reserved Font Name Romacs Icons.
+Copyright (c) 2014, Ryan L McIntyre (https://ryanlmcintyre.com), for Symbols
+Nerd Font (Nerd Fonts 3.4.0), of which Romacs Icons (RomacsIcons.ttf) is a
+Modified Version: its glyphs are taken from it (assets/icons/sources.txt).
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

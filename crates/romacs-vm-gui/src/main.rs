@@ -214,7 +214,7 @@ mod lent_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
         host.borrow_mut().presentation = 3;
-        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3, tab_bar: vec![], status_bar: vec![] };
+        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3, tab_bar: vec![], status_bar: Default::default() };
         let mut live = presentation::Presentation::new();
         let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
         let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
@@ -342,7 +342,7 @@ mod frame_tests {
         let mut vm = romacs_vm::Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
-        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4, tab_bar: vec![], status_bar: vec![] };
+        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4, tab_bar: vec![], status_bar: Default::default() };
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, same, 4).unwrap().is_none(), "an unchanged frame still on screen repaints");
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
@@ -361,7 +361,7 @@ mod frame_tests {
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         painted.snapshot.tab_bar = Some(romacs_layout_input::TabBarSnapshot { height: 20, face: Default::default(), faces: vec![],
             text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
-        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)], status_bar: vec![] };
+        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)], status_bar: Default::default() };
         let click = |x, y, button, pressed| super::tab_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
             action: PointerAction::Button { button, pressed, modifiers: 0 } }));
@@ -383,14 +383,17 @@ mod frame_tests {
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         painted.snapshot.status_bar = Some(romacs_layout_input::StatusBarSnapshot { x: 6, y: 760, width: 1188, height: 20,
             text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] },
-            face: Default::default(), faces: vec![], window: 1, focused: true });
-        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![], status_bar: vec![(6.0, 10.0), (16.0, 10.0)] };
+            face: Default::default(), faces: vec![], window: 1, focused: true, marks: Default::default() });
+        let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![],
+                                   status_bar: (vec![Some((6.0, 10.0)), Some((16.0, 10.0)), Some((26.0, 100.0)), Some((126.0, 10.0)), None], Some(2)) };
         let click = |x, y, button, pressed| super::status_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
             action: PointerAction::Button { button, pressed, modifiers: 0 } }));
         assert_eq!(click(17.0, 765.0, 1, false).as_deref(), Some("(romacs--status-bar-click 1 'mouse-1)"));
-        assert_eq!(click(6.0, 779.0, 3, true).as_deref(), Some("(romacs--status-bar-click 0 'down-mouse-3)"));
+        assert_eq!(click(6.0, 779.0, 3, true).as_deref(), Some("nil"), "a press is consumed and runs nothing");
         assert_eq!(click(500.0, 765.0, 1, false), None, "past the text");
+        assert_eq!(click(60.0, 765.0, 1, false), None, "the marker's room");
+        assert_eq!(click(130.0, 765.0, 1, false).as_deref(), Some("(romacs--status-bar-click 3 'mouse-1)"));
         assert_eq!(click(17.0, 759.0, 1, false), None, "above the band");
     }
 
@@ -408,7 +411,7 @@ mod frame_tests {
         vm.display_apply_layout(&ends).unwrap();
         let end = vm.eval_source("(window-end)").unwrap().display().unwrap();
         assert_ne!(end, vm.eval_source("(point-max)").unwrap().display().unwrap(), "the window shows part of the buffer");
-        let shown = super::Shown { frame: painted, ends, presentation: 1, tab_bar: vec![], status_bar: vec![] };
+        let shown = super::Shown { frame: painted, ends, presentation: 1, tab_bar: vec![], status_bar: Default::default() };
         vm.eval_source("(romacs-select-buffer (current-buffer))").unwrap();
         let next = super::frame(&mut vm, false, 1200, 800).unwrap();
         assert!(super::changed_frame(&mut vm, &shown, next, 1).unwrap().is_none(), "the frame did not change");
@@ -461,8 +464,9 @@ struct Shown {
     presentation: u64,
     /// The painted tab bar's characters: each one's left edge and width.
     tab_bar: Vec<(f32, f32)>,
-    /// The painted status bar's characters, likewise.
-    status_bar: Vec<(f32, f32)>,
+    /// The painted status bar's characters, each one's left edge and width
+    /// or None where clipped, and its `right-align' marker's index.
+    status_bar: (Vec<Option<(f32, f32)>>, Option<usize>),
 }
 
 /// The frame to paint after a batch, or None when the paint on screen still
@@ -936,7 +940,7 @@ fn paint(
     }).collect();
     let diagnostics_prepare_ns = diagnostic_start.elapsed().as_nanos();
     let tab_bar = romacs_layout2::tab_bar_extents(&frame);
-    let status_bar = romacs_layout2::status_bar_extents(&frame);
+    let status_bar = shown.snapshot.status_bar.as_ref().map(|bar| romacs_layout2::status_bar_extents(&frame, bar)).unwrap_or_default();
     let submit_start = Instant::now();
     sender.submit_scene(frame, children, shown.animations.clone())?;
     let submit_ns = submit_start.elapsed().as_nanos();
@@ -1008,7 +1012,7 @@ fn tab_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
 /// A mouse button event over the root frame's status bar as the Lisp that
 /// runs the binding of the mode line it shows (`romacs--status-bar-click'):
 /// the index of the painted character under the pointer. Between or past
-/// the characters it is no click.
+/// the characters, and on the `right-align' marker's room, it is no click.
 fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let InputEvent::PositionedPointer(romacs_display_runtime::thread_comm::PositionedPointerInput {
         position, action: romacs_display_runtime::thread_comm::PointerAction::Button { button, pressed, .. }, ..
@@ -1016,9 +1020,14 @@ fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let bar = shown.frame.snapshot.status_bar.as_ref()?;
     let (top, bottom) = (bar.y as f32, (bar.y + bar.height) as f32);
     if position.target_frame_id != 1 || position.y < top || position.y >= bottom || !(1..=3).contains(button) { return None; }
-    let column = shown.status_bar.iter().position(|&(x, width)| position.x >= x && position.x < x + width)?;
-    let kind = if *pressed { "down-mouse" } else { "mouse" };
-    Some(format!("(romacs--status-bar-click {column} '{kind}-{button})"))
+    let (extents, marker) = &shown.status_bar;
+    let column = extents.iter().position(|e| e.is_some_and(|(x, width)| position.x >= x && position.x < x + width))?;
+    if Some(column) == *marker { return None; }
+    // A press is the bar's and runs nothing: its release is the click, so
+    // `[mode-line down-mouse-1] mouse-drag-mode-line' never starts a drag of
+    // an edge the bar does not have (VM2-STATUS-BAR).
+    if *pressed { return Some("nil".into()); }
+    Some(format!("(romacs--status-bar-click {column} 'mouse-{button})"))
 }
 
 /// No cursor colour cycle in any window of SNAPSHOT, its child frames'
@@ -1243,7 +1252,7 @@ fn evaluate(
     if let Some(Err(error)) = &early { eprintln!("romacs: server window: {error}"); }
     if let (Some(Ok(())), Some(server)) = (&early, host.borrow_mut().server.as_mut()) { server.shown = true; }
     let mut previous = if serve.is_some() && !host.borrow().window_shown() {
-        Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Vec::new() }
+        Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Default::default() }
     } else {
         paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending,
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?

@@ -38,7 +38,11 @@
     (shell #xFE019 nil nil) (text #xFE01A nil nil) (org #xFE01B nil nil) (markdown #xFE01C nil nil)
     (dired #xFE01D nil nil) (mail #xFE01E nil nil) (chat #xFE01F nil nil) (term #xFE020 nil nil)
     (web #xFE021 nil nil) (image #xFE022 nil nil) (scratch #xFE023 nil nil) (help #xFE024 nil nil)
-    (default #xFE025 nil nil))
+    (default #xFE025 nil nil) (missing #xFE026 "⊘" "!") (vc-edited #xFE027 "±" "*") (vc-conflict #xFE028 "⚠" "!")
+    (javascript #xFE029 nil nil) (typescript #xFE02A nil nil) (go #xFE02B nil nil) (java #xFE02C nil nil)
+    (nix #xFE02D nil nil) (haskell #xFE02E nil nil) (json #xFE02F nil nil) (html #xFE030 nil nil)
+    (css #xFE031 nil nil) (lua #xFE032 nil nil) (conf #xFE033 nil nil) (data #xFE034 nil nil)
+    (calendar #xFE035 nil nil) (info #xFE036 nil nil) (database #xFE037 nil nil))
   "Each icon: (NAME CODEPOINT TEXT ASCII), the character of Romacs Icons
 \(assets/icons/codepoints.txt), the Unicode symbol shown without that
 font, and the ASCII character with `romacs-icons-ascii'; a mode's icon

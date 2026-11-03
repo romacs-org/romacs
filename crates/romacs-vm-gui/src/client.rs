@@ -19,7 +19,7 @@ const USAGE: &str = "usage: romacs --server NAME [-n|--no-wait] [-e|--eval FORM]
 
 /// Launch options that take a value, forwarded with it to a server this
 /// client starts.
-const VALUED: [&str; 3] = ["--geometry", "--world-store", "--gc-floor"];
+const VALUED: [&str; 4] = ["--geometry", "--world-store", "--gc-floor", "--restore"];
 
 /// Environment a started server does not inherit: the client's terminal
 /// and its own unit's bookkeeping.

@@ -276,6 +276,160 @@ thousandth a stack mark."
           (dotimes (_ 20) (sit-for 0))
           (mapc #'cancel-timer timers)))
 
+;;;; Mode line (rlisp/romacs-mode-line.el)
+
+(defvar scaling-mode-line-hook nil)
+
+(scaling-probe mode-line-segments :n 500
+  ;; Segments defined while the mode is on, each on a shared hook and on
+  ;; a hook of its own, so both registries grow; then both hooks a
+  ;; refresh runs on.
+  :setup (progn (require 'romacs-mode-line) (romacs-mode-line-mode 1) nil)
+  :body (progn
+          (dotimes (i n)
+            (let ((own (intern (format "scaling-mode-line-hook-%d" i))))
+              (set own nil)
+              (eval `(romacs-mode-line-define-segment ,(intern (format "scaling-%d" i)) "A probe."
+                       :compute (lambda () nil) :hooks (scaling-mode-line-hook ,own))
+                    t)))
+          (run-hooks 'scaling-mode-line-hook)
+          (run-hooks 'after-change-major-mode-hook)))
+
+;; The status bar's marks and paint (VM2-STATUS-BAR): N pill segments,
+;; each with an icon state, its own pill colour and its own pill text
+;; colour, laid out after each step's change.
+(scaling-probe mode-line-bar-segments :gui t :n 40 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (dotimes (i n)
+             (let ((face (intern (format "bar-probe-face-%d" i))))
+               (make-face face)
+               (set-face-attribute face nil :background (format "#%02x3040" (% (* 5 i) 256))
+                                   :foreground (format "#e0%02xa0" (% (* 3 i) 256)))
+               (eval `(romacs-mode-line-define-segment ,(intern (format "bar-probe-%d" i)) "A probe."
+                        :pill ,face :pill-text ,face
+                        :format (" " (:propertize "%*" romacs-icon ((?* . modified) (?- . saved))) " "))
+                     t))
+             (push (intern (format "bar-probe-%d" i)) romacs-mode-line-right))
+           (romacs-mode-line-rebuild)
+           (switch-to-buffer (scaling--lines-buffer "scaling-bar" 50)))
+  :body (with-current-buffer it (insert "x")))
+
+;; N pills on one pill face, each a different character in its own text
+;; colour, all shown (the right side shows whole): the painter's
+;; recoloured faces and their character bindings.
+(scaling-probe mode-line-bar-pill-text :gui t :n 12 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (setq romacs-mode-line-right nil)
+           (dotimes (i n)
+             (let ((face (intern (format "bar-text-face-%d" i))))
+               (make-face face)
+               (set-face-attribute face nil :foreground (format "#e0%02x%02x" (% (* 7 i) 256) (% (* 11 i) 256)))
+               (eval `(romacs-mode-line-define-segment ,(intern (format "bar-text-%d" i)) "A probe."
+                        :pill romacs-mode-line-pill :pill-text ,face
+                        :format ,(format " %c " (+ ?α i)))
+                     t)
+               (push (intern (format "bar-text-%d" i)) romacs-mode-line-right)))
+           (romacs-mode-line-rebuild)
+           (switch-to-buffer (scaling--lines-buffer "scaling-bar-text" 50)))
+  :body (with-current-buffer it (insert "x")))
+
+;; N characters the bar draws as an icon an alist of N entries names,
+;; the icon's entry at the end of a registry grown by N: the registry and
+;; each piece's alist are indexed once, not walked per character.
+(scaling-probe mode-line-bar-icons :gui t :n 20 :steps 20
+  :setup (progn
+           (require 'romacs-icons)
+           (setq romacs-icons--font t romacs-icons-source 'romacs romacs-icons-ascii nil)
+           (setq romacs-icons-alist
+                 (append romacs-icons-alist
+                         (cl-loop for j below n collect (list (intern (format "probe-icon-%d" j)) #xFE001))))
+           ;; The string's own mapping grows too: N characters, each mapped
+           ;; near its end.
+           (let ((last (intern (format "probe-icon-%d" (1- n))))
+                 (text (apply #'string (cl-loop for j below n collect (+ #x100 j)))))
+             (setq-default mode-line-format
+                           `((:propertize ,text romacs-icon
+                                          ,(cl-loop for j below n collect (cons (+ #x100 j) last))))))
+           (switch-to-buffer (scaling--lines-buffer "scaling-bar-icons" 50)))
+  :body (with-current-buffer it (insert "x")))
+
+;; Text showing an icon at N pixel sizes, laid out each step: the font
+;; resolver's per-icon answers (`resolve_sole'), one per size, are found,
+;; not resolved again.
+(scaling-probe icon-sizes :gui t :n 20 :steps 20
+  :setup (let ((buffer (scaling--lines-buffer "scaling-icon-sizes" 10)))
+           (with-current-buffer buffer
+             (goto-char (point-min))
+             (dotimes (i n)
+               (insert (propertize (string #xFE001) 'face (list :height (+ 1.0 (* 0.01 i)))) " ")))
+           (switch-to-buffer buffer)
+           buffer)
+  :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
+
+;; N windows, each showing its own buffer and drawing its own line
+;; (VM2-MODE-LINE), a key typed in one: the others' lines are reused,
+;; not expanded again.
+(scaling-probe mode-line-windows :gui t :n 2 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (delete-other-windows)
+           (let ((main (scaling--lines-buffer "scaling-windows" 20)))
+             (switch-to-buffer main)
+             (save-selected-window
+               (dotimes (i (1- n))
+                 (select-window (split-window (get-largest-window) nil (quote below)))
+                 (switch-to-buffer (scaling--lines-buffer (format "scaling-window-%d" i) 5))))
+             (balance-windows)
+             main))
+  :body (with-current-buffer it (insert "x")))
+
+;; N side windows whose buffers set their own mode line, each folded into
+;; the status bar as a context segment (VM2-STATUS-BAR), a key typed in
+;; the selected window.
+(scaling-probe mode-line-contexts :gui t :n 2 :steps 20
+  :setup (progn
+           (delete-other-windows)
+           (let ((main (scaling--lines-buffer "scaling-contexts" 20)))
+             (switch-to-buffer main)
+             (dotimes (i n)
+               (let ((buffer (scaling--lines-buffer (format "scaling-context-%d" i) 2)))
+                 (with-current-buffer buffer (setq-local mode-line-format (list (format "ctx %d " i) "%b")))
+                 (display-buffer-in-side-window buffer `((side . right) (slot . ,i) (window-width . 12)))))
+             main))
+  :body (with-current-buffer it (insert "x")))
+
+;; N side windows whose own lines are each wider than the bar, so every
+;; one is dropped when the bar fits (VM2-STATUS-BAR): fitting and folding
+;; stay linear in what they drop.
+(scaling-probe mode-line-contexts-saturated :gui t :n 3 :steps 20
+  :setup (progn
+           (delete-other-windows)
+           (let ((main (scaling--lines-buffer "scaling-saturated" 20)))
+             (switch-to-buffer main)
+             (dotimes (i n)
+               (let ((buffer (scaling--lines-buffer (format "scaling-saturated-%d" i) 2)))
+                 (with-current-buffer buffer (setq-local mode-line-format (list (make-string 200 (+ ?a (% i 26))))))
+                 (display-buffer-in-side-window buffer `((side . ,(if (cl-oddp i) 'left 'right)) (slot . ,i) (window-width . 10)))))
+             main))
+  :body (with-current-buffer it (insert "x")))
+
+;; `format-mode-line' of N pieces under one `:propertize' whose shared
+;; keymap has N bindings: the map is made once for the string, not once
+;; per piece (VM2-G1B).
+(scaling-probe mode-line-shared-properties :n 200
+  :setup (let ((map (list 'keymap)))
+           (dotimes (i n) (push (cons (+ 1000 i) 'ignore) (cdr map)))
+           (list :propertize (let (pieces) (dotimes (i n) (push (propertize "a" 'help-echo (number-to-string i)) pieces)) pieces)
+                 'local-map map))
+  :body (let* ((noninteractive nil) (s (format-mode-line it)))
+          (unless (get-text-property 0 'local-map s) (error "The shared keymap is not projected"))
+          s))
+
 ;;;; Redisplay (GUI: the host lays out each step's change)
 
 (scaling-probe redisplay-lines :gui t :n 2000 :steps 20 :budget 0.5
@@ -464,6 +618,30 @@ thousandth a stack mark."
             (dolist (i it) (romacs-mcp--withdraw 'scaling-peer "w" i))
             (romacs-mcp--poll-deferred))
           (unless (null romacs-mcp--deferred) (error "Withdrawn calls were not retired"))))
+
+;; N one-shot questions pending, each session's turn end reaching only its
+;; own handler.
+(scaling-probe agent-asks :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--asks)
+                (mapcar (lambda (id)
+                          (let ((session (romacs-agent--make :id id :harness 'claude :title id :state 'running)))
+                            (puthash id (lambda (_event) (remhash id romacs-agent--asks)) romacs-agent--asks)
+                            session))
+                        (scaling--names "scaling-ask" n)))
+  :body (progn
+          (dolist (session it)
+            (romacs-agent--raise session (list :type 'done :text "ok" :seq 1 :last t)))
+          (unless (zerop (hash-table-count romacs-agent--asks)) (error "Asks left unanswered"))))
+
+;; N gnosis cursors and plans handed out as tokens (the newest 256 kept),
+;; each looked up again.
+(scaling-probe agent-gnosis-tokens :n 400
+  :setup (progn (scaling--agent) (require 'romacs-agent-gnosis)
+                (clrhash romacs-agent-gnosis--tokens) (fillarray romacs-agent-gnosis--ring nil)
+                (number-sequence 1 n))
+  :body (dolist (i it)
+          (romacs-agent-gnosis--value-of (romacs-agent-gnosis--token (list :after i)))))
 
 ;; N messages sent to a per-turn session while its turn runs.
 (scaling-probe agent-queue :n 2000

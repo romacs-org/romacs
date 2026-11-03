@@ -39,13 +39,16 @@ options: --romacs BIN --gnu EMACS --output DIR --work DIR --profile stock|init -
 COMPARISON POLICY (bench_compare): the selected buffer, the buffer's name,
 modes, point, size, flags, file and directory, global minor modes, the
 window tree, each window's buffer, start, point, hscroll, body size,
-dedication, mode and header lines and displayed rows (over the rows both
-show: line heights follow each engine's font metrics), the minibuffer, the
+dedication, header lines and displayed rows (over the rows both show: line
+heights follow each engine's font metrics), the minibuffer, the
 echo area, *Messages* lines since the previous compare, the last
 command-loop error and the buffer list.  Faces are compared separately and
 reported as the `faces' category.  Normalised: each engine's private root
 and package directory become <root> and <lisp>; clock times (HH:MM:SS)
-become <clock>.  Ignored: window-end and pixel geometry.  A compare's
+become <clock>.  Ignored: window-end, pixel geometry, body heights and
+windows' mode lines: Romacs's status bar is the mode line and its windows
+have no mode-line row (DIVERGENCES.md VM2-STATUS-BAR), so heights differ
+by those rows and its windows show none.  A compare's
 `ignore' names path prefixes the agent judged nondeterministic (a model's
 reply), recorded with the call.  romacs-error: Romacs signalled where GNU
 did not (a new command-loop error, or a new *Messages* line reporting an
@@ -226,8 +229,12 @@ def comparable(obs, other, faces):
     for i, window in enumerate(obs.get('windows') or []):
         twin = (other.get('windows') or [])[i] if i < len(other.get('windows') or []) else None
         span = min(len(window['rows']), len(twin['rows'])) if twin else len(window['rows'])
-        entry = {} if faces else {k: window.get(k) for k in ('buffer', 'selected', 'start', 'point', 'hscroll', 'body',
-                                                               'dedicated', 'modeLine', 'headerLine')}
+        entry = {} if faces else {k: window.get(k) for k in ('buffer', 'selected', 'start', 'point', 'hscroll',
+                                                               'dedicated', 'headerLine')}
+        if not faces:
+            # The body's width; its height differs by the mode-line row.
+            body = window.get('body')
+            entry['body'] = body[0] if isinstance(body, list) and body else body
         entry['rows'] = rows_view(window['rows'], span, faces)
         windows.append(entry)
     view['windows'] = windows

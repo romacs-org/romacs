@@ -60,9 +60,6 @@
              '((project-file (styles fzf substring))))))
     ;; A layer is a child frame, which only a window system makes.
     ,(if (and window-system (fboundp 'romacs-complete-mode)) '(romacs-complete-mode t) '(fido-vertical-mode t))
-    ;; The status bar is a band of a window-system frame (romacs-chrome.el,
-    ;; DIVERGENCES.md VM2-STATUS-BAR).
-    ,@(and window-system (fboundp 'romacs-status-bar-mode) '((romacs-status-bar-mode t)))
     ;; Romacs's mode line (romacs-mode-line.el, DIVERGENCES.md VM2-MODE-LINE).
     ,@(and window-system (fboundp 'romacs-mode-line-mode) '((romacs-mode-line-mode t))))
   "Romacs's standard value for each completion option, in the order set.")

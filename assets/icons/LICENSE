@@ -1,15 +1,50 @@
-Romacs's icons: the drawings in this directory (*.svg) and the codepoint
-list (codepoints.txt).
+Romacs's icons: the glyphs in this directory (*.svg), the codepoint list
+(codepoints.txt) and the provenance list (sources.txt).
 
-Copyright 2026 Thanos Apollo <public@thanosapollo.org>
+Each *.svg is an upstream glyph, scaled and placed in one text cell by
+scripts/import-icon-glyphs.py from Symbols Nerd Font Mono 3.4.0
+(Nerd Fonts, https://github.com/ryanoasis/nerd-fonts). That font is
+Copyright (c) 2014, Ryan L McIntyre (https://ryanlmcintyre.com) and is
+licensed under the SIL Open Font License 1.1; Romacs Icons is a Modified
+Version of it under the same licence (../fonts/OFL.txt). sources.txt names
+every icon's upstream glyph and its set; each set's licence applies to its
+glyphs too:
 
-These drawings are Romacs's own. They are dual-licensed: you may use,
-modify and redistribute them under the GNU General Public License,
-version 3 or (at your option) any later version, as the rest of Romacs
-(see COPYING), OR under the SIL Open Font License, Version 1.1
-(see ../fonts/OFL.txt).
+  md      Material Design Icons (Pictogrammers, https://pictogrammers.com),
+          icons outside its Brand / Logos category: Apache License 2.0
+          (LICENSE-Apache-2.0.txt).
+  dev     Devicon 2.16.0, as Nerd Fonts assembles it (https://devicon.dev):
+          MIT, Copyright (c) 2015 konpa.
+  oct     Octicons (https://github.com/primer/octicons): MIT,
+          Copyright (c) 2023 GitHub Inc.
+  custom  Nerd Fonts' own glyphs: MIT, Copyright (c) 2014 Ryan L McIntyre.
 
-assets/fonts/RomacsIcons.ttf is built from them by
-scripts/build-icon-font.py and is distributed under the SIL Open Font
-License, Version 1.1, with Reserved Font Name "Romacs Icons"
-(../fonts/OFL.txt).
+The MIT License text, for the MIT sets above (each set's copyright notice
+as given there):
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
+
+  The above copyright notice and this permission notice shall be included
+  in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+  CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The codepoint list, the provenance list and the scripts are Romacs's,
+under the GNU General Public License, version 3 or (at your option) any
+later version (see COPYING).
+
+assets/fonts/RomacsIcons.ttf is built from the glyphs by
+scripts/build-icon-font.py, under the SIL Open Font License 1.1
+(../fonts/OFL.txt), its glyphs under their sets' licences above as well.

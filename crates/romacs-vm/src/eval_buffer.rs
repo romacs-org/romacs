@@ -145,11 +145,13 @@ impl Vm {
                 self.set_variable_value(slot, value)?;
                 Ok(value)
             }
-            ForceModeLineUpdate => Ok(if n == 0 {
-                Value::NIL
-            } else {
-                self.stack[start]
-            }),
+            ForceModeLineUpdate => {
+                // GNU's update_mode_lines: the bar is expanded again at the
+                // next redisplay (`BarKey'), from freshly converted forms.
+                self.display_state.mode_line_epoch = self.display_state.mode_line_epoch.wrapping_add(1);
+                self.mode_line_forms.clear();
+                Ok(if n == 0 { Value::NIL } else { self.stack[start] })
+            }
             Daemonp => Ok(Value::NIL),
             DaemonInitialized => {
                 Err("This function can only be called if emacs is run as a daemon".into())

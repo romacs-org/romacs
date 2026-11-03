@@ -30,12 +30,18 @@
 `romacs-agent-providers', by default `romacs-agent-default-provider'),
 sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
-(its client request id) for the record.  Return the session.
+(its client request id) for the record.  KNOWN, when given, is called
+with the session before its harness starts.  Return the session.
 
-(fn CWD &optional PROMPT TITLE PROVIDER OPTIONS)" t)
+(fn CWD &optional PROMPT TITLE PROVIDER OPTIONS KNOWN)" t)
 (defvar romacs-agent-restored-hook nil
 "Run after `romacs-agent-restore' has loaded every recorded session.")
 (register-definition-prefixes "romacs-agent" '("romacs-agent-"))
+
+
+;;; Generated autoloads from romacs-agent-gnosis.el
+
+(register-definition-prefixes "romacs-agent-gnosis" '("romacs-agent-gnosis--"))
 
 
 ;;; Generated autoloads from romacs-agent-tools.el
@@ -522,6 +528,11 @@ which end with this process.")
 Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked.
 
 (fn &optional PLAN FILE)")
+(autoload 'warm-restart-adopt-pending "warm-restart"
+"Restore the image a restart of server SERVER left, when this server was
+started by someone else (a launcher) before the restart's successor.
+
+(fn SERVER)")
 (autoload 'warm-restart-restore-image "warm-restart"
 "Restore the session image FILE over this session; return the report.
 Under STARTUP, as `--restore' passes it, the windows are laid out and
@@ -802,6 +813,25 @@ fallback.
 
 (fn REQUEST RESOLVE REJECT)")
 (register-definition-prefixes "gnosis-agent-review-hermes" '("gnosis-agent-review-hermes-"))
+
+
+;;; Generated autoloads from gnosis-agent-romacs.el
+
+(autoload 'gnosis-agent-eval-romacs "gnosis-agent-romacs"
+"Evaluate captured REQUEST in a Romacs agent session; RESOLVE or REJECT once.
+As `gnosis-agent-eval-hermes': REQUEST holds :question, :reference-answer,
+:rubric and :response strings; RESOLVE gets (:verdict pass|fail|ungradable
+:explanation STRING).  Return an idempotent cancellation function.  No
+grade is recorded.
+
+(fn REQUEST RESOLVE REJECT)")
+(autoload 'gnosis-agent-review-romacs "gnosis-agent-romacs"
+"Send contextual REQUEST to a Romacs agent session; RESOLVE or REJECT once.
+As `gnosis-agent-review-hermes': the same tutor protocol and the same
+validation of its answer.  Return an idempotent cancellation function.
+
+(fn REQUEST RESOLVE REJECT)")
+(register-definition-prefixes "gnosis-agent-romacs" '("gnosis-agent-romacs-"))
 
 
 ;;; Generated autoloads from gnosis-anki.el

@@ -181,13 +181,15 @@ that are bound, else every bound non-custom variable named with
     (with-current-buffer buffer
       (list :buffer (buffer-name buffer)
             :start start :point (window-point window) :end (window-end window)
-            :body (list (window-body-width window) (window-body-height window))
+            ;; Widths only: Romacs's windows have no mode-line row (its status
+            ;; bar is the mode line, DIVERGENCES.md VM2-STATUS-BAR), so their
+            ;; heights and tops differ from GNU's by those rows.
+            :body (list (window-body-width window))
             ;; Pixel edges, geometry by the harness's policy.  Not
             ;; `window-edges' or `window-left-column': Romacs gains their
             ;; frame-internal-border-width and window-left-column with
             ;; t3/daily-use-gui-fixes (0e58798).
-            :edges (list (window-pixel-left window) (window-pixel-top window)
-                         (window-pixel-width window) (window-pixel-height window))
+            :edges (list (window-pixel-left window) (window-pixel-width window))
             :hscroll (window-hscroll window)
             :dedicated (window-dedicated-p window)
             :header (and header-line-format (parity-probe--format-line header-line-format window))
@@ -246,6 +248,7 @@ that are bound, else every bound non-custom variable named with
      :buffers (seq-remove (lambda (name) (string-prefix-p " " name)) (mapcar #'buffer-name (buffer-list)))
      :tree (parity-probe--tree (frame-root-window))
      :windows (mapcar #'parity-probe--window (window-list nil 'nomini (frame-first-window)))
+     ;; The frame's size: the status bar changes window bodies, not it.
      :frame (list (frame-width) (frame-height))
      :variables (parity-probe--variables buffer)
      :db (parity-probe-db queries))))

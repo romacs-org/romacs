@@ -22,9 +22,11 @@
 ;; under its Romacs name.  Families are the session's fonts
 ;; and heights are relative to the default face's; an unspecified weight,
 ;; slant or width is normal.
-(defconst romacs-theme-test-rum-divergences '(vertical-border)
-  "Faces `rum' shows otherwise, on purpose: dividers in the
-window background under pane chrome (DIVERGENCES.md VM2-PANE-CHROME).")
+(defconst romacs-theme-test-rum-divergences '(font-lock-comment-delimiter-face vertical-border)
+  "Faces `rum' shows otherwise, on purpose: dividers in the window
+background under pane chrome (DIVERGENCES.md VM2-PANE-CHROME); comment
+delimiters inheriting the comment face, as GNU's defface has them, so
+they follow it (same colour, Modus's slant through it).")
 
 (defun romacs-theme-test--normalise (attributes default)
   (let ((base (plist-get default :height)) out)

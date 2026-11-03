@@ -694,12 +694,13 @@ harness as its whole stdin."
     (romacs-agent--manifest session argv)))
 
 ;;;###autoload
-(defun romacs-agent-start (cwd &optional prompt title provider options)
+(defun romacs-agent-start (cwd &optional prompt title provider options known)
   "Start a session in CWD under instance PROVIDER (a name in
 `romacs-agent-providers', by default `romacs-agent-default-provider'),
 sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
-\(its client request id) for the record.  Return the session."
+\(its client request id) for the record.  KNOWN, when given, is called
+with the session before its harness starts.  Return the session."
   (interactive (let* ((cwd (read-directory-name "Agent directory: " default-directory))
                       (provider (romacs-agent--read-provider)))
                  (list cwd (read-string "Prompt (empty for none): ") nil provider)))
@@ -721,6 +722,7 @@ the harness, :role, :parent (the delegating session's id) and :request
     (set-file-modes (romacs-agent-dir session) #o700)
     (puthash id session romacs-agent--sessions)
     (romacs-agent--index session)
+    (when known (funcall known session))
     (let ((prompt (and prompt (not (string-empty-p prompt)) prompt)))
       (if (romacs-agent--per-turn-p session)
           ;; No harness runs until a prompt starts a turn.
@@ -829,6 +831,54 @@ keeps the conversation there."
     (romacs-agent--launch session (romacs-agent--claude-argv session t)))
   (setf (romacs-agent-state session) 'starting)
   (romacs-agent--attach session 50))
+
+;;; One question
+
+(defvar romacs-agent--asks (make-hash-table :test #'equal)
+  "A one-shot session's id to its `romacs-agent-ask' handler.")
+
+(defun romacs-agent-ask (prompt resolve reject &rest options)
+  "Ask PROMPT of a one-shot session; call RESOLVE with its reply, or
+REJECT with why it has none, once.  OPTIONS: :provider (an instance of
+`romacs-agent-providers'), :model and :effort (the instance's and the
+harness's own defaults when absent), :cwd (default a private empty
+directory, removed after) and :title.  The session stops once its first
+turn ends.  Return a function that cancels: it stops the session, and
+neither callback runs after it."
+  (let* ((own (not (plist-get options :cwd)))
+         (cwd (or (plist-get options :cwd) (make-temp-file "romacs-agent-ask-" t)))
+         (session nil) (settled nil))
+    (cl-flet ((settle (function value)
+                (unless settled
+                  (setq settled t)
+                  (when session
+                    (remhash (romacs-agent-id session) romacs-agent--asks)
+                    (ignore-errors (romacs-agent-stop session)))
+                  (when own (ignore-errors (delete-directory cwd t)))
+                  (when function (funcall function value)))))
+      (let ((handler (lambda (event)
+                       (pcase (plist-get event :type)
+                         ('done (if (or (plist-get event :error) (not (stringp (plist-get event :text))))
+                                    (settle reject (or (plist-get event :text) "the harness answered nothing"))
+                                  (settle resolve (plist-get event :text))))
+                         ('exit (settle reject (format "the harness exited (%s) before answering"
+                                                       (plist-get event :status))))))))
+        (condition-case err
+            (romacs-agent-start cwd prompt (or (plist-get options :title) "ask") (plist-get options :provider)
+                                (list :model (plist-get options :model) :effort (plist-get options :effort)
+                                      :role "ask")
+                                ;; Known before it launches: a fast run's end is not missed.
+                                (lambda (new)
+                                  (setq session new)
+                                  (puthash (romacs-agent-id new) handler romacs-agent--asks)))
+          (error (settle nil nil) (signal (car err) (cdr err)))))
+      (lambda () (settle nil nil)))))
+
+(defun romacs-agent--ask-event (session event)
+  (when-let* ((handler (gethash (romacs-agent-id session) romacs-agent--asks)))
+    (funcall handler event)))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent--ask-event)
 
 ;;; A new server
 
