@@ -16,6 +16,7 @@ romacs-face.workspace = true
 romacs-renderer-wgpu.workspace = true
 romacs-display-runtime = { path = "../romacs-display-runtime", default-features = false, features = ["core-free"] }
 serde_json.workspace = true
+libc.workspace = true
 crossbeam-channel.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

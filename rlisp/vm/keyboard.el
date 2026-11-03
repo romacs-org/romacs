@@ -522,6 +522,16 @@ the maps before it moved by its change of length, or nil."
         (romacs--keyremap-shift fkey (- (length new) (length keys)))))
     new))
 
+(defvar romacs--sequence-start-functions nil
+  "Functions run with no arguments once per key sequence, after its first
+event is read and before it is looked up: a choice of keymaps made here
+holds for the whole sequence, whatever arrives between its keys.")
+
+(defvar romacs--sequence-end-functions nil
+  "Functions run with no arguments when a read whose sequence started
+ends, normally or not: a choice made at its start is undone here, so a
+read nested in another's restores the outer one's.")
+
 (defun romacs--read-key-sequence (dont-downcase-last)
   "keyboard.c read_key_sequence: read a complete key sequence.
 Return its events as a vector, or nil at the end of an executing
@@ -534,6 +544,8 @@ one (`romacs--translate-keys'), and the sequence is then reread from its
 start, so a translation's events pass through the maps after it. An
 unbound upper-case or shifted key is looked up without its shift, and
 `this-command-keys-shift-translated' says when that was used."
+  (let ((started nil))
+   (unwind-protect
   (let* ((keys-start (length romacs--command-keys))
          (indec (romacs--keyremap (and (boundp 'input-decode-map) input-decode-map)))
          (fkey (romacs--keyremap (if (boundp 'local-function-key-map)
@@ -576,7 +588,13 @@ unbound upper-case or shifted key is looked up without its shift, and
                     (t (setq key (romacs--read-char)
                              quit-flag nil
                              raw (vconcat raw (list key))
-                             keys (vconcat keys (list key)))))
+                             keys (vconcat keys (list key)))
+                       ;; Once per sequence, after its first event is read
+                       ;; and before it is looked up; replays of the
+                       ;; sequence do not run it again.
+                       (unless started
+                         (setq started t)
+                         (run-hooks 'romacs--sequence-start-functions))))
               ;; A click in a mode line, header line or margin is looked
               ;; up after its area, a fake prefix key.
               (when (and (eq state 'read) (consp key) (consp (cdr key))
@@ -622,7 +640,9 @@ unbound upper-case or shifted key is looked up without its shift, and
           romacs--key-sequence-command (and keys binding)
           romacs--key-sequence-remapped
           (and keys (symbolp binding) binding (command-remapping binding)))
-    keys))
+    keys)
+     ;; A read whose sequence started ends it, normally or not.
+     (when started (run-hooks 'romacs--sequence-end-functions)))))
 
 ;; keyboard.c read_key_sequence_vs; Fread_key_sequence's string form is Rust.
 (defun romacs--read-key-sequence-vs (prompt continue-echo dont-downcase-last _cmd-loop)

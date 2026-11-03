@@ -134,7 +134,7 @@ fn visit_each(vm: &mut Vm, files: &[std::path::PathBuf], select: bool) -> Result
 /// with the file arguments (startup.el:2830-2905): `-l FILE', `-f
 /// FUNCTION' and `--eval EXPRESSION', in their GNU spellings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StartupOption { Load, Funcall, Eval }
+pub enum StartupOption { Load, Funcall, Eval, Restore }
 
 impl StartupOption {
     pub fn parse(arg: &str) -> Option<Self> {
@@ -142,6 +142,7 @@ impl StartupOption {
             "-l" | "-load" | "--load" => Some(Self::Load),
             "-f" | "-funcall" | "--funcall" | "-e" => Some(Self::Funcall),
             "-eval" | "--eval" | "-execute" | "--execute" => Some(Self::Eval),
+            "--restore" => Some(Self::Restore),
             _ => None,
         }
     }
@@ -168,6 +169,12 @@ impl StartupOption {
             // GNU's check for text after the expression matches anywhere
             // (startup.el:2877), so any is ignored.
             Self::Eval => format!("(progn (setq inhibit-startup-screen t) (eval (car (read-from-string {text})) t))"),
+            // A session image (rlisp/warm-restart.el), restored over what the
+            // init made. A failure is reported and keeps the image; it never
+            // ends the startup.
+            Self::Restore => format!("(progn (setq inhibit-startup-screen t)
+               (condition-case err (warm-restart-restore-image (expand-file-name {text} command-line-default-directory) t)
+                 (error (message \"Session restore failed: %s; the image stays at %s\" (error-message-string err) {text}))))"),
         })
     }
 }
@@ -2465,6 +2472,32 @@ mod tests {
         assert_eq!(session.pixel_size, launch.pixel_size, "{launch:?} at launch, {session:?} in the session");
         assert!(session.pixel_size >= 10.0, "{session:?}");
         assert_eq!(settings, "(t t t t)", "{values}");
+    }
+
+    /// A face defined after the launch font, a package's settings theme
+    /// enabled (`use-package''s, for `:custom-face'), and the library that
+    /// enables it leave the default face's realised font and the stock
+    /// theme alone, as in GNU: only a colour scheme replaces the stock
+    /// theme.
+    #[test]
+    fn faces_and_settings_themes_after_launch_keep_the_default_face() {
+        let (before, after, themes) = on_evaluator(|| {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            private_home(&mut vm, "late-faces");
+            let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
+            let before = vm.display_default_face().unwrap();
+            vm.eval_source("(progn (defface romacs-late-face '((t :foreground \"red\" :weight bold)) \"A late face.\")
+                (require 'use-package-core)
+                (custom-declare-theme 'romacs-late-settings nil)
+                (custom-theme-set-faces 'romacs-late-settings '(romacs-late-face ((t :slant italic))))
+                (enable-theme 'romacs-late-settings))").unwrap();
+            let after = vm.display_default_face().unwrap();
+            (before, after, printed(&mut vm, "(and (memq 'default custom-enabled-themes) t)"))
+        });
+        assert_eq!(after, before);
+        assert_eq!(themes, "t");
     }
 
     /// `--loadup` visiting a Lisp file: its first redisplay runs jit-lock

@@ -256,3 +256,20 @@ fn programming_buffers_number_their_lines_relatively() {
         "(nil t)",
     ]);
 }
+
+/// `use-package' forms show in a Lisp buffer's imenu under "Packages"
+/// (`use-package-enable-imenu-support'); the switch takes the entry away.
+#[test]
+fn use_package_forms_are_in_imenu() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let (mut vm, _home) = session("imenu", false);
+        let packages = "(progn (require 'lisp-mode)
+            (list use-package-enable-imenu-support
+                  (and (assoc \"Packages\" lisp-imenu-generic-expression) t)))";
+        let mut report = vec![printed(&mut vm, packages)];
+        vm.eval_source("(romacs-defaults-mode -1)").unwrap();
+        report.push(printed(&mut vm, packages));
+        report
+    }).unwrap().join().unwrap();
+    assert_eq!(report, ["(t t)", "(nil nil)"]);
+}

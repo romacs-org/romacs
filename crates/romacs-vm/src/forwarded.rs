@@ -1344,6 +1344,32 @@ impl Vm {
         }).collect()
     }
 
+    /// The saved truename of BUFFER's visit, when BUFFER visits a file:
+    /// one buffer's record, without walking the others (lock-buffer).
+    pub(crate) fn visit_truename(&self, buffer: Value) -> Option<Vec<u8>> {
+        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-file-name") else { return None };
+        let locals = self.per_buffer(buffer.index(0).ok()?.checked_sub(1)?)?;
+        self.file_name_bytes(locals.get(i)?)?;
+        locals.3.clone()
+    }
+    /// The visit whose saved truename is TRUENAME, compared in place:
+    /// filelock.c get_truename_buffer. The current buffer is tried first,
+    /// as a lock is nearly always its own visit's, so locking N buffers
+    /// does not walk the buffer list N times; only when two buffers visit
+    /// one truename can the answer differ from GNU's first in list order.
+    pub(crate) fn visit_with_truename(&self, truename: &std::path::Path) -> Option<Value> {
+        use std::os::unix::ffi::OsStrExt;
+        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-file-name") else { return None };
+        let visits = |buffer: &Value| {
+            let Some(locals) = buffer.index(0).ok().and_then(|n| n.checked_sub(1)).and_then(|n| self.per_buffer(n)) else { return false };
+            locals.3.as_deref().is_some_and(|saved| std::path::Path::new(std::ffi::OsStr::from_bytes(saved)) == truename)
+                && locals.get(i).and_then(|name| self.file_name_bytes(name)).is_some()
+        };
+        let current = self.slots[self.buffer_slot].value;
+        if visits(&current) { return Some(current); }
+        self.buffer_order_snapshot().into_iter().find(visits)
+    }
+
     /// GNU `bset_<field> (current_buffer, VALUE)`: write the current buffer's
     /// own slot of the per-buffer variable NAME and flag it local, bypassing
     /// `let` bindings and the predicate, as C does when it sets a BVAR

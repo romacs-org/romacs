@@ -26,13 +26,15 @@
 ;;; Generated autoloads from romacs-agent.el
 
 (autoload 'romacs-agent-start "romacs-agent"
-"Start a Claude Code session in CWD, sending PROMPT when given.
-Return the session.
+"Start a session in CWD under instance PROVIDER (a name in
+`romacs-agent-providers', by default `romacs-agent-default-provider'),
+sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
+the harness, :role, :parent (the delegating session's id) and :request
+(its client request id) for the record.  Return the session.
 
-(fn CWD &optional PROMPT TITLE)" t)
-(autoload 'romacs-agent-restore "romacs-agent"
-"Know every recorded session, and attach to those whose supervisor runs.
-A server runs this at its start, so sessions survive it.")
+(fn CWD &optional PROMPT TITLE PROVIDER OPTIONS)" t)
+(defvar romacs-agent-restored-hook nil
+"Run after `romacs-agent-restore' has loaded every recorded session.")
 (register-definition-prefixes "romacs-agent" '("romacs-agent-"))
 
 
@@ -501,6 +503,41 @@ however many times `romacs-video' is loaded.")
 ;;; Generated autoloads from romacs-workspace-completion.el
 
 (register-definition-prefixes "romacs-workspace-completion" '("buffer-name-history" "execute-extended-command" "extended-command-history" "read-" "romacs-"))
+
+
+;;; Generated autoloads from warm-restart.el
+
+(autoload 'warm-restart-plan "warm-restart"
+"What a session image made now would carry, as a plist.
+:buffers lists (:name NAME :strategy STRATEGY :reason REASON :modified
+FLAG) per buffer, internal ones aside; :processes lists the processes,
+which end with this process.")
+(autoload 'warm-restart-write "warm-restart"
+"Write a session image of PLAN (default: `warm-restart-plan') to FILE.
+Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked.
+
+(fn &optional PLAN FILE)")
+(autoload 'warm-restart-restore-image "warm-restart"
+"Restore the session image FILE over this session; return the report.
+Under STARTUP, as `--restore' passes it, the windows are laid out and
+the buffers activated after the startup hooks, and the value is nil.
+The image is kept as restored.image, or left where it is when any
+carried text may not have arrived.
+
+(fn FILE &optional STARTUP)" t)
+(autoload 'warm-restart-report "warm-restart"
+"Show what the last restore carried, did not carry, and what went wrong." t)
+(autoload 'romacs-restart "warm-restart"
+"Restart into a new process, carrying this session.
+Write a session image, run `kill-emacs-hook' so packages save their
+state, start the new process with `--restore IMAGE', and exit.  A blocked
+buffer refuses the restart and names why.  Processes, terminals and
+network connections are not carried yet: when one would ask before
+`kill-emacs', so does this, unless FORCE.  See `romacs-restart-command'
+for running a newer build.
+
+(fn &optional FORCE)" t)
+(register-definition-prefixes "warm-restart" '("romacs-restart-" "warm-restart-"))
 
 
 ;;; Directory rlisp/emacs-lisp

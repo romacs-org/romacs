@@ -18,6 +18,14 @@ headless labwc, HOME, XDG and TMPDIR (parity_live.py).
   unit       with the user manager reachable, the client starts the server
              as the transient unit romacs-server-S, which a closed window
              leaves active and `--stop' ends.
+  crash      with the user manager: a server killed by SIGKILL shows a
+             desktop notification (its unit's ExecStopPost; notify-send is a
+             recording stand-in) naming the journal command; `--stop' and a
+             unit stop (a logout's TERM) show none.
+  build      the server keeps its build when the one ROMACS_BUILD_WATCH
+             names changes: it says "Romacs <sha> installed; quit and
+             relaunch to switch" once, at its next idle with the window
+             shown, never while the window is hidden.
   probe      clients x files: finishing one buffer and retiring one client
              with many pending buffers, at 1, 10 and 100 in each dimension
              (the costs must not grow with the other dimension).
@@ -416,7 +424,105 @@ def stop(args, base):
         s.close()
 
 
-WORKFLOWS = {'stop': stop, 'lifecycle': lifecycle, 'waiters': waiters, 'unit': unit, 'probe': probe}
+def notifier(root):
+    """A stand-in notify-send recording its arguments, first on PATH."""
+    bin_dir, log = root / 'notify-bin', root / 'notifications.jsonl'
+    bin_dir.mkdir()
+    script = bin_dir / 'notify-send'
+    script.write_text(f'#!/bin/sh\nprintf "%s\\0" "$@" >> {log}\nprintf "\\n" >> {log}\n')
+    script.chmod(0o755)
+    return bin_dir, log
+
+
+def notified(log):
+    if not log.exists():
+        return []
+    return [line.strip('\0').split('\0') for line in log.read_text().splitlines() if line]
+
+
+def crash(args, base):
+    bus = os.environ.get('DBUS_SESSION_BUS_ADDRESS')
+    if not bus:
+        return {'ok': None, 'skipped': 'no user bus'}
+    name = f'c{os.getpid()}'
+    s = Server(args, base, name, {'DBUS_SESSION_BUS_ADDRESS': bus, 'ROMACS_SERVER_SLICE': 'romacs-build.slice'})
+    bin_dir, log = notifier(s.root)
+    s.env['PATH'] = f'{bin_dir}:{s.env["PATH"]}'
+    s.env['WAYLAND_DISPLAY'] = str(s.runtime / s.env['WAYLAND_DISPLAY'])
+    s.env['XDG_RUNTIME_DIR'] = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+    unit_name = s.unit = f'romacs-server-{name}'
+    state = lambda: subprocess.run(['systemctl', '--user', 'is-active', unit_name], capture_output=True,
+                                   text=True).stdout.strip()
+    try:
+        s.client('-n')
+        s.pid = int(s.eval('(emacs-pid)'))
+        os.kill(s.pid, 9)
+        until(lambda: notified(log), 20, 'crash notification')
+        crashed = notified(log)
+        # A clean stop and a unit stop (as at logout) are no news.
+        s.client('-n')
+        s.client('--stop=none')
+        until(lambda: state() != 'active', 15, 'stopped')
+        s.client('-n')
+        subprocess.run(['systemctl', '--user', 'stop', unit_name], capture_output=True, timeout=30)
+        until(lambda: state() != 'active', 15, 'unit stopped')
+        time.sleep(1)
+        after = notified(log)
+        expected = ['-u', 'critical', '-a', 'Romacs', 'Romacs exited (signal KILL)',
+                    f'Log: journalctl --user -u {unit_name}']
+        return {'crash': crashed, 'clean_ends_noticed': len(after) - len(crashed),
+                'ok': crashed == [expected] and after == crashed}
+    finally:
+        subprocess.run(['systemctl', '--user', 'stop', unit_name], capture_output=True)
+        s.close()
+
+
+def build(args, base):
+    builds = base / 'builds'
+    for label, commit in (('a', 'aaaaaaaa11111111'), ('b', 'bbbbbbbb22222222'), ('c', 'cccccccc33333333')):
+        (builds / label).mkdir(parents=True)
+        (builds / label / 'build.json').write_text(json.dumps({'commit': commit}))
+    link = base / 'current'
+    link.symlink_to(builds / 'a')
+
+    def install(label):
+        fresh = base / 'current.new'
+        fresh.symlink_to(builds / label)
+        fresh.replace(link)
+
+    s = Server(args, base, 'bw', {'ROMACS_BUILD_WATCH': str(link)})
+    told = lambda: lisp_read(s.eval('(with-current-buffer "*Messages*" (buffer-string))'))
+    try:
+        s.client('-n')
+        s.pid = int(s.eval('(emacs-pid)'))
+        quiet_first = 'installed' not in told()
+        install('b')
+        until(lambda: 'Romacs bbbbbbbb installed; quit and relaunch to switch' in told(), 20, 'notice')
+        time.sleep(4.5)  # more checks: said once
+        once = told().count('installed') == 1
+        toast = lisp_read(s.eval('(if (boundp (quote romacs-layer--toasts)) '
+                                 '(mapconcat (lambda (toast) (nth 1 toast)) romacs-layer--toasts "|") "")'))
+        # Hidden: nothing is said until the window shows again.
+        s.eval("(romacs--native-window 'hide)")
+        install('c')
+        time.sleep(4.5)  # two checks while hidden
+        hidden_quiet = 'cccccccc' not in told()
+        s.client('-n')
+        until(lambda: 'Romacs cccccccc installed' in told(), 20, 'notice once shown')
+        result = {'quiet_first': quiet_first, 'once': once, 'toast': toast, 'hidden_quiet': hidden_quiet,
+                  'pid_same': s.eval('(emacs-pid)') == str(s.pid)}
+        result['ok'] = quiet_first and once and hidden_quiet and result['pid_same']
+        return result
+    finally:
+        s.close()
+
+
+def lisp_read(text):
+    return parity_live.read_sexp(text) if text.startswith('"') else text
+
+
+WORKFLOWS = {'stop': stop, 'lifecycle': lifecycle, 'waiters': waiters, 'unit': unit, 'crash': crash, 'build': build,
+             'probe': probe}
 
 
 def main():
@@ -430,7 +536,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['lifecycle', 'waiters', 'stop', 'probe']:
+    for name in args.workflow or ['lifecycle', 'waiters', 'stop', 'build', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result

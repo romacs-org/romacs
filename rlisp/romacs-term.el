@@ -5,7 +5,27 @@
 
 ;;; Commentary:
 
-;; Native Alacritty terminal for Romacs.
+;; Native Alacritty terminal for Romacs.  Every key goes through the
+;; command loop.  While a window shows the terminal with point on its
+;; cursor, keys reach the program through generated passthrough keymaps,
+;; except the keys in `romacs-term-keymap-exceptions', which keep their
+;; Emacs bindings (vterm's `vterm-keymap-exceptions').  On the alternate
+;; screen (a full-screen program) only `romacs-term-alternate-exceptions'
+;; stay with Emacs.  A command that moves a window's point off the cursor,
+;; or scrolls it back, leaves that window a plain read-only Emacs buffer
+;; over the scrollback; typing there puts it back on the cursor and sends
+;; the key.
+;;
+;; The keymap is chosen once per key sequence, when its first event is
+;; read (`romacs--sequence-start-functions'), and is the buffer's local map
+;; for that sequence alone, as vterm's mode map is local: minor modes and
+;; the overriding maps (isearch, transient maps) come before it.  Output
+;; arriving between a prefix and its next key never splits the sequence
+;; between two routes, and a sequence that leaves the terminal buffer is
+;; looked up with Emacs maps alone.
+;;
+;; The editable prompt line, bash's integration and completion come later;
+;; this is the passthrough part.
 
 ;;; Code:
 
@@ -14,8 +34,83 @@
 (defvar romacs-term-mode-hook nil)
 (defvar romacs-term--closing nil)
 (defvar romacs-term-session nil)
-(defvar romacs-term-emacs-input nil)
 (defvar kill-ring nil)
+
+(defvar romacs-term-keymap-exceptions
+  '("C-c" "C-x" "C-u" "C-g" "C-h" "C-l" "M-x" "M-o" "C-y" "M-y" "C-v" "M-v")
+  "Keys that keep their Emacs bindings in a terminal running a program.
+Each is a `kbd' string.  Every other key goes to the program.  After
+changing this outside Customize, run `romacs-term-update-keymaps'.")
+
+(defvar romacs-term-alternate-exceptions '("C-x" "M-x" "C-g")
+  "Keys that keep their Emacs bindings while a program has the alternate
+screen (a full-screen program such as an editor or pager).  Each is a
+`kbd' string.  After changing this outside Customize, run
+`romacs-term-update-keymaps'.")
+
+(defun romacs-term--set-exceptions (symbol value)
+  "Customize's setter for the exception lists: set SYMBOL to VALUE and
+rebuild the generated keymaps."
+  (set-default symbol value)
+  (when romacs-term--passthrough-base (romacs-term-update-keymaps)))
+
+(defvar romacs-term--passthrough-base nil
+  "The generated passthrough bindings, rebuilt from
+`romacs-term-keymap-exceptions'.")
+(defvar romacs-term--alternate-base nil
+  "The generated alternate-screen bindings, rebuilt from
+`romacs-term-alternate-exceptions'; parent of `romacs-term-alternate-map'.")
+
+(defvar romacs-term-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [3 3] 'romacs-term-interrupt)
+    (define-key map [3 11] 'romacs-term-interrupt)
+    (define-key map [25] 'romacs-term-yank)
+    (define-key map [?\M-y] 'romacs-term-yank-pop)
+    map)
+  "Keys of a terminal buffer: C-c C-c interrupts, and C-y and M-y send
+kills.  While a program runs, a binding made here wins over the keys sent
+to it, and survives `romacs-term-update-keymaps'.")
+
+(defvar romacs-term--passthrough (list 'keymap romacs-term-mode-map (make-sparse-keymap))
+  "The passthrough route's keymap: `romacs-term-mode-map' composed over
+the generated bindings (its third element, `romacs-term--passthrough-base').")
+(defvar romacs-term-alternate-map (make-sparse-keymap)
+  "Keys of a terminal on its alternate screen, above the generated ones.")
+(defvar romacs-term-away-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [remap self-insert-command] 'romacs-term-send-key)
+    (define-key map [13] 'romacs-term-send-key)
+    (define-key map [return] 'romacs-term-send-key)
+    (define-key map [9] 'romacs-term-send-key)
+    (define-key map [127] 'romacs-term-send-key)
+    map)
+  "Keys of a terminal window moved off its cursor: Emacs's, except that
+typing puts the window back on the cursor and sends the key.")
+
+(defvar romacs-term--away (list 'keymap romacs-term-away-map romacs-term-mode-map)
+  "The away route's keymap: `romacs-term-away-map' composed over
+`romacs-term-mode-map'.")
+
+(defun romacs-term--route-map (route)
+  "The local keymap of a key sequence read on ROUTE."
+  (cond ((eq route 'passthrough) romacs-term--passthrough)
+        ((eq route 'alternate) romacs-term-alternate-map)
+        ((eq route 'away) romacs-term--away)
+        (t romacs-term-mode-map)))
+
+(defvar romacs-term--latches nil
+  "The key sequences being read, innermost first: (BUFFER . ROUTE) each.")
+
+(defun romacs-term--add-hook (hook function)
+  "Add FUNCTION to HOOK's global value, with `add-hook' where it exists."
+  (if (fboundp 'add-hook)
+      (add-hook hook function)
+    (let ((value (if (boundp hook) (symbol-value hook))))
+      (if (or (functionp value) (and (consp value) (eq (car value) 'lambda)))
+          (setq value (list value)))
+      (unless (memq function value)
+        (set-default hook (cons function value))))))
 
 (defun romacs-term-running-p ()
   "Return non-nil when the current buffer owns a running terminal."
@@ -32,52 +127,184 @@
       (setq buffers (cdr buffers)))
     running))
 
-(defun romacs-term-keyboard-quit ()
-  "Quit editor interaction without sending any input to the terminal."
+;;;; Keymaps
+
+(defconst romacs-term--function-keys
+  '(return tab backtab backspace escape up down left right home end
+    prior next insert delete deletechar
+    f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12)
+  "The function keys a terminal has bytes for.")
+
+(defconst romacs-term--modifier-prefixes
+  '("" "S-" "C-" "M-" "C-S-" "M-S-" "C-M-" "C-M-S-")
+  "The modifier combinations bound for each function key.")
+
+(defun romacs-term--descriptions (keys)
+  "KEYS, `kbd' strings, as `key-description' gives them."
+  (mapcar (lambda (key) (key-description (kbd key))) keys))
+
+(defun romacs-term--passthrough-keymap (exceptions)
+  "A keymap that sends every key to the terminal except EXCEPTIONS: ASCII
+and meta characters and the function keys with their modifiers
+explicitly, and every other character the global map self-inserts
+through a remapping, so non-ASCII and input-method characters are
+covered.  An exception keeps a key's Emacs binding; a printable one, whose
+binding would only self-insert into the read-only buffer, is still sent
+through the remapping."
+  ;; Full keymaps (a char-table each, the ESC map too), so a character's
+  ;; lookup does not walk hundreds of bindings: the host's passthrough
+  ;; check makes it on every key.
+  (let ((map (make-keymap))
+        (skip (romacs-term--descriptions exceptions))
+        (code 0))
+    (define-key map [27] (make-keymap))
+    (while (< code 128)
+      ;; Every ASCII character and its meta form, bound outright, so a
+      ;; global binding of a printable key does not win; a bare ESC is the
+      ;; `escape' function key, and M-ESC is left to Emacs.
+      (let ((keys (list (vector code) (vector (logior code #x8000000)))))
+        (when (= code 27) (setq keys nil))
+        (while keys
+          (unless (member (key-description (car keys)) skip)
+            (define-key map (car keys) 'romacs-term-send-key))
+          (setq keys (cdr keys))))
+      (setq code (1+ code)))
+    (let ((names romacs-term--function-keys))
+      (while names
+        (let ((prefixes romacs-term--modifier-prefixes))
+          (while prefixes
+            (let ((key (vector (intern (concat (car prefixes) (symbol-name (car names)))))))
+              (unless (member (key-description key) skip)
+                (define-key map key 'romacs-term-send-key)))
+            (setq prefixes (cdr prefixes))))
+        (setq names (cdr names))))
+    ;; Last, so the front of the list: every lookup of a remapping finds it
+    ;; first.
+    (define-key map [remap self-insert-command] 'romacs-term-send-key)
+    map))
+
+(defun romacs-term-update-keymaps ()
+  "Rebuild the generated terminal keymaps from the exception lists.
+Bindings in `romacs-term-mode-map' and `romacs-term-alternate-map' are
+kept."
   (interactive)
-  (keyboard-quit))
+  (setq romacs-term--passthrough-base (romacs-term--passthrough-keymap romacs-term-keymap-exceptions)
+        romacs-term--alternate-base (romacs-term--passthrough-keymap romacs-term-alternate-exceptions))
+  (setcar (cdr (cdr romacs-term--passthrough)) romacs-term--passthrough-base)
+  (set-keymap-parent romacs-term-alternate-map romacs-term--alternate-base))
+
+(defun romacs-term--ensure-keymaps ()
+  "Build the generated keymaps, once, and install the routes' hooks."
+  (unless romacs-term--passthrough-base (romacs-term-update-keymaps))
+  (romacs-term--add-hook 'romacs--sequence-start-functions 'romacs-term--sequence-start)
+  (romacs-term--add-hook 'romacs--sequence-end-functions 'romacs-term--sequence-end)
+  (romacs-term--add-hook 'post-command-hook 'romacs-term--track))
+
+;;;; Routing
+
+(defun romacs-term--route ()
+  "The current buffer's route for a key sequence starting now:
+`alternate', `passthrough' (the selected window follows the cursor),
+`away' (it does not), or nil: not a running terminal in the selected
+window, or one whose local map another owns (a confirmation's answers)."
+  (when (and romacs-term-session (eq (window-buffer (selected-window)) (current-buffer))
+             (eq (current-local-map) romacs-term-mode-map))
+    (let ((state (romacs--term-state romacs-term-session)))
+      (cond ((not (plist-get state :running)) nil)
+            ((plist-get state :alternate) 'alternate)
+            ((plist-get state :following) 'passthrough)
+            (t 'away)))))
+
+(defun romacs-term--select (latch on)
+  "Give LATCH's buffer its route's local map, ON, or its own again: only
+over `romacs-term-mode-map', and undoing only that, so a local map another
+installed meanwhile stays."
+  (let ((buffer (car latch)) (route (cdr latch)))
+    (when (and route (buffer-live-p buffer))
+      (with-current-buffer buffer
+        (let ((from (romacs-term--route-map (and (not on) route)))
+              (to (romacs-term--route-map (and on route))))
+          (when (eq (current-local-map) from) (use-local-map to)))))))
+
+(defun romacs-term--sequence-start ()
+  "Latch the route of the key sequence whose first event was just read."
+  (condition-case nil
+      (let ((latch (cons (current-buffer) (romacs-term--route))))
+        (if romacs-term--latches (romacs-term--select (car romacs-term--latches) nil))
+        (setq romacs-term--latches (cons latch romacs-term--latches))
+        (romacs-term--select latch t))
+    (error nil)))
+
+(defun romacs-term--sequence-end ()
+  "Release the latch of the key sequence just read; restore the outer one."
+  (condition-case nil
+      (when romacs-term--latches
+        (romacs-term--select (car romacs-term--latches) nil)
+        (setq romacs-term--latches (cdr romacs-term--latches))
+        (if romacs-term--latches (romacs-term--select (car romacs-term--latches) t)))
+    (error nil)))
+
+(defun romacs-term--track ()
+  "After each command: a terminal window the command moved off the
+cursor, or scrolled back, becomes a plain Emacs buffer."
+  (condition-case nil (romacs--term-track) (error nil)))
+
+;;;; Commands
+
+(defun romacs-term--session ()
+  "The current buffer's terminal session, or a `user-error'."
+  (or romacs-term-session (signal 'user-error '("Not a terminal buffer"))))
+
+(defun romacs-term--snap ()
+  "Put the selected window back on the terminal's cursor."
+  (romacs--term-follow (romacs-term--session) t))
+
+(defun romacs-term-send-key ()
+  "Send the key that ran this command to the terminal, as the terminal's
+bytes for it: an ESC prefix before it (a meta key typed as ESC KEY)
+makes it a meta key.  The selected window follows the cursor again."
+  (interactive)
+  (let* ((session (romacs-term--session))
+         (keys (this-command-keys-vector))
+         (event last-command-event))
+    (when (and (> (length keys) 1) (eq (aref keys (- (length keys) 2)) 27))
+      (setq event (if (integerp event)
+                      (logior event #x8000000)
+                    (intern (concat "M-" (symbol-name event))))))
+    (romacs-term--snap)
+    (romacs--term-send-event session event)))
+
+(defun romacs-term--paste (text)
+  "Send TEXT to the terminal as a paste, after `yank-transform-functions'."
+  (let ((session (romacs-term--session))
+        (functions (and (boundp 'yank-transform-functions) yank-transform-functions)))
+    (while functions
+      (setq text (funcall (car functions) text)
+            functions (cdr functions)))
+    (romacs-term--snap)
+    (romacs--term-paste session text)))
+
+(defun romacs-term-yank (&optional arg)
+  "Send the most recent kill to the terminal, as `yank' would insert it:
+the clipboard first, through `interprogram-paste-function'.  With ARG,
+the ARGth most recent kill.  Bracketed when the program asked for it."
+  (interactive "P")
+  (romacs-term--paste (current-kill (cond ((listp arg) 0) ((eq arg '-) -2) (t (1- arg))))))
+
+(defun romacs-term-yank-pop ()
+  "Choose a kill from the kill ring and send it to the terminal.
+Text sent to a program cannot be taken back, so nothing is replaced."
+  (interactive)
+  (romacs-term--paste
+   (if (fboundp 'read-from-kill-ring)
+       (read-from-kill-ring "Send from kill-ring: ")
+     (completing-read "Send from kill-ring: " kill-ring nil t))))
 
 (defun romacs-term-interrupt ()
-  "Send Ctrl-C/ETX to the PTY; its line discipline normally delivers SIGINT."
+  "Send Ctrl-C (ETX) to the terminal; its line discipline normally
+delivers SIGINT."
   (interactive)
-  (unless romacs-term-session (signal 'user-error '("Not a terminal buffer")))
-  (romacs--term-send romacs-term-session "\003"))
-
-(defun romacs-term-toggle-input ()
-  "Toggle terminal input and protected Eshell-style editor navigation."
-  (interactive)
-  (unless romacs-term-session (signal 'user-error '("Not a terminal buffer")))
-  (setq romacs-term-emacs-input (not romacs-term-emacs-input))
-  (romacs--term-follow romacs-term-session (not romacs-term-emacs-input))
-  (setq mode-name (if romacs-term-emacs-input "Term Emacs" "Term Input"))
-  (romacs-gui-echo (if romacs-term-emacs-input
-                    "Emacs input: navigate/copy; C-c C-c returns to terminal"
-                  "Terminal input: C-x/M-x/C-g stay in editor; C-c C-k interrupts")))
-
-(defun romacs-term-input-mode ()
-  "Return explicitly to live terminal input."
-  (interactive)
-  (when romacs-term-emacs-input (romacs-term-toggle-input)))
-
-(defun romacs-term-emacs-mode ()
-  "Navigate protected terminal output with ordinary editor keys."
-  (interactive)
-  (unless romacs-term-emacs-input (romacs-term-toggle-input)))
-
-(defun romacs-term-set-mark ()
-  "Set a marker for copying terminal text without changing the application cursor."
-  (interactive)
-  (set-mark-command nil))
-
-(defun romacs-term-copy-region ()
-  "Copy logical terminal text between point and the terminal navigation mark."
-  (interactive)
-  (copy-region-as-kill (region-beginning) (region-end)))
-
-(defun romacs-term-search (text)
-  "Find TEXT in the protected terminal projection without writing to the PTY."
-  (interactive (list (read-string "Search terminal: ")))
-  (search-forward text))
+  (romacs--term-send (romacs-term--session) "\003"))
 
 (defun romacs-term--kill-query ()
   "Ask before killing a buffer whose terminal still runs, as GNU's
@@ -92,21 +319,13 @@
     (romacs--term-close romacs-term-session)
     (setq romacs-term-session nil)))
 
-(defvar romacs-term-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [3 3] 'romacs-term-toggle-input)
-    (define-key map [3 11] 'romacs-term-interrupt)
-    (define-key map [7] 'romacs-term-keyboard-quit)
-    (define-key map [0] 'romacs-term-set-mark)
-    (define-key map (kbd "M-w") 'romacs-term-copy-region)
-    (define-key map [19] 'romacs-term-search)
-    map))
-
 (defun romacs-term (&optional shell)
-  "Open a native Alacritty-backed terminal running SHELL in default-directory.
-C-x, M-x and C-g retain editor behavior.  C-c C-k sends Ctrl-C, and C-c C-c toggles
-terminal input and Emacs navigation.  Terminal output is always protected."
+  "Open a native Alacritty-backed terminal running SHELL in `default-directory'.
+Keys go to the program, except `romacs-term-keymap-exceptions'.  C-c C-c
+sends Ctrl-C; C-y and M-y send kills.  Moving point off the cursor, or
+scrolling back, makes the window a plain Emacs buffer until you type."
   (interactive)
+  (romacs-term--ensure-keymaps)
   (let* ((directory (or (and (boundp 'default-directory) default-directory) "/"))
          (buffer (get-buffer-create (generate-new-buffer-name "*romacs-term*")))
          (completed nil))
@@ -114,15 +333,13 @@ terminal input and Emacs navigation.  Terminal output is always protected."
         (progn
           (with-current-buffer buffer
             (make-local-variable 'romacs-term-session)
-            (make-local-variable 'romacs-term-emacs-input)
             (make-local-variable 'default-directory)
             (make-local-variable 'mode-line-format)
             (make-local-variable 'kill-buffer-hook)
             (make-local-variable 'kill-buffer-query-functions)
             (setq default-directory directory
-                  major-mode 'romacs-term-mode mode-name "Term Input"
-                  buffer-file-name nil buffer-read-only t
-                  romacs-term-emacs-input nil)
+                  major-mode 'romacs-term-mode mode-name "Term"
+                  buffer-file-name nil buffer-read-only t)
             (use-local-map romacs-term-mode-map))
           ;; Shown first, so the session takes the size of the window that
           ;; shows it (with a one-line mini-window), not the caller's.
@@ -133,7 +350,7 @@ terminal input and Emacs navigation.  Terminal output is always protected."
                   kill-buffer-query-functions '(romacs-term--kill-query)
                   mode-line-format '("  %b  |  " mode-name "  "
                                      (:eval (if (romacs-term-running-p) "running" "exited"))
-                                     "  |  C-c C-c toggle · C-c C-k interrupt"))
+                                     "  |  C-c C-c interrupt"))
             (run-hooks 'romacs-term-mode-hook))
           (setq completed t)
           buffer)
@@ -141,5 +358,14 @@ terminal input and Emacs navigation.  Terminal output is always protected."
         (when (buffer-live-p buffer)
           (with-current-buffer buffer (romacs-term--close))
           (let ((kill-buffer-query-functions nil) (kill-buffer-hook nil)) (kill-buffer buffer)))))))
+
+;; Customize knows the exception lists where it is loaded.
+(when (fboundp 'custom-declare-variable)
+  (custom-declare-variable 'romacs-term-keymap-exceptions (list 'quote romacs-term-keymap-exceptions)
+                           (get 'romacs-term-keymap-exceptions 'variable-documentation)
+                           :type '(repeat string) :set 'romacs-term--set-exceptions :group 'terminals)
+  (custom-declare-variable 'romacs-term-alternate-exceptions (list 'quote romacs-term-alternate-exceptions)
+                           (get 'romacs-term-alternate-exceptions 'variable-documentation)
+                           :type '(repeat string) :set 'romacs-term--set-exceptions :group 'terminals))
 
 (provide 'romacs-term)

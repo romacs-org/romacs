@@ -155,8 +155,11 @@ or a repeat."
          (unless (member (plist-get event :text) '("requesting" "compacting"))
            (romacs-agent-ui--line session event (format "· %s" (plist-get event :text)) 'face 'romacs-agent-dim)))
         ('error (romacs-agent-ui--line session event (format "! %s" (plist-get event :text)) 'face 'romacs-agent-error))
-        ('exit (romacs-agent-ui--line session event (format "· harness exited (%s)" (plist-get event :status))
-                                      'face 'romacs-agent-dim))
+        ('exit
+         ;; A per-turn harness ends every turn: only a failed run is news.
+         (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
+           (romacs-agent-ui--line session event (format "· harness exited (%s)" (plist-get event :status))
+                                  'face 'romacs-agent-dim)))
         ('session nil)
         (_ nil))
       (force-mode-line-update))))
@@ -172,7 +175,7 @@ or a repeat."
 (defun romacs-agent-ui--header ()
   (let ((session romacs-agent-ui--session))
     (format " %s · %s · %s · %s%s"
-            (romacs-agent-harness session) (or (romacs-agent-model session) "…")
+            (romacs-agent-provider session) (or (romacs-agent-model session) "…")
             (abbreviate-file-name (or (romacs-agent-cwd session) ""))
             (romacs-agent-state session)
             (if (numberp (romacs-agent-cost session)) (format " · $%.4f" (romacs-agent-cost session)) ""))))
@@ -203,6 +206,7 @@ or a repeat."
 
 (define-derived-mode romacs-agent-chat-mode fundamental-mode "Agent"
   "An agent session's transcript and composer."
+  (setq-local desktop-save-buffer #'romacs-agent-ui--desktop-save)
   (setq-local header-line-format '(:eval (romacs-agent-ui--header)))
   (setq-local buffer-invisibility-spec (list 'romacs-agent-output))
   (visual-line-mode 1))
@@ -225,12 +229,38 @@ or a repeat."
     (goto-char (point-max))
     buffer))
 
+(defvar desktop-buffer-mode-handlers)
+
+;; A session outlives the editor in its supervisor, so a restored chat
+;; (desktop.el, warm-restart.el) carries only which session it shows and
+;; the composer's unsent text; the transcript replays from the journal.
+(defun romacs-agent-ui--desktop-save (_dirname)
+  "The session this chat shows and its composer's unsent text."
+  (list :session (romacs-agent-id romacs-agent-ui--session)
+        :draft (and (markerp romacs-agent-ui--end) (romacs-agent-ui--composer-text))))
+
+(defun romacs-agent-ui-desktop-restore (_file _name misc)
+  "The chat of MISC's session, made anew from its journal, with its draft."
+  (let ((id (plist-get misc :session)))
+    (unless (romacs-agent-get id) (romacs-agent-restore))
+    (when-let* ((session (romacs-agent-get id))
+                (buffer (save-window-excursion (romacs-agent-show session))))
+      (with-current-buffer buffer
+        (when-let* ((draft (plist-get misc :draft)))
+          (unless (string-empty-p draft)
+            (goto-char (point-max))
+            (insert draft))))
+      buffer)))
+
+(add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-chat-mode . romacs-agent-ui-desktop-restore))
+
 (defun romacs-agent-ui--replay (session)
   "Render SESSION's journal into the current chat buffer."
   ;; A copy parses, so the live session's own state is not replayed over.
   (let ((scratch (copy-romacs-agent session)))
-    (setf (romacs-agent-seq scratch) 0
+    (setf (romacs-agent-seq scratch) 0 (romacs-agent-turns scratch) 0
           (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
+          (romacs-agent-tools scratch) (make-hash-table :test #'equal)
           (romacs-agent-approvals scratch) (make-hash-table :test #'equal))
     (let ((romacs-agent-event-functions (list (lambda (_ event) (romacs-agent-ui--render session event)))))
       (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record))))))
@@ -336,14 +366,14 @@ or a repeat."
 
 (define-derived-mode romacs-agents-mode tabulated-list-mode "Agents"
   "Every agent session this server knows."
-  (setq tabulated-list-format [("Session" 28 t) ("Harness" 8 t) ("State" 16 t) ("Cost" 9 t) ("Directory" 40 t)])
+  (setq tabulated-list-format [("Session" 28 t) ("Provider" 12 t) ("State" 16 t) ("Cost" 9 t) ("Directory" 40 t)])
   (setq tabulated-list-entries #'romacs-agents--entries)
   (tabulated-list-init-header))
 
 (defun romacs-agents--entries ()
   (mapcar (lambda (session)
             (list (romacs-agent-id session)
-                  (vector (or (romacs-agent-title session) "") (symbol-name (romacs-agent-harness session))
+                  (vector (or (romacs-agent-title session) "") (or (romacs-agent-provider session) "")
                           (symbol-name (romacs-agent-state session))
                           (if (numberp (romacs-agent-cost session)) (format "$%.4f" (romacs-agent-cost session)) "")
                           (abbreviate-file-name (or (romacs-agent-cwd session) "")))))

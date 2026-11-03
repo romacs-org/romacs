@@ -381,6 +381,96 @@ thousandth a stack mark."
           (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
             (dolist (i it) (romacs-mcp--withdraw 'scaling-peer "w" i)))))
 
+;; N delegated tasks, each indexed by its client request id and found again.
+(scaling-probe agent-requests :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--requests)
+                (mapcar (lambda (id) (romacs-agent--make :id id :harness 'codex :title id
+                                                        :options (list :parent "scaling-parent" :request id)))
+                        (scaling--names "scaling-request" n)))
+  :body (progn
+          (dolist (session it)
+            (puthash (romacs-agent-id session) session romacs-agent--sessions)
+            (romacs-agent--index session))
+          (dolist (session it) (romacs-agent-requested "scaling-parent" (romacs-agent-id session)))))
+
+;; N children of one parent each ending a turn while the parent's turn
+;; runs: each wake is queued behind it once (the real send and queue).
+(scaling-probe agent-wake :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (clrhash romacs-agent-tools--answered)
+                (let ((parent (romacs-agent--make :id "scaling-parent" :harness 'codex :title "parent"
+                                                  :state 'running)))
+                  (puthash "scaling-parent" parent romacs-agent--sessions))
+                (mapcar (lambda (id)
+                          (let ((child (romacs-agent--make :id id :harness 'codex :title id :done-seq 1
+                                                           :ends (list (list 1 "ok" nil))
+                                                           :dir (expand-file-name id (romacs-agent--state-root))
+                                                           :options (list :parent "scaling-parent"))))
+                            (make-directory (romacs-agent-dir child) t)
+                            (puthash id child romacs-agent--sessions)
+                            child))
+                        (scaling--names "scaling-child" n)))
+  :body (dolist (child it) (romacs-agent-tools--wake child)))
+
+;; One child with N turn ends its parent has not had: one wake gives each,
+;; in order, behind the parent's running turn.
+(scaling-probe agent-wake-ends :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (clrhash romacs-agent-tools--answered)
+                (puthash "scaling-parent" (romacs-agent--make :id "scaling-parent" :harness 'codex :title "parent"
+                                                              :state 'running)
+                         romacs-agent--sessions)
+                (let ((child (romacs-agent--make :id "scaling-ends" :harness 'codex :title "ends"
+                                                 :dir (expand-file-name "scaling-ends" (romacs-agent--state-root))
+                                                 :options (list :parent "scaling-parent")
+                                                 :ends (let (ends) (dotimes (i n) (push (list (1+ i) "ok" nil) ends)) ends))))
+                  (make-directory (romacs-agent-dir child) t)
+                  (puthash "scaling-ends" child romacs-agent--sessions)
+                  child))
+  :body (romacs-agent-tools--wake it))
+
+;; One child ending N turns, one after another, behind its parent's running
+;; turn: each wake hands on only the new end.
+(scaling-probe agent-wake-successive :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (clrhash romacs-agent-tools--answered)
+                (puthash "scaling-parent" (romacs-agent--make :id "scaling-parent" :harness 'codex :title "parent"
+                                                              :state 'running)
+                         romacs-agent--sessions)
+                (clrhash romacs-agent-tools--scheduled)
+                (let ((child (romacs-agent--make :id "scaling-turns" :harness 'codex :title "turns"
+                                                 :dir (expand-file-name "scaling-turns" (romacs-agent--state-root))
+                                                 :options (list :parent "scaling-parent"))))
+                  (make-directory (romacs-agent-dir child) t)
+                  (puthash "scaling-turns" child romacs-agent--sessions)
+                  child))
+  :body (dotimes (i n)
+          (romacs-agent--raise it (list :type 'done :text "ok" :seq (1+ i) :last t))
+          (romacs-agent-tools--wake it)))
+
+;; N deferred calls (delegations waiting) withdrawn by their relay, then
+;; retired by the next poll.
+(scaling-probe agent-withdraw-deferred :n 64
+  :setup (progn (require 'romacs-mcp) (number-sequence 0 (1- n)))
+  :body (let ((romacs-mcp--deferred nil) (romacs-mcp--deferred-index (make-hash-table :test #'equal))
+              (romacs-mcp--deferred-timer t))
+          (dolist (i it)
+            (romacs-mcp--defer-request (list :peer 'scaling-peer :cancelled nil) i #'ignore nil))
+          (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
+            (dolist (i it) (romacs-mcp--withdraw 'scaling-peer "w" i))
+            (romacs-mcp--poll-deferred))
+          (unless (null romacs-mcp--deferred) (error "Withdrawn calls were not retired"))))
+
+;; N messages sent to a per-turn session while its turn runs.
+(scaling-probe agent-queue :n 2000
+  :setup (progn (scaling--agent)
+                (romacs-agent--make :id "scaling-queue" :harness 'codex :title "queue" :state 'running))
+  :body (dotimes (i n) (romacs-agent-send it "queued")))
+
 ;; A chat of N tool calls, started then each answered.
 (scaling-probe agent-chat-tools :n 200
   :setup (progn (scaling--agent)
@@ -395,6 +485,102 @@ thousandth a stack mark."
           (dotimes (i n)
             (romacs-agent-ui--render it (list :type 'tool :state 'completed :id (format "t%d" i) :output "ok"
                                               :seq (+ 1 n i) :last t)))))
+
+;;;; Session images (rlisp/warm-restart.el)
+
+(defun scaling--session (n)
+  "N text buffers, and a private image directory."
+  (require 'warm-restart)
+  (setq warm-restart-directory (make-temp-file "scaling-images-" t))
+  (dolist (name (scaling--names "scaling-session" n))
+    (with-current-buffer (get-buffer-create name) (text-mode) (insert name "\nsecond line\n"))))
+
+;; An image of a session of N buffers written.
+(scaling-probe session-image-write :n 200
+  :setup (progn (scaling--session n) (expand-file-name "w.image" warm-restart-directory))
+  :body (warm-restart-write nil it))
+
+;; An image of N buffers restored into a session without them.
+(scaling-probe session-image-restore :n 200
+  :setup (progn (scaling--session n)
+                (let ((file (expand-file-name "r.image" warm-restart-directory)))
+                  (warm-restart-write nil file)
+                  (dolist (name (scaling--names "scaling-session" n)) (kill-buffer name))
+                  file))
+  :body (warm-restart-restore-image it))
+
+;; An image of N file buffers, every other one with unsaved text,
+;; restored into a session without them.
+(scaling-probe session-image-restore-files :n 100
+  :setup (let ((dir (make-temp-file "scaling-files-" t)) (create-lockfiles nil))
+           (scaling--session 0)
+           (dolist (name (scaling--names "scaling-file" n))
+             (let ((file (expand-file-name name dir)))
+               (with-temp-file file (insert name "\n"))
+               (with-current-buffer (find-file-noselect file)
+                 (when (cl-evenp (length (buffer-list))) (insert "unsaved\n")))))
+           (let ((image (expand-file-name "f.image" warm-restart-directory)))
+             (warm-restart-write nil image)
+             (dolist (buffer (buffer-list))
+               (when (buffer-file-name buffer)
+                 (with-current-buffer buffer (set-buffer-modified-p nil))
+                 (kill-buffer buffer)))
+             image))
+  :body (warm-restart-restore-image it))
+
+;; N Hermes chats restored through Hermes's own desktop handler beside N
+;; text buffers, then attached at activation (offline: no dashboard).
+(defun scaling--offline-hermes (function)
+  "Call FUNCTION with Hermes's dashboard transport off."
+  (cl-letf (((symbol-function 'hermes-chat--dashboard-default-transport-p) #'ignore))
+    (funcall function)))
+
+(scaling-probe session-image-restore-mixed :n 50
+  :setup (progn
+           (scaling--session n)
+           (add-to-list 'load-path (expand-file-name "hermes" (file-name-directory (locate-library "warm-restart"))))
+           (require 'hermes-chat)
+           (scaling--offline-hermes
+            (lambda ()
+              (let ((warm-restart-passive t) (warm-restart-activate-functions nil))
+                (dolist (name (scaling--names "scaling-chat" n))
+                  (hermes-chat-desktop-restore nil name (list :version 1 :session-id name :title name))))
+              (setq hermes-chat--warm-restart-attaches nil)))
+           (let ((file (expand-file-name "m.image" warm-restart-directory)))
+             (warm-restart-write nil file)
+             (dolist (buffer (buffer-list))
+               (when (string-match-p "\\`scaling-\\(chat\\|session\\)" (buffer-name buffer))
+                 (with-current-buffer buffer (set-buffer-modified-p nil))
+                 (let ((kill-buffer-query-functions nil)) (kill-buffer buffer))))
+             file))
+  :body (scaling--offline-hermes (lambda () (warm-restart-restore-image it))))
+
+;; The restore's lock pass over N modified file buffers.
+(scaling-probe session-image-locks :n 100
+  :setup (let ((dir (make-temp-file "scaling-locks-" t)))
+           (require 'warm-restart)
+           (mapcar (lambda (name)
+                     (let ((file (expand-file-name name dir)))
+                       (with-temp-file file (insert "text\n"))
+                       (with-current-buffer (let ((create-lockfiles nil)) (find-file-noselect file))
+                         (let ((create-lockfiles nil)) (insert "edit"))
+                         (current-buffer))))
+                   (scaling--names "scaling-lock" n)))
+  :body (warm-restart--lock it))
+
+;; The same pass when another editor holds every one of those locks.
+(scaling-probe session-image-locks-contended :n 100
+  :setup (let ((dir (make-temp-file "scaling-contended-" t)))
+           (require 'warm-restart)
+           (mapcar (lambda (name)
+                     (let ((file (expand-file-name name dir)))
+                       (with-temp-file file (insert "text\n"))
+                       (make-symbolic-link "someone@elsewhere.1:0" (expand-file-name (concat ".#" name) dir))
+                       (with-current-buffer (let ((create-lockfiles nil)) (find-file-noselect file))
+                         (let ((create-lockfiles nil)) (insert "edit"))
+                         (current-buffer))))
+                   (scaling--names "scaling-contended" n)))
+  :body (warm-restart--lock it))
 
 ;; Cursor motion in a truncated window, which places point's line for its
 ;; hscroll each redisplay: N faces defined, then N distinct faces on

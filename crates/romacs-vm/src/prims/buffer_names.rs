@@ -121,6 +121,24 @@ fn bury_buffer_internal(cx, buffer: Value) -> Step {
 }}
 fn done_nil(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
 
+// Romacs: the buffer list ordered with BUFFERS first, then the others in
+// their order, as one change with one `buffer-list-update-hook': a session
+// image's restore (rlisp/warm-restart.el) puts back a whole order, which
+// `bury-buffer-internal' would rebuild once per buffer.
+defsubr! { name = "romacs--lead-buffer-list", gnu = "romacs:session-image", effect = Global,
+fn lead_buffer_list(cx, buffers: Value) -> Step {
+    let mut lead = Vec::new();
+    let mut tail = buffers;
+    while let Some((buffer, rest)) = cx.pair(tail) {
+        lead.push(buffer);
+        tail = rest;
+    }
+    if tail != Value::NIL { return Err(Fault::Wrong("listp", buffers)); }
+    cx.lead_buffer_order(&lead);
+    let hook = cx.intern("buffer-list-update-hook");
+    Ok(Step::Call { f: cx.intern("run-hooks"), args: vec![hook], then: done_nil, saved: vec![] })
+}}
+
 #[cfg(test)]
 mod tests {
     use crate::{Value, Vm};

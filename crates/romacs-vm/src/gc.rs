@@ -642,6 +642,7 @@ impl Vm {
         }
         pending.extend(self.permanent_symbol_names.values().copied());
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
+        pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| pending.push(*v));
         }
@@ -1031,7 +1032,7 @@ impl Vm {
             .chain(self.stack.iter_mut())
             .chain(self.suspended_stacks.iter_mut().flatten())
             .chain(self.external_roots.iter_mut())
-            .chain(self.terminal_bindings.iter_mut().map(|binding| &mut binding.buffer))
+            .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
         {
             rewrite(v);
         }

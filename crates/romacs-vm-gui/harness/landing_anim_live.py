@@ -75,6 +75,7 @@ import tempfile
 import time
 
 import fileio_live as fio
+import re
 import live_oracle as live
 
 WIDTH, HEIGHT = 1600, 1000
@@ -133,7 +134,9 @@ def main():
                 time.sleep(0.3)
                 proc = subprocess.Popen([str(a.binary.resolve()), '--loadup', '--trace-scene'], env=env,
                                         stdin=subprocess.DEVNULL, stdout=blog, stderr=blog)
-                rows = lambda: fio.rows(stderr_path.read_text(errors='replace'))
+                # *scratch* is a programming buffer, numbered by default: rows
+                # are compared without their line-number column.
+                rows = lambda: [re.sub(r'^\s*\d+ ', '', r) for r in fio.rows(stderr_path.read_text(errors='replace'))]
                 fio.wait(lambda: any('SPC pause' in r for r in rows()), a.timeout * 3, 'the landing', proc)
 
                 def keys(*parts):
@@ -398,6 +401,11 @@ def main():
                     time.sleep(1.0)
                     return shot(f'alpha-{percent}')
 
+                # These shots compare pixel rows round the landing: a cursor
+                # trail still animating under load would cross them.
+                keys('-M', 'alt', ':', '-m', 'alt')
+                keys("(setopt romacs-cursor-motion-trail-size 0)")
+                keys('-k', 'Return')
                 opaque = frame_alpha(100)
                 # The lit mark and its glow inside the frame's border, short of
                 # the message corner; then the wordmark below them.
