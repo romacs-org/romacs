@@ -117,7 +117,7 @@ impl FaceDef {
         for kw in [":family", ":foundry"] {
             if let Some((_, v)) = pairs.iter().rev().find(|(k, _)| *k == kw) {
                 let a = Attribute::from_keyword(kw).expect("known");
-                attrs = attrs.with(a, validate(face, a, v)?);
+                attrs.set(a, validate(face, a, v)?);
             }
         }
         for (key, value) in pairs {
@@ -139,7 +139,7 @@ impl FaceDef {
                         _ if value.is_nil() => validate(face, a, &Datum::symbol(off))?,
                         _ => validate(face, a, &Datum::symbol(on))?,
                     };
-                    attrs = attrs.with(a, slot);
+                    attrs.set(a, slot);
                 }
                 // A font object cannot be expressed without a font backend;
                 // GNU also ignores :font on a non-window frame. Out of scope
@@ -152,7 +152,7 @@ impl FaceDef {
                     if a == Attribute::Extend {
                         self.extend_mentioned = true;
                     }
-                    attrs = attrs.with(a, validate(face, a, value)?);
+                    attrs.set(a, validate(face, a, value)?);
                 }
             }
         }

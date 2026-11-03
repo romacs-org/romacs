@@ -117,6 +117,7 @@ prims/callint.rs run_command variable_set 1 held  # a leaf or T2 continuation: i
 prims/coding.rs set_safe_terminal_coding_system_internal variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/expand_file_name.rs decode_file variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/face.rs function_height safe_call 1 held  # a leaf: its engine is not suspended
+prims/face.rs set_lisp_face_attribute safe_call 1 held  # a leaf: its engine is not suspended; afterwards it returns FACE, a symbol, which never moves
 prims/face.rs set_lisp_face_attribute variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/fileio.rs write_chosen variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
 prims/frame.rs frame_or_buffer_changed_p variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended

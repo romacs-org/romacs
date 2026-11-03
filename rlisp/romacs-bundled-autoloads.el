@@ -437,6 +437,11 @@ recompiling; signals an error if no frame shader is installed
 (register-definition-prefixes "romacs-test" '("romacs-"))
 
 
+;;; Generated autoloads from romacs-theme.el
+
+(register-definition-prefixes "romacs-theme" '("romacs-"))
+
+
 ;;; Generated autoloads from romacs-unidata.el
 
 (register-definition-prefixes "romacs-unidata" '("romacs-unidata-"))

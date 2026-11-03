@@ -445,8 +445,17 @@ impl Theme {
         for (face, keyword, value) in edits {
             let key: Arc<str> = self.canonical_name(face).into();
             let entry = overrides.entry(key.clone()).or_default();
-            entry.push(Datum::symbol(keyword));
-            entry.push((**value).clone());
+            // A keyword's later value wins over its earlier one whatever lies
+            // between (`:bold' and `:weight' set one slot in order), so the
+            // earlier pair goes: a face's edits stay one pair per keyword
+            // however many times a theme sets them.
+            let mut kept = Vec::with_capacity(entry.len() + 2);
+            for pair in entry.chunks(2).filter(|pair| pair[0].as_symbol() != Some(keyword)) {
+                kept.extend_from_slice(pair);
+            }
+            kept.push(Datum::symbol(keyword));
+            kept.push((**value).clone());
+            *entry = kept;
             if !order.contains(&key) {
                 order.push(key);
             }
@@ -491,7 +500,7 @@ pub(crate) fn resolve_reset(attrs: &Attrs, default_realized: &Attrs) -> Attrs {
     let mut out = attrs.clone();
     for a in Attribute::ALL {
         if matches!(attrs.get(a), Slot::Reset) {
-            out = out.with(a, default_realized.get(a).clone());
+            out.set(a, default_realized.get(a).clone());
         }
     }
     out

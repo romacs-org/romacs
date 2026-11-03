@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "f4fd0101d5a10059dd1b3a2989614635b533790bc48673a31f50228ab118a8f0",
+    "input_hash": "96a4ec5af7dab84d42460000c2109a2b9ae064ea5a7c695402f9d52950d4ec3d",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7847
+    "vm2_universe": 7852
   },
   "schema": 2,
   "vm2": {
-    "count": 1285,
+    "count": 1287,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -497,6 +497,7 @@
       "internal-get-lisp-face-attribute",
       "internal-handle-focus-in",
       "internal-lisp-face-attribute-values",
+      "internal-lisp-face-equal-p",
       "internal-lisp-face-p",
       "internal-make-lisp-face",
       "internal-make-var-non-special",
@@ -814,6 +815,7 @@
       "romacs--decode-output",
       "romacs--display-animates",
       "romacs--doc-variable-records",
+      "romacs--frame-shares-faces-p",
       "romacs--frozen-regions",
       "romacs--fzf-filter",
       "romacs--fzf-highlight",

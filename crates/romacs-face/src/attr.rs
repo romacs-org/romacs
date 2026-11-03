@@ -233,8 +233,12 @@ impl Attrs {
 
     pub(crate) fn with(&self, attr: Attribute, slot: Slot) -> Attrs {
         let mut next = self.clone();
-        next.slots[attr.index()] = slot;
+        next.set(attr, slot);
         next
+    }
+
+    pub(crate) fn set(&mut self, attr: Attribute, slot: Slot) {
+        self.slots[attr.index()] = slot;
     }
 }
 
