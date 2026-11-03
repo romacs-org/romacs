@@ -29,6 +29,7 @@ mod layout_host;
 mod display_host;
 mod session_host;
 mod terminal_host;
+mod terminal_keys;
 mod process_jobs;
 mod subprocess;
 mod tls;

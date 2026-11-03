@@ -24,3 +24,18 @@ defsubr! { name = "romacs--term-running-p", gnu = "romacs:terminal", effect = Re
 fn terminal_running(cx, session: Integer) {
     cx.terminal_running(session.0)
 }}
+
+defsubr! { name = "romacs--term-encode-event", gnu = "romacs:terminal", effect = Reads,
+fn terminal_encode_event(cx, event: Value; optional application_cursor: Value) {
+    cx.terminal_encode_event(event, application_cursor != Value::NIL)
+}}
+
+defsubr! { name = "romacs--term-send-event", gnu = "romacs:terminal", effect = Global,
+fn terminal_send_event(cx, session: Integer, event: Value) {
+    cx.terminal_send_event(session.0, event)
+}}
+
+defsubr! { name = "romacs--term-state", gnu = "romacs:terminal", effect = Reads,
+fn terminal_state(cx, session: Integer) {
+    cx.terminal_state(session.0)
+}}

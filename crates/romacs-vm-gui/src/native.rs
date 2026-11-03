@@ -9,6 +9,17 @@ pub fn translate(event: InputEvent) -> Option<CommandEvent> {
         InputEvent::Key { key, modifiers, pressed: true, .. } => (key, modifiers),
         _ => return None,
     };
+    // Shift+Tab is the function key `backtab', as GNU's X and pgtk frames
+    // deliver ISO_Left_Tab; modifiers other than Shift stay on it.
+    if let FrontendKey::Keysym(0xff09 | 0xfe20) = key
+        && modifiers & ROMACS_SHIFT_MASK != 0
+    {
+        let mut prefix = String::new();
+        for (mask, label) in [(ROMACS_ALT_MASK, "A-"), (ROMACS_CTRL_MASK, "C-"), (ROMACS_HYPER_MASK, "H-"), (ROMACS_META_MASK, "M-"), (ROMACS_SUPER_MASK, "s-")] {
+            if modifiers & mask != 0 { prefix.push_str(label); }
+        }
+        return Some(CommandEvent::Named(prefix + "backtab"));
+    }
     let mut code = match key {
         FrontendKey::Character(c) => Some(c as i64),
         FrontendKey::Keysym(k) => match k {

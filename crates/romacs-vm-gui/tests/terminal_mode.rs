@@ -20,7 +20,7 @@ impl TerminalHost for Host {
     fn send(&mut self, _: u64, bytes: &[u8]) -> Result<(),String> { self.0.borrow_mut().push(bytes.to_vec()); Ok(()) }
     fn resize(&mut self, _: u64, _: u16, _: u16) -> Result<(),String> { Ok(()) }
     fn close(&mut self, _: u64) -> Result<(),String> { Ok(()) }
-    fn input_state(&mut self, _: u64) -> Result<romacs_vm::TerminalInputState,String> { Ok(romacs_vm::TerminalInputState { running:true, application_cursor:false, bracketed_paste:false }) }
+    fn input_state(&mut self, _: u64) -> Result<romacs_vm::TerminalInputState,String> { Ok(romacs_vm::TerminalInputState { running:true, application_cursor:false, bracketed_paste:false, alternate_screen: false }) }
     fn changed_sessions(&mut self) -> Vec<u64> { vec![] }
     fn snapshot(&mut self, _: u64) -> Result<TerminalSnapshot,String> { Ok(TerminalSnapshot { revision:1, text:"$ ".into(), styles:std::sync::Arc::from([romacs_vm::TerminalStyleRun { bytes:0..1, style:romacs_vm::TerminalStyle { foreground:FOREGROUND.get(), ..Default::default() } }]), default_colors:[None;2], cursor_byte:2, screen_start_byte:0, columns:80, rows:24, alternate_screen:false, running:true, application_cursor:false, bracketed_paste:false }) }
 }

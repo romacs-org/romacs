@@ -69,6 +69,52 @@ impl Leaf<'_> {
         Ok(Value::NIL)
     }
 
+    /// EVENT, a Lisp input event, as the bytes a terminal sends for it
+    /// (`terminal_keys'): a unibyte string, empty for an event with no bytes.
+    pub(crate) fn terminal_encode_event(&mut self, event: Value, application_cursor: bool) -> Out {
+        let bytes = self.event_bytes(event, application_cursor)?;
+        Ok(self.vm.make_lisp_string(bytes, false))
+    }
+
+    fn event_bytes(&mut self, event: Value, application_cursor: bool) -> std::result::Result<Vec<u8>, Fault> {
+        use crate::terminal_keys::{character_event, encode, symbol_event};
+        let key = if let Ok(code) = event.as_integer() {
+            character_event(code).ok_or_else(|| Fault::Error("Invalid character event".into()))?
+        } else if event.tag() == 7 || event == Value::NIL || event == Value::TRUE {
+            let name = self.symbol_name(event)?;
+            return encode(symbol_event(&name), application_cursor).map_err(Fault::Error);
+        } else {
+            // A mouse or other list event: no terminal bytes.
+            return Ok(Vec::new());
+        };
+        encode(key, application_cursor).map_err(Fault::Error)
+    }
+
+    /// Send EVENT to SESSION as the terminal's bytes for it, in the
+    /// application-cursor mode the terminal is in now.
+    pub(crate) fn terminal_send_event(&mut self, session: i64, event: Value) -> Out {
+        let id = u64::try_from(session).map_err(|_| Fault::Error("Invalid terminal session".into()))?;
+        let state = self.vm.terminal_input_state(id).map_err(Fault::Error)?;
+        let bytes = self.event_bytes(event, state.application_cursor)?;
+        if bytes.is_empty() {
+            return Ok(Value::NIL);
+        }
+        let string = self.vm.make_lisp_string(bytes, false);
+        self.terminal_send(session, string)
+    }
+
+    /// SESSION's state, as a plist: `:running', `:alternate',
+    /// `:bracketed-paste', `:application-cursor'.
+    pub(crate) fn terminal_state(&mut self, session: i64) -> Out {
+        let id = u64::try_from(session).map_err(|_| Fault::Error("Invalid terminal session".into()))?;
+        let state = self.vm.terminal_input_state(id).map_err(Fault::Error)?;
+        let flag = |on: bool| if on { Value::TRUE } else { Value::NIL };
+        let keys = [":running", ":alternate", ":bracketed-paste", ":application-cursor"].map(|k| self.intern(k));
+        let values = [state.running, state.alternate_screen, state.bracketed_paste, state.application_cursor].map(flag);
+        let items: Vec<Value> = keys.iter().zip(values).flat_map(|(&k, v)| [k, v]).collect();
+        Ok(self.vm.list_value(&items))
+    }
+
     pub(crate) fn terminal_running(&mut self, session: i64) -> Out {
         let running = self.vm.terminal_input_state(session as u64).map_err(Fault::Error)?.running;
         Ok(if running { Value::TRUE } else { Value::NIL })

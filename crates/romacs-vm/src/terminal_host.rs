@@ -89,12 +89,13 @@ pub struct TerminalInputState {
     pub running: bool,
     pub application_cursor: bool,
     pub bracketed_paste: bool,
+    pub alternate_screen: bool,
 }
 
 impl TerminalSnapshot {
     /// Read protocol flags from an immutable publication.
     pub fn input_state(&self) -> TerminalInputState {
-        TerminalInputState { running: self.running, application_cursor: self.application_cursor, bracketed_paste: self.bracketed_paste }
+        TerminalInputState { running: self.running, application_cursor: self.application_cursor, bracketed_paste: self.bracketed_paste, alternate_screen: self.alternate_screen }
     }
 }
 
