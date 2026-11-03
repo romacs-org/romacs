@@ -104,13 +104,25 @@ fn allow(ruleset: &std::os::fd::OwnedFd, path: &Path, access: u64) -> io::Result
 }
 
 /// A world build's read roots (§5 step 2): the RECIPE's own, the pinned
-/// table `DIR/p` that its working and temporary directories are in, and
-/// the binary's (`runtime_roots`).
+/// table `DIR/p` that its working and temporary directories are in, what
+/// Lisp startup reads (`startup_roots`) and the binary's (`runtime_roots`).
 pub fn build_roots(recipe: Vec<PathBuf>, dir: &Path) -> Vec<PathBuf> {
     let mut roots = recipe;
     roots.push(dir.join("p"));
+    roots.extend(startup_roots());
     roots.extend(runtime_roots());
     roots
+}
+
+/// The files Lisp startup reads beside the trees it loads, which a world
+/// build runs: `set-locale-environment' reads the first of its candidate
+/// locale alias files that exists (mule-cmds.el).
+pub fn startup_roots() -> Vec<PathBuf> {
+    [
+        "/usr/share/X11/locale/locale.alias", "/usr/lib/X11/locale/locale.alias",
+        "/usr/X11R6/lib/X11/locale/locale.alias", "/usr/openwin/lib/locale/locale.alias",
+        "/usr/share/locale/locale.alias",
+    ].map(PathBuf::from).into()
 }
 
 /// The roots this binary itself reads at run time: its build tree (the
