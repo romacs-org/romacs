@@ -148,6 +148,17 @@ fn window_el_fits_windows_with_dividers_as_pinned_gnu() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// The same fitting of a bottom side window under Romacs's status bar
+/// (VM2-STATUS-BAR), against pinned GNU X11 on a frame shorter by the
+/// bar's line, where the root window is as tall (window_status_bar.el and
+/// .gnu).
+#[test]
+fn window_el_fits_a_bottom_side_window_under_the_status_bar() {
+    let failures = gui_probe::probe(include_str!("window_status_bar.el"), include_str!("window_status_bar.gnu"),
+                                    "window_el_fits_a_bottom_side_window_under_the_status_bar", |_, _| {});
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn keymap_popup_window_matches_pinned_gnu() {
     let library = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/emacs-lisp/keymap-popup.el");

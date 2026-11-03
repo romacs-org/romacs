@@ -172,6 +172,8 @@ pub(super) struct DisplayState {
     pub(crate) face_revision: u64,
     /// The least height a painted row has, for a face revision.
     row_floor: Option<(u64, u32)>,
+    /// The status bar's row height for its faces, for a face revision.
+    pub(super) bar_fit: Option<(u64, Vec<Face>, u32)>,
     pub version: u64,
     /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
     pub(super) hosted: bool,
@@ -182,7 +184,7 @@ pub(super) struct DisplayState {
     /// Every evaluator entry a mode-line expansion made (`Vm::mode_line_evals').
     pub(super) mode_line_evals: u64,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, version, hosted, width, height, building_band, diagnostics, mode_line_evals });
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, bar_fit, version, hosted, width, height, building_band, diagnostics, mode_line_evals });
 impl DisplayState {
     /// The theme with every pending face edit applied: built once for them
     /// all, or, when that fails, one edit at a time, so an edit the theme
@@ -302,6 +304,7 @@ impl DisplayState {
             bases: std::collections::BTreeMap::new(),
             face_revision: 0,
             row_floor: None,
+            bar_fit: None,
             theme: std::cell::RefCell::new(Theme::build(
                 Arc::new(defs),
                 None,

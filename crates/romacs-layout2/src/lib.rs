@@ -228,6 +228,7 @@ pub fn tab_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
 
 /// Whether CH is one of Romacs's icons (U+FE000-U+FE0FF): one column wide
 /// in any face (VM2-MODE-LINE).
+#[inline]
 fn is_icon(ch: char) -> bool {
     ('\u{FE000}'..='\u{FE0FF}').contains(&ch)
 }
@@ -990,15 +991,17 @@ fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> b
             None,
             false,
         );
-        let published = publish_face_text(
-            resolver,
-            frame,
-            id,
-            &FontRequest::new(&face.family, face.pixel_size),
-            &policy,
-            &face_text[index],
-        )
-        .map_err(|e| e.to_string())?;
+        // Icons are bound from the resolver's one answer for them, not
+        // resolved through the face's fallback on every layout.
+        let request = FontRequest::new(&face.family, face.pixel_size);
+        let text = &face_text[index];
+        let plain: std::borrow::Cow<str> = if text.chars().any(is_icon) { text.chars().filter(|&c| !is_icon(c)).collect::<String>().into() } else { text.into() };
+        let published = publish_face_text(resolver, frame, id, &request, &policy, &plain).map_err(|e| e.to_string())?;
+        for icon in text.chars().filter(|&c| is_icon(c)) {
+            let resolution = resolver.resolve_sole(&request, icon, &policy).map_err(|e| e.to_string())?;
+            if !frame.fonts.contains_key(&resolution.font.id) { frame.fonts.insert(resolution.font.id, resolution.font.clone()); }
+            frame.char_fonts.entry(id).or_default().insert(icon, resolution.glyph.clone());
+        }
         if !published.unresolved.is_empty() {
             return Err(format!("unresolved face text: {:?}", published.unresolved));
         }

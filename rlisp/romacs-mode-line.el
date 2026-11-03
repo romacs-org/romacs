@@ -155,14 +155,13 @@ DOC documents it.  SPEC is a plist:
              (defun ,(intern (format "romacs-mode-line-refresh-%s" name)) ()
                ,(format "Compute the segment `%s' again in the current buffer." name)
                (let* ((text (funcall ,compute))
-                      (value (and text (propertize text ,@(and face `('face ',face)) 'romacs-segment ',name
-                                                   ,@(and pill `('romacs-pill ',pill))
-                                                   ,@(and pill-text `('romacs-pill-text ',pill-text))))))
+                      (value (and text ,(if face `(propertize text 'face ',face) 'text))))
                  (unless (equal-including-properties value ,variable)
                    (setq ,variable value)
                    (force-mode-line-update))))))
        (romacs-mode-line--add-segment
-        ',name (list :compute ,(and compute t) :hooks ',(plist-get spec :hooks) :local ,local))
+        ',name (list :compute ,(and compute t) :hooks ',(plist-get spec :hooks) :local ,local
+                     :pill ',pill :pill-text ',pill-text))
        ',name)))
 
 (defun romacs-mode-line--refresh (name)
@@ -472,10 +471,16 @@ left segments, the `right-align' marker, the right segments.")
 (put 'romacs-mode-line-format 'risky-local-variable t)
 
 (defun romacs-mode-line--element (item)
-  "ITEM of a segment list as a format element: a segment's variable."
-  (if (and (symbolp item) (gethash item romacs-mode-line--segments))
-      (romacs-mode-line--variable item)
-    item))
+  "ITEM of a segment list as a format element: a segment's variable, a
+`:compute' one in the `:propertize' that names it its segment (and pill),
+as a `:format' one's own value does."
+  (let ((definition (and (symbolp item) (gethash item romacs-mode-line--segments))))
+    (cond ((not definition) item)
+          ((plist-get definition :compute)
+           `(:propertize ("" ,(romacs-mode-line--variable item)) romacs-segment ,item
+                         ,@(when-let* ((pill (plist-get definition :pill))) `(romacs-pill ,pill))
+                         ,@(when-let* ((text (plist-get definition :pill-text))) `(romacs-pill-text ,text))))
+          (t (romacs-mode-line--variable item)))))
 
 (defvar romacs-mode-line--installed nil
   "The format `romacs-mode-line-mode' last installed.")

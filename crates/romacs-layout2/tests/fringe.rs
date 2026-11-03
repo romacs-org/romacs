@@ -220,6 +220,30 @@ fn the_status_bar_splits_at_its_marker_and_draws_pills_and_icons() {
     assert!(accent.is_some());
 }
 
+/// An icon in buffer text is one column, as in a band, and measuring the
+/// text gives the advances painting it does (VM2-MODE-LINE): the icon
+/// font's own advance differs from a 20-pixel mono cell.
+#[test]
+fn an_icon_in_text_paints_and_measures_one_column() {
+    assert!(romacs_font::register_font_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/RomacsIcons.ttf")));
+    let text = "a\u{FE001}b";
+    let mut snapshot = window(text, LineWrap::Window);
+    snapshot.faces = vec![Face { pixel_size: 20.0, ..face([255; 3], [0; 3]) }; 3];
+    let painted = lay_out(frame(snapshot.clone(), None));
+    let widths: Vec<(char, f32)> = painted.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { row_role: GlyphRowRole::Text, char, width, .. } => Some((*char, *width)),
+        _ => None,
+    }).collect();
+    assert_eq!(widths.iter().map(|w| w.0).collect::<String>(), text);
+    assert_eq!(widths[1].1, widths[0].1, "an icon is one column: {widths:?}");
+    let measured = romacs_layout2::LayoutEngine::new().unwrap().measure(&romacs_layout_input::MeasureInput {
+        font_selection: Default::default(), font_alternatives: Default::default(),
+        faces: snapshot.faces.clone(), text: snapshot.text.clone(),
+    }).unwrap();
+    let advances: Vec<u32> = measured.glyphs.iter().map(|g| g.0).collect();
+    assert_eq!(advances, widths.iter().map(|w| w.1.round() as u32).collect::<Vec<_>>());
+}
+
 /// Panes (VM2-PANE-CHROME): each window's box, fringes included, but the
 /// mini-window's; the selected window's edge in the focus colour, the
 /// others' in the hairline's and dimmed; none in GNU's look.

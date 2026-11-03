@@ -194,6 +194,9 @@ pub struct FontResolver {
     alternatives: FontAlternativeState,
     primary: HashMap<(RequestKey, u64), Result<ResolvedFont, FontResolveError>>,
     chars: HashMap<(RequestKey, u64, char), Result<CharResolution, FontResolveError>>,
+    /// Characters only one font has (Romacs's icons), by character and the
+    /// request's style and size, whatever its family (`resolve_sole').
+    sole: HashMap<(char, u16, romacs_display_protocol::font::FontSlantKind, u16, u32), Result<CharResolution, FontResolveError>>,
     opened: HashMap<(String, u32, u32), Option<OpenedFace>>,
     files: HashMap<String, Option<std::sync::Arc<Vec<u8>>>>,
 }
@@ -219,6 +222,7 @@ impl FontResolver {
             alternatives: FontAlternativeState::default(),
             primary: HashMap::default(),
             chars: HashMap::default(),
+            sole: HashMap::default(),
             opened: HashMap::default(),
             files: HashMap::default(),
         })
@@ -247,6 +251,7 @@ impl FontResolver {
             self.selection_order = state;
             self.primary.clear();
             self.chars.clear();
+            self.sole.clear();
         }
     }
 
@@ -258,6 +263,7 @@ impl FontResolver {
             self.alternatives = state;
             self.primary.clear();
             self.chars.clear();
+            self.sole.clear();
         }
     }
 
@@ -331,6 +337,19 @@ impl FontResolver {
         let resolved = self.resolve_char_uncached(request, ch, policy);
         self.chars.insert(key, resolved.clone());
         resolved
+    }
+
+    /// CH's font and glyph for a character that only one font has, as
+    /// Romacs's icons (U+FE000-U+FE0FF, its own font) are: resolved once per
+    /// style and size through `resolve_char', then by character alone, so
+    /// no family is hashed or font cloned for it again.
+    pub fn resolve_sole(&mut self, request: &FontRequest, ch: char, policy: &FontsetPolicy) -> Result<&CharResolution, FontResolveError> {
+        let key = (ch, request.weight, request.slant, request.width, request.pixel_size.to_bits());
+        if !self.sole.contains_key(&key) {
+            let resolved = self.resolve_char(request, ch, policy);
+            self.sole.insert(key, resolved);
+        }
+        self.sole[&key].as_ref().map_err(Clone::clone)
     }
 
     fn resolve_char_uncached(

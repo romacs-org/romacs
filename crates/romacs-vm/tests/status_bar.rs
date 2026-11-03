@@ -365,6 +365,29 @@ fn the_bar_marks_its_segments_pills_and_icons() {
     assert!(state.pill.is_some_and(|p| p.foreground.is_some()), "{state:?}");
 }
 
+/// A string's own marks reach the bar as a `:propertize''s do: a raw
+/// string element's `romacs-icon' and `romacs-segment', and a string's
+/// inside an outer face, which only sets the face (VM2-STATUS-BAR).
+#[test]
+fn a_strings_own_marks_reach_the_bar() {
+    let mut vm = session("name");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el"] {
+        vm.load_file(&root.join(file)).unwrap();
+    }
+    eval(&mut vm, "(progn (setq romacs-icons--font t)
+        (defvar mle-raw (propertize \"*\" 'romacs-icon '((?* . modified)) 'romacs-segment 'raw))
+        (defvar mle-under (propertize \"ab\" 'romacs-segment 'under 'romacs-pill 'mode-line-highlight))
+        (put 'mle-raw 'risky-local-variable t) (put 'mle-under 'risky-local-variable t)
+        (setq-default mode-line-format '(\"x\" mle-raw \" \" (:propertize mle-under face bold))))");
+    let shown = bar(&mut vm);
+    assert!(shown.text.utf8.starts_with("x* ab"), "{:?}", shown.text.utf8);
+    assert_eq!(shown.marks.icons, vec![(1, '\u{FE001}')]);
+    let segments: Vec<(&str, std::ops::Range<usize>, bool)> = shown.marks.segments.iter()
+        .map(|s| (s.name.as_str(), s.bytes.clone(), s.pill.is_some())).collect();
+    assert_eq!(segments, vec![("raw", 1..2, false), ("under", 3..5, true)]);
+}
+
 /// `romacs-status-bar-string' is what the painter places: the host's
 /// advances right of the accent block, a long text clipped where the bar
 /// ends, a right side wider than the bar from its start.

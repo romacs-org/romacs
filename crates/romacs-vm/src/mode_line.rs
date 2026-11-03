@@ -15,15 +15,15 @@ pub(super) enum Target { Display, String, NoProp }
 /// The text properties a mode line projects besides faces (VM2-G1B): a
 /// string element's own, else an enclosing `:propertize''s. A
 /// `format-mode-line' string carries them all; a painted band the ones
-/// the painter reads (`BandMarks', VM2-STATUS-BAR).
-const PAINTED: [&str; 4] = ["romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text"];
-const PROJECTED: [&str; 7] = ["local-map", "keymap", "help-echo", "romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text"];
+/// the painter reads (`BandMarks', VM2-STATUS-BAR): from a `:propertize'
+/// its icons (its segments are `Band::segments'), from a string all four.
+const PAINTED: [&str; 1] = ["romacs-icon"];
+const MARKS: [&str; 4] = ["romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text"];
 
-/// The `:propertize' properties that make a construct a segment of the
-/// status bar: they belong to all it expands to, whatever an inner
-/// `:propertize' gives its pieces (`Band::segments').
+/// The `:propertize' properties that make a construct one of the status
+/// bar's segments, which owns all it expands to (`Band::segments').
 const SEGMENT: [&str; 3] = ["romacs-segment", "romacs-pill", "romacs-pill-text"];
-
+const PROJECTED: [&str; 7] = ["local-map", "keymap", "help-echo", "romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text"];
 
 /// A piece's projected properties, by name.
 pub(super) type Projected = std::rc::Rc<Vec<(&'static str, Form)>>;
@@ -228,6 +228,11 @@ fn propertize_of(plist: &Form, names: &'static [&'static str]) -> Option<std::rc
     (face.is_some() || !projected.is_empty()).then(|| std::rc::Rc::new(Propertize { face, projected: std::rc::Rc::new(projected) }))
 }
 
+/// Whether a `:propertize' PLIST has the property NAME.
+fn plist_has(plist: &Form, name: &str) -> bool {
+    matches!(plist, Form::List(items) if items.chunks(2).any(|pair| matches!(&pair[0], Form::Sym(n) if n == name)))
+}
+
 /// OUTER's projected properties over OWN's: an enclosing `:propertize'
 /// wins (display_mode_element), else the string's own show.
 fn merged(outer: Option<&Propertize>, own: Option<&Own>) -> Option<Projected> {
@@ -393,7 +398,13 @@ impl Vm {
         if risky || (names.is_empty() && props.is_some_and(|p| p.face.is_some())) { return Ok(None); }
         let Form::Object(object) = elt else { return Ok(None) };
         let value = object.value(self)?;
-        if !matches!(self.object_if(value), Some(data::Object::String(_))) || self.string_bytes(value)?.is_empty() { return Ok(None); }
+        // A string without properties shows none; of NAMES, only those it
+        // carries somewhere are read per run.
+        let names: Vec<&'static str> = match self.object_if(value) {
+            Some(data::Object::String(s)) if !s.properties.is_empty() => names.iter().copied().filter(|name| s.properties.has_key(name)).collect(),
+            _ => return Ok(None),
+        };
+        if self.string_bytes(value)?.is_empty() { return Ok(None); }
         let face = self.intern("face");
         let keys: Vec<Value> = names.iter().map(|name| self.intern(name)).collect();
         let mut runs: Vec<(usize, Own)> = vec![];
@@ -511,7 +522,14 @@ impl Vm {
                 // GNU replaces a risky string's properties with PROPS and
                 // otherwise merges PROPS onto the string's own: where PROPS
                 // has no face, the string's own faces show.
-                let own = self.ml_own_props(&elt, props.as_deref(), risky, band.projected)?;
+                // A marked band reads a string's own marks (`MARKS'); any
+                // other painted band only its faces.
+                let own_names: &'static [&'static str] = match band.target {
+                    Target::String => band.projected,
+                    Target::Display if !band.projected.is_empty() => &MARKS,
+                    _ => &[],
+                };
+                let own = self.ml_own_props(&elt, props.as_deref(), risky, own_names)?;
                 if literal {
                     // GNU `store_mode_line_string`: precision and N count characters.
                     let shown = if precision - n > 0 { char_prefix(&s, (precision - n) as usize) } else { &s };
@@ -617,19 +635,21 @@ impl Vm {
                             }
                             if let Some((inner, plist)) = split(cdr) {
                                 let start = band.text.len();
-                                let segment = (band.target == Target::Display && !band.projected.is_empty())
-                                    .then(|| propertize_of(&plist, &SEGMENT)).flatten()
-                                    .filter(|p| p.projected.iter().any(|(name, _)| *name == "romacs-segment"));
+                                // In the status bar a construct naming a segment
+                                // owns all it expands to (`Band::segments').
+                                let segment = (band.target == Target::Display && !band.projected.is_empty()
+                                               && plist_has(&plist, "romacs-segment"))
+                                    .then(|| propertize_of(&plist, &SEGMENT)).flatten().map(|p| p.projected.clone());
                                 // The bar's painter lays out what follows a
                                 // `right-align' marker from the right edge and
                                 // shows it whole: it gets its own columns, however
                                 // long the left side ran.
-                                if segment.as_ref().is_some_and(|s| s.projected.iter().any(|(name, value)| *name == "romacs-segment" && matches!(value, Form::Sym(v) if v == "right-align"))) {
+                                if segment.as_ref().is_some_and(|s| s.iter().any(|(name, v)| *name == "romacs-segment" && matches!(v, Form::Sym(v) if v == "right-align"))) {
                                     band.cols = 0;
                                 }
                                 n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, propertize_of(&plist, band.projected), risky)?;
-                                if let Some(segment) = segment && band.text.len() > start {
-                                    band.segments.push((start..band.text.len(), segment.projected.clone()));
+                                if let Some(projected) = segment && band.text.len() > start {
+                                    band.segments.push((start..band.text.len(), projected));
                                 }
                             }
                             break;

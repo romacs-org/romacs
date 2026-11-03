@@ -58,6 +58,22 @@ mode line would be."
       (romacs-mode-line-mode -1)
       (setq-default mode-line-format gnu))))
 
+(romacs-deftest romacs-chrome-keeps-a-mode-chosen-during-classic ()
+  (unwind-protect
+      (progn
+        (romacs-status-bar-mode 1)
+        (romacs-mode-line-mode 1)
+        (romacs-classic-chrome 1)
+        (romacs-should-not romacs-status-bar-mode)
+        ;; Turned off by hand during classic: classic's end keeps it off.
+        (romacs-status-bar-mode -1)
+        (romacs-classic-chrome -1)
+        (romacs-should-not romacs-status-bar-mode)
+        (romacs-should romacs-mode-line-mode))
+    (romacs-classic-chrome -1)
+    (romacs-mode-line-mode -1)
+    (romacs-status-bar-mode -1)))
+
 (romacs-deftest romacs-mode-line-leaves-a-buffers-own-format ()
   (with-temp-buffer
     (setq-local mode-line-format '("own"))

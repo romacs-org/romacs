@@ -106,19 +106,33 @@ default background lifted 15% toward the default foreground."
 (defvar romacs-status-bar-mode)
 (defvar romacs-mode-line-mode)
 
-(defvar romacs-chrome--mode-line nil
-  "Whether `romacs-mode-line-mode' was on when classic chrome turned it off.")
+(defvar romacs-chrome--classic-off nil
+  "The modes classic chrome turned off, to turn on again after it.")
 
-(defun romacs-chrome--classic-mode-line (classic)
-  "Turn Romacs's mode line off for CLASSIC chrome, and on again after it
-when classic chrome turned it off."
-  (when (fboundp 'romacs-mode-line-mode)
-    (cond ((and classic (bound-and-true-p romacs-mode-line-mode))
-           (setq romacs-chrome--mode-line t)
-           (romacs-mode-line-mode -1))
-          ((and (not classic) romacs-chrome--mode-line)
-           (setq romacs-chrome--mode-line nil)
-           (romacs-mode-line-mode 1)))))
+(defvar romacs-chrome--toggling nil
+  "Non-nil while classic chrome turns a mode off or on itself.")
+
+(defun romacs-chrome--classic-modes (classic)
+  "Turn Romacs's status bar and mode line off for CLASSIC chrome, and on
+again after it those classic chrome turned off."
+  (let ((romacs-chrome--toggling t))
+    (dolist (mode '(romacs-status-bar-mode romacs-mode-line-mode))
+      (when (fboundp mode)
+        (cond ((and classic (symbol-value mode))
+               (push mode romacs-chrome--classic-off)
+               (funcall mode -1))
+              ((and (not classic) (memq mode romacs-chrome--classic-off))
+               (setq romacs-chrome--classic-off (delq mode romacs-chrome--classic-off))
+               (funcall mode 1)))))))
+
+(defun romacs-chrome--chosen (mode)
+  "MODE was turned on or off by its user, not by classic chrome: classic
+chrome's end leaves it as chosen."
+  (unless romacs-chrome--toggling
+    (setq romacs-chrome--classic-off (delq mode romacs-chrome--classic-off))))
+
+(add-hook 'romacs-status-bar-mode-hook (lambda () (romacs-chrome--chosen 'romacs-status-bar-mode)))
+(add-hook 'romacs-mode-line-mode-hook (lambda () (romacs-chrome--chosen 'romacs-mode-line-mode)))
 
 (defcustom romacs-pane-label 'name
   "What each window's own mode-line band shows while the status bar
@@ -159,7 +173,7 @@ again."
   :group 'romacs-chrome
   (when (and romacs-classic-chrome (bound-and-true-p window-divider-mode))
     (window-divider-mode -1))
-  (romacs-chrome--classic-mode-line romacs-classic-chrome)
+  (romacs-chrome--classic-modes romacs-classic-chrome)
   (romacs-chrome-apply))
 
 (define-minor-mode romacs-status-bar-mode

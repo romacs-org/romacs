@@ -29,7 +29,10 @@ with --classic).
 
 With --scenes the session then shows, each in a screenshot: a file of
 a Git repository (vc), that buffer modified, the buffer in
-`flymake-mode' with an error and a warning, and an M-x prompt.  With --slowdown N the window animations run N times
+`flymake-mode' with an error and a warning, an M-x prompt, and three
+tall toasts: every one shown ends above the status bar
+(`romacs-chrome-bottom') and the bar's pixel probe still finds its
+background (on a short --mode one toast waits hidden).  With --slowdown N the window animations run N times
 longer and a screenshot is taken a third into the second split.
 
 With --gpu-frames N (at least 200) the three panes then show N edits,
@@ -103,6 +106,16 @@ SCENES = r'''
                                  (flymake-mode 1) (flymake-start))
                       (run-at-time 1 nil (lambda () (chrome-live--note "flymake")))))
 (run-at-time 23 nil (lambda () (chrome-live--note "prompt")))
+(run-at-time 28 nil (lambda ()
+  (dotimes (i 3) (romacs-layer-toast (format "toast %d\n%s" i (string-join (make-list 5 "a toast line") "\n"))))
+  (run-at-time 1 nil (lambda ()
+    (with-temp-file (expand-file-name "toasts.json" chrome-live-dir)
+      (insert (format "{\"bottom\": %d, \"toasts\": [%s]}" (romacs-chrome-bottom)
+                      (mapconcat (lambda (toast)
+                                   (let ((f (romacs-layer--frame (car toast))))
+                                     (format "[%d, %d, %s]" (cdr (frame-position f)) (+ (cdr (frame-position f)) (frame-pixel-height f))
+                                             (if (frame-visible-p f) "true" "false"))))
+                                 romacs-layer--toasts ", "))))))))
 '''
 LOAD = r'''
 (blink-cursor-mode -1)
@@ -144,6 +157,8 @@ def contrast(a: str, b: str) -> float:
 
 
 def near(a: str, b: str, slack: int = 3) -> bool:
+    if not (a.startswith('#') and b.startswith('#')):
+        return a == b
     return all(abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) <= slack for i in (1, 3, 5))
 
 
@@ -213,7 +228,7 @@ def main():
                 init += f'(setopt romacs-window-animations-slowdown {args.slowdown})\n'
             end = LOAD.replace('{frames}', str(args.gpu_frames)) if args.gpu_frames else '(run-at-time 13 nil (lambda () (kill-emacs 0)))\n'
             if args.scenes:
-                end = SCENES + '(run-at-time 30 nil (lambda () (kill-emacs 0)))\n'
+                end = SCENES + '(run-at-time 33 nil (lambda () (kill-emacs 0)))\n'
                 repo = home / 'repo'
                 repo.mkdir()
                 (repo / 'a.el').write_text(';;; a.el --- a file  -*- lexical-binding: t -*-\n(defun a () 1)\n')
@@ -297,6 +312,19 @@ def main():
                     report[f'state-{scene}'] = json.loads(note.read_text())
                     if scene == 'prompt':
                         subprocess.run(['/usr/bin/wtype', '-M', 'ctrl', 'g', '-m', 'ctrl'], env=env, timeout=10)
+                if args.scenes:
+                    toasts = notes / 'toasts.json'
+                    wait(toasts.exists, args.timeout, 'toasts', proc)
+                    time.sleep(1.5)
+                    png = shot('scene-toasts')
+                    found = json.loads(toasts.read_text())
+                    report['toasts'] = found
+                    shown = [t for t in found['toasts'] if t[2]]
+                    checks['toasts-above-bar'] = ['ok' if shown and all(t[1] <= found['bottom'] for t in shown) else 'covered', 'ok']
+                    if not args.classic:
+                        state = report['state-3']
+                        bx = round((state['native_width'] - state['border'] - 3) * args.scale)
+                        checks['bar-under-toasts'] = [pixel(png, bx, round((state['bar_top'] + 2) * args.scale)), state['bar_background']]
                 wait(lambda: proc.poll() is not None, 30 + args.gpu_frames * .1, 'exit', None)
             if args.gpu_frames:
                 report['gpu'] = gpu_times(log_path.read_text(errors='replace'), out / 'trace.jsonl', MEASURED)

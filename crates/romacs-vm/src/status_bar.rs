@@ -6,7 +6,7 @@
 //! the host measures for its faces.
 use super::mode_line;
 use crate::{data::Object, *};
-use romacs_layout_input::{BandMarks, FaceHandle, FaceRun, Pill, Segment, StatusBarSnapshot, TextSlice};
+use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, Pill, Segment, StatusBarSnapshot, TextSlice};
 
 /// The corner radius of a segment's pill, in pixels.
 const PILL_RADIUS: u32 = 6;
@@ -88,13 +88,13 @@ impl Vm {
     /// and from strings that carry `romacs-segment' (PROPS), each a pill on
     /// the background of its `romacs-pill' face, its text in the foreground
     /// of its `romacs-pill-text' face; and each character a `romacs-icon'
-    /// alist names, drawn as that icon (`icon_characters').
+    /// alist names, drawn as that icon (`icon_index').
     fn band_marks(&mut self, text: &str, props: &[(std::ops::Range<usize>, mode_line::Projected)],
                   segments: &[(std::ops::Range<usize>, mode_line::Projected)], table: &super::FaceTable) -> Result<BandMarks> {
         let mut marks = BandMarks::default();
-        let structural = segments.iter().filter_map(|(bytes, projected)| self.segment_of(bytes, projected, table)).collect::<Vec<_>>();
-        // Each structural segment's ranges by name, ordered, to find the one
-        // containing a property run by search.
+        let structural: Vec<Segment> = segments.iter().filter_map(|(bytes, projected)| self.segment_of(bytes, projected, table)).collect();
+        // A string's segment inside a construct of the same name is that
+        // construct's: each name's ranges, ordered, searched per run.
         let mut by_name: std::collections::HashMap<&str, Vec<std::ops::Range<usize>>> = std::collections::HashMap::new();
         for s in &structural { by_name.entry(s.name.as_str()).or_default().push(s.bytes.clone()); }
         for ranges in by_name.values_mut() { ranges.sort_by_key(|r| r.start); }
@@ -102,10 +102,9 @@ impl Vm {
             let at = ranges.partition_point(|r| r.start <= bytes.start);
             at > 0 && ranges[at - 1].end >= bytes.end
         });
-        let mut icons: Option<Vec<(String, char)>> = None;
+        let mut icons: Option<std::collections::HashMap<u64, char>> = None;
         for (bytes, projected) in props {
-            if let Some(segment) = self.segment_of(bytes, projected, table)
-                && !contained(&segment.name, bytes) {
+            if let Some(segment) = self.segment_of(bytes, projected, table) && !contained(&segment.name, bytes) {
                 match marks.segments.last_mut() {
                     // One segment's pieces are adjacent runs of its name.
                     Some(last) if last.name == segment.name && last.bytes.end == segment.bytes.start && last.pill == segment.pill => {
@@ -115,13 +114,16 @@ impl Vm {
                 }
             }
             let Some((_, alist)) = projected.iter().find(|(name, _)| *name == "romacs-icon") else { continue };
-            let alist = self.ml_icon_alist(alist);
-            let icons = match &mut icons { Some(icons) => icons, None => icons.insert(self.icon_characters()?) };
+            let icons = match &icons { Some(icons) => icons, None => icons.insert(self.icon_index()?) };
+            if icons.is_empty() { continue; }
+            // The piece's own alist, its first entry per character (assq),
+            // resolved to icons once.
+            let mut own: std::collections::HashMap<i64, Option<char>> = std::collections::HashMap::new();
+            for (key, name) in self.ml_icon_alist(alist) {
+                if !own.contains_key(&key) { own.insert(key, icons.get(&self.intern(&name).0).copied()); }
+            }
             for (at, c) in text[bytes.clone()].char_indices() {
-                let named = alist.iter().find(|(key, _)| *key == c as i64).map(|(_, name)| name);
-                if let Some(&(_, icon)) = named.and_then(|n| icons.iter().find(|(name, _)| name == n)) {
-                    marks.icons.push((bytes.start + at, icon));
-                }
+                if let Some(&Some(icon)) = own.get(&(c as i64)) { marks.icons.push((bytes.start + at, icon)); }
             }
         }
         marks.segments.extend(structural);
@@ -189,25 +191,26 @@ impl Vm {
             _ => None,
         }).collect()
     }
-    /// Each icon's name and character from `romacs-icons-alist', while
-    /// Romacs Icons is there to draw them (`romacs-icons--font' t) and
-    /// wanted (`romacs-icons-source' `romacs', `romacs-icons-ascii' nil),
-    /// as `romacs-icon' decides; else none.
-    fn icon_characters(&mut self) -> Result<Vec<(String, char)>> {
-        let [font, source, ascii] = ["romacs-icons--font", "romacs-icons-source", "romacs-icons-ascii"].map(|name| self.slot(name));
+    /// Each icon's character by its name's symbol, read in place from
+    /// `romacs-icons-alist' once for a bar, while Romacs Icons is there to
+    /// draw them (`romacs-icons--font' t) and wanted (`romacs-icons-source'
+    /// `romacs', `romacs-icons-ascii' nil), as `romacs-icon' decides; else
+    /// none.
+    fn icon_index(&mut self) -> Result<std::collections::HashMap<u64, char>> {
+        let [font, source, ascii, alist] = ["romacs-icons--font", "romacs-icons-source", "romacs-icons-ascii", "romacs-icons-alist"].map(|name| self.slot(name));
         let romacs = self.intern("romacs");
+        let mut index = std::collections::HashMap::new();
         if self.variable_value(font)? != Value::TRUE || self.variable_value(source)? != romacs
-            || !matches!(self.variable_value(ascii)?, Value::NIL | Value::UNBOUND) { return Ok(vec![]); }
-        let alist = self.slot("romacs-icons-alist");
-        let alist = self.variable_value(alist)?;
-        let Form::List(entries) = self.mode_line_form(alist) else { return Ok(vec![]) };
-        Ok(entries.into_iter().filter_map(|entry| match entry {
-            Form::List(fields) => match fields.as_slice() {
-                [Form::Sym(name), Form::Int(point), ..] => char::from_u32(u32::try_from(*point).ok()?).map(|c| (name.clone(), c)),
-                _ => None,
-            },
-            _ => None,
-        }).collect())
+            || !matches!(self.variable_value(ascii)?, Value::NIL | Value::UNBOUND) { return Ok(index); }
+        let mut tail = self.variable_value(alist)?;
+        while let Ok((entry, rest)) = self.cons_pair(tail) {
+            tail = rest;
+            let Ok((key, fields)) = self.cons_pair(entry) else { continue };
+            let point = self.cons_pair(fields).ok().and_then(|(point, _)| point.integer_value());
+            // The first entry for a name is the one `assq' finds.
+            if let Some(c) = point.and_then(|p| u32::try_from(p).ok()).and_then(char::from_u32) { index.entry(key.0).or_insert(c); }
+        }
+        Ok(index)
     }
     /// OWNER's effective mode-line format expanded as its band is, at
     /// COLUMNS: `%-' fills them and the text is clipped there. None when it
@@ -248,8 +251,21 @@ impl Vm {
     pub(crate) fn refit_status_bar(&mut self, bar: Option<&StatusBarSnapshot>) -> Result<bool> {
         let Some(bar) = bar else { return Ok(false) };
         if !self.display_state.hosted || !self.has_layout_host() { return Ok(false); }
-        let runs = std::iter::once(0).chain(bar.text.face_runs.iter().map(|run| run.face.0 as usize)).collect();
-        let measured = self.face_row_height(bar.faces.clone(), runs)?;
+        let mut runs: Vec<usize> = std::iter::once(0).chain(bar.text.face_runs.iter().map(|run| run.face.0 as usize)).collect();
+        runs.sort_unstable();
+        runs.dedup();
+        // Measured once per face revision and faces used: a key repaints
+        // the bar with the same faces.
+        let revision = self.display_state.face_revision;
+        let used: Vec<Face> = runs.iter().filter_map(|&i| bar.faces.get(i).cloned()).collect();
+        let measured = match &self.display_state.bar_fit {
+            Some((known, faces, height)) if *known == revision && *faces == used => *height,
+            _ => {
+                let height = self.face_row_height(bar.faces.clone(), runs)?;
+                self.display_state.bar_fit = Some((revision, used, height));
+                height
+            }
+        };
         if measured == 0 || measured == self.window_state.status_height { return Ok(false); }
         self.window_state.status_height = measured;
         Ok(true)
