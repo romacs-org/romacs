@@ -131,21 +131,35 @@ fn gnu(args: &[&str]) -> Result<String, String> {
         let mut child = std::process::Command::new(&binary).args(args)
             .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
             .spawn().map_err(|e| e.to_string())?;
+        // Both pipes drain while GNU runs, so its output never fills one.
+        let drain = |mut pipe: Box<dyn Read + Send>| std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = pipe.read_to_end(&mut bytes);
+            bytes
+        });
+        let stdout = drain(Box::new(child.stdout.take().unwrap()));
+        let stderr = drain(Box::new(child.stderr.take().unwrap()));
         let start = std::time::Instant::now();
-        while child.try_wait().map_err(|e| e.to_string())?.is_none() && start.elapsed() < GNU_TIMEOUT {
+        let status = loop {
+            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                break Some(status);
+            }
+            if start.elapsed() >= GNU_TIMEOUT {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
             std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
-            let _ = child.kill();
-            let _ = child.wait();
+        };
+        let (stdout, stderr) = (stdout.join().unwrap_or_default(), stderr.join().unwrap_or_default());
+        let Some(status) = status else {
             eprintln!("GNU oracle ran out of {GNU_TIMEOUT:?} (attempt {attempt} of {GNU_ATTEMPTS})");
             continue;
+        };
+        if !status.success() {
+            return Err(String::from_utf8_lossy(&stderr).into_owned());
         }
-        let output = child.wait_with_output().map_err(|e| e.to_string())?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).into_owned());
-        }
-        return String::from_utf8(output.stdout).map_err(|e| e.to_string());
+        return String::from_utf8(stdout).map_err(|e| e.to_string());
     }
     Err(format!("GNU oracle gave no answer in {GNU_ATTEMPTS} tries of {GNU_TIMEOUT:?}"))
 }
@@ -175,8 +189,8 @@ fn pins_path() -> PathBuf {
 }
 
 /// The pins' answer under KEY, or GNU's live to ARGS under ROMACS_GNUTLS_LIVE
-/// or ROMACS_GNUTLS_RECORD (which writes it to a pins file of its own,
-/// merged by regenerate.sh).
+/// or ROMACS_GNUTLS_RECORD (which stages it beside the pins, for
+/// regenerate.sh to merge).
 fn pinned_or_live(key: &str, args: &[&str]) -> String {
     let live = std::env::var_os("ROMACS_GNUTLS_LIVE").is_some();
     let record = std::env::var_os("ROMACS_GNUTLS_RECORD").is_some();
@@ -186,13 +200,13 @@ fn pinned_or_live(key: &str, args: &[&str]) -> String {
     }
     let answer = gnu(args).unwrap_or_else(|e| panic!("GNU on {key}: {e}"));
     if record {
-        std::fs::write(fixture(&format!("gnu-{key}.json")), serde_json::to_string(&serde_json::json!({key: answer})).unwrap()).unwrap();
+        std::fs::write(fixture(&format!("gnu-{key}.recorded.json")), serde_json::to_string(&serde_json::json!({key: answer})).unwrap()).unwrap();
     }
     answer
 }
 
 /// GNU's answer to each case: the pins, or GNU itself under
-/// ROMACS_GNUTLS_LIVE or ROMACS_GNUTLS_RECORD (which also rewrites the pins).
+/// ROMACS_GNUTLS_LIVE or ROMACS_GNUTLS_RECORD (which also stages new pins).
 fn gnu_answers(cases: &[String], port: u16) -> Vec<String> {
     let live = std::env::var_os("ROMACS_GNUTLS_LIVE").is_some();
     let record = std::env::var_os("ROMACS_GNUTLS_RECORD").is_some();
@@ -218,7 +232,8 @@ fn gnu_answers(cases: &[String], port: u16) -> Vec<String> {
             "revision": revision, "gnu_binary_sha256": sha256, "regime": "-Q --batch; (require 'gnutls)",
             "cases": cases.iter().zip(&answers).map(|(case, gnu)| serde_json::json!({"source": template(case, port), "gnu": gnu})).collect::<Vec<_>>(),
         });
-        std::fs::write(pins_path(), serde_json::to_string_pretty(&pins).unwrap() + "\n").unwrap();
+        // Staged: regenerate.sh publishes the pins once every recording passed.
+        std::fs::write(fixture("gnu-answers.recorded.json"), serde_json::to_string_pretty(&pins).unwrap() + "\n").unwrap();
     }
     answers
 }
@@ -268,11 +283,46 @@ fn tls_capability_claims_sessions_only() {
     assert_eq!(vm.eval_source("(list (gnutls-available-p) libgnutls-version)").unwrap().display().unwrap(), "((gnutls gnutls3) -1)");
 }
 
+/// BODY on a thread of its own, failing the test after LIMIT whatever it
+/// is doing, a TLS handshake included, rather than waiting for it.
+fn bounded(limit: std::time::Duration, body: impl FnOnce() + Send + 'static) {
+    let (done, finished) = std::sync::mpsc::channel();
+    let worker = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        body();
+        let _ = done.send(());
+    }).unwrap();
+    match finished.recv_timeout(limit) {
+        Ok(()) => worker.join().unwrap(),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => std::panic::resume_unwind(worker.join().unwrap_err()),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("still running after {limit:?}"),
+    }
+}
+
+/// The bound holds against a peer that takes the connection and never
+/// speaks TLS: gnutls-boot would wait on it for ever.
+#[test]
+fn a_stalled_handshake_is_cut_off_by_the_bound() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || { let _held: Vec<_> = listener.incoming().flatten().collect(); });
+    let outcome = std::panic::catch_unwind(|| bounded(std::time::Duration::from_secs(5), move || {
+        let mut vm = bootstrapped();
+        vm.eval_source("(require 'gnutls)").unwrap();
+        let _ = vm.eval_source(&format!(r#"(gnutls-boot (make-network-process :name "stall" :host "127.0.0.1" :service {port} :noquery t) 'gnutls-x509pki (list :hostname "localhost"))"#));
+    }));
+    let message = outcome.expect_err("the stalled handshake finished").downcast::<String>().map(|s| *s).unwrap_or_default();
+    assert!(message.contains("still running after"), "{message}");
+}
+
 /// A 200 KB line sent over TLS comes back whole, every time: twenty
 /// echoes, each bounded, so a stall reports how far the echo got instead
-/// of hanging the suite.
+/// of hanging the suite; the whole test is bounded too (`bounded').
 #[test]
 fn a_large_echo_completes_every_time() {
+    bounded(std::time::Duration::from_secs(240), large_echoes);
+}
+
+fn large_echoes() {
     let port = start_server();
     let mut vm = bootstrapped();
     vm.eval_source("(progn (require 'gnutls) (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))").unwrap();
@@ -294,9 +344,13 @@ fn a_large_echo_completes_every_time() {
 
 /// A :nowait connection that boots TLS through :tls-parameters opens and
 /// tells its sentinel, every time: twenty, each bounded, so a lost event
-/// fails the round instead of waiting for ever.
+/// fails the round instead of waiting for ever; the whole test is bounded.
 #[test]
 fn a_nowait_tls_connection_opens_every_time() {
+    bounded(std::time::Duration::from_secs(240), nowait_connections);
+}
+
+fn nowait_connections() {
     let port = start_server();
     let mut vm = bootstrapped();
     vm.eval_source("(require 'gnutls)").unwrap();

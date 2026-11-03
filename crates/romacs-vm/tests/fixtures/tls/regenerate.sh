@@ -2,8 +2,8 @@
 # Re-record GNU's answers for tests/gnutls.rs from the pinned oracle:
 #   ROMACS_GNU_ORACLE=/abs/path/to/emacs crates/romacs-vm/tests/fixtures/tls/regenerate.sh
 # The oracle must be the pin (scripts/gnu_oracle.py check). The session cases
-# are written to gnu-answers.json with the build that gave them; the
-# capability shape is recorded beside them and merged in.
+# and the capability shape are recorded to staging files, and merged into
+# gnu-answers.json, with the build that gave them, only if both tests pass.
 set -euo pipefail
 [ $# -eq 0 ] || { echo "regenerate.sh takes no arguments; set ROMACS_GNU_ORACLE" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
@@ -12,12 +12,17 @@ python3 -B "$root/scripts/gnu_oracle.py" check
 cd "$root"
 ROMACS_GNUTLS_RECORD=1 cargo test --profile gate --locked --offline -p romacs-vm --test gnutls -- \
   tls_sessions_match_pinned_gnu tls_capability_claims_sessions_only --test-threads 1
+# Publish only now that both recordings passed: merge the staged files
+# and replace the pins in one rename.
 python3 - "$here" <<'PY'
-import json, pathlib, sys
+import json, os, pathlib, sys
 here = pathlib.Path(sys.argv[1])
-pins = json.loads((here / "gnu-answers.json").read_text())
-extra = here / "gnu-capability.json"
-pins.update(json.loads(extra.read_text()))
-extra.unlink()
-(here / "gnu-answers.json").write_text(json.dumps(pins, indent=2, ensure_ascii=False) + "\n")
+staged = [here / "gnu-answers.recorded.json", here / "gnu-capability.recorded.json"]
+pins = json.loads(staged[0].read_text())
+pins.update(json.loads(staged[1].read_text()))
+fresh = here / "gnu-answers.json.new"
+fresh.write_text(json.dumps(pins, indent=2, ensure_ascii=False) + "\n")
+os.replace(fresh, here / "gnu-answers.json")
+for path in staged:
+    path.unlink()
 PY
