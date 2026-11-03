@@ -2,6 +2,11 @@
 //! and the constants its code holds, as bytes; and back into a VM.
 //!
 //! Constants are a graph of nodes, so sharing and cycles survive.
+//! A function's body is encoded apart, after the values, functions and
+//! inline caches it names, so a load installs it pending (`PendingBody`)
+//! and decodes it when it is first called (`Vm::decode_pending`), as a
+//! code image's bodies stay mapped until their first call; most functions
+//! a file defines are not called while it loads.
 //! Interned symbols are indices into the artifact's name table; an
 //! uninterned symbol is one of the unit's own, made afresh at each load
 //! (GNU's `.elc` reads `#:x` per form). Each function's quoted constants
@@ -29,7 +34,7 @@ impl Names {
 }
 
 /// A reference to a value inside a unit.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Ref {
     Nil,
     True,
@@ -50,6 +55,36 @@ const NODE_RECORD: u8 = 6;
 const NODE_BOOL_VECTOR: u8 = 7;
 const NODE_CLOSURE: u8 = 8;
 const NODE_CELL: u8 = 9;
+
+/// What one function's body names of its unit, each once, in order: the
+/// values (nodes and uninterned symbols), child functions and inline
+/// caches. The body refers to them by these local indices.
+#[derive(Default)]
+struct Deps {
+    values: Vec<Ref>,
+    value_of: HashMap<Ref, usize>,
+    children: Vec<usize>,
+    child_of: HashMap<usize, usize>,
+    caches: Vec<usize>,
+    cache_of: HashMap<usize, usize>,
+}
+fn local<T: Copy + Eq + std::hash::Hash>(list: &mut Vec<T>, of: &mut HashMap<T, usize>, x: T) -> usize {
+    *of.entry(x).or_insert_with(|| {
+        list.push(x);
+        list.len() - 1
+    })
+}
+impl Deps {
+    fn value(&mut self, r: Ref) -> usize {
+        local(&mut self.values, &mut self.value_of, r)
+    }
+    fn child(&mut self, f: usize) -> usize {
+        local(&mut self.children, &mut self.child_of, f)
+    }
+    fn cache(&mut self, c: usize) -> usize {
+        local(&mut self.caches, &mut self.cache_of, c)
+    }
+}
 
 /// Encodes one unit from the VM it was compiled in.
 pub(super) struct Encoder<'a> {
@@ -318,67 +353,94 @@ impl<'a> Encoder<'a> {
                 }
             }
         }
-        out.n(f.sites.len());
+        let mut body = Writer::default();
+        let mut deps = Deps::default();
+        body.n(f.sites.len());
         for site in &f.sites {
-            out.n(site.len());
+            body.n(site.len());
             for &r in site {
-                out.n(r);
+                body.n(r);
             }
         }
-        out.n(f.capture_mutations.len());
+        body.n(f.capture_mutations.len());
         for &m in &f.capture_mutations {
-            out.byte(u8::from(m));
+            body.byte(u8::from(m));
         }
-        out.n(f.code.len());
+        body.n(f.code.len());
         let mut consts = vec![];
         for &op in &f.code {
-            self.op(&mut out, op, &mut consts)?;
+            self.op(&mut body, op, &mut consts, &mut deps)?;
         }
+        out.n(deps.values.len());
+        for &r in &deps.values {
+            Self::write_ref(&mut out, r);
+        }
+        for list in [&deps.children, &deps.caches] {
+            out.n(list.len());
+            list.iter().for_each(|&x| out.n(x));
+        }
+        out.data(&body.bytes);
         Ok(out.bytes)
     }
-    fn op(&mut self, out: &mut Writer, op: Op, consts: &mut Vec<Value>) -> Result<()> {
+    /// R in a body: a node or uninterned symbol by its index in DEPS.
+    fn write_local(out: &mut Writer, deps: &mut Deps, r: Ref) {
+        match r {
+            Ref::Node(_) | Ref::Uninterned(_) => {
+                out.byte(5);
+                out.n(deps.value(r));
+            }
+            r => Self::write_ref(out, r),
+        }
+    }
+    /// The symbol SLOT in a body: a name's index, shifted, or an
+    /// uninterned symbol's index in DEPS, shifted and odd.
+    fn local_symbol(&mut self, slot: usize, deps: &mut Deps) -> Result<usize> {
+        let s = self.symbol(slot)?;
+        Ok(if s & 1 == 1 { deps.value(Ref::Uninterned(s >> 1)) << 1 | 1 } else { s })
+    }
+    fn op(&mut self, out: &mut Writer, op: Op, consts: &mut Vec<Value>, deps: &mut Deps) -> Result<()> {
         let n = |out: &mut Writer, xs: &[usize]| xs.iter().for_each(|&x| out.n(x));
         match op {
             Op::Const(d, v) => {
                 out.byte(0);
                 n(out, &[d]);
                 let r = self.constant(consts, v)?;
-                Self::write_ref(out, r);
+                Self::write_local(out, deps, r);
             }
             Op::Move(a, b) => { out.byte(1); n(out, &[a, b]) }
             Op::Cell(a) => { out.byte(2); n(out, &[a]) }
             Op::ReadCell(a, b) => { out.byte(3); n(out, &[a, b]) }
             Op::WriteCell(a, b) => { out.byte(4); n(out, &[a, b]) }
-            Op::Global(d, s) => { out.byte(5); let s = self.symbol(s)?; n(out, &[d, s]) }
-            Op::SetGlobal(s, r) => { out.byte(6); let s = self.symbol(s)?; n(out, &[s, r]) }
-            Op::Bind(s, r) => { out.byte(7); let s = self.symbol(s)?; n(out, &[s, r]) }
+            Op::Global(d, s) => { out.byte(5); let s = self.local_symbol(s, deps)?; n(out, &[d, s]) }
+            Op::SetGlobal(s, r) => { out.byte(6); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
+            Op::Bind(s, r) => { out.byte(7); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
             Op::Unbind(k) => { out.byte(8); n(out, &[k]) }
             Op::Jump(t) => { out.byte(9); n(out, &[t]) }
             Op::Unless(r, t) => { out.byte(10); n(out, &[r, t]) }
             Op::Closure(d, id, site) => {
                 out.byte(11);
                 let f = self.function(id)?;
-                n(out, &[d, f, site])
+                n(out, &[d, deps.child(f), site])
             }
-            Op::Define(s, r) => { out.byte(12); let s = self.symbol(s)?; n(out, &[s, r]) }
-            Op::DefineMacro(s, r) => { out.byte(13); let s = self.symbol(s)?; n(out, &[s, r]) }
-            Op::DeclareSpecial(s) => { out.byte(14); let s = self.symbol(s)?; n(out, &[s]) }
+            Op::Define(s, r) => { out.byte(12); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
+            Op::DefineMacro(s, r) => { out.byte(13); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
+            Op::DeclareSpecial(s) => { out.byte(14); let s = self.local_symbol(s, deps)?; n(out, &[s]) }
             Op::Call(d, x, start, k) => { out.byte(15); n(out, &[d, x, start, k]) }
             Op::Direct(d, s, cache, start, k) => {
                 out.byte(16);
-                let s = self.symbol(s)?;
+                let s = self.local_symbol(s, deps)?;
                 let next = self.caches.len();
                 let c = *self.caches.entry(cache).or_insert(next);
-                n(out, &[d, s, c, start, k])
+                n(out, &[d, s, deps.cache(c), start, k])
             }
-            Op::Sealed(d, s, start, k) => { out.byte(17); let s = self.symbol(s)?; n(out, &[d, s, start, k]) }
+            Op::Sealed(d, s, start, k) => { out.byte(17); let s = self.local_symbol(s, deps)?; n(out, &[d, s, start, k]) }
             Op::Return(r) => { out.byte(18); n(out, &[r]) }
             Op::Catch(d, x, t) => { out.byte(19); n(out, &[d, x, t]) }
             Op::Condition(d, v, t) => {
                 out.byte(20);
                 n(out, &[d]);
                 let r = self.constant(consts, v)?;
-                Self::write_ref(out, r);
+                Self::write_local(out, deps, r);
                 n(out, &[t]);
             }
             Op::PopHandlers(k) => { out.byte(21); n(out, &[k]) }
@@ -510,133 +572,163 @@ fn read_node(r: &mut Reader) -> Result<Node> {
 
 /// A decoded op operand that names a value or a function, resolved once
 /// the unit's nodes and function ids exist.
-enum Fixup {
-    Value(usize, usize, Ref),
+/// What decoding needs of the artifact: its bytes, which pending bodies
+/// keep, and its names' slots.
+pub(super) struct Install<'a> {
+    pub(super) bytes: &'a Arc<Vec<u8>>,
+    pub(super) slots: &'a Arc<Vec<usize>>,
 }
 
-/// What decoding needs of the artifact: its names' slots.
-pub(super) struct Install<'a> {
-    pub(super) slots: &'a [usize],
+/// What a function's body names, and where its bytes are in the artifact.
+struct BodyRefs {
+    values: Vec<Ref>,
+    children: Vec<usize>,
+    caches: Vec<usize>,
+    body: std::ops::Range<usize>,
 }
 
 impl Install<'_> {
-    /// Decode the unit at R into VM and install its functions: the entry's id.
+    /// Decode the unit at R into VM and install its functions, their
+    /// bodies pending: the entry's id.
     pub(super) fn unit(&self, vm: &mut Vm, r: &mut Reader) -> Result<usize> {
         let n = r.count()?;
         let uninterned: Vec<usize> = (0..n)
             .map(|_| Ok(vm.uninterned_symbol(r.str()?).index(7)? - 1))
             .collect::<Result<_>>()?;
-        let symbol = |s: usize| -> Result<usize> {
-            let table: &[usize] = if s & 1 == 1 { &uninterned } else { self.slots };
-            table.get(s >> 1).copied().ok_or_else(|| "compiled Lisp artifact: bad symbol".into())
-        };
         let n = r.count()?;
         let nodes = (0..n).map(|_| read_node(r)).collect::<Result<Vec<_>>>()?;
         let n = r.count()?;
-        let mut functions = Vec::with_capacity(n);
-        let mut fixups = vec![];
-        for index in 0..n {
-            functions.push(read_function(r, index, &symbol, &mut fixups, self.slots, &uninterned, vm)?);
-        }
+        let (headers, refs): (Vec<Function>, Vec<BodyRefs>) =
+            (0..n).map(|_| self.read_function(r, &uninterned, vm)).collect::<Result<Vec<_>>>()?.into_iter().unzip();
         let entry = r.n()?;
         let caches = r.n()?;
         if caches > 1_000_000 {
             return Err("compiled Lisp artifact: too many caches".into());
         }
-        validate(&functions, &nodes, entry, caches, vm.slots.len())?;
-        let (ids, cache_ids) = vm.reserve_request_artifact(&functions, caches);
+        validate(&headers, &refs, &nodes, entry, caches)?;
+        let (ids, cache_ids) = vm.reserve_request_artifact(headers, caches);
         let values = materialise(vm, &nodes, &ids, self.slots, &uninterned)?;
-        let resolve = |r: Ref| resolve_ref(r, &values, self.slots, &uninterned);
-        for Fixup::Value(f, pc, r) in fixups {
-            let v = resolve(r)?;
-            match &mut functions[f].code[pc] {
-                Op::Const(_, x) | Op::Condition(_, x, _) => *x = v,
-                _ => unreachable!("fixups name value operands"),
-            }
-        }
-        for f in &mut functions {
-            for op in &mut f.code {
-                match op {
-                    Op::Closure(_, id, _) => *id = ids[*id],
-                    Op::Direct(_, _, c, _, _) => *c = cache_ids[*c],
-                    _ => {}
-                }
-            }
-        }
-        for (&id, function) in ids.iter().zip(functions) {
-            vm.register_width = vm.register_width.max(function.regs);
-            vm.functions[id] = Arc::new(function);
+        for (l, &id) in refs.into_iter().zip(&ids) {
+            let pending = PendingBody {
+                bytes: Arc::clone(self.bytes),
+                body: l.body,
+                values: l.values.iter().map(|&r| resolve_ref(r, &values, self.slots, &uninterned)).collect::<Result<_>>()?,
+                children: l.children.iter().map(|&f| ids[f]).collect(),
+                caches: l.caches.iter().map(|&c| cache_ids[c]).collect(),
+                names: Arc::clone(self.slots),
+            };
+            Arc::get_mut(&mut vm.functions[id]).expect("a function just installed is private").pending = Some(Box::new(pending));
         }
         vm.claim_caches(&cache_ids);
         Ok(ids[entry])
     }
+
+    fn read_function(&self, r: &mut Reader, uninterned: &[usize], vm: &Vm) -> Result<(Function, BodyRefs)> {
+        let (regs, captures, arity, required) = (r.n()?, r.n()?, r.n()?, r.n()?);
+        let rest = r.byte()? != 0;
+        let dynamic = match r.byte()? { 0 => None, 1 => Some(false), 2 => Some(true), _ => return Err("bad dialect".into()) };
+        let params = match r.byte()? {
+            0 => None,
+            1 => {
+                let n = r.count()?;
+                Some((0..n).map(|_| read_form(r, self.slots, uninterned, vm)).collect::<Result<Vec<_>>>()?)
+            }
+            _ => return Err("bad parameter list".into()),
+        };
+        let values = read_refs(r)?;
+        let list = |r: &mut Reader| -> Result<Vec<usize>> { let n = r.count()?; (0..n).map(|_| r.n()).collect() };
+        let (children, caches) = (list(r)?, list(r)?);
+        let body = r.data()?;
+        let start = body.as_ptr() as usize - self.bytes.as_ptr() as usize;
+        let function = Function { capture_mutations: vec![], mapped_code: None, code: vec![], regs, captures, arity, required, rest,
+                                  sites: vec![], lazy: None, dynamic, params, pending: None };
+        Ok((function, BodyRefs { values, children, caches, body: start..start + body.len() }))
+    }
 }
 
-fn read_function(r: &mut Reader, index: usize, symbol: &impl Fn(usize) -> Result<usize>, fixups: &mut Vec<Fixup>,
-                 names: &[usize], uninterned: &[usize], vm: &Vm) -> Result<Function> {
-    let (regs, captures, arity, required) = (r.n()?, r.n()?, r.n()?, r.n()?);
-    let rest = r.byte()? != 0;
-    let dynamic = match r.byte()? { 0 => None, 1 => Some(false), 2 => Some(true), _ => return Err("bad dialect".into()) };
-    let params = match r.byte()? {
-        0 => None,
-        1 => {
-            let n = r.count()?;
-            Some((0..n).map(|_| read_form(r, names, uninterned, vm)).collect::<Result<Vec<_>>>()?)
+impl Vm {
+    /// The function ID with its pending body decoded (`PendingBody`): its
+    /// code and closure sites, each operand checked as a unit's are.
+    pub(crate) fn decode_pending(&self, id: usize) -> Result<Function> {
+        let f = self.functions.get(id).ok_or("invalid function")?;
+        let p = f.pending.as_deref().ok_or("function is not pending")?;
+        let mut r = Reader::new(&p.bytes[p.body.clone()]);
+        let n = r.count()?;
+        let mut sites = Vec::with_capacity(n);
+        for _ in 0..n {
+            let k = r.count()?;
+            sites.push((0..k).map(|_| r.n()).collect::<Result<Vec<_>>>()?);
         }
-        _ => return Err("bad parameter list".into()),
-    };
-    let n = r.count()?;
-    let mut sites = Vec::with_capacity(n);
-    for _ in 0..n {
-        let k = r.count()?;
-        sites.push((0..k).map(|_| r.n()).collect::<Result<Vec<_>>>()?);
-    }
-    let n = r.count()?;
-    let capture_mutations = (0..n).map(|_| Ok(r.byte()? != 0)).collect::<Result<Vec<_>>>()?;
-    let n = r.count()?;
-    let mut code = Vec::with_capacity(n);
-    for pc in 0..n {
-        let op = r.byte()?;
-        let mut v = || r.n();
-        code.push(match op {
-            0 => {
-                let d = v()?;
-                fixups.push(Fixup::Value(index, pc, read_ref(r)?));
-                Op::Const(d, Value::NIL)
+        let n = r.count()?;
+        let capture_mutations = (0..n).map(|_| Ok(r.byte()? != 0)).collect::<Result<Vec<_>>>()?;
+        let bad = |what: &str| format!("compiled Lisp artifact: invalid {what}");
+        let symbol = |s: usize| -> Result<usize> {
+            if s & 1 == 0 {
+                p.names.get(s >> 1).copied().ok_or_else(|| bad("name"))
+            } else {
+                p.values.get(s >> 1).and_then(|v| v.index(7).ok()).map(|i| i - 1).ok_or_else(|| bad("symbol"))
             }
-            1 => Op::Move(v()?, v()?),
-            2 => Op::Cell(v()?),
-            3 => Op::ReadCell(v()?, v()?),
-            4 => Op::WriteCell(v()?, v()?),
-            5 => Op::Global(v()?, symbol(v()?)?),
-            6 => { let s = symbol(v()?)?; Op::SetGlobal(s, v()?) }
-            7 => { let s = symbol(v()?)?; Op::Bind(s, v()?) }
-            8 => Op::Unbind(v()?),
-            9 => Op::Jump(v()?),
-            10 => Op::Unless(v()?, v()?),
-            11 => Op::Closure(v()?, v()?, v()?),
-            12 => { let s = symbol(v()?)?; Op::Define(s, v()?) }
-            13 => { let s = symbol(v()?)?; Op::DefineMacro(s, v()?) }
-            14 => Op::DeclareSpecial(symbol(v()?)?),
-            15 => Op::Call(v()?, v()?, v()?, v()?),
-            16 => { let d = v()?; let s = symbol(v()?)?; Op::Direct(d, s, v()?, v()?, v()?) }
-            17 => { let d = v()?; let s = symbol(v()?)?; Op::Sealed(d, s, v()?, v()?) }
-            18 => Op::Return(v()?),
-            19 => Op::Catch(v()?, v()?, v()?),
-            20 => {
-                let d = v()?;
-                fixups.push(Fixup::Value(index, pc, read_ref(r)?));
-                Op::Condition(d, Value::NIL, r.n()?)
-            }
-            21 => Op::PopHandlers(v()?),
-            22 => Op::Protect(v()?, v()?, v()?),
-            23 => Op::LeaveProtect(v()?),
-            24 => Op::ResumeExit,
-            _ => return Err("compiled Lisp artifact: bad op".into()),
-        });
+        };
+        let value = |r: &mut Reader| -> Result<Value> {
+            Ok(match r.byte()? {
+                0 => Value::NIL,
+                1 => Value::TRUE,
+                2 => Value::integer(r.i()?)?,
+                3 => Value::reference(*p.names.get(r.n()?).ok_or_else(|| bad("name"))? + 1, 7),
+                5 => *p.values.get(r.n()?).ok_or_else(|| bad("value"))?,
+                6 => resolve_ref(Ref::Primitive(r.u()?), &[], &[], &[])?,
+                _ => return Err(bad("value reference")),
+            })
+        };
+        let child = |i: usize| p.children.get(i).copied().ok_or_else(|| bad("closure"));
+        let n = r.count()?;
+        let mut code = Vec::with_capacity(n);
+        for _ in 0..n {
+            let op = r.byte()?;
+            let mut v = || r.n();
+            code.push(match op {
+                0 => { let d = v()?; Op::Const(d, value(&mut r)?) }
+                1 => Op::Move(v()?, v()?),
+                2 => Op::Cell(v()?),
+                3 => Op::ReadCell(v()?, v()?),
+                4 => Op::WriteCell(v()?, v()?),
+                5 => Op::Global(v()?, symbol(v()?)?),
+                6 => { let s = symbol(v()?)?; Op::SetGlobal(s, v()?) }
+                7 => { let s = symbol(v()?)?; Op::Bind(s, v()?) }
+                8 => Op::Unbind(v()?),
+                9 => Op::Jump(v()?),
+                10 => Op::Unless(v()?, v()?),
+                11 => { let d = v()?; let c = child(v()?)?; Op::Closure(d, c, v()?) }
+                12 => { let s = symbol(v()?)?; Op::Define(s, v()?) }
+                13 => { let s = symbol(v()?)?; Op::DefineMacro(s, v()?) }
+                14 => Op::DeclareSpecial(symbol(v()?)?),
+                15 => Op::Call(v()?, v()?, v()?, v()?),
+                16 => {
+                    let d = v()?;
+                    let s = symbol(v()?)?;
+                    let c = *p.caches.get(v()?).ok_or_else(|| bad("cache"))?;
+                    Op::Direct(d, s, c, v()?, v()?)
+                }
+                17 => { let d = v()?; let s = symbol(v()?)?; Op::Sealed(d, s, v()?, v()?) }
+                18 => Op::Return(v()?),
+                19 => Op::Catch(v()?, v()?, v()?),
+                20 => { let d = v()?; let x = value(&mut r)?; Op::Condition(d, x, r.n()?) }
+                21 => Op::PopHandlers(v()?),
+                22 => Op::Protect(v()?, v()?, v()?),
+                23 => Op::LeaveProtect(v()?),
+                24 => Op::ResumeExit,
+                _ => return Err(bad("op")),
+            });
+        }
+        if !r.done() {
+            return Err(bad("body"));
+        }
+        let decoded = Function { capture_mutations, mapped_code: None, code, regs: f.regs, captures: f.captures, arity: f.arity,
+                                 required: f.required, rest: f.rest, sites, lazy: None, dynamic: f.dynamic,
+                                 params: f.params.clone(), pending: None };
+        validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
+        Ok(decoded)
     }
-    Ok(Function { capture_mutations, mapped_code: None, code, regs, captures, arity, required, rest, sites,
-                  lazy: None, dynamic, params })
 }
 
 fn read_form(r: &mut Reader, names: &[usize], uninterned: &[usize], vm: &Vm) -> Result<Form> {
@@ -664,9 +756,9 @@ fn read_form(r: &mut Reader, names: &[usize], uninterned: &[usize], vm: &Vm) -> 
     })
 }
 
-/// Bounds of every operand, so only valid IR reaches threaded lowering
-/// (as `source_cache/persistent.rs` and `code_image.rs` check theirs).
-fn validate(functions: &[Function], nodes: &[Node], entry: usize, caches: usize, slots: usize) -> Result<()> {
+/// A unit's bounds that hold without its bodies: headers, what each body
+/// names, closures among the nodes, and the entry's signature.
+fn validate(functions: &[Function], refs: &[BodyRefs], nodes: &[Node], entry: usize, caches: usize) -> Result<()> {
     let bad = |what: &str| -> Result<()> { Err(format!("compiled Lisp artifact: invalid {what}")) };
     if entry >= functions.len() {
         return bad("entry");
@@ -678,45 +770,58 @@ fn validate(functions: &[Function], nodes: &[Node], entry: usize, caches: usize,
             return bad("closure");
         }
     }
-    for f in functions {
-        if f.regs == 0 || f.regs > 65536 || f.captures + f.arity + usize::from(f.rest) > f.regs || f.required > f.arity
-            || !matches!(f.code.last(), Some(Op::Return(_) | Op::Jump(_)))
-        {
+    for (f, l) in functions.iter().zip(refs) {
+        if f.regs == 0 || f.regs > 65536 || f.captures + f.arity + usize::from(f.rest) > f.regs || f.required > f.arity {
             return bad("function header");
         }
-        let r = |r: usize| r < f.regs;
-        let s = |s: usize| s < slots;
-        let jump = |t: usize| t < f.code.len();
-        let window = |start: usize, n: usize| n <= 4096 && start.checked_add(n).is_some_and(|end| end <= f.regs);
-        for op in &f.code {
-            let ok = match *op {
-                Op::Const(d, _) | Op::Cell(d) | Op::Return(d) | Op::LeaveProtect(d) => r(d),
-                Op::Move(d, x) | Op::ReadCell(d, x) | Op::WriteCell(d, x) => r(d) && r(x),
-                Op::Global(d, x) => r(d) && s(x),
-                Op::SetGlobal(x, d) | Op::Bind(x, d) | Op::Define(x, d) | Op::DefineMacro(x, d) => s(x) && r(d),
-                Op::Unbind(n) | Op::PopHandlers(n) => n <= f.code.len(),
-                Op::Protect(d, cleanup, end) => r(d) && jump(cleanup) && jump(end),
-                Op::ResumeExit => true,
-                Op::DeclareSpecial(x) => s(x),
-                Op::Jump(t) => jump(t),
-                Op::Unless(d, t) => r(d) && jump(t),
-                Op::Catch(d, x, t) => r(d) && r(x) && jump(t),
-                Op::Condition(d, _, t) => r(d) && jump(t),
-                Op::Closure(d, id, site) => r(d) && functions.get(id).is_some_and(|child| {
-                    f.sites.get(site).is_some_and(|regs| regs.len() == child.captures && regs.iter().all(|x| r(*x)))
-                }),
-                Op::Call(d, x, start, n) => r(d) && r(x) && window(start, n),
-                Op::Direct(d, x, c, start, n) => r(d) && s(x) && c < caches && window(start, n),
-                Op::Sealed(d, x, start, n) => r(d) && s(x) && window(start, n),
-            };
-            if !ok {
-                return bad("operand");
-            }
+        if l.children.iter().any(|&c| c >= functions.len()) || l.caches.iter().any(|&c| c >= caches) {
+            return bad("body references");
         }
     }
     let f = &functions[entry];
     if f.captures != 0 || f.arity != 0 || f.rest {
         return bad("entry signature");
+    }
+    Ok(())
+}
+
+/// Bounds of every operand of a decoded body F, so only valid IR reaches
+/// threaded lowering (as `code_image.rs` checks its own). CAPTURES gives a
+/// child function's capture count; SLOTS and CACHES bound symbols and
+/// inline caches.
+fn validate_body(f: &Function, captures: impl Fn(usize) -> Option<usize>, slots: usize, caches: usize) -> Result<()> {
+    let bad = |what: &str| -> Result<()> { Err(format!("compiled Lisp artifact: invalid {what}")) };
+    if !matches!(f.code.last(), Some(Op::Return(_) | Op::Jump(_))) {
+        return bad("function body");
+    }
+    let r = |r: usize| r < f.regs;
+    let s = |s: usize| s < slots;
+    let jump = |t: usize| t < f.code.len();
+    let window = |start: usize, n: usize| n <= 4096 && start.checked_add(n).is_some_and(|end| end <= f.regs);
+    for op in &f.code {
+        let ok = match *op {
+            Op::Const(d, _) | Op::Cell(d) | Op::Return(d) | Op::LeaveProtect(d) => r(d),
+            Op::Move(d, x) | Op::ReadCell(d, x) | Op::WriteCell(d, x) => r(d) && r(x),
+            Op::Global(d, x) => r(d) && s(x),
+            Op::SetGlobal(x, d) | Op::Bind(x, d) | Op::Define(x, d) | Op::DefineMacro(x, d) => s(x) && r(d),
+            Op::Unbind(n) | Op::PopHandlers(n) => n <= f.code.len(),
+            Op::Protect(d, cleanup, end) => r(d) && jump(cleanup) && jump(end),
+            Op::ResumeExit => true,
+            Op::DeclareSpecial(x) => s(x),
+            Op::Jump(t) => jump(t),
+            Op::Unless(d, t) => r(d) && jump(t),
+            Op::Catch(d, x, t) => r(d) && r(x) && jump(t),
+            Op::Condition(d, _, t) => r(d) && jump(t),
+            Op::Closure(d, id, site) => r(d) && f.sites.get(site).is_some_and(|regs| {
+                captures(id) == Some(regs.len()) && regs.iter().all(|x| r(*x))
+            }),
+            Op::Call(d, x, start, n) => r(d) && r(x) && window(start, n),
+            Op::Direct(d, x, c, start, n) => r(d) && s(x) && c < caches && window(start, n),
+            Op::Sealed(d, x, start, n) => r(d) && s(x) && window(start, n),
+        };
+        if !ok {
+            return bad("operand");
+        }
     }
     Ok(())
 }

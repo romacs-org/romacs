@@ -362,6 +362,11 @@ a value in `ivy-re-builders-alist'.
 (register-definition-prefixes "romacs-pgtk" '("pgtk-" "romacs-pgtk--" "x-g"))
 
 
+;;; Generated autoloads from romacs-precompile.el
+
+(register-definition-prefixes "romacs-precompile" '("romacs-precompile"))
+
+
 ;;; Generated autoloads from romacs-project.el
 
 (register-definition-prefixes "romacs-project" '("romacs-project-"))

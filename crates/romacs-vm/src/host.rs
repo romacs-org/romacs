@@ -660,7 +660,9 @@ pub(crate) fn build_root() -> PathBuf {
 fn env_read(form: &str, name: &[u8], value: Option<&OsString>) {
     let shown = String::from_utf8_lossy(name);
     match class(Fact::Env(name), None) {
-        Class::P => p_read(Fact::Env(name), format!("env {shown} ({form})")),
+        // A compile process (`Mode::Record`) pins nothing: a per-process
+        // name it reads is an input like any other.
+        Class::P if refusing() => p_read(Fact::Env(name), format!("env {shown} ({form})")),
         _ => record("env", json!({"form": form, "name": encoded(name), "value": value.map(|v| encoded(v.as_bytes()))})),
     }
 }
@@ -1226,6 +1228,10 @@ pub fn replay(record: &Json) -> Option<Json> {
             "canon" => { let _ = canonicalize(path()?); }
             "env" => {
                 let name = decoded(&record["name"])?;
+                // Asked as a compile process's recorder asks it, which
+                // records a per-process name too (`env_read`); a build
+                // records none of those as `env`.
+                MODE.with(|m| m.set(Mode::Record));
                 match record["form"].as_str()? {
                     "host" => { getenv(std::str::from_utf8(&name).ok()?); }
                     "process" => lisp_env(EnvList::Process, &name),
@@ -1313,6 +1319,27 @@ pub fn uid() -> u32 {
         host_fact("uid", json!(uid));
     }
     uid
+}
+
+/// Die with PARENT: SIGTERM when the thread that started this process
+/// ends, and exit now if PARENT is gone already. A child of a session
+/// thread then never outlives the session.
+pub fn die_with_parent(parent: u32) {
+    unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
+    if unsafe { libc::getppid() } as u32 != parent {
+        std::process::exit(1);
+    }
+}
+
+/// Lower this process to the background: the weakest CPU niceness and the
+/// idle I/O class, which its children inherit. Best effort.
+pub fn lower_priority() {
+    const IOPRIO_WHO_PROCESS: libc::c_long = 1;
+    const IOPRIO_CLASS_IDLE: libc::c_long = 3;
+    unsafe {
+        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, IOPRIO_CLASS_IDLE << 13);
+    }
 }
 
 pub fn euid() -> u32 {

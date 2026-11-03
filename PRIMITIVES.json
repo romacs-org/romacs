@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "580c006f5de7a9120a79c68190ceb1c9782eb2679258cdbcd703fc7d6bf3fb39",
+  "source_fingerprint": "7373f8101f63f982d20cba8d8201834eb7fb1ca55d14254c4d6e97b6dd151806",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1276,
-  "parsed_vm2_only": 1276
+  "parsed_total": 1277,
+  "parsed_vm2_only": 1277
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4117,6 +4117,11 @@
    "name": "romacs--collection-share",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:24"
+  },
+  "romacs--compiled-lisp-background": {
+   "name": "romacs--compiled-lisp-background",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/compiled_lisp.rs:9"
   },
   "romacs--concat-list": {
    "name": "romacs--concat-list",

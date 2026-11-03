@@ -525,10 +525,11 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
   --eval EXPR           evaluate EXPR there
   --batch ARG...        GNU's `emacs --batch ARG...', from a batch world of its own
                         once one is prepared in an existing store
-  --compile-lisp FILE   compile FILE into the compiled-Lisp store beside the
-                        world store (what a compiled load runs on a miss)
+  --compile-lisp FILE   compile FILE into the compiled-Lisp store (what a
+                        compiled load runs on a miss)
   ROMACS_WORLD=off      boot from source, without a world
-  ROMACS_COMPILED_LISP=on  load GNU-compiled-kind files through compiled artifacts
+  ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
+                        artifacts (default: on in a live session, off in --batch)
   ROMACS_DIAGNOSTICS=1  print each paint, message and the loadup tables on stderr (harnesses)
   ROMACS_RENDER_STALL_MS=N  call a paint the window has not drawn in N ms
                         stalled (default 2000): editing goes on, once told
@@ -685,6 +686,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // ROMACS_WORLD=off. Its builder builds here, before any window; a launch
     // opens and maps the world on the evaluator's thread while this one
     // brings up the window and the GPU.
+    let named_store = world_store.clone();
     let world_store = match (live && launch == startup::Launch::Loadup, romacs_vm::world::store::disabled()) {
         (true, false) => world_store.or_else(|| world::default_store(|name| std::env::var_os(name))),
         (true, true) => {
@@ -697,7 +699,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor, init_layer.as_ref())?;
     }
     if live && launch == startup::Launch::Loadup && !romacs_vm::world::store::building() {
-        batch::configure_compiled_lisp(world_store.as_deref());
+        batch::configure_compiled_lisp(named_store.as_deref(), true);
     }
     // The session from here: its every end says why.
     exit::install();
