@@ -551,24 +551,67 @@ spec replaces the face's own."
   (put (car entry) 'theme-properties
        (list :kind 'color-scheme :background-mode (nth 1 entry) :family (nth 2 entry))))
 
+(defun romacs-theme--modus-palette (modus)
+  "The palette MODUS describes, Modus's every entry (overrides first, as
+Modus merges them): MODUS is a plist of :base, :preference, :core (a
+`romacs-theme-modus-' core palette's symbol), :overrides and :user."
+  (append (plist-get modus :overrides) romacs-theme-common-palette-overrides
+          (plist-get modus :user)
+          (romacs-theme-modus-generate-palette (plist-get modus :base) (plist-get modus :preference)
+                                               (symbol-value (plist-get modus :core)))))
+
+(defun romacs-theme--modus-settings (modus mode)
+  "The faces and variables Modus's table gives the palette MODUS
+describes, for a theme of MODE, as (FACES . VARIABLES):
+`modus-themes-theme''s evaluation, every palette name bound to its value."
+  (let ((palette (romacs-theme--modus-palette modus)))
+    ;; Modus writes its specs for a colour display of 256 colours or more;
+    ;; Romacs draws only on one, and builds its world on a frame without a
+    ;; window system, so the specs apply to every display.
+    (eval `(let* ((c t)
+                  (palette ',palette)
+                  ,@(mapcar (lambda (entry)
+                              (list (car entry) `(romacs-theme-modus-retrieve-palette-value ',(car entry) palette)))
+                            palette))
+             (cons (list ,@romacs-theme-modus-faces)
+                   (list ,@romacs-theme-modus-custom-variables '(frame-background-mode ',mode))))
+          t)))
+
+(defun romacs-theme--romacs-face-p (face)
+  "Whether FACE is one Romacs's engine colours over a Modus table: Romacs's
+own faces, and the fringes and dividers a pane is separated without."
+  (or (string-prefix-p "romacs-" (symbol-name face))
+      (memq face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border))))
+
 (defun romacs-theme-define (name doc &rest properties)
   "Define theme NAME, documented by DOC, from PROPERTIES :palette (base
 and pinned slots, `romacs-theme-resolve'), :mode and :family.  Where
 Custom is loaded it is GNU's theme, enabled and disabled as any other;
 elsewhere (a launch without GNU's Lisp) its faces are declared as the
-faces' own specs.  Defining it changes no face that shows."
+faces' own specs.  With :modus (`romacs-theme--modus-palette') and
+Custom, its faces are Modus's table over that palette, Romacs's own faces
+over them from :palette.  Defining it changes no face that shows."
   (let* ((palette (let ((given (plist-get properties :palette)))
                     (if (assq 'mode given) given (cons (list 'mode (plist-get properties :mode)) given))))
          (resolved (romacs-theme-resolve palette))
-         (faces (romacs-theme-faces resolved)))
+         (faces (romacs-theme-faces resolved))
+         (modus (plist-get properties :modus)))
     (put name 'romacs-palette palette)
     (put name 'romacs-palette-resolved resolved)
     (if (fboundp 'custom-theme-set-faces)
-        (progn
+        (let ((settings (when modus
+                          (require 'romacs-theme-modus)
+                          (romacs-theme--modus-settings modus (plist-get properties :mode)))))
           (custom-declare-theme name (intern (concat (symbol-name name) "-theme")) doc
                                 (list :kind 'color-scheme :background-mode (plist-get properties :mode)
                                       :family (plist-get properties :family)))
-          (apply #'custom-theme-set-faces name faces)
+          (if settings
+              (let ((ours (seq-filter (lambda (row) (romacs-theme--romacs-face-p (car row))) faces)))
+                ;; Each face once: Romacs's row where it has one, else Modus's.
+                (apply #'custom-theme-set-faces name
+                       (append (seq-remove (lambda (row) (assq (car row) ours)) (car settings)) ours))
+                (apply #'custom-theme-set-variables name (cdr settings)))
+            (apply #'custom-theme-set-faces name faces))
           (provide-theme name))
       (dolist (row faces)
         (eval (list 'defface (car row) (list 'quote (romacs-theme--with-font (car row) (romacs-theme--second row)))

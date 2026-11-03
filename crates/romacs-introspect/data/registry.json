@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "836267fd33ac76822fe6859827680c85a25bdf91e1216e7faf91649d25420751",
+    "input_hash": "885eb84ff73cf547ad9c1b08c3a5be4a91a21cd7a7629fce1e490629cdf82756",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7882
+    "vm2_universe": 7884
   },
   "schema": 2,
   "vm2": {
-    "count": 1288,
+    "count": 1289,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -501,6 +501,7 @@
       "internal-lisp-face-p",
       "internal-make-lisp-face",
       "internal-make-var-non-special",
+      "internal-merge-in-global-face",
       "internal-set-alternative-font-family-alist",
       "internal-set-alternative-font-registry-alist",
       "internal-set-font-selection-order",
