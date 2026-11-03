@@ -228,7 +228,39 @@ CONTROLS = [
     key('quit-search', [T('q')], HELLO),
 ]
 
-WORKFLOWS = {'read': READ, 'compose-send': COMPOSE_SEND, 'reply-send': REPLY_SEND, 'controls': CONTROLS}
+# isearch for a name whose first match is below the window: the window
+# scrolls to it, the match in `isearch', other matches lazily highlighted.
+ISEARCHING = '(and (boundp (quote isearch-mode)) isearch-mode)'
+ISEARCH = [
+    key('hello', [C('x'), T('m')], HELLO),
+    key('search-prompt', [T('s')], MINIBUFFER),
+    typed('search', 'tag:inbox', [K('Return')], SEARCH, settle=1),
+    key('isearch-start', [C('s')], ISEARCHING),
+    dict(name='isearch-name', keys=[T('Caro')], keys_ready=f'(and {ISEARCHING} (equal isearch-string "Caro"))',
+         trigger=[T('l')], ready=f'(and {ISEARCHING} (equal isearch-string "Carol"))', settle=1),
+    key('isearch-next', [C('s')], ISEARCHING, settle=1),
+    key('isearch-exit', [K('Return')], f'(and {SEARCH} (not {ISEARCHING}))', settle=1),
+    key('quit-search', [T('q')], HELLO),
+]
+
+# The same in a plain buffer, to tell isearch from notmuch's text.
+ISEARCH_PLAIN = [
+    key('scratch', [C('x'), T('b')], MINIBUFFER),
+    typed('scratch-name', '*scratch*', [K('Return')], BUFFER_IS(lisp_string('*scratch*'))),
+    key('eval-prompt', [M(':')], MINIBUFFER),
+    # A needle every 40 lines: the second and third matches scroll the window.
+    typed('fill', '(progn (dotimes (i 200) (insert (format (if (= (% i 40) 39) "needle line %d\\n" "plain line %d\\n") i))) (goto-char (point-min)))',
+          [K('Return')], f'(not {MINIBUFFER})', settle=1),
+    key('isearch-start', [C('s')], ISEARCHING),
+    dict(name='isearch-needle', keys=[T('needl')], keys_ready=f'(and {ISEARCHING} (equal isearch-string "needl"))',
+         trigger=[T('e')], ready=f'(and {ISEARCHING} (equal isearch-string "needle"))', settle=1),
+    key('isearch-next', [C('s')], ISEARCHING, settle=1),
+    key('isearch-next-2', [C('s')], ISEARCHING, settle=1),
+    key('isearch-exit', [K('Return')], f'(not {ISEARCHING})', settle=1),
+]
+
+WORKFLOWS = {'read': READ, 'compose-send': COMPOSE_SEND, 'reply-send': REPLY_SEND, 'controls': CONTROLS,
+             'isearch': ISEARCH, 'isearch-plain': ISEARCH_PLAIN}
 
 
 def normalised_mail(engine):

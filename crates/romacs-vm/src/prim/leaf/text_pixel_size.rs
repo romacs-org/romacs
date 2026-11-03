@@ -159,6 +159,27 @@ impl Leaf<'_> {
         })
     }
 
+    /// Settle each live window's start as the next layout will
+    /// (`Vm::redisplay_point_visibility_now'), and record the end it will
+    /// show as `window-end' UPDATE measures it, so `window-end' without
+    /// UPDATE (isearch's `window-group-end') answers the new display too.
+    pub(crate) fn redisplay_point_visibility_now(&mut self) -> std::result::Result<(), Fault> {
+        if !self.vm.has_layout_host() { return Ok(()); }
+        self.vm.redisplay_point_visibility_now().map_err(Fault::Error)?;
+        for w in self.vm.leaf_windows().map_err(Fault::Error)? {
+            let shown = matches!(self.vm.object_if(w), Some(Object::Window(x)) if x.live() && !x.mini && x.height > 0);
+            if !shown { continue; }
+            // A window the measurement cannot follow keeps its last end.
+            let Some(end) = self.window_end(w, Value::TRUE).ok().and_then(|v| v.integer_value()) else { continue };
+            let buffer = self.vm.window(w).map_err(Fault::Error)?.buffer;
+            let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { continue };
+            let distance = (b.len_chars() as i64 + 1 - end).max(0) as usize;
+            let index = w.index(0).map_err(Fault::Error)? - 1;
+            if let Object::Window(x) = &mut self.vm.objects[index] { x.end_distance = distance; }
+        }
+        Ok(())
+    }
+
     /// Whether WINDOW's buffer bytes FROM..TO show other glyphs than their
     /// characters (`text_shows_glyphs').
     pub(crate) fn window_text_shows_glyphs(&mut self, window: Value, from: usize, to: usize) -> std::result::Result<bool, Fault> {

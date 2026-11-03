@@ -367,12 +367,17 @@ fn lower_frame(cx; optional frame: Value) {
     Ok(Value::NIL)
 }}
 
-// Fredisplay: nil while a keyboard macro runs, else t. VM2 cannot redraw
-// synchronously (VM2-REDISPLAY1); the host redraws after the command.
+// Fredisplay: nil while a keyboard macro runs, else t. VM2 paints only
+// after the command (VM2-REDISPLAY1), but settles each window's start now,
+// so what Lisp asks of the display after it is credible.
 defsubr! { name = "redisplay", gnu = "dispnew.c:7020", effect = Global,
 fn redisplay(cx; optional _force: Value) {
     let macro_ = cx.intern("executing-kbd-macro");
-    Ok(if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { Value::NIL } else { Value::TRUE })
+    if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { return Ok(Value::NIL); }
+    // Under `inhibit-redisplay' GNU's redisplay does nothing.
+    let inhibit = cx.intern("inhibit-redisplay");
+    if cx.variable_value(inhibit)?.is_none_or(|v| v == Value::NIL) { cx.redisplay_point_visibility_now()?; }
+    Ok(Value::TRUE)
 }}
 
 defsubr! { name = "pos-visible-in-window-p", gnu = "window.c:1998", effect = Reads,

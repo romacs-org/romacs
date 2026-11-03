@@ -775,6 +775,29 @@ mod tests {
         h.eval("(delete-all-overlays)");
     }
 
+    /// `redisplay' inside a command settles each window's start and end as
+    /// the next layout will, so Lisp that asks after it (`sit-for', then
+    /// `window-start' and `window-end', as isearch's lazy highlighting does)
+    /// sees the display the command will leave; the layout keeps them.
+    #[test]
+    fn redisplay_settles_the_start_and_end_the_next_layout_shows() {
+        let mut h = hosted();
+        h.eval("(progn (erase-buffer) (kill-all-local-variables) (dotimes (i 200) (insert (format \"line %d\\n\" i))) (goto-char 1) (set-window-start nil 1))");
+        h.paint();
+        h.eval("(goto-char (- (point-max) 300))");
+        assert_eq!(h.eval("(window-start)"), "1", "NOT_BEFORE_REDISPLAY");
+        // Nothing under `inhibit-redisplay', as GNU's.
+        let end_before = h.eval("(window-end)");
+        assert_eq!(h.eval("(let ((inhibit-redisplay t)) (list (redisplay) (window-start) (window-end)))"), format!("(t 1 {end_before})"), "INHIBITED");
+        assert_eq!(h.eval("(redisplay)"), "t");
+        let (start, end) = (h.eval("(window-start)"), h.eval("(window-end)"));
+        assert_ne!(start, "1", "REDISPLAY_SCROLLS_TO_POINT");
+        assert_eq!(end, h.eval("(window-end nil t)"), "THE_END_IS_THE_NEW_DISPLAY_S");
+        assert_eq!(h.eval("(and (pos-visible-in-window-p (point)) t)"), "t");
+        h.paint();
+        assert_eq!((h.eval("(window-start)"), h.eval("(window-end)")), (start, end), "THE_LAYOUT_KEEPS_THEM");
+    }
+
     /// A package's `make-display-table' leaves `standard-display-table' an
     /// empty table; vertical motion (next-line) still runs on the host's
     /// layout rather than refusing.
