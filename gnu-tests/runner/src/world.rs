@@ -116,16 +116,19 @@ fn world_root(preload: &[PathBuf]) -> Option<&Path> {
 /// its preloads' tree, when the others, the run's own (its test's
 /// directory), all follow them, as run.py lays them out; a restored world
 /// then takes the run's own after them (`run_load_path`), so worlds are
-/// shared across runs. Any other layout keys and builds on the whole path.
+/// shared across runs. Any other layout, or a tree entry given twice, which
+/// leaves where the run's own go unclear, keys and builds on the whole path.
 /// A preload needing a directory outside its tree fails the build, and the
 /// run boots from source.
 fn world_load_path(path: &[PathBuf], preload: &[PathBuf]) -> Vec<PathBuf> {
     let Some(root) = world_root(preload) else { return path.to_vec() };
     let split = path.iter().position(|p| !p.starts_with(root)).unwrap_or(path.len());
-    if path[split..].iter().any(|p| p.starts_with(root)) {
+    let own = &path[..split];
+    let repeated = own.iter().enumerate().any(|(i, p)| own[..i].contains(p));
+    if repeated || path[split..].iter().any(|p| p.starts_with(root)) {
         return path.to_vec();
     }
-    path[..split].to_vec()
+    own.to_vec()
 }
 
 /// A restored world's `load-path' made the run's: its own entries, those
@@ -260,6 +263,9 @@ mod tests {
         assert_eq!(world_load_path(&before, &preload), before);
         let between = paths(&["/r/gnu-lisp", "/t/run-1", "/r/rlisp"]);
         assert_eq!(world_load_path(&between, &preload), between);
+        // A tree entry given twice: where the run's own go is unclear.
+        let twice = paths(&["/r/a", "/r/b", "/r/a", "/t/run-1"]);
+        assert_eq!(world_load_path(&twice, &preload), twice);
         // No bootstrap preload, no world tree: the whole path.
         assert_eq!(world_load_path(&paths(&["/r/gnu-lisp", "/t"]), &[]), paths(&["/r/gnu-lisp", "/t"]));
     }
