@@ -37,6 +37,7 @@ enum HarnessKind {
     Real,
 }
 
+#[derive(Clone)]
 struct Args {
     kind: HarnessKind,
     measurement_regime: bool,
