@@ -123,19 +123,30 @@ class Transport(unittest.TestCase):
         self.assertEqual(err, b"")
 
     def test_eof_drains_delayed_response_and_keeps_listener(self):
+        # A client that writes its requests and closes its input at once (a
+        # shell pipe) still gets the replies: the relay does not pass the
+        # EOF on, which would end the server's side before it answered, and
+        # closes once the server has been quiet for its timeout.
         p = self.launch()
         peer = self.accept()
         def server():
             request = b""
-            while data := peer.recv(1024):
-                request += data
-            self.assertEqual(request, b"request\n")
+            while not request.endswith(b"second\n"):
+                request += peer.recv(1024)
+            self.assertEqual(request, b"request\nsecond\n")
+            time.sleep(0.2)
             peer.sendall(b"final outstanding\n")
-            peer.shutdown(socket.SHUT_WR)
+            time.sleep(0.2)
+            peer.sendall(b"and the second\n")
+            self.assertEqual(peer.recv(1), b"")
         self.thread(server)
-        p.stdin.write(b"request\n")
+        p.stdin.write(b"request\nsecond\n")
         p.stdin.close()
-        self.assertEqual(self.finish(p), b"final outstanding\n")
+        start = time.monotonic()
+        code = p.wait(timeout=3)
+        self.assertEqual(code, 0)
+        self.assertGreater(time.monotonic() - start, 0.4 + BUDGET / 1000 * 0.9)
+        self.assertEqual(p.stdout.read(), b"final outstanding\nand the second\n")
         # Relay closes only its connection; it neither unlinks nor kills server.
         self.assertTrue(pathlib.Path(self.path).exists())
         next_client = socket.socket(socket.AF_UNIX)
@@ -147,8 +158,8 @@ class Transport(unittest.TestCase):
         p = self.launch()
         peer = self.accept()
         p.stdin.close()
-        self.assertEqual(peer.recv(1), b"")
-        self.assertEqual(self.finish(p, False, b"stdin EOF drain deadline"), b"")
+        # Quiet for the timeout after the input ended: the relay closes.
+        self.assertEqual(self.finish(p), b"")
         self.assertEqual(peer.recv(1), b"")
         q = self.launch()
         successor = self.accept()
@@ -273,7 +284,7 @@ class Transport(unittest.TestCase):
         self.assertTrue(pathlib.Path(self.path).exists())
 
     def test_cli_requires_one_absolute_socket(self):
-        for args in [[], ["--socket", "relative"], ["--socket"],
+        for args in [["--socket", "relative"], ["--socket"], ["--server"], ["--server", "a/b"],
                      ["--socket", self.path, "--socket", self.path],
                      ["--socket", self.path, "--timeout-ms", "0"],
                      ["--socket", self.path, "--timeout-ms", "60001"],
