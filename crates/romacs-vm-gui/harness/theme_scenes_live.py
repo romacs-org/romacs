@@ -8,7 +8,8 @@ split with an Emacs Lisp buffer, an active region and line numbers beside
 an empty buffer (`code'); org headings, markup and a source block
 (`org'); help for `find-file' beside a diff (`help-diff'); Emacs Lisp
 beside dired (`elisp-dired'); a message, which Romacs shows as a toast (`toast');
-the command panel open (`complete'); and,
+the command panel open (`complete'); with --gnosis-db, gnosis-dashboard
+over a copy of that database (`gnosis'); and,
 when the system has notmuch and its Lisp, notmuch-hello, a search and a
 thread of a synthetic store (`notmuch_fixture.py'; `hello', `search',
 `show').  Each scene is one PNG per theme, and a sheet stacks every
@@ -129,6 +130,9 @@ SCENES = r'''
 (global-set-key (kbd "<f10>") (lambda () (interactive)
   (message "Wrote %s (%d lines)" (abbreviate-file-name (getenv "TS_SRC")) 1234) (ts-done 'toast)))
 (global-set-key (kbd "<f9>") (lambda () (interactive) (delete-other-windows) (switch-to-buffer "*scratch*") (ts-done 'scratch)))
+(when (getenv "TS_GNOSIS")
+  (setq gnosis-dir (getenv "TS_GNOSIS"))
+  (global-set-key (kbd "<f11>") (lambda () (interactive) (delete-other-windows) (gnosis-dashboard) (delete-other-windows) (ts-done 'gnosis))))
 '''
 
 
@@ -160,11 +164,22 @@ def session(engine, binary, theme, args, out):
                'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
                'TS_LOG': str(root / 'scenes.txt'), 'TS_SRC': str(src / 'romacs-defaults.el'),
                'TS_DIFF': str(root / 'sample.diff')}
+        if args.gnosis_db:
+            (root / 'gnosis').mkdir()
+            shutil.copy(args.gnosis_db, root / 'gnosis' / 'gnosis.db')
+            (root / 'gnosis' / 'gnosis.db').chmod(0o644)
+            env['TS_GNOSIS'] = str(root / 'gnosis') + '/'
         if notmuch:
             notmuch_fixture.build(root / 'store', ANCHOR)
             env.update(notmuch_fixture.environment(root / 'store'), TS_NOTMUCH=str(SITE_LISP))
         if engine == 'gnu':
-            (home / 'init.el').write_text(GNU_RUM % {'inputs': INPUTS} + SCENES)
+            # The packages Romacs bundles (gnosis among them), on GNU's
+            # `load-path' with Romacs's generated autoloads, as
+            # gnosis_parity_live.py gives them.
+            bundled = ' '.join(f'"{ROOT / "rlisp" / d}"' for d in ('gnosis', 'emacs-lisp', '', 'deps/fsm', 'deps/markdown-mode', 'deps/websocket'))
+            packages = (f'(setq load-path (append (list {bundled}) load-path))\n'
+                        f'(load "{ROOT / "rlisp/romacs-bundled-autoloads.el"}" nil t)\n') if args.gnosis_db else ''
+            (home / 'init.el').write_text(GNU_RUM % {'inputs': INPUTS} + packages + SCENES)
             command = [str(binary), '-Q', '-l', str(home / 'init.el')]
             env['GDK_BACKEND'] = 'wayland'
         else:
@@ -231,6 +246,8 @@ def session(engine, binary, theme, args, out):
                     scene('F8', 'show', 2.5)
                 scene('F9', 'scratch', 1)
                 scene('F10', 'toast', .6)
+                if args.gnosis_db:
+                    scene('F11', 'gnosis', 4)
                 keys('-M', 'alt', 'x', '-m', 'alt')
                 time.sleep(2)
                 shots['complete'] = out / 'complete.png'
@@ -263,6 +280,7 @@ def main():
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--themes', default='default,rum')
     ap.add_argument('--gnu', help='pinned GNU, to show the reference Rum configuration first')
+    ap.add_argument('--gnosis-db', type=Path, help='a copy of a gnosis.db for the `gnosis\' (dashboard) scene; copied again per session')
     ap.add_argument('--scale', type=float, default=1)
     ap.add_argument('--mode', default='1600x1000')
     ap.add_argument('--timeout', type=float, default=600)
