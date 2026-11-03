@@ -1,7 +1,8 @@
 //! A batch run with `--world-store' builds the runner's world once, confined
 //! to what the bootstrap and Lisp startup read, and a later run restores it,
 //! even when its test sits in another directory, as run.py extracts each
-//! run's test tree afresh; the restored run still loads its target there.
+//! run's test tree afresh; the restored run's `load-path' has that
+//! directory, so its target finds a library beside it by name.
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -28,16 +29,18 @@ fn events(output: &Output) -> Vec<Value> {
 }
 
 /// The world event a run under DIR, a test directory of its own, reports,
-/// and whether its target loaded from DIR.
+/// and whether its target required the library beside it in DIR.
 fn run(scratch: &Path, store: &Path, dir: &str) -> (Value, bool, Output) {
     let dir = scratch.join(dir);
     fs::create_dir_all(&dir).unwrap();
     let target = dir.join("target.el");
-    fs::write(&target, "(setq target-dir (file-name-directory load-file-name))\n").unwrap();
+    let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+    fs::write(dir.join("wr-sibling.el"), format!("(defvar wr-sibling-run {name:?})\n(provide 'wr-sibling)\n")).unwrap();
+    fs::write(&target, "(require 'wr-sibling)\n").unwrap();
     let harness = dir.join("harness.el");
     fs::write(&harness, "(defun ert-run-tests-batch (_selector) t)\n").unwrap();
     let reporter = dir.join("reporter.el");
-    fs::write(&reporter, "(princ (format \"TARGET-DIR %s\\n\" target-dir))\n0\n").unwrap();
+    fs::write(&reporter, "(princ (format \"SIBLING %s\\n\" wr-sibling-run))\n0\n").unwrap();
     let plan = dir.join("plan.json");
     fs::write(&plan, json!({"file": target, "forms": []}).to_string()).unwrap();
     let lisp = root().join("gnu-lisp");
@@ -54,7 +57,7 @@ fn run(scratch: &Path, store: &Path, dir: &str) -> (Value, bool, Output) {
     command.arg("--load-path").arg(root().join("rlisp")).arg("--load-path").arg(&dir).arg("--world-store").arg(store);
     let output = command.output().unwrap();
     let world = events(&output).into_iter().find(|e| e["event"] == "world").unwrap_or(Value::Null);
-    let loaded = String::from_utf8_lossy(&output.stdout).contains(&format!("TARGET-DIR {}/", dir.display()));
+    let loaded = output.status.success() && String::from_utf8_lossy(&output.stdout).contains(&format!("SIBLING {name}\n"));
     (world, loaded, output)
 }
 

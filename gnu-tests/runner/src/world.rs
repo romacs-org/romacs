@@ -112,29 +112,47 @@ fn world_root(preload: &[PathBuf]) -> Option<&Path> {
         .and_then(|p| p.parent()?.parent())
 }
 
-/// The load path the world is built with and keyed on: the entries in its
-/// preloads' tree. A run's own, its test's directory, is added to a
-/// restored world's (`run_load_path`), so worlds are shared across runs.
-fn world_load_path(args: &crate::Args) -> Vec<PathBuf> {
-    let Some(root) = world_root(&args.preload) else { return vec![] };
-    args.load_path.iter().filter(|p| p.starts_with(root)).cloned().collect()
+/// The load path the world is built with and keyed on: the run's entries in
+/// its preloads' tree, when the others, the run's own (its test's
+/// directory), all follow them, as run.py lays them out; a restored world
+/// then takes the run's own after them (`run_load_path`), so worlds are
+/// shared across runs. Any other layout keys and builds on the whole path.
+/// A preload needing a directory outside its tree fails the build, and the
+/// run boots from source.
+fn world_load_path(path: &[PathBuf], preload: &[PathBuf]) -> Vec<PathBuf> {
+    let Some(root) = world_root(preload) else { return path.to_vec() };
+    let split = path.iter().position(|p| !p.starts_with(root)).unwrap_or(path.len());
+    if path[split..].iter().any(|p| p.starts_with(root)) {
+        return path.to_vec();
+    }
+    path[..split].to_vec()
 }
 
-/// A restored world's `load-path' made the run's: its own entries outside
-/// the world's tree appended, in the order a fresh VM has them.
+/// A restored world's `load-path' made the run's: its own entries, those
+/// the world was not built on, spliced in after the world's last entry from
+/// the run, where a fresh VM has them before anything a preload added.
 fn run_load_path(vm: &mut Vm, args: &crate::Args) -> Result<(), String> {
-    let own = world_load_path(args);
-    let extra: Vec<String> = args.load_path.iter().filter(|p| !own.contains(p))
-        .map(|p| serde_json::to_string(&p.to_string_lossy()).unwrap_or_default()).collect();
-    if extra.is_empty() { return Ok(()); }
-    crate::eval(vm, &format!("(setq load-path (append load-path (list {})))", extra.join(" "))).map(drop).map_err(|e| e.1)
+    let own = world_load_path(&args.load_path, &args.preload);
+    let extra = &args.load_path[own.len()..];
+    if extra.is_empty() {
+        return Ok(());
+    }
+    let literal = |p: &PathBuf| serde_json::to_string(&p.to_string_lossy()).unwrap_or_default();
+    let extra = extra.iter().map(literal).collect::<Vec<_>>().join(" ");
+    let form = match own.last() {
+        Some(last) => format!(
+            "(let ((tail (member {} load-path))) (setq load-path (if tail (append (butlast load-path (length (cdr tail))) (list {extra}) (cdr tail)) (append load-path (list {extra})))))",
+            literal(last)),
+        None => format!("(setq load-path (append (list {extra}) load-path))"),
+    };
+    crate::eval(vm, &form).map(drop).map_err(|e| e.1)
 }
 
 /// The recipe of the runner's world (§7): every embedder step before the
 /// world's end, in order.
 fn recipe(args: &crate::Args) -> Vec<String> {
     let mut lines = vec!["consumer romacs-gnu-ert".to_owned(), "noninteractive t".into(), "geometry 80 25 1 1".into()];
-    lines.extend(world_load_path(args).iter().map(|p| format!("load-path {}", p.display())));
+    lines.extend(world_load_path(&args.load_path, &args.preload).iter().map(|p| format!("load-path {}", p.display())));
     lines.push("prelude".into());
     lines.extend(args.preload[..world_preloads(&args.preload)].iter().map(|p| format!("preload {}", p.display())));
     lines
@@ -193,13 +211,13 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
 /// The builder: run the world's preloads in build mode, confined, then
 /// publish the world and exit, 0 when it was published.
 fn build(world: &World, args: &crate::Args, count: usize) -> ! {
-    let roots = world.build_roots(world_load_path(args).into_iter().chain(args.preload[..count].iter().cloned()).collect());
+    let roots = world.build_roots(world_load_path(&args.load_path, &args.preload).into_iter().chain(args.preload[..count].iter().cloned()).collect());
     if let Err(e) = world.begin_build(&roots) {
         crate::emit(json!({"event": "world-build", "ok": false, "error": e.to_string()}));
         std::process::exit(3);
     }
     let built = world.build(|| {
-        let mut vm = crate::fresh_vm(&crate::Args { load_path: world_load_path(args), ..args.clone() });
+        let mut vm = crate::fresh_vm(&crate::Args { load_path: world_load_path(&args.load_path, &args.preload), ..args.clone() });
         let mut chain = vec![];
         if !crate::load_chain(&mut vm, args, 0, count, &mut chain) || chain.iter().any(|e| e["loaded"] != true) {
             return Err(json!({"chain": chain}).to_string());
@@ -229,6 +247,21 @@ mod tests {
         assert_eq!(world_preloads(&tree), 3);
         assert_eq!(world_preloads(&paths(&["/r/rlisp/x.el"])), 0);
         assert_eq!(world_preloads(&[]), 0);
+    }
+
+    #[test]
+    fn the_world_keys_on_its_trees_load_path_only_before_the_runs_own() {
+        let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
+        let preload = paths(&["/r/rlisp/romacs-loadup-bootstrap.el"]);
+        // run.py's layout: the tree's entries, then the test's directory.
+        assert_eq!(world_load_path(&paths(&["/r/gnu-lisp", "/r/rlisp", "/t/run-1"]), &preload), paths(&["/r/gnu-lisp", "/r/rlisp"]));
+        // Another layout keys on the whole path, whose order a restore keeps.
+        let before = paths(&["/t/run-1", "/r/gnu-lisp", "/r/rlisp"]);
+        assert_eq!(world_load_path(&before, &preload), before);
+        let between = paths(&["/r/gnu-lisp", "/t/run-1", "/r/rlisp"]);
+        assert_eq!(world_load_path(&between, &preload), between);
+        // No bootstrap preload, no world tree: the whole path.
+        assert_eq!(world_load_path(&paths(&["/r/gnu-lisp", "/t"]), &[]), paths(&["/r/gnu-lisp", "/t"]));
     }
 
     #[test]
