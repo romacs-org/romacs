@@ -3,7 +3,8 @@
 //! quits there: in a loop that reads no input, inside a long regexp search
 //! (the matcher's quit probe) and in a process wait (`accept-process-output'
 //! with nothing to read); it is not left as an event for an input read that
-//! never comes.
+//! never comes. Unlike C-g it quits under `inhibit-quit' too, which the
+//! handler clears.
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -57,6 +58,15 @@ fn sigusr2_breaks_a_backtracking_search_into_the_debugger() {
     // Minutes of backtracking (the backreference defeats the matcher's
     // memo): every way to split the a's fails at the b.
     assert_eq!(debugger_line("regexp", r#"(string-match "^\\(\\(a\\)\\2?\\)*$" (concat (make-string 48 ?a) "b"))"#),
+               "DEBUGGER (error (quit))");
+}
+
+#[test]
+fn sigusr2_breaks_a_loop_and_a_search_under_inhibit_quit() {
+    assert_eq!(debugger_line("inhibited-loop", "(let ((inhibit-quit t) (n 0)) (while t (setq n (1+ n))))"),
+               "DEBUGGER (error (quit))");
+    assert_eq!(debugger_line("inhibited-regexp",
+                             r#"(let ((inhibit-quit t)) (string-match "^\\(\\(a\\)\\2?\\)*$" (concat (make-string 48 ?a) "b")))"#),
                "DEBUGGER (error (quit))");
 }
 
