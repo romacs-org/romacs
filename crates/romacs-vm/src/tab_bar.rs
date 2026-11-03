@@ -57,7 +57,7 @@ impl Vm {
             };
             if *start < end { face_runs.push(FaceRun { bytes: *start..end, face: local }); }
         }
-        Ok(Some(TabBarSnapshot { height: lines * self.window_state.line, text: TextSlice { utf8: text, face_runs, raw: vec![] },
+        Ok(Some(TabBarSnapshot { height: lines * self.window_state.line, text: TextSlice { extends: vec![], utf8: text, face_runs, raw: vec![] },
                                  face: FaceHandle(0), faces }))
     }
 }
