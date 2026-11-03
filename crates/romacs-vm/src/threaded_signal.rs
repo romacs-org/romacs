@@ -7,12 +7,18 @@ pub(crate) enum SignalHandler {
     Catch(Value),
     Bind { conditions: Value, function: Value, group: usize },
     Mask(usize),
+    /// A compile-time macro expansion (`Vm::expanding_alone'): every signal
+    /// it raises stops here and no catch beneath it is live, so no handler
+    /// around the compilation sees an escape GNU would raise at the form's
+    /// reach, inside the form's own handlers.
+    Boundary,
 }
 romacs_snapshot::snapshot_enum!(SignalHandler {
     SignalHandler::Condition(f0) => (f0),
     SignalHandler::Catch(f0) => (f0),
     SignalHandler::Bind { conditions, function, group } => (conditions, function, group),
     SignalHandler::Mask(f0) => (f0),
+    SignalHandler::Boundary => (),
 });
 
 impl SignalHandler {
@@ -20,7 +26,7 @@ impl SignalHandler {
         match self {
             Self::Condition(value) | Self::Catch(value) => visit(value),
             Self::Bind { conditions, function, .. } => { visit(conditions); visit(function); }
-            Self::Mask(_) => {}
+            Self::Mask(_) | Self::Boundary => {}
         }
     }
 }
@@ -61,8 +67,8 @@ pub(super) fn release_control(e: &mut Engine<'_>, control: &Control) {
 /// its selected condition target through eval/load and cleanup unchanged.
 pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Option<usize>) -> bool {
     let mut replaced = false;
-    if !hooked && let Some(Escape::Signal(condition, data)) = e.escape.as_ref()
-        && let Some(replacement) = signal_hook(e, *condition, *data, failed_depth)
+    if !hooked && let Some(&Escape::Signal(condition, data)) = e.escape.as_ref()
+        && let Some(replacement) = signal_hook(e, condition, data, failed_depth)
     {
         e.escape = Some(replacement);
         replaced = true;
@@ -87,6 +93,27 @@ pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Opt
     replaced
 }
 
+/// Whether CONDITION's handler search ends at a compile-time expansion's
+/// `Boundary': GNU signals it only at the form's reach, where
+/// `signal-hook-function' hears of it, so it hears nothing now. A
+/// `handler-bind' that matches first may leave before the boundary, so
+/// the hook hears that signal now (and again at the reach, if it does not).
+pub(super) fn speculative(e: &mut Engine<'_>, condition: Value) -> bool {
+    let conditions = e.vm.signal_conditions(condition);
+    let mut at = e.vm.signal_handlers.len();
+    while at != 0 {
+        at -= 1;
+        match e.vm.signal_handlers[at] {
+            SignalHandler::Mask(skip) => at = skip,
+            SignalHandler::Boundary => return true,
+            SignalHandler::Condition(choices) | SignalHandler::Bind { conditions: choices, .. }
+                if matches(e.vm, conditions, choices) => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// GNU signal_or_quit after its handler search: whether the debugger is
 /// considered for the pending error, then maybe_call_debugger's tests that
 /// need no Lisp. It is considered with `debug-on-signal', when no handler
@@ -96,6 +123,9 @@ pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Opt
 fn debugger_wanted(e: &mut Engine<'_>) -> bool {
     let Some(Escape::Error { conditions, target, .. }) = e.escape.as_ref() else { return false; };
     let (conditions, clause) = match target.and_then(|at| e.vm.signal_handlers.get(at)) {
+        // A compile-time expansion's escape: GNU signals it at the form's
+        // reach, where the debugger is considered then.
+        Some(SignalHandler::Boundary) => return false,
         Some(SignalHandler::Condition(choices)) => (*conditions, *choices),
         _ => (*conditions, Value::NIL),
     };
@@ -125,6 +155,10 @@ fn search(e: &mut Engine<'_>) -> bool {
         let (condition, conditions, object) = (*condition, *conditions, *object);
         match handler {
             SignalHandler::Mask(skip) => at = skip,
+            SignalHandler::Boundary => {
+                if let Some(Escape::Error { target, .. }) = e.escape.as_mut() { *target = Some(at); }
+                break;
+            }
             SignalHandler::Condition(choices) if matches(e.vm, conditions, choices) => {
                 if let Some(Escape::Error { target, .. }) = e.escape.as_mut() { *target = Some(at); }
                 break;

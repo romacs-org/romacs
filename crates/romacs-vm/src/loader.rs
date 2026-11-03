@@ -375,7 +375,12 @@ impl Vm {
         // expansion budget across sibling top-level forms.
         self.expanded_macros.clear();
         self.expanded_symbols.clear();
-        if let Some(expanded) = self.expand_macro(form)? {
+        self.propagated_escape = None;
+        let expanded = match self.expanding_for_load(|vm| vm.expand_macro(form)) {
+            Ok(expanded) => expanded,
+            Err(error) => return Err(self.eager_expansion_failure(error)),
+        };
+        if let Some(expanded) = expanded {
             return self.eval_load_toplevel(&expanded, None, lazy, depth + 1);
         }
         // Before GNU subr.el has installed prog2, its bootstrap surface
@@ -398,12 +403,16 @@ impl Vm {
             value
         } else {
             self.seed_file_specials = true;
-            let compiled = if !lazy && let Some(source) = source {
-                self.cached_source_form(source, form)
+            let compiled = self.expanding_for_load(|vm| if !lazy && let Some(source) = source {
+                vm.cached_source_form(source, form)
             } else {
-                self.compile_request(form).map(|(function, _)| function)
-            };
+                vm.compile_request(form).map(|(function, _)| function)
+            });
             self.seed_file_specials = false;
+            let compiled = match compiled {
+                Ok(function) => Ok(function),
+                Err(error) => Err(self.eager_expansion_failure(error)),
+            };
             compiled.and_then(|function| {
                 self.propagate_next |= self.loader.propagate != 0;
                 self.execute_raw(function)
@@ -426,6 +435,45 @@ impl Vm {
             self.set_variable_value(dynvars, declared)?;
         }
         result
+    }
+    /// RUN, which expands a top-level form, under macroexp.el
+    /// internal-macroexpand-for-load's `condition-case' clause `(debug
+    /// error)': the debugger is considered as GNU's would, and no
+    /// handler around the load sees an error the expansion signals, which
+    /// `eager_expansion_failure' wraps.
+    fn expanding_for_load<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.signal_handlers.len();
+        let (debug, error) = (self.intern("debug"), self.intern("error"));
+        let clause = self.list_value(&[debug, error]);
+        self.signal_handlers.push(threaded::SignalHandler::Condition(clause));
+        let result = run(self);
+        self.signal_handlers.truncate(mark);
+        result
+    }
+    /// macroexp.el internal-macroexpand-for-load: an error that expanding a
+    /// top-level form signals reaches the loader's caller as (error "Eager
+    /// macro-expansion failure: ERR"), ERR printed as `%S' prints it. A quit
+    /// or another signal that is no error passes as it is, as does a throw
+    /// to a catch outside the load.
+    fn eager_expansion_failure(&mut self, error: String) -> String {
+        let (condition, object) = match self.propagated_escape {
+            Some(threaded::Escape::Signal(condition, data)) => {
+                self.conses.push((condition, data));
+                (condition, Value::reference(self.conses.len() - 1, 3))
+            }
+            Some(threaded::Escape::Error { condition, object, .. }) => (condition, object),
+            _ => return error,
+        };
+        let error_symbol = self.intern("error");
+        if !self.condition_matches(condition, error_symbol) {
+            return error;
+        }
+        let Ok(printed) = self.print_render(object, true, Value::NIL, false) else { return error };
+        let message = format!("Eager macro-expansion failure: {printed}");
+        let Ok(text) = self.literal(&Form::String(message.clone())) else { return error };
+        let data = self.list_value(&[text]);
+        self.propagated_escape = Some(threaded::Escape::Signal(error_symbol, data));
+        message
     }
     pub(super) fn source_load_active(&self) -> bool {
         !self.loader.active.is_empty()

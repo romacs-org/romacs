@@ -153,12 +153,12 @@ impl Vm {
     }
 
     /// GNU maybe_quit at a safepoint, with handle_interrupt for each press
-    /// the host counted: the escape to raise, or None to go on. Never while
-    /// compiling or expanding a macro, whose escape would unwind past the
-    /// handlers of the code being compiled; the quit then waits for the
-    /// next safepoint.
+    /// the host counted: the escape to raise, or None to go on. A macro
+    /// expanding while a form compiles quits too: the expansion runs where
+    /// GNU's would, inside the handlers around the form's reach or around
+    /// the load, and its escape propagates to them.
     pub(crate) fn maybe_quit(&mut self) -> Option<Escape> {
-        if self.compile_depth > 0 || !self.expanding.is_empty() || !self.quit.busy() {
+        if !self.quit.busy() {
             return None;
         }
         for _ in 0..self.quit.take() {
@@ -178,6 +178,7 @@ impl Vm {
         }
         // process_quit_flag.
         self.set_quit_variable("quit-flag", Value::NIL);
+        self.quit_unwinding = true;
         if flag == throw_on_input {
             return Some(Escape::Throw(flag, Value::TRUE));
         }

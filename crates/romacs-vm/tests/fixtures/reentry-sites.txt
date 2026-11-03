@@ -50,6 +50,7 @@ host_input.rs run_window_change_functions call_prepared_source_raw 1 clean  # no
 insdel.rs mark_deactivated set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 lib.rs execute_raw execute_rooted 1 clean  # no roots
 lib.rs execute_rooted execute 1 rooted  # ROOTS are a frame, written back after
+lib.rs expr_evaluated expand_macro 1 held  # an open compiler builder holds collection
 lib.rs expr_now expand_macro 1 held  # an open compiler builder holds collection
 lib.rs force_lazy compile_lazy_request 1 held  # an open compiler builder holds collection
 lib.rs primitive loader_primitive 1 held  # a legacy primitive call: its engine is not suspended

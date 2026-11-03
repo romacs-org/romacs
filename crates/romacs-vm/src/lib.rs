@@ -1015,8 +1015,11 @@ struct LazyBody {
     /// expands each form when evaluation reaches it). Its own root is
     /// compiled strictly, so a failure signals instead of deferring again.
     deferred: bool,
+    /// Compiled for `eval' (`evaluating'): its quoted objects are the very
+    /// structure `eval' was handed, as GNU's interpreter evaluates it.
+    evaluated: bool,
 }
-romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, local_specials, pending_specials, dynamic_scope, deferred });
+romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, local_specials, pending_specials, dynamic_scope, deferred, evaluated });
 #[derive(Clone, Copy)]
 struct Binding {
     reg: usize,
@@ -1304,6 +1307,32 @@ pub struct Vm {
     lazy_regime: bool,
     /// R215: compile a failing form as a deferred reach-time expansion.
     defer_expansion_errors: bool,
+    /// Compiling for `eval', which GNU interprets: a macro call whose
+    /// expansion escapes, or a call whose function a form run before it may
+    /// still define, defers to its reach (`defer_expansion_errors'), and a
+    /// `lambda' with nothing to capture compiles at its first call.
+    evaluating: bool,
+    /// A quit (or `throw-on-input' throw) `maybe_quit' raised from C-g or
+    /// `quit-flag' is unwinding: no `catch' or `condition-case' has ended it
+    /// since. An unwind-protect cleanup that replaces it keeps it set, so
+    /// what leaves an expansion it began in is told apart from an error the
+    /// macro raised after catching a quit (`quit_watched').
+    quit_unwinding: bool,
+    /// The error objects (CONDITION . DATA) of the `no-catch'es throws that
+    /// found no live catch made, while those errors escape, the newest last:
+    /// an error with one of these very objects, made afresh for each signal,
+    /// is that throw, not one Lisp signalled (`signal_form' raises it again
+    /// as the throw). Each retires when its error is caught; they are weak
+    /// (gc.rs), so one whose error a Rust caller discards goes at the next
+    /// collection and keeps nothing alive.
+    thrown_no_catch: Vec<Value>,
+    /// The next form compiled is a deferred call reached (`force_lazy'): its
+    /// own expansion signals there, the forms inside it defer as ever.
+    strict_root: bool,
+    /// The head of the deferred call being reached, while it compiles: with
+    /// no function, that call compiles to signal void-function at once, not
+    /// to defer again. Consumed by the call's own compilation.
+    reached_head: Option<String>,
     /// Set for the builder about to be created (`Builder::loader_order`).
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
@@ -1510,6 +1539,11 @@ romacs_snapshot::snapshot_fields!(Vm {
     seed_file_specials,
     lazy_regime,
     defer_expansion_errors,
+    evaluating,
+    quit_unwinding,
+    thrown_no_catch,
+    strict_root,
+    reached_head,
     loader_order_request,
     keep_captures,
     lambda_depth,
@@ -1689,6 +1723,11 @@ impl Vm {
             seed_file_specials: false,
             lazy_regime: false,
             defer_expansion_errors: false,
+            evaluating: false,
+            quit_unwinding: false,
+            thrown_no_catch: Vec::new(),
+            strict_root: false,
+            reached_head: None,
             loader_order_request: false,
             keep_captures: false,
             lambda_depth: 0,
@@ -2225,7 +2264,7 @@ impl Vm {
         // call: GNU's interpreter decides whether each `let' binds
         // dynamically when it runs, after the files loaded since have
         // declared their variables special (VM2-LATE-SPECIAL1).
-        if self.lazy_regime || (self.lambda_depth > 0 && b.env.is_empty()) {
+        if self.lazy_regime || ((self.lambda_depth > 0 || self.evaluating) && b.env.is_empty()) {
             return self.lazy_lambda(b, args, body, false);
         }
         // Ordinary closures retain only executable state. Source metadata is
@@ -2270,6 +2309,7 @@ impl Vm {
             pending_specials: self.pending_specials.clone(),
             dynamic_scope: self.dynamic_scope,
             deferred,
+            evaluated: self.evaluating,
         };
         let id = self.install_function(Function {
             capture_mutations: vec![true; names.len()],
@@ -2302,7 +2342,10 @@ impl Vm {
         let Some(lazy) = self.functions.get(id).and_then(|f| f.lazy.clone()) else {
             return Ok(());
         };
-        let body = match self.expansion_form(lazy.body, 0)? {
+        // A body `eval' compiles keeps each quoted object itself, as GNU's
+        // interpreter evaluates the very structure it was handed.
+        let body = if lazy.evaluated { self.eval_datum_form(lazy.body)? } else { self.expansion_form(lazy.body, 0)? };
+        let body = match body {
             Form::List(forms) => forms,
             Form::Sym(nil) if nil == "nil" => vec![],
             _ => return Err("invalid lazy body".into()),
@@ -2315,9 +2358,11 @@ impl Vm {
             .map(|(reg, (name, &cell))| (name.clone(), Binding { reg, cell }))
             .collect();
         let saved_regime = std::mem::replace(&mut self.lazy_regime, true);
-        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, !lazy.deferred);
+        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
+        let saved_strict = std::mem::replace(&mut self.strict_root, lazy.deferred);
         let saved_scope = std::mem::replace(&mut self.dynamic_scope, lazy.dynamic_scope);
         let saved_pending = std::mem::replace(&mut self.pending_specials, lazy.pending_specials.clone());
+        let saved_evaluating = std::mem::replace(&mut self.evaluating, lazy.evaluated);
         if self.compile_depth == 0 {
             self.expanded_macros.clear();
             self.expanded_symbols.clear();
@@ -2332,8 +2377,10 @@ impl Vm {
         self.compile_depth -= 1;
         self.lazy_regime = saved_regime;
         self.defer_expansion_errors = saved_defer;
+        self.strict_root = saved_strict;
         self.dynamic_scope = saved_scope;
         self.pending_specials = saved_pending;
+        self.evaluating = saved_evaluating;
         let (compiled, names) = result?;
         if names != lazy.names {
             return Err("lazy body changed its capture layout".into());
@@ -2353,29 +2400,141 @@ impl Vm {
         self.expr_inner(b, f)
     }
     fn expr_inner(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
+        // A deferred call reached: its expansion signals here, at its reach.
+        // With no function yet, it compiles as a call that signals
+        // void-function before any argument runs (`reached_head'); the calls
+        // in its arguments defer as ever.
+        if std::mem::take(&mut self.strict_root) {
+            if let Form::List(items) = f
+                && let Some(Form::Sym(head)) = items.first()
+            {
+                self.reached_head = Some(head.clone());
+            }
+            let result = self.expr_now(b, f);
+            self.reached_head = None;
+            return result;
+        }
+        if self.evaluating && self.defer_expansion_errors {
+            return self.expr_evaluated(b, f);
+        }
         if !self.defer_expansion_errors || !matches!(f, Form::List(a) if !a.is_empty()) {
             return self.expr_now(b, f);
         }
         let (code, next, sites) = (b.code.len(), b.next, b.sites.len());
         let (env, local_specials) = (b.env.clone(), b.local_specials.clone());
-        match self.expr_now(b, f) {
+        let (result, quit) = self.quit_watched(|vm| vm.expr_now(b, f));
+        match result {
             Ok(r) => Ok(r),
+            // A throw to a catch around the compilation is no failure of
+            // this form: it leaves now, as GNU's eager expansion's would.
+            Err(error) if matches!(self.propagated_escape, Some(threaded::Escape::Throw(..))) => Err(error),
             Err(_) => {
                 // GNU expands this form only when evaluation reaches it, and
                 // signals then (eval.c eval_sub). Discard the partial code and
-                // compile a reach-time expansion instead.
-                self.propagated_escape = None;
+                // compile the escape, or a reach-time expansion, instead.
                 b.code.truncate(code);
                 b.next = next;
                 b.sites.truncate(sites);
                 b.env = env;
                 b.local_specials = local_specials;
-                let thunk = self.lazy_lambda(b, &[], std::slice::from_ref(f), true)?;
-                let r = b.reg();
-                b.emit(Op::Call(r, thunk, b.next, 0));
-                Ok(r)
+                self.expansion_failed(b, f, quit)
             }
         }
+    }
+    /// F compiled for `eval', which GNU interprets. A macro call expands
+    /// now, before anything is emitted for it, and compiles its expansion;
+    /// an expansion that escapes defers the call to its reach, which runs
+    /// the macro again there. The expansion runs alone (`expanding_alone'),
+    /// as nothing of the form around it has run yet. A call whose function
+    /// is not yet defined defers too: a form evaluated before it may define
+    /// it, even as a macro. Every other form compiles as it is, its own
+    /// forms in turn.
+    fn expr_evaluated(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
+        let Form::List(items) = f else { return self.expr_now(b, f) };
+        let Some(Form::Sym(head)) = items.first() else { return self.expr_now(b, f) };
+        if head.starts_with("#:") {
+            return self.expr_now(b, f);
+        }
+        if self.names.get(head).is_none_or(|&slot| self.slots[slot].function == Value::UNBOUND) {
+            return self.reach_thunk(b, f);
+        }
+        let (expanded, quit) = self.quit_watched(|vm| vm.expanding_alone(|vm| vm.expand_macro(f)));
+        match expanded {
+            Ok(Some(expansion)) => self.expr(b, &expansion),
+            Ok(None) => self.expr_unexpanded(b, f),
+            Err(_) => self.expansion_failed(b, f, quit),
+        }
+    }
+    /// RUN with a `Boundary' innermost on the handler stack: no handler or
+    /// catch around the compilation sees what it signals or throws.
+    fn expanding_alone<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.signal_handlers.len();
+        self.signal_handlers.push(threaded::SignalHandler::Boundary);
+        let result = run(self);
+        self.signal_handlers.truncate(mark);
+        result
+    }
+    /// RUN's result, and whether it failed with a quit from C-g still
+    /// unwinding out of it (`quit_unwinding'), which then still unwinds.
+    fn quit_watched<T>(&mut self, run: impl FnOnce(&mut Self) -> Result<T>) -> (Result<T>, bool) {
+        let saved = std::mem::replace(&mut self.quit_unwinding, false);
+        let result = run(self);
+        let quit = result.is_err() && self.quit_unwinding;
+        self.quit_unwinding = saved || quit;
+        (result, quit)
+    }
+    /// F, whose expansion just escaped. When a quit from C-g left it (QUIT),
+    /// what left it is raised at F's reach, as it left, without running the
+    /// macro again; otherwise F expands again at its reach.
+    fn expansion_failed(&mut self, b: &mut Builder, f: &Form, quit: bool) -> Result<usize> {
+        let escape = self.propagated_escape.take();
+        let ended = match &escape {
+            Some(threaded::Escape::Error { object, .. }) => Some(*object),
+            _ => None,
+        };
+        let raised = escape.filter(|_| quit).and_then(|escape| self.signal_form(escape));
+        // The escape ends here, so its throw's mark retires.
+        if let Some(object) = ended {
+            self.retire_thrown_no_catch(object);
+        }
+        match raised {
+            Some(raised) => self.expr_now(b, &raised),
+            None => self.reach_thunk(b, f),
+        }
+    }
+    /// `(signal CONDITION DATA)' for the signal ESCAPE carries, or `(throw
+    /// TAG VALUE)' for a throw, which the expansion's `Boundary' made a
+    /// `no-catch' (a `while-no-input' around the form catches it there).
+    fn signal_form(&mut self, escape: threaded::Escape) -> Option<Form> {
+        let call = |vm: &Self, head: &str, a, b| Form::List(vec![Form::Sym(head.into()), vm.eval_quoted_form(a), vm.eval_quoted_form(b)]);
+        let (condition, data, thrown) = match escape {
+            threaded::Escape::Signal(condition, data) => (condition, data, false),
+            threaded::Escape::Error { object, .. } => {
+                let (condition, data) = self.cons_pair(object).ok()?;
+                (condition, data, self.thrown_no_catch.contains(&object))
+            }
+            threaded::Escape::Throw(tag, value) => return Some(call(self, "throw", tag, value)),
+            threaded::Escape::Normal(_) => return None,
+        };
+        if thrown
+            && let Ok((tag, rest)) = self.cons_pair(data)
+            && let Ok((value, Value::NIL)) = self.cons_pair(rest)
+        {
+            return Some(call(self, "throw", tag, value));
+        }
+        Some(call(self, "signal", condition, data))
+    }
+    /// OBJECT's error has ended: no throw's mark is kept for it.
+    pub(crate) fn retire_thrown_no_catch(&mut self, object: Value) {
+        self.thrown_no_catch.retain(|&marked| marked != object);
+    }
+    /// A call of a closure, made here, whose body is F, compiled when the
+    /// call is reached (GNU expands F then, eval.c eval_sub).
+    fn reach_thunk(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
+        let thunk = self.lazy_lambda(b, &[], std::slice::from_ref(f), true)?;
+        let r = b.reg();
+        b.emit(Op::Call(r, thunk, b.next, 0));
+        Ok(r)
     }
     /// The special form HEAD's function names through a chain of symbol
     /// aliases (GNU indirect_function), if it ends at one.
@@ -2398,6 +2557,10 @@ impl Vm {
         if let Some(expanded) = self.expand_macro(f)? {
             return self.expr(b, &expanded);
         }
+        self.expr_unexpanded(b, f)
+    }
+    /// F, no call of a Lisp macro, compiled.
+    fn expr_unexpanded(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
         if let Some(expanded) = expand::expand(f)? {
             return self.expr(b, &expanded);
         }
@@ -2787,7 +2950,9 @@ impl Vm {
                             // Non-eager Lisp bodies may name a macro before its
                             // defining file is loaded. Keep that entire form
                             // unevaluated until reached, not just its arguments.
-                            if self.defer_expansion_errors && self.slots[slot].function == Value::UNBOUND {
+                            if self.defer_expansion_errors && self.slots[slot].function == Value::UNBOUND
+                                && self.reached_head.take_if(|reached| reached == head).is_none()
+                            {
                                 return Err(format!("defer unresolved function {head}"));
                             }
                         }

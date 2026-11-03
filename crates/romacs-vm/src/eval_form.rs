@@ -125,7 +125,14 @@ impl Vm {
         // form made are retired once unreachable, as for any request. Code
         // compiled per call and never retired grew every collection's walk.
         let saved = std::mem::replace(&mut self.dynamic_scope, lexical == Value::NIL);
+        // GNU's `eval' interprets, expanding each macro call at its reach:
+        // an expansion that escapes defers there, and a definition's body
+        // compiles at its first call.
+        let saved_evaluating = std::mem::replace(&mut self.evaluating, true);
+        let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
         let compiled = self.compile_request(&form);
+        self.defer_expansion_errors = saved_defer;
+        self.evaluating = saved_evaluating;
         self.dynamic_scope = saved;
         let (function, _) = compiled?;
         self.propagate_next = true;
@@ -163,6 +170,33 @@ mod tests {
     // The escape an `eval` engine hands to its caller holds heap Values. It is
     // a collector root while present: garbage allocated before it is reclaimed,
     // its payload moves, and the stored handles must follow the move.
+    // A throw's no-catch is marked by its error object while it escapes
+    // (`Vm::thrown_no_catch'); caught, the mark retires. Marks are weak: one
+    // whose error is gone leaves at the next collection.
+    #[test]
+    fn a_caught_thrown_no_catch_retires_its_mark() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let value = vm.eval_source("(condition-case nil (eval '(throw 'missing (make-vector 3 nil)) t) (no-catch 'caught))").unwrap();
+        assert_eq!(value.display().unwrap(), "caught");
+        assert!(vm.thrown_no_catch.is_empty());
+        // An error a Rust caller dropped: its mark goes with it.
+        let object = vm.list_value(&[Value::NIL]);
+        vm.thrown_no_catch.push(object);
+        vm.collect_marked(&mut []);
+        assert!(vm.thrown_no_catch.is_empty());
+        // Garbage first, so the kept error moves when the cons space compacts.
+        for i in 0..64 {
+            vm.list_value(&[Value::integer(i).unwrap()]);
+        }
+        let mut kept = [vm.list_value(&[Value::NIL])];
+        let before = kept[0];
+        vm.thrown_no_catch.push(kept[0]);
+        vm.collect_marked(&mut kept);
+        assert_ne!(kept[0], before, "the kept error moved");
+        assert_eq!(vm.thrown_no_catch, kept.to_vec(), "a live error keeps its mark, moved with it");
+    }
+
     #[test]
     fn propagated_escape_is_traced_across_a_moving_collection() {
         let mut vm = Vm::new();

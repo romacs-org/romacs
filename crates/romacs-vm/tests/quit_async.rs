@@ -126,6 +126,114 @@ fn eval_buffer_and_load_quit_between_forms_keeping_what_ran() {
     assert!(n > 0 && n < FORMS, "load ran {n} forms");
 }
 
+// A macro whose expansion never ends quits like any loop, to the handler
+// around the expansion: in `eval' at the call's reach, inside a function
+// `eval' defined, through `macroexpand', and during `load''s expansion of
+// a top-level form (a quit is no error, so no "Eager macro-expansion
+// failure" wraps it).
+fn endless_macro_vm() -> (Vm, Arc<QuitSignal>) {
+    let (mut vm, signal) = busy_vm();
+    eval(&mut vm, "(defmacro quit-async-endless () (while t) nil)");
+    (vm, signal)
+}
+
+#[test]
+fn an_endless_expansion_in_eval_quits_to_its_handler() {
+    let (mut vm, signal) = endless_macro_vm();
+    assert_eq!(quit_into(&mut vm, &signal, "(eval '(condition-case nil (quit-async-endless) (quit 'quit)) t)"), "quit");
+    assert_eq!(eval(&mut vm, "(list quit-flag (input-pending-p))"), "(nil nil)");
+}
+
+#[test]
+fn an_endless_expansion_in_a_function_eval_defined_quits() {
+    let (mut vm, signal) = endless_macro_vm();
+    eval(&mut vm, "(eval '(defun quit-async-g () (quit-async-endless)) t)");
+    assert_eq!(quit_into(&mut vm, &signal, "(condition-case nil (quit-async-g) (quit 'quit))"), "quit");
+}
+
+#[test]
+fn an_endless_macroexpand_quits() {
+    let (mut vm, signal) = endless_macro_vm();
+    assert_eq!(quit_into(&mut vm, &signal, "(condition-case nil (macroexpand '(quit-async-endless)) (quit 'quit))"), "quit");
+}
+
+#[test]
+fn an_endless_expansion_during_load_quits_unwrapped() {
+    let (mut vm, signal) = endless_macro_vm();
+    let file = std::env::temp_dir().join(format!("quit-async-macro-{}.el", std::process::id()));
+    let _cleanup = Cleanup([file.clone()]);
+    std::fs::write(&file, ";;; -*- lexical-binding: t -*-\n(quit-async-endless)\n").unwrap();
+    let load = format!("(condition-case nil (progn (load {:?} nil t t) 'done) (quit 'quit))", file.display().to_string());
+    assert_eq!(quit_into(&mut vm, &signal, &load), "quit");
+}
+
+/// The escape that leaves a quit expansion is raised at the form's reach,
+/// whatever the quit became on its way out, and the macro does not run
+/// again: here the macro's cleanup replaces the quit with its own error,
+/// as GNU's unwind-protect lets it.
+#[test]
+fn a_quit_expansion_raises_what_left_it() {
+    let (mut vm, signal) = endless_macro_vm();
+    eval(&mut vm, "(defmacro quit-async-cleanup () (unwind-protect (while t) (error \"cleanup\")) nil)");
+    let form = "(eval '(condition-case e (quit-async-cleanup) (error (list 'error e)) (quit 'quit)) t)";
+    assert_eq!(quit_into(&mut vm, &signal, form), r#"(error (error "cleanup"))"#);
+}
+
+/// A quit taken by an `eval' nested in a macro's expansion leaves the
+/// outer expansion too: one C-g, and the outer macro does not run again.
+#[test]
+fn a_quit_in_a_nested_eval_leaves_the_outer_expansion() {
+    let (mut vm, signal) = endless_macro_vm();
+    eval(&mut vm, "(defmacro quit-async-outer () (eval '(quit-async-endless) t) nil)");
+    assert_eq!(quit_into(&mut vm, &signal, "(eval '(condition-case nil (quit-async-outer) (quit 'quit)) t)"), "quit");
+}
+
+/// Quits `quit-flag' raises inside a macro's expansion, against pinned GNU
+/// batch: a quit the macro catches itself leaves nothing to raise, so its
+/// later error expands again at the reach, under the form's own binding
+/// (GNU `(error inner)'); a `no-catch' a cleanup signals stays a signal
+/// (GNU `caught'); a cleanup's error replaces the quit (GNU `(error (error
+/// "cleanup"))'); a quit through a nested `eval' leaves the outer
+/// expansion, which does not run again (GNU `(quit (outer-ran))'); and a
+/// `throw-on-input' throw stays a throw through a cleanup (GNU `t'), while
+/// a `no-catch' a cleanup signals stays a signal though a throw elsewhere
+/// made one meanwhile, or though it carries a caught throw's very data
+/// (GNU `caught', both); and a throw stays a throw though its cleanup
+/// catches another throw's `no-catch', or sixteen nested ones (GNU `t').
+#[test]
+fn quit_flag_in_an_expansion_raises_what_gnu_does() {
+    let (mut vm, _signal) = busy_vm();
+    eval(&mut vm, "(progn (defvar rt-log nil) (defvar rt-phase 'outer)
+      (defmacro rt-cq () (condition-case nil (progn (setq quit-flag t) (while t)) (quit nil)) (signal 'error (list rt-phase)))
+      (defmacro rt-nc () (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch '(done 7))))
+      (defmacro rt-cu () (unwind-protect (progn (setq quit-flag t) (while t)) (error \"cleanup\")))
+      (defmacro rt-q0 () (setq quit-flag t) (while t))
+      (defmacro rt-nq () (push 'outer-ran rt-log) (eval '(rt-q0) t))
+      (defmacro rt-ti () (unwind-protect (progn (setq quit-flag 'done) (while t)) nil))
+      (defmacro rt-swallow () (condition-case nil (throw 'missing 1) (no-catch nil)))
+      (defmacro rt-stale () (unwind-protect (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch '(done 7))) (eval '(rt-swallow) t)))
+      (defvar rt-saved (condition-case e (eval '(throw 'done 7) t) (no-catch e)))
+      (defmacro rt-resignal () (unwind-protect (progn (setq quit-flag t) (while t)) (signal 'no-catch (cdr rt-saved))))
+      (defmacro rt-ti-nested () (unwind-protect (progn (setq quit-flag 'done) (while t)) (eval '(rt-swallow) t)))
+      (defun rt-nested-no-catch (n) (when (> n 0) (condition-case nil (unwind-protect (throw 'missing n) (rt-nested-no-catch (1- n))) (no-catch nil))))
+      (defmacro rt-swallow-deep () (rt-nested-no-catch 16) nil)
+      (defmacro rt-ti-deep () (unwind-protect (progn (setq quit-flag 'done) (while t)) (eval '(rt-swallow-deep) t))))");
+    let cases = [
+        ("(eval '(let ((rt-phase 'inner)) (condition-case e (rt-cq) (error e))) t)", "(error inner)"),
+        ("(eval '(catch 'done (condition-case nil (rt-nc) (no-catch 'caught))) t)", "caught"),
+        ("(eval '(condition-case e (rt-cu) (error (list 'error e)) (quit 'quit)) t)", r#"(error (error "cleanup"))"#),
+        ("(progn (setq rt-log nil) (list (eval '(condition-case nil (rt-nq) (quit 'quit)) t) rt-log))", "(quit (outer-ran))"),
+        ("(let ((throw-on-input 'done)) (eval '(catch 'done (list 'body (rt-ti))) t))", "t"),
+        ("(eval '(catch 'done (condition-case nil (rt-stale) (no-catch 'caught))) t)", "caught"),
+        ("(eval '(catch 'done (condition-case nil (rt-resignal) (no-catch 'caught))) t)", "caught"),
+        ("(let ((throw-on-input 'done)) (eval '(catch 'done (condition-case nil (rt-ti-nested) (no-catch 'wrong-handler))) t))", "t"),
+        ("(let ((throw-on-input 'done)) (eval '(catch 'done (condition-case nil (rt-ti-deep) (no-catch 'wrong-handler))) t))", "t"),
+    ];
+    for (form, gnu) in cases {
+        assert_eq!(eval(&mut vm, form), gnu, "{form}");
+    }
+}
+
 /// Removes its paths when dropped, so a panicking test cleans up too.
 struct Cleanup<const N: usize>([std::path::PathBuf; N]);
 

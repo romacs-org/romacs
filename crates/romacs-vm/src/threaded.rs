@@ -9,7 +9,7 @@ use super::*;
 #[path = "threaded_signal.rs"]
 mod signal_handlers;
 pub(super) use signal_handlers::SignalHandler;
-use signal_handlers::{prepare_signal, release_control, DEBUGGER_HELPER};
+use signal_handlers::{prepare_signal, release_control, speculative, DEBUGGER_HELPER};
 #[cfg(test)]
 #[path = "error_signal_tests.rs"]
 mod error_signal_tests;
@@ -822,7 +822,7 @@ unsafe fn call_suspended<T>(e: &mut Engine<'_>, r: *mut Value, call: impl FnOnce
 fn signal_hook(e: &mut Engine<'_>, condition: Value, data: Value, failed_depth: Option<usize>) -> Option<Escape> {
     let slot = e.vm.slot("signal-hook-function");
     let hook = e.vm.variable_value(slot).ok()?;
-    if hook == Value::NIL || hook == Value::UNBOUND { return None; }
+    if hook == Value::NIL || hook == Value::UNBOUND || speculative(e, condition) { return None; }
     let form = Form::List(vec![Form::Sym("funcall".into()), quoted(e.vm, hook), quoted(e.vm, condition), quoted(e.vm, data)]);
     call_in_signal(e, form, 20, failed_depth)
 }
@@ -942,13 +942,19 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
     escape = e.escape.take().unwrap();
     if let Escape::Throw(tag, value) = escape
         && (!e.propagate || e.depth_base > 1)
-        && !e.vm.signal_handlers.iter()
+        && !e.vm.signal_handlers.iter().rev()
+            .take_while(|h| !matches!(h, SignalHandler::Boundary))
             .any(|h| matches!(h, SignalHandler::Catch(wanted) if *wanted != Value::NIL && *wanted == tag))
     {
         let slot = e.vm.slot("no-catch");
         let data = e.vm.list_value(&[tag, value]);
         e.escape = Some(Escape::Signal(Value::reference(slot + 1, 7), data));
-        prepare_signal(e, false, None);
+        // Marked a throw only if no handler-bind or debugger replaced it.
+        if !prepare_signal(e, false, None)
+            && let Some(Escape::Error { object, .. }) = e.escape
+        {
+            e.vm.thrown_no_catch.push(object);
+        }
         escape = e.escape.take().unwrap();
     }
     leave_native(e);
@@ -998,6 +1004,12 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                     });
                 }
                 ControlKind::Catch(_) | ControlKind::Condition(_) => {
+                    // Caught: a quit from C-g unwinding to here ends here,
+                    // and a throw's no-catch caught here retires its mark.
+                    e.vm.quit_unwinding = false;
+                    if let Escape::Error { object, .. } = &escape {
+                        e.vm.retire_thrown_no_catch(*object);
+                    }
                     if matches!(control.kind, ControlKind::Condition(_)) {
                         while e.controls.len() > e.controls_base
                             && e.controls.last().is_some_and(|previous| {
@@ -1888,14 +1900,9 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
 #[cold]
 #[inline(never)]
 fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
-    // Not while compiling (a lazy body's first call, a macro expansion): a
-    // compile-time escape unwinds past the Lisp handlers of the code being
-    // compiled. The signal stays pending for the next safepoint in Lisp.
-    if e.vm.compile_depth > 0 || !e.vm.expanding.is_empty() {
-        return None;
-    }
     if crate::host::interrupt_pending() && isolate_quit(e) {
         // A signal, not an engine failure: `condition-case' catches it.
+        e.vm.quit_unwinding = true;
         return Some(raise(e, "quit", &[]));
     }
     let escape = e.vm.maybe_quit()?;
