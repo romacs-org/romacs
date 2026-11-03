@@ -247,11 +247,27 @@ fn terminal_color(color: Color, colors: &alacritty_terminal::term::color::Colors
         Color::Named(NamedColor::Background) => TerminalColor::Background,
         Color::Named(NamedColor::DimForeground) if colors[NamedColor::DimForeground].is_none() => TerminalColor::DimForeground,
         Color::Named(NamedColor::BrightForeground) if colors[NamedColor::BrightForeground].is_none() => TerminalColor::Foreground,
-        color => {
-            let index = match color { Color::Named(name) => name as usize, Color::Indexed(index) => usize::from(index), Color::Spec(_) => unreachable!() };
-            let rgb = colors[index].unwrap_or_else(|| default_color(index));
-            TerminalColor::Rgb([rgb.r, rgb.g, rgb.b])
+        Color::Named(name) => indexed_color(name as usize, colors),
+        Color::Indexed(index) => indexed_color(usize::from(index), colors),
+    }
+}
+
+/// The colour of slot INDEX: the session's own where it set one, else the
+/// theme's for the sixteen base colours and their dim forms, else literal.
+fn indexed_color(index: usize, colors: &alacritty_terminal::term::color::Colors) -> TerminalColor {
+    let rgb = |rgb: Rgb| TerminalColor::Rgb([rgb.r, rgb.g, rgb.b]);
+    let dim = NamedColor::DimBlack as usize..=NamedColor::DimWhite as usize;
+    match colors[index] {
+        Some(set) => rgb(set),
+        None if index < 16 => TerminalColor::Ansi(index as u8),
+        None if dim.contains(&index) => {
+            let base = index - NamedColor::DimBlack as usize;
+            match colors[base] {
+                Some(set) => TerminalColor::Rgb([set.r, set.g, set.b].map(|v| (f32::from(v) * 0.66) as u8)),
+                None => TerminalColor::DimAnsi(base as u8),
+            }
         }
+        None => rgb(default_color(index)),
     }
 }
 
@@ -263,9 +279,7 @@ fn cell_style(cell: &alacritty_terminal::term::cell::Cell, colors: &alacritty_te
         }
         Color::Named(name) if (cell.flags & Flags::DIM_BOLD).intersects(Flags::DIM) => terminal_color(Color::Named(name.to_dim()), colors),
         Color::Indexed(index) if cell.flags & Flags::DIM_BOLD == Flags::DIM && index < 8 => {
-            let index = NamedColor::DimBlack as usize + usize::from(index);
-            let rgb = colors[index].unwrap_or_else(|| default_color(index));
-            TerminalColor::Rgb([rgb.r, rgb.g, rgb.b])
+            indexed_color(NamedColor::DimBlack as usize + usize::from(index), colors)
         }
         Color::Indexed(index) if cell.flags & Flags::DIM_BOLD == Flags::DIM && index < 16 => terminal_color(Color::Indexed(index - 8), colors),
         color => terminal_color(color, colors),
@@ -273,25 +287,10 @@ fn cell_style(cell: &alacritty_terminal::term::cell::Cell, colors: &alacritty_te
     TerminalStyle { foreground, background: terminal_color(cell.bg, colors), inverse: cell.flags.contains(Flags::INVERSE), hidden: cell.flags.contains(Flags::HIDDEN) }
 }
 
+/// The colour of INDEX where the theme does not give it: the 256-colour
+/// cube and greys, and Alacritty's defaults otherwise.
 fn default_color(index: usize) -> Rgb {
-    const ANSI: [[u8; 3]; 16] = [
-        [24, 24, 24],
-        [172, 66, 66],
-        [144, 169, 89],
-        [244, 191, 117],
-        [106, 159, 181],
-        [170, 117, 159],
-        [117, 181, 170],
-        [216, 216, 216],
-        [107, 107, 107],
-        [197, 85, 85],
-        [170, 194, 110],
-        [254, 202, 136],
-        [130, 184, 200],
-        [194, 140, 184],
-        [147, 211, 195],
-        [248, 248, 248],
-    ];
+    const ANSI: [[u8; 3]; 16] = romacs_vm::DEFAULT_ANSI;
     let [r, g, b] = match index {
         0..=15 => ANSI[index],
         16..=231 => {

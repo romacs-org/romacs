@@ -9,6 +9,10 @@ use romacs_vm::{CommandEvent, TerminalHost, TerminalSnapshot, Vm};
 use std::{cell::RefCell, rc::Rc};
 fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> { vm.frame_snapshot(width,height) }
 
+thread_local! {
+    /// The foreground of the first cell this thread's terminal shows.
+    static FOREGROUND: std::cell::Cell<romacs_vm::TerminalColor> = const { std::cell::Cell::new(romacs_vm::TerminalColor::Rgb([200,30,20])) };
+}
 #[derive(Clone)]
 struct Host(Rc<RefCell<Vec<Vec<u8>>>>);
 impl TerminalHost for Host {
@@ -18,7 +22,7 @@ impl TerminalHost for Host {
     fn close(&mut self, _: u64) -> Result<(),String> { Ok(()) }
     fn input_state(&mut self, _: u64) -> Result<romacs_vm::TerminalInputState,String> { Ok(romacs_vm::TerminalInputState { running:true, application_cursor:false, bracketed_paste:false }) }
     fn changed_sessions(&mut self) -> Vec<u64> { vec![] }
-    fn snapshot(&mut self, _: u64) -> Result<TerminalSnapshot,String> { Ok(TerminalSnapshot { revision:1, text:"$ ".into(), styles:std::sync::Arc::from([romacs_vm::TerminalStyleRun { bytes:0..1, style:romacs_vm::TerminalStyle { foreground:romacs_vm::TerminalColor::Rgb([200,30,20]), ..Default::default() } }]), default_colors:[None;2], cursor_byte:2, screen_start_byte:0, columns:80, rows:24, alternate_screen:false, running:true, application_cursor:false, bracketed_paste:false }) }
+    fn snapshot(&mut self, _: u64) -> Result<TerminalSnapshot,String> { Ok(TerminalSnapshot { revision:1, text:"$ ".into(), styles:std::sync::Arc::from([romacs_vm::TerminalStyleRun { bytes:0..1, style:romacs_vm::TerminalStyle { foreground:FOREGROUND.get(), ..Default::default() } }]), default_colors:[None;2], cursor_byte:2, screen_start_byte:0, columns:80, rows:24, alternate_screen:false, running:true, application_cursor:false, bracketed_paste:false }) }
 }
 fn setup() -> (Vm,Rc<RefCell<Vec<Vec<u8>>>>) {
     let sent=Rc::new(RefCell::new(vec![])); let mut vm=Vm::new();
@@ -98,4 +102,21 @@ fn bundled_feature_and_navigation_copy_search_share_the_terminal_buffer() {
     assert_eq!(terminal.snapshot.faces[face.0 as usize].background,[62,68,81],"SHARED_REGION_OVERRIDES_TERMINAL_BACKGROUND");
     vm.eval_source("(setq kill-ring-max 1) (romacs-term-copy-region)").unwrap();
     assert_eq!(printed(&mut vm,"(list (length kill-ring) (eq kill-ring-yank-pointer kill-ring) mark-active)"),"(1 t nil)","TERMINAL_COPY_USES_SHARED_RING_LIMIT_AND_POINTER");
+}
+
+#[test]
+fn terminal_base_colours_follow_the_ansi_color_faces() {
+    use romacs_vm::TerminalColor;
+    let foreground = |vm: &mut Vm| {
+        let frame = vm.frame_snapshot(1000,700).unwrap();
+        let terminal = frame.windows.iter().find(|window| window.snapshot.text.utf8 == "$ ").unwrap();
+        let face = terminal.snapshot.text.face_runs.iter().find(|run| run.bytes.contains(&0)).unwrap().face;
+        terminal.snapshot.faces[face.0 as usize].foreground
+    };
+    FOREGROUND.set(TerminalColor::Ansi(1));
+    let (mut vm,_)=setup(); open(&mut vm);
+    assert_eq!(printed(&mut vm,"(internal-get-lisp-face-attribute 'ansi-color-red :foreground nil)"),"\"#ff5f59\"");
+    assert_eq!(foreground(&mut vm),[0xff,0x5f,0x59],"BASE_COLOUR_IS_THE_FACE_S");
+    vm.eval_source("(internal-set-lisp-face-attribute 'ansi-color-red :foreground \"#604020\" nil)").unwrap();
+    assert_eq!(foreground(&mut vm),[0x60,0x40,0x20],"A_FACE_CHANGE_RECOLOURS_THE_TERMINAL");
 }

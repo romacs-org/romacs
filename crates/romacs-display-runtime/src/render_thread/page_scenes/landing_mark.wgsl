@@ -15,7 +15,8 @@
 // Uniforms (the scene node's, in order): u0 yaw and u1 pitch in degrees, u2
 // the light cycle's phase in [0, 1), u3 how far the mark has assembled in
 // [0, 1], u4 and u5 the braille dot pitch in logical pixels, u6 the margin
-// around the mark in logical pixels.  Rust prepends FIELD_HALF and
+// around the mark in logical pixels, u7 the key light as 0xRRGGBB (the
+// theme's `romacs-landing-mark', landing.rs key_light).  Rust prepends FIELD_HALF and
 // MARK_HALF.  The output is straight alpha.
 
 const FIELD_RANGE: f32 = 0.35;
@@ -28,9 +29,14 @@ const RED: vec3<f32> = vec3<f32>(1.0, 0.113, 0.1);
 const BLUE: vec3<f32> = vec3<f32>(0.028, 0.43, 1.0);
 const GOLD: vec3<f32> = vec3<f32>(0.66, 0.254, 0.014);
 const BRIGHT: vec3<f32> = vec3<f32>(0.905, 0.797, 0.546);
-const KEY: vec3<f32> = vec3<f32>(1.0, 0.86, 0.62);
 const FILL: vec3<f32> = vec3<f32>(0.25, 0.36, 0.62);
 const EMBER: vec3<f32> = vec3<f32>(1.0, 0.16, 0.05);
+
+// The key light, the theme's (u7, 0xRRGGBB).
+fn key_light() -> vec3<f32> {
+    let k = u32(u_u7());
+    return vec3<f32>(f32((k >> 16u) & 255u), f32((k >> 8u) & 255u), f32(k & 255u)) / 255.0;
+}
 
 struct Field {
     d: f32,
@@ -114,14 +120,14 @@ fn shade(p: vec3<f32>, h: f32, r: f32, eye: vec3<f32>, yaw: f32, pitch: f32, pha
     // A studio around it: dark floor, a warm soft box above, a gold kicker
     // behind on the right.  Its reflection is the gloss.
     let mirrored = reflect(-eye, n);
-    let studio = mix(vec3<f32>(0.012, 0.01, 0.009), KEY * 0.75, smoothstep(0.05, 0.85, mirrored.y))
+    let studio = mix(vec3<f32>(0.012, 0.01, 0.009), key_light() * 0.75, smoothstep(0.05, 0.85, mirrored.y))
         + GOLD * 1.6 * smoothstep(0.35, 0.95, dot(mirrored, rim));
     let face = g.y * step(0.0, p.z);
     let sheen = mix(0.8, 1.12, clamp(p.y * 0.5 + 0.5, 0.0, 1.0));
     var c = albedo * (0.06 + 0.7 * max(dot(n, key), 0.0)) * mix(0.25, 1.0, back) * mix(1.0, sheen, face)
         + albedo * FILL * max(dot(n, fill), 0.0) * 0.4
         + studio * (0.08 + fresnel)
-        + KEY * spec * 1.1
+        + key_light() * spec * 1.1
         + GOLD * pow(1.0 - ndv, 4.0) * (0.2 + 1.6 * max(dot(n, rim), 0.0));
     let light = band(p.xy, phase);
     // The face keeps the lattice it assembled on: its dots are pressed in

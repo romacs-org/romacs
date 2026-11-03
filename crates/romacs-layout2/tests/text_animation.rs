@@ -37,7 +37,7 @@ fn shown(frame: &FrameGlyphBuffer, row: u32) -> String {
 
 fn logo(top: i32, cols: u32, rows: u32) -> TextAnimation {
     TextAnimation { window: 7, top, cols, rows, fps: 25, moving: true, still: false,
-                    kind: TextAnimationKind::Logo { cell_aspect: 0.5, epoch: 0 } }
+                    kind: TextAnimationKind::Logo { cell_aspect: 0.5, epoch: 0, colours: Default::default() } }
 }
 
 /// CELLS from a string: each character red, a space empty.

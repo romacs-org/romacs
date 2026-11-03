@@ -1,14 +1,30 @@
 use crate::{Value, Vm};
 
-/// Terminal defaults follow the editor theme; explicit ANSI colours remain literal.
+/// Terminal defaults follow the editor theme: the default colours and the
+/// sixteen base colours (`ansi-color-*' faces) a session has not set
+/// itself; a colour the session set, and the 256-colour cube and greys,
+/// remain literal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TerminalColor { Foreground, Background, DimForeground, Rgb([u8; 3]) }
+pub enum TerminalColor { Foreground, Background, DimForeground, Ansi(u8), DimAnsi(u8), Rgb([u8; 3]) }
 romacs_snapshot::snapshot_enum!(TerminalColor {
     TerminalColor::Foreground => (),
     TerminalColor::Background => (),
     TerminalColor::DimForeground => (),
+    TerminalColor::Ansi(f0) => (f0),
+    TerminalColor::DimAnsi(f0) => (f0),
     TerminalColor::Rgb(f0) => (f0),
 });
+
+/// The sixteen base colours where no theme gives them: Alacritty's.
+pub const DEFAULT_ANSI: [[u8; 3]; 16] = [
+    [24, 24, 24], [172, 66, 66], [144, 169, 89], [244, 191, 117],
+    [106, 159, 181], [170, 117, 159], [117, 181, 170], [216, 216, 216],
+    [107, 107, 107], [197, 85, 85], [170, 194, 110], [254, 202, 136],
+    [130, 184, 200], [194, 140, 184], [147, 211, 195], [248, 248, 248],
+];
+
+/// A colour at the 0.66 a dim cell draws in, Alacritty's factor.
+fn dim(rgb: [u8; 3]) -> [u8; 3] { rgb.map(|v| (f32::from(v) * 0.66) as u8) }
 
 /// An immutable cell colour projected without creating global Lisp faces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -27,11 +43,15 @@ impl Default for TerminalStyle {
 }
 
 impl TerminalStyle {
-    pub(crate) fn face(self, default: &romacs_layout_input::Face) -> romacs_layout_input::Face {
+    /// The face this style draws in over DEFAULT, the sixteen base colours
+    /// ANSI resolved from the theme.
+    pub(crate) fn face(self, default: &romacs_layout_input::Face, ansi: &[[u8; 3]; 16]) -> romacs_layout_input::Face {
         let color = |value| match value {
             TerminalColor::Foreground => default.foreground,
             TerminalColor::Background => default.background,
-            TerminalColor::DimForeground => default.foreground.map(|v| (f32::from(v) * 0.66) as u8),
+            TerminalColor::DimForeground => dim(default.foreground),
+            TerminalColor::Ansi(n) => ansi[usize::from(n) % 16],
+            TerminalColor::DimAnsi(n) => dim(ansi[usize::from(n) % 16]),
             TerminalColor::Rgb(rgb) => rgb,
         };
         let (mut foreground, mut background) = (color(self.foreground), color(self.background));
@@ -371,5 +391,18 @@ mod tests {
         assert_eq!(viewport_start(text, screen, cursor, 4), screen);
         assert_eq!(&text[viewport_start(text, screen, cursor, 2)..], "r2\nr3");
         assert_eq!(&text[viewport_start(text, screen, cursor, 1)..], "r3");
+    }
+
+    #[test]
+    fn base_colours_come_from_the_theme_s_sixteen() {
+        use super::{TerminalColor, TerminalStyle};
+        let default = romacs_layout_input::Face { foreground: [200, 200, 200], background: [0, 0, 0], family: String::new(), pixel_size: 10.0 };
+        let mut ansi = super::DEFAULT_ANSI;
+        ansi[1] = [100, 50, 10];
+        let style = |foreground| TerminalStyle { foreground, ..Default::default() }.face(&default, &ansi).foreground;
+        assert_eq!(style(TerminalColor::Ansi(1)), [100, 50, 10]);
+        assert_eq!(style(TerminalColor::DimAnsi(1)), [66, 33, 6], "a dim base colour is the theme's at 0.66");
+        assert_eq!(style(TerminalColor::Ansi(2)), super::DEFAULT_ANSI[2]);
+        assert_eq!(style(TerminalColor::Rgb([1, 2, 3])), [1, 2, 3], "a colour the session set stays literal");
     }
 }

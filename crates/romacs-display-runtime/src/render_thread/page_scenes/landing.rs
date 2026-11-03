@@ -17,6 +17,7 @@ use std::time::Duration;
 use kurbo::{Affine, BezPath, PathEl, Rect, Shape, Size};
 use romacs_display_protocol::motion_spec::{MotionDuration, MotionSpec, TweenSpec, UnitBezier};
 use romacs_display_protocol::scroll_animation::TransitionEasing;
+use romacs_display_protocol::text_animation::LogoColours;
 use romacs_scene::diff::{Diff, Op, Rev};
 use romacs_scene::motion::{Animate, Policy, Repeat};
 use romacs_scene::node::{Color, Dim, FillRule, Kind, NodeId, NodeSpec, PathNode, ShaderNode};
@@ -94,7 +95,7 @@ pub(crate) fn geometry(view: romacs_logo::View, cell: Size) -> Option<Geometry> 
 /// The scene drawing GEOMETRY, from its first frame: the nodes at their
 /// starting values and the motions toward their targets; unless POLICY is
 /// `On`, the targets alone, the still frame.
-pub(crate) fn scene(g: &Geometry, policy: Policy) -> Diff {
+pub(crate) fn scene(g: &Geometry, colours: LogoColours, policy: Policy) -> Diff {
     let at = |spec: NodeSpec, r: Rect| {
         spec.with(|c| {
             c.transform.x = r.x0 as f32;
@@ -109,6 +110,7 @@ pub(crate) fn scene(g: &Geometry, policy: Policy) -> Diff {
     uniforms[4] = g.dot.width as f32;
     uniforms[5] = g.dot.height as f32;
     uniforms[6] = g.margin as f32;
+    uniforms[7] = packed(key_light(colours.mark));
     let mark = at(
         NodeSpec::new(MARK.0, Kind::Shader(ShaderNode {
             source: mark_wgsl().into(),
@@ -121,7 +123,7 @@ pub(crate) fn scene(g: &Geometry, policy: Policy) -> Diff {
     let word = at(
         NodeSpec::new(WORDMARK.0, Kind::Path(PathNode {
             data: Arc::new(wordmark(g.word.size())),
-            fill: colour(romacs_logo::WORDMARK_COLOUR),
+            fill: rgb(colours.word),
             rule: FillRule::EvenOdd,
             ..PathNode::default()
         })),
@@ -155,7 +157,7 @@ pub(crate) fn scene(g: &Geometry, policy: Policy) -> Diff {
 /// The diff that moves the scene SCENE_REV built for other geometry onto
 /// GEOMETRY, motions running on; a running rise of the wordmark ends where
 /// it is.
-pub(crate) fn refit(g: &Geometry, scene_rev: Rev) -> Diff {
+pub(crate) fn refit(g: &Geometry, colours: LogoColours, scene_rev: Rev) -> Diff {
     let set = |id, prop, value| Op::Set { id, prop, value: Some(value), animate: None };
     let px = |v: f64| Value::Dim(Dim::Px(v as f32));
     let num = |v: f64| Value::Num(v as f32);
@@ -174,6 +176,18 @@ pub(crate) fn refit(g: &Geometry, scene_rev: Rev) -> Diff {
             set(WORDMARK, Prop::Y, num(g.word.y0)),
             set(WORDMARK, Prop::Width, px(g.word.width())),
             set(WORDMARK, Prop::Height, px(g.word.height())),
+        ].into_iter().chain(recolour(colours, scene_rev).ops).collect(),
+    }
+}
+
+/// The scene in COLOURS and nothing else changed, so every motion runs on.
+pub(crate) fn recolour(colours: LogoColours, scene_rev: Rev) -> Diff {
+    let set = |id, prop, value| Op::Set { id, prop, value: Some(value), animate: None };
+    Diff {
+        base: scene_rev,
+        ops: vec![
+            set(MARK, Prop::Uniform(7), Value::Num(packed(key_light(colours.mark)))),
+            set(WORDMARK, Prop::Fill, Value::Color(rgb(colours.word))),
         ],
     }
 }
@@ -190,8 +204,26 @@ fn tween(ms: u64, bezier: Option<UnitBezier>, easing: TransitionEasing) -> Motio
     })
 }
 
-fn colour(rgb: u32) -> Color {
-    Color::rgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+fn rgb([r, g, b]: [u8; 3]) -> Color {
+    Color::rgb8(r, g, b)
+}
+
+/// The mark's key light for the theme colour MARK: white tinted toward
+/// MARK at its full brightness, so it keeps the mark lit on any theme and
+/// takes the theme's hue.  The stock accent gives the warm light the mark
+/// was drawn with.
+pub(crate) fn key_light(mark: [u8; 3]) -> [f32; 3] {
+    let peak = f32::from(mark.into_iter().max().unwrap_or(0)).max(1.0);
+    mark.map(|c| 1.0 - KEY_TINT * (1.0 - f32::from(c) / peak))
+}
+
+/// How far the key light is tinted toward the theme colour.
+const KEY_TINT: f32 = 0.43;
+
+/// RGB, each from 0 to 1, as one uniform: 8 bits a channel, 0xRRGGBB, which
+/// an f32 holds exactly (landing_mark.wgsl key_light unpacks it).
+pub(crate) fn packed(rgb: [f32; 3]) -> f32 {
+    rgb.iter().fold(0u32, |n, c| (n << 8) | (c.clamp(0.0, 1.0) * 255.0).round() as u32) as f32
 }
 
 /// The wordmark's outlines scaled into a box of SIZE, from its top left.

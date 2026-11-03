@@ -89,10 +89,13 @@ fn a_layer_publishes_how_it_animates_and_its_selection_band() {
     let (children, _) = engine.layout_children(&snapshot, 4, None).unwrap();
     assert_eq!(children[0].layer.animation, romacs_display_protocol::LayerAnimation::Full);
     assert_eq!(children[0].layer.selection, None, "no band past the rows shown");
-    // Glass: rounded and lit, its border padding (unpainted), and its
-    // `background-color' its text's background, as a frame's default face's.
-    vm.eval_source("(modify-frame-parameters c '((romacs-layer-radius . 12) (romacs-layer-shadow . t) \
-                    (romacs-layer-glow . \"#d48a20\") (child-frame-border-width . 10) (background-color . \"#102030\")))").unwrap();
+    // Glass: rounded and lit, its border padding (unpainted), its glow
+    // `romacs-layer-glow''s foreground and its background, its text's,
+    // `romacs-layer-glass''s.
+    vm.eval_source("(progn (internal-make-lisp-face 'romacs-layer-glow) (internal-make-lisp-face 'romacs-layer-glass)
+                    (internal-set-lisp-face-attribute 'romacs-layer-glow :foreground \"#d48a20\" nil)
+                    (internal-set-lisp-face-attribute 'romacs-layer-glass :background \"#102030\" nil)
+                    (modify-frame-parameters c '((romacs-layer-radius . 12) (romacs-layer-shadow . t) (child-frame-border-width . 10))))").unwrap();
     let snapshot = vm.frame_snapshot(400, 300).unwrap();
     let (children, _) = engine.layout_children(&snapshot, 5, None).unwrap();
     let child = &children[0];

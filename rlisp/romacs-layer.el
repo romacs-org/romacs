@@ -18,7 +18,7 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
-;; The chrome colours: the accent and the glass mix.
+;; The chrome faces, and where a layer ends (`romacs-chrome-bottom').
 (require 'romacs-chrome)
 
 (defgroup romacs-layer nil
@@ -61,35 +61,24 @@ environment variable ROMACS_LAYER_ANIMATION is 1."
 
 (defcustom romacs-layer-glass t
   "Whether raised layers (the completion panel, message toasts) are glass:
-rounded, padded, on the background lifted 8% toward the foreground,
+rounded, padded, on `romacs-layer-glass's background,
 casting a soft shadow and glowing in `romacs-layer-glow'.  nil gives
 them GNU's square child-frame border."
   :type 'boolean)
 
-(defun romacs-layer--hex (color)
-  "COLOR, a colour name, as #RRGGBB, or nil when it is unknown."
-  (when-let* ((values (and color (color-values color))))
-    (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (/ v 257)) values))))
-
-(defun romacs-layer-glass-parameters (glass)
+(defun romacs-layer-glass-parameters (glass &optional face)
   "Frame parameters that make a layer glass when GLASS is non-nil, else
-the ones that make it GNU's square child frame again.  The host rounds a glass layer's corners (`romacs-layer-radius'),
-lights it (`romacs-layer-shadow', `romacs-layer-glow') and leaves its
-border, there padding, unpainted."
+the ones that make it GNU's square child frame again.  The host rounds a
+glass layer's corners (`romacs-layer-radius'), lights it
+(`romacs-layer-shadow'), leaves its border, there padding, unpainted,
+and paints it in faces: its background FACE's (default
+`romacs-layer-glass'), its glow `romacs-layer-glow''s foreground."
   (if glass
       `((romacs-layer-radius . 8) (romacs-layer-shadow . t)
-        (romacs-layer-glow . ,(romacs-layer--hex (face-foreground 'romacs-layer-glow nil t)))
-        (child-frame-border-width . 10)
-        (background-color . ,(romacs-chrome-mix 0.08)))
-    `((romacs-layer-radius) (romacs-layer-shadow) (romacs-layer-glow) (background-color)
+        (romacs-layer-face . ,(or face 'romacs-layer-glass))
+        (child-frame-border-width . 10))
+    `((romacs-layer-radius) (romacs-layer-shadow) (romacs-layer-face)
       (child-frame-border-width . ,(alist-get 'child-frame-border-width romacs-layer-frame-parameters)))))
-
-(defun romacs-layer-refresh ()
-  "Make every glass layer glass again with the faces as they are now:
-after a theme change (`romacs-chrome-refresh')."
-  (dolist (frame (frame-list))
-    (when (and (frame-parent frame) (frame-parameter frame 'romacs-layer-radius))
-      (modify-frame-parameters frame (romacs-layer-glass-parameters t)))))
 
 (defvar romacs-layer--frames nil
   "Alist of (BUFFER . FRAME): the child frame showing each layer's buffer.")
@@ -311,7 +300,7 @@ The same TEXT as the newest toast shows that one longer instead."
       (with-current-buffer buffer
         (let ((inhibit-read-only t)) (erase-buffer) (insert text)))
       (let ((frame (romacs-layer--frame buffer)))
-        (modify-frame-parameters frame (romacs-layer-glass-parameters romacs-layer-glass))
+        (modify-frame-parameters frame (romacs-layer-glass-parameters romacs-layer-glass 'romacs-layer-toast))
         (set-window-start (frame-root-window frame) 1))
       (push (list buffer text (run-at-time romacs-layer-toast-timeout nil #'romacs-layer--toast-expire buffer))
             romacs-layer--toasts)
