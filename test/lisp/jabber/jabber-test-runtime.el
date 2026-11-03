@@ -21,7 +21,7 @@
                   (expand-file-name invocation-name invocation-directory)
                   nil '(t nil) nil "-Q" "--batch"
                   "--eval" (format "(setq load-path '%S)" (cons lisp-dir load-path))
-                  "--eval" (format "(setq jabber-db-path nil jabber-omemo-module-directory %S)"
+                  "--eval" (format "(setq jabber-db-path nil jabber-omemo-enable t jabber-omemo-module-directory %S)"
                                    directory)
                   "--eval" "(progn (require 'jabber) (require 'jabber-omemo)
 (princ (list (featurep 'jabber) jabber-omemo--available

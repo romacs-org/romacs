@@ -384,7 +384,8 @@ spec replaces the face's own."
       (funcall face 'tab-bar :inherit 'variable-pitch :foreground (funcall text 'fg (funcall v 'bg-dark)) :background (funcall v 'bg-dark))
       (funcall face 'tab-line :inherit 'variable-pitch :foreground (funcall text 'fg (funcall v 'bg-dark)) :background (funcall v 'bg-dark))
       (funcall face 'line-number :inherit 'default :foreground (funcall dim 'fg-muted))
-      (funcall face 'line-number-current-line :inherit 'line-number :foreground (funcall text 'fg-bright))
+      ;; The current line's number in the bright cyan, bold; no band.
+      (funcall face 'line-number-current-line :inherit '(bold default) :foreground (funcall text 'cyan))
       (funcall face 'show-paren-match :background (funcall v 'bg-paren))
       (funcall face 'show-paren-mismatch :foreground (funcall v 'bg) :background (funcall v 'error))
       (funcall face 'isearch :foreground (funcall text 'fg-bright (funcall v 'bg-search-current)) :background (funcall v 'bg-search-current))

@@ -330,6 +330,14 @@ from `--commit`.  `--only` takes groups (`batch micro ert gui init apps`)
 or workloads: a batch row's name, `micro`, `ERT 25 files`, `launch`,
 `keys`, `init` or `apps`.
 
+## Line numbers in programming buffers
+
+An interactive session's defaults (`romacs-defaults-mode`, without `-Q`)
+number programming-mode buffers' lines relatively. The digits are ordinary
+text glyphs in the scene diagnostics, so a harness that matches a
+programming buffer's rows by their glyph text starts its init with
+`live_oracle.NO_LINE_NUMBERS`, which turns them off the way a user's init
+does (`fontify_live.py`, `lines_live.py`).
 # Driving Romacs through its MCP tools (`romacs_mcp_client.py`)
 
 A live harness can drive a Romacs session the way an agent does, through

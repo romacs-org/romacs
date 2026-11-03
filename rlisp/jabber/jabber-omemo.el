@@ -53,11 +53,11 @@
 (declare-function jabber-muc--identity-jids "jabber-muc" (jc group))
 (declare-function jabber-muc-create-buffer "jabber-muc" (jc group))
 
-(defcustom jabber-omemo-enable t
+(defcustom jabber-omemo-enable nil
   "Whether to enable OMEMO encryption support.
 When nil, the native module is not loaded and OMEMO features are
-disabled.  Set to nil if you do not have the build toolchain to
-compile jabber-omemo-core."
+disabled.  Romacs's copy defaults to nil, where upstream's is t:
+Romacs loads no native modules."
   :type 'boolean
   :group 'jabber)
 

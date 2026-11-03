@@ -56,7 +56,7 @@ TAB_FILE = ROOT / 'gnu-lisp/help-macro.el'
 # The journeys start where a GNU init that inhibits the startup screen
 # starts: in *scratch*, or in the visited file alone.  Without it GNU, and
 # --loadup, show the read-only screen, or its concise form beside the file.
-INIT = '''(setq inhibit-startup-screen t)
+INIT = live.NO_LINE_NUMBERS + '''(setq inhibit-startup-screen t)
 (defun lines-live-record (form)
   (write-region (concat (prin1-to-string form) "\\n") nil {state} 'append 'silent))
 (run-with-timer 1 nil (lambda () (lines-live-record

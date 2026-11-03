@@ -938,6 +938,9 @@ Alice has initiated a session towards Bob's bundle."
   (let* ((dir (make-temp-file "jabber-omemo-broken" t))
          (lisp-dir (file-name-directory (locate-library "jabber-omemo")))
          (form `(progn
+                  ;; OMEMO is off by default in Romacs's copy; this test
+                  ;; is about the module-loading path, so turn it on.
+                  (setq jabber-omemo-enable t)
                   (setq jabber-omemo-module-directory ,dir)
                   (setq jabber-db-path nil)
                   (require 'jabber-omemo)
