@@ -439,13 +439,40 @@ struct Bands {
 
 /// A mode-line band as a text slice whose faces index TABLE.
 fn band_slice(table: &FaceTable, band: mode_line::Band) -> TextSlice {
+    let (utf8, runs) = shown_band(&band.text, band.runs);
     TextSlice {
-        face_runs: band.runs.into_iter()
+        face_runs: runs.into_iter()
             .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: table.handle(&face)? }))
             .collect(),
-        utf8: band.text,
+        utf8,
         raw: vec![],
     }
+}
+
+/// A band's text as the display shows it, with its face runs moved to
+/// match: a C0 control character or DEL as `^X` (`ctl-arrow'), a C1 one as
+/// its octal escape, as GNU's display of a mode or header line shows them.
+/// `format-mode-line' keeps them; a subject with a control character in a
+/// header line is drawn, never refused.
+fn shown_band<T>(text: &str, runs: Vec<(std::ops::Range<usize>, T)>) -> (String, Vec<(std::ops::Range<usize>, T)>) {
+    if !text.chars().any(char::is_control) {
+        return (text.to_owned(), runs);
+    }
+    // (old byte, new byte) at each character, then the end.
+    let mut map = Vec::with_capacity(text.len() + 1);
+    let mut shown = String::with_capacity(text.len() + 8);
+    for (at, c) in text.char_indices() {
+        map.push((at, shown.len()));
+        match c {
+            '\u{0}'..='\u{1f}' | '\u{7f}' => { shown.push('^'); shown.push(char::from((c as u8) ^ 0x40)); }
+            c if c.is_control() => shown.push_str(&format!("\\{:o}", c as u32)),
+            c => shown.push(c),
+        }
+    }
+    map.push((text.len(), shown.len()));
+    let moved = |byte: usize| map[map.partition_point(|&(old, _)| old < byte)].1;
+    let runs = runs.into_iter().map(|(bytes, face)| (moved(bytes.start)..moved(bytes.end), face)).collect();
+    (shown, runs)
 }
 
 struct Graph<'a>(&'a Vm);
