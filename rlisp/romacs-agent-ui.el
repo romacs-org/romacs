@@ -13,13 +13,13 @@
 ;;
 ;; - `romacs-agents': the home page, as T3 Code's sidebar: sessions grouped
 ;;   by project, delegated ones nested under the session that started them,
-;;   each with its state, the time of its last activity, its cost and its
-;;   instance and model.  RET opens a chat, c starts a session, i
+;;   each with its state, the time of its last activity and its model
+;;   (and instance, when not the default).  RET opens a chat, c starts a session, i
 ;;   interrupts, k stops, r resumes, g refreshes; n and p move.
 ;; - A chat buffer per session: a header (harness, permission mode, model,
 ;;   context used of its window), the transcript (`> prompt', tool rows
 ;;   marked ● running, ✓ done or ! failed with their output folded, the
-;;   reply in Markdown), a rule closing each turn with its time and cost, a
+;;   reply in Markdown), a rule closing each turn with its time, a
 ;;   live rule while a turn runs, and the composer.  RET in the composer
 ;;   sends, C-c C-c interrupts, C-c C-k stops, C-c C-r resumes, M-p recalls;
 ;;   in the transcript TAB folds a tool's output and n and p move between
@@ -198,18 +198,15 @@ range its deltas wrote."
     (set-marker (car range) nil)))
 
 (defun romacs-agent-ui--footer (session event)
-  "The rule closing a turn: ✓ or !, how long it took, what it cost."
+  "The rule closing a turn: ✓ or !, and how long it took."
   (romacs-agent-ui--helpers)
   (maphash (lambda (id _) (romacs-agent-ui--message-end id)) (copy-hash-table romacs-agent-ui--messages))
   (let* ((failed (plist-get event :error))
          (duration (or (plist-get event :duration)
                        (and (numberp (plist-get event :time)) (numberp (romacs-agent-turn-start session))
                             (- (plist-get event :time) (romacs-agent-turn-start session)))))
-         (cost (romacs-agent-turn-cost session))
          (text (concat (propertize (if failed "!" "✓") 'face (if failed 'romacs-agent-error 'romacs-agent-dim))
-                       (if duration (propertize (concat " " (hermes-chat--clock duration)) 'face 'romacs-agent-dim) "")
-                       (if (and (numberp cost) (> cost 0))
-                           (propertize (format " · $%.4f" cost) 'face 'romacs-agent-dim) ""))))
+                       (if duration (propertize (concat " " (hermes-chat--clock duration)) 'face 'romacs-agent-dim) ""))))
     (romacs-agent-ui--line session event (romacs-agent-ui--rule text))))
 
 (defun romacs-agent-ui--rule-width ()
@@ -555,7 +552,7 @@ harness's own transcript it was imported from, when it was."
     (romacs-agent-history-draw session (romacs-agent-imported session)))
   ;; A copy parses, so the live session's own state is not replayed over.
   (let ((scratch (copy-romacs-agent session)))
-    (setf (romacs-agent-seq scratch) 0 (romacs-agent-turns scratch) 0 (romacs-agent-cost-base scratch) 0
+    (setf (romacs-agent-seq scratch) 0 (romacs-agent-turns scratch) 0
           (romacs-agent-title-auto scratch) nil
           (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
           (romacs-agent-tools scratch) (make-hash-table :test #'equal)
@@ -563,8 +560,7 @@ harness's own transcript it was imported from, when it was."
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
                    ;; The scratch copy's turn data, for the footers it draws.
-                   (setf (romacs-agent-turn-start session) (or (romacs-agent-turn-start scratch) (romacs-agent-turn-start session))
-                         (romacs-agent-turn-cost session) (romacs-agent-turn-cost scratch))
+                   (setf (romacs-agent-turn-start session) (or (romacs-agent-turn-start scratch) (romacs-agent-turn-start session)))
                    (romacs-agent-ui--render session event)))))
       (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record))))))
 
@@ -689,7 +685,7 @@ PROPERTY: the previous one is the run point is in, past its start."
   "SESSION's (MARK FACE WORD) on the home page."
   (let ((state (romacs-agent-state session)))
     (cond ((memq state '(starting running)) '("●" romacs-agent-running "working"))
-          ((eq state 'waiting-approval) '("◆" romacs-agent-approval "waiting for you"))
+          ((eq state 'waiting-approval) '("◆" romacs-agent-approval "needs you"))
           ((romacs-agent-cancelled session) '("○" romacs-agent-dim "cancelled"))
           ((romacs-agent-failed session) '("!" romacs-agent-error "failed"))
           ((eq state 'detached) '("○" romacs-agent-dim "detached"))
@@ -700,38 +696,52 @@ PROPERTY: the previous one is the run point is in, past its start."
 (defun romacs-agent-ui--column (text width)
   (truncate-string-to-width (or text "") width nil ?\s "…"))
 
+(defconst romacs-agent-ui--word-width 10 "The status column: its longest word and a space.")
+(defconst romacs-agent-ui--instance-width 20 "The model column, shown on a page 72 columns wide or more.")
+
+(defun romacs-agent-ui--instance (provider harness model)
+  "The model column: PROVIDER when not the default, then MODEL without its
+HARNESS's prefix (claude-opus-5-5 is opus-5-5)."
+  (let ((provider (and provider (not (equal provider (ignore-errors (romacs-agent--default-provider)))) provider))
+        (model (if (and model harness) (string-remove-prefix (concat (symbol-name harness) "-") model) model)))
+    (mapconcat #'identity (delq nil (list provider model)) " · ")))
+
+(defun romacs-agent-ui--fit (row width)
+  "ROW, a plist (:indent :mark :face :title :title-face :word :ago :instance),
+as one home-page line WIDTH columns wide: the title takes what the status,
+age and model columns leave; a narrow page drops the model."
+  (let* ((show-instance (>= width 72))
+         (indent (plist-get row :indent))
+         (face (plist-get row :face))
+         (tail (+ romacs-agent-ui--word-width 5 (if show-instance romacs-agent-ui--instance-width 0)))
+         (title-width (max 12 (- width (string-width indent) 2 1 tail))))
+    (concat indent (propertize (plist-get row :mark) 'face face) " "
+            (propertize (romacs-agent-ui--column (plist-get row :title) title-width) 'face (plist-get row :title-face))
+            " " (propertize (romacs-agent-ui--column (plist-get row :word) romacs-agent-ui--word-width) 'face face)
+            (propertize (romacs-agent-ui--column (plist-get row :ago) 5) 'face 'romacs-agent-dim)
+            (if show-instance
+                (propertize (truncate-string-to-width (plist-get row :instance) romacs-agent-ui--instance-width nil nil "…")
+                            'face 'romacs-agent-dim)
+              "")
+            "\n")))
+
 (defun romacs-agent-ui--row (session depth root-cwd width)
-  "SESSION's row on the home page, nested DEPTH under its root, fitted to
-WIDTH columns: the title takes what the other columns leave; a narrow
-page drops the cost, then the model."
-  (pcase-let* ((`(,mark ,face ,word) (romacs-agent-ui--status session))
-               (unread (> (romacs-agent-done-seq session) (romacs-agent-seen-seq session)))
-               (indent (if (> depth 0) (concat (make-string (* 2 (1- depth)) ?\s) "└ ") ""))
-               (cwd (romacs-agent-cwd session))
-               (title (concat (romacs-agent-title session)
-                              (if (and (> depth 0) root-cwd (not (equal cwd root-cwd)))
-                                  (propertize (concat "  " (abbreviate-file-name cwd)) 'face 'romacs-agent-dim) "")))
-               (model (or (romacs-agent-model session) (plist-get (romacs-agent-options session) :model)))
-               (instance (concat (romacs-agent-provider session) (if model (concat " · " model) "")))
-               (show-model (>= width 72)) (show-cost (>= width 90))
-               ;; The same columns on every row: the instance's is the last.
-               (tail (+ 16 5 (if show-cost 8 0) (if show-model 26 0)))
-               (title-width (max 12 (- width (string-width indent) 2 1 tail))))
+  "SESSION's row on the home page, nested DEPTH under its root, fitted to WIDTH."
+  (pcase-let ((`(,mark ,face ,word) (romacs-agent-ui--status session))
+              (cwd (romacs-agent-cwd session)))
     (propertize
-     (concat indent (propertize mark 'face face) " "
-             (propertize (romacs-agent-ui--column title title-width)
-                         'face (if unread 'romacs-agent-unread 'default))
-             " " (propertize (romacs-agent-ui--column word 16) 'face face)
-             (propertize (romacs-agent-ui--column (romacs-agent-ui--ago (romacs-agent-last-time session)) 5)
-                         'face 'romacs-agent-dim)
-             (if show-cost
-                 (propertize (romacs-agent-ui--column (if (numberp (romacs-agent-cost session))
-                                                           (format "$%.2f" (romacs-agent-cost session)) "")
-                                                       8)
-                             'face 'romacs-agent-dim)
-               "")
-             (if show-model (propertize (truncate-string-to-width instance 26 nil nil "…") 'face 'romacs-agent-dim) "")
-             "\n")
+     (romacs-agent-ui--fit
+      (list :indent (if (> depth 0) (concat (make-string (* 2 (1- depth)) ?\s) "└ ") "")
+            :mark mark :face face :word word
+            :title (concat (romacs-agent-title session)
+                           (if (and (> depth 0) root-cwd (not (equal cwd root-cwd)))
+                               (propertize (concat "  " (abbreviate-file-name cwd)) 'face 'romacs-agent-dim) ""))
+            :title-face (if (> (romacs-agent-done-seq session) (romacs-agent-seen-seq session)) 'romacs-agent-unread 'default)
+            :ago (romacs-agent-ui--ago (romacs-agent-last-time session))
+            :instance (romacs-agent-ui--instance (romacs-agent-provider session) (romacs-agent-harness session)
+                                                 (or (romacs-agent-model session)
+                                                     (plist-get (romacs-agent-options session) :model))))
+      width)
      'romacs-agent-session (romacs-agent-id session))))
 
 (defun romacs-agent-ui--tree ()
@@ -752,28 +762,16 @@ activity first, and a table from a session's id to its children."
                        (lambda (a b) (< (or (romacs-agent-last-time a) 0) (or (romacs-agent-last-time b) 0)))))
     (romacs-agent-ui--insert-subtree child children (1+ depth) root-cwd width)))
 
-(defun romacs-agent-ui--size (bytes)
-  (cond ((< bytes 1024) (format "%dB" bytes))
-        ((< bytes (* 1024 1024)) (format "%dK" (/ bytes 1024)))
-        (t (format "%.1fM" (/ bytes 1048576.0)))))
-
 (defun romacs-agent-ui--history-row (item width)
   "A harness transcript ITEM's row, dimmed, in the session rows' columns."
-  (let* ((instance (plist-get item :provider))
-         (show-model (>= width 72)) (show-cost (>= width 90))
-         (tail (+ 16 5 (if show-cost 8 0) (if show-model 26 0)))
-         (title-width (max 12 (- width 2 1 tail))))
-    (propertize
-     (concat (propertize "◇" 'face 'romacs-agent-dim) " "
-             (propertize (romacs-agent-ui--column (plist-get item :title) title-width) 'face 'romacs-agent-dim)
-             " " (propertize (romacs-agent-ui--column "history" 16) 'face 'romacs-agent-dim)
-             (propertize (romacs-agent-ui--column (romacs-agent-ui--ago (plist-get item :mtime)) 5) 'face 'romacs-agent-dim)
-             (if show-cost (propertize (romacs-agent-ui--column (romacs-agent-ui--size (plist-get item :size)) 8)
-                                       'face 'romacs-agent-dim)
-               "")
-             (if show-model (propertize (truncate-string-to-width instance 26 nil nil "…") 'face 'romacs-agent-dim) "")
-             "\n")
-     'romacs-agent-history item)))
+  (propertize
+   (romacs-agent-ui--fit
+    (list :indent "" :mark "◇" :face 'romacs-agent-dim :word ""
+          :title (plist-get item :title) :title-face 'romacs-agent-dim
+          :ago (romacs-agent-ui--ago (plist-get item :mtime))
+          :instance (romacs-agent-ui--instance (plist-get item :provider) nil nil))
+    width)
+   'romacs-agent-history item))
 
 (defvar-local romacs-agents--all-history nil "Every project's history shows, not its newest few.")
 

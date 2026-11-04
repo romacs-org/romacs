@@ -114,10 +114,10 @@ not started, `outcome unknown' when it had)."
   journal-start
   ;; What its views show, kept as its events arrive: the harness's permission
   ;; mode, the tokens of its last prompt and its model's window, the last
-  ;; record's time, when the running turn began, the cost before it and the
-  ;; last turn's, whether the title is generated (the first prompt replaces
-  ;; it), and the last turn end its chat has shown.
-  permission-mode context-used context-window last-time turn-start (cost-base 0) turn-cost
+  ;; record's time, when the running turn began, whether the title is
+  ;; generated (the first prompt replaces it), and the last turn end its
+  ;; chat has shown.
+  permission-mode context-used context-window last-time turn-start
   title-auto (seen-seq 0)
   ;; The harness's own transcript this session continues, when it was
   ;; imported from the harness's history: (:path PATH :size BYTES), the
@@ -551,11 +551,9 @@ goes on whatever becomes of this server."
            (romacs-agent--note-end session)
            (when (plist-get event :context-window)
              (setf (romacs-agent-context-window session) (plist-get event :context-window)))
-           ;; Claude's cost is the session's so far: a turn's is its increase.
+           ;; Claude's cost is the session's so far, for queries; no view shows it.
            (when (numberp (plist-get event :cost))
-             (setf (romacs-agent-turn-cost session) (- (plist-get event :cost) (romacs-agent-cost-base session))
-                   (romacs-agent-cost-base session) (plist-get event :cost)
-                   (romacs-agent-cost session) (plist-get event :cost))))
+             (setf (romacs-agent-cost session) (plist-get event :cost))))
     ('exit
      (unless (eq (romacs-agent-state session) 'idle)
        ;; It ended mid-turn: that turn failed.
