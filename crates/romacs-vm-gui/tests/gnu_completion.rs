@@ -264,7 +264,9 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                 (delete-other-windows))))"));
         // A prompt that wraps, at `bottom' over a short selected window:
         // the rows, the panel and paging all fit the room above its mode
-        // line once the prompt wrapped.
+        // line once the prompt wrapped. The minibuffer wraps at words
+        // (VM2-WRAP-WORDS), so the 70 p's move past the count's spaces to
+        // rows of their own: three rows, five candidates.
         vm.eval_source("(defun rc-pick () (interactive)
             (minibuffer-with-setup-hook
                 (lambda () (add-hook 'post-command-hook
@@ -334,7 +336,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         // the minibuffer and is the windows' mode line, so a window
                         // ends where its band would start (VM2-STATUS-BAR).
                         "(768 ((top 330 93 600 80 8 top) (center 330 260 600 80 8 top) (bottom 330 468 600 80 8 top)))",
-                        "(200 7 0)", "(\"cand-07\" (6 6 40 180 200) 2 t)",
+                        "(200 7 0)", "(\"cand-06\" (5 5 60 180 200) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
                         // 500 pixels less the fringes and the pane gap's internal

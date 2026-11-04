@@ -371,8 +371,13 @@ pub struct WindowChrome {
     pub indicators: Indicators,
     pub right_divider: u32,
     pub bottom_divider: u32,
+    /// The display table's truncation and continuation glyphs (disptab.h
+    /// DISP_TRUNC_GLYPH, DISP_CONTINUE_GLYPH), where it sets them to a
+    /// character without a face: shown in the default face for the `$' and
+    /// `\\' a window without a fringe shows.
+    pub line_glyphs: [Option<char>; 2],
 }
-romacs_snapshot::snapshot_struct!(WindowChrome { left_margin, right_margin, left_fringe, right_fringe, outside_margins, fringe_face, border, indicators, right_divider, bottom_divider });
+romacs_snapshot::snapshot_struct!(WindowChrome { left_margin, right_margin, left_fringe, right_fringe, outside_margins, fringe_face, border, indicators, right_divider, bottom_divider, line_glyphs });
 
 impl WindowChrome {
     /// The pixels left and right of the text area inside the window's box:

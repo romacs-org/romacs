@@ -758,10 +758,11 @@ impl Leaf<'_> {
             _ => false,
         };
         // The host paints a display table's glyphs for characters and its
-        // escape and control glyphs as the elements publish them, but draws
-        // its own truncation and continuation glyphs.
-        if area.hosted && let Some(table) = self.display_table()? && !self.no_line_glyphs(table) {
-            return Err(unsupported("with a display table's truncation or continuation glyphs in a displayed window"));
+        // escape and control glyphs as the elements publish them, and its
+        // truncation and continuation glyphs when they are characters
+        // without a face.
+        if area.hosted && let Some(table) = self.display_table()? && !self.host_line_glyphs(table) {
+            return Err(unsupported("with a display table's faced truncation or continuation glyphs in a displayed window"));
         }
         Ok(Ctx {
             last_visible_x: area.first_visible + area.columns - area.left_margin - area.right_margin - glyph - border,
@@ -773,11 +774,19 @@ impl Leaf<'_> {
         })
     }
 
-    /// Whether the display table TABLE sets no truncation or continuation
-    /// glyph (slots 0 and 1).
-    fn no_line_glyphs(&self, table: Value) -> bool {
-        let Some(Object::CharTable(t)) = self.vm.object_if(table) else { return false };
-        t.extras.iter().take(2).all(|&v| v == Value::NIL)
+    /// Whether the display table TABLE's truncation and continuation glyphs
+    /// (slots 0 and 1) are unset or characters without a face, which the
+    /// host draws.
+    fn host_line_glyphs(&mut self, table: Value) -> bool {
+        self.vm.display_table_line_slots(table)
+            .is_some_and(|slots| slots.iter().all(|&g| g == Value::NIL || self.vm.plain_glyph(g).is_some()))
+    }
+
+    /// The character the host shows for the truncation (SLOT 0) or
+    /// continuation (SLOT 1) glyph: the display table's, else `$' or `\'.
+    pub(super) fn host_line_glyph(&mut self, slot: usize) -> std::result::Result<char, Fault> {
+        let glyph = self.special_glyph(slot)?;
+        Ok(self.vm.plain_glyph(glyph).unwrap_or(if slot == 0 { '$' } else { '\\' }))
     }
 
     /// The truncation (SLOT 0) or continuation (SLOT 1) glyph's columns:
@@ -864,7 +873,8 @@ struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height
 /// show its indicator in (xdisp.c:3510-3518). The host continues,
 /// truncates and word-wraps rows as GNU does (romacs-layout2 `WordBreaks').
 fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> std::result::Result<Ctx, Fault> {
-    let advance = if area.right_fringe > 0 { 0 } else { hosted.default_advance(if cx.wrap == Wrap::Truncate { '$' } else { '\\' })?.0 };
+    let glyph = hosted.source().leaf().host_line_glyph(usize::from(cx.wrap != Wrap::Truncate))?;
+    let advance = if area.right_fringe > 0 { 0 } else { hosted.default_advance(glyph)?.0 };
     // Iterator x counts from the line's start, the hidden columns too.
     cx.last_visible_x = area.first_visible * area.column + area.body_width - advance;
     Ok(cx)
