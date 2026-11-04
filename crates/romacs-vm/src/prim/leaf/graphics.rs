@@ -335,7 +335,7 @@ impl Leaf<'_> {
         };
         let margins = if failed { (0, 0) } else { self.image_margins(spec) };
         let extension = if failed || spec.kind != "gif" { vec![] } else { self.gif_extension(spec)? };
-        let entry = ImageEntry { facts, margins, failed, dependencies, extension, used: std::time::Instant::now() };
+        let entry = ImageEntry { facts, margins, failed, dependencies, extension };
         self.vm.images.insert(key.clone(), entry.clone());
         Ok((key, entry, error))
     }
@@ -346,7 +346,7 @@ impl Leaf<'_> {
     fn gif_extension(&mut self, spec: &Spec) -> std::result::Result<Vec<(u8, Vec<u8>)>, Fault> {
         let bytes = if let Some(file) = spec.get(":file") {
             let name = String::from_utf8_lossy(self.vm.str_view(file).unwrap().bytes()).into_owned();
-            match self.image_find_file(&name)?.and_then(|path| std::fs::read(path).ok()) { Some(b) => b, None => return Ok(vec![]) }
+            match self.image_find_file(&name)?.and_then(|path| crate::host::read_file(path).ok()) { Some(b) => b, None => return Ok(vec![]) }
         } else {
             spec.get(":data").and_then(|d| self.vm.str_view(d)).map_or(vec![], |s| s.bytes().to_vec())
         };
@@ -515,9 +515,9 @@ impl Leaf<'_> {
         let expand = |dir: &str| std::path::Path::new(dir).join(name);
         if std::path::Path::new(name).is_absolute() || name.starts_with('~') {
             let path = if let Some(rest) = name.strip_prefix("~/") {
-                std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(rest)).unwrap_or_else(|| name.into())
+                crate::host::getenv("HOME").map(|h| std::path::Path::new(&h).join(rest)).unwrap_or_else(|| name.into())
             } else { name.into() };
-            return Ok(path.is_file().then(|| path.to_string_lossy().into_owned()));
+            return Ok(crate::host::probe(crate::host::Probe::IsFile, &path).then(|| path.to_string_lossy().into_owned()));
         }
         let mut dirs = vec![];
         let data = self.intern("data-directory");
@@ -531,7 +531,7 @@ impl Leaf<'_> {
             if let Some(s) = self.vm.str_view(dir) { dirs.push(String::from_utf8_lossy(s.bytes()).into_owned()); }
             tail = rest;
         }
-        Ok(dirs.iter().map(|d| expand(d)).find(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned()))
+        Ok(dirs.iter().map(|d| expand(d)).find(|p| crate::host::probe(crate::host::Probe::IsFile, p)).map(|p| p.to_string_lossy().into_owned()))
     }
 
     /// XBM raw `:data' (a packed-bit string, a bool-vector, or a vector of
