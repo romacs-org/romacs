@@ -214,6 +214,39 @@ REPEAT_INIT = '''(repeat-mode 1)
 '''
 
 
+PROMPTS_INIT = '''(load {scenes} nil t)
+(defun popup-live--prompt ()
+  (interactive)
+  (let* ((root (romacs-layer--root-frame)) (host (romacs--minibuffer-host)) (window (active-minibuffer-window)))
+    (write-region
+     (prin1-to-string
+      (with-current-buffer (window-buffer window)
+        (let ((lines (split-string (buffer-substring-no-properties (point-min) (point-max)) "\\n")))
+          (list :command (and (symbolp this-command) (symbol-name this-command))
+                :host (and host (list (car (frame-position host)) (cdr (frame-position host)) (frame-pixel-width host) (frame-pixel-height host)))
+                :body (window-body-width window) :longest (seq-max (mapcar #'string-width lines)) :lines (length lines)
+                :rows (/ (cdr (window-text-pixel-size window)) (frame-char-height root))
+                :room (/ (frame-text-width root) (frame-char-width root))
+                :text-pixels (romacs-complete--measure-prompt (current-buffer) (frame-char-width root) 100000)
+                :layer-text (and host (frame-text-width host))
+                :depth (minibuffer-depth)))))
+     nil {state} nil 'quiet)))
+(add-hook 'minibuffer-setup-hook (lambda () (run-at-time 0.6 nil #'popup-live--prompt)))
+(global-set-key (kbd "<f12>") #'popup-live--prompt)
+(define-key minibuffer-local-map (kbd "<f12>") #'popup-live--prompt)
+;; The mode turned off in a prompt, then back on outside it.
+(define-key minibuffer-local-map (kbd "<f4>") (lambda () (interactive) (romacs-complete-mode -1)))
+(global-set-key (kbd "<f3>") (lambda () (interactive) (romacs-complete-mode 1)))
+(define-key minibuffer-local-map (kbd "<f2>")
+  (lambda () (interactive)
+    (write-region (prin1-to-string (list :layer (and (frame-live-p romacs-complete--layer) (frame-visible-p romacs-complete--layer) t)
+                                         :host (and (romacs--minibuffer-host) t)
+                                         :root (eq (window-frame (minibuffer-window)) (romacs-layer--root-frame))
+                                         :text (substring-no-properties (minibuffer-contents))))
+                  nil {state} nil 'quiet)))
+'''
+
+
 TOASTS_INIT = '''(split-window-right)
 (defun popup-live--toasts ()
   (write-region
@@ -341,6 +374,109 @@ def check_repeat(args, output, report, env, process, state, keys, glyphs):
     if done.get('repeat'):
         raise AssertionError(f'repeat still in progress after C-f: {done}')
     report['checks'].append({'hints': report['captures'][-1]['rows'], 'repeated': again['window'], 'ended': done.get('command')})
+
+
+def check_prompts(args, output, report, env, process, state, keys, glyphs):
+    """read-from-minibuffer menus laid out for a frame-wide minibuffer, as
+    GNU's is (notmuch-jump, read-multiple-choice, a long y-or-n-p): the
+    minibuffer's layer widens to the prompt's widest line, centred, so no
+    row wraps; where the frame is narrower than that line, the layer takes
+    the frame's room and the rows wrap at words."""
+    for key, scene in (('F5', 'jump'), ('F6', 'rmc'), ('F7', 'yn')):
+        if state.exists():
+            state.unlink()
+        keys('-k', key)
+        fio.wait(state.exists, args.timeout, f'{scene} prompt', process)
+        time.sleep(.6)
+        probe = read_plist(state.read_text())
+        fio.shot(output / f'prompt-{scene}.png', env, report)
+        report['captures'].append({'name': scene, 'state': probe})
+        x, y, width, height = probe['host']
+        fits = probe['longest'] + 2 <= probe['room']
+        if fits and (probe['rows'] != probe['lines'] or probe['body'] < probe['longest']):
+            raise AssertionError(f'{scene}: {probe["lines"]} lines show in {probe["rows"]} rows, body {probe["body"]} for {probe["longest"]}')
+        if not fits and probe['body'] + 4 < probe['room']:
+            raise AssertionError(f'{scene}: a prompt wider than the frame in a layer {probe["body"]} wide of {probe["room"]}')
+        if abs((x + width / 2) - args.width / 2) > 12:
+            raise AssertionError(f'{scene}: layer at {x} {width} wide, not centred in {args.width}')
+        keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+        time.sleep(.6)
+    def probe_now(what):
+        if state.exists():
+            state.unlink()
+        keys('-k', 'F12')
+        fio.wait(state.exists, args.timeout, what, process)
+        return read_plist(state.read_text())
+
+    def wraps_needlessly(probe):
+        # A layer narrower than its text while the room holds it.
+        return probe['layer-text'] < min(probe['text-pixels'], (probe['room'] - 2) * 10) - 1
+
+    # Typing into a prompt-only minibuffer widens its layer; deleting narrows it.
+    keys('-k', 'F8')
+    time.sleep(1)
+    keys('q' * 40)
+    typed = probe_now('typed')
+    keys(*(['-k', 'BackSpace'] * 35))
+    deleted = probe_now('deleted')
+    fio.shot(output / 'prompt-typed.png', env, report)
+    report['captures'].append({'name': 'typed', 'state': typed})
+    report['captures'].append({'name': 'deleted', 'state': deleted})
+    def fits(probe):
+        return probe['text-pixels'] + 20 <= probe['room'] * 10
+
+    if (wraps_needlessly(typed) or wraps_needlessly(deleted) or (fits(typed) and typed['rows'] != 1)
+            or deleted['layer-text'] > typed['layer-text'] or (fits(deleted) and deleted['rows'] != 1)):
+        raise AssertionError(f'typing {typed}, deleting {deleted}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    time.sleep(.6)
+    # A nested short prompt returns to its long outer one at the outer's width,
+    # after RET and after C-g.
+    keys('-k', 'F9')
+    time.sleep(1)
+    outer = probe_now('outer')
+    for leave in (['-k', 'Return'], ['-M', 'ctrl', 'g', '-m', 'ctrl']):
+        keys('-k', 'F11')
+        time.sleep(1)
+        keys(*leave)
+        time.sleep(.8)
+        back = probe_now('back in the outer prompt')
+        report['captures'].append({'name': f'nested {leave[-1]}', 'state': back})
+        if back['depth'] != 1 or back['layer-text'] != outer['layer-text'] or wraps_needlessly(back):
+            raise AssertionError(f'outer {outer}, back {back}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    time.sleep(.6)
+    # A prompt at twice the height is as wide as it is painted.
+    keys('-k', 'F10')
+    time.sleep(1)
+    tall = probe_now('tall')
+    fio.shot(output / 'prompt-tall.png', env, report)
+    report['captures'].append({'name': 'tall', 'state': tall})
+    if wraps_needlessly(tall):
+        raise AssertionError(f'tall prompt {tall}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    time.sleep(.6)
+    # Turned off in a prompt, the mode makes no layer as the user types: the
+    # input shows in the frame's own minibuffer line.
+    keys('-k', 'F8')
+    time.sleep(1)
+    keys('-k', 'F4')
+    time.sleep(.5)
+    keys('abc')
+    if state.exists():
+        state.unlink()
+    keys('-k', 'F2')
+    fio.wait(state.exists, args.timeout, 'the prompt with the mode off', process)
+    off = read_plist(state.read_text())
+    fio.shot(output / 'prompt-mode-off.png', env, report)
+    report['captures'].append({'name': 'mode off', 'state': off})
+    if off['layer'] or off['host'] or not off['root'] or off['text'] != 'abc':
+        raise AssertionError(f'mode off in a prompt: {off}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    time.sleep(.5)
+    keys('-k', 'F3')
+    time.sleep(.5)
+    report['checks'].append({c['name']: [c['state'].get('body'), c['state'].get('longest'), c['state'].get('rows'), c['state'].get('lines')] for c in report['captures']})
 
 
 def check_toasts(args, output, report, env, process, state, keys, glyphs):
@@ -732,6 +868,7 @@ def main():
     parser.add_argument('--repeat', action='store_true', help="repeat-mode's map as hints after C-x o")
     parser.add_argument('--indicators', action='store_true', help="packages' indicators in the status bar")
     parser.add_argument('--toasts', action='store_true', help='messages as toasts')
+    parser.add_argument('--prompts', action='store_true', help='read-from-minibuffer menus in the minibuffer layer')
     parser.add_argument('--theme', help='a theme loaded first (modus-operandi: a light one)')
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
@@ -749,14 +886,14 @@ def main():
                 directory.mkdir()
             state = work / 'popup-state.el'
             (home / 'config/romacs').mkdir(parents=True)
-            init = (TOASTS_INIT if args.toasts else INDICATORS_INIT if args.indicators else REPEAT_INIT if args.repeat else WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame
+            init = (PROMPTS_INIT if args.prompts else TOASTS_INIT if args.toasts else INDICATORS_INIT if args.indicators else REPEAT_INIT if args.repeat else WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame
                     else LAYER_INIT if args.layer else INIT)
             if args.theme:
                 # Doubled braces survive the init's format below.
                 init = f"(mapc #'disable-theme custom-enabled-themes) (load-theme '{args.theme} t)\n" + init
             faces_state = work / 'popup-faces.el'
             (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state)), fixture=json.dumps(str(HERE / 'keymap_popup_fixture.el')),
-                                                                   faces=json.dumps(str(faces_state))) if args.layer else init.format(state=json.dumps(str(state))))
+                                                                   faces=json.dumps(str(faces_state))) if args.layer else init.format(state=json.dumps(str(state)), scenes=json.dumps(str(HERE / 'prompt_scenes.el'))) if args.prompts else init.format(state=json.dumps(str(state))))
             (config / 'rc.xml').write_text(live.RC_XML)
             env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
@@ -805,6 +942,11 @@ def main():
                     return [text for _, text, _ in rows(glyphs(), 'StatusBar') + rows(glyphs(), 'ModeLine')]
 
                 fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
+                if args.prompts:
+                    time.sleep(1)
+                    check_prompts(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
                 if args.toasts:
                     time.sleep(1)
                     check_toasts(args, output, report, env, process, state, keys, glyphs)
