@@ -244,5 +244,63 @@ mode line would be."
         (romacs-should (string-prefix-p (string #xFE038 ?\s)
                                         (romacs-mode-line-test--format '("" romacs-mode-line-mode-icon))))))))
 
+;; What packages add to `mode-line-modes' shows in the `modes' segment;
+;; GNU's own elements (mode name, process, lighters, specs) do not.
+(romacs-deftest romacs-mode-line-shows-what-packages-add-to-modes ()
+  (let* ((saved (default-value 'mode-line-modes))
+         ;; GNU's own elements alone: compile.el may have added its entry.
+         (gnu (seq-filter #'romacs-mode-line--gnu-modes-element-p saved))
+         (compiling '(romacs-test-compiling "[Compiling] ")))
+    (defvar romacs-test-compiling nil)
+    (unwind-protect
+        (progn
+          ;; An entry added before the mode turns on (compile.el's as it loads).
+          (setq-default mode-line-modes (cons compiling gnu))
+          (romacs-mode-line-test--with-mode
+            (romacs-should (equal romacs-mode-line-modes-extra (list compiling)))
+            (with-temp-buffer
+              (romacs-should (equal (romacs-mode-line-test--format romacs-mode-line-modes) ""))
+              (setq romacs-test-compiling t)
+              (romacs-should (equal (romacs-mode-line-test--format romacs-mode-line-modes) "[Compiling] ")))
+            ;; One added while it is on, at the end, as erc-track's `after-modes'.
+            (add-to-list 'mode-line-modes '(t "#chat ") t)
+            (romacs-should (equal romacs-mode-line-modes-extra (list compiling '(t "#chat "))))
+            ;; A buffer's own value, then killed: the default's again, and
+            ;; the default's later changes.
+            (with-temp-buffer
+              (setq-local mode-line-modes (list "%[" '(t "local ") "%]"))
+              (romacs-should (equal romacs-mode-line-modes-extra '((t "local "))))
+              (kill-local-variable 'mode-line-modes)
+              (romacs-should (equal romacs-mode-line-modes-extra (list compiling '(t "#chat "))))
+              (add-to-list 'mode-line-modes '(t "late ") t)
+              (romacs-should (equal romacs-mode-line-modes-extra (list compiling '(t "#chat ") '(t "late "))))
+              (setq-default mode-line-modes (remove '(t "late ") (default-value 'mode-line-modes))))
+            (romacs-should (equal (default-value 'romacs-mode-line-modes-extra) (list compiling '(t "#chat "))))
+            ;; GNU's own value has none.
+            (setq-default mode-line-modes gnu)
+            (romacs-should-not romacs-mode-line-modes-extra)
+            (romacs-should (memq 'romacs-mode-line-modes romacs-mode-line-format))))
+      (setq romacs-test-compiling nil)
+      (setq-default mode-line-modes saved))))
+
+;; Values set while the mode is off, a buffer's own among them, show once
+;; it turns on.
+(romacs-deftest romacs-mode-line-reconciles-modes-as-it-turns-on ()
+  (let* ((saved (default-value 'mode-line-modes))
+         (gnu (seq-filter #'romacs-mode-line--gnu-modes-element-p saved)))
+    (unwind-protect
+        (with-temp-buffer
+          (setq-default mode-line-modes (cons '(t "global ") gnu))
+          (setq-local mode-line-modes (list "%[" '(t "before ") "%]"))
+          (romacs-mode-line-test--with-mode
+            (romacs-should (equal romacs-mode-line-modes-extra '((t "before "))))
+            (romacs-should (equal (default-value 'romacs-mode-line-modes-extra) '((t "global "))))
+            (romacs-should (equal (romacs-mode-line-test--format romacs-mode-line-modes) "before ")))
+          ;; Changed while off: the next turn on sees it.
+          (setq-local mode-line-modes (list '(t "later ")))
+          (romacs-mode-line-test--with-mode
+            (romacs-should (equal romacs-mode-line-modes-extra '((t "later "))))))
+      (setq-default mode-line-modes saved))))
+
 (provide 'romacs-mode-line-test)
 ;;; romacs-mode-line-test.el ends here

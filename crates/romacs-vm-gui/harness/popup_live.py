@@ -214,6 +214,22 @@ REPEAT_INIT = '''(repeat-mode 1)
 '''
 
 
+INDICATORS_INIT = '''(run-at-time 1 nil (lambda ()
+  (switch-to-buffer (get-buffer-create "w.el"))
+  (emacs-lisp-mode)
+  (insert "(defun alpha ()\n  (list 1\n        2))\n\n(defun beta () 3)\n")
+  (goto-char 20)
+  (which-function-mode 1)
+  (display-time-mode 1)
+  (narrow-to-defun)
+  ;; From the source buffer, which stays selected; *compilation* shows
+  ;; in another window.
+  (let ((default-directory (expand-file-name "~/"))) (compile "sleep 120"))
+  (run-at-time 1 nil (lambda ()
+    (write-region (prin1-to-string (list :time (substring-no-properties (string-trim display-time-string)) :selected (buffer-name (window-buffer)))) nil {state} nil 'quiet)))))
+'''
+
+
 WHICH_KEY_INIT = '''(require 'which-key)
 (setq which-key-popup-type 'custom
       which-key-custom-show-popup-function #'romacs-popup-which-key-show
@@ -282,6 +298,39 @@ def check_repeat(args, output, report, env, process, state, keys, glyphs):
     if done.get('repeat'):
         raise AssertionError(f'repeat still in progress after C-f: {done}')
     report['checks'].append({'hints': report['captures'][-1]['rows'], 'repeated': again['window'], 'ended': done.get('command')})
+
+
+def check_indicators(args, output, report, env, process, state, keys, glyphs):
+    """What packages and GNU features show through the standard places
+    reaches the status bar of the selected window: display-time's time and
+    which-function's name (`mode-line-misc-info'), compile's `[Compiling]'
+    (`mode-line-modes') from the source buffer, the narrowing glyph; with
+    the compilation buffer selected, its process state
+    (`mode-line-process').  Minor-mode lighters stay out."""
+    def bar():
+        return ' '.join(text for _, text, _ in rows(glyphs(), 'StatusBar'))
+
+    fio.wait(state.exists, args.timeout, 'indicators set up', process)
+    setup = read_plist(state.read_text())
+    if setup['selected'] != 'w.el':
+        raise AssertionError(f'selected {setup}')
+    narrow = chr(0xFE005)
+    wanted = [setup['time'], '[alpha]', '[Compiling]', narrow]
+    fio.wait(lambda: all(w in bar() for w in wanted), args.timeout, f'bar holds {wanted}', process)
+    time.sleep(.5)
+    fio.shot(output / 'indicators.png', env, report)
+    source = bar()
+    report['captures'].append({'name': 'indicators', 'bar': source})
+    for lighter in ('ElDoc', 'WK', 'Narrow'):
+        if lighter in source:
+            raise AssertionError(f'the bar shows {lighter!r}: {source!r}')
+    # The compilation buffer selected: its process state.
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl', 'o')
+    fio.wait(lambda: ':run' in bar(), args.timeout, 'process state with *compilation* selected', process)
+    time.sleep(.5)
+    fio.shot(output / 'process.png', env, report)
+    report['captures'].append({'name': 'process', 'bar': bar()})
+    report['checks'].append({'source_bar': source, 'process_bar': report['captures'][-1]['bar']})
 
 
 def check_which_key(args, output, report, env, process, state, keys, glyphs):
@@ -524,6 +573,7 @@ def main():
     parser.add_argument('--layer', action='store_true', help="keymap-popup's Romacs panel backend")
     parser.add_argument('--width', type=int, default=1280, help='the output width: a narrow one reflows the menu')
     parser.add_argument('--repeat', action='store_true', help="repeat-mode's map as hints after C-x o")
+    parser.add_argument('--indicators', action='store_true', help="packages' indicators in the status bar")
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
@@ -540,7 +590,7 @@ def main():
                 directory.mkdir()
             state = work / 'popup-state.el'
             (home / 'config/romacs').mkdir(parents=True)
-            init = (REPEAT_INIT if args.repeat else WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame
+            init = (INDICATORS_INIT if args.indicators else REPEAT_INIT if args.repeat else WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame
                     else LAYER_INIT if args.layer else INIT)
             faces_state = work / 'popup-faces.el'
             (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state)), fixture=json.dumps(str(HERE / 'keymap_popup_fixture.el')),
@@ -593,6 +643,10 @@ def main():
                     return [text for _, text, _ in rows(glyphs(), 'StatusBar') + rows(glyphs(), 'ModeLine')]
 
                 fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
+                if args.indicators:
+                    check_indicators(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
                 if args.repeat:
                     time.sleep(1)
                     check_repeat(args, output, report, env, process, state, keys, glyphs)

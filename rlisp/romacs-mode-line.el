@@ -438,6 +438,62 @@ set by `romacs-popup-repeat-echo' where hints do not show them.")
   :priority 60
   :format ("" romacs-mode-line-repeat))
 
+;; What packages add to `mode-line-modes': GNU shows it in every mode
+;; line, `[Compiling]' while a compilation runs, erc-track's channel
+;; activity, repeat's `repeat-echo-mode-line'; its own elements (the
+;; major mode's name, the process, the minor modes' lighters, the
+;; narrowing and recursive-edit specs) other segments show or leave out.
+
+(defun romacs-mode-line--gnu-modes-element-p (element)
+  "Non-nil for an element of GNU's own `mode-line-modes' (bindings.el),
+told by its content: a package's entry may be added before this file
+loads (compile.el adds its own as it loads)."
+  (pcase element
+    ((pred stringp) (member (substring-no-properties element) '("%[" "%]" "%n" "(" ")" " " "")))
+    (`(:eval (,(or 'car 'cdr) mode-line-modes-delimiters)) t)
+    (`(:propertize ("" mode-name) . ,_) t)
+    (`("" ,(or 'mode-line-process 'mode-line-minor-modes 'minor-mode-alist)) t)))
+
+(defun romacs-mode-line--modes-extra (modes)
+  "The elements of MODES, a `mode-line-modes' value, packages added."
+  (seq-remove #'romacs-mode-line--gnu-modes-element-p (if (listp modes) modes (list modes))))
+
+(defvar romacs-mode-line-modes-extra nil
+  "What packages added to `mode-line-modes', as the `modes' segment shows
+it: kept by `romacs-mode-line--modes-watch' as `mode-line-modes' is set.")
+(put 'romacs-mode-line-modes-extra 'risky-local-variable t)
+
+(defun romacs-mode-line--modes-watch (_symbol value operation where)
+  "`mode-line-modes' is about to be VALUE by OPERATION, in buffer WHERE
+when that is its local value: keep `romacs-mode-line-modes-extra' to
+match.  A local value killed (`makunbound' in WHERE) takes the default's
+again."
+  (cond ((and (buffer-live-p where) (eq operation 'makunbound))
+         (with-current-buffer where (kill-local-variable 'romacs-mode-line-modes-extra)))
+        ((buffer-live-p where)
+         (with-current-buffer where
+           (setq-local romacs-mode-line-modes-extra (romacs-mode-line--modes-extra value))))
+        (t (set-default 'romacs-mode-line-modes-extra
+                        (and (not (eq operation 'makunbound)) (romacs-mode-line--modes-extra value))))))
+
+(defun romacs-mode-line--modes-reconcile ()
+  "Make `romacs-mode-line-modes-extra' match `mode-line-modes' everywhere:
+its default, and each buffer's own value where it has one, once, as the
+watcher starts."
+  (set-default 'romacs-mode-line-modes-extra (romacs-mode-line--modes-extra (default-value 'mode-line-modes)))
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (cond ((local-variable-p 'mode-line-modes)
+             (setq-local romacs-mode-line-modes-extra (romacs-mode-line--modes-extra mode-line-modes)))
+            ((local-variable-p 'romacs-mode-line-modes-extra)
+             (kill-local-variable 'romacs-mode-line-modes-extra))))))
+
+(romacs-mode-line-define-segment modes
+  "What packages add to `mode-line-modes': a compilation in progress,
+chat activity."
+  :priority 45
+  :format ("" romacs-mode-line-modes-extra))
+
 (romacs-mode-line-define-segment misc
   "What packages and the user add (`mode-line-misc-info', with
 `global-mode-string': the time, a clock, a timer)."
@@ -609,7 +665,7 @@ mode-line constructs."
   :set #'romacs-mode-line--set-layout)
 
 (defcustom romacs-mode-line-right
-  '(repeat misc lsp encoding major-mode vc diagnostics)
+  '(repeat modes misc lsp encoding major-mode vc diagnostics)
   "The mode line's segments laid out from the right edge."
   :type '(repeat sexp)
   :set #'romacs-mode-line--set-layout)
@@ -689,6 +745,8 @@ Off, GNU's default returns where this mode's is installed."
         (unless romacs-mode-line-format (romacs-mode-line-rebuild))
         (romacs-mode-line--hook t)
         (romacs-mode-line--refresh-all)
+        (romacs-mode-line--modes-reconcile)
+        (add-variable-watcher 'mode-line-modes #'romacs-mode-line--modes-watch)
         (if (or (eq current romacs-mode-line--gnu-default)
                 (and romacs-mode-line--installed (eq current romacs-mode-line--installed)))
             (progn
@@ -697,6 +755,7 @@ Off, GNU's default returns where this mode's is installed."
               (setq romacs-mode-line--installed romacs-mode-line-format))
           (message "romacs-mode-line-mode: keeping the installed `mode-line-format'")))
     (romacs-mode-line--hook nil)
+    (remove-variable-watcher 'mode-line-modes #'romacs-mode-line--modes-watch)
     (when (and romacs-mode-line--installed (eq (default-value 'mode-line-format) romacs-mode-line--installed))
       (romacs-mode-line--install romacs-mode-line--installed romacs-mode-line--gnu-default))))
 
